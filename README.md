@@ -7,7 +7,9 @@
 ![](https://img.shields.io/badge/Zeabur-Ready-blueviolet.svg)
 
 ## ✨ 功能特性
+![](https://github.com/user-attachments/assets/4340d206-5f5f-4d3b-bd87-f6264a0674b9)
 
+![](https://github.com/user-attachments/assets/5131345c-0e4a-487d-970e-6e9b255b5814)
 - 🎨 **现代化 UI** - 粉色主题 + 玻璃拟态效果 + 动漫背景
 - 💰 **实时余额监控** - 显示每月免费额度剩余（$X.XX / $5.00）
 - ***项目费用追踪** - 每个项目的实时费用统计
