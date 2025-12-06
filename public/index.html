@@ -1356,6 +1356,7 @@
           setPassword: '',
           setPasswordConfirm: '',
           setPasswordError: '',
+          sessionId: null,  // 保存 sessionId
           // 批量添加
           batchAccounts: '',
           maskedBatchAccounts: '',
@@ -1502,6 +1503,8 @@
               });
 
               if (loginRes.ok) {
+                const loginData = await loginRes.json();
+                this.sessionId = loginData.sessionId;  // 保存 sessionId
                 this.showSetPasswordModal = false;
                 this.isAuthenticated = true;
 
@@ -1540,10 +1543,11 @@
             });
 
             console.log('📨 登录响应状态:', response.status, response.statusText);
-            console.log('📨 响应头 Set-Cookie:', response.headers.get('set-cookie'));
 
             if (response.ok) {
-              console.log('✅ 登录成功，正在加载数据...');
+              const loginData = await response.json();
+              this.sessionId = loginData.sessionId;  // 保存 sessionId
+              console.log('✅ 登录成功，sessionId:', this.sessionId?.substring(0, 8) + '...');
               this.isAuthenticated = true;
               this.showLoginModal = false;
 
@@ -1577,11 +1581,13 @@
           const masked = local.substring(0, 2) + 'x'.repeat(local.length - 4) + local.substring(local.length - 2);
           return masked + '@' + domain;
         },
-        // 获取请求头（包含密码）
+        // 获取请求头（包含 sessionId）
         getAuthHeaders() {
-          return {
-            'Content-Type': 'application/json'
-          };
+          const headers = { 'Content-Type': 'application/json' };
+          if (this.sessionId) {
+            headers['Authorization'] = `Bearer ${this.sessionId}`;
+          }
+          return headers;
         },
         async loadManagedAccounts() {
           try {
@@ -1652,13 +1658,18 @@
           this.refreshing = true;
           this.loading = true;
           try {
+            console.log('📊 开始获取数据，管理账号数:', this.managedAccounts.length);
+            
             // 如果有账号，使用账号
             if (this.managedAccounts.length > 0) {
+              console.log('📝 使用管理账号列表');
               // 清除账号中的手动余额，让服务器使用 API 真实数据
               const accountsWithoutManualBalance = this.managedAccounts.map(acc => ({
                 ...acc,
                 balance: null // 不发送手动余额
               }));
+              
+              console.log('📤 发送给服务器的账号:', accountsWithoutManualBalance);
 
               const [accountsRes, projectsRes] = await Promise.all([
                 fetch('/api/temp-accounts', {
@@ -1667,8 +1678,10 @@
                   credentials: 'include',
                   body: JSON.stringify({ accounts: accountsWithoutManualBalance })
                 }).then(async r => {
+                  console.log('📥 /api/temp-accounts 响应状态:', r.status);
                   if (!r.ok) {
                     const text = await r.text();
+                    console.error('❌ 响应体:', text);
                     throw new Error(`/api/temp-accounts 返回 ${r.status}: ${text.substring(0, 100)}`);
                   }
                   return r.json();
@@ -1925,8 +1938,11 @@
             this.managedAccounts.splice(index, 1);
             await this.saveManagedAccounts();
             console.log('✓ 账号已从本地删除并保存到服务器');
-            await this.fetchData();
             alert('✓ 账号已删除');
+            // 延迟后再刷新数据，确保服务器已保存
+            setTimeout(() => {
+              this.fetchData();
+            }, 500);
           } catch (error) {
             alert('✗ 删除失败: ' + error.message);
           }
