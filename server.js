@@ -135,8 +135,20 @@ function destroySession(req) {
 function requireAuth(req, res, next) {
   const session = getSession(req);
   if (session) {
-    console.log(`✅ session 认证通过`);
+    console.log(`✅ session 认证通过 (cookie)`);
     return next();
+  }
+
+  // 尝试从 Authorization header 中获取 sessionId
+  const authHeader = req.headers['authorization'];
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const sessionId = authHeader.substring(7);
+    if (sessions[sessionId]) {
+      sessions[sessionId].lastAccessedAt = new Date().toISOString();
+      saveSessions();
+      console.log(`✅ session 认证通过 (header) sid=${sessionId.substring(0, 8)}...`);
+      return next();
+    }
   }
 
   // 回退到旧的 header 验证（保持兼容）
@@ -154,9 +166,9 @@ function requireAuth(req, res, next) {
     return next();
   }
 
-  console.log(`❌ 认证失败：无有效 session 或 header 密码`);
+  console.log(`❌ 认证失败：无有效 session 或密码`);
   // 确保返回有效的 JSON（不会导致 502）
-  return res.status(401).json({ success: false, error: '未认证或密码错误，session 已过期请重新登录' });
+  return res.status(401).json({ success: false, error: '未认证，请重新登录' });
 }
 
 app.use(express.static('public'));
@@ -693,15 +705,12 @@ app.post('/api/login', express.json(), (req, res) => {
     sameSite: 'lax',
     path: '/'
   };
-  // 仅在 production 且 HTTPS 时设置 secure
-  if (process.env.NODE_ENV === 'production' && process.env.SECURE_COOKIE !== 'false') {
-    cookieOptions.secure = true;
-  }
-
+  
   console.log(`✅ 创建会话 sid=${sid.substring(0, 8)}... (永久保存)`);
   console.log(`   cookie options:`, cookieOptions);
   res.cookie('sid', sid, cookieOptions);
-  res.json({ success: true });
+  // 同时返回 sessionId 供前端使用（备用方案：如果 cookie 不可用）
+  res.json({ success: true, sessionId: sid });
 });
 
 // 登出：销毁 session
@@ -715,12 +724,16 @@ app.post('/api/logout', (req, res) => {
 // 会话检查
 app.get('/api/session', (req, res) => {
   const session = getSession(req);
+  console.log(`🔍 /api/session 检查 - 认证状态:`, !!session);
+  if (session) {
+    console.log(`   sid=${Object.keys(sessions).find(sid => sessions[sid] === session)?.substring(0, 8)}...`);
+  }
   res.json({ authenticated: !!session });
 });
 
 // 健康检查（不需要认证）
 app.get('/health', (req, res) => {
-  res.json({ ok: true, timestamp: new Date().toISOString() });
+  res.json({ ok: true, timestamp: new Date().toISOString(), origin: req.headers.origin });
 });
 
 // 设置管理员密码（首次）
