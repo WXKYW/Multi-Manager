@@ -10,10 +10,10 @@
 
 <div style="display: flex; gap: 10px;">
   <div style="flex: 1;">
-    <img src="https://github.com/user-attachments/assets/4340d206-5f5f-4d3b-bd87-f6264a0674b9" alt="Image 1" style="width: 100%; height: auto; display: block;">
+    <img src="https://github.com/user-attachments/assets/4340d206-5f5f-4d3b-bd87-f6264a0674b9" alt="亮色" style="width: 100%; height: auto; display: block;">
   </div>
   <div style="flex: 1;">
-    <img src="https://github.com/user-attachments/assets/5131345c-0e4a-487d-970e-6e9b255b5814" alt="Image 2" style="width: 100%; height: auto; display: block;">
+    <img src="https://github.com/user-attachments/assets/5131345c-0e4a-487d-970e-6e9b255b5814" alt="暗色" style="width: 100%; height: auto; display: block;">
   </div>
 </div>
 
