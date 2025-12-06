@@ -106,7 +106,6 @@ npm start
 - **后端**：Node.js + Express
 - **前端**：Vue.js 3 (CDN)
 - **API**：Zeabur GraphQL API
-- **样式**：原生 CSS（玻璃拟态效果）
 
 ## 快速运行（使用镜像）
 
