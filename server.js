@@ -398,18 +398,38 @@ async function fetchAccountData(token) {
       }
     }
   `;
+
+  // 查询当月服务费用
+  const serviceCostsQuery = `
+    query {
+      me {
+        serviceCostsThisMonth
+      }
+    }
+  `;
   
-  const [userData, projectsData, aihubData] = await Promise.all([
+  const [userData, projectsData, aihubData, serviceCostsData] = await Promise.all([
     queryZeabur(token, userQuery),
     queryZeabur(token, projectsQuery),
-    queryZeabur(token, aihubQuery).catch(() => ({ data: { aihubTenant: null } }))
+    queryZeabur(token, aihubQuery),
+    queryZeabur(token, serviceCostsQuery)
   ]);
-  
-  return {
-    user: userData.data?.me || {},
-    projects: (projectsData.data?.projects?.edges || []).map(edge => edge.node),
-    aihub: aihubData.data?.aihubTenant || null
-  };
+
+  // 将 GraphQL 原始返回值转换为更方便使用的结构，保证字段存在性，避免上游调用因 undefined 报错
+  const user = userData?.data?.me || {};
+  const projects = projectsData?.data?.projects?.edges?.map(e => e.node) || [];
+  const aihub = aihubData?.data?.aihubTenant || {};
+  const serviceCosts = serviceCostsData?.data?.me?.serviceCostsThisMonth || 0;
+
+  return { user, projects, aihub, serviceCosts };
+}
+
+async function checkSession(req, res) {
+  const session = getSession(req);
+  if (session) {
+    return res.json({ authenticated: true });
+  }
+  res.json({ authenticated: false });
 }
 
 // 获取项目用量数据
@@ -526,8 +546,8 @@ app.post('/api/temp-accounts', requireAuth, express.json(), async (req, res) => 
     const results = await Promise.all(accounts.map(async (account) => {
       try {
         console.log(`🔍 正在获取账号 [${account.name}] 的数据...`);
-        const { user, projects, aihub } = await fetchAccountData(account.token);
-        console.log(`   API 返回的 credit: ${user.credit}`);
+        const { user, projects, aihub, serviceCosts } = await fetchAccountData(account.token);
+        console.log(`   API 返回的 credit: ${user.credit}, serviceCosts: $${serviceCosts}`);
         
         // 获取用量数据
         let usageData = { totalUsage: 0, freeQuotaRemaining: 5, freeQuotaLimit: 5 };
@@ -550,6 +570,7 @@ app.post('/api/temp-accounts', requireAuth, express.json(), async (req, res) => 
             ...user,
             credit: creditInCents, // 使用计算的剩余额度
             totalUsage: usageData.totalUsage,
+            totalCost: usageData.totalUsage, // 总费用 = 所有项目费用的原始值总和
             freeQuotaLimit: usageData.freeQuotaLimit
           },
           aihub: aihub
@@ -602,12 +623,19 @@ app.post('/api/temp-projects', requireAuth, express.json(), async (req, res) => 
         console.log(`📦 [${account.name}] 找到 ${projects.length} 个项目`);
         
         const projectsWithCost = projects.map(project => {
-          const cost = projectCosts[project._id] || 0;
-          console.log(`  - ${project.name}: $${cost.toFixed(2)}`);
-          
+          // 兼容不同的 id 字段命名（_id 或 id），并处理可能的嵌套对象
+          const pid = project && (project._id || project.id || (project._id && project._id.$oid)) || '';
+          let rawCost = 0;
+          if (pid && projectCosts[pid] !== undefined) rawCost = projectCosts[pid];
+          else if (project && projectCosts[project.id] !== undefined) rawCost = projectCosts[project.id];
+          else rawCost = 0;
+
+          const cost = Number(rawCost) || 0;
+          console.log(`  - ${project?.name || pid}: $${cost.toFixed(2)}`);
+
           return {
-            _id: project._id,
-            name: project.name,
+            _id: project._id || project.id || pid,
+            name: project.name || '',
             region: project.region?.name || 'Unknown',
             environments: project.environments || [],
             services: project.services || [],
@@ -826,11 +854,103 @@ app.delete('/api/server-accounts/:index', requireAuth, async (req, res) => {
 
 // 服务器配置的账号API（兼容旧版本）
 app.get('/api/accounts', async (req, res) => {
-  res.json([]);
+  const accounts = loadServerAccounts();
+  const data = [];
+  
+  for (const account of accounts) {
+    try {
+      const { user, projects, aihub, serviceCosts } = await fetchAccountData(account.token);
+      
+      // 获取用量数据（项目费用）
+      let usageData = { totalUsage: 0, freeQuotaRemaining: 5, freeQuotaLimit: 5 };
+      if (user._id) {
+        try {
+          usageData = await fetchUsageData(account.token, user._id, projects);
+        } catch (e) {
+          console.log(`⚠️ [${account.name}] 获取用量失败:`, e.message);
+        }
+      }
+      
+      // 计算剩余额度
+      const creditInCents = Math.round(usageData.freeQuotaRemaining * 100);
+      const totalCost = usageData.totalUsage || 0; // 总费用 = 所有项目费用的原始值总和
+
+      data.push({
+        name: account.name,
+        success: true,
+        data: {
+          ...user,
+          credit: creditInCents,
+          totalUsage: usageData.totalUsage,
+          totalCost: totalCost,
+          freeQuotaLimit: usageData.freeQuotaLimit
+        },
+        aihub: aihub
+      });
+    } catch (error) {
+      console.error(`❌ [${account.name}] 错误:`, error.message);
+      data.push({
+        name: account.name,
+        success: false,
+        error: error.message
+      });
+    }
+  }
+  
+  res.json(data);
 });
 
 app.get('/api/projects', async (req, res) => {
-  res.json([]);
+  try {
+    // 返回服务器配置账号对应的项目（含费用），行为与 /api/temp-projects 保持一致
+    const serverAccounts = loadServerAccounts();
+    const results = await Promise.all(serverAccounts.map(async (account) => {
+      try {
+        const { user, projects } = await fetchAccountData(account.token);
+
+        // 获取用量数据
+        let projectCosts = {};
+        if (user._id) {
+          try {
+            const usageData = await fetchUsageData(account.token, user._id, projects);
+            projectCosts = usageData.projectCosts;
+          } catch (e) {
+            console.log(`⚠️ [${account.name}] 获取用量失败:`, e.message);
+          }
+        }
+
+        const projectsWithCost = projects.map(project => {
+          const pid = project && (project._id || project.id || (project._id && project._id.$oid)) || '';
+          let rawCost = 0;
+          if (pid && projectCosts[pid] !== undefined) rawCost = projectCosts[pid];
+          else if (project && projectCosts[project.id] !== undefined) rawCost = projectCosts[project.id];
+          else rawCost = 0;
+
+          const cost = Number(rawCost) || 0;
+
+          return {
+            _id: project._id || project.id || pid,
+            name: project.name || '',
+            region: project.region?.name || 'Unknown',
+            environments: project.environments || [],
+            services: project.services || [],
+            cost: cost,
+            hasCostData: cost > 0
+          };
+        });
+
+        return { name: account.name, success: true, projects: projectsWithCost };
+      } catch (error) {
+        console.error(`❌ [${account.name}] 错误:`, error.message);
+        return { name: account.name, success: false, error: error.message };
+      }
+    }));
+
+    res.json(results);
+  } catch (error) {
+    console.error('❌ /api/projects 未捕获异常:', error);
+    res.status(500).json({ error: '/api/projects 服务器错误: ' + error.message });
+  }
 });
 
 // 暂停服务
