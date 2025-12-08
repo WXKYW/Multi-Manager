@@ -1819,7 +1819,11 @@
         totalCost() {
           let total = 0;
           for (const acc of this.accounts) {
-            if (acc.projects) {
+            // 优先使用账号的 totalCost（来自官方 serviceCostsThisMonth）
+            if (acc.data && acc.data.totalCost !== undefined) {
+              total += acc.data.totalCost || 0;
+            } else if (acc.projects) {
+              // 备用：累加项目费用（当账号没有 totalCost 时）
               for (const p of acc.projects) {
                 total += p.cost || 0;
               }
