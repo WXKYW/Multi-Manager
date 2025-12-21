@@ -51,6 +51,7 @@ export const r2Methods = {
         if (!store.dnsSelectedAccountId || !store.r2SelectedBucketName) return;
 
         store.r2LoadingObjects = true;
+        store.r2SelectedObjects = []; // 清空选择
         try {
             // 使用 delimiter='/' 来实现文件夹模拟
             let url = `/api/cf-dns/accounts/${store.dnsSelectedAccountId}/r2/buckets/${store.r2SelectedBucketName}/objects?delimiter=/`;
@@ -65,7 +66,8 @@ export const r2Methods = {
             const data = await response.json();
             if (data.success) {
                 // 整合公共前缀(文件夹)和具体对象(文件)
-                const folders = (data.delimitedPrefixes || []).map(p => ({
+                // Cloudflare API 使用 delimited_prefixes (下划线格式)
+                const folders = (data.delimited_prefixes || data.delimitedPrefixes || []).map(p => ({
                     key: p,
                     isFolder: true,
                     name: p.slice(store.r2CurrentPrefix.length, -1)
@@ -166,7 +168,15 @@ export const r2Methods = {
      * 删除存储桶
      */
     async deleteBucket(bucketName) {
-        if (!confirm(`确定要删除存储桶 "${bucketName}" 吗？此操作不可逆，且桶必须为空。`)) return;
+        const confirmed = await store.showConfirm({
+            title: '删除存储桶',
+            message: `确定要删除存储桶 "${bucketName}" 吗？此操作不可逆，且桶必须为空。`,
+            icon: 'fa-trash',
+            confirmText: '删除',
+            confirmClass: 'btn-danger'
+        });
+
+        if (!confirmed) return;
 
         try {
             const response = await fetch(`/api/cf-dns/accounts/${store.dnsSelectedAccountId}/r2/buckets/${bucketName}`, {
@@ -187,6 +197,191 @@ export const r2Methods = {
         } catch (error) {
             toast.error('删除过程发生错误');
         }
+    },
+
+    /**
+     * 删除 R2 对象
+     */
+    async deleteR2Object(objectKey) {
+        const confirmed = await store.showConfirm({
+            title: '删除文件',
+            message: `确定要删除文件 "${objectKey}" 吗？此操作不可逆。`,
+            icon: 'fa-trash',
+            confirmText: '删除',
+            confirmClass: 'btn-danger'
+        });
+
+        if (!confirmed) return;
+
+        try {
+            const response = await fetch(
+                `/api/cf-dns/accounts/${store.dnsSelectedAccountId}/r2/buckets/${store.r2SelectedBucketName}/objects/${encodeURIComponent(objectKey)}`,
+                {
+                    method: 'DELETE',
+                    headers: store.getAuthHeaders()
+                }
+            );
+
+            const data = await response.json();
+            if (data.success) {
+                toast.success('文件已删除');
+                await this.loadObjects();
+            } else {
+                toast.error('删除失败: ' + (data.error || '未知错误'));
+            }
+        } catch (error) {
+            console.error('[R2] 删除对象异常:', error);
+            toast.error('删除过程发生错误');
+        }
+    },
+
+    /**
+     * 下载 R2 对象
+     */
+    async downloadR2Object(obj) {
+        // 尝试从 localStorage 获取保存的自定义域名
+        const savedDomain = localStorage.getItem(`r2_custom_domain_${store.r2SelectedBucketName}`);
+
+        if (savedDomain) {
+            // 有保存的域名，直接下载
+            this._executeDownload(obj, savedDomain);
+        } else {
+            // 没有域名，显示模态框
+            store.r2PendingDownloadObj = obj;
+            store.r2CustomDomainInput = '';
+            store.showR2DomainModal = true;
+        }
+    },
+
+    /**
+     * 取消域名输入
+     */
+    cancelR2DomainInput() {
+        store.showR2DomainModal = false;
+        store.r2PendingDownloadObj = null;
+        store.r2CustomDomainInput = '';
+    },
+
+    /**
+     * 确认域名输入并下载
+     */
+    confirmR2DomainInput() {
+        if (!store.r2CustomDomainInput || !store.r2PendingDownloadObj) return;
+
+        // 保存域名
+        const domain = store.r2CustomDomainInput.replace(/\/$/, ''); // 移除末尾斜杠
+        localStorage.setItem(`r2_custom_domain_${store.r2SelectedBucketName}`, domain);
+
+        // 执行下载
+        this._executeDownload(store.r2PendingDownloadObj, domain);
+
+        // 关闭模态框
+        store.showR2DomainModal = false;
+        store.r2PendingDownloadObj = null;
+        store.r2CustomDomainInput = '';
+    },
+
+    /**
+     * 执行下载
+     */
+    async _executeDownload(obj, domain) {
+        const publicUrl = `${domain}/${obj.key}`;
+
+        // 复制 URL 到剪贴板
+        try {
+            await navigator.clipboard.writeText(publicUrl);
+            toast.success(`下载链接已复制: ${obj.name}`);
+        } catch (e) {
+            console.warn('无法复制到剪贴板:', e);
+        }
+
+        // 在新标签页打开
+        window.open(publicUrl, '_blank');
+    },
+
+    /**
+     * 切换单个对象选中状态
+     */
+    toggleR2ObjectSelection(key, checked) {
+        if (checked) {
+            if (!store.r2SelectedObjects.includes(key)) {
+                store.r2SelectedObjects.push(key);
+            }
+        } else {
+            const index = store.r2SelectedObjects.indexOf(key);
+            if (index > -1) {
+                store.r2SelectedObjects.splice(index, 1);
+            }
+        }
+    },
+
+    /**
+     * 全选/取消全选
+     */
+    toggleSelectAllR2Objects(checked) {
+        if (checked) {
+            // 选中所有非文件夹对象
+            store.r2SelectedObjects = store.r2Objects
+                .filter(o => !o.isFolder)
+                .map(o => o.key);
+        } else {
+            store.r2SelectedObjects = [];
+        }
+    },
+
+    /**
+     * 批量删除选中的对象
+     */
+    async batchDeleteR2Objects() {
+        const count = store.r2SelectedObjects.length;
+        if (count === 0) return;
+
+        const confirmed = await store.showConfirm({
+            title: '批量删除',
+            message: `确定要删除选中的 ${count} 个文件吗？此操作不可逆。`,
+            icon: 'fa-trash',
+            confirmText: `删除 ${count} 个文件`,
+            confirmClass: 'btn-danger'
+        });
+
+        if (!confirmed) return;
+
+        let successCount = 0;
+        let failCount = 0;
+
+        for (const key of [...store.r2SelectedObjects]) {
+            try {
+                const response = await fetch(
+                    `/api/cf-dns/accounts/${store.dnsSelectedAccountId}/r2/buckets/${store.r2SelectedBucketName}/objects/${encodeURIComponent(key)}`,
+                    {
+                        method: 'DELETE',
+                        headers: store.getAuthHeaders()
+                    }
+                );
+
+                const data = await response.json();
+                if (data.success) {
+                    successCount++;
+                } else {
+                    failCount++;
+                }
+            } catch (error) {
+                failCount++;
+            }
+        }
+
+        // 清空选择
+        store.r2SelectedObjects = [];
+
+        // 显示结果
+        if (failCount === 0) {
+            toast.success(`成功删除 ${successCount} 个文件`);
+        } else {
+            toast.warning(`删除完成: ${successCount} 成功, ${failCount} 失败`);
+        }
+
+        // 刷新列表
+        await this.loadObjects();
     },
 
     /**

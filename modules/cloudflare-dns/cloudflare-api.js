@@ -1098,6 +1098,7 @@ async function listR2Buckets(auth, accountId) {
 async function getR2Bucket(auth, accountId, bucketName) {
   try {
     const result = await cfRequest(auth, 'GET', `/accounts/${accountId}/r2/buckets/${bucketName}`);
+    console.log('[CF-API] R2 Bucket 详情:', JSON.stringify(result, null, 2));
     return result.result;
   } catch (e) {
     console.error('[CF-API] 获取 R2 存储桶详情失败:', e.message);
@@ -1154,7 +1155,15 @@ async function listR2Objects(auth, accountId, bucketName, options = {}) {
     }
 
     const result = await cfRequest(auth, 'GET', path);
-    return result.result;
+
+    // Cloudflare R2 API 返回格式:
+    // - result: 直接是对象数组
+    // - result_info.delimited: 文件夹前缀数组
+    return {
+      objects: result.result || [],
+      delimited_prefixes: result.result_info?.delimited || [],
+      cursor: result.result_info?.cursor || null
+    };
   } catch (e) {
     console.error('[CF-API] 列出 R2 对象失败:', e.message);
     throw e;

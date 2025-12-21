@@ -1609,5 +1609,45 @@ router.delete('/accounts/:accountId/r2/buckets/:bucketName/objects/:objectKey', 
   }
 });
 
+/**
+ * 获取 R2 对象下载 URL
+ * 尝试获取存储桶的公开访问配置
+ */
+router.get('/accounts/:accountId/r2/buckets/:bucketName/objects/:objectKey/download-info', async (req, res) => {
+  try {
+    const { accountId, bucketName, objectKey } = req.params;
+
+    const account = storage.getAccountById(accountId);
+    if (!account) {
+      return res.status(404).json({ error: '账号不存在' });
+    }
+
+    const auth = account.email ? { email: account.email, key: account.apiToken } : account.apiToken;
+    const cfAccountId = await cfApi.getAccountId(auth);
+
+    // 获取存储桶详情，其中包含公开访问 URL
+    let publicUrl = null;
+    try {
+      const bucketInfo = await cfApi.getR2Bucket(auth, cfAccountId, bucketName);
+      // R2 公开访问 URL 在 bucket 配置中
+      if (bucketInfo && bucketInfo.public_url_base) {
+        publicUrl = `${bucketInfo.public_url_base}/${objectKey}`;
+      }
+    } catch (e) {
+      logger.warn('获取 R2 存储桶详情失败:', e.message);
+    }
+
+    res.json({
+      success: true,
+      publicUrl: publicUrl,
+      objectKey: objectKey,
+      bucketName: bucketName
+    });
+  } catch (e) {
+    logger.error('获取 R2 下载信息失败:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 
 module.exports = router;

@@ -184,6 +184,14 @@
     background: rgba(0, 0, 0, 0.02);
 }
 
+.r2-table tr.r2-row-selected {
+    background: rgba(243, 128, 32, 0.08);
+}
+
+.r2-table tr.r2-row-selected:hover {
+    background: rgba(243, 128, 32, 0.12);
+}
+
 .r2-object-name-cell {
     display: flex;
     align-items: center;
