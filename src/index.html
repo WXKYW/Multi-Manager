@@ -23,8 +23,9 @@
   </style>
 
   <div id="app" v-cloak>
-    <!-- 认证模块 (用于设置密码等) -->
+    <!-- 认证模块 -->
     <div id="template-auth"></div>
+    <div id="template-welcome"></div>
 
     <!-- 主界面布局 -->
     <div v-if="isAuthenticated" class="app-wrapper">
@@ -45,8 +46,7 @@
                 module === 'server' ? 'server-tab' : '',
                 module === 'antigravity' ? 'antigravity-tab' : '',
                 module === 'gemini-cli' ? 'gemini-cli-tab' : ''
-              ]"
-              @click="handleTabSwitch(module)" :title="getModuleName(module)">
+              ]" @click="handleTabSwitch(module)" :title="getModuleName(module)">
               <i class="fas" :class="getModuleIcon(module)"></i>
               <span class="tab-label">{{ getModuleName(module) }}</span>
             </button>
@@ -113,6 +113,7 @@
           <div id="template-dns"></div>
           <div id="template-gemini-cli"></div>
           <div id="template-openai"></div>
+          <div id="template-r2"></div>
           <div id="template-server"></div>
           <div id="template-antigravity"></div>
         </div>

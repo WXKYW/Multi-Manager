@@ -12,3 +12,5 @@ yarn-error.log*
 .DS_Store
 coverage
 build
+data/
+*.sqlite

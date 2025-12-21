@@ -307,6 +307,29 @@ export const settingsMethods = {
     this.showGlobalToast(`${this.getModuleName(module)} 模块已${this.moduleVisibility[module] ? '显示' : '隐藏'}`, 'success');
   },
 
+  // 一键设置所有模块可见性
+  setAllModulesVisibility(visible) {
+    this.moduleOrder.forEach((module, index) => {
+      // 如果是隐藏全部，保留排序中的第一个模块可见以防界面空白
+      if (!visible && index === 0) {
+        this.moduleVisibility[module] = true;
+      } else {
+        this.moduleVisibility[module] = visible;
+      }
+    });
+
+    // 如果隐藏的是当前模块且当前模块现在不可见，切换到第一个可见模块
+    if (!this.moduleVisibility[this.mainActiveTab]) {
+      const firstVisible = this.moduleOrder.find(m => this.moduleVisibility[m]);
+      if (firstVisible) {
+        this.mainActiveTab = firstVisible;
+      }
+    }
+
+    this.saveModuleSettings();
+    this.showGlobalToast(`所有模块已${visible ? '显示' : '隐藏（已保留首位模块）'}`, 'success');
+  },
+
   // 切换渠道启用状态 (不影响 UI 可见性)
   toggleChannelEnabled(channel) {
     if (!this.channelEnabled) this.channelEnabled = {};
