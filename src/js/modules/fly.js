@@ -103,6 +103,10 @@ export const flyMethods = {
             deployed: app.deployed,
             hostname: app.hostname,
             machines: app.machines?.nodes || [],
+            ips: (app.ipAddresses?.nodes || []).map(ip => ({
+                address: ip.address,
+                type: ip.type
+            })),
             domains: (app.certificates?.nodes || []).map(cert => ({
               domain: cert.hostname,
               status: cert.clientStatus,
@@ -272,48 +276,159 @@ export const flyMethods = {
     return store.flyExpandedAccounts[accountName] !== false; // 默认为 true
   },
 
-  // 重启应用
-  async restartFlyApp(account, app) {
-    const confirmed = await store.showConfirm({
-      title: '确认重启',
-      message: `确定要重启 Fly.io 应用 "${app.name}" 吗？`,
-      icon: 'fa-redo',
-      confirmText: '确定重启',
-      confirmClass: 'btn-primary'
-    });
+    // 重启应用
+    async restartFlyApp(account, app) {
+      // ... existing logic
+    },
+  
+    // 重新部署应用 (触发新 Release)
+    async redeployFlyApp(account, app) {
+      const confirmed = await store.showConfirm({
+        title: '确认重新部署',
+        message: `确定要为 Fly.io 应用 "${app.name}" 触发一次新部署吗？这将创建一个新的发布版本。`,
+        icon: 'fa-rocket',
+        confirmText: '确定部署',
+        confirmClass: 'btn-primary'
+      });
+  
+      if (!confirmed) return;
+  
+      try {
+        const response = await fetch(`/api/fly/apps/${app.name}/redeploy`, {
+          method: 'POST',
+          headers: store.getAuthHeaders(),
+          body: JSON.stringify({ accountId: account.id })
+        });
+  
+        const result = await response.json();
+        if (result.success) {
+          toast.success('重新部署已开始');
+          this.loadFlyData();
+        } else {
+          toast.error('部署失败: ' + result.error);
+        }
+      } catch (error) {
+        toast.error('操作失败: ' + error.message);
+      }
+    },
 
-    if (!confirmed) return;
+    // 开始重命名应用
+    startEditFlyAppName(app) {
+      app.editingName = app.name;
+      app.isEditing = true;
+      this.$nextTick(() => {
+          const inputs = this.$refs.flyAppNameInput;
+          if (inputs) {
+              const input = Array.isArray(inputs) ? inputs.find(el => el) : inputs;
+              if (input) {
+                  input.focus();
+                  input.select();
+              }
+          }
+      });
+    },
 
-    try {
-      const response = await fetch(`/api/fly/apps/${app.name}/restart`, {
-        method: 'POST',
-        headers: store.getAuthHeaders(),
-        body: JSON.stringify({
-          accountId: account.id,
-          appId: app.id
-        })
+    // 提交重命名
+    async saveFlyAppName(account, app) {
+      const newName = app.editingName?.trim();
+      if (!newName || newName === app.name) {
+          app.isEditing = false;
+          return;
+      }
+
+      try {
+        const response = await fetch(`/api/fly/apps/${app.name}/rename`, {
+          method: 'POST',
+          headers: store.getAuthHeaders(),
+          body: JSON.stringify({ 
+              accountId: account.id,
+              newName: newName 
+          })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+          toast.success('应用已成功重命名');
+          app.name = newName;
+          app.isEditing = false;
+          this.loadFlyData();
+        } else {
+          toast.error('重命名失败: ' + result.error);
+        }
+      } catch (error) {
+        toast.error('操作失败: ' + error.message);
+      }
+    },
+
+    // 取消重命名
+    cancelEditFlyAppName(app) {
+      app.isEditing = false;
+      app.editingName = '';
+    },
+
+    // 删除应用
+    async deleteFlyApp(account, app) {
+      const confirmed = await store.showConfirm({
+        title: '⚠️ 确认删除应用',
+        message: `确定要永久删除 Fly.io 应用 "${app.name}" 吗？此操作不可恢复，且会销毁所有底层 Machine。`,
+        icon: 'fa-trash-alt',
+        confirmText: '永久删除',
+        confirmClass: 'btn-danger'
       });
 
-      const contentType = response.headers.get("content-type");
-      if (!contentType || !contentType.includes("application/json")) {
-        const text = await response.text();
-        throw new Error(`服务器返回了非 JSON 响应 (${response.status}): ${text.substring(0, 100)}...`);
-      }
+      if (!confirmed) return;
 
-      const result = await response.json();
-      if (result.success) {
-        toast.success('重启命令已发送');
-        this.loadFlyData();
-      } else {
-        const errorMsg = result.error || '未知错误';
-        const details = result.details ? ` (${JSON.stringify(result.details)})` : '';
-        toast.error('重启失败: ' + errorMsg + details);
-      }
-    } catch (error) {
-      toast.error('操作失败: ' + error.message);
-    }
-  },
+      try {
+        const response = await fetch(`/api/fly/apps/${app.name}`, {
+          method: 'DELETE',
+          headers: store.getAuthHeaders(),
+          body: JSON.stringify({ accountId: account.id })
+        });
 
+        const result = await response.json();
+        if (result.success) {
+          toast.success('应用已成功删除');
+          this.loadFlyData();
+        } else {
+          toast.error('删除失败: ' + result.error);
+        }
+      } catch (error) {
+        toast.error('操作失败: ' + error.message);
+      }
+    },
+
+    // 创建应用
+    async createFlyApp(account) {
+      const name = await store.showPrompt({
+          title: '创建新应用',
+          message: '请输入新应用的名称 (留空则由系统随机生成)：',
+          placeholder: '例如: my-new-api',
+          icon: 'fa-plus-circle'
+      });
+
+      if (name === null) return; // 取消操作
+
+      try {
+        const response = await fetch('/api/fly/apps', {
+          method: 'POST',
+          headers: store.getAuthHeaders(),
+          body: JSON.stringify({ 
+              accountId: account.id,
+              name: name.trim() || undefined 
+          })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+          toast.success(`应用 ${result.data.name} 已创建`);
+          this.loadFlyData();
+        } else {
+          toast.error('创建失败: ' + result.error);
+        }
+      } catch (error) {
+        toast.error('操作失败: ' + error.message);
+      }
+    },
   // 获取实例详情
   async fetchFlyMachines(account, app) {
     if (app.showMachines) {
@@ -452,6 +567,38 @@ export const flyMethods = {
       reader.readAsText(file);
     };
     input.click();
+  },
+
+  // 查看配置
+  async viewFlyConfig(account, app) {
+    this.openLogViewer({
+        title: `应用配置: ${app.name}`,
+        subtitle: `Fly.io / ${account.name}`,
+        source: 'fly',
+        fetcher: async () => {
+          try {
+            const response = await fetch(`/api/fly/apps/${app.name}/config?accountId=${account.id}`, {
+              headers: store.getAuthHeaders()
+            });
+            const result = await response.json();
+            
+            if (result.success) {
+                // 将 JSON 配置格式化为易读的字符串显示在日志查看器中
+                const configStr = JSON.stringify(result.data, null, 2);
+                return [
+                    { timestamp: Date.now(), message: `--- 当前激活配置 (JSON 格式) ---` },
+                    ...configStr.split('\n').map(line => ({
+                        timestamp: Date.now(),
+                        message: line
+                    }))
+                ];
+            }
+            throw new Error(result.error);
+          } catch (e) {
+            return [{ timestamp: Date.now(), message: "获取配置失败: " + e.message }];
+          }
+        }
+    });
   },
 
   // 状态样式辅助

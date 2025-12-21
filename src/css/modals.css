@@ -11,7 +11,6 @@
   align-items: center;
   justify-content: center;
   z-index: 1000;
-  padding: 20px;
 }
 
 .modal-overlay.logs-fullscreen-overlay {
@@ -154,7 +153,8 @@
 
 .modal-close {
   position: absolute;
-  top: 14px; /* 固定定位 */
+  top: 14px;
+  /* 固定定位 */
   right: 16px;
   width: 32px;
   height: 32px;
@@ -167,7 +167,8 @@
   border: none;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  z-index: 100; /* 确保层级足够高 */
+  z-index: 100;
+  /* 确保层级足够高 */
 }
 
 .modal-close:hover {
@@ -480,22 +481,26 @@
   background: transparent;
   border-bottom: 1px solid var(--border-color);
   display: flex;
-  justify-content: flex-end; /* 改为靠右对齐 */
+  justify-content: flex-end;
+  /* 改为靠右对齐 */
 }
 
 .pill-group {
   display: inline-flex;
   background: rgba(0, 0, 0, 0.03);
-  padding: 2px; /* 进一步缩减 */
+  padding: 2px;
+  /* 进一步缩减 */
   border-radius: 20px;
   border: 1px solid var(--border-color);
 }
 
 .pill-btn {
   border: none;
-  padding: 4px 12px; /* 缩减宽度 */
+  padding: 4px 12px;
+  /* 缩减宽度 */
   border-radius: 18px;
-  font-size: 12px; /* 字号减小 */
+  font-size: 12px;
+  /* 字号减小 */
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -511,7 +516,8 @@
   background: var(--ag-primary) !important;
   color: white !important;
   box-shadow: 0 2px 8px rgba(var(--ag-primary-rgb), 0.3);
-  transform: none; /* 移除位移以保持稳定感 */
+  transform: none;
+  /* 移除位移以保持稳定感 */
 }
 
 /* 悬停态：仅针对非活动按钮 */

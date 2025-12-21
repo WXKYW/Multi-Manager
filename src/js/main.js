@@ -23,6 +23,10 @@ import '../css/zeabur.css'; // Zeabur 专属样式
 import '../css/koyeb.css'; // Koyeb 专属样式
 import '../css/fly.css'; // Fly.io 专属样式
 import '../css/r2.css'; // R2 存储专属样式
+import '../css/chat.css'; // 聊天界面样式
+import '../css/welcome.css'; // 欢迎页面样式
+import '../css/template.css'; // 模块模板通用样式
+import '../css/refined-ui.css'; // 精选组件样式
 
 // 导入模板加载器
 import './template-loader.js';

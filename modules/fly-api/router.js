@@ -186,6 +186,12 @@ router.get('/fly/proxy/apps', async (req, res) => {
                   clientStatus
                 }
               }
+              ipAddresses {
+                nodes {
+                  address
+                  type
+                }
+              }
             }
           }
         }
@@ -222,60 +228,99 @@ router.post('/fly/apps/:appName/restart', async (req, res) => {
   try {
     const { appName } = req.params;
     const { accountId, appId } = req.body;
-
-    const targetName = appName; // Machines API works best with app name
-
-    console.log(`[Fly.io] Restarting app via Machines API: ${targetName} for account: ${accountId}`);
-
+    
+    const targetName = appName; 
+    console.log(`[Fly.io] Restarting app: ${targetName} for account: ${accountId}`);
+    
     const account = await storage.getAccount(accountId);
-    if (!account) {
-      return res.status(404).json({ success: false, error: '账号不存在' });
-    }
-
-    if (!account.api_token) {
-      return res.status(400).json({ success: false, error: '账号未配置 API Token' });
-    }
+    if (!account) return res.status(404).json({ success: false, error: '账号不存在' });
 
     try {
-      // 1. 获取该应用的所有 Machines
-      const machines = await machineRequest('GET', `/apps/${targetName}/machines`, account.api_token);
+        // 1. 优先尝试 Machines API (V2 应用)
+        const machines = await machineRequest('GET', `/apps/${targetName}/machines`, account.api_token);
+        
+        if (Array.isArray(machines) && machines.length > 0) {
+            console.log(`[Fly.io] Restarting ${machines.length} machines via REST API...`);
+            const restartPromises = machines.map(m => 
+                machineRequest('POST', `/apps/${targetName}/machines/${m.id}/restart`, account.api_token)
+                    .catch(err => ({ error: true, id: m.id, message: err.message }))
+            );
+            const results = await Promise.all(restartPromises);
+            const failedCount = results.filter(r => r.error).length;
+            return res.json({ success: failedCount < machines.length, mode: 'machines', results });
+        }
 
-      if (!Array.isArray(machines) || machines.length === 0) {
-        console.log(`[Fly.io] No machines found for ${targetName}, falling back to GraphQL restartApp`);
-
-        // 回退到 GraphQL 方式 (V1 应用或特殊情况)
+        // 2. 如果没有 Machines，尝试 GraphQL (V1 应用)
+        console.log(`[Fly.io] No machines found, falling back to GraphQL restartApp`);
         const mutation = `mutation($appId: ID!) { restartApp(input: { appId: $appId }) { app { name } } }`;
         const result = await flyRequest(mutation, { appId: targetName }, account.api_token);
         if (result.errors) throw new Error(result.errors[0].message);
-
-        return res.json({ success: true, mode: 'graphql', data: result.data.restartApp });
-      }
-
-      // 2. 逐个重启 Machines
-      console.log(`[Fly.io] Found ${machines.length} machines. Triggering restarts...`);
-      const restartPromises = machines.map(m =>
-        machineRequest('POST', `/apps/${targetName}/machines/${m.id}/restart`, account.api_token)
-          .catch(err => ({ error: true, id: m.id, message: err.message }))
-      );
-
-      const results = await Promise.all(restartPromises);
-      const failedCount = results.filter(r => r.error).length;
-
-      res.json({
-        success: failedCount < machines.length,
-        mode: 'machines',
-        total: machines.length,
-        failed: failedCount,
-        results: results
-      });
-
+        
+        res.json({ success: true, mode: 'graphql', data: result.data.restartApp });
     } catch (apiError) {
-      const status = apiError.response ? apiError.response.status : 500;
-      const msg = apiError.response ? (apiError.response.data?.error || apiError.message) : apiError.message;
-      res.status(status).json({ success: false, error: msg });
+        const status = apiError.response ? apiError.response.status : 500;
+        res.status(status).json({ success: false, error: apiError.message });
     }
   } catch (error) {
-    console.error('[Fly.io] Restart Route Exception:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 重新部署应用 (对于 V2 应用，重启所有机器通常等同于重新加载)
+router.post('/fly/apps/:appName/redeploy', async (req, res) => {
+  try {
+    const { appName } = req.params;
+    const { accountId } = req.body;
+    
+    const account = await storage.getAccount(accountId);
+    if (!account) return res.status(404).json({ success: false, error: '账号不存在' });
+
+    console.log(`[Fly.io] Triggering redeploy for ${appName}...`);
+
+    let graphqlError = null;
+    try {
+        // 1. 首先尝试 GraphQL 方式
+        const mutation = `
+          mutation($appId: ID!) {
+            restartApp(input: { appId: $appId }) {
+              app { name }
+            }
+          }
+        `;
+        const result = await flyRequest(mutation, { appId: appName }, account.api_token);
+        
+        if (!result.errors) {
+            return res.json({ success: true, mode: 'graphql', data: result.data.restartApp });
+        }
+        graphqlError = result.errors[0].message;
+    } catch (e) {
+        graphqlError = e.message;
+    }
+
+    // 2. 如果 GraphQL 失败 (报错或抛出 500)，强制回退到 Machines 重启
+    console.warn(`[Fly.io] GraphQL Redeploy failed (${graphqlError}), performing machine-based fallback for ${appName}...`);
+    
+    try {
+        const machines = await machineRequest('GET', `/apps/${appName}/machines`, account.api_token);
+        if (Array.isArray(machines) && machines.length > 0) {
+            console.log(`[Fly.io] Falling back to restarting ${machines.length} machines...`);
+            const results = await Promise.all(machines.map(m => 
+                machineRequest('POST', `/apps/${appName}/machines/${m.id}/restart`, account.api_token)
+                    .catch(err => ({ error: true, id: m.id, message: err.message }))
+            ));
+            return res.json({ 
+                success: true, 
+                mode: 'machines-fallback', 
+                message: 'GraphQL 接口异常，已自动通过 Machines API 完成重启',
+                details: results 
+            });
+        }
+        throw new Error(graphqlError || '应用无可用实例且 GraphQL 接口异常');
+    } catch (apiError) {
+        console.error(`[Fly.io] All redeploy methods failed for ${appName}:`, apiError.message);
+        res.status(500).json({ success: false, error: '部署操作失败: ' + apiError.message });
+    }
+  } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -393,6 +438,99 @@ router.get('/fly/apps/:appName/certificates', async (req, res) => {
     res.json({ success: true, data: result.data.app.certificates.nodes });
   } catch (error) {
     console.error('[Fly.io] Certificates Fetch Error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 获取应用配置 (App Config)
+router.get('/fly/apps/:appName/config', async (req, res) => {
+  // ...
+});
+
+// 重命名应用
+router.post('/fly/apps/:appName/rename', async (req, res) => {
+  try {
+    const { appName } = req.params;
+    const { accountId, newName } = req.body;
+    
+    const account = await storage.getAccount(accountId);
+    if (!account) return res.status(404).json({ success: false, error: '账号不存在' });
+
+    const mutation = `
+      mutation($appId: ID!, $newName: String!) {
+        renameApp(input: { appId: $appId, newName: $newName }) {
+          app {
+            name
+          }
+        }
+      }
+    `;
+
+    const result = await flyRequest(mutation, { appId: appName, newName }, account.api_token);
+    if (result.errors) throw new Error(result.errors[0].message);
+
+    res.json({ success: true, data: result.data.renameApp });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 删除应用
+router.delete('/fly/apps/:appName', async (req, res) => {
+  try {
+    const { appName } = req.params;
+    const { accountId } = req.body;
+    
+    const account = await storage.getAccount(accountId);
+    if (!account) return res.status(404).json({ success: false, error: '账号不存在' });
+
+    const mutation = `
+      mutation($appId: ID!) {
+        deleteApp(input: { appId: $appId }) {
+          organization {
+            slug
+          }
+        }
+      }
+    `;
+
+    const result = await flyRequest(mutation, { appId: appName }, account.api_token);
+    if (result.errors) throw new Error(result.errors[0].message);
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 创建应用
+router.post('/fly/apps', async (req, res) => {
+  try {
+    const { accountId, name, orgId } = req.body;
+    
+    const account = await storage.getAccount(accountId);
+    if (!account) return res.status(404).json({ success: false, error: '账号不存在' });
+
+    // 如果没传 orgId，尝试使用账号默认的
+    const targetOrgId = orgId || account.organization_id;
+
+    const mutation = `
+      mutation($name: String, $organizationId: ID!) {
+        createApp(input: { name: $name, organizationId: $organizationId, machines: true }) {
+          app {
+            id
+            name
+            status
+          }
+        }
+      }
+    `;
+
+    const result = await flyRequest(mutation, { name, organizationId: targetOrgId }, account.api_token);
+    if (result.errors) throw new Error(result.errors[0].message);
+
+    res.json({ success: true, data: result.data.createApp.app });
+  } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
