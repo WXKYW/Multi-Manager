@@ -52,9 +52,9 @@
 
 /* ========== Fly.io 专属视觉定制 (对齐其它模块) ========== */
 
-/* 账号卡片左侧品牌边框 */
+/* Account Card */
 .fly-account-card {
-    border-left: 4px solid var(--fly-primary);
+    border-color: rgba(var(--fly-primary-rgb), 0.15);
 }
 
 /* 账号卡片展开状态的 Header 渐变 */
