@@ -32,15 +32,15 @@
   color: var(--primary-color);
 }
 
-.main-tab.zeabur-tab:hover {
+.main-tab.paas-tab:hover {
   color: var(--zeabur-primary);
 }
 
-.main-tab.zeabur-tab.active {
+.main-tab.paas-tab.active {
   color: var(--zeabur-primary);
 }
 
-.main-tab.zeabur-tab::after {
+.main-tab.paas-tab::after {
   background-color: var(--zeabur-primary);
 }
 
@@ -144,7 +144,7 @@
 }
 
 /* 各模块特色颜色 - 激活状态 */
-.main-tabs-sidebar .sidebar-tab.zeabur-tab.active {
+.main-tabs-sidebar .sidebar-tab.paas-tab.active {
   color: var(--zeabur-primary);
 }
 
@@ -164,9 +164,7 @@
   color: var(--ag-primary);
 }
 
-.main-tabs-sidebar .sidebar-tab.gemini-cli-tab.active {
-  color: #4285f4;
-}
+
 
 /* Tooltip 提示 - 侧边栏模式 */
 .main-tabs-sidebar .sidebar-tab::after {

@@ -273,6 +273,9 @@ export const dnsMethods = {
   selectDnsZone(zone) {
     store.dnsSelectedZoneId = zone.id;
     store.dnsSelectedZoneName = zone.name;
+    // 兼容两种命名方式: nameServers (驼峰) 和 name_servers (下划线)
+    store.dnsSelectedZoneNameServers = zone.nameServers || zone.name_servers || [];
+    console.log('[DNS] 已选择域名:', zone.name, '| NS记录数量:', store.dnsSelectedZoneNameServers.length, '| NS数据:', store.dnsSelectedZoneNameServers);
     // 保存选中的 zone 到缓存以便下次恢复
     if (store.dnsSelectedAccountId) {
       try {
@@ -282,6 +285,208 @@ export const dnsMethods = {
       }
     }
     this.loadDnsRecords();
+    this.loadZoneSsl(); // 加载SSL信息
+    // this.loadZoneAnalytics(); // 加载Analytics数据 - 暂时禁用
+  },
+
+  toggleNsPopover() {
+    store.showNsPopover = !store.showNsPopover;
+  },
+
+  /**
+   * 清除Zone的所有缓存
+   */
+  async purgeZoneCache() {
+    if (!store.dnsSelectedAccountId || !store.dnsSelectedZoneId) {
+      toast.error('请先选择域名');
+      return;
+    }
+
+    const confirmed = await store.showConfirm({
+      title: '确认清除缓存',
+      message: `确定要清除域名 "${store.dnsSelectedZoneName}" 的所有缓存吗？此操作将清空CDN缓存，可能会短暂影响性能。`,
+      icon: 'fa-broom',
+      confirmText: '清除缓存',
+      confirmClass: 'btn-warning'
+    });
+
+    if (!confirmed) return;
+
+    store.dnsPurgingCache = true;
+
+    try {
+      const response = await fetch(
+        `/api/cf-dns/accounts/${store.dnsSelectedAccountId}/zones/${store.dnsSelectedZoneId}/purge`,
+        {
+          method: 'POST',
+          headers: store.getAuthHeaders(),
+          body: JSON.stringify({ purge_everything: true })
+        }
+      );
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        toast.success(`✅ 缓存已清除！域名: ${store.dnsSelectedZoneName}`);
+      } else {
+        toast.error('清除缓存失败: ' + (data.error || data.message || '未知错误'));
+      }
+    } catch (error) {
+      toast.error('清除缓存失败: ' + error.message);
+    } finally {
+      store.dnsPurgingCache = false;
+    }
+  },
+
+  /**
+   * 加载域名的SSL/TLS信息
+   */
+  async loadZoneSsl() {
+    if (!store.dnsSelectedAccountId || !store.dnsSelectedZoneId) return;
+
+    store.dnsLoadingSsl = true;
+    store.dnsSelectedZoneSsl = null;
+
+    try {
+      const response = await fetch(
+        `/api/cf-dns/accounts/${store.dnsSelectedAccountId}/zones/${store.dnsSelectedZoneId}/ssl`,
+        { headers: store.getAuthHeaders() }
+      );
+
+      const data = await response.json();
+      if (data.success) {
+        store.dnsSelectedZoneSsl = data.ssl;
+        console.log('[DNS] SSL信息已加载:', data.ssl);
+      } else {
+        toast.error('加载SSL信息失败: ' + (data.error || '未知错误'));
+      }
+    } catch (error) {
+      console.error('[DNS] 加载SSL信息失败:', error);
+      toast.error('加载SSL信息失败: ' + error.message);
+    } finally {
+      store.dnsLoadingSsl = false;
+    }
+  },
+
+  /**
+   * 更新SSL模式
+   */
+  async updateSslMode(mode) {
+    if (!store.dnsSelectedAccountId || !store.dnsSelectedZoneId) return;
+
+    const modeNames = {
+      'off': 'Off (关闭)',
+      'flexible': 'Flexible (灵活)',
+      'full': 'Full (完全)',
+      'strict': 'Full (strict)'
+    };
+
+    const confirmed = await store.showConfirm({
+      title: '确认修改SSL模式',
+      message: `确定要将SSL模式修改为 "${modeNames[mode]}" 吗？\n\n修改后可能需要几分钟生效。`,
+      icon: 'fa-lock',
+      confirmText: '确认修改',
+      confirmClass: 'btn-primary'
+    });
+
+    if (!confirmed) return;
+
+    store.dnsLoadingSsl = true;
+
+    try {
+      const response = await fetch(
+        `/api/cf-dns/accounts/${store.dnsSelectedAccountId}/zones/${store.dnsSelectedZoneId}/ssl`,
+        {
+          method: 'PATCH',
+          headers: store.getAuthHeaders(),
+          body: JSON.stringify({ mode })
+        }
+      );
+
+      const data = await response.json();
+      if (data.success) {
+        store.dnsSelectedZoneSsl.mode = data.ssl.mode;
+        toast.success(`✅ SSL模式已更新为: ${modeNames[mode]}`);
+      } else {
+        toast.error('更新SSL模式失败: ' + (data.error || '未知错误'));
+      }
+    } catch (error) {
+      console.error('[DNS] 更新SSL模式失败:', error);
+      toast.error('更新SSL模式失败: ' + error.message);
+    } finally {
+      store.dnsLoadingSsl = false;
+    }
+  },
+
+  /**
+   * 加载Analytics数据
+   */
+  async loadZoneAnalytics(timeRange = '24h') {
+    if (!store.dnsSelectedAccountId || !store.dnsSelectedZoneId) return;
+
+    store.dnsLoadingAnalytics = true;
+    store.dnsAnalyticsTimeRange = timeRange;
+
+    try {
+      console.log('[DNS] 开始加载Analytics:', {
+        accountId: store.dnsSelectedAccountId,
+        zoneId: store.dnsSelectedZoneId,
+        timeRange
+      });
+
+      const response = await fetch(
+        `/api/cf-dns/accounts/${store.dnsSelectedAccountId}/zones/${store.dnsSelectedZoneId}/analytics?timeRange=${timeRange}`,
+        { headers: store.getAuthHeaders() }
+      );
+
+      console.log('[DNS] Analytics响应状态:', response.status);
+
+      const data = await response.json();
+
+      console.log('[DNS] Analytics返回数据:', data);
+
+      if (data.success) {
+        store.dnsSelectedZoneAnalytics = data.analytics;
+        console.log('[DNS] Analytics已加载:', data.analytics);
+
+        // 如果数据全是0，给出提示
+        if (data.analytics.requests === 0 && data.analytics.bandwidth === 0) {
+          console.warn('[DNS] Analytics数据为0，可能原因：');
+          console.warn('1. 域名在此时间段内没有流量');
+          console.warn('2. Analytics数据还未生成（新域名）');
+          console.warn('3. API权限问题');
+        }
+      } else {
+        console.error('[DNS] Analytics加载失败:', data.error);
+        toast.error('加载Analytics失败: ' + (data.error || '未知错误'));
+      }
+    } catch (error) {
+      console.error('[DNS] Analytics请求异常:', error);
+      console.error('[DNS] 错误详情:', error.message, error.stack);
+      // 静默失败，不影响其他功能
+      store.dnsSelectedZoneAnalytics = null;
+    } finally {
+      store.dnsLoadingAnalytics = false;
+    }
+  },
+
+  /**
+   * 格式化数字（简化显示）
+   */
+  formatNumber(num) {
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+    return num.toString();
+  },
+
+  /**
+   * 格式化字节
+   */
+  formatBytes(bytes) {
+    if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2) + ' GB';
+    if (bytes >= 1048576) return (bytes / 1048576).toFixed(2) + ' MB';
+    if (bytes >= 1024) return (bytes / 1024).toFixed(2) + ' KB';
+    return bytes + ' B';
   },
 
   async loadDnsRecords() {
@@ -1998,6 +2203,123 @@ export default {
       }
     } catch (error) {
       toast.error('删除失败: ' + error.message);
+    }
+  },
+
+  // ==================== Zone (域名) 管理 ====================
+
+  /**
+   * 打开添加域名模态框
+   */
+  openAddZoneModal() {
+    this.zoneForm = {
+      name: '',
+      jumpStart: false
+    };
+    this.zoneFormError = '';
+    this.showAddZoneModal = true;
+  },
+
+  /**
+   * 保存域名(添加新域名到 Cloudflare)
+   */
+  async saveZone() {
+    const name = this.zoneForm.name?.trim();
+    if (!name) {
+      this.zoneFormError = '请输入域名';
+      return;
+    }
+
+    // 简单的域名格式验证
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]?\.[a-zA-Z]{2,}$/.test(name)) {
+      this.zoneFormError = '请输入有效的域名格式,如 example.com';
+      return;
+    }
+
+    this.dnsSaving = true;
+    this.zoneFormError = '';
+
+    try {
+      const response = await fetch(`/api/cf-dns/accounts/${store.dnsSelectedAccountId}/zones`, {
+        method: 'POST',
+        headers: {
+          ...store.getAuthHeaders(),
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name,
+          jumpStart: this.zoneForm.jumpStart
+        })
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        toast.success(`域名 "${name}" 已添加到 Cloudflare`);
+        this.showAddZoneModal = false;
+        // 重新加载域名列表
+        await this.loadDnsZones();
+      } else {
+        this.zoneFormError = data.error || '添加域名失败';
+        toast.error(this.zoneFormError);
+      }
+    } catch (error) {
+      this.zoneFormError = '添加域名失败: ' + error.message;
+      toast.error(this.zoneFormError);
+    } finally {
+      this.dnsSaving = false;
+    }
+  },
+
+  /**
+   * 删除域名
+   */
+  async deleteZone() {
+    if (!store.dnsSelectedZoneId) {
+      toast.error('请先选择要删除的域名');
+      return;
+    }
+
+    // 获取当前选中的域名信息
+    const selectedZone = store.dnsZones.find(z => z.id === store.dnsSelectedZoneId);
+    if (!selectedZone) {
+      toast.error('未找到选中的域名');
+      return;
+    }
+
+    const confirmed = await store.showConfirm({
+      title: '确认删除域名',
+      message: `确定要从 Cloudflare 删除域名 "${selectedZone.name}" 吗?\n\n⚠️ 此操作不可恢复,将删除该域名下的所有 DNS 记录、Workers 路由等配置!`,
+      icon: 'fa-exclamation-triangle',
+      confirmText: '确认删除',
+      confirmClass: 'btn-danger'
+    });
+
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch(
+        `/api/cf-dns/accounts/${store.dnsSelectedAccountId}/zones/${store.dnsSelectedZoneId}`,
+        {
+          method: 'DELETE',
+          headers: store.getAuthHeaders()
+        }
+      );
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        toast.success(`域名 "${selectedZone.name}" 已从 Cloudflare 删除`);
+        // 清除选中的域名
+        store.dnsSelectedZoneId = null;
+        store.dnsRecords = [];
+        // 重新加载域名列表
+        await this.loadDnsZones();
+      } else {
+        toast.error(data.error || '删除域名失败');
+      }
+    } catch (error) {
+      toast.error('删除域名失败: ' + error.message);
     }
   }
 };

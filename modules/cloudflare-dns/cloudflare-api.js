@@ -11,17 +11,29 @@ const CF_API_BASE = 'api.cloudflare.com';
 
 /**
  * 发送 Cloudflare API 请求
+ * @param {string|object} auth - API Token (string) 或 { email, key } 对象
  */
-function cfRequest(apiToken, method, path, body = null) {
+function cfRequest(auth, method, path, body = null) {
   return new Promise((resolve, reject) => {
+    // 支持两种认证方式
+    const headers = {
+      'Content-Type': 'application/json'
+    };
+
+    if (typeof auth === 'string') {
+      // API Token 方式
+      headers['Authorization'] = `Bearer ${auth}`;
+    } else if (auth && auth.email && auth.key) {
+      // Global API Key 方式
+      headers['X-Auth-Email'] = auth.email;
+      headers['X-Auth-Key'] = auth.key;
+    }
+
     const options = {
       hostname: CF_API_BASE,
       path: `/client/v4${path}`,
       method: method,
-      headers: {
-        'Authorization': `Bearer ${apiToken}`,
-        'Content-Type': 'application/json'
-      },
+      headers: headers,
       timeout: 15000
     };
 
@@ -60,14 +72,22 @@ function cfRequest(apiToken, method, path, body = null) {
 // ==================== 账号验证 ====================
 
 /**
- * 验证 API Token 是否有效
+ * 验证 API Token 或 Global API Key 是否有效
+ * @param {string|object} auth - API Token (string) 或 { email, key } 对象
  */
-async function verifyToken(apiToken) {
+async function verifyToken(auth) {
   try {
-    const result = await cfRequest(apiToken, 'GET', '/user/tokens/verify');
+    // 对于 Global API Key，使用 /user 端点验证
+    // 对于 API Token，使用 /user/tokens/verify 端点
+    const endpoint = (typeof auth === 'object' && auth.email)
+      ? '/user'  // Global API Key
+      : '/user/tokens/verify';  // API Token
+
+    const result = await cfRequest(auth, 'GET', endpoint);
+
     return {
       valid: true,
-      status: result.result?.status,
+      status: result.result?.status || 'active',
       expiresOn: result.result?.expires_on
     };
   } catch (e) {
@@ -115,6 +135,38 @@ async function listZones(apiToken, options = {}) {
  */
 async function getZone(apiToken, zoneId) {
   const result = await cfRequest(apiToken, 'GET', `/zones/${zoneId}`);
+  return result.result;
+}
+
+/**
+ * 创建新的 Zone (添加域名)
+ * @param {string} apiToken
+ * @param {string} name - 域名,如 "example.com"
+ * @param {Object} options - { account: { id }, jump_start, type }
+ */
+async function createZone(apiToken, name, options = {}) {
+  const body = {
+    name,
+    jump_start: options.jump_start !== undefined ? options.jump_start : false,
+    type: options.type || 'full' // full, partial, secondary
+  };
+
+  // 如果提供了账号 ID
+  if (options.account && options.account.id) {
+    body.account = { id: options.account.id };
+  }
+
+  const result = await cfRequest(apiToken, 'POST', '/zones', body);
+  return result.result;
+}
+
+/**
+ * 删除 Zone (删除域名)
+ * @param {string} apiToken
+ * @param {string} zoneId
+ */
+async function deleteZone(apiToken, zoneId) {
+  const result = await cfRequest(apiToken, 'DELETE', `/zones/${zoneId}`);
   return result.result;
 }
 
@@ -251,6 +303,228 @@ async function switchDnsContent(apiToken, zoneId, type, name, newContent) {
 async function exportDnsRecords(apiToken, zoneId) {
   const result = await cfRequest(apiToken, 'GET', `/zones/${zoneId}/dns_records/export`);
   return result.result;
+}
+
+
+/**
+ * 清除 Zone 的缓存
+ * @param {string} apiToken
+ * @param {string} zoneId
+ * @param {Object} options - { purge_everything: true } 或 { files: [...] } 或 { tags: [...] }
+ */
+async function purgeCache(apiToken, zoneId, options = {}) {
+  const body = options.purge_everything ? { purge_everything: true } :
+    (options.files ? { files: options.files } :
+      (options.tags ? { tags: options.tags } : { purge_everything: true }));
+
+  console.log('[CF-API] 清除缓存请求:', { zoneId, body });
+
+  try {
+    const result = await cfRequest(apiToken, 'POST', `/zones/${zoneId}/purge_cache`, body);
+    console.log('[CF-API] 清除缓存成功:', result);
+    return result.result;
+  } catch (error) {
+    console.error('[CF-API] 清除缓存失败:', error.message);
+    throw error;
+  }
+}
+
+// ==================== SSL/TLS 管理 ====================
+
+/**
+ * 获取 Zone 的 SSL 设置
+ * @param {string|object} auth - API Token 或 { email, key }
+ * @param {string} zoneId
+ */
+async function getSslSettings(auth, zoneId) {
+  try {
+    const result = await cfRequest(auth, 'GET', `/zones/${zoneId}/settings/ssl`);
+    return result.result;
+  } catch (e) {
+    console.error('[CF-API] 获取SSL设置失败:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * 修改 Zone 的 SSL 模式
+ * @param {string|object} auth
+ * @param {string} zoneId
+ * @param {string} mode - off, flexible, full, strict
+ */
+async function updateSslMode(auth, zoneId, mode) {
+  const body = { value: mode };
+  const result = await cfRequest(auth, 'PATCH', `/zones/${zoneId}/settings/ssl`, body);
+  return result.result;
+}
+
+/**
+ * 获取 Zone 的 SSL 证书包
+ * @param {string|object} auth
+ * @param {string} zoneId
+ */
+async function getSslCertificates(auth, zoneId) {
+  try {
+    const result = await cfRequest(auth, 'GET', `/zones/${zoneId}/ssl/certificate_packs`);
+    return result.result || [];
+  } catch (e) {
+    console.error('[CF-API] 获取SSL证书失败:', e.message);
+    return [];
+  }
+}
+
+/**
+ * 获取 SSL 验证状态
+ * @param {string|object} auth
+ * @param {string} zoneId
+ */
+async function getSslVerification(auth, zoneId) {
+  try {
+    const result = await cfRequest(auth, 'GET', `/zones/${zoneId}/ssl/verification`);
+    return result.result || [];
+  } catch (e) {
+    console.error('[CF-API] 获取SSL验证状态失败:', e.message);
+    return [];
+  }
+}
+
+// ==================== Analytics 分析 ====================
+
+/**
+ * 获取 Zone 的 Analytics 数据
+ * @param {string|object} auth
+ * @param {string} zoneId
+ * @param {Object} options - { since, until }
+ */
+async function getZoneAnalytics(auth, zoneId, options = {}) {
+  try {
+    // 默认获取最近24小时的数据
+    const since = options.since || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const until = options.until || new Date().toISOString();
+
+    const params = new URLSearchParams({
+      since,
+      until
+    });
+
+    const result = await cfRequest(
+      auth,
+      'GET',
+      `/zones/${zoneId}/analytics/dashboard?${params.toString()}`
+    );
+
+    return result.result;
+  } catch (e) {
+    console.error('[CF-API] 获取Analytics失败:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * 获取简化的Analytics数据（用于仪表板）
+ * @param {string|object} auth
+ * @param {string} zoneId
+ * @param {string} timeRange - '24h', '7d', '30d'
+ */
+async function getSimpleAnalytics(auth, zoneId, timeRange = '24h') {
+  const limits = {
+    '24h': 24,
+    '7d': 168,
+    '30d': 720
+  };
+
+  const limit = limits[timeRange] || 24;
+
+  try {
+    // 使用GraphQL Analytics Engine API - httpRequests1hGroups
+    const query = `{
+      viewer {
+        zones(filter: {zoneTag: "${zoneId}"}) {
+          httpRequests1hGroups(
+            limit: ${limit}
+            orderBy: [datetime_DESC]
+          ) {
+            sum {
+              requests
+              bytes
+              cachedRequests
+              cachedBytes
+              threats
+              pageViews
+            }
+            uniq {
+              uniques
+            }
+          }
+        }
+      }
+    }`;
+
+    const result = await cfRequest(
+      auth,
+      'POST',
+      `/graphql`,
+      { query }
+    );
+
+    console.log('[CF-API] GraphQL Analytics原始数据:', result);
+
+    // 聚合所有小时的数据
+    const groups = result.data?.viewer?.zones?.[0]?.httpRequests1hGroups || [];
+
+    let totalRequests = 0;
+    let totalBytes = 0;
+    let totalCached = 0;
+    let totalThreats = 0;
+    let totalPageViews = 0;
+    let uniquesSet = new Set();
+
+    groups.forEach(group => {
+      const sum = group.sum || {};
+      const uniq = group.uniq || {};
+
+      totalRequests += sum.requests || 0;
+      totalBytes += sum.bytes || 0;
+      totalCached += sum.cachedRequests || 0;
+      totalThreats += sum.threats || 0;
+      totalPageViews += sum.pageViews || 0;
+
+      if (uniq.uniques) uniquesSet.add(uniq.uniques);
+    });
+
+    const cacheHitRate = totalRequests > 0 ? Math.round((totalCached / totalRequests) * 100) : 0;
+
+    return {
+      requests: totalRequests,
+      bandwidth: totalBytes,
+      threats: totalThreats,
+      pageViews: totalPageViews,
+      uniques: uniquesSet.size > 0 ? Math.max(...uniquesSet) : 0,
+      cacheHitRate: cacheHitRate,
+      timeseries: []
+    };
+  } catch (e) {
+    console.error('[CF-API] 获取Analytics失败:', e.message);
+    console.error('[CF-API] 错误详情:', e);
+    return {
+      requests: 0,
+      bandwidth: 0,
+      threats: 0,
+      pageViews: 0,
+      uniques: 0,
+      cacheHitRate: 0,
+      timeseries: []
+    };
+  }
+}
+
+/**
+ * 计算缓存命中率
+ */
+function calculateCacheHitRate(totals) {
+  const cached = totals.requests?.cached || 0;
+  const all = totals.requests?.all || 0;
+  return all > 0 ? Math.round((cached / all) * 100) : 0;
 }
 
 // ==================== 实用函数 ====================
@@ -766,6 +1040,103 @@ async function deletePagesProject(apiToken, accountId, projectName) {
   return await cfRequest(apiToken, 'DELETE', `/accounts/${accountId}/pages/projects/${projectName}`);
 }
 
+// ==================== R2 存储管理 ====================
+
+/**
+ * 获取 R2 存储桶列表
+ */
+async function listR2Buckets(auth, accountId) {
+  try {
+    const result = await cfRequest(auth, 'GET', `/accounts/${accountId}/r2/buckets`);
+    return result.result?.buckets || [];
+  } catch (e) {
+    console.error('[CF-API] 获取 R2 存储桶失败:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * 获取 R2 存储桶详情
+ */
+async function getR2Bucket(auth, accountId, bucketName) {
+  try {
+    const result = await cfRequest(auth, 'GET', `/accounts/${accountId}/r2/buckets/${bucketName}`);
+    return result.result;
+  } catch (e) {
+    console.error('[CF-API] 获取 R2 存储桶详情失败:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * 创建 R2 存储桶
+ */
+async function createR2Bucket(auth, accountId, name, location = 'auto') {
+  try {
+    const body = { name };
+    if (location && location !== 'auto') {
+      body.location = location;
+    }
+    const result = await cfRequest(auth, 'POST', `/accounts/${accountId}/r2/buckets`, body);
+    return result.result;
+  } catch (e) {
+    console.error('[CF-API] 创建 R2 存储桶失败:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * 删除 R2 存储桶
+ */
+async function deleteR2Bucket(auth, accountId, bucketName) {
+  try {
+    await cfRequest(auth, 'DELETE', `/accounts/${accountId}/r2/buckets/${bucketName}`);
+    return true;
+  } catch (e) {
+    console.error('[CF-API] 删除 R2 存储桶失败:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * 列出 R2 存储桶内的对象
+ */
+async function listR2Objects(auth, accountId, bucketName, options = {}) {
+  try {
+    const { prefix, cursor, limit, delimiter } = options;
+    let path = `/accounts/${accountId}/r2/buckets/${bucketName}/objects?`;
+
+    const params = [];
+    if (prefix) params.push(`prefix=${encodeURIComponent(prefix)}`);
+    if (cursor) params.push(`cursor=${encodeURIComponent(cursor)}`);
+    if (limit) params.push(`limit=${limit}`);
+    if (delimiter) params.push(`delimiter=${encodeURIComponent(delimiter)}`);
+
+    if (params.length > 0) {
+      path += params.join('&');
+    }
+
+    const result = await cfRequest(auth, 'GET', path);
+    return result.result;
+  } catch (e) {
+    console.error('[CF-API] 列出 R2 对象失败:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * 删除 R2 对象
+ */
+async function deleteR2Object(auth, accountId, bucketName, objectKey) {
+  try {
+    await cfRequest(auth, 'DELETE', `/accounts/${accountId}/r2/buckets/${bucketName}/objects/${encodeURIComponent(objectKey)}`);
+    return true;
+  } catch (e) {
+    console.error('[CF-API] 删除 R2 对象失败:', e.message);
+    throw e;
+  }
+}
+
 module.exports = {
   // 验证
   verifyToken,
@@ -774,6 +1145,8 @@ module.exports = {
   // Zone 管理
   listZones,
   getZone,
+  createZone,
+  deleteZone,
 
   // DNS 记录
   listDnsRecords,
@@ -784,6 +1157,17 @@ module.exports = {
   batchCreateDnsRecords,
   switchDnsContent,
   exportDnsRecords,
+  purgeCache,  // 缓存管理
+
+  // SSL/TLS 管理
+  getSslSettings,
+  updateSslMode,
+  getSslCertificates,
+  getSslVerification,
+
+  // Analytics 分析
+  getZoneAnalytics,
+  getSimpleAnalytics,
 
   // 实用函数
   getSupportedRecordTypes,
@@ -816,5 +1200,13 @@ module.exports = {
   listPagesDomains,
   addPagesDomain,
   deletePagesDomain,
-  deletePagesProject
+  deletePagesProject,
+
+  // R2 管理
+  listR2Buckets,
+  getR2Bucket,
+  createR2Bucket,
+  deleteR2Bucket,
+  listR2Objects,
+  deleteR2Object
 };

@@ -281,10 +281,51 @@ export const geminiCliMethods = {
                 headers: store.getAuthHeaders()
             });
             const data = await response.json();
-            this.geminiCliLogDetail = data;
-            this.showGeminiCliLogDetailModal = true;
+
+            // 标准化数据结构以适配 Antigravity 模板 (Gemini -> OpenAI 格式)
+            if (data) {
+                // 1. 顶层字段映射
+                data.created_at = data.created_at || data.timestamp;
+                data.duration_ms = data.duration_ms || data.durationMs;
+                data.request_method = data.request_method || 'POST'; // 默认为 POST
+                data.request_path = data.request_path || '/v1beta/models/...:generateContent';
+
+                // 2. Detail 对象标准化
+                if (data.detail) {
+                    // Case A: 已经是 OpenAI 格式 (直接透传的请求)
+                    // 需要将 detail.request.messages 提升到 detail.messages 以匹配模板
+                    if (data.detail.request && data.detail.request.messages && !data.detail.messages) {
+                        data.detail.messages = data.detail.request.messages;
+                    }
+
+                    // Case B: Google 格式 (contents) -> OpenAI 格式 (messages)
+                    if (data.detail.request && data.detail.request.contents && !data.detail.messages) {
+                        data.detail.messages = data.detail.request.contents.map(c => ({
+                            role: c.role === 'model' ? 'assistant' : c.role,
+                            content: c.parts ? c.parts.map(p => p.text).join('') : ''
+                        }));
+                    }
+
+                    // 处理 Response: candidates -> choices
+                    // 如果是流式请求 (type: stream)，可能没有完整的 response 对象，或者 response 是空的
+                    if (data.detail.response && data.detail.response.candidates && !data.detail.response.choices) {
+                        data.detail.response.choices = data.detail.response.candidates.map(c => ({
+                            message: {
+                                role: 'assistant',
+                                content: c.content && c.content.parts ? c.content.parts.map(p => p.text).join('') : '',
+                                reasoning_content: null 
+                            }
+                        }));
+                    }
+                }
+            }
+
+            store.gcliLogDetailShowRaw = false;
+            store.geminiCliLogDetail = data;
+            store.showGeminiCliLogDetailModal = true;
         } catch (error) {
             toast.error('加载日志详情失败');
+            console.error(error);
         }
     },
 

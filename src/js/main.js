@@ -107,7 +107,6 @@ const app = createApp({
       dnsEditAccountForm: { name: '', apiToken: '', email: '' },
       dnsEditAccountFormError: '',
       dnsEditAccountFormSuccess: '',
-      dnsSelectedZoneName: '',
       showDnsRecordModal: false,
       dnsEditingRecord: null,
       dnsRecordForm: { type: 'A', name: '', content: '', ttl: 1, proxied: false, priority: 10 },
@@ -124,6 +123,12 @@ const app = createApp({
       dnsTemplateForm: { name: '', type: 'A', content: '', ttl: 1, proxied: false, description: '' },
       dnsTemplateFormError: '',
       dnsSavingTemplate: false,
+
+      // Zone (域名) 管理相关
+      showAddZoneModal: false,
+      zoneForm: { name: '', jumpStart: false },
+      zoneFormError: '',
+      dnsSaving: false,
 
       // Workers 管理相关
       workers: [],
@@ -204,7 +209,7 @@ const app = createApp({
       agCustomProjectId: '',
       agAllowRandomProjectId: true,
       showOAuthExpand: false,
-      antigravityLogDetail: null,
+      // antigravityLogDetail: null, // Moved to store
       showAntigravityLogDetailModal: false,
       agSettingsForm: {
         API_KEY: '',
@@ -230,8 +235,8 @@ const app = createApp({
       },
       geminiCliAccountFormError: '',
       geminiCliEditingAccount: null,
-      geminiCliLogDetail: null,
-      showGeminiCliLogDetailModal: false,
+      // geminiCliLogDetail: null, // Moved to store
+      // showGeminiCliLogDetailModal: false, // Moved to store
       geminiCliSettingsForm: {},
 
 
@@ -448,65 +453,66 @@ const app = createApp({
         this.showPagesDeploymentsModal ||
         this.showPagesDomainsModal ||
         this.showImagePreviewModal ||
+        this.showAddZoneModal ||
         (this.customDialog && this.customDialog.show);
     }
   },
 
-    async mounted() {
-      // 保存 Vue 实例到全局，供其他模块使用
-      window.vueApp = this;
+  async mounted() {
+    // 保存 Vue 实例到全局，供其他模块使用
+    window.vueApp = this;
 
-      // 1. 全局图片点击代理 (针对 Markdown 动态生成的图片)
-      window.addEventListener('click', (e) => {
-        const target = e.target;
-        if (target.tagName === 'IMG' && (target.classList.contains('msg-inline-image') || target.closest('.chat-history-compact'))) {
-          const link = target.closest('a');
-          if (link) e.preventDefault();
-          this.openImagePreview(target.src);
+    // 1. 全局图片点击代理 (针对 Markdown 动态生成的图片)
+    window.addEventListener('click', (e) => {
+      const target = e.target;
+      if (target.tagName === 'IMG' && (target.classList.contains('msg-inline-image') || target.closest('.chat-history-compact'))) {
+        const link = target.closest('a');
+        if (link) e.preventDefault();
+        this.openImagePreview(target.src);
+      }
+    }, true);
+
+    // 2. 增强版全局 Tooltip 引擎
+    const tooltipEl = document.createElement('div');
+    tooltipEl.className = 'system-tooltip';
+    document.body.appendChild(tooltipEl);
+
+    window.addEventListener('mouseover', (e) => {
+      const trigger = e.target.closest('[data-tooltip]');
+      if (trigger) {
+        const text = trigger.getAttribute('data-tooltip');
+        if (!text) return;
+
+        tooltipEl.textContent = text;
+        tooltipEl.classList.add('visible');
+
+        const rect = trigger.getBoundingClientRect();
+        const tooltipRect = tooltipEl.getBoundingClientRect();
+
+        // 智能定位：居中对齐触发器顶部
+        let top = rect.top - tooltipRect.height - 10;
+        let left = rect.left + (rect.width / 2) - (tooltipRect.width / 2);
+
+        // 边缘检测：防止超出屏幕左侧/右侧
+        if (left < 10) left = 10;
+        if (left + tooltipRect.width > window.innerWidth - 10) {
+          left = window.innerWidth - tooltipRect.width - 10;
         }
-      }, true);
+        // 防止超出屏幕顶部
+        if (top < 10) top = rect.bottom + 10;
 
-      // 2. 增强版全局 Tooltip 引擎
-      const tooltipEl = document.createElement('div');
-      tooltipEl.className = 'system-tooltip';
-      document.body.appendChild(tooltipEl);
+        tooltipEl.style.top = `${top}px`;
+        tooltipEl.style.left = `${left}px`;
+      }
+    });
 
-      window.addEventListener('mouseover', (e) => {
-        const trigger = e.target.closest('[data-tooltip]');
-        if (trigger) {
-          const text = trigger.getAttribute('data-tooltip');
-          if (!text) return;
+    window.addEventListener('mouseout', (e) => {
+      if (e.target.closest('[data-tooltip]')) {
+        tooltipEl.classList.remove('visible');
+      }
+    });
 
-          tooltipEl.textContent = text;
-          tooltipEl.classList.add('visible');
-
-          const rect = trigger.getBoundingClientRect();
-          const tooltipRect = tooltipEl.getBoundingClientRect();
-
-          // 智能定位：居中对齐触发器顶部
-          let top = rect.top - tooltipRect.height - 10;
-          let left = rect.left + (rect.width / 2) - (tooltipRect.width / 2);
-
-          // 边缘检测：防止超出屏幕左侧/右侧
-          if (left < 10) left = 10;
-          if (left + tooltipRect.width > window.innerWidth - 10) {
-            left = window.innerWidth - tooltipRect.width - 10;
-          }
-          // 防止超出屏幕顶部
-          if (top < 10) top = rect.bottom + 10;
-
-          tooltipEl.style.top = `${top}px`;
-          tooltipEl.style.left = `${left}px`;
-        }
-      });
-
-      window.addEventListener('mouseout', (e) => {
-        if (e.target.closest('[data-tooltip]')) {
-          tooltipEl.classList.remove('visible');
-        }
-      });
-
-      // 全局 Esc 键监听，用于关闭当前打开的模态框
+    // 全局 Esc 键监听，用于关闭当前打开的模态框
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && this.isAnyModalOpen) {
         // 关闭顺序优先级：图片预览 > 对话框 > 日志查看器 > 设置 > 其他模块模态框
@@ -537,7 +543,7 @@ const app = createApp({
           'showAntigravityLogDetailModal', 'showGeminiCliLogDetailModal', 'showGeminiCliAccountModal',
           'showAntigravityManualModal', 'showAddCredentialModal', 'showNewWorkerModal',
           'showWorkerRoutesModal', 'showWorkerDomainsModal', 'showPagesDeploymentsModal',
-          'showPagesDomainsModal', 'showLoginModal', 'showSetPasswordModal'
+          'showPagesDomainsModal', 'showLoginModal', 'showSetPasswordModal', 'showAddZoneModal'
         ];
 
         for (const modal of modals) {
@@ -1041,7 +1047,7 @@ const app = createApp({
       this.loginPassword = '';
       localStorage.removeItem('admin_password');
       localStorage.removeItem('password_time');
-      
+
       // 重置所有模块数据
       this.accounts = [];
       this.managedAccounts = [];

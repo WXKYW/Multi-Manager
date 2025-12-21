@@ -331,6 +331,15 @@ class UserSettings extends BaseModel {
      * 更新用户设置
      */
     updateSettings(updates) {
+        // 自动迁移：确保新字段存在
+        if (!this.hasColumn('channel_model_prefix')) {
+            try {
+                this.getDb().prepare(`ALTER TABLE ${this.tableName} ADD COLUMN channel_model_prefix TEXT`).run();
+            } catch (e) {
+                console.warn('Auto-migration for channel_model_prefix failed:', e.message);
+            }
+        }
+
         const data = { ...updates };
 
         // 处理 JSON 字段

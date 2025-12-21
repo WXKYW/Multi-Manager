@@ -187,3 +187,85 @@
   margin-left: 14px;
   /* 保持左对齐 */
 }
+
+/* =================================================================
+   Module-Specific Theming for Sidebar Tabs
+   Matches colors from top main-tabs (tabs.css)
+   ================================================================= */
+
+/* Zeabur Tab */
+.sidebar-tab.paas-tab:hover {
+  background: rgba(var(--zeabur-primary-rgb), 0.08);
+  color: var(--zeabur-primary);
+}
+
+.sidebar-tab.paas-tab.active {
+  background: linear-gradient(135deg, var(--zeabur-primary) 0%, var(--zeabur-secondary) 100%);
+  color: white;
+  box-shadow: 0 4px 12px rgba(var(--zeabur-primary-rgb), 0.3);
+}
+
+/* DNS Tab (Cloudflare) */
+.sidebar-tab.dns-tab:hover {
+  background: rgba(243, 128, 32, 0.08);
+  /* --cf-color rgb */
+  color: var(--cf-color);
+}
+
+.sidebar-tab.dns-tab.active {
+  background: linear-gradient(135deg, var(--cf-color) 0%, var(--cf-dark) 100%);
+  color: white;
+  box-shadow: 0 4px 12px rgba(243, 128, 32, 0.3);
+}
+
+/* OpenAI Tab */
+.sidebar-tab.openai-tab:hover {
+  background: rgba(16, 163, 127, 0.08);
+  /* --openai-color rgb */
+  color: var(--openai-color);
+}
+
+.sidebar-tab.openai-tab.active {
+  background: linear-gradient(135deg, var(--openai-color) 0%, var(--openai-dark) 100%);
+  color: white;
+  box-shadow: 0 4px 12px rgba(16, 163, 127, 0.3);
+}
+
+/* Server Tab (Hosts) */
+.sidebar-tab.server-tab:hover {
+  background: rgba(71, 85, 105, 0.08);
+  /* --server-primary rgb */
+  color: var(--server-primary);
+}
+
+.sidebar-tab.server-tab.active {
+  background: linear-gradient(135deg, var(--server-primary) 0%, var(--server-primary-dark) 100%);
+  color: white;
+  box-shadow: 0 4px 12px rgba(71, 85, 105, 0.3);
+}
+
+/* Antigravity Tab */
+.sidebar-tab.antigravity-tab:hover {
+  background: rgba(var(--ag-primary-rgb), 0.08);
+  color: var(--ag-primary);
+}
+
+.sidebar-tab.antigravity-tab.active {
+  background: linear-gradient(135deg, var(--ag-primary) 0%, #f4511e 100%);
+  /* #f4511e is ag-primary-hover */
+  color: white;
+  box-shadow: 0 4px 12px rgba(var(--ag-primary-rgb), 0.3);
+}
+
+/* Gemini CLI Tab */
+.sidebar-tab.gemini-cli-tab:hover {
+  background: rgba(0, 191, 165, 0.08);
+  /* --gemini-primary rgb */
+  color: var(--gemini-primary);
+}
+
+.sidebar-tab.gemini-cli-tab.active {
+  background: linear-gradient(135deg, var(--gemini-primary) 0%, var(--gemini-secondary) 100%);
+  color: white;
+  box-shadow: 0 4px 12px rgba(0, 191, 165, 0.3);
+}

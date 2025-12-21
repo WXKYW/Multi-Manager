@@ -89,6 +89,110 @@
 }
 
 /* Markdown Content Styles in Log Detail */
+.chat-history-modern {
+    box-sizing: border-box;
+    width: 100%;
+    overflow-x: hidden; /* 核心：禁止水平溢出 */
+}
+
+.chat-history-modern .msg-bubble {
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.5;
+    position: relative;
+    word-break: break-all; /* 强制所有字符换行 */
+    overflow-wrap: break-word;
+    max-width: 100%;
+    box-sizing: border-box;
+    min-width: 0; /* 允许在 flex 容器中收缩 */
+}
+
+.chat-history-modern .user-bubble {
+    background: rgba(var(--ag-primary-rgb), 0.08);
+    color: var(--text-primary);
+    border: 1px solid rgba(var(--ag-primary-rgb), 0.2);
+    border-top-right-radius: 2px;
+}
+
+.chat-history-modern .assistant-bubble {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-top-left-radius: 2px;
+}
+
+.chat-history-modern .current-response-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: var(--bg-tertiary);
+    padding: 14px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    border-top-left-radius: 2px;
+    width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+    min-width: 0;
+}
+
+.chat-history-modern .response-content {
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-primary);
+    word-break: break-all;
+    overflow-wrap: break-word;
+    max-width: 100%;
+    min-width: 0;
+}
+
+.msg-bubble p, .response-content p {
+    margin: 0 0 10px 0;
+    max-width: 100%;
+}
+
+.msg-bubble ul, .msg-bubble ol,
+.response-content ul, .response-content ol {
+    margin: 8px 0;
+    padding-left: 1.5em; 
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.msg-bubble li, .response-content li {
+    margin-bottom: 4px;
+    word-break: break-all; /* 确保列表项内容也强制换行 */
+    white-space: normal;
+    max-width: 100%;
+}
+
+/* 针对长代码块的额外保护 */
+.msg-bubble pre, .response-content pre {
+    max-width: 100%;
+    overflow-x: auto;
+    white-space: pre-wrap; /* 如果希望代码也自动换行，取消此行的注释或保持 pre 内的滚动 */
+    word-break: normal;
+}
+
+/* Markdown Table 处理 */
+.msg-bubble table, .response-content table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10px 0;
+    font-size: 12px;
+    table-layout: auto;
+    display: block; /* 允许横向滚动 */
+    overflow-x: auto;
+}
+
+.msg-bubble th, .response-content th,
+.msg-bubble td, .response-content td {
+    border: 1px solid var(--border-color);
+    padding: 6px 10px;
+    text-align: left;
+}
+
 .chat-history-compact p {
     margin: 0 0 8px 0;
 }
@@ -194,6 +298,10 @@
     background: rgba(255, 255, 255, 0.3); /* 半透明，适配暗色模式 */
     white-space: pre-wrap;
     font-style: italic;
+    overflow-wrap: break-word; /* 防止溢出 */
+    word-break: break-word;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 @media (prefers-color-scheme: dark) {

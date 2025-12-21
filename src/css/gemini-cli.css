@@ -11,11 +11,11 @@
 }
 
 
-.gemini-cli-tab.active {
+.main-tab.gemini-cli-tab.active {
   color: var(--gemini-primary) !important;
 }
 
-.gemini-cli-tab:hover {
+.main-tab.gemini-cli-tab:hover {
   color: var(--gemini-primary) !important;
 }
 
