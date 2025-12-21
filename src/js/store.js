@@ -113,8 +113,17 @@ export const store = reactive({
     computeCurrentTab: 'workers',
     dnsSelectedAccountId: null,
     dnsSelectedZoneId: null,
+    dnsSelectedZoneName: '', // 当前选中的域名名称
+    dnsSelectedZoneNameServers: [], // 存储当前域名的 NS 记录
+    dnsSelectedZoneSsl: null, // 当前域名的SSL/TLS信息
+    dnsSelectedZoneAnalytics: null, // 当前域名的Analytics数据
+    showNsPopover: false, // 控制 NS 记录弹出层的显示
     dnsLoadingZones: false,
     dnsLoadingRecords: false,
+    dnsLoadingSsl: false, // SSL信息加载中
+    dnsLoadingAnalytics: false, // Analytics加载中
+    dnsAnalyticsTimeRange: '24h', // Analytics时间范围
+    dnsPurgingCache: false, // 缓存清除中状态
     dnsRecords: [],
     dnsSelectedRecords: [],
     dnsSearchText: '',
@@ -161,6 +170,7 @@ export const store = reactive({
     antigravitySettings: [],
     agRefreshingAll: false,
     agLogDetailShowRaw: false, // 是否显示原始 JSON
+    antigravityLogDetail: null, // 移入 store
     antigravityQuotaViewMode: 'list',
     antigravityModelRedirects: [],
     newRedirectSource: '',
@@ -173,6 +183,8 @@ export const store = reactive({
     geminiCliLoading: false,
     geminiCliSaving: false,
     showGeminiCliAccountModal: false,
+    showGeminiCliLogDetailModal: false, // 移入 store
+    geminiCliLogDetail: null, // 移入 store
     showGeminiCliOAuthExpand: false,
     geminiCliOAuthUrl: '',
     geminiCliOauthReturnUrl: '',
@@ -196,6 +208,7 @@ export const store = reactive({
     geminiCliModelSelectedAccountId: '',
     geminiCliLogFilterAccount: '',
     geminiCliLogFilterModel: '',
+    gcliLogDetailShowRaw: false, // 是否显示原始 JSON (Gemini CLI)
 
     // 统一日志查看器 (Log Viewer)
     logViewer: {

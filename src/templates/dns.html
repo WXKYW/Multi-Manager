@@ -38,6 +38,16 @@
       </div>
     </div>
 
+    <!-- 域名操作按钮 -->
+    <div v-if="dnsSelectedAccountId && !dnsLoadingZones" style="margin-bottom: 16px; display: flex; gap: 8px;">
+      <button class="btn btn-success" style="padding: 6px 12px;" @click="openAddZoneModal">
+        <i class="fas fa-plus"></i> 添加域名
+      </button>
+      <button v-if="dnsSelectedZoneId" class="btn btn-danger" style="padding: 6px 12px;" @click="deleteZone">
+        <i class="fas fa-trash"></i> 删除域名
+      </button>
+    </div>
+
     <div v-if="dnsLoadingZones" class="loading">
       <div class="spinner"></div>
       <div style="margin-top: 12px;">加载域名列表...</div>
@@ -47,7 +57,7 @@
     <div v-if="dnsSelectedAccountId && dnsZones.length > 0 && !dnsLoadingZones" class="zones-grid">
       <div v-for="zone in dnsZones" :key="zone.id" class="zone-card" :class="{ active: dnsSelectedZoneId === zone.id }"
         @click="selectDnsZone(zone)">
-        <div>
+        <div style="flex: 1;">
           <div class="zone-name">{{ zone.name }}</div>
           <div class="zone-status" :class="zone.status">{{ zone.status }}</div>
         </div>
@@ -77,12 +87,163 @@
       </button>
     </div>
 
+    <!-- SSL/TLS 状态卡片 -->
+    <div v-if="dnsSelectedZoneId && dnsSelectedZoneSsl" class="ssl-status-card quick-fade-in">
+      <div class="ssl-header">
+        <div class="ssl-title">
+          <i class="fas fa-lock"></i>
+          <h3>SSL/TLS 证书</h3>
+        </div>
+        <div v-if="dnsLoadingSsl" class="ssl-loading">
+          <i class="fas fa-spinner fa-spin"></i>
+        </div>
+      </div>
+
+      <div class="ssl-body">
+        <!-- SSL模式选择 -->
+        <div class="ssl-row">
+          <span class="ssl-label">
+            <i class="fas fa-shield-alt"></i>
+            SSL模式:
+          </span>
+          <div class="ssl-mode-selector">
+            <select :value="dnsSelectedZoneSsl.mode" @change="updateSslMode($event.target.value)"
+              :disabled="dnsLoadingSsl" class="ssl-mode-select">
+              <option value="off">Off (关闭)</option>
+              <option value="flexible">Flexible (灵活)</option>
+              <option value="full">Full (完全)</option>
+              <option value="strict">Full (strict)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 证书信息 -->
+        <div v-if="dnsSelectedZoneSsl.certificates && dnsSelectedZoneSsl.certificates.length > 0">
+          <div v-for="cert in dnsSelectedZoneSsl.certificates.filter(c => c.primary)" :key="cert.id"
+            class="ssl-cert-info">
+            <div class="ssl-row">
+              <span class="ssl-label">
+                <i class="fas fa-certificate"></i>
+                证书类型:
+              </span>
+              <span class="ssl-value ssl-cert-type">{{ cert.type || 'Universal' }}</span>
+            </div>
+            <div class="ssl-row">
+              <span class="ssl-label">
+                <i class="fas fa-check-circle"></i>
+                状态:
+              </span>
+              <span class="ssl-status" :class="'status-' + (cert.status || 'active').toLowerCase()">
+                <i class="fas" :class="cert.status === 'active' ? 'fa-check' : 'fa-clock'"></i>
+                {{ cert.status || 'Active' }}
+              </span>
+            </div>
+            <div class="ssl-row" v-if="cert.validityDays">
+              <span class="ssl-label">
+                <i class="fas fa-calendar-alt"></i>
+                有效期:
+              </span>
+              <span class="ssl-value">还剩 {{ cert.validityDays }} 天</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Analytics 仪表板（暂时隐藏，待完善） -->
+    <div v-if="false && dnsSelectedZoneId && dnsSelectedZoneAnalytics" class="analytics-card quick-fade-in">
+      <div class="analytics-header">
+        <div class="analytics-title">
+          <i class="fas fa-chart-bar"></i>
+          <span>Analytics</span>
+          <span class="analytics-time-badge">{{ dnsAnalyticsTimeRange }}</span>
+        </div>
+        <div class="analytics-controls">
+          <div class="analytics-time-selector">
+            <button v-for="range in ['24h', '7d', '30d']" :key="range" @click="loadZoneAnalytics(range)"
+              :class="['time-btn', { active: dnsAnalyticsTimeRange === range }]" :disabled="dnsLoadingAnalytics">
+              {{ range }}
+            </button>
+          </div>
+          <button @click="loadZoneAnalytics(dnsAnalyticsTimeRange)" class="refresh-btn" :disabled="dnsLoadingAnalytics"
+            title="刷新数据">
+            <i class="fas fa-sync" :class="{ 'fa-spin': dnsLoadingAnalytics }"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="analytics-metrics">
+        <div class="metric">
+          <i class="fas fa-chart-line"></i>
+          <div class="metric-info">
+            <span class="metric-value">{{ formatNumber(dnsSelectedZoneAnalytics.requests) }}</span>
+            <span class="metric-label">请求</span>
+          </div>
+        </div>
+        <div class="metric">
+          <i class="fas fa-database"></i>
+          <div class="metric-info">
+            <span class="metric-value">{{ formatBytes(dnsSelectedZoneAnalytics.bandwidth) }}</span>
+            <span class="metric-label">带宽</span>
+          </div>
+        </div>
+        <div class="metric">
+          <i class="fas fa-shield-alt"></i>
+          <div class="metric-info">
+            <span class="metric-value">{{ formatNumber(dnsSelectedZoneAnalytics.threats) }}</span>
+            <span class="metric-label">威胁</span>
+          </div>
+        </div>
+        <div class="metric">
+          <i class="fas fa-bolt"></i>
+          <div class="metric-info">
+            <span class="metric-value">{{ dnsSelectedZoneAnalytics.cacheHitRate }}%</span>
+            <span class="metric-label">缓存</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- DNS 记录表格 -->
     <div v-if="dnsSelectedZoneId" class="panel">
       <div class="panel-header">
         <div class="panel-title"><i class="fas fa-list-alt" style="margin-right: 8px; color: var(--cf-color);"></i>DNS
           记录列表</div>
         <div style="display: flex; gap: 8px;">
+          <!-- NS 记录按钮 -->
+          <div style="position: relative;">
+            <button class="btn btn-secondary paas-control-btn" style="padding: 6px 12px;" @click="toggleNsPopover"
+              title="查看 NS 记录">
+              <i class="fas fa-server"></i> NS
+            </button>
+            <div v-if="showNsPopover" class="ns-popover quick-fade-in">
+              <div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px;">Name
+                Servers</div>
+              <!-- 调试信息 -->
+              <div
+                style="font-size: 11px; color: var(--text-tertiary); margin-bottom: 8px; padding: 6px; background: var(--bg-secondary); border-radius: 4px;">
+                域名: {{ dnsSelectedZoneName || '未选择' }} |
+                NS数量: {{ dnsSelectedZoneNameServers ? dnsSelectedZoneNameServers.length : 0 }}
+              </div>
+              <div v-if="dnsSelectedZoneNameServers && dnsSelectedZoneNameServers.length > 0">
+                <div v-for="ns in dnsSelectedZoneNameServers" :key="ns" @click.stop="copyToClipboard(ns)"
+                  class="ns-item">
+                  <span>{{ ns }}</span>
+                  <i class="fas fa-copy"></i>
+                </div>
+              </div>
+              <div v-else style="font-size: 12px; color: var(--text-tertiary);">暂无记录</div>
+            </div>
+            <!-- 背景遮罩层 -->
+            <div v-if="showNsPopover" class="popover-overlay" @click="toggleNsPopover"></div>
+          </div>
+
+          <!-- 清除缓存按钮 -->
+          <button class="btn btn-warning paas-control-btn" style="padding: 6px 12px;" @click="purgeZoneCache"
+            :disabled="dnsPurgingCache" title="清除全部缓存">
+            <i class="fas" :class="dnsPurgingCache ? 'fa-spinner fa-spin' : 'fa-broom'"></i> 清缓存
+          </button>
+
           <button class="btn btn-success paas-control-btn" style="padding: 6px 12px;" @click="openAddDnsRecordModal">
             <i class="fas fa-plus"></i> 添加
           </button>
@@ -181,7 +342,7 @@
               </td>
               <td class="actions text-center">
                 <div class="flex-cell">
-                  <button class="btn btn-icon-refined" @click="openEditDnsRecordModal(record)" title="编辑记录">
+                  <button class="btn btn-icon-refined" @click="editDnsRecord(record)" title="编辑记录">
                     <i class="fas fa-edit"></i>
                   </button>
                   <button class="btn btn-icon-refined" @click="deleteDnsRecord(record)" title="删除记录"

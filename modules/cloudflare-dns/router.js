@@ -13,7 +13,7 @@ const logger = createLogger('CF-DNS');
 // ==================== 账号管理 ====================
 
 /**
- * 获取所有账号（隐藏 API Token）
+ * 获取所有账号（隐藏 API Token�?
  */
 router.get('/accounts', (req, res) => {
   try {
@@ -62,12 +62,17 @@ router.post('/accounts', async (req, res) => {
     const { name, apiToken, email, skipVerify } = req.body;
 
     if (!name || !apiToken) {
-      return res.status(400).json({ error: '名称和 API Token 必填' });
+      return res.status(400).json({ error: '名称�?API Token 必填' });
     }
 
-    // 验证 Token（除非明确跳过验证，用于数据导入）
+    // 验证 Token（除非明确跳过验证，用于数据导入�?
     if (!skipVerify) {
-      const verification = await cfApi.verifyToken(apiToken);
+      // 根据是否�?email 选择验证方式
+      const auth = email
+        ? { email, key: apiToken }  // Global API Key
+        : apiToken;  // API Token
+
+      const verification = await cfApi.verifyToken(auth);
       if (!verification.valid) {
         return res.status(400).json({ error: `Token 无效: ${verification.error}` });
       }
@@ -98,7 +103,12 @@ router.put('/accounts/:id', async (req, res) => {
 
     // 如果更新 Token，先验证
     if (apiToken) {
-      const verification = await cfApi.verifyToken(apiToken);
+      // 根据是否�?email 选择验证方式
+      const auth = email
+        ? { email, key: apiToken }  // Global API Key
+        : apiToken;  // API Token
+
+      const verification = await cfApi.verifyToken(auth);
       if (!verification.valid) {
         return res.status(400).json({ error: `Token 无效: ${verification.error}` });
       }
@@ -106,7 +116,7 @@ router.put('/accounts/:id', async (req, res) => {
 
     const updated = storage.updateAccount(id, { name, apiToken, email });
     if (!updated) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     res.json({ success: true });
@@ -123,7 +133,7 @@ router.delete('/accounts/:id', (req, res) => {
     const { id } = req.params;
     const deleted = storage.deleteAccount(id);
     if (!deleted) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
     res.json({ success: true });
   } catch (e) {
@@ -139,10 +149,15 @@ router.post('/accounts/:id/verify', async (req, res) => {
     const { id } = req.params;
     const account = storage.getAccountById(id);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
-    const verification = await cfApi.verifyToken(account.apiToken);
+    // 根据账号配置选择认证方式
+    const auth = account.email
+      ? { email: account.email, key: account.apiToken }  // Global API Key
+      : account.apiToken;  // API Token
+
+    const verification = await cfApi.verifyToken(auth);
     res.json(verification);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -150,14 +165,14 @@ router.post('/accounts/:id/verify', async (req, res) => {
 });
 
 /**
- * 获取账号的 API Token（用于显示）
+ * 获取账号�?API Token（用于显示）
  */
 router.get('/accounts/:id/token', (req, res) => {
   try {
     const { id } = req.params;
     const account = storage.getAccountById(id);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     res.json({
@@ -172,18 +187,24 @@ router.get('/accounts/:id/token', (req, res) => {
 // ==================== Zone 管理 ====================
 
 /**
- * 获取账号下的所有域名
+ * 获取账号下的所有域�?
  */
 router.get('/accounts/:id/zones', async (req, res) => {
   try {
     const { id } = req.params;
     const account = storage.getAccountById(id);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     storage.touchAccount(id);
-    const { zones, resultInfo } = await cfApi.listZones(account.apiToken);
+
+    // 根据账号配置选择认证方式
+    const auth = account.email
+      ? { email: account.email, key: account.apiToken }
+      : account.apiToken;
+
+    const { zones, resultInfo } = await cfApi.listZones(auth);
 
     res.json({
       zones: zones.map(z => ({
@@ -204,10 +225,83 @@ router.get('/accounts/:id/zones', async (req, res) => {
   }
 });
 
+/**
+ * 创建域名 (添加�?Zone)
+ */
+router.post('/accounts/:id/zones', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, jumpStart } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: '域名不能为空' });
+    }
+
+    const account = storage.getAccountById(id);
+    if (!account) {
+      return res.status(404).json({ error: '账号不存�? });
+    }
+
+    storage.touchAccount(id);
+
+    // 获取 Cloudflare Account ID
+    const cfAccountId = await cfApi.getAccountId(account.apiToken);
+
+    // 创建新域�?
+    const zone = await cfApi.createZone(account.apiToken, name, {
+      account: { id: cfAccountId },
+      jump_start: jumpStart !== undefined ? jumpStart : false
+    });
+
+    logger.info(`域名创建成功: ${name} (Zone ID: ${zone.id})`);
+
+    res.json({
+      success: true,
+      zone: {
+        id: zone.id,
+        name: zone.name,
+        status: zone.status,
+        nameServers: zone.name_servers,
+        createdOn: zone.created_on
+      }
+    });
+  } catch (e) {
+    logger.error(`创建域名失败:`, e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * 删除域名 (删除 Zone)
+ */
+router.delete('/accounts/:accountId/zones/:zoneId', async (req, res) => {
+  try {
+    const { accountId, zoneId } = req.params;
+
+    const account = storage.getAccountById(accountId);
+    if (!account) {
+      return res.status(404).json({ error: '账号不存�? });
+    }
+
+    storage.touchAccount(accountId);
+    const result = await cfApi.deleteZone(account.apiToken, zoneId);
+
+    logger.info(`域名删除成功: Zone ID ${zoneId}`);
+
+    res.json({
+      success: true,
+      result
+    });
+  } catch (e) {
+    logger.error(`删除域名失败:`, e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ==================== DNS 记录管理 ====================
 
 /**
- * 获取域名的 DNS 记录
+ * 获取域名�?DNS 记录
  */
 router.get('/accounts/:accountId/zones/:zoneId/records', async (req, res) => {
   try {
@@ -216,12 +310,18 @@ router.get('/accounts/:accountId/zones/:zoneId/records', async (req, res) => {
 
     const account = storage.getAccountById(accountId);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     storage.touchAccount(accountId);
+
+    // 根据账号配置选择认证方式
+    const auth = account.email
+      ? { email: account.email, key: account.apiToken }
+      : account.apiToken;
+
     const { records, resultInfo } = await cfApi.listDnsRecords(
-      account.apiToken,
+      auth,
       zoneId,
       { type, name, page }
     );
@@ -255,7 +355,7 @@ router.post('/accounts/:accountId/zones/:zoneId/records', async (req, res) => {
 
     const account = storage.getAccountById(accountId);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     // 验证记录
@@ -297,7 +397,7 @@ router.put('/accounts/:accountId/zones/:zoneId/records/:recordId', async (req, r
 
     const account = storage.getAccountById(accountId);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     storage.touchAccount(accountId);
@@ -333,7 +433,7 @@ router.delete('/accounts/:accountId/zones/:zoneId/records/:recordId', async (req
 
     const account = storage.getAccountById(accountId);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     storage.touchAccount(accountId);
@@ -346,7 +446,7 @@ router.delete('/accounts/:accountId/zones/:zoneId/records/:recordId', async (req
 });
 
 /**
- * 快速切换 DNS 记录内容
+ * 快速切�?DNS 记录内容
  */
 router.post('/accounts/:accountId/zones/:zoneId/switch', async (req, res) => {
   try {
@@ -359,7 +459,7 @@ router.post('/accounts/:accountId/zones/:zoneId/switch', async (req, res) => {
 
     const account = storage.getAccountById(accountId);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     storage.touchAccount(accountId);
@@ -394,12 +494,12 @@ router.post('/accounts/:accountId/zones/:zoneId/batch', async (req, res) => {
     const { records } = req.body;
 
     if (!records || !Array.isArray(records)) {
-      return res.status(400).json({ error: '需要提供 records 数组' });
+      return res.status(400).json({ error: '需要提�?records 数组' });
     }
 
     const account = storage.getAccountById(accountId);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     storage.touchAccount(accountId);
@@ -421,10 +521,183 @@ router.post('/accounts/:accountId/zones/:zoneId/batch', async (req, res) => {
   }
 });
 
+// ==================== 缓存管理 ====================
+
+/**
+ * 清除域名的所有缓�?
+ */
+router.post('/accounts/:accountId/zones/:zoneId/purge', async (req, res) => {
+  try {
+    const { accountId, zoneId } = req.params;
+    const { purge_everything } = req.body;
+
+    logger.info(`收到清除缓存请求 - Account: ${accountId}, Zone: ${zoneId}, Body:`, req.body);
+
+    const account = storage.getAccountById(accountId);
+    if (!account) {
+      return res.status(404).json({ error: '账号不存�? });
+    }
+
+    storage.touchAccount(accountId);
+
+    // 根据账号配置选择认证方式
+    const auth = account.email
+      ? { email: account.email, key: account.apiToken }  // Global API Key
+      : account.apiToken;  // API Token
+
+    logger.info(`使用认证方式: ${account.email ? 'Global API Key' : 'API Token'}`);
+
+    // 调用 Cloudflare API 清除缓存
+    logger.info(`调用 Cloudflare API 清除缓存...`);
+    const result = await cfApi.purgeCache(auth, zoneId, { purge_everything });
+
+    logger.info(`缓存已清除成�?(Zone: ${zoneId})`);
+
+    res.json({
+      success: true,
+      message: '缓存已清�?,
+      result
+    });
+  } catch (e) {
+    logger.error(`清除缓存失败:`, e.message, e.stack);
+    res.status(500).json({ error: e.message, details: e.stack });
+  }
+});
+
+// ==================== SSL/TLS 管理 ====================
+
+/**
+ * 获取域名的SSL/TLS信息
+ */
+router.get('/accounts/:accountId/zones/:zoneId/ssl', async (req, res) => {
+  try {
+    const { accountId, zoneId } = req.params;
+
+    const account = storage.getAccountById(accountId);
+    if (!account) {
+      return res.status(404).json({ error: '账号不存�? });
+    }
+
+    storage.touchAccount(accountId);
+
+    // 认证方式选择
+    const auth = account.email
+      ? { email: account.email, key: account.apiToken }
+      : account.apiToken;
+
+    // 并行获取多个SSL相关信息
+    const [settings, certificates, verification] = await Promise.all([
+      cfApi.getSslSettings(auth, zoneId),
+      cfApi.getSslCertificates(auth, zoneId),
+      cfApi.getSslVerification(auth, zoneId)
+    ]);
+
+    logger.info(`获取SSL信息成功 (Zone: ${zoneId})`);
+
+    res.json({
+      success: true,
+      ssl: {
+        mode: settings.value,
+        modifiedOn: settings.modified_on,
+        editable: settings.editable,
+        certificates: certificates.map(cert => ({
+          id: cert.id,
+          type: cert.type,
+          hosts: cert.hosts,
+          status: cert.status,
+          validityDays: cert.validity_days,
+          certificateAuthority: cert.certificate_authority,
+          primary: cert.primary
+        })),
+        verification: verification
+      }
+    });
+  } catch (e) {
+    logger.error(`获取SSL信息失败:`, e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * 修改域名的SSL模式
+ */
+router.patch('/accounts/:accountId/zones/:zoneId/ssl', async (req, res) => {
+  try {
+    const { accountId, zoneId } = req.params;
+    const { mode } = req.body;
+
+    if (!mode || !['off', 'flexible', 'full', 'strict'].includes(mode)) {
+      return res.status(400).json({ error: '无效的SSL模式' });
+    }
+
+    const account = storage.getAccountById(accountId);
+    if (!account) {
+      return res.status(404).json({ error: '账号不存�? });
+    }
+
+    storage.touchAccount(accountId);
+
+    const auth = account.email
+      ? { email: account.email, key: account.apiToken }
+      : account.apiToken;
+
+    const result = await cfApi.updateSslMode(auth, zoneId, mode);
+
+    logger.info(`SSL模式已更�?(Zone: ${zoneId}, Mode: ${mode})`);
+
+    res.json({
+      success: true,
+      ssl: {
+        mode: result.value,
+        modifiedOn: result.modified_on
+      }
+    });
+  } catch (e) {
+    logger.error(`更新SSL模式失败:`, e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ==================== Analytics 分析 ====================
+
+/**
+ * 获取域名的Analytics数据
+ */
+router.get('/accounts/:accountId/zones/:zoneId/analytics', async (req, res) => {
+  try {
+    const { accountId, zoneId } = req.params;
+    const { timeRange = '24h' } = req.query;
+
+    const account = storage.getAccountById(accountId);
+    if (!account) {
+      return res.status(404).json({ error: '账号不存�? });
+    }
+
+    storage.touchAccount(accountId);
+
+    const auth = account.email
+      ? { email: account.email, key: account.apiToken }
+      : account.apiToken;
+
+    const analytics = await cfApi.getSimpleAnalytics(auth, zoneId, timeRange);
+
+    logger.info(`获取Analytics成功 (Zone: ${zoneId}, Range: ${timeRange})`);
+
+    res.json({
+      success: true,
+      analytics,
+      timeRange
+    });
+  } catch (e) {
+    logger.error(`获取Analytics失败:`, e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ==================== DNS 模板管理 ====================
 
 /**
- * 获取所有模板
+ * 获取所有模�?
  */
 router.get('/templates', (req, res) => {
   try {
@@ -443,7 +716,7 @@ router.post('/templates', (req, res) => {
     const { name, type, content, proxied, ttl, priority, description } = req.body;
 
     if (!name || !type || !content) {
-      return res.status(400).json({ error: '名称、类型、内容必填' });
+      return res.status(400).json({ error: '名称、类型、内容必�? });
     }
 
     const template = storage.addTemplate({
@@ -465,7 +738,7 @@ router.put('/templates/:id', (req, res) => {
     const updated = storage.updateTemplate(id, req.body);
 
     if (!updated) {
-      return res.status(404).json({ error: '模板不存在' });
+      return res.status(404).json({ error: '模板不存�? });
     }
 
     res.json({ success: true, template: updated });
@@ -483,7 +756,7 @@ router.delete('/templates/:id', (req, res) => {
     const deleted = storage.deleteTemplate(id);
 
     if (!deleted) {
-      return res.status(404).json({ error: '模板不存在' });
+      return res.status(404).json({ error: '模板不存�? });
     }
 
     res.json({ success: true });
@@ -493,7 +766,7 @@ router.delete('/templates/:id', (req, res) => {
 });
 
 /**
- * 应用模板到域名
+ * 应用模板到域�?
  */
 router.post('/templates/:templateId/apply', async (req, res) => {
   try {
@@ -506,13 +779,13 @@ router.post('/templates/:templateId/apply', async (req, res) => {
 
     const account = storage.getAccountById(accountId);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     const templates = storage.getTemplates();
     const template = templates.find(t => t.id === templateId);
     if (!template) {
-      return res.status(404).json({ error: '模板不存在' });
+      return res.status(404).json({ error: '模板不存�? });
     }
 
     storage.touchAccount(accountId);
@@ -546,14 +819,14 @@ router.post('/templates/:templateId/apply', async (req, res) => {
 // ==================== 实用功能 ====================
 
 /**
- * 获取支持的记录类型
+ * 获取支持的记录类�?
  */
 router.get('/record-types', (req, res) => {
   res.json(cfApi.getSupportedRecordTypes());
 });
 
 /**
- * 导出账号（包含完整数据，用于备份）
+ * 导出账号（包含完整数据，用于备份�?
  */
 router.get('/export/accounts', (req, res) => {
   try {
@@ -565,18 +838,18 @@ router.get('/export/accounts', (req, res) => {
 });
 
 /**
- * 批量导入账号（直接覆盖数据库）
+ * 批量导入账号（直接覆盖数据库�?
  */
 router.post('/import/accounts', (req, res) => {
   try {
     const { accounts, overwrite } = req.body;
 
     if (!accounts || !Array.isArray(accounts)) {
-      return res.status(400).json({ error: '需要提供 accounts 数组' });
+      return res.status(400).json({ error: '需要提�?accounts 数组' });
     }
 
     if (overwrite) {
-      // 直接覆盖所有账号
+      // 直接覆盖所有账�?
       storage.saveAccounts(accounts);
     } else {
       // 追加账号
@@ -592,18 +865,18 @@ router.post('/import/accounts', (req, res) => {
 });
 
 /**
- * 批量导入模板（直接覆盖数据库）
+ * 批量导入模板（直接覆盖数据库�?
  */
 router.post('/import/templates', (req, res) => {
   try {
     const { templates, overwrite } = req.body;
 
     if (!templates || !Array.isArray(templates)) {
-      return res.status(400).json({ error: '需要提供 templates 数组' });
+      return res.status(400).json({ error: '需要提�?templates 数组' });
     }
 
     if (overwrite) {
-      // 直接覆盖所有模板
+      // 直接覆盖所有模�?
       storage.saveTemplates(templates);
     } else {
       // 追加模板
@@ -621,14 +894,14 @@ router.post('/import/templates', (req, res) => {
 // ==================== Workers 管理 ====================
 
 /**
- * 获取账号的 Cloudflare Account ID
+ * 获取账号�?Cloudflare Account ID
  */
 router.get('/accounts/:id/cf-account-id', async (req, res) => {
   try {
     const { id } = req.params;
     const account = storage.getAccountById(id);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     const cfAccountId = await cfApi.getAccountId(account.apiToken);
@@ -639,30 +912,30 @@ router.get('/accounts/:id/cf-account-id', async (req, res) => {
 });
 
 /**
- * 获取账号下的所有 Workers
+ * 获取账号下的所�?Workers
  */
 router.get('/accounts/:id/workers', async (req, res) => {
   try {
     const { id } = req.params;
     const account = storage.getAccountById(id);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     storage.touchAccount(id);
 
-    // 先获取 CF Account ID
+    // 先获�?CF Account ID
     const cfAccountId = await cfApi.getAccountId(account.apiToken);
     const workers = await cfApi.listWorkers(account.apiToken, cfAccountId);
-    logger.info(`获取到 ${workers.length} 个 Workers (Account: ${cfAccountId})`);
+    logger.info(`获取�?${workers.length} �?Workers (Account: ${cfAccountId})`);
 
-    // 获取子域名信息
+    // 获取子域名信�?
     const subdomain = await cfApi.getWorkersSubdomain(account.apiToken, cfAccountId);
 
     res.json({
       workers: workers.map(w => ({
         id: w.id,
-        name: w.id, // Worker 的 id 就是名称
+        name: w.id, // Worker �?id 就是名称
         createdOn: w.created_on,
         modifiedOn: w.modified_on,
         etag: w.etag
@@ -684,7 +957,7 @@ router.get('/accounts/:id/workers/:scriptName', async (req, res) => {
     const { id, scriptName } = req.params;
     const account = storage.getAccountById(id);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     const cfAccountId = await cfApi.getAccountId(account.apiToken);
@@ -704,7 +977,7 @@ router.get('/accounts/:id/workers/:scriptName', async (req, res) => {
 });
 
 /**
- * 创建或更新 Worker 脚本
+ * 创建或更�?Worker 脚本
  */
 router.put('/accounts/:id/workers/:scriptName', async (req, res) => {
   try {
@@ -719,7 +992,7 @@ router.put('/accounts/:id/workers/:scriptName', async (req, res) => {
 
     const account = storage.getAccountById(id);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     storage.touchAccount(id);
@@ -752,7 +1025,7 @@ router.delete('/accounts/:id/workers/:scriptName', async (req, res) => {
     const { id, scriptName } = req.params;
     const account = storage.getAccountById(id);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     storage.touchAccount(id);
@@ -775,7 +1048,7 @@ router.post('/accounts/:id/workers/:scriptName/toggle', async (req, res) => {
 
     const account = storage.getAccountById(id);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     storage.touchAccount(id);
@@ -789,14 +1062,14 @@ router.post('/accounts/:id/workers/:scriptName/toggle', async (req, res) => {
 });
 
 /**
- * 获取域名的 Worker 路由
+ * 获取域名�?Worker 路由
  */
 router.get('/accounts/:accountId/zones/:zoneId/workers/routes', async (req, res) => {
   try {
     const { accountId, zoneId } = req.params;
     const account = storage.getAccountById(accountId);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     storage.touchAccount(accountId);
@@ -823,12 +1096,12 @@ router.post('/accounts/:accountId/zones/:zoneId/workers/routes', async (req, res
     const { pattern, script } = req.body;
 
     if (!pattern || !script) {
-      return res.status(400).json({ error: 'pattern 和 script 必填' });
+      return res.status(400).json({ error: 'pattern �?script 必填' });
     }
 
     const account = storage.getAccountById(accountId);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     storage.touchAccount(accountId);
@@ -857,7 +1130,7 @@ router.put('/accounts/:accountId/zones/:zoneId/workers/routes/:routeId', async (
 
     const account = storage.getAccountById(accountId);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     storage.touchAccount(accountId);
@@ -884,7 +1157,7 @@ router.delete('/accounts/:accountId/zones/:zoneId/workers/routes/:routeId', asyn
     const { accountId, zoneId, routeId } = req.params;
     const account = storage.getAccountById(accountId);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     storage.touchAccount(accountId);
@@ -906,7 +1179,7 @@ router.get('/accounts/:id/workers/:scriptName/analytics', async (req, res) => {
 
     const account = storage.getAccountById(id);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     const cfAccountId = await cfApi.getAccountId(account.apiToken);
@@ -918,7 +1191,7 @@ router.get('/accounts/:id/workers/:scriptName/analytics', async (req, res) => {
   }
 });
 
-// ==================== Workers 自定义域名管理 ====================
+// ==================== Workers 自定义域名管�?====================
 
 /**
  * 获取 Worker 的自定义域名列表
@@ -928,7 +1201,7 @@ router.get('/accounts/:id/workers/:scriptName/domains', async (req, res) => {
     const { id, scriptName } = req.params;
     const account = storage.getAccountById(id);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     const cfAccountId = await cfApi.getAccountId(account.apiToken);
@@ -952,7 +1225,7 @@ router.get('/accounts/:id/workers/:scriptName/domains', async (req, res) => {
 });
 
 /**
- * 添加 Worker 自定义域名
+ * 添加 Worker 自定义域�?
  */
 router.post('/accounts/:id/workers/:scriptName/domains', async (req, res) => {
   try {
@@ -960,12 +1233,12 @@ router.post('/accounts/:id/workers/:scriptName/domains', async (req, res) => {
     const { hostname, environment } = req.body;
 
     if (!hostname) {
-      return res.status(400).json({ error: '请输入域名' });
+      return res.status(400).json({ error: '请输入域�? });
     }
 
     const account = storage.getAccountById(id);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     storage.touchAccount(id);
@@ -980,14 +1253,14 @@ router.post('/accounts/:id/workers/:scriptName/domains', async (req, res) => {
 });
 
 /**
- * 删除 Worker 自定义域名
+ * 删除 Worker 自定义域�?
  */
 router.delete('/accounts/:id/workers/:scriptName/domains/:domainId', async (req, res) => {
   try {
     const { id, scriptName, domainId } = req.params;
     const account = storage.getAccountById(id);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     storage.touchAccount(id);
@@ -1012,14 +1285,14 @@ router.get('/accounts/:id/pages', async (req, res) => {
     const { id } = req.params;
     const account = storage.getAccountById(id);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     storage.touchAccount(id);
     const cfAccountId = await cfApi.getAccountId(account.apiToken);
     const projects = await cfApi.listPagesProjects(account.apiToken, cfAccountId);
 
-    logger.info(`获取到 ${projects.length} 个 Pages 项目 (Account: ${cfAccountId})`);
+    logger.info(`获取�?${projects.length} �?Pages 项目 (Account: ${cfAccountId})`);
 
     res.json({
       projects: projects.map(p => ({
@@ -1044,14 +1317,14 @@ router.get('/accounts/:id/pages', async (req, res) => {
 });
 
 /**
- * 获取 Pages 项目的部署列表
+ * 获取 Pages 项目的部署列�?
  */
 router.get('/accounts/:id/pages/:projectName/deployments', async (req, res) => {
   try {
     const { id, projectName } = req.params;
     const account = storage.getAccountById(id);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     const cfAccountId = await cfApi.getAccountId(account.apiToken);
@@ -1059,15 +1332,19 @@ router.get('/accounts/:id/pages/:projectName/deployments', async (req, res) => {
 
     res.json({
       success: true,
-      deployments: deployments.map(d => ({
-        id: d.id,
-        url: d.url,
-        environment: d.environment,
-        status: d.latest_stage?.status || 'unknown',
-        createdOn: d.created_on,
-        source: d.source,
-        buildConfig: d.build_config
-      }))
+      deployments: (deployments || []).map(d => {
+        // 防御性处理：防止 d 为空或字段缺�?
+        if (!d) return null;
+        return {
+          id: d.id,
+          url: d.url,
+          environment: d.environment,
+          status: (d.latest_stage && d.latest_stage.status) ? d.latest_stage.status : 'unknown',
+          createdOn: d.created_on,
+          source: d.source,
+          buildConfig: d.build_config
+        };
+      }).filter(d => d !== null) // 过滤掉无效项
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1082,7 +1359,7 @@ router.delete('/accounts/:id/pages/:projectName/deployments/:deploymentId', asyn
     const { id, projectName, deploymentId } = req.params;
     const account = storage.getAccountById(id);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     const cfAccountId = await cfApi.getAccountId(account.apiToken);
@@ -1102,7 +1379,7 @@ router.get('/accounts/:id/pages/:projectName/domains', async (req, res) => {
     const { id, projectName } = req.params;
     const account = storage.getAccountById(id);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     const cfAccountId = await cfApi.getAccountId(account.apiToken);
@@ -1124,7 +1401,7 @@ router.get('/accounts/:id/pages/:projectName/domains', async (req, res) => {
 });
 
 /**
- * 添加 Pages 自定义域名
+ * 添加 Pages 自定义域�?
  */
 router.post('/accounts/:id/pages/:projectName/domains', async (req, res) => {
   try {
@@ -1132,12 +1409,12 @@ router.post('/accounts/:id/pages/:projectName/domains', async (req, res) => {
     const { domain } = req.body;
 
     if (!domain) {
-      return res.status(400).json({ error: '请输入域名' });
+      return res.status(400).json({ error: '请输入域�? });
     }
 
     const account = storage.getAccountById(id);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     const cfAccountId = await cfApi.getAccountId(account.apiToken);
@@ -1150,14 +1427,14 @@ router.post('/accounts/:id/pages/:projectName/domains', async (req, res) => {
 });
 
 /**
- * 删除 Pages 自定义域名
+ * 删除 Pages 自定义域�?
  */
 router.delete('/accounts/:id/pages/:projectName/domains/:domain', async (req, res) => {
   try {
     const { id, projectName, domain } = req.params;
     const account = storage.getAccountById(id);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     const cfAccountId = await cfApi.getAccountId(account.apiToken);
@@ -1177,7 +1454,7 @@ router.delete('/accounts/:id/pages/:projectName', async (req, res) => {
     const { id, projectName } = req.params;
     const account = storage.getAccountById(id);
     if (!account) {
-      return res.status(404).json({ error: '账号不存在' });
+      return res.status(404).json({ error: '账号不存�? });
     }
 
     const cfAccountId = await cfApi.getAccountId(account.apiToken);
@@ -1188,5 +1465,131 @@ router.delete('/accounts/:id/pages/:projectName', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+
+// ==================== R2 �洢���� ====================
+
+/**
+ * ��ȡ R2 �洢Ͱ�б�
+ */
+router.get('/accounts/:accountId/r2/buckets', async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const account = storage.getAccountById(accountId);
+    if (!account) {
+      return res.status(404).json({ error: '�˺Ų�����' });
+    }
+
+    const auth = account.email ? { email: account.email, key: account.apiToken } : account.apiToken;
+    const cfAccountId = await cfApi.getAccountId(account.apiToken);
+    
+    const buckets = await cfApi.listR2Buckets(auth, cfAccountId);
+    res.json({ success: true, buckets });
+  } catch (e) {
+    logger.error(��ȡ R2 �洢Ͱʧ��:, e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * ���� R2 �洢Ͱ
+ */
+router.post('/accounts/:accountId/r2/buckets', async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const { name, location } = req.body;
+    
+    if (!name) {
+      return res.status(400).json({ error: 'Ͱ���Ʊ���' });
+    }
+
+    const account = storage.getAccountById(accountId);
+    if (!account) {
+      return res.status(404).json({ error: '�˺Ų�����' });
+    }
+
+    const auth = account.email ? { email: account.email, key: account.apiToken } : account.apiToken;
+    const cfAccountId = await cfApi.getAccountId(account.apiToken);
+    
+    const bucket = await cfApi.createR2Bucket(auth, cfAccountId, name, location);
+    res.json({ success: true, bucket });
+  } catch (e) {
+    logger.error(���� R2 �洢Ͱʧ��:, e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * ɾ�� R2 �洢Ͱ
+ */
+router.delete('/accounts/:accountId/r2/buckets/:bucketName', async (req, res) => {
+  try {
+    const { accountId, bucketName } = req.params;
+    
+    const account = storage.getAccountById(accountId);
+    if (!account) {
+      return res.status(404).json({ error: '�˺Ų�����' });
+    }
+
+    const auth = account.email ? { email: account.email, key: account.apiToken } : account.apiToken;
+    const cfAccountId = await cfApi.getAccountId(account.apiToken);
+    
+    await cfApi.deleteR2Bucket(auth, cfAccountId, bucketName);
+    res.json({ success: true });
+  } catch (e) {
+    logger.error(ɾ�� R2 �洢Ͱʧ��:, e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * �г� R2 ����
+ */
+router.get('/accounts/:accountId/r2/buckets/:bucketName/objects', async (req, res) => {
+  try {
+    const { accountId, bucketName } = req.params;
+    const { prefix, cursor, limit, delimiter } = req.query;
+    
+    const account = storage.getAccountById(accountId);
+    if (!account) {
+      return res.status(404).json({ error: '�˺Ų�����' });
+    }
+
+    const auth = account.email ? { email: account.email, key: account.apiToken } : account.apiToken;
+    const cfAccountId = await cfApi.getAccountId(account.apiToken);
+    
+    const result = await cfApi.listR2Objects(auth, cfAccountId, bucketName, {
+      prefix, cursor, limit, delimiter
+    });
+    
+    res.json({ success: true, ...result });
+  } catch (e) {
+    logger.error(�г� R2 ����ʧ��:, e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * ɾ�� R2 ����
+ */
+router.delete('/accounts/:accountId/r2/buckets/:bucketName/objects/:objectKey', async (req, res) => {
+  try {
+    const { accountId, bucketName, objectKey } = req.params;
+    
+    const account = storage.getAccountById(accountId);
+    if (!account) {
+      return res.status(404).json({ error: '�˺Ų�����' });
+    }
+
+    const auth = account.email ? { email: account.email, key: account.apiToken } : account.apiToken;
+    const cfAccountId = await cfApi.getAccountId(account.apiToken);
+    
+    await cfApi.deleteR2Object(auth, cfAccountId, bucketName, objectKey);
+    res.json({ success: true });
+  } catch (e) {
+    logger.error(ɾ�� R2 ����ʧ��:, e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 
 module.exports = router;

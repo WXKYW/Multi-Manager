@@ -2186,3 +2186,69 @@ body.modal-open {
     gap: 8px;
   }
 }
+
+/* Reasoning/Thinking Process Styles */
+.reasoning-details {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.reasoning-details summary {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  display: flex;
+  align-items: center;
+  user-select: none;
+  transition: background 0.2s;
+  outline: none;
+  list-style: none; /* 移除默认三角形 */
+}
+
+/* 自定义折叠图标 */
+.reasoning-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.reasoning-details summary::after {
+  content: '\f078'; /* fa-chevron-down */
+  font-family: 'Font Awesome 5 Free';
+  font-weight: 900;
+  margin-left: auto;
+  font-size: 10px;
+  transition: transform 0.3s;
+  opacity: 0.5;
+}
+
+.reasoning-details[open] summary::after {
+  transform: rotate(180deg);
+}
+
+.reasoning-details summary:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.reasoning-content-inner {
+  padding: 12px;
+  border-top: 1px solid var(--border-color);
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  line-height: 1.6;
+  overflow-wrap: break-word; /* 确保长单词换行 */
+  word-break: break-word; /* 兼容性增强 */
+  max-width: 100%; /* 限制最大宽度 */
+  box-sizing: border-box; /* 确保 padding 不会撑破宽度 */
+}
+
+/* Dark mode adjustment */
+@media (prefers-color-scheme: dark) {
+  .reasoning-details summary:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+}

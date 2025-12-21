@@ -24,7 +24,14 @@ export function renderMarkdown(text) {
             if (!part) return '';
             if (typeof part === 'string') return part;
             if (typeof part === 'object') {
-                if (part.type === 'text') return part.text || '';
+                // 支持带 thought 属性的文本块 (Gemini/DeepSeek 后端适配)
+                if (part.type === 'text' || !part.type) {
+                    const content = part.text || part.content || '';
+                    if (part.thought) {
+                        return `<think>${content}</think>`;
+                    }
+                    return content;
+                }
                 if (part.type === 'image_url') {
                     const url = part.image_url?.url || '';
                     // 极致去空白处理：HTML 保持在一行，杜绝段落包裹
@@ -47,11 +54,18 @@ export function renderMarkdown(text) {
         }
     }
 
+    // 4. 预处理思考标签 <think> (DeepSeek/Gemini)
+    // 将 <think>...</think> 转换为 <details> 结构，实现可折叠的思考过程
+    source = source.replace(/<think>([\s\S]*?)<\/think>/gi, (match, content) => {
+        // 处理内部可能的 Markdown
+        return `<details class="reasoning-details"><summary><i class="fas fa-brain" style="margin-right: 6px;"></i>思考过程</summary><div class="reasoning-content-inner">\n\n${content}\n\n</div></details>`;
+    });
+
     try {
         const rawHtml = marked.parse(source, { breaks: true });
         return DOMPurify.sanitize(rawHtml, {
-            ADD_ATTR: ['target', 'title', 'rel'],
-            ADD_TAGS: ['a', 'img', 'div'],
+            ADD_ATTR: ['target', 'title', 'rel', 'open', 'class', 'style'],
+            ADD_TAGS: ['a', 'img', 'div', 'details', 'summary', 'i', 'span'],
             // 允许 data: 协议以便查看 Base64 图片
             ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp|data):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i
         });

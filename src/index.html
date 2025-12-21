@@ -37,7 +37,15 @@
         <!-- 侧边栏导航 (Sidebar Mode) -->
         <div v-if="navLayout === 'sidebar'" class="sidebar-nav">
           <template v-for="module in moduleOrder" :key="module">
-            <button v-if="moduleVisibility[module]" class="sidebar-tab" :class="{ active: mainActiveTab === module }"
+            <button v-if="moduleVisibility[module]" class="sidebar-tab" :class="[
+                { active: mainActiveTab === module },
+                module === 'paas' ? 'paas-tab' : '',
+                module === 'dns' ? 'dns-tab' : '',
+                module === 'openai' ? 'openai-tab' : '',
+                module === 'server' ? 'server-tab' : '',
+                module === 'antigravity' ? 'antigravity-tab' : '',
+                module === 'gemini-cli' ? 'gemini-cli-tab' : ''
+              ]"
               @click="handleTabSwitch(module)" :title="getModuleName(module)">
               <i class="fas" :class="getModuleIcon(module)"></i>
               <span class="tab-label">{{ getModuleName(module) }}</span>
@@ -83,7 +91,7 @@
           </div>
 
           <!-- 主标签页导航 (Top Mode) -->
-          <div v-if="navLayout === 'top'" class="main-tabs">
+          <div v-if="navLayout === 'top' && visibleModulesCount > 1" class="main-tabs">
             <template v-for="module in moduleOrder" :key="module">
               <button v-if="moduleVisibility[module]" class="main-tab" :class="[
                   { active: mainActiveTab === module },
