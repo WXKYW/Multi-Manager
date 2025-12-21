@@ -207,7 +207,17 @@
           <!-- ==================== Modules Tab ==================== -->
           <div v-if="settingsCurrentTab === 'modules'" class="settings-tab-content fade-in">
             <div class="settings-group">
-              <div class="settings-group-title">功能模块管理</div>
+              <div class="settings-group-title" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>功能模块管理</span>
+                <div style="display: flex; gap: 8px;">
+                  <button class="btn btn-xs btn-secondary" @click="setAllModulesVisibility(true)" title="显示所有模块">
+                    <i class="fas fa-eye"></i> 全部显示
+                  </button>
+                  <button class="btn btn-xs btn-secondary" @click="setAllModulesVisibility(false)" title="隐藏大部分模块">
+                    <i class="fas fa-eye-slash"></i> 全部隐藏
+                  </button>
+                </div>
+              </div>
               <div class="settings-description" style="margin-bottom: 12px;">
                 拖拽调整菜单顺序，点击眼睛图标控制显示/隐藏。
               </div>

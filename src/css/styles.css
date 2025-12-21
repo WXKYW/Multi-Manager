@@ -472,6 +472,13 @@ body.modal-open {
   border-radius: 6px;
 }
 
+.btn-xs {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+  border-radius: 4px;
+}
+
 /* 按钮内图标大小统一 */
 .btn i {
   font-size: 14px;
