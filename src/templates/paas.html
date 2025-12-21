@@ -1,6 +1,7 @@
 <div v-if="mainActiveTab === 'paas'" class="tab-content paas-sec-tab" :class="getTabAnimationClass('paas')">
   <!-- PaaS 统一子标签页：Zeabur | Koyeb | 账号管理 | 模块配置 -->
-  <div class="sec-tabs" style="display: flex; justify-content: space-between; align-items: center; padding-right: 15px;">
+  <div class="sec-tabs"
+    style="display: flex; justify-content: space-between; align-items: center; padding-right: 15px;">
     <div style="display: flex; gap: 5px;">
       <button class="tab-btn" :class="{ active: paasCurrentTab === 'zeabur' }"
         @click="paasCurrentTab = 'zeabur'; paasCurrentPlatform = 'zeabur'">
@@ -9,6 +10,10 @@
       <button class="tab-btn" :class="{ active: paasCurrentTab === 'koyeb' }"
         @click="paasCurrentTab = 'koyeb'; paasCurrentPlatform = 'koyeb'">
         <i class="fas fa-cube"></i> Koyeb
+      </button>
+      <button class="tab-btn" :class="{ active: paasCurrentTab === 'fly' }"
+        @click="paasCurrentTab = 'fly'; paasCurrentPlatform = 'fly'">
+        <i class="fas fa-paper-plane"></i> Fly.io
       </button>
       <button class="tab-btn" :class="{ active: paasCurrentTab === 'accounts' }" @click="paasCurrentTab = 'accounts'">
         <i class="fas fa-users"></i> 账号管理
@@ -19,22 +24,26 @@
     </div>
 
     <!-- 嵌入式刷新控制条 (仅在监控页显示) -->
-    <div v-if="paasCurrentTab === 'zeabur' || paasCurrentTab === 'koyeb'" 
-         class="integrated-control-bar" style="display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,0.03); padding: 3px 10px; border-radius: 20px; border: 1px solid var(--border-color); box-shadow: inset 0 1px 3px rgba(0,0,0,0.05); transform: scale(0.95); transform-origin: right;">
-      
+    <div v-if="paasCurrentTab === 'zeabur' || paasCurrentTab === 'koyeb' || paasCurrentTab === 'fly'"
+      class="integrated-control-bar"
+      style="display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,0.03); padding: 3px 10px; border-radius: 20px; border: 1px solid var(--border-color); box-shadow: inset 0 1px 3px rgba(0,0,0,0.05); transform: scale(0.95); transform-origin: right;">
+
       <!-- Zeabur 版逻辑 -->
       <template v-if="paasCurrentTab === 'zeabur'">
         <button class="btn-icon-mini" @click="toggleDataRefresh" :data-tooltip="dataRefreshPaused ? '继续更新' : '暂停更新'"
-                style="border: none; background: transparent; cursor: pointer; color: var(--text-secondary); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;">
-          <i class="fas" :class="dataRefreshPaused ? 'fa-play' : 'fa-pause'" style="font-size: 10px;" :style="{ color: dataRefreshPaused ? 'var(--success-color)' : 'inherit' }"></i>
+          style="border: none; background: transparent; cursor: pointer; color: var(--text-secondary); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;">
+          <i class="fas" :class="dataRefreshPaused ? 'fa-play' : 'fa-pause'" style="font-size: 10px;"
+            :style="{ color: dataRefreshPaused ? 'var(--success-color)' : 'inherit' }"></i>
         </button>
         <div style="width: 1px; height: 12px; background: var(--border-color); opacity: 0.5;"></div>
         <div class="refresh-clickable-area" @click="fetchData(true)" data-tooltip="点击强制刷新"
-             style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-          <span style="font-family: var(--font-mono); font-size: 11px; min-width: 25px; opacity: 0.8;">{{ loading ? '...' : refreshCountdown + 's' }}</span>
+          style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+          <span style="font-family: var(--font-mono); font-size: 11px; min-width: 25px; opacity: 0.8;">{{ loading ?
+            '...' : refreshCountdown + 's' }}</span>
           <div style="width: 60px; height: 4px; background: rgba(0,0,0,0.05); border-radius: 2px; overflow: hidden;">
-            <div :style="{ width: refreshProgress + '%', background: dataRefreshPaused ? '#999' : 'var(--zeabur-primary)' }"
-                 style="height: 100%; transition: width 1s linear;"></div>
+            <div
+              :style="{ width: refreshProgress + '%', background: dataRefreshPaused ? '#999' : 'var(--zeabur-primary)' }"
+              style="height: 100%; transition: width 1s linear;"></div>
           </div>
           <i class="fas fa-sync-alt" :class="{'fa-spin': loading}" style="font-size: 10px; opacity: 0.4;"></i>
         </div>
@@ -42,19 +51,43 @@
 
       <!-- Koyeb 版逻辑 -->
       <template v-else-if="paasCurrentTab === 'koyeb'">
-        <button class="btn-icon-mini" @click="toggleKoyebDataRefresh" :data-tooltip="koyebDataRefreshPaused ? '继续更新' : '暂停更新'"
-                style="border: none; background: transparent; cursor: pointer; color: var(--text-secondary); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;">
-          <i class="fas" :class="koyebDataRefreshPaused ? 'fa-play' : 'fa-pause'" style="font-size: 10px;" :style="{ color: koyebDataRefreshPaused ? 'var(--success-color)' : 'inherit' }"></i>
+        <button class="btn-icon-mini" @click="toggleKoyebDataRefresh"
+          :data-tooltip="koyebDataRefreshPaused ? '继续更新' : '暂停更新'"
+          style="border: none; background: transparent; cursor: pointer; color: var(--text-secondary); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;">
+          <i class="fas" :class="koyebDataRefreshPaused ? 'fa-play' : 'fa-pause'" style="font-size: 10px;"
+            :style="{ color: koyebDataRefreshPaused ? 'var(--success-color)' : 'inherit' }"></i>
         </button>
         <div style="width: 1px; height: 12px; background: var(--border-color); opacity: 0.5;"></div>
         <div class="refresh-clickable-area" @click="loadKoyebData(true)" data-tooltip="点击强制刷新"
-             style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-          <span style="font-family: var(--font-mono); font-size: 11px; min-width: 25px; opacity: 0.8;">{{ koyebRefreshing ? '...' : koyebRefreshCountdown + 's' }}</span>
+          style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+          <span style="font-family: var(--font-mono); font-size: 11px; min-width: 25px; opacity: 0.8;">{{
+            koyebRefreshing ? '...' : koyebRefreshCountdown + 's' }}</span>
           <div style="width: 60px; height: 4px; background: rgba(0,0,0,0.05); border-radius: 2px; overflow: hidden;">
             <div :style="{ width: koyebRefreshProgress + '%', background: koyebDataRefreshPaused ? '#999' : '#4f46e5' }"
-                 style="height: 100%; transition: width 1s linear;"></div>
+              style="height: 100%; transition: width 1s linear;"></div>
           </div>
           <i class="fas fa-sync-alt" :class="{'fa-spin': koyebRefreshing}" style="font-size: 10px; opacity: 0.4;"></i>
+        </div>
+      </template>
+
+      <!-- Fly.io 版逻辑 -->
+      <template v-else-if="paasCurrentTab === 'fly'">
+        <button class="btn-icon-mini" @click="toggleFlyDataRefresh"
+          :data-tooltip="flyDataRefreshPaused ? '继续更新' : '暂停更新'"
+          style="border: none; background: transparent; cursor: pointer; color: var(--text-secondary); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;">
+          <i class="fas" :class="flyDataRefreshPaused ? 'fa-play' : 'fa-pause'" style="font-size: 10px;"
+            :style="{ color: flyDataRefreshPaused ? 'var(--success-color)' : 'inherit' }"></i>
+        </button>
+        <div style="width: 1px; height: 12px; background: var(--border-color); opacity: 0.5;"></div>
+        <div class="refresh-clickable-area" @click="loadFlyData(true)" data-tooltip="点击强制刷新"
+          style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+          <span style="font-family: var(--font-mono); font-size: 11px; min-width: 25px; opacity: 0.8;">{{ flyRefreshing
+            ? '...' : flyRefreshCountdown + 's' }}</span>
+          <div style="width: 60px; height: 4px; background: rgba(0,0,0,0.05); border-radius: 2px; overflow: hidden;">
+            <div :style="{ width: flyRefreshProgress + '%', background: flyDataRefreshPaused ? '#999' : '#8b5cf6' }"
+              style="height: 100%; transition: width 1s linear;"></div>
+          </div>
+          <i class="fas fa-sync-alt" :class="{'fa-spin': flyRefreshing}" style="font-size: 10px; opacity: 0.4;"></i>
         </div>
       </template>
     </div>
@@ -435,6 +468,299 @@
   </div>
   <!-- Koyeb 监控结束 -->
 
+    <!-- ========== Fly.io 服务监控 ========== -->
+
+    <div v-if="paasCurrentTab === 'fly'" class="sub-tab-content quick-fade-in">
+
+      <div v-if="flyAccounts.length > 0" class="stats-grid">
+
+        <div class="stat-card">
+
+          <div class="stat-icon-wrapper" style="background: rgba(var(--fly-primary-rgb), 0.1); color: var(--fly-primary);">
+
+            <i class="fas fa-user-circle"></i>
+
+          </div>
+
+          <div class="stat-content">
+
+            <div class="stat-label">账号数</div>
+
+            <div class="stat-value">{{ flyAccounts.length }}</div>
+
+          </div>
+
+        </div>
+
+        <div class="stat-card">
+
+          <div class="stat-icon-wrapper" style="background: rgba(var(--fly-primary-rgb), 0.1); color: var(--fly-primary);">
+
+            <i class="fas fa-folder-open"></i>
+
+          </div>
+
+          <div class="stat-content">
+
+            <div class="stat-label">应用总数</div>
+
+            <div class="stat-value">{{ getCurrentPlatformStats().projects }}</div>
+
+          </div>
+
+        </div>
+
+        <div class="stat-card">
+
+          <div class="stat-icon-wrapper" style="background: rgba(16, 185, 129, 0.1); color: #10b981;">
+
+            <i class="fas fa-play-circle"></i>
+
+          </div>
+
+          <div class="stat-content">
+
+            <div class="stat-label">运行中</div>
+
+            <div class="stat-value success">{{ getCurrentPlatformStats().running }}</div>
+
+          </div>
+
+        </div>
+
+      </div>
+
+  
+
+      <div v-if="flyLoading && flyAccounts.length === 0" class="loading">
+
+        ⚡ 正在加载 Fly.io 数据...
+
+      </div>
+
+  
+
+      <div v-else>
+
+        <div v-for="account in flyAccounts" :key="account.id" class="account-card fly-account-card"
+
+          :class="{ 'expanded': isFlyAccountExpanded(account.name) }" style="margin-bottom: 12px;">
+
+          <div class="account-header fly-account-header" @click="toggleFlyAccount(account.name)">
+
+            <div class="account-info">
+
+              <i class="fas fa-chevron-right toggle-icon fly-toggle" :style="{
+
+                      transform: isFlyAccountExpanded(account.name) ? 'rotate(90deg)' : 'rotate(0deg)'
+
+                    }"></i>
+
+              <!-- 头像 -->
+
+              <div class="zeabur-account-avatar fly-account-avatar">
+
+                <span class="avatar-letter">{{ (account.name || 'F').charAt(0).toUpperCase() }}</span>
+
+              </div>
+
+              <!-- 账户信息 -->
+
+              <div class="zeabur-account-details">
+
+                <div class="zeabur-account-name">{{ account.name }}</div>
+
+              </div>
+
+            </div>
+
+          </div>
+
+  
+
+          <div v-if="account.error" class="error">❌ 错误: {{ account.error }}</div>
+
+  
+
+          <div class="account-card-body">
+
+            <div v-if="account.projects" class="projects-grid fly-projects-grid" :class="{ 
+
+                'collapsed': !isFlyAccountExpanded(account.name),
+
+                'single-app': account.projects.length === 1
+
+              }">
+
+              <div v-for="app in account.projects" :key="app.id" class="project-card fly-project-card">
+
+                <div class="project-header fly-project-header">
+
+                  <div class="project-name-wrapper fly-project-name-wrapper">
+
+                    <span class="project-name-icon">✈️</span>
+
+                    <span class="project-name-text fly-project-name-text">{{ app.name }}</span>
+
+                  </div>
+
+                </div>
+
+  
+
+                <div class="services-container">
+
+                  <div class="service-item fly-service-item" :class="getFlyStatusClass(app.status)">
+
+                    <div class="service-header">
+
+                      <div class="service-name-container">
+
+                        <span class="service-name fly-service-name">{{ app.hostname || app.name }}</span>
+
+                      </div>
+
+                      <div :class="['service-status', getFlyStatusClass(app.status)]">
+
+                        {{ getFlyStatusText(app.status) }}
+
+                      </div>
+
+                    </div>
+
+  
+
+                    <div class="service-actions">
+
+                      <button @click="restartFlyApp(account, app)" class="service-btn btn-restart fly-btn">
+
+                        <i class="fas fa-redo"></i> 重启
+
+                      </button>
+
+                      <button @click="fetchFlyMachines(account, app)" class="service-btn fly-btn"
+
+                        style="background-color: rgba(139, 92, 246, 0.2); color: #8b5cf6;">
+
+                        <i class="fas" :class="app.loadingMachines ? 'fa-spinner fa-spin' : 'fa-server'"></i> 实例
+
+                      </button>
+
+                      <button @click="showFlyAppLogs(account, app)" class="service-btn btn-logs fly-btn">
+
+                        <i class="fas fa-file-alt"></i> 日志
+
+                      </button>
+
+                    </div>
+
+  
+
+                    <!-- Fly.io 实例列表 -->
+
+                    <div v-if="app.showMachines && app.machines && app.machines.length > 0"
+
+                      class="instances-container fly-instances-container quick-fade-in">
+
+                      <div class="instances-title fly-instances-title">
+
+                        <span>运行实例 ({{ app.machines.length }})</span>
+
+                        <span style="cursor: pointer;" @click="app.showMachines = false">×</span>
+
+                      </div>
+
+                      <div v-for="machine in app.machines" :key="machine.id" class="instance-item fly-instance-item">
+
+                        <span class="instance-id fly-instance-id">{{ machine.id.substring(0, 8) }}...</span>
+
+                        <div style="display: flex; gap: 8px; align-items: center;">
+
+                          <span class="instance-region fly-instance-region" style="font-size: 10px;">{{
+
+                            formatRegion(machine.region)
+
+                            }}</span>
+
+                          <span :class="['ag-status-badge', getFlyStatusClass(machine.state)]"
+
+                            style="padding: 1px 6px; font-size: 9px;">
+
+                            {{ machine.state }}
+
+                          </span>
+
+                        </div>
+
+                      </div>
+
+                    </div>
+
+                  </div>
+
+                </div>
+
+  
+
+                <!-- App Domains -->
+
+                <div v-if="app.hostname || (app.domains && app.domains.length > 0)" class="domains-container">
+
+                  <!-- Default fly.dev domain -->
+
+                  <a v-if="app.hostname" :href="'https://' + app.hostname" target="_blank" class="domain-link fly-domain-link">
+
+                    <i class="fas fa-globe"></i>
+
+                    <span>{{ app.hostname }}</span>
+
+                    <span class="domain-badge" style="font-size: 8px; background: #666;">默认</span>
+
+                  </a>
+
+                  <!-- Custom domains -->
+
+                  <a v-for="domainInfo in app.domains" :key="domainInfo.domain"
+
+                    :href="'https://' + domainInfo.domain" target="_blank" class="domain-link fly-domain-link"
+
+                    :title="'状态: ' + domainInfo.status">
+
+                    <i class="fas fa-link"></i>
+
+                    <span>{{ domainInfo.domain }}</span>
+
+                    <span v-if="domainInfo.isVerified" class="domain-badge" style="font-size: 8px; background: var(--success-color);">已就绪</span>
+
+                    <span v-else class="domain-badge" style="font-size: 8px; background: var(--warning-color);">{{ domainInfo.status === 'Awaiting configuration' ? '待配置' : '配置中' }}</span>
+
+                  </a>
+
+                </div>
+
+              </div>
+
+            </div>
+
+          </div>
+
+        </div>
+
+  
+
+        <div v-if="!flyLoading && flyAccounts.length === 0" class="error">
+
+          未配置 Fly.io 账号。请在账号管理中添加。
+
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- Fly.io 监控结束 -->
+  <!-- Fly.io 监控结束 -->
+
   <!-- ========== 账号管理（统一管理 Zeabur + Koyeb） ========== -->
   <div v-if="paasCurrentTab === 'accounts'" class="sub-tab-content quick-fade-in">
     <!-- Zeabur 账号管理 -->
@@ -447,10 +773,10 @@
             @click="showAddZeaburAccountModal = true">
             <i class="fas fa-plus"></i> 添加账号
           </button>
-          <button class="btn btn-secondary paas-control-btn" @click="exportAllAccounts" style="padding: 6px 12px;">
+          <button class="btn btn-secondary paas-control-btn" @click="exportZeaburAccounts" style="padding: 6px 12px;">
             <i class="fas fa-upload"></i> 导出
           </button>
-          <button class="btn btn-secondary paas-control-btn" @click="importAllAccounts" style="padding: 6px 12px;">
+          <button class="btn btn-secondary paas-control-btn" @click="importZeaburAccounts" style="padding: 6px 12px;">
             <i class="fas fa-download"></i> 导入
           </button>
         </div>
@@ -571,10 +897,10 @@
           <button class="btn btn-success paas-control-btn" @click=" showAddKoyebAccountModal=true">
             <i class="fas fa-plus"></i> 添加账号
           </button>
-          <button class="btn btn-secondary paas-control-btn" @click="exportAllAccounts" style="padding: 6px 12px;">
+          <button class="btn btn-secondary paas-control-btn" @click="exportKoyebAccounts" style="padding: 6px 12px;">
             <i class="fas fa-upload"></i> 导出
           </button>
-          <button class="btn btn-secondary paas-control-btn" @click="importAllAccounts" style="padding: 6px 12px;">
+          <button class="btn btn-secondary paas-control-btn" @click="importKoyebAccounts" style="padding: 6px 12px;">
             <i class="fas fa-download"></i> 导入
           </button>
         </div>
@@ -656,6 +982,81 @@
           </button>
         </div>
       </div>
+
+      <!-- Fly.io 账号管理 -->
+      <div class="panel" style="margin-top: 24px;">
+        <div class="panel-header">
+          <div class="panel-title"><i class="fas fa-users" style="margin-right: 8px; color: #8b5cf6;"></i>Fly.io 账号管理
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-success paas-control-btn" @click="showAddFlyAccountModal=true">
+              <i class="fas fa-plus"></i> 添加账号
+            </button>
+            <button class="btn btn-secondary paas-control-btn" @click="exportFlyAccounts" style="padding: 6px 12px;">
+              <i class="fas fa-upload"></i> 导出
+            </button>
+            <button class="btn btn-secondary paas-control-btn" @click="importFlyAccounts" style="padding: 6px 12px;">
+              <i class="fas fa-download"></i> 导入
+            </button>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>名称</th>
+                <th>邮箱</th>
+                <th class="text-center" style="width: 120px;">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(account, index) in flyManagedAccounts" :key="'fly-' + index">
+                <td>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <i class="fas fa-paper-plane" style="font-size: 12px; color: #8b5cf6; opacity: 0.7;"></i>
+                    <strong>{{ account.name }}</strong>
+                  </div>
+                </td>
+                <td>{{ account.email || '-' }}</td>
+                <td class="actions text-center">
+                  <div class="flex-cell">
+                    <button class="btn btn-icon-refined" @click="removeFlyAccount(account.id, account.name)"
+                      title="删除账号" style="color: var(--danger-color);">
+                      <i class="fas fa-trash"></i>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-if="flyManagedAccounts.length === 0" class="empty-state">
+            <i class="fas fa-user-plus" style="font-size: 48px; margin-bottom: 16px;"></i>
+            <div>暂无 Fly.io 账号，点击上方按钮添加</div>
+          </div>
+        </div>
+
+        <!-- Fly.io 批量添加 -->
+        <div class="panel fly-batch-panel" style="margin-top: 16px;">
+          <div class="panel-header">
+            <div class="panel-title"><i class="fas fa-layer-group" style="margin-right: 8px; color: #8b5cf6;"></i>批量添加
+            </div>
+          </div>
+          <div>
+            <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 12px;">
+              每行一个账号，格式：<code>名称:Token</code> 或 <code>名称：Token</code>
+            </p>
+            <div style="position: relative; min-height: 100px;">
+              <textarea v-model="flyBatchAccounts" placeholder="每行一个账号，格式：账号名称:API_Token" class="form-textarea"
+                style="min-height: 100px;"></textarea>
+            </div>
+            <button class="btn btn-primary" @click="batchAddFlyAccounts" :disabled="flyAddingAccount"
+              style="width: 100%; margin-top: 12px; background-color: #8b5cf6; border-color: #8b5cf6;">
+              {{ flyAddingAccount ? '添加中...' : '批量添加 Fly.io 账号' }}
+            </button>
+          </div>
+        </div>
+      </div>
     </div> <!-- 账号管理内容结束 -->
   </div> <!-- 账号管理标签页结束 -->
 
@@ -680,6 +1081,12 @@
           <label class="form-label" style="margin-bottom: 8px;">Koyeb 自动刷新间隔[>5秒]</label>
           <input type="number" :value="koyebRefreshInterval / 1000"
             @input="koyebRefreshInterval = Math.max(5, parseInt($event.target.value)) * 1000" class="form-input" min="5"
+            placeholder="30" style="max-width: 200px;" />
+        </div>
+        <div class="form-group" style="margin-bottom: 0;">
+          <label class="form-label" style="margin-bottom: 8px;">Fly.io 自动刷新间隔[>5秒]</label>
+          <input type="number" :value="flyRefreshInterval / 1000"
+            @input="flyRefreshInterval = Math.max(5, parseInt($event.target.value)) * 1000" class="form-input" min="5"
             placeholder="30" style="max-width: 200px;" />
         </div>
       </div>

@@ -47,6 +47,7 @@ function registerRoutes(app) {
     'zeabur-api': '/api', // 注意：Zeabur 模块内部路由可能以 /zeabur 开头，或者直接挂载在 /api 下
     'koyeb-api': '/api', // Koyeb 模块 - 内部路由以 /koyeb 开头
     'cloudflare-dns': '/api/cf-dns',
+    'fly-api': '/api',
     'openai-api': '/api/openai',
     'server-management': '/api/server',
     'antigravity-api': '/api/antigravity',

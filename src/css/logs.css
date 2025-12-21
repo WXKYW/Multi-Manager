@@ -44,14 +44,14 @@
 
 /* 顶栏 */
 .log-header {
-    height: 60px;
+    height: 50px;
     background-color: var(--bg-secondary);
     backdrop-filter: blur(15px);
     -webkit-backdrop-filter: blur(15px);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 24px;
+    padding: 0 5px;
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
 }
@@ -76,9 +76,11 @@
 }
 
 .log-info {
+    gap: 8px;
     display: flex;
     flex-direction: row;
     justify-content: center;
+    align-items: flex-end;
 }
 
 .log-title {
@@ -368,7 +370,7 @@
     flex-direction: row;
     align-items: center;
     justify-content: flex-start;
-    padding: 3px 12px;
+    /* padding: 3px 12px; */
     font-size: 13px;
     line-height: 1.6;
     transition: background 0.1s;

@@ -104,8 +104,9 @@ app.use(fileUpload({
 }));
 
 // 注册所有路由
+// Fly.io module integrated - v4
 registerRoutes(app);
-logger.info('所有系统路由及功能模块已就绪');
+logger.success('所有系统路由及功能模块已就绪 (v4)');
 
 // Favicon 处理
 // Favicon 处理 - 前端构建已包含 hash URL，服务端直接返回 204

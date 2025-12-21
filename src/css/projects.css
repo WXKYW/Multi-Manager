@@ -292,6 +292,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  margin-top: 4px;
   margin-bottom: 8px;
 }
 
@@ -360,7 +361,7 @@
 
 .service-status {
   padding: 4px 8px;
-  border-radius: 20px;
+  border-radius: 7px;
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;

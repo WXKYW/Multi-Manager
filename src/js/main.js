@@ -21,6 +21,8 @@ import '../css/login.css';
 import '../css/sidebar-nav.css';
 import '../css/zeabur.css'; // Zeabur 专属样式
 import '../css/koyeb.css'; // Koyeb 专属样式
+import '../css/fly.css'; // Fly.io 专属样式
+import '../css/r2.css'; // R2 存储专属样式
 
 // 导入模板加载器
 import './template-loader.js';
@@ -41,7 +43,9 @@ import { zeaburMethods } from './modules/zeabur.js';
 import { renderMarkdown } from './modules/utils.js';
 import { paasMethods } from './modules/paas.js';
 import { koyebMethods } from './modules/koyeb.js';
+import { flyMethods } from './modules/fly.js';
 import { dnsMethods } from './modules/dns.js';
+import { r2Methods } from './modules/r2.js';
 import { openaiMethods } from './modules/openai.js';
 import { antigravityMethods } from './modules/antigravity.js';
 import { geminiCliMethods } from './modules/gemini-cli.js';
@@ -431,6 +435,8 @@ const app = createApp({
       return this.showSettingsModal ||
         this.logViewer.visible ||
         this.showAddZeaburAccountModal ||
+        this.showAddKoyebAccountModal ||
+        this.showAddFlyAccountModal ||
         this.showAddDnsAccountModal ||
         this.showEditDnsAccountModal ||
         this.showDnsRecordModal ||
@@ -536,7 +542,7 @@ const app = createApp({
 
         // 批量重置其他所有布尔类型的模态框状态
         const modals = [
-          'showAddZeaburAccountModal', 'showAddDnsAccountModal', 'showEditDnsAccountModal',
+          'showAddZeaburAccountModal', 'showAddKoyebAccountModal', 'showAddFlyAccountModal', 'showAddDnsAccountModal', 'showEditDnsAccountModal',
           'showDnsRecordModal', 'showDnsTemplateModal', 'showOpenaiEndpointModal',
           'showServerModal', 'showImportServerModal', 'showDockerModal',
           'showSSHTerminalModal', 'showAntigravityAccountModal', 'showAddSessionSelectModal',
@@ -751,19 +757,26 @@ const app = createApp({
                   if (!this.dataRefreshPaused) {
                     this.startAutoRefresh();
                   }
-                } else if (this.paasCurrentPlatform === 'koyeb') {
-                  // 优先加载缓存
-                  if (this.koyebAccounts.length === 0) {
-                    this.loadFromKoyebCache();
-                  }
-                  // 启动刷新
-                  if (!this.koyebDataRefreshPaused) {
-                    this.startKoyebAutoRefresh();
-                    this.loadKoyebData(); // 立即触发一次
-                  }
-                }
-                break;
-              case 'dns':
+                                  } else if (this.paasCurrentPlatform === 'koyeb') {
+                                    // 优先加载缓存
+                                    if (this.koyebAccounts.length === 0) {
+                                      this.loadFromKoyebCache();
+                                    }
+                                    // 启动刷新
+                                    if (!this.koyebDataRefreshPaused) {
+                                      this.startKoyebAutoRefresh();
+                                      this.loadKoyebData(); // 立即触发一次
+                                    }
+                                  } else if (this.paasCurrentPlatform === 'fly') {
+                                    if (this.flyAccounts.length === 0) {
+                                      this.loadFromFlyCache();
+                                    }
+                                    if (!this.flyDataRefreshPaused) {
+                                      this.startFlyAutoRefresh();
+                                      this.loadFlyData();
+                                    }
+                                  }
+                                  break;              case 'dns':
                 if (this.dnsAccounts.length === 0) {
                   // 优先加载缓存实现即时显示
                   this.loadFromDnsAccountsCache();
@@ -833,6 +846,8 @@ const app = createApp({
                 this.loadFromZeaburCache();
               } else if (this.paasCurrentPlatform === 'koyeb') {
                 this.loadKoyebData();
+              } else if (this.paasCurrentPlatform === 'fly') {
+                this.loadFlyData();
               }
               break;
             case 'dns':
@@ -891,18 +906,38 @@ const app = createApp({
         }
         // 停止 Zeabur 自动刷新
         this.stopAutoRefresh();
+      } else if (newVal === 'fly') {
+        this.paasCurrentPlatform = 'fly';
+        if (this.flyAccounts.length === 0) {
+          this.loadFromFlyCache();
+        }
+        if (this.flyManagedAccounts.length === 0) {
+          this.loadFlyManagedAccounts();
+        }
+        // 启动 Fly 自动刷新
+        if (!this.flyDataRefreshPaused) {
+          this.startFlyAutoRefresh();
+          this.loadFlyData(); // 立即触发一次
+        }
+        // 停止其他自动刷新
+        this.stopAutoRefresh();
+        this.stopKoyebAutoRefresh();
       } else {
         // 其他标签页，停止所有自动刷新
         this.stopAutoRefresh();
         this.stopKoyebAutoRefresh();
+        this.stopFlyAutoRefresh();
 
         if (newVal === 'accounts') {
-          // 加载两个平台的账号
+          // 加载三个平台的账号
           if (this.managedAccounts.length === 0) {
             this.loadManagedAccounts();
           }
           if (this.koyebManagedAccounts.length === 0) {
             this.loadKoyebManagedAccounts();
+          }
+          if (this.flyManagedAccounts.length === 0) {
+            this.loadFlyManagedAccounts();
           }
         }
       }
@@ -924,6 +959,18 @@ const app = createApp({
 
     // 各种模态框的聚焦处理
     showAddZeaburAccountModal(newVal) {
+      if (newVal) {
+        this.$nextTick(() => this.focusModalOverlay());
+      }
+    },
+
+    showAddKoyebAccountModal(newVal) {
+      if (newVal) {
+        this.$nextTick(() => this.focusModalOverlay());
+      }
+    },
+
+    showAddFlyAccountModal(newVal) {
       if (newVal) {
         this.$nextTick(() => this.focusModalOverlay());
       }
@@ -1059,6 +1106,8 @@ const app = createApp({
       this.openaiEndpoints = [];
       this.antigravityAccounts = [];
       this.geminiCliAccounts = [];
+      this.flyAccounts = [];
+      this.flyManagedAccounts = [];
 
       try {
         await fetch('/api/logout', { method: 'POST' });
@@ -3025,7 +3074,9 @@ const app = createApp({
     ...zeaburMethods,
     ...paasMethods,
     ...koyebMethods,
+    ...flyMethods,
     ...dnsMethods,
+    ...r2Methods,
     ...openaiMethods,
     ...antigravityMethods,
     ...geminiCliMethods,
