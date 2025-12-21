@@ -344,7 +344,11 @@ const app = createApp({
         logFileSizeMB: 10  // 日志文件最大大小(MB)
       },
       logSettingsSaving: false,
-      logLimitsEnforcing: false
+      logLimitsEnforcing: false,
+
+      // CDN 配置状态 (构建时注入)
+      cdnEnabled: typeof __USE_CDN__ !== 'undefined' ? __USE_CDN__ : false,
+      cdnProvider: typeof __CDN_PROVIDER__ !== 'undefined' ? __CDN_PROVIDER__ : 'npmmirror'
     };
   },
 
@@ -708,12 +712,12 @@ const app = createApp({
           const sessionId = newVal.replace('ssh_', '');
           this.$nextTick(() => {
             const session = this.sshSessions.find(s => s.id === sessionId);
-            if (session && session.fit && session.terminal) {
+            if (session) {
               // 延迟一点确保DOM完全渲染
               setTimeout(() => {
-                session.fit.fit();
-                session.terminal.focus();
-              }, 50);
+                this.safeTerminalFit(session);
+                if (session.terminal) session.terminal.focus();
+              }, 150);
             }
           });
         }
@@ -761,26 +765,26 @@ const app = createApp({
                   if (!this.dataRefreshPaused) {
                     this.startAutoRefresh();
                   }
-                                  } else if (this.paasCurrentPlatform === 'koyeb') {
-                                    // 优先加载缓存
-                                    if (this.koyebAccounts.length === 0) {
-                                      this.loadFromKoyebCache();
-                                    }
-                                    // 启动刷新
-                                    if (!this.koyebDataRefreshPaused) {
-                                      this.startKoyebAutoRefresh();
-                                      this.loadKoyebData(); // 立即触发一次
-                                    }
-                                  } else if (this.paasCurrentPlatform === 'fly') {
-                                    if (this.flyAccounts.length === 0) {
-                                      this.loadFromFlyCache();
-                                    }
-                                    if (!this.flyDataRefreshPaused) {
-                                      this.startFlyAutoRefresh();
-                                      this.loadFlyData();
-                                    }
-                                  }
-                                  break;              case 'dns':
+                } else if (this.paasCurrentPlatform === 'koyeb') {
+                  // 优先加载缓存
+                  if (this.koyebAccounts.length === 0) {
+                    this.loadFromKoyebCache();
+                  }
+                  // 启动刷新
+                  if (!this.koyebDataRefreshPaused) {
+                    this.startKoyebAutoRefresh();
+                    this.loadKoyebData(); // 立即触发一次
+                  }
+                } else if (this.paasCurrentPlatform === 'fly') {
+                  if (this.flyAccounts.length === 0) {
+                    this.loadFromFlyCache();
+                  }
+                  if (!this.flyDataRefreshPaused) {
+                    this.startFlyAutoRefresh();
+                    this.loadFlyData();
+                  }
+                }
+                break; case 'dns':
                 if (this.dnsAccounts.length === 0) {
                   // 优先加载缓存实现即时显示
                   this.loadFromDnsAccountsCache();
@@ -1091,6 +1095,40 @@ const app = createApp({
       this.settingsCurrentTab = tabName;
       this.showSettingsModal = true;
       // 不收起菜单，让用户可以继续切换
+    },
+
+    /**
+     * 安全地调整终端大小
+     * 只有在终端可见且已初始化渲染服务时才调用 fit()
+     */
+    safeTerminalFit(session) {
+      if (!session || !session.fit || !session.terminal) return;
+
+      const terminal = session.terminal;
+      const fit = session.fit;
+
+      // 如果终端尚未挂载或不可见，跳过（offsetWidth 为 0 通常意味着 display: none）
+      if (!terminal.element || terminal.element.offsetWidth === 0 || terminal.element.offsetHeight === 0) {
+        return;
+      }
+
+      // 检查 xterm.js 内部渲染服务是否就绪 (scrollBarWidth 等属性依赖此服务)
+      // _core 是内部 API，但在需要确保稳定性的情况下不得不检查
+      if (!terminal._core || !terminal._core._renderService) {
+        return;
+      }
+
+      try {
+        fit.fit();
+      } catch (e) {
+        // 捕获并静默处理特定的 TypeError，避免污染控制台
+        // 这类错误通常是因为终端在计算尺寸的瞬间变得不可见
+        if (e instanceof TypeError && (e.message.includes('scrollBarWidth') || e.message.includes('undefined'))) {
+          // 忽略
+        } else {
+          console.warn('终端自适应调整失败:', e);
+        }
+      }
     },
 
     async logout() {
@@ -1811,13 +1849,12 @@ const app = createApp({
       this.activeSessionId = sessionId;
       this.$nextTick(() => {
         const session = this.sshSessions.find(s => s.id === sessionId);
-        if (session && session.fit) {
-          try {
-            session.fit.fit();
-          } catch (e) {
-            console.warn('切换标签页时终端自适应失败:', e);
-          }
-          session.terminal.focus();
+        if (session) {
+          // 增加微小延迟，确保 CSS 过渡不会干扰尺寸计算
+          setTimeout(() => {
+            this.safeTerminalFit(session);
+            if (session.terminal) session.terminal.focus();
+          }, 100);
         }
       });
     },
@@ -2113,15 +2150,10 @@ const app = createApp({
       terminal.open(terminalContainer);
 
       // 延迟执行 fit 以确保元素已完全挂载并计算尺寸
+      // xterm.js 需要足够时间完成内部渲染器初始化 (scrollBarWidth 等属性)
       setTimeout(() => {
-        try {
-          if (fit && terminal.element) {
-            fit.fit();
-          }
-        } catch (e) {
-          console.warn('终端自适应调整失败:', e);
-        }
-      }, 50);
+        this.safeTerminalFit(session);
+      }, 300);
 
       // 保存到会话
       session.terminal = terminal;
@@ -2216,16 +2248,14 @@ const app = createApp({
 
       // 监听窗口大小变化
       const resizeHandler = () => {
-        if (session.fit) {
-          session.fit.fit();
-          // 通知服务器终端大小变化
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({
-              type: 'resize',
-              cols: terminal.cols,
-              rows: terminal.rows
-            }));
-          }
+        this.safeTerminalFit(session);
+        // 通知服务器终端大小变化
+        if (ws.readyState === WebSocket.OPEN && session.terminal) {
+          ws.send(JSON.stringify({
+            type: 'resize',
+            cols: terminal.cols,
+            rows: terminal.rows
+          }));
         }
       };
       window.addEventListener('resize', resizeHandler);
@@ -2239,9 +2269,11 @@ const app = createApp({
       this.activeSessionId = sessionId;
       this.$nextTick(() => {
         const session = this.sshSessions.find(s => s.id === sessionId);
-        if (session && session.fit) {
-          session.fit.fit();
-          session.terminal.focus();
+        if (session) {
+          setTimeout(() => {
+            this.safeTerminalFit(session);
+            if (session.terminal) session.terminal.focus();
+          }, 100);
         }
       });
     },

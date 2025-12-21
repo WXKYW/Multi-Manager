@@ -207,7 +207,8 @@
           <!-- ==================== Modules Tab ==================== -->
           <div v-if="settingsCurrentTab === 'modules'" class="settings-tab-content fade-in">
             <div class="settings-group">
-              <div class="settings-group-title" style="display: flex; justify-content: space-between; align-items: center;">
+              <div class="settings-group-title"
+                style="display: flex; justify-content: space-between; align-items: center;">
                 <span>功能模块管理</span>
                 <div style="display: flex; gap: 8px;">
                   <button class="btn btn-xs btn-secondary" @click="setAllModulesVisibility(true)" title="显示所有模块">
@@ -368,6 +369,37 @@
                 <button class="btn btn-secondary" @click="resetCustomCss" style="flex: 1;">
                   <i class="fas fa-undo"></i> 恢复默认
                 </button>
+              </div>
+            </div>
+
+            <div class="settings-group">
+              <div class="settings-group-title">
+                <i class="fas fa-cloud-download-alt"></i> CDN 加速配置
+              </div>
+              <div class="settings-description">
+                静态资源 CDN 加速设置（构建时生效）。
+              </div>
+              <div style="background: var(--bg-tertiary); border-radius: 10px; padding: 14px; margin-top: 12px;">
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                  <span style="font-size: 13px; color: var(--text-secondary);">CDN 模式:</span>
+                  <span v-if="cdnEnabled" class="status-badge"
+                    style="background: rgba(16, 185, 129, 0.15); color: #10b981;">
+                    <i class="fas fa-check-circle"></i> 已启用
+                  </span>
+                  <span v-else class="status-badge" style="background: rgba(107, 114, 128, 0.15); color: #6b7280;">
+                    <i class="fas fa-times-circle"></i> 已禁用
+                  </span>
+                </div>
+                <div v-if="cdnEnabled" style="display: flex; align-items: center; gap: 10px;">
+                  <span style="font-size: 13px; color: var(--text-secondary);">CDN 提供商:</span>
+                  <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">{{ cdnProvider }}</span>
+                </div>
+                <div class="form-help" style="margin-top: 12px; font-size: 12px;">
+                  <i class="fas fa-info-circle"></i>
+                  CDN 配置在构建时生效。修改方法：设置环境变量 <code
+                    style="background: var(--bg-secondary); padding: 2px 6px; border-radius: 4px;">VITE_USE_CDN=true</code>
+                  后重新构建。
+                </div>
               </div>
             </div>
           </div>

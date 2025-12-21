@@ -163,6 +163,11 @@ export const store = reactive({
     r2Uploading: false,
     r2DeletingBucket: false,
     r2DeletingObject: false,
+    // R2 自定义域名模态框
+    showR2DomainModal: false,
+    r2CustomDomainInput: '',
+    r2PendingDownloadObj: null, // 等待下载的对象
+    r2SelectedObjects: [], // 已选中的对象 keys
 
     // OpenAI
     openaiEndpoints: [],

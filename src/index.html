@@ -5,12 +5,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>API Monitor</title>
-  <link rel="icon" type="image/svg+xml" href="./logo.svg">
-  <link rel="shortcut icon" href="./logo.svg">
-  <link rel="icon" type="image/svg+xml" href="./logo.svg" sizes="32x32">
+  <link rel="icon" type="image/svg+xml" href="/logo.svg">
+  <link rel="shortcut icon" href="/logo.svg">
+  <link rel="icon" type="image/svg+xml" href="/logo.svg" sizes="32x32">
 
+  <!-- CDN 样式 (由 Vite 注入) -->
+  <%- cdnStyleTags %>
 
-  <!-- Template Loader imported in main.js -->
+    <!-- Template Loader imported in main.js -->
 </head>
 
 <body>
@@ -33,7 +35,7 @@
       <!-- 左侧边栏 -->
       <aside class="app-sidebar" :class="{ 'sidebar-locked': showSettingsModal }">
         <!-- Logo -->
-        <img src="./logo.svg" class="sidebar-logo" alt="Logo" title="API Monitor">
+        <img src="/logo.svg" class="sidebar-logo" alt="Logo" title="API Monitor">
 
         <!-- 侧边栏导航 (Sidebar Mode) -->
         <div v-if="navLayout === 'sidebar'" class="sidebar-nav">
@@ -111,11 +113,11 @@
           <!-- 模块模板占位符 -->
           <div id="template-paas"></div>
           <div id="template-dns"></div>
-          <div id="template-gemini-cli"></div>
-          <div id="template-openai"></div>
           <div id="template-r2"></div>
-          <div id="template-server"></div>
+          <div id="template-openai"></div>
           <div id="template-antigravity"></div>
+          <div id="template-gemini-cli"></div>
+          <div id="template-server"></div>
         </div>
 
         <!-- 未登录占位符 -->
@@ -133,8 +135,11 @@
     <!-- Toast 系统容器将由 toast.js 自动创建 -->
   </div>
 
-  <!-- 模块化 JavaScript -->
-  <script type="module" src="/js/main.js"></script>
+  <!-- CDN 脚本 (由 Vite 注入) -->
+  <%- cdnScriptTags %>
+
+    <!-- 模块化 JavaScript -->
+    <script type="module" src="/js/main.js"></script>
 </body>
 
 </html>
