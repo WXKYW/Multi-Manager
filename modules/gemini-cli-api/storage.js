@@ -146,9 +146,9 @@ function saveToken(tokenData) {
 }
 
 /**
- * 添加日志
+ * 记录调用日志（与 Antigravity 格式一致）
  */
-function addLog(logData) {
+function recordLog(logData) {
     try {
         const db = dbService.getDatabase();
         const stmt = db.prepare(`
@@ -156,37 +156,62 @@ function addLog(logData) {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         stmt.run(
-            logData.account_id || null,
+            logData.accountId || null,
             logData.model || null,
             logData.is_balanced ? 1 : 0,
-            logData.request_path,
-            logData.request_method,
-            logData.status_code,
-            logData.duration_ms,
-            logData.client_ip || null,
-            logData.user_agent || null,
-            logData.detail || null
+            logData.path,
+            logData.method,
+            logData.statusCode,
+            logData.durationMs,
+            logData.clientIp || null,
+            logData.userAgent || null,
+            logData.detail ? JSON.stringify(logData.detail) : null
         );
     } catch (e) {
-        console.error('❌ 添加 Gemini CLI 日志失败:', e.message);
+        console.error('❌ 记录 Gemini CLI 日志失败:', e.message);
     }
 }
 
 /**
- * 获取日志列表
+ * 获取最近日志（与 Antigravity 格式一致）
  */
-function getLogs(limit = 100, offset = 0) {
+function getRecentLogs(limit = 100) {
     try {
         const db = dbService.getDatabase();
-        return db.prepare(`
-            SELECT l.*, a.name as account_name 
+        const logs = db.prepare(`
+            SELECT 
+                l.id,
+                l.account_id as accountId,
+                l.model,
+                l.is_balanced as isBalanced,
+                a.name as accountName,
+                l.request_path as path,
+                l.request_method as method,
+                l.status_code as statusCode,
+                l.duration_ms as durationMs,
+                l.client_ip as clientIp,
+                l.user_agent as userAgent,
+                l.detail,
+                l.created_at as timestamp
             FROM gemini_cli_logs l
             LEFT JOIN gemini_cli_accounts a ON l.account_id = a.id
             ORDER BY l.created_at DESC 
-            LIMIT ? OFFSET ?
-        `).all(limit, offset);
+            LIMIT ?
+        `).all(limit);
+
+        // 如果 model 列为空，尝试从 detail 字段提取 (兼容旧数据)
+        return logs.map(log => {
+            let model = log.model;
+            if (!model && log.detail) {
+                try {
+                    const detail = JSON.parse(log.detail);
+                    model = detail.model || null;
+                } catch (e) { }
+            }
+            return { ...log, model, detail: undefined };
+        });
     } catch (e) {
-        console.error('❌ 获取 Gemini CLI 日志失败:', e.message);
+        console.error('❌ 获取日志失败:', e.message);
         return [];
     }
 }
@@ -322,8 +347,8 @@ module.exports = {
     toggleAccount,
     getTokenByAccountId,
     saveToken,
-    addLog,
-    getLogs,
+    recordLog,
+    getRecentLogs,
     getLogDetail,
     clearLogs,
     getSettings,

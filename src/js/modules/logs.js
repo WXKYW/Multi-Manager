@@ -14,6 +14,7 @@ export const systemLogsMethods = {
       title: '系统实时日志',
       subtitle: 'System Operation Logs',
       source: 'system',
+      fullscreen: true,
       fetcher: async () => {
         // 获取最近的日志快照
         const response = await fetch('/api/settings/sys-logs', {
@@ -77,6 +78,7 @@ export const systemLogsMethods = {
       title: '系统原始日志文件',
       subtitle: 'app.log (Raw File Content)',
       source: 'system-raw',
+      fullscreen: true,
       fetcher: async () => {
         const response = await fetch('/api/settings/app-log-file', {
           headers: this.getAuthHeaders()

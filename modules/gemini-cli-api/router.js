@@ -101,6 +101,10 @@ function getAvailableModels(prefix) {
         const config = matrix[baseModelId];
         if (!config) return;
 
+        // 检查是否至少有一个功能开启
+        const hasAnyEnabled = config.base || config.maxThinking || config.noThinking || config.fakeStream || config.antiTrunc;
+        if (!hasAnyEnabled) return;
+
         // 1. 收集当前模型的基础可用变体 ID (不含前缀)
         const standardVariants = [];
 
@@ -132,23 +136,36 @@ function getAvailableModels(prefix) {
         }
 
         // 2. 为每个变体生成最终的模型对象 (应用全局前缀 + 功能前缀)
-        standardVariants.forEach(variantId => {
-            // 2.1 添加标准模型 (带全局前缀)
-            const id1 = prefix + variantId;
-            if (!disabledModels.includes(id1)) models.push(createModelObject(id1));
+        if (standardVariants.length > 0) {
+            standardVariants.forEach(variantId => {
+                // 2.1 添加标准模型 (带全局前缀)
+                const id1 = prefix + variantId;
+                if (!disabledModels.includes(id1)) models.push(createModelObject(id1));
 
-            // 2.2 添加假流式变体
+                // 2.2 添加假流式变体
+                if (config.fakeStream) {
+                    const id2 = prefix + '假流式/' + variantId;
+                    if (!disabledModels.includes(id2)) models.push(createModelObject(id2));
+                }
+
+                // 2.3 添加抗截断变体
+                if (config.antiTrunc) {
+                    const id3 = prefix + '流式抗截断/' + variantId;
+                    if (!disabledModels.includes(id3)) models.push(createModelObject(id3));
+                }
+            });
+        } else {
+            // 如果没有任何基础变体（base/maxThinking/noThinking 都为 false），
+            // 但有功能性开关开启，则直接生成功能性变体
             if (config.fakeStream) {
-                const id2 = prefix + '假流式/' + variantId;
-                if (!disabledModels.includes(id2)) models.push(createModelObject(id2));
+                const id = prefix + '假流式/' + baseModelId;
+                if (!disabledModels.includes(id)) models.push(createModelObject(id));
             }
-
-            // 2.3 添加抗截断变体
             if (config.antiTrunc) {
-                const id3 = prefix + '流式抗截断/' + variantId;
-                if (!disabledModels.includes(id3)) models.push(createModelObject(id3));
+                const id = prefix + '流式抗截断/' + baseModelId;
+                if (!disabledModels.includes(id)) models.push(createModelObject(id));
             }
-        });
+        }
     });
 
     // 3. 注入重定向模型
@@ -160,7 +177,7 @@ function getAvailableModels(prefix) {
             models.push(createModelObject(sourceWithPrefix));
         }
     });
-    
+
     return models;
 }
 
@@ -217,7 +234,7 @@ router.use(['/v1', '/chat/completions'], requireChannelEnabled);
 
 // 账号冷却/避让逻辑缓存 (内存中)
 // key: accountId:modelId -> resetTime
-const accountCoolDowns = new Map(); 
+const accountCoolDowns = new Map();
 
 /**
  * 检查账号是否处于冷却期
@@ -225,7 +242,7 @@ const accountCoolDowns = new Map();
 function isAccountInCoolDown(accountId, model) {
     const key = `${accountId}:${model}`;
     const resetTime = accountCoolDowns.get(key);
-    
+
     if (!resetTime) return false;
 
     if (resetTime > Date.now()) {
@@ -243,7 +260,7 @@ function isAccountInCoolDown(accountId, model) {
 function getAccountCoolDowns(accountId) {
     const limitedModels = [];
     const now = Date.now();
-    
+
     for (const [key, resetTime] of accountCoolDowns.entries()) {
         if (key.startsWith(`${accountId}:`)) {
             if (resetTime > now) {
@@ -359,7 +376,7 @@ router.get('/accounts', async (req, res) => {
         // 尝试验证每个账号的 Token 状态
         const accountsWithStatus = await Promise.all(accounts.map(async (account) => {
             let status = 'online';
-            
+
             // 获取该账号下所有被限流的模型列表
             const coolDowns = getAccountCoolDowns(account.id);
 
@@ -558,13 +575,12 @@ router.post('/accounts/:id/toggle', async (req, res) => {
 });
 
 /**
- * 日志管理 - 获取列表
+ * 日志管理 - 获取列表（与 Antigravity 格式一致）
  */
 router.get('/logs', async (req, res) => {
     try {
         const limit = parseInt(req.query.limit) || 100;
-        const offset = parseInt(req.query.offset) || 0;
-        const logs = await storage.getLogs(limit, offset);
+        const logs = storage.getRecentLogs(limit);
         res.json(logs);
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -725,7 +741,7 @@ router.post(['/v1/chat/completions', '/chat/completions'], requireApiKey, async 
 
         // 注意：v1.js 的 dispatch 已经尝试剥离过一次前缀
         // 这里的 model 应当是剥离后的 inner model，或者是没匹配上前缀的完整 ID
-        
+
         // 如果 model 依然带着前缀，剥离它（兼容直接调用该路由的情况）
         if (prefix && model.startsWith(prefix)) {
             model = model.substring(prefix.length);
@@ -740,7 +756,7 @@ router.post(['/v1/chat/completions', '/chat/completions'], requireApiKey, async 
 
         // 最终的模型 ID (带前缀，用于验证和日志)
         const modelWithPrefix = prefix + model;
-        
+
         // 验证模型是否有效（即在矩阵配置中存在且未被禁用）
         const availableModels = getAvailableModels(prefix);
         if (!availableModels.find(m => m.id === modelWithPrefix)) {
@@ -752,9 +768,9 @@ router.post(['/v1/chat/completions', '/chat/completions'], requireApiKey, async 
                 return res.status(404).json({ error: { message: `Model '${modelWithPrefix}' not found in Gemini CLI matrix`, type: 'invalid_request_error', code: 'model_not_found' } });
             }
         }
-        
+
         // 更新请求中的模型名为剥离前缀后的名字，供 client 使用
-        req.body.model = model; 
+        req.body.model = model;
 
         // 获取所有启用账号
         let allAccounts = (await storage.getAccounts()).filter(a => a.enable !== 0);
@@ -765,12 +781,12 @@ router.post(['/v1/chat/completions', '/chat/completions'], requireApiKey, async 
         // 过滤掉处于冷却期的账号
         allAccounts = allAccounts.filter(a => !isAccountInCoolDown(a.id, model));
         if (allAccounts.length === 0) {
-            return res.status(429).json({ 
-                error: { 
-                    message: 'All available Gemini accounts are currently rate-limited (429). Please try again later.', 
+            return res.status(429).json({
+                error: {
+                    message: 'All available Gemini accounts are currently rate-limited (429). Please try again later.',
                     type: 'rate_limit_error',
                     code: '429'
-                } 
+                }
             });
         }
 
@@ -794,24 +810,49 @@ router.post(['/v1/chat/completions', '/chat/completions'], requireApiKey, async 
                     res.setHeader('Cache-Control', 'no-cache');
                     res.setHeader('Connection', 'keep-alive');
 
+                    // 累积流式响应内容用于日志记录
+                    let fullContent = '';
+                    let fullReasoning = '';
+
                     const stream = streamProcessor.processStream(req.body, account.id);
                     for await (const chunk of stream) {
                         res.write(chunk);
+                        // 尝试解析 chunk 以累积内容
+                        try {
+                            if (chunk.startsWith('data: ') && !chunk.includes('[DONE]')) {
+                                const data = JSON.parse(chunk.slice(6));
+                                const delta = data.choices?.[0]?.delta;
+                                if (delta?.content) fullContent += delta.content;
+                                if (delta?.reasoning_content) fullReasoning += delta.reasoning_content;
+                            }
+                        } catch (e) { /* 忽略解析错误 */ }
                     }
                     res.end();
 
-                    // 记录成功日志
-                    await storage.addLog({
-                        account_id: account.id,
+                    // 记录成功日志（包含累积的回复内容）
+                    storage.recordLog({
+                        accountId: account.id,
                         model: modelWithPrefix,
                         is_balanced: req.lb,
-                        request_path: req.path,
-                        request_method: req.method,
-                        status_code: 200,
-                        duration_ms: Date.now() - startTime,
-                        client_ip: req.ip,
-                        user_agent: req.get('user-agent'),
-                        detail: JSON.stringify({ request: req.body, type: 'stream' })
+                        path: req.path,
+                        method: req.method,
+                        statusCode: 200,
+                        durationMs: Date.now() - startTime,
+                        clientIp: req.ip,
+                        userAgent: req.get('user-agent'),
+                        detail: {
+                            request: req.body,
+                            type: 'stream',
+                            response: {
+                                choices: [{
+                                    message: {
+                                        role: 'assistant',
+                                        content: fullContent,
+                                        reasoning_content: fullReasoning
+                                    }
+                                }]
+                            }
+                        }
                     });
                     return; // 成功后退出
                 } else {
@@ -844,17 +885,17 @@ router.post(['/v1/chat/completions', '/chat/completions'], requireApiKey, async 
                     };
 
                     // 记录成功日志
-                    await storage.addLog({
-                        account_id: account.id,
+                    storage.recordLog({
+                        accountId: account.id,
                         model: modelWithPrefix,
                         is_balanced: req.lb,
-                        request_path: req.path,
-                        request_method: req.method,
-                        status_code: 200,
-                        duration_ms: Date.now() - startTime,
-                        client_ip: req.ip,
-                        user_agent: req.get('user-agent'),
-                        detail: JSON.stringify({ request: req.body, response: responseData })
+                        path: req.path,
+                        method: req.method,
+                        statusCode: 200,
+                        durationMs: Date.now() - startTime,
+                        clientIp: req.ip,
+                        userAgent: req.get('user-agent'),
+                        detail: { request: req.body, response: responseData }
                     });
 
                     return res.json(responseData); // 成功后退出
@@ -867,10 +908,10 @@ router.post(['/v1/chat/completions', '/chat/completions'], requireApiKey, async 
                 if (error.response?.status === 429) {
                     const errorData = error.response.data;
                     // 支持多种 Google 错误格式中的重置时间字段
-                    let resetTimeStr = errorData?.quotaInfo?.resetTime || 
-                                     errorData?.error?.details?.[0]?.metadata?.quotaResetTimeStamp ||
-                                     errorData?.error?.details?.[0]?.metadata?.resetTime;
-                    
+                    let resetTimeStr = errorData?.quotaInfo?.resetTime ||
+                        errorData?.error?.details?.[0]?.metadata?.quotaResetTimeStamp ||
+                        errorData?.error?.details?.[0]?.metadata?.resetTime;
+
                     const key = `${account.id}:${model}`;
                     if (resetTimeStr) {
                         const resetTime = new Date(resetTimeStr).getTime();
@@ -885,21 +926,21 @@ router.post(['/v1/chat/completions', '/chat/completions'], requireApiKey, async 
                 }
 
                 // 记录错误日志
-                await storage.addLog({
-                    account_id: account.id,
+                storage.recordLog({
+                    accountId: account.id,
                     model: modelWithPrefix,
                     is_balanced: req.lb,
-                    request_path: req.path,
-                    request_method: req.method,
-                    status_code: error.response?.status || 500,
-                    duration_ms: Date.now() - startTime,
-                    client_ip: req.ip,
-                    user_agent: req.get('user-agent'),
-                    detail: JSON.stringify({ 
-                        error: error.message, 
-                        response_data: error.response?.data, // 仅记录 data 避免循环引用
-                        body: req.body 
-                    })
+                    path: req.path,
+                    method: req.method,
+                    statusCode: error.response?.status || 500,
+                    durationMs: Date.now() - startTime,
+                    clientIp: req.ip,
+                    userAgent: req.get('user-agent'),
+                    detail: {
+                        error: error.message,
+                        response_data: error.response?.data,
+                        body: req.body
+                    }
                 });
 
                 if (res.headersSent) {

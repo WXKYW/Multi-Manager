@@ -156,13 +156,13 @@ pre,
       --current-dark: var(--primary-dark);
   }
 
-  .theme-openai { --current-primary: var(--openai-primary); --current-dark: var(--openai-dark); }
-  .theme-antigravity { --current-primary: var(--ag-primary); --current-dark: var(--ag-dark); }
-  .theme-gemini-cli { --current-primary: var(--gemini-primary); --current-dark: var(--gemini-dark); }
-  .theme-cf-dns { --current-primary: var(--cf-primary); --current-dark: var(--cf-dark); }
-  .theme-self-h { --current-primary: var(--selfh-primary); --current-dark: var(--selfh-dark); }
-  .theme-server { --current-primary: var(--server-primary); --current-dark: var(--server-primary-dark); }
-  .theme-paas { --current-primary: var(--paas-primary); --current-dark: var(--paas-dark); }
+  .theme-openai { --current-primary: var(--openai-primary); --current-dark: var(--openai-dark); --current-rgb: 16, 163, 127; }
+  .theme-antigravity { --current-primary: var(--ag-primary); --current-dark: var(--ag-dark); --current-rgb: 244, 63, 94; }
+  .theme-gemini-cli { --current-primary: var(--gemini-primary); --current-dark: var(--gemini-dark); --current-rgb: 66, 133, 244; }
+  .theme-cf-dns { --current-primary: var(--cf-primary); --current-dark: var(--cf-dark); --current-rgb: 243, 128, 32; }
+  .theme-self-h { --current-primary: var(--selfh-primary); --current-dark: var(--selfh-dark); --current-rgb: 6, 182, 212; }
+  .theme-server { --current-primary: var(--server-primary); --current-dark: var(--server-primary-dark); --current-rgb: 71, 85, 105; }
+  .theme-paas { --current-primary: var(--paas-primary); --current-dark: var(--paas-dark); --current-rgb: 99, 102, 241; }
 
   /* 应用动态颜色到通用组件 */
   [class*="theme-"] .btn-primary {
@@ -432,13 +432,84 @@ body.modal-open {
   border-color: var(--primary-color);
 }
 
-/* Header */
+/* 顶部 Header 布局优化 */
 .header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
-  position: relative;
+  padding: 15px 5px;
+  margin-bottom: 5px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 现代设置按钮样式 */
+.btn-settings-toggle {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 8px 16px;
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-settings-toggle:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.btn-settings-toggle.active {
+  background: var(--primary-color);
+  color: white;
+  border-color: var(--primary-color);
+}
+
+.btn-settings-toggle i {
+  font-size: 16px;
+  transition: transform 0.5s ease;
+}
+
+.btn-settings-toggle:hover i {
+  transform: rotate(90deg);
+}
+
+/* 基础布局容器 - 增加动效支持 */
+.app-wrapper {
+  transition: transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.1), filter 0.5s ease;
+  transform-origin: center center;
+  will-change: transform, filter;
+}
+
+/* 当设置面板激活时的背景状态 */
+.app-wrapper.settings-active-context {
+  filter: blur(3px) brightness(0.9); /* 轻微模糊并压暗 */
+  transform: scale(0.97); /* 轻微向后缩进 */
+  pointer-events: none; /* 防止背景误触 */
+  user-select: none;
+}
+
+/* 移除侧边栏后的全屏适配 */
+.app-wrapper.no-sidebar {
+  display: block;
+  width: 100%;
+}
+
+.app-wrapper.no-sidebar .app-main {
+  margin-left: 0;
+  width: 100%;
 }
 
 .header-actions {
@@ -544,18 +615,18 @@ body.modal-open {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
-/* 所有的 Hover 统一逻辑：上浮 + 阴影增强 */
+/* 所有的 Hover 统一逻辑：仅亮度微调 */
 .btn:hover:not(:disabled) {
-  transform: translateY(-1.5px);
-  box-shadow: 0 6px 15px -3px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.12);
   filter: brightness(1.05);
 }
 
-/* 所有的 Active 统一逻辑：按压沉降 */
+/* 所有的 Active 统一逻辑：按压沉降与微调 */
 .btn:active:not(:disabled) {
-  transform: translateY(0.5px) scale(0.98);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  transition: all 0.05s;
+  transform: scale(0.97);
+  filter: brightness(0.95);
+  border-color: rgba(0, 0, 0, 0.15);
+  transition: all 0.05s ease;
 }
 
 .btn:disabled {

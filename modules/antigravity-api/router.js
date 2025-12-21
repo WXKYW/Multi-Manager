@@ -1,16 +1,19 @@
 const express = require('express');
 const storage = require('./storage');
 const client = require('./antigravity-client');
+const service = require('./antigravity-service');
 const { v4: uuidv4 } = require('uuid');
 const axios = require('axios');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { requireAuth } = require('../../src/middleware/auth');
 const { getSession, getSessionById } = require('../../src/services/session');
 
 const router = express.Router();
 
 // 内存中的 OAuth State
-const OAUTH_STATE = crypto.randomUUID();
+const AG_OAUTH_STATE = crypto.randomUUID();
 const OAUTH_REDIRECT_URI = 'http://localhost:8045/oauth-callback';
 
 /**
@@ -55,7 +58,7 @@ function requireApiAuth(req, res, next) {
 // ============== 管理接口 (需 Admin 权限) ==============
 
 // 所有管理接口使用 requireAuth
-router.use(['/accounts', '/settings', '/logs', '/oauth', '/stats', '/quotas'], requireAuth);
+router.use(['/accounts', '/settings', '/logs', '/oauth', '/stats', '/quotas', '/config/matrix'], requireAuth);
 
 // 全局渠道启用状态检查中间件
 function requireChannelEnabled(req, res, next) {
@@ -77,6 +80,25 @@ function requireChannelEnabled(req, res, next) {
 
 // 所有 /v1 接口受全局启用状态控制
 router.use('/v1', requireChannelEnabled);
+
+/**
+ * 获取模型矩阵配置 (内部 API)
+ */
+router.get('/config/matrix', requireAuth, (req, res) => {
+    res.json(service.getMatrixConfig());
+});
+
+/**
+ * 更新模型矩阵配置 (内部 API)
+ */
+router.post('/config/matrix', requireAuth, (req, res) => {
+    const newConfig = req.body;
+    if (service.saveMatrixConfig(newConfig)) {
+        res.json({ success: true });
+    } else {
+        res.status(500).json({ error: 'Failed to save configuration' });
+    }
+});
 
 
 // OAuth 配置 (与 client.js 保持一致)
@@ -309,7 +331,7 @@ router.get('/oauth/url', (req, res) => {
         redirect_uri: OAUTH_REDIRECT_URI,
         response_type: 'code',
         scope: SCOPES.join(' '),
-        state: OAUTH_STATE
+        state: AG_OAUTH_STATE
     });
     const url = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
     res.json({ url });
@@ -332,9 +354,9 @@ router.post('/oauth/parse-url', async (req, res) => {
         }
 
         // 校验 state 避免 CSRF（可选，但原程序有校验）
-        if (state && state !== OAUTH_STATE) {
-            console.warn('OAuth state mismatch:', { received: state, expected: OAUTH_STATE, expectedGlobal: OAUTH_STATE });
-            // 为了提高兼容性，暂时打印警告但不强制拦截（如果用户刷新了页面，OAUTH_STATE 可能会变）
+        if (state && state !== AG_OAUTH_STATE) {
+            console.warn('OAuth state mismatch:', { received: state, expected: AG_OAUTH_STATE, expectedGlobal: AG_OAUTH_STATE });
+            // 为了提高兼容性，暂时打印警告但不强制拦截（如果用户刷新了页面，AG_OAUTH_STATE 可能会变）
         } else if (!state) {
             console.warn('OAuth state missing from callback URL.');
         }
@@ -744,74 +766,20 @@ router.get('/v1/models', requireApiAuth, async (req, res) => {
         const globalSettings = userSettingsService.loadUserSettings();
         const prefix = (globalSettings.channelModelPrefix || {})['antigravity'] || '';
 
-        // 默认使用第一个启用且有效的账号获取模型列表
-        const accounts = storage.getAccounts().filter(a => a.enable);
-        if (accounts.length === 0) {
-            statusCode = 503;
-            storage.recordLog({
-                accountId: null,
-                path: '/v1/models',
-                method: 'GET',
-                statusCode,
-                durationMs: Date.now() - startTime,
-                clientIp: req.ip || req.connection?.remoteAddress,
-                userAgent: req.headers['user-agent']
-            });
-            return res.status(503).json({ error: 'No enabled accounts available' });
-        }
-
-        const data = await client.listModels(accounts[0].id);
-
-        // 过滤被禁用的模型，并添加重定向模型
-        if (data && data.data) {
-            const configs = storage.getModelConfigs();
-            data.data = data.data.filter(m => {
-                return configs[m.id] !== undefined ? configs[m.id] : true;
-            }).map(m => {
-                // 应用前缀
-                return {
-                    ...m,
-                    id: prefix + m.id
-                };
-            });
-
-            // 注入重定向模型并收集目标模型
-            const redirects = storage.getModelRedirects();
-            const targetModels = new Set();
-
-            redirects.forEach(r => {
-                targetModels.add(prefix + r.target_model);
-                const sourceWithPrefix = prefix + r.source_model;
-                // 仅当源模型不冲突时添加
-                if (!data.data.find(m => m.id === sourceWithPrefix)) {
-                    data.data.push({
-                        id: sourceWithPrefix,
-                        object: 'model',
-                        created: Date.now(),
-                        owned_by: 'system-redirect',
-                        permission: [],
-                        root: sourceWithPrefix,
-                        parent: null
-                    });
-                }
-            });
-
-            // 移除被重命名的原始模型（即重定向的目标模型）
-            data.data = data.data.filter(m => !targetModels.has(m.id));
-        }
+        const models = service.getAvailableModels(prefix);
 
         storage.recordLog({
-            accountId: accounts[0].id,
+            accountId: null,
             path: '/v1/models',
             method: 'GET',
             statusCode: 200,
             durationMs: Date.now() - startTime,
             clientIp: req.ip || req.connection?.remoteAddress,
             userAgent: req.headers['user-agent'],
-            detail: { modelCount: data?.data?.length || 0 }
+            detail: { modelCount: models.length }
         });
 
-        res.json(data);
+        res.json({ object: 'list', data: models });
     } catch (error) {
         statusCode = 500;
         storage.recordLog({
@@ -831,206 +799,248 @@ router.get('/v1/models', requireApiAuth, async (req, res) => {
 // 聊天补全
 router.post('/v1/chat/completions', requireApiAuth, async (req, res) => {
     const startTime = Date.now();
-    let { model, messages, stream } = req.body;
+    try {
+        let { model, messages, stream } = req.body;
 
-    // 获取前缀配置并尝试移除前缀
-    const userSettingsService = require('../../src/services/userSettings');
-    const globalSettings = userSettingsService.loadUserSettings();
-    const prefix = (globalSettings.channelModelPrefix || {})['antigravity'] || '';
-    
-    // 极致解析：移除所有可能的前缀，包括 [AG] 标记
-    let rawModel = model;
-    if (prefix && rawModel.startsWith(prefix)) {
-        rawModel = rawModel.substring(prefix.length);
-    }
-    if (rawModel.startsWith('[AG]')) {
-        rawModel = rawModel.substring(4);
-    }
-    model = rawModel;
-    req.body.model = model;
+        // 防崩溃保护：校验 model
+        if (!model || typeof model !== 'string') {
+            return res.status(400).json({ error: { message: 'Invalid or missing model parameter', type: 'invalid_request_error' } });
+        }
 
-    // 预处理重定向
-    const redirects = storage.getModelRedirects();
-    const redirect = redirects.find(r => r.source_model === model);
-    if (redirect) {
-        model = redirect.target_model;
-        req.body.model = model;
-    }
+        // 获取前缀配置
+        const userSettingsService = require('../../src/services/userSettings');
+        const globalSettings = userSettingsService.loadUserSettings();
+        const prefix = (globalSettings.channelModelPrefix || {})['antigravity'] || '';
 
-    // 最终的模型 ID (带前缀，用于校验和显示)
-    const modelWithPrefix = prefix + model;
+        // 极致解析：安全剥离前缀
+        let rawModel = model;
+        if (prefix && rawModel.startsWith(prefix)) {
+            rawModel = rawModel.substring(prefix.length);
+        }
+        if (rawModel.startsWith('[AG]')) {
+            rawModel = rawModel.substring(4);
+        }
 
-    // 检查模型是否被禁用
-    if (!storage.isModelEnabled(model)) {
-        return res.status(403).json({ error: { message: `Model '${modelWithPrefix}' is disabled`, type: 'permission_error', code: 'model_disabled' } });
-    }
+        // 记录功能性前缀，用于验证时使用
+        let funcPrefix = '';
+        if (rawModel.startsWith('假流式/')) {
+            funcPrefix = '假流式/';
+            rawModel = rawModel.substring(4);
+        } else if (rawModel.startsWith('流式抗截断/')) {
+            funcPrefix = '流式抗截断/';
+            rawModel = rawModel.substring(6);
+        }
+        model = rawModel;
 
-    // 获取所有启用账号
-    const allAccounts = storage.getAccounts().filter(a => a.enable);
-    if (allAccounts.length === 0) {
-        return res.status(503).json({ error: 'No enabled accounts available' });
-    }
+        // 构建完整的模型 ID（带渠道前缀和功能性前缀）用于验证和日志
+        // 注意：如果请求来自 v1.js，模型名可能已被剥离前缀，这里需要重新添加
+        const requestedModel = prefix + funcPrefix + model;
 
-    const settings = globalSettings;
-    const strategy = settings.load_balancing_strategy || 'random';
-    const loadBalancer = require('../../src/utils/loadBalancer');
-
-    // 智能重试逻辑：尝试所有可用账号
-    let attemptedAccounts = new Set();
-    let lastError = null;
-
-    while (attemptedAccounts.size < allAccounts.length) {
-        // 排除已尝试过的账号
-        const availableAccounts = allAccounts.filter(a => !attemptedAccounts.has(a.id));
-        if (availableAccounts.length === 0) break;
-
-        const account = loadBalancer.getNextAccount('antigravity', availableAccounts, strategy);
-        attemptedAccounts.add(account.id);
-
-        try {
-            if (stream) {
-                // 仅在尚未发送 Header 时设置
-                if (!res.headersSent) {
-                    res.setHeader('Content-Type', 'text/event-stream');
-                    res.setHeader('Cache-Control', 'no-cache');
-                    res.setHeader('Connection', 'keep-alive');
-                    res.setHeader('X-Accel-Buffering', 'no'); // 禁用代理缓存
+        // 核心验证：在重定向之前验证模型是否在矩阵中被允许
+        const availableModels = service.getAvailableModels(prefix);
+        if (!availableModels.find(m => m.id === requestedModel)) {
+            return res.status(404).json({
+                error: {
+                    message: `Model '${requestedModel}' not found or disabled in matrix`,
+                    type: 'invalid_request_error',
+                    code: 'model_not_found'
                 }
-
-                const id = `chatcmpl-${uuidv4()}`;
-                const created = Math.floor(Date.now() / 1000);
-                let fullContent = '';
-                let fullReasoning = '';
-
-                await client.chatCompletionsStream(account.id, req.body, (event) => {
-                    let chunk = null;
-                    if (event.type === 'text') {
-                        fullContent += event.content;
-                        chunk = {
-                            id, object: 'chat.completion.chunk', created, model: modelWithPrefix,
-                            choices: [{ index: 0, delta: { content: event.content }, finish_reason: null }]
-                        };
-                    } else if (event.type === 'thinking') {
-                        fullReasoning += event.content;
-                        chunk = {
-                            id, object: 'chat.completion.chunk', created, model: modelWithPrefix,
-                            choices: [{ index: 0, delta: { reasoning_content: event.content }, finish_reason: null }]
-                        };
-                    } else if (event.type === 'tool_calls') {
-                        chunk = {
-                            id, object: 'chat.completion.chunk', created, model: modelWithPrefix,
-                            choices: [{
-                                index: 0,
-                                delta: {
-                                    tool_calls: event.tool_calls.map((tc, idx) => ({
-                                        index: idx,
-                                        id: tc.id,
-                                        type: 'function',
-                                        function: { name: tc.name, arguments: JSON.stringify(tc.args) }
-                                    }))
-                                },
-                                finish_reason: null
-                            }]
-                        };
-                    }
-
-                    if (chunk) {
-                        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-                    }
-                });
-
-                res.write('data: [DONE]\n\n');
-                res.end();
-
-                // 记录成功日志 (包含累计的回复内容和思考过程)
-                const originalMessages = JSON.parse(JSON.stringify(req.body.messages || []));
-                storage.recordLog({
-                    accountId: account.id,
-                    model: modelWithPrefix,
-                    is_balanced: req.lb,
-                    path: req.path,
-                    method: 'POST',
-                    statusCode: 200,
-                    durationMs: Date.now() - startTime,
-                    clientIp: req.ip,
-                    userAgent: req.headers['user-agent'],
-                    detail: { 
-                        model: req.body.model, 
-                        type: 'stream', 
-                        accountName: account.name,
-                        messages: originalMessages,
-                        response: {
-                            choices: [{
-                                message: {
-                                    role: 'assistant',
-                                    content: fullContent,
-                                    reasoning_content: fullReasoning
-                                }
-                            }]
-                        }
-                    }
-                });
-                return; // 成功后退出
-            } else {
-                // 非流式处理
-                const result = await client.chatCompletions(account.id, req.body);
-                // 确保返回结果中的 model 是带前缀的
-                if (result && result.model) result.model = modelWithPrefix;
-                
-                const originalMessages = JSON.parse(JSON.stringify(req.body.messages || []));
-                storage.recordLog({
-                    accountId: account.id,
-                    model: modelWithPrefix,
-                    is_balanced: req.lb,
-                    path: req.path,
-                    method: 'POST',
-                    statusCode: 200,
-                    durationMs: Date.now() - startTime,
-                    clientIp: req.ip,
-                    userAgent: req.headers['user-agent'],
-                    detail: { 
-                        model: req.body.model, 
-                        response: result, 
-                        accountName: account.name,
-                        messages: originalMessages // 添加对话消息
-                    }
-                });
-
-                return res.json(result); // 成功后退出
-            }
-        } catch (error) {
-            console.warn(`[Antigravity] Account ${account.name} failed, trying next... Error: ${error.message}`);
-            lastError = error;
-            
-            // 如果是 401 之外的错误（通常是 429 或 5xx），记录日志并继续循环
-            storage.recordLog({
-                accountId: account.id,
-                model: modelWithPrefix,
-                is_balanced: req.lb,
-                path: req.path,
-                method: 'POST',
-                statusCode: error.response?.status || 500,
-                durationMs: Date.now() - startTime,
-                clientIp: req.ip,
-                userAgent: req.headers['user-agent'],
-                detail: { error: error.message, model: req.body.model }
             });
-            
-            // 如果已经发送了 Header (流式过程中报错)，则无法切换账号，只能报错
-            if (res.headersSent) {
-                if (stream) res.write(`data: ${JSON.stringify({ error: { message: 'Stream interrupted: ' + error.message } })}\n\n`);
-                return res.end();
+        }
+
+        // 预处理重定向
+        const redirects = storage.getModelRedirects();
+        const redirect = redirects.find(r => r.source_model === model);
+        if (redirect) {
+            model = redirect.target_model;
+            req.body.model = model;
+        }
+
+        // 最终兜底验证：即使通过了列表检查，如果映射后的目标模型在矩阵里被彻底禁用（三个开关全关），直接拦截
+        const finalMatrix = service.getMatrixConfig();
+        const finalMConfig = finalMatrix[model];
+        if (finalMConfig &&
+            finalMConfig.base === false &&
+            finalMConfig.fakeStream === false &&
+            finalMConfig.antiTrunc === false) {
+            return res.status(403).json({ error: { message: `Target model '${model}' is disabled in function matrix.`, type: 'permission_error' } });
+        }
+
+        // 最终用于日志展示的模型 ID (带前缀)
+        const modelWithPrefix = requestedModel;
+
+        // 获取所有启用账号
+        const allAccounts = storage.getAccounts().filter(a => a.enable);
+        if (allAccounts.length === 0) {
+            return res.status(503).json({ error: 'No enabled accounts available' });
+        }
+
+        const settings = globalSettings;
+        const strategy = settings.load_balancing_strategy || 'random';
+        const loadBalancer = require('../../src/utils/loadBalancer');
+
+        // 智能重试逻辑：尝试所有可用账号
+        let attemptedAccounts = new Set();
+        let lastError = null;
+
+        while (attemptedAccounts.size < allAccounts.length) {
+            // 排除已尝试过的账号
+            const availableAccounts = allAccounts.filter(a => !attemptedAccounts.has(a.id));
+            if (availableAccounts.length === 0) break;
+
+            const account = loadBalancer.getNextAccount('antigravity', availableAccounts, strategy);
+            attemptedAccounts.add(account.id);
+
+            try {
+                if (stream) {
+                    // 仅在尚未发送 Header 时设置
+                    if (!res.headersSent) {
+                        res.setHeader('Content-Type', 'text/event-stream');
+                        res.setHeader('Cache-Control', 'no-cache');
+                        res.setHeader('Connection', 'keep-alive');
+                        res.setHeader('X-Accel-Buffering', 'no'); // 禁用代理缓存
+                    }
+
+                    const id = `chatcmpl-${uuidv4()}`;
+                    const created = Math.floor(Date.now() / 1000);
+                    let fullContent = '';
+                    let fullReasoning = '';
+
+                    await client.chatCompletionsStream(account.id, req.body, (event) => {
+                        let chunk = null;
+                        if (event.type === 'text') {
+                            fullContent += event.content;
+                            chunk = {
+                                id, object: 'chat.completion.chunk', created, model: modelWithPrefix,
+                                choices: [{ index: 0, delta: { content: event.content }, finish_reason: null }]
+                            };
+                        } else if (event.type === 'thinking') {
+                            fullReasoning += event.content;
+                            chunk = {
+                                id, object: 'chat.completion.chunk', created, model: modelWithPrefix,
+                                choices: [{ index: 0, delta: { reasoning_content: event.content }, finish_reason: null }]
+                            };
+                        } else if (event.type === 'tool_calls') {
+                            chunk = {
+                                id, object: 'chat.completion.chunk', created, model: modelWithPrefix,
+                                choices: [{
+                                    index: 0,
+                                    delta: {
+                                        tool_calls: event.tool_calls.map((tc, idx) => ({
+                                            index: idx,
+                                            id: tc.id,
+                                            type: 'function',
+                                            function: { name: tc.name, arguments: JSON.stringify(tc.args) }
+                                        }))
+                                    },
+                                    finish_reason: null
+                                }]
+                            };
+                        }
+
+                        if (chunk) {
+                            res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+                        }
+                    });
+
+                    res.write('data: [DONE]\n\n');
+                    res.end();
+
+                    // 记录成功日志 (包含累计的回复内容和思考过程)
+                    const originalMessages = JSON.parse(JSON.stringify(req.body.messages || []));
+                    storage.recordLog({
+                        accountId: account.id,
+                        model: modelWithPrefix,
+                        is_balanced: req.lb,
+                        path: req.path,
+                        method: 'POST',
+                        statusCode: 200,
+                        durationMs: Date.now() - startTime,
+                        clientIp: req.ip,
+                        userAgent: req.headers['user-agent'],
+                        detail: {
+                            model: req.body.model,
+                            type: 'stream',
+                            accountName: account.name,
+                            messages: originalMessages,
+                            response: {
+                                choices: [{
+                                    message: {
+                                        role: 'assistant',
+                                        content: fullContent,
+                                        reasoning_content: fullReasoning
+                                    }
+                                }]
+                            }
+                        }
+                    });
+                    return; // 成功后退出
+                } else {
+                    // 非流式处理
+                    const result = await client.chatCompletions(account.id, req.body);
+                    // 确保返回结果中的 model 是带前缀的
+                    if (result && result.model) result.model = modelWithPrefix;
+
+                    const originalMessages = JSON.parse(JSON.stringify(req.body.messages || []));
+                    storage.recordLog({
+                        accountId: account.id,
+                        model: modelWithPrefix,
+                        is_balanced: req.lb,
+                        path: req.path,
+                        method: 'POST',
+                        statusCode: 200,
+                        durationMs: Date.now() - startTime,
+                        clientIp: req.ip,
+                        userAgent: req.headers['user-agent'],
+                        detail: {
+                            model: req.body.model,
+                            response: result,
+                            accountName: account.name,
+                            messages: originalMessages // 添加对话消息
+                        }
+                    });
+
+                    return res.json(result); // 成功后退出
+                }
+            } catch (error) {
+                console.warn(`[Antigravity] Account ${account.name} failed, trying next... Error: ${error.message}`);
+                lastError = error;
+
+                // 如果是 401 之外的错误（通常是 429 或 5xx），记录日志并继续循环
+                storage.recordLog({
+                    accountId: account.id,
+                    model: modelWithPrefix,
+                    is_balanced: req.lb,
+                    path: req.path,
+                    method: 'POST',
+                    statusCode: error.response?.status || 500,
+                    durationMs: Date.now() - startTime,
+                    clientIp: req.ip,
+                    userAgent: req.headers['user-agent'],
+                    detail: { error: error.message, model: req.body.model }
+                });
+
+                // 如果已经发送了 Header (流式过程中报错)，则无法切换账号，只能报错
+                if (res.headersSent) {
+                    if (stream) res.write(`data: ${JSON.stringify({ error: { message: 'Stream interrupted: ' + error.message } })}\n\n`);
+                    return res.end();
+                }
             }
+        }
+
+        // 所有账号都尝试过了
+        res.status(lastError?.response?.status || 503).json({
+            error: {
+                message: `All accounts failed. Last error: ${lastError?.message}`,
+                type: 'api_error'
+            }
+        });
+    } catch (e) {
+        console.error('Chat Completion General Error:', e.message);
+        if (!res.headersSent) {
+            res.status(500).json({ error: { message: e.message, type: 'api_error' } });
         }
     }
-
-    // 所有账号都尝试过了
-    res.status(lastError?.response?.status || 503).json({
-        error: {
-            message: `All accounts failed. Last error: ${lastError?.message}`,
-            type: 'api_error'
-        }
-    });
 });
 
 module.exports = router;

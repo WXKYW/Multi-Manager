@@ -317,17 +317,38 @@ function cleanJsonSchema(schema) {
  * 将 OpenAI 格式的请求转换为 Antigravity API 格式
  */
 function convertOpenAIToAntigravityRequest(openaiRequest, token) {
-    const { model, messages, temperature, max_tokens, top_p, top_k, stop, tools } = openaiRequest;
+    let { model, messages, temperature, max_tokens, top_p, top_k, stop, tools } = openaiRequest;
+
+    // 剥离功能性前缀（假流式/、流式抗截断/），获取基础模型名
+    if (model.startsWith('假流式/')) {
+        model = model.substring(4);
+    } else if (model.startsWith('流式抗截断/')) {
+        model = model.substring(6);
+    }
+
+    // 获取矩阵配置进行硬核校验
+    const service = require('./antigravity-service');
+    const matrix = service.getMatrixConfig();
+    const modelConfig = matrix[model] || {};
 
     const hasAssistantToolCalls = Array.isArray(messages) &&
         messages.some(msg => msg?.role === 'assistant' && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0);
 
+    // 基础思考能力判定：必须在矩阵中显式开启了 base 或者是特定已知模型
     const baseEnableThinking = model.endsWith('-thinking') ||
         model === 'gemini-2.5-pro' ||
         model.startsWith('gemini-3-pro-') ||
         model === 'rev19-uic3-1p' ||
         model === 'gpt-oss-120b-medium';
 
+    // 核心修正：如果矩阵配置存在且三个开关全为 false，说明该模型在功能矩阵中被彻底关闭
+    if (modelConfig.base === false &&
+        modelConfig.fakeStream === false &&
+        modelConfig.antiTrunc === false) {
+        throw new Error(`Model '${model}' is explicitly disabled in the function matrix.`);
+    }
+
+    // 只有矩阵中 base 开启，才允许思考模式 (如果是强制思考模型，则检查 base 开关)
     const enableThinking = baseEnableThinking && !(model.includes('claude') && hasAssistantToolCalls);
 
     // 转换 messages 到 contents
@@ -597,7 +618,7 @@ async function chatCompletionsStream(accountId, requestBody, callback) {
     let statusCode = 200;
     // 将 OpenAI 格式转换为 Antigravity API 格式
     const antigravityRequest = convertOpenAIToAntigravityRequest(requestBody, tokenObj);
-    
+
     console.log(`[Debug] Antigravity Request: Project=${antigravityRequest.project}, Model=${antigravityRequest.model}`);
 
     try {

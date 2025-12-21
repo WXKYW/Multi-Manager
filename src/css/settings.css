@@ -1,108 +1,143 @@
 /* Settings Sidebar Styles */
 
-.settings-sidebar {
-  position: fixed;
-  top: 0;
-  left: var(--sidebar-width);
-  bottom: 0;
-  width: 800px;
-  /* Increased from 400px for 2-column layout */
-  max-width: calc(95vw - var(--sidebar-width));
-  background-color: var(--sidebar-bg);
-  box-shadow: 20px 0px 30px rgba(0, 0, 0, 0.1);
-  display: flex;
-  flex-direction: column;
-  /* animation removed, handled by Vue transition */
-  z-index: 2001;
-  border-right: 1px solid var(--border-color);
-}
-
-/* Vue Transition: settings-fade */
-.settings-fade-enter-active,
-.settings-fade-leave-active {
-  transition: clip-path 0.35s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.3s ease;
-  transform: none !important;
-}
-
-.settings-fade-enter-from,
-.settings-fade-leave-to {
-  /* 从左向右展开 */
-  clip-path: inset(0 100% 0 0);
-  opacity: 0;
-}
-
-.settings-fade-enter-to,
-.settings-fade-leave-from {
-  clip-path: inset(0 0 0 0);
-  opacity: 1;
-}
-
-/* Ensure wrapper doesn't block clicks when hidden (though v-if removes it, this positions it correctly) */
+/* 弹窗外层包裹器：负责背景遮罩的丝滑过渡 */
 .settings-modal-wrapper {
   position: fixed;
   top: 0;
-  left: var(--sidebar-width);
-  /* Adjust to start after sidebar */
+  left: 0;
   right: 0;
   bottom: 0;
   z-index: 2000;
-  background-color: transparent;
-  /* Keep it transparent as requested */
+  background-color: rgba(0, 0, 0, 0);
+  /* 初始透明 */
+  backdrop-filter: blur(0px);
+  /* 初始无模糊 */
   pointer-events: auto;
-  /* Enable clicks to allow click-outside-to-close */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.4s ease, backdrop-filter 0.4s ease;
 }
 
-/* 桌面端：隐藏移动端导航（如果有的话） */
-.settings-nav-mobile {
-  display: none;
+/* 当面板显示时，包裹器背景变深变模糊 */
+.show-settings-active .settings-modal-wrapper {
+  background-color: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px);
 }
 
-/* Mobile Responsive */
+.settings-sidebar {
+  position: relative;
+  /* 改为 relative 配合 flex 居中 */
+  width: 90%;
+  max-width: 1000px;
+  height: 85vh;
+  background-color: var(--sidebar-bg);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  z-index: 2001;
+  border-radius: 24px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+
+  /* 核心：设置转换原点在右上角按钮附近 */
+  transform-origin: calc(100% - 40px) 40px;
+}
+
+/* Vue 动画定义 */
+.settings-fade-enter-active,
+.settings-fade-leave-active {
+  transition: all 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* 进场：从按钮处轻微缩放并淡入 (幅度减小) */
+.settings-fade-enter-from,
+.settings-fade-leave-to {
+  opacity: 0;
+  transform: scale(0.92);
+  /* 从 92% 开始，而不是 10% */
+  filter: blur(4px);
+  /* 减小模糊感，使其更清爽 */
+}
+
+/* 进场后：恢复正常大小 */
+.settings-fade-enter-to,
+.settings-fade-leave-from {
+  opacity: 1;
+  transform: scale(1);
+  filter: blur(0);
+}
+
+/* 针对移动端的特殊原点处理 */
 @media (max-width: 768px) {
   .settings-sidebar {
-    left: auto;
-    right: 0;
     width: 100vw;
     max-width: 100vw;
-    border-left: none;
-    bottom: 60px;
-    /* 避开底部导航栏 */
+    height: 100vh;
+    border-radius: 0;
+    transform-origin: calc(100% - 30px) 30px;
+    /* 移动端原点微调 */
   }
 
-  .settings-modal-wrapper {
-    left: 0;
-    bottom: 60px;
-    /* 避开底部导航栏 */
+  .settings-fade-enter-active,
+  .settings-fade-leave-active {
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   }
+}
 
-  /* 从右向左展开动画 */
-  .settings-fade-enter-from,
-  .settings-fade-leave-to {
-    clip-path: inset(0 0 0 100%);
-    /* 从右向左展开 */
-  }
+/* 从右向左展开动画 */
+.settings-fade-enter-from,
+.settings-fade-leave-to {
+  clip-path: inset(0 0 0 100%);
+  /* 从右向左展开 */
+}
 
-  .settings-container {
-    flex-direction: column;
-  }
+.settings-container {
+  flex-direction: column;
+}
 
-  /* 移动端：完全隐藏设置导航栏（已在底部栏实现） */
-  .settings-nav {
-    display: none !important;
-  }
+/* 移动端：优化设置导航栏显示而非隐藏 */
+.settings-nav {
+  width: 100% !important;
+  height: auto !important;
+  flex-direction: row !important;
+  overflow-x: auto !important;
+  padding: 8px !important;
+  border-right: none !important;
+  border-bottom: 1px solid var(--border-color) !important;
+  gap: 4px !important;
+}
 
-  .settings-main {
-    padding: 12px;
-    height: 100%;
-  }
+.settings-nav-item {
+  width: auto !important;
+  padding: 8px 12px !important;
+  border-left: none !important;
+  border-bottom: 2px solid transparent !important;
+  justify-content: center !important;
+}
 
-  .settings-group {
-    padding: 16px;
-  }
+.settings-nav-item.active {
+  border-bottom-color: var(--primary-color) !important;
+  background-color: transparent !important;
+}
 
-  .settings-group-title {
-    font-size: 16px;
-  }
+.settings-nav-item span {
+  opacity: 1 !important;
+  visibility: visible !important;
+  font-size: 12px !important;
+}
+
+.settings-main {
+  padding: 12px;
+  height: 100%;
+}
+
+.settings-group {
+  padding: 16px;
+}
+
+.settings-group-title {
+  font-size: 16px;
 }
 
 /* Enable pointer events for the sidebar itself */
@@ -190,7 +225,8 @@
 .settings-nav-item {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 10px;
+  /* 从 16px 减小到 10px */
   padding: 12px 18px;
   /* 调整内边距以居中图标 */
   width: 150px;
@@ -241,14 +277,20 @@
 .settings-main {
   flex: 1;
   overflow-y: auto;
-  padding: 15px;
+  padding: 12px;
   background-color: var(--bg-primary);
-  /* Lighter background for content */
 }
 
 /* Tab Animation */
 .settings-tab-content {
   animation: fadeIn 0.3s ease-out;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.settings-tab-content.full-height {
+  height: 100%;
 }
 
 @keyframes fadeIn {
@@ -268,8 +310,9 @@
   background-color: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 12px;
-  padding: 24px;
-  margin-bottom: 18px;
+  padding: 20px;
+  margin-bottom: 0;
+  /* 使用 gap 控制间距 */
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
@@ -327,7 +370,7 @@
 
 .input-with-icon i {
   position: absolute;
-  left: 14px;
+  left: 12px;
   top: 50%;
   transform: translateY(-50%);
   color: var(--text-tertiary);
@@ -337,7 +380,7 @@
 }
 
 .input-with-icon .form-input {
-  padding-left: 38px !important;
+  padding-left: 34px !important;
   width: 100%;
 }
 
@@ -382,12 +425,13 @@
 .draggable-module-item {
   display: flex;
   align-items: center;
-  padding: 12px 16px;
+  padding: 6px 12px;
+  /* 极致压缩 padding */
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: 8px;
   cursor: grab;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.2s ease;
   user-select: none;
 }
 
@@ -426,7 +470,6 @@
 .draggable-module-item:hover {
   background: var(--input-bg);
   border-color: var(--primary-light);
-  transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
@@ -488,7 +531,12 @@
   background: var(--bg-secondary);
   border-color: var(--primary-color);
   color: var(--primary-color);
-  transform: scale(1.05);
+}
+
+.btn-sm.btn-icon:active {
+  transform: scale(0.94);
+  filter: brightness(0.9);
+  border-color: var(--primary-dark);
 }
 
 .btn-sm.btn-icon.text-success {
@@ -710,6 +758,21 @@
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.5;
+}
+
+/* Settings Grid Layout for Appearance Tab */
+.settings-grid-layout {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 20px;
+  align-items: stretch;
+  /* margin-bottom: 20px; */
+}
+
+@media (max-width: 900px) {
+  .settings-grid-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Footer Actions */

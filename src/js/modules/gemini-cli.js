@@ -125,7 +125,7 @@ export const geminiCliMethods = {
         let logs = store.geminiCliLogs || [];
 
         if (store.geminiCliLogFilterAccount) {
-            logs = logs.filter(log => log.account_id === store.geminiCliLogFilterAccount);
+            logs = logs.filter(log => log.accountId === store.geminiCliLogFilterAccount);
         }
 
         if (store.geminiCliLogFilterModel) {
@@ -215,6 +215,22 @@ export const geminiCliMethods = {
         this.saveGeminiCliMatrix();
     },
 
+    toggleGeminiCliMatrixRow(modelId) {
+        if (!store.geminiCliMatrix[modelId]) return;
+
+        const row = store.geminiCliMatrix[modelId];
+        // 逻辑：如果当前行有任何一项是 true，则全部设为 false；否则全部设为 true
+        const fields = ['base', 'maxThinking', 'noThinking', 'search', 'fakeStream', 'antiTrunc'];
+        const hasAnyOn = fields.some(f => row[f]);
+        const newState = !hasAnyOn;
+
+        fields.forEach(f => {
+            if (row[f] !== undefined) row[f] = newState;
+        });
+
+        this.saveGeminiCliMatrix();
+    },
+
     // 获取有序的矩阵数据列表
     getGeminiCliMatrixList() {
         if (!store.geminiCliMatrix) return [];
@@ -282,13 +298,18 @@ export const geminiCliMethods = {
             });
             const data = await response.json();
 
-            // 标准化数据结构以适配 Antigravity 模板 (Gemini -> OpenAI 格式)
+            // 标准化数据结构以适配 Antigravity 模板 (与 Antigravity 格式一致)
             if (data) {
-                // 1. 顶层字段映射
-                data.created_at = data.created_at || data.timestamp;
-                data.duration_ms = data.duration_ms || data.durationMs;
-                data.request_method = data.request_method || 'POST'; // 默认为 POST
-                data.request_path = data.request_path || '/v1beta/models/...:generateContent';
+                // 1. 顶层字段映射（数据库字段 -> 驼峰命名）
+                // getLogDetail 返回的是数据库原始格式，需要映射
+                data.timestamp = data.timestamp || data.created_at;
+                data.durationMs = data.durationMs || data.duration_ms;
+                data.statusCode = data.statusCode || data.status_code;
+                data.accountId = data.accountId || data.account_id;
+                data.path = data.path || data.request_path || '/v1/chat/completions';
+                data.method = data.method || data.request_method || 'POST';
+                data.clientIp = data.clientIp || data.client_ip;
+                data.userAgent = data.userAgent || data.user_agent;
 
                 // 2. Detail 对象标准化
                 if (data.detail) {
@@ -313,7 +334,7 @@ export const geminiCliMethods = {
                             message: {
                                 role: 'assistant',
                                 content: c.content && c.content.parts ? c.content.parts.map(p => p.text).join('') : '',
-                                reasoning_content: null 
+                                reasoning_content: null
                             }
                         }));
                     }

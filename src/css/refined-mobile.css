@@ -1,0 +1,143 @@
+/* Refined Mobile Adaptation - API Monitor */
+
+/* --- 基础布局 --- */
+@media (max-width: 768px) {
+    /* 容器调整 */
+    .main-container {
+        padding: 12px !important;
+        margin-top: 10px !important; /* 移除侧边栏后不再需要那么大的 margin */
+        width: 100% !important;
+        overflow-x: hidden;
+    }
+
+    .header {
+        padding: 10px 5px !important;
+    }
+
+    .btn-settings-toggle span {
+        display: none; /* 移动端隐藏“设置”文字，仅留图标 */
+    }
+    
+    .btn-settings-toggle {
+        padding: 8px 12px !important;
+    }
+
+    .panel {
+        padding: 12px !important;
+        margin-bottom: 12px !important;
+        border-radius: 12px !important;
+    }
+
+    .panel-header {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 12px !important;
+        padding-bottom: 12px !important;
+    }
+
+    .panel-title {
+        font-size: 15px !important;
+    }
+
+    .panel-actions-group {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px !important;
+        width: 100%;
+    }
+
+    .panel-actions-group .btn, 
+    .panel-actions-group .form-input,
+    .panel-actions-group .select-sm-adaptive {
+        width: 100% !important;
+        margin: 0 !important;
+    }
+
+    /* --- 核心组件：自适应表格 (保持原始结构) --- */
+    .table-container {
+        width: 100%;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch;
+        border-radius: 8px;
+        background: var(--bg-secondary);
+    }
+
+    .data-table {
+        min-width: 600px; /* 保证最小宽度，防止内容过度挤压 */
+        white-space: nowrap; /* 防止文字换行撑高行高 */
+    }
+
+    .data-table th, .data-table td {
+        padding: 8px 10px !important;
+        font-size: 12px !important;
+    }
+
+    /* 模型矩阵特殊优化 */
+    .model-matrix-table {
+        min-width: 700px; 
+    }
+
+    /* --- 模型矩阵特殊优化 --- */
+    .model-matrix-table {
+        min-width: 600px; /* 保证列不被压缩得太难看 */
+    }
+
+    .matrix-header-cell span {
+        font-size: 11px !important;
+    }
+
+    /* --- 二级标签栏优化 --- */
+    .sec-tabs {
+        overflow-x: auto;
+        display: flex;
+        white-space: nowrap;
+        padding-bottom: 8px !important;
+        margin-bottom: 12px !important;
+        scrollbar-width: none;
+    }
+    
+    .sec-tabs::-webkit-scrollbar {
+        display: none;
+    }
+
+    .tab-btn {
+        flex: 0 0 auto;
+        min-width: 80px;
+        padding: 6px 12px !important;
+        font-size: 12px !important;
+    }
+
+    /* --- 模态框全屏化 --- */
+    .modal {
+        width: 95% !important;
+        max-width: 95% !important;
+        margin: 10px auto !important;
+        max-height: 90vh !important;
+        border-radius: 16px !important;
+    }
+
+    .modal-body {
+        padding: 16px !important;
+    }
+
+    .info-grid {
+        grid-template-columns: 1fr !important; /* 详情网格单列显示 */
+    }
+
+    /* --- 登录页适配 --- */
+    .login-card {
+        width: 90% !important;
+        padding: 24px !important;
+    }
+}
+
+/* 平板适配 (iPad etc) */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .ag-quota-grid {
+        grid-template-columns: 1fr 1fr !important;
+    }
+    
+    .modal {
+        width: 80% !important;
+    }
+}

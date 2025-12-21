@@ -1,222 +1,197 @@
-/* Sidebar Navigation (Vertical Tabs) */
+/* --- Modern Sidebar Redesign --- */
+
+.app-sidebar {
+  width: 68px; /* 默认宽度略微增加，提升点击舒适度 */
+  background: var(--bg-primary);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  transition: width 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.1); /* 弹性展开动画 */
+  position: relative;
+  z-index: 100;
+  overflow: hidden;
+}
+
+.app-sidebar:hover:not(.sidebar-locked) {
+  width: 200px !important; /* 展开后的宽度，给文字留足空间 */
+  box-shadow: 10px 0 30px rgba(0, 0, 0, 0.1);
+}
+
+/* Logo 区域 */
+.sidebar-logo {
+  width: 32px;
+  height: 32px;
+  margin: 20px 18px; /* 初始偏移量 */
+  flex-shrink: 0;
+  transition: all 0.3s ease;
+  filter: drop-shadow(0 0 8px rgba(var(--ag-primary-rgb), 0.2));
+}
+
+.app-sidebar:hover .sidebar-logo {
+  margin-left: 20px;
+  transform: rotate(360deg); /* 展开时 Logo 微旋 */
+}
+
+/* 导航容器 */
 .sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  width: 100%;
-  padding: 0 10px;
-  margin-top: 20px;
+  gap: 12px; /* 增加项间距 */
+  padding: 10px 14px;
   flex: 1;
   overflow-y: auto;
-  align-items: flex-start;
-  /* 改为左对齐，方便展开 */
+  overflow-x: hidden;
 }
 
+/* 基础项样式 */
 .sidebar-tab {
   width: 40px;
-  /* 初始宽度 */
   height: 40px;
-  border-radius: 10px;
+  border-radius: 12px;
   border: none;
   background: transparent;
-  color: var(--text-secondary);
-  /* 从 tertiary 改为 secondary 以增强对比度 */
+  color: var(--text-tertiary);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  /* 图标靠左 */
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  font-size: 16px;
   position: relative;
-  padding: 10px;
-  overflow: hidden;
-  white-space: nowrap;
-  gap: 12px;
-}
-
-.tab-label {
-  font-size: 14px;
-  font-weight: 500;
-  opacity: 0;
-  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  pointer-events: none;
-  white-space: nowrap;
-  /* 强制不换行，防止宽度不足时文字抖动 */
-  visibility: hidden;
-  /* 隐藏时完全移除 */
-}
-
-/* 侧边栏悬停状态下的样式 */
-.app-sidebar:not(.sidebar-locked):hover {
-  width: 160px !important;
-  /* 展开宽度 */
-}
-
-.app-sidebar:not(.sidebar-locked):hover .sidebar-tab {
-  width: 100%;
-  /* 按钮撑满 */
-}
-
-.app-sidebar:not(.sidebar-locked):hover .tab-label {
-  opacity: 1;
-  visibility: visible;
-  transition-delay: 0.1s;
-  /* 稍微延迟显示，等待侧边栏展开一定宽度 */
+  padding: 0 10px;
+  gap: 16px; /* 图标与文字间距 */
 }
 
 .sidebar-tab i {
+  font-size: 18px;
   width: 20px;
-  /* 固定图标容器宽度 */
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
-  /* 统一图标视觉大小 */
   flex-shrink: 0;
-  text-align: center;
 }
 
+.tab-label {
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0;
+  transform: translateX(-10px);
+  transition: all 0.3s ease;
+  white-space: nowrap;
+}
+
+.app-sidebar:hover .sidebar-tab {
+  width: 100%;
+}
+
+.app-sidebar:hover .tab-label {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* 悬停与激活态 - 核心视觉提升 */
 .sidebar-tab:hover {
-  background: rgba(var(--primary-rgb), 0.08);
+  background: rgba(var(--primary-rgb), 0.05);
   color: var(--primary-color);
-  transform: translateX(2px);
 }
 
 .sidebar-tab.active {
-  background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
-  color: white;
-  box-shadow: 0 4px 12px rgba(var(--primary-rgb), 0.3);
+  background: var(--bg-secondary) !important;
+  color: var(--current-primary, var(--primary-color)) !important;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
 }
 
-/* Mobile adaptation for sidebar nav */
-@media (max-width: 768px) {
-  .sidebar-nav {
-    flex-direction: row;
-    margin-top: 0;
-    gap: 4px;
-    padding: 0;
-    overflow-x: auto;
-    justify-content: flex-start;
-    /* Left align items */
-    align-items: center;
-  }
-
-  .sidebar-tab {
-    width: auto;
-    min-width: 40px;
-    height: 40px;
-    padding: 0 12px;
-  }
-
-  .tab-label {
-    display: none;
-    /* 移动端不显示名称 */
-  }
-
-  /* 移动端禁用展开效果 */
-  .app-sidebar:hover {
-    width: 100% !important;
-  }
+/* 侧边活动指示条 (Pill) */
+.sidebar-tab.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 4px;
+  background: var(--current-primary, var(--primary-color));
+  border-radius: 0 4px 4px 0;
+  box-shadow: 2px 0 10px var(--current-primary, var(--primary-color));
 }
 
-/* Hide scrollbar */
-.sidebar-nav::-webkit-scrollbar {
-  display: none;
-}
-
-/* Footer buttons adaptation */
+/* 底部区域 */
 .sidebar-footer {
-  align-items: flex-start !important;
-  padding: 0 10px !important;
+  padding: 15px 14px;
+  border-top: 1px solid var(--border-color);
+  background: rgba(var(--bg-secondary-rgb), 0.3);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .auth-btn {
   width: 40px !important;
   height: 40px !important;
-  justify-content: flex-start !important;
-  padding: 10px !important;
-  /* 修改为 10px，与顶部 tab 一致以实现视觉居中 */
-  gap: 12px !important;
-  overflow: hidden;
-  white-space: nowrap;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  border-radius: 12px !important;
   background: transparent !important;
-  color: var(--primary-color) !important;
-  /* 强制按钮使用主色调文字，确保可见 */
-  border-radius: 10px !important;
-}
-
-.auth-btn.active {
-  background: var(--primary-color) !important;
-  color: white !important;
-  box-shadow: 0 4px 12px rgba(var(--primary-rgb), 0.3);
-}
-
-.auth-btn:hover {
-  /* background: rgba(var(--primary-rgb), 0.1) !important; */
-}
-
-.auth-btn i {
-  width: 20px;
-  /* 与上方标签保持一致 */
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  flex-shrink: 0;
-  text-align: center;
+  padding: 0 10px !important;
+  gap: 16px !important;
+  color: var(--text-secondary) !important;
+  transition: all 0.3s ease !important;
 }
 
-.app-sidebar:not(.sidebar-locked):hover .auth-btn {
+.app-sidebar:hover .auth-btn {
   width: 100% !important;
 }
 
-.app-sidebar {
-  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+.auth-btn:hover {
+  background: var(--bg-tertiary) !important;
+  color: var(--primary-color) !important;
 }
 
-.sidebar-logo {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-  margin-left: 14px;
-  /* 初始偏移以居中 (32px logo in 60px sidebar) */
-  align-self: flex-start;
+/* 隐藏滚动条 */
+.sidebar-nav::-webkit-scrollbar {
+  display: none;
 }
 
-.app-sidebar:hover .sidebar-logo {
-  margin-left: 14px;
-  /* 保持左对齐 */
+/* --- 移动端适配覆盖 --- */
+@media (max-width: 768px) {
+  .app-sidebar {
+    width: 100% !important;
+    height: 60px !important;
+    flex-direction: row !important;
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+    position: fixed;
+    top: 0;
+    left: 0;
+  }
+
+  .sidebar-logo {
+    margin: 14px !important;
+  }
+
+  .sidebar-nav {
+    flex-direction: row !important;
+    padding: 10px !important;
+    gap: 8px !important;
+    align-items: center;
+  }
+
+  .sidebar-tab {
+    width: 44px !important;
+    height: 40px !important;
+    padding: 0 !important;
+    justify-content: center !important;
+  }
+
+  .sidebar-tab.active::before {
+    left: 8px;
+    right: 8px;
+    top: auto;
+    bottom: 0;
+    width: auto;
+    height: 3px;
+    border-radius: 3px 3px 0 0;
+  }
+
+  .tab-label, .sidebar-footer {
+    display: none !important;
+  }
 }
-
-/* =================================================================
-   Module-Specific Theming for Sidebar Tabs
-   Matches colors from top main-tabs (tabs.css)
-   ================================================================= */
-
-/* Zeabur Tab */
-.sidebar-tab.paas-tab:hover { background: rgba(99, 102, 241, 0.08); color: var(--paas-primary); }
-.sidebar-tab.paas-tab.active { background: linear-gradient(135deg, var(--paas-primary) 0%, var(--paas-dark) 100%); color: white; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3); }
-
-/* DNS Tab (Cloudflare) */
-.sidebar-tab.dns-tab:hover { background: rgba(243, 128, 32, 0.08); color: var(--cf-primary); }
-.sidebar-tab.dns-tab.active { background: linear-gradient(135deg, var(--cf-primary) 0%, var(--cf-dark) 100%); color: white; box-shadow: 0 4px 12px rgba(243, 128, 32, 0.3); }
-
-/* OpenAI Tab */
-.sidebar-tab.openai-tab:hover { background: rgba(16, 163, 127, 0.08); color: var(--openai-primary); }
-.sidebar-tab.openai-tab.active { background: linear-gradient(135deg, var(--openai-primary) 0%, var(--openai-dark) 100%); color: white; box-shadow: 0 4px 12px rgba(16, 163, 127, 0.3); }
-
-/* Server Tab (Hosts) */
-.sidebar-tab.server-tab:hover { background: rgba(71, 85, 105, 0.08); color: var(--server-primary); }
-.sidebar-tab.server-tab.active { background: linear-gradient(135deg, var(--server-primary) 0%, var(--server-primary-dark) 100%); color: white; box-shadow: 0 4px 12px rgba(71, 85, 105, 0.3); }
-
-/* Self-H Tab */
-.sidebar-tab.self-h-tab:hover { background: rgba(6, 182, 212, 0.08); color: var(--selfh-primary); }
-.sidebar-tab.self-h-tab.active { background: linear-gradient(135deg, var(--selfh-primary) 0%, var(--selfh-dark) 100%); color: white; box-shadow: 0 4px 12px rgba(6, 182, 212, 0.3); }
-
-/* Antigravity Tab */
-.sidebar-tab.antigravity-tab:hover { background: rgba(244, 63, 94, 0.08); color: var(--ag-primary); }
-.sidebar-tab.antigravity-tab.active { background: linear-gradient(135deg, var(--ag-primary) 0%, var(--ag-dark) 100%); color: white; box-shadow: 0 4px 12px rgba(244, 63, 94, 0.3); }
-
-/* Gemini CLI Tab */
-.sidebar-tab.gemini-cli-tab:hover { background: rgba(66, 133, 244, 0.08); color: var(--gemini-primary); }
-.sidebar-tab.gemini-cli-tab.active { background: linear-gradient(135deg, var(--gemini-primary) 0%, var(--gemini-dark) 100%); color: white; box-shadow: 0 4px 12px rgba(66, 133, 244, 0.3); }

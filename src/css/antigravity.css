@@ -407,6 +407,70 @@
 }
 
 
+/* Antigravity Model Matrix Styles */
+.model-matrix-table th {
+  vertical-align: middle;
+  padding: 8px 4px;
+  background: var(--bg-secondary);
+}
+
+.model-matrix-table td {
+  vertical-align: middle;
+  height: 50px;
+  padding: 0 4px;
+}
+
+.model-matrix-table td.text-center {
+  text-align: center;
+}
+
+.model-matrix-table td.text-center .switch {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0;
+}
+
+/* Fix Model Name alignment */
+.model-matrix-table th:first-child,
+.model-matrix-table td:first-child {
+  padding-left: 16px;
+  text-align: left;
+}
+
+.matrix-header-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 6px 12px;
+  border-radius: 6px;
+  transition: background-color 0.2s;
+  user-select: none;
+}
+
+.matrix-header-cell:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+@media (prefers-color-scheme: dark) {
+  .matrix-header-cell:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+}
+
+.matrix-header-cell .switch {
+  display: none;
+  margin: 0;
+  pointer-events: none;
+}
+
+.matrix-header-cell span {
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0.9;
+}
+
 /* Switch 开关样式 - 紧凑 */
 .switch {
     position: relative;

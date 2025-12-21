@@ -20,6 +20,7 @@ export const logViewerMethods = {
     async openLogViewer(options = {}) {
         // 重置状态
         store.logViewer.visible = true;
+        store.logViewer.fullscreen = !!options.fullscreen;
         store.logViewer.title = options.title || '日志查看器';
         store.logViewer.subtitle = options.subtitle || '';
         store.logViewer.source = options.source || 'generic';

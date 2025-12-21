@@ -6,7 +6,7 @@
   <div class="sec-tabs gemini-sec-tabs">
     <button class="tab-btn" :class="{ active: geminiCliCurrentTab === 'models' || geminiCliCurrentTab === 'quotas' }"
       @click="switchGeminiCliTab('models')">
-      <i class="fas fa-th-list"></i> 模型列表
+      <i class="fas fa-th-list"></i> 模型矩阵
     </button>
     <button class="tab-btn" :class="{ active: geminiCliCurrentTab === 'accounts' }"
       @click="switchGeminiCliTab('accounts')">
@@ -109,7 +109,10 @@
             </thead>
             <tbody>
               <tr v-for="row in getGeminiCliMatrixList()" :key="row.id">
-                <td style="font-family: var(--font-mono); font-weight: 600;">{{ row.id }}</td>
+                <td style="font-family: var(--font-mono); font-weight: 600; cursor: pointer; user-select: none;"
+                  @click="toggleGeminiCliMatrixRow(row.id)" title="点击切换整行开关">
+                  {{ row.id }}
+                </td>
                 <td class="text-center">
                   <label class="switch">
                     <input type="checkbox" :checked="row.base" @change="toggleMatrixItem(row.id, 'base')">
@@ -267,10 +270,10 @@
           </thead>
           <tbody>
             <tr v-for="account in geminiCliAccounts" :key="account.id">
-              <td><strong>{{ account.name || '未命名' }}</strong></td>
-              <td><code class="code-sm">{{ account.project_id || '-' }}</code></td>
-              <td><span style="font-size: 11px; opacity: 0.7;">{{ account.email || '-' }}</span></td>
-              <td class="text-center">
+              <td data-label="备注名称"><strong>{{ account.name || '未命名' }}</strong></td>
+              <td data-label="项目 ID"><code class="code-sm">{{ account.project_id || '-' }}</code></td>
+              <td data-label="邮箱"><span style="font-size: 11px; opacity: 0.7;">{{ account.email || '-' }}</span></td>
+              <td data-label="当前状态" class="text-center">
                 <div class="flex-cell">
                   <span class="ag-status-badge"
                     :class="account.status === 'online' ? 'ag-status-online' : (account.status === 'error' ? 'ag-status-error' : 'ag-status-unknown')">
@@ -350,44 +353,44 @@
           </thead>
           <tbody>
             <tr v-for="log in getFilteredGeminiCliLogs()" :key="log.id">
-              <td class="text-center">
+              <td data-label="调用时间" class="text-center">
                 <div class="flex-cell">
                   <div class="log-time">
                     <i class="far fa-clock" style="margin-right: 4px; opacity: 0.5;"></i>
-                    {{ formatDateTime(log.created_at) }}
+                    {{ formatDateTime(log.timestamp) }}
                   </div>
                 </div>
               </td>
-              <td>
+              <td data-label="账号备注">
                 <div style="display: flex; align-items: center; gap: 8px;">
                   <i class="fas fa-id-card" style="font-size: 12px; color: var(--primary-color); opacity: 0.7;"></i>
-                  <strong>{{ log.account_name || log.account_id }}</strong>
-                  <span v-if="log.is_balanced" class="badge-lb" title="经过全局负载均衡分发">LB</span>
+                  <strong>{{ log.accountName || log.accountId }}</strong>
+                  <span v-if="log.isBalanced" class="badge-lb" title="经过全局负载均衡分发">LB</span>
                 </div>
               </td>
-              <td class="text-center">
+              <td data-label="调用模型" class="text-center">
                 <div class="flex-cell">
                   <code class="code-sm">{{ log.model || '-' }}</code>
                 </div>
               </td>
-              <td>
+              <td data-label="接口路径">
                 <div style="display: flex; align-items: center;">
-                  <span class="method-badge" :class="'method-' + (log.request_method || 'POST').toLowerCase()">
-                    {{ log.request_method || 'POST' }}
+                  <span class="method-badge" :class="'method-' + (log.method || 'POST').toLowerCase()">
+                    {{ log.method || 'POST' }}
                   </span>
-                  <span class="log-path" :title="log.request_path">{{ log.request_path }}</span>
+                  <span class="log-path" :title="log.path">{{ log.path }}</span>
                 </div>
               </td>
-              <td class="text-center">
+              <td data-label="状态码" class="text-center">
                 <div class="flex-cell">
-                  <span :class="getGcliStatusClass(log.status_code)" class="ag-status-badge">
-                    {{ log.status_code }}
+                  <span :class="getGcliStatusClass(log.statusCode)" class="ag-status-badge">
+                    {{ log.statusCode }}
                   </span>
                 </div>
               </td>
-              <td class="text-center">
+              <td data-label="请求耗时" class="text-center">
                 <div class="flex-cell">
-                  <span class="log-duration">{{ log.duration_ms }}ms</span>
+                  <span class="log-duration">{{ log.durationMs }}ms</span>
                 </div>
               </td>
               <td class="actions text-center">
@@ -400,7 +403,8 @@
             </tr>
             <tr v-if="getFilteredGeminiCliLogs().length === 0">
               <td colspan="7" style="padding: 60px;">
-                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-tertiary);">
+                <div
+                  style="display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-tertiary);">
                   <i class="fas fa-inbox" style="font-size: 40px; margin-bottom: 12px; opacity: 0.3;"></i>
                   <span>尚无调用记录</span>
                 </div>

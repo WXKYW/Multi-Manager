@@ -1,27 +1,28 @@
 <!-- ==================== PaaS 管理部分 ==================== -->
 <div v-show="mainActiveTab === 'paas'" class="tab-content paas-tab-content theme-paas" :class="getTabAnimationClass('paas')">
   <!-- PaaS 子标签页 -->
-  <div class="sec-tabs paas-sec-tabs">
-    <div style="display: flex; gap: 5px;">
-      <button class="tab-btn" :class="{ active: paasCurrentTab === 'zeabur' }"
-        @click="paasCurrentTab = 'zeabur'; paasCurrentPlatform = 'zeabur'">
-        <i class="fas fa-rocket"></i> Zeabur
-      </button>
-      <button class="tab-btn" :class="{ active: paasCurrentTab === 'koyeb' }"
-        @click="paasCurrentTab = 'koyeb'; paasCurrentPlatform = 'koyeb'">
-        <i class="fas fa-cube"></i> Koyeb
-      </button>
-      <button class="tab-btn" :class="{ active: paasCurrentTab === 'fly' }"
-        @click="paasCurrentTab = 'fly'; paasCurrentPlatform = 'fly'">
-        <i class="fas fa-paper-plane"></i> Fly.io
-      </button>
-      <button class="tab-btn" :class="{ active: paasCurrentTab === 'accounts' }" @click="paasCurrentTab = 'accounts'">
-        <i class="fas fa-users"></i> 账号管理
-      </button>
-      <button class="tab-btn" :class="{ active: paasCurrentTab === 'settings' }" @click="paasCurrentTab = 'settings'">
-        <i class="fas fa-cog"></i> 模块配置
-      </button>
-    </div>
+  <div class="sec-tabs paas-sec-tabs" style="display: flex; align-items: center; justify-content: space-between;">
+    <button class="tab-btn" :class="{ active: paasCurrentTab === 'zeabur' }"
+      @click="paasCurrentTab = 'zeabur'; paasCurrentPlatform = 'zeabur'">
+      <i class="fas fa-rocket"></i> Zeabur
+    </button>
+    <button class="tab-btn" :class="{ active: paasCurrentTab === 'koyeb' }"
+      @click="paasCurrentTab = 'koyeb'; paasCurrentPlatform = 'koyeb'">
+      <i class="fas fa-cube"></i> Koyeb
+    </button>
+    <button class="tab-btn" :class="{ active: paasCurrentTab === 'fly' }"
+      @click="paasCurrentTab = 'fly'; paasCurrentPlatform = 'fly'">
+      <i class="fas fa-paper-plane"></i> Fly.io
+    </button>
+    <button class="tab-btn" :class="{ active: paasCurrentTab === 'accounts' }" @click="paasCurrentTab = 'accounts'">
+      <i class="fas fa-users"></i> 账号管理
+    </button>
+    <button class="tab-btn" :class="{ active: paasCurrentTab === 'settings' }" @click="paasCurrentTab = 'settings'">
+      <i class="fas fa-cog"></i> 模块配置
+    </button>
+
+    <!-- 弹性占位符，将后续元素推向右侧 -->
+    <div style="flex: 1;"></div>
 
     <!-- 嵌入式刷新控制条 -->
     <div v-if="paasCurrentTab === 'zeabur' || paasCurrentTab === 'koyeb' || paasCurrentTab === 'fly'"
@@ -217,7 +218,7 @@
               </div>
               <div class="services-container">
                 <div v-for="service in project.services" :key="service._id" class="service-item"
-                  :class="service.status.toLowerCase()">
+                  :class="'status-' + service.status.toLowerCase()">
                   <div class="service-header">
                     <div class="service-name-container">
                       <span v-if="!service.isEditing" class="service-name zeabur-service-name"
@@ -227,7 +228,7 @@
                         @keyup.esc="cancelEditServiceName(service)" @blur="saveServiceName(account, project, service)"
                         class="service-name-input" />
                     </div>
-                    <div :class="['service-status', service.status.toLowerCase()]">
+                    <div :class="['service-status', 'status-' + service.status.toLowerCase()]">
                       {{ service.status === 'RUNNING' ? '运行中' : service.status === 'SUSPENDED' ? '已暂停' : service.status
                       }}
                     </div>
@@ -464,24 +465,48 @@
         <table class="data-table">
           <thead>
             <tr>
-              <th>名称</th>
-              <th>邮箱</th>
-              <th class="text-center">余额</th>
-              <th class="text-center">状态</th>
-              <th class="text-center">操作</th>
+              <th>备注名称</th>
+              <th>账号邮箱</th>
+              <th class="text-center" style="width: 120px;">余额</th>
+              <th class="text-center" style="width: 100px;">状态</th>
+              <th class="text-center" style="width: 120px;">操作</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="(account, index) in managedAccounts" :key="'local-' + index">
               <td><strong>{{ account.name }}</strong></td>
-              <td>{{ account.email || '-' }}</td>
-              <td class="text-center">${{ (account.balance || 0).toFixed(2) }}</td>
-              <td class="text-center"><span class="ag-status-badge running">正常</span></td>
-              <td class="text-center"><button class="btn btn-icon-refined" @click="removeAccount(index)"
-                  style="color: var(--danger-color);"><i class="fas fa-trash"></i></button></td>
+              <td><span style="font-size: 13px; color: var(--text-secondary);">{{ account.email || '-' }}</span></td>
+              <td class="text-center">
+                <span style="font-weight: 600; color: var(--info-color);">${{ (account.balance || 0).toFixed(2) }}</span>
+              </td>
+              <td class="text-center">
+                <span class="ag-status-badge ag-status-online">正常</span>
+              </td>
+              <td class="actions text-center">
+                <div class="flex-cell">
+                  <button class="btn btn-icon-refined" @click="removeAccount(index)" title="删除账号"
+                    style="color: var(--danger-color);">
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </div>
+              </td>
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <!-- Zeabur 批量导入 -->
+      <div style="margin-top: 20px; padding: 15px; background: var(--bg-tertiary); border-radius: 12px; border: 1px dashed var(--border-color);">
+        <div style="font-size: 13px; font-weight: 600; margin-bottom: 10px; color: var(--text-secondary);">
+          批量添加 Zeabur 账号 (格式: 备注,Sk-Token)
+        </div>
+        <textarea v-model="batchAccounts" class="form-textarea" placeholder="我的账号1,sk-xxxx...
+我的账号2,sk-yyyy..." style="min-height: 80px; font-size: 12px; font-family: var(--font-mono);"></textarea>
+        <div v-if="batchAddError" class="form-error" style="margin-top: 8px;">{{ batchAddError }}</div>
+        <div v-if="batchAddSuccess" class="form-success" style="margin-top: 8px;">{{ batchAddSuccess }}</div>
+        <button class="btn btn-primary btn-sm" @click="batchAddAccounts" :disabled="addingAccount" style="width: 100%; margin-top: 12px;">
+          <i class="fas fa-layer-group"></i> 批量验证并添加
+        </button>
       </div>
     </div>
 
@@ -503,24 +528,48 @@
         <table class="data-table">
           <thead>
             <tr>
-              <th>名称</th>
-              <th>邮箱</th>
-              <th class="text-center">余额</th>
-              <th class="text-center">状态</th>
-              <th class="text-center">操作</th>
+              <th>备注名称</th>
+              <th>账号邮箱</th>
+              <th class="text-center" style="width: 120px;">余额</th>
+              <th class="text-center" style="width: 100px;">状态</th>
+              <th class="text-center" style="width: 120px;">操作</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="account in koyebManagedAccounts" :key="account.id">
               <td><strong>{{ account.name }}</strong></td>
-              <td>{{ account.email || '-' }}</td>
-              <td class="text-center">${{ (account.balance || 0).toFixed(2) }}</td>
-              <td class="text-center"><span class="ag-status-badge running">正常</span></td>
-              <td class="text-center"><button class="btn btn-icon-refined" @click="removeKoyebAccount(account.id)"
-                  style="color: var(--danger-color);"><i class="fas fa-trash"></i></button></td>
+              <td><span style="font-size: 13px; color: var(--text-secondary);">{{ account.email || '-' }}</span></td>
+              <td class="text-center">
+                <span style="font-weight: 600; color: #4f46e5;">${{ (account.balance || 0).toFixed(2) }}</span>
+              </td>
+              <td class="text-center">
+                <span class="ag-status-badge ag-status-online">正常</span>
+              </td>
+              <td class="actions text-center">
+                <div class="flex-cell">
+                  <button class="btn btn-icon-refined" @click="removeKoyebAccount(account.id)" title="删除账号"
+                    style="color: var(--danger-color);">
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </div>
+              </td>
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <!-- Koyeb 批量导入 -->
+      <div style="margin-top: 20px; padding: 15px; background: var(--bg-tertiary); border-radius: 12px; border: 1px dashed var(--border-color);">
+        <div style="font-size: 13px; font-weight: 600; margin-bottom: 10px; color: var(--text-secondary);">
+          批量添加 Koyeb 账号 (格式: 备注,koyeb_xxxx...)
+        </div>
+        <textarea v-model="koyebBatchAccounts" class="form-textarea" placeholder="我的Koyeb1,koyeb_xxxx...
+我的Koyeb2,koyeb_yyyy..." style="min-height: 80px; font-size: 12px; font-family: var(--font-mono);"></textarea>
+        <div v-if="koyebBatchAddError" class="form-error" style="margin-top: 8px;">{{ koyebBatchAddError }}</div>
+        <div v-if="koyebBatchAddSuccess" class="form-success" style="margin-top: 8px;">{{ koyebBatchAddSuccess }}</div>
+        <button class="btn btn-primary btn-sm" @click="batchAddKoyebAccounts" :disabled="koyebAddingAccount" style="width: 100%; margin-top: 12px;">
+          <i class="fas fa-layer-group"></i> 批量验证并添加
+        </button>
       </div>
     </div>
 
@@ -542,23 +591,45 @@
         <table class="data-table">
           <thead>
             <tr>
-              <th>名称</th>
-              <th>邮箱</th>
-              <th class="text-center">状态</th>
-              <th class="text-center">操作</th>
+              <th>备注名称</th>
+              <th>账号邮箱</th>
+              <th class="text-center" style="width: 100px;">状态</th>
+              <th class="text-center" style="width: 120px;">操作</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="account in flyManagedAccounts" :key="account.id">
               <td><strong>{{ account.name }}</strong></td>
-              <td>{{ account.email || '-' }}</td>
-              <td class="text-center"><span class="ag-status-badge running">正常</span></td>
-              <td class="text-center"><button class="btn btn-icon-refined"
-                  @click="removeFlyAccount(account.id, account.name)" style="color: var(--danger-color);"><i
-                    class="fas fa-trash"></i></button></td>
+              <td><span style="font-size: 13px; color: var(--text-secondary);">{{ account.email || '-' }}</span></td>
+              <td class="text-center">
+                <span class="ag-status-badge ag-status-online">正常</span>
+              </td>
+              <td class="actions text-center">
+                <div class="flex-cell">
+                  <button class="btn btn-icon-refined"
+                    @click="removeFlyAccount(account.id, account.name)" title="删除账号"
+                    style="color: var(--danger-color);">
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </div>
+              </td>
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <!-- Fly.io 批量导入 -->
+      <div style="margin-top: 20px; padding: 15px; background: var(--bg-tertiary); border-radius: 12px; border: 1px dashed var(--border-color);">
+        <div style="font-size: 13px; font-weight: 600; margin-bottom: 10px; color: var(--text-secondary);">
+          批量添加 Fly.io 账号 (格式: 备注,Fly-Token)
+        </div>
+        <textarea v-model="flyBatchAccounts" class="form-textarea" placeholder="我的Fly1,flyv1_xxxx...
+我的Fly2,flyv1_yyyy..." style="min-height: 80px; font-size: 12px; font-family: var(--font-mono);"></textarea>
+        <div v-if="flyBatchAddError" class="form-error" style="margin-top: 8px;">{{ flyBatchAddError }}</div>
+        <div v-if="flyBatchAddSuccess" class="form-success" style="margin-top: 8px;">{{ flyBatchAddSuccess }}</div>
+        <button class="btn btn-primary btn-sm" @click="batchAddFlyAccounts" :disabled="flyAddingAccount" style="width: 100%; margin-top: 12px;">
+          <i class="fas fa-layer-group"></i> 批量验证并添加
+        </button>
       </div>
     </div>
   </div>

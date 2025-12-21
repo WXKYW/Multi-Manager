@@ -604,10 +604,10 @@ export const flyMethods = {
   // 状态样式辅助
   getFlyStatusClass(status) {
     status = status?.toLowerCase() || 'unknown';
-    if (['deployed', 'running', 'started'].includes(status)) return 'running';
-    if (['suspended', 'dead', 'stopped', 'destroyed'].includes(status)) return 'stopped';
-    if (['pending', 'created'].includes(status)) return 'starting';
-    return 'unknown';
+    if (['deployed', 'running', 'started'].includes(status)) return 'status-running';
+    if (['suspended', 'dead', 'stopped', 'destroyed'].includes(status)) return 'status-stopped';
+    if (['pending', 'created'].includes(status)) return 'status-starting';
+    return 'status-unknown';
   },
 
   getFlyStatusText(status) {

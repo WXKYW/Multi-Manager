@@ -333,6 +333,15 @@ export const antigravityMethods = {
                 }
                 this.loadAntigravityQuotas();
             }
+        } else if (tabName === 'matrix') {
+            // 矩阵列表依赖于额度中的模型列表，因此需要确保额度数据已加载
+            if (!store.antigravityQuotas || Object.keys(store.antigravityQuotas).length === 0) {
+                this.loadAntigravityQuotas().then(() => {
+                    this.loadAntigravityMatrix();
+                });
+            } else {
+                this.loadAntigravityMatrix();
+            }
         } else if (tabName === 'settings') {
             this.loadAntigravitySettings();
         } else if (tabName === 'logs') {
@@ -879,5 +888,109 @@ export const antigravityMethods = {
         } catch (error) {
             toast.error('请求失败: ' + error.message);
         }
+    },
+
+    // 模型矩阵管理
+    async loadAntigravityMatrix() {
+        store.antigravityLoading = true;
+        try {
+            const response = await fetch('/api/antigravity/config/matrix', {
+                headers: store.getAuthHeaders()
+            });
+            store.antigravityMatrix = await response.json();
+            if (store.mainActiveTab === 'antigravity' && store.antigravityCurrentTab === 'matrix') {
+                toast.success('模型矩阵已加载');
+            }
+        } catch (error) {
+            console.error('Failed to load matrix:', error);
+            toast.error('加载矩阵配置失败');
+        } finally {
+            store.antigravityLoading = false;
+        }
+    },
+
+    async saveAntigravityMatrix() {
+        store.antigravityLoading = true;
+        try {
+            const response = await fetch('/api/antigravity/config/matrix', {
+                method: 'POST',
+                headers: {
+                    ...store.getAuthHeaders(),
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(store.antigravityMatrix)
+            });
+
+            if (response.ok) {
+                toast.success('矩阵配置已保存');
+            } else {
+                toast.error('保存失败');
+            }
+        } catch (error) {
+            toast.error('保存请求失败: ' + error.message);
+        } finally {
+            store.antigravityLoading = false;
+        }
+    },
+
+    getAntigravityMatrixList() {
+        if (!store.antigravityMatrix) return [];
+        
+        // 我们希望矩阵列表包含当前在“额度状态”中出现且已启用的所有内部模型
+        const allInternalModels = this.getAllAntigravityModels()
+            .filter(m => m.enabled !== false) // 仅包含在额度状态中启用的模型
+            .map(m => m.id);
+        
+        // 确保矩阵中有这些内部模型的条目
+        allInternalModels.forEach(id => {
+            if (!store.antigravityMatrix[id]) {
+                // 如果是新发现的模型，给个默认禁用状态
+                store.antigravityMatrix[id] = { base: false, fakeStream: false, antiTrunc: false };
+            }
+        });
+
+        // 转换为数组用于渲染，并根据内部 ID 排序
+        return Object.keys(store.antigravityMatrix)
+            .filter(id => allInternalModels.includes(id)) // 仅显示在额度状态中启用的模型
+            .sort()
+            .map(id => ({
+                id,
+                ...store.antigravityMatrix[id]
+            }));
+    },
+
+    toggleAgMatrixItem(modelId, field) {
+        if (!store.antigravityMatrix[modelId]) {
+            store.antigravityMatrix[modelId] = { base: false, fakeStream: false, antiTrunc: false };
+        }
+        store.antigravityMatrix[modelId][field] = !store.antigravityMatrix[modelId][field];
+    },
+
+    isAgMatrixColumnAllChecked(field) {
+        const list = this.getAntigravityMatrixList();
+        if (list.length === 0) return false;
+        return list.every(item => item[field]);
+    },
+
+    toggleAgMatrixColumn(field) {
+        const list = this.getAntigravityMatrixList();
+        const allChecked = this.isAgMatrixColumnAllChecked(field);
+        
+        list.forEach(item => {
+            store.antigravityMatrix[item.id][field] = !allChecked;
+        });
+    },
+
+    toggleAgMatrixRow(modelId) {
+        if (!store.antigravityMatrix[modelId]) return;
+        
+        const row = store.antigravityMatrix[modelId];
+        // 逻辑：如果当前行有任何一项是 true，则全部设为 false；否则全部设为 true
+        const hasAnyOn = row.base || row.fakeStream || row.antiTrunc;
+        const newState = !hasAnyOn;
+        
+        row.base = newState;
+        row.fakeStream = newState;
+        row.antiTrunc = newState;
     }
 };

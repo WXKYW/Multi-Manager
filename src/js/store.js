@@ -217,11 +217,13 @@ export const store = reactive({
     antigravityLogFilterAccount: '',
     antigravityLogFilterModel: '',
     antigravitySettings: [],
+    agShowApiKey: false,
     agRefreshingAll: false,
     agLogDetailShowRaw: false, // 是否显示原始 JSON
     antigravityLogDetail: null, // 移入 store
     antigravityQuotaViewMode: 'list',
     antigravityModelRedirects: [],
+    antigravityMatrix: null,
     newRedirectSource: '',
     newRedirectTarget: '',
     agEditingRedirectSource: null,

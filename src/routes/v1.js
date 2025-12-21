@@ -72,12 +72,12 @@ function requireApiAuth(req, res, next) {
         const sessionById = getSessionById(token);
         if (sessionById) return next();
 
-        // 尝试作为 API Key (优先使用 Antigravity 的设置)
-        let configuredApiKey = agStorage ? agStorage.getSetting('API_KEY') : null;
-        // 如果 Antigravity 没有配置，尝试 GCLI 的设置
-        if (!configuredApiKey && gcliStorage && gcliStorage.getSetting) {
-            configuredApiKey = gcliStorage.getSetting('API_KEY');
-        }
+        // 尝试作为 API Key (动态从存储中获取最新值)
+        let configuredApiKey = null;
+        try {
+            const agStorage = require(path.join(modulesDir, 'antigravity-api', 'storage.js'));
+            configuredApiKey = agStorage.getSetting('API_KEY');
+        } catch (e) { }
 
         if (configuredApiKey && token === configuredApiKey) {
             return next();
@@ -87,10 +87,12 @@ function requireApiAuth(req, res, next) {
     // 3. 检查 Query Param (compat)
     const queryKey = req.query.key;
     if (queryKey) {
-        let configuredApiKey = agStorage ? agStorage.getSetting('API_KEY') : null;
-        if (!configuredApiKey && gcliStorage && gcliStorage.getSetting) {
-            configuredApiKey = gcliStorage.getSetting('API_KEY');
-        }
+        let configuredApiKey = null;
+        try {
+            const agStorage = require(path.join(modulesDir, 'antigravity-api', 'storage.js'));
+            configuredApiKey = agStorage.getSetting('API_KEY');
+        } catch (e) { }
+
         if (configuredApiKey && queryKey === configuredApiKey) {
             return next();
         }
@@ -108,46 +110,14 @@ router.get('/models', requireApiAuth, async (req, res) => {
         const channelModelPrefix = settings.channelModelPrefix || {};
 
         const allModelsMap = new Map(); // 使用 Map 进行全局去重 (ID 为 Key)
-        const now = Math.floor(Date.now() / 1000);
 
         // --- 1. 处理 Antigravity 渠道 ---
         if (channelEnabled['antigravity']) {
             try {
-                const agStorage = require(path.join(modulesDir, 'antigravity-api', 'storage.js'));
-                const agClient = require(path.join(modulesDir, 'antigravity-api', 'antigravity-client.js'));
+                const agService = require(path.join(modulesDir, 'antigravity-api', 'antigravity-service.js'));
                 const prefix = channelModelPrefix['antigravity'] || '';
-
-                const accounts = agStorage.getAccounts().filter(a => a.enable);
-                if (accounts.length > 0) {
-                    const agData = await agClient.listModels(accounts[0].id);
-                    if (agData && agData.data) {
-                        const modelConfigs = agStorage.getModelConfigs();
-                        const redirects = agStorage.getModelRedirects();
-
-                        // 记录哪些模型是被重定向的目标，后续需要隐藏
-                        const redirectTargets = new Set(redirects.map(r => r.target_model));
-
-                        // 处理原始模型
-                        agData.data.forEach(m => {
-                            const isEnabled = modelConfigs[m.id] !== undefined ? modelConfigs[m.id] : true;
-                            // 仅当模型启用，且不是重定向目标时才添加
-                            if (isEnabled && !redirectTargets.has(m.id)) {
-                                const id = prefix + m.id;
-                                if (!allModelsMap.has(id)) {
-                                    allModelsMap.set(id, { id, object: 'model', created: now, owned_by: 'antigravity' });
-                                }
-                            }
-                        });
-
-                        // 处理重定向模型 (Alias)
-                        redirects.forEach(r => {
-                            const id = prefix + r.source_model;
-                            if (!allModelsMap.has(id)) {
-                                allModelsMap.set(id, { id, object: 'model', created: now, owned_by: 'system-redirect' });
-                            }
-                        });
-                    }
-                }
+                const agModels = agService.getAvailableModels(prefix);
+                agModels.forEach(m => allModelsMap.set(m.id, m));
             } catch (e) {
                 console.warn('[v1/models] Antigravity process failed:', e.message);
             }
@@ -156,57 +126,71 @@ router.get('/models', requireApiAuth, async (req, res) => {
         // --- 2. 处理 Gemini CLI 渠道 ---
         if (channelEnabled['gemini-cli']) {
             try {
-                const gcliStorage = require(path.join(modulesDir, 'gemini-cli-api', 'storage.js'));
-                const prefix = channelModelPrefix['gemini-cli'] || '';
+                // 同样引用 GCLI 的逻辑 (如果 GCLI 也有 service 更好，否则复刻精简版)
+                const gcliPrefix = channelModelPrefix['gemini-cli'] || '';
                 const matrixPath = path.join(modulesDir, 'gemini-cli-api', 'gemini-matrix.json');
+                const gcliStorage = require(path.join(modulesDir, 'gemini-cli-api', 'storage.js'));
 
                 if (fs.existsSync(matrixPath)) {
                     const matrix = JSON.parse(fs.readFileSync(matrixPath, 'utf8'));
                     const disabledModels = gcliStorage.getDisabledModels();
                     const redirects = gcliStorage.getModelRedirects();
                     const redirectTargets = new Set(redirects.map(r => r.target_model));
+                    const now = Math.floor(Date.now() / 1000);
 
-                    Object.keys(matrix).forEach(baseModelId => {
-                        const config = matrix[baseModelId];
-                        if (!config) return;
-
-                        // 生成变体
+                    Object.keys(matrix).forEach(baseId => {
+                        const config = matrix[baseId];
                         const variants = [];
                         if (config.base) {
-                            variants.push(baseModelId);
-                            if (config.search) variants.push(baseModelId + '-search');
+                            variants.push(baseId);
+                            if (config.search) variants.push(baseId + '-search');
                         }
                         if (config.maxThinking) {
-                            variants.push(baseModelId + '-maxthinking');
-                            if (config.search) variants.push(baseModelId + '-maxthinking-search');
+                            variants.push(baseId + '-maxthinking');
+                            if (config.search) variants.push(baseId + '-maxthinking-search');
                         }
                         if (config.noThinking) {
-                            variants.push(baseModelId + '-nothinking');
-                            if (config.search) variants.push(baseModelId + '-nothinking-search');
+                            variants.push(baseId + '-nothinking');
+                            if (config.search) variants.push(baseId + '-nothinking-search');
                         }
 
-                        variants.forEach(v => {
-                            const ids = [v];
-                            if (config.fakeStream) ids.push('假流式/' + v);
-                            if (config.antiTrunc) ids.push('流式抗截断/' + v);
+                        if (variants.length > 0) {
+                            variants.forEach(v => {
+                                const possibleIds = [v];
+                                if (config.fakeStream) possibleIds.push('假流式/' + v);
+                                if (config.antiTrunc) possibleIds.push('流式抗截断/' + v);
 
-                            ids.forEach(rawId => {
-                                const fullId = prefix + rawId;
-                                // 过滤禁用和重定向目标
-                                if (!disabledModels.includes(fullId) && !redirectTargets.has(rawId)) {
-                                    if (!allModelsMap.has(fullId)) {
-                                        allModelsMap.set(fullId, { id: fullId, object: 'model', created: now, owned_by: 'google' });
+                                possibleIds.forEach(id => {
+                                    const fullId = gcliPrefix + id;
+                                    if (!disabledModels.includes(fullId) && !redirectTargets.has(id)) {
+                                        if (!allModelsMap.has(fullId)) {
+                                            allModelsMap.set(fullId, { id: fullId, object: 'model', created: now, owned_by: 'google' });
+                                        }
                                     }
-                                }
+                                });
                             });
-                        });
+                        } else {
+                            // base/maxThinking/noThinking 都为 false 时，直接生成功能性变体
+                            if (config.fakeStream) {
+                                const fullId = gcliPrefix + '假流式/' + baseId;
+                                if (!disabledModels.includes(fullId) && !allModelsMap.has(fullId)) {
+                                    allModelsMap.set(fullId, { id: fullId, object: 'model', created: now, owned_by: 'google' });
+                                }
+                            }
+                            if (config.antiTrunc) {
+                                const fullId = gcliPrefix + '流式抗截断/' + baseId;
+                                if (!disabledModels.includes(fullId) && !allModelsMap.has(fullId)) {
+                                    allModelsMap.set(fullId, { id: fullId, object: 'model', created: now, owned_by: 'google' });
+                                }
+                            }
+                        }
                     });
 
-                    // 处理 GCLI 重定向
+                    // GCLI Redirects
                     redirects.forEach(r => {
-                        const id = prefix + r.source_model;
-                        if (!allModelsMap.has(id)) {
-                            allModelsMap.set(id, { id, object: 'model', created: now, owned_by: 'system-redirect' });
+                        const fullId = gcliPrefix + r.source_model;
+                        if (!allModelsMap.has(fullId)) {
+                            allModelsMap.set(fullId, { id: fullId, object: 'model', created: now, owned_by: 'system-redirect' });
                         }
                     });
                 }

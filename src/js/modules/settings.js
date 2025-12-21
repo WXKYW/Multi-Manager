@@ -153,6 +153,7 @@ export const settingsMethods = {
 
   // 保存所有设置到后端
   async saveUserSettingsToServer() {
+    this.antigravitySaving = true; // 复用该变量控制全局 Loading
     try {
       const settings = {
         customCss: this.customCss,
@@ -174,12 +175,20 @@ export const settingsMethods = {
 
       if (response.ok) {
         const result = await response.json();
-        return result.success;
+        if (result.success) {
+          this.showGlobalToast('系统设置已应用并保存', 'success');
+          // 可选：如果布局发生变化，可以强制刷新下某些视图
+          return true;
+        }
       }
+      this.showGlobalToast('设置保存失败，请检查连接', 'error');
       return false;
     } catch (error) {
       console.error('保存用户设置失败:', error);
+      this.showGlobalToast('保存出错: ' + error.message, 'error');
       return false;
+    } finally {
+      this.antigravitySaving = false;
     }
   },
 

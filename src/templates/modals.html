@@ -254,7 +254,15 @@
                   </span>
                 </div>
 
-                <div class="msg-bubble" :class="msg.role === 'user' ? 'user-bubble' : 'assistant-bubble'"
+                <details v-if="msg.role === 'system'" class="reasoning-details" style="width: 100%;">
+                  <summary>
+                    <i class="fas fa-terminal"></i>
+                    <span>系统指令 / System Prompt</span>
+                  </summary>
+                  <div class="msg-bubble system-bubble" 
+                    style="font-family: var(--font-mono); font-size: 12px; background: var(--bg-tertiary); border: 1px dashed var(--border-color); white-space: pre-wrap; opacity: 0.8; width: 100%; border-top: none; border-radius: 0 0 8px 8px; margin-top: 0;">{{ msg.content }}</div>
+                </details>
+                <div v-else class="msg-bubble" :class="msg.role === 'user' ? 'user-bubble' : 'assistant-bubble'"
                   v-html="renderMarkdown(msg.content)">
                 </div>
               </div>
@@ -439,7 +447,15 @@
                   </span>
                 </div>
 
-                <div class="msg-bubble" :class="msg.role === 'user' ? 'user-bubble' : 'assistant-bubble'"
+                <details v-if="msg.role === 'system'" class="reasoning-details" style="width: 100%;">
+                  <summary>
+                    <i class="fas fa-terminal"></i>
+                    <span>系统指令 / System Prompt</span>
+                  </summary>
+                  <div class="msg-bubble system-bubble" 
+                    style="font-family: var(--font-mono); font-size: 12px; background: var(--bg-tertiary); border: 1px dashed var(--border-color); white-space: pre-wrap; opacity: 0.8; width: 100%; border-top: none; border-radius: 0 0 8px 8px; margin-top: 0;">{{ msg.content }}</div>
+                </details>
+                <div v-else class="msg-bubble" :class="msg.role === 'user' ? 'user-bubble' : 'assistant-bubble'"
                   v-html="renderMarkdown(msg.content)">
                 </div>
               </div>

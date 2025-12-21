@@ -537,55 +537,80 @@ const app = createApp({
 
     // 全局 Esc 键监听，用于关闭当前打开的模态框
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && this.isAnyModalOpen) {
-        // 关闭顺序优先级：图片预览 > 对话框 > 日志查看器 > 设置 > 其他模块模态框
-        if (this.showImagePreviewModal) {
-          this.showImagePreviewModal = false;
-          return;
-        }
-        if (this.customDialog.show) {
-          if (this.customDialog.onCancel) this.customDialog.onCancel();
-          else this.customDialog.show = false;
-          return;
-        }
-        if (this.logViewer.visible) {
-          this.closeLogViewer();
-          return;
-        }
-        if (this.showSettingsModal) {
-          this.showSettingsModal = false;
-          return;
-        }
-
-        // 批量重置其他所有布尔类型的模态框状态
-        const modals = [
-          'showAddZeaburAccountModal', 'showAddKoyebAccountModal', 'showAddFlyAccountModal', 'showAddDnsAccountModal', 'showEditDnsAccountModal',
-          'showDnsRecordModal', 'showDnsTemplateModal', 'showOpenaiEndpointModal',
-          'showServerModal', 'showImportServerModal', 'showDockerModal',
-          'showSSHTerminalModal', 'showAntigravityAccountModal', 'showAddSessionSelectModal',
-          'showAntigravityLogDetailModal', 'showGeminiCliLogDetailModal', 'showGeminiCliAccountModal',
-          'showAntigravityManualModal', 'showAddCredentialModal', 'showNewWorkerModal',
-          'showWorkerRoutesModal', 'showWorkerDomainsModal', 'showPagesDeploymentsModal',
-          'showPagesDomainsModal', 'showLoginModal', 'showSetPasswordModal', 'showAddZoneModal'
-        ];
-
-        for (const modal of modals) {
-          if (this[modal]) {
-            // 如果是非函数闭包触发的普通模态框，直接设为 false
-            // 特殊关闭逻辑可以通过专门的方法处理
-            if (modal === 'showPagesDeploymentsModal') {
-              this.closePagesDeploymentsModal();
-            } else {
-              this[modal] = false;
-            }
-            return;
-          }
-        }
-      }
+      // ... existing code ...
     });
 
     // 加载模块可见性和顺序设置
     this.loadModuleSettings();
+
+    // 3. 手机端左右滑动切换标签页
+    let touchStartX = 0;
+    let touchStartY = 0;
+    const swipeThreshold = 80; // 滑动位移阈值
+
+    window.addEventListener('touchstart', (e) => {
+      // 仅在移动端开启手势
+      if (window.innerWidth > 768) return;
+      // 排除在设置面板或模态框内的滑动
+      if (this.isAnyModalOpen) return;
+      // 排除在代码编辑器或滚动容器内的滑动
+      if (e.target.closest('#monaco-editor-container') || e.target.closest('.log-stream-container') || e.target.closest('.table-container')) return;
+
+      touchStartX = e.changedTouches[0].screenX;
+      touchStartY = e.changedTouches[0].screenY;
+    }, { passive: true });
+
+    window.addEventListener('touchend', (e) => {
+      if (window.innerWidth > 768) return;
+
+      const touchEndX = e.changedTouches[0].screenX;
+      const touchEndY = e.changedTouches[0].screenY;
+      const dx = touchEndX - touchStartX;
+      const dy = touchEndY - touchStartY;
+
+      // 判定条件：水平位移 > 阈值 且 水平位移 > 2倍垂直位移
+      if (Math.abs(dx) > swipeThreshold && Math.abs(dx) > Math.abs(dy) * 2) {
+
+        // --- 情况 A: 设置面板已打开 ---
+        if (this.showSettingsModal) {
+          const settingsTabs = ['general', 'api', 'modules', 'database', 'logs', 'appearance', 'about'];
+          const currentIndex = settingsTabs.indexOf(this.settingsCurrentTab);
+          let nextIndex = -1;
+
+          if (dx > 0) { // 右划：上一个
+            nextIndex = (currentIndex - 1 + settingsTabs.length) % settingsTabs.length;
+          } else { // 左划：下一个
+            nextIndex = (currentIndex + 1) % settingsTabs.length;
+          }
+
+          if (nextIndex !== -1 && nextIndex !== currentIndex) {
+            this.settingsCurrentTab = settingsTabs[nextIndex];
+            if ('vibrate' in navigator) navigator.vibrate(10);
+          }
+          return; // 处理完设置滑动后退出
+        }
+
+        // --- 情况 B: 主界面 (无模态框) ---
+        if (!this.isAnyModalOpen) {
+          const visibleModules = this.moduleOrder.filter(m => this.moduleVisibility[m]);
+          if (visibleModules.length <= 1) return;
+
+          const currentIndex = visibleModules.indexOf(this.mainActiveTab);
+          let nextIndex = -1;
+
+          if (dx > 0) {
+            nextIndex = (currentIndex - 1 + visibleModules.length) % visibleModules.length;
+          } else {
+            nextIndex = (currentIndex + 1) % visibleModules.length;
+          }
+
+          if (nextIndex !== -1 && nextIndex !== currentIndex) {
+            this.handleTabSwitch(visibleModules[nextIndex]);
+            if ('vibrate' in navigator) navigator.vibrate(15);
+          }
+        }
+      }
+    }, { passive: true });
 
     // SSH 终端使用固定深色主题,不需要监听主题变化
     // this.setupThemeObserver();

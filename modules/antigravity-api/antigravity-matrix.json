@@ -1,0 +1,62 @@
+{
+  "gemini-2.5-pro": {
+    "base": true,
+    "fakeStream": true,
+    "antiTrunc": true
+  },
+  "gemini-2.5-flash": {
+    "base": true,
+    "fakeStream": true,
+    "antiTrunc": true
+  },
+  "gemini-2.5-flash-lite": {
+    "base": true,
+    "fakeStream": true,
+    "antiTrunc": true
+  },
+  "gemini-3-pro-high": {
+    "base": false,
+    "fakeStream": false,
+    "antiTrunc": true
+  },
+  "gemini-3-pro-low": {
+    "base": true,
+    "fakeStream": true,
+    "antiTrunc": true
+  },
+  "claude-sonnet-4-5": {
+    "base": true,
+    "fakeStream": true,
+    "antiTrunc": true
+  },
+  "gpt-oss-120b-medium": {
+    "base": true,
+    "fakeStream": true,
+    "antiTrunc": true
+  },
+  "gemini-3-pro-image": {
+    "base": true,
+    "fakeStream": true,
+    "antiTrunc": true
+  },
+  "claude-opus-4-5-thinking": {
+    "base": false,
+    "fakeStream": false,
+    "antiTrunc": true
+  },
+  "claude-sonnet-4-5-thinking": {
+    "base": true,
+    "fakeStream": true,
+    "antiTrunc": true
+  },
+  "rev19-uic3-1p": {
+    "base": false,
+    "fakeStream": false,
+    "antiTrunc": true
+  },
+  "gemini-3-flash": {
+    "base": false,
+    "fakeStream": false,
+    "antiTrunc": true
+  }
+}

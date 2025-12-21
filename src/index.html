@@ -13,6 +13,7 @@
   <%- cdnStyleTags %>
 
     <!-- Template Loader imported in main.js -->
+  <link rel="stylesheet" href="css/refined-mobile.css">
 </head>
 
 <body>
@@ -30,71 +31,32 @@
     <div id="template-welcome"></div>
 
     <!-- 主界面布局 -->
-    <div v-if="isAuthenticated" class="app-wrapper">
-
-      <!-- 左侧边栏 -->
-      <aside class="app-sidebar" :class="{ 'sidebar-locked': showSettingsModal }">
-        <!-- Logo -->
-        <img src="/logo.svg" class="sidebar-logo" alt="Logo" title="API Monitor">
-
-        <!-- 侧边栏导航 (Sidebar Mode) -->
-        <div v-if="navLayout === 'sidebar'" class="sidebar-nav">
-          <template v-for="module in moduleOrder" :key="module">
-            <button v-if="moduleVisibility[module]" class="sidebar-tab" :class="[
-                { active: mainActiveTab === module },
-                module === 'paas' ? 'paas-tab' : '',
-                module === 'dns' ? 'dns-tab' : '',
-                module === 'openai' ? 'openai-tab' : '',
-                module === 'server' ? 'server-tab' : '',
-                module === 'self-h' ? 'self-h-tab' : '',
-                module === 'antigravity' ? 'antigravity-tab' : '',
-                module === 'gemini-cli' ? 'gemini-cli-tab' : ''
-              ]" @click="handleTabSwitch(module)" :title="getModuleName(module)">
-              <i class="fas" :class="getModuleIcon(module)"></i>
-              <span class="tab-label">{{ getModuleName(module) }}</span>
-            </button>
-          </template>
-        </div>
-        <!-- 底部登录控制 -->
-        <div class="sidebar-footer">
-          <!-- PC端设置按钮 -->
-          <button v-if="isAuthenticated" class="auth-btn desktop-settings-btn" :class="{ active: showSettingsModal }"
-            @click="showSettingsModal = !showSettingsModal" title="系统设置">
-            <i class="fas fa-cog"></i>
-            <span class="tab-label">系统设置</span>
-          </button>
-          <!-- 未登录状态 -->
-          <template v-if="!isAuthenticated">
-            <button class="auth-btn" @click="showLoginModal = true" title="登录">
-              <i class="fas fa-sign-in-alt"></i>
-              <span class="tab-label">登录</span>
-            </button>
-          </template>
-          <!-- 已登录状态 -->
-          <template v-else>
-            <button class="auth-btn" @click="logout" title="退出登录">
-              <i class="fas fa-sign-out-alt"></i>
-              <span class="tab-label">退出登录</span>
-            </button>
-          </template>
-        </div>
-      </aside>
+    <div v-if="isAuthenticated" class="app-wrapper no-sidebar" :class="{ 'settings-active-context': showSettingsModal }">
 
       <!-- 主内容区 -->
       <main class="app-main">
         <div v-if="isAuthenticated" class="container">
           <!-- 页面头部 - 模块控制和设置 -->
           <div class="header">
-            <div class="title" style="cursor: default;">
-              <i class="fas fa-chart-line"></i>
-              API Monitor
+            <div class="title-group" style="display: flex; align-items: center; gap: 12px;">
+              <img src="/logo.svg" style="width: 28px; height: 28px;" alt="Logo">
+              <div class="title" style="cursor: default; font-weight: 800; letter-spacing: -0.5px;">
+                API Monitor
+              </div>
             </div>
-            <!-- 右侧占位，保持布局平衡 -->
-            <div style="width: 32px;"></div>
+            
+            <!-- 右侧操作区 -->
+            <div class="header-actions">
+              <button class="btn-settings-toggle" :class="{ active: showSettingsModal }"
+                @click="showSettingsModal = !showSettingsModal" title="系统设置">
+                <i class="fas fa-cog"></i>
+                <span>设置</span>
+              </button>
+            </div>
           </div>
 
-          <!-- 主标签页导航 (Top Mode) -->
-          <div v-if="navLayout === 'top' && visibleModulesCount > 1" class="main-tabs">
+          <!-- 主标签页导航 (始终在顶部) -->
+          <div class="main-tabs">
             <template v-for="module in moduleOrder" :key="module">
               <button v-if="moduleVisibility[module]" class="main-tab" :class="[
                   { active: mainActiveTab === module },
@@ -126,7 +88,8 @@
         <!-- 未登录占位符 -->
         <div v-else class="guest-placeholder">
           <i class="fas fa-lock"></i>
-          <p>请在左侧栏登录以访问控制台</p>
+          <p>请登录以访问控制台</p>
+          <button class="btn btn-primary mt-3" @click="showLoginModal = true">立即登录</button>
         </div>
       </main>
     </div>
@@ -142,7 +105,7 @@
   <%- cdnScriptTags %>
 
     <!-- 模块化 JavaScript -->
-    <script type="module" src="/js/main.js?v=1734794100"></script>
+    <script type="module" src="/js/main.js"></script>
 </body>
 
 </html>

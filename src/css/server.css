@@ -1916,6 +1916,92 @@
     background: var(--card-bg);
 }
 
+/* SSH 终端工具栏 */
+.ssh-terminal-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 15px;
+    background: #2d2d2d;
+    border-bottom: 1px solid #444;
+}
+
+.ssh-terminal-info {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.ssh-terminal-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.ssh-terminal-actions .btn-sm {
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.ssh-terminal-actions .btn-primary {
+    background: linear-gradient(135deg, var(--server-primary), var(--server-primary-dark));
+    border: none;
+    transition: all 0.3s ease;
+}
+
+.ssh-terminal-actions .btn-primary:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(96, 165, 250, 0.3);
+}
+
+.ssh-terminal-actions .btn-primary i {
+    margin-right: 4px;
+}
+
+.ssh-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 12px;
+}
+
+.ssh-status.connected {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+}
+
+.ssh-status.disconnected {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+}
+
+.ssh-status i {
+    font-size: 8px;
+}
+
+.ssh-server-info {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: #888;
+}
+
+.ssh-terminal-actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* 内嵌终端面板 */
+.ssh-terminal-pane-embedded {
+    width: 100%;
+    height: calc(100vh - 280px);
+    min-height: 400px;
+    max-height: 700px;
+    /* padding: 12px; */
+    background: var(--card-bg);
+}
+
 /* SSH 终端底部提示 */
 .ssh-terminal-footer {
     padding: 8px 15px;
