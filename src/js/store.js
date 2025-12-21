@@ -31,6 +31,7 @@ export const store = reactive({
         'gemini-cli': true,
         paas: true,
         dns: true,
+        'self-h': true,
         server: true
     },
     channelEnabled: {
@@ -41,7 +42,7 @@ export const store = reactive({
         antigravity: '',
         'gemini-cli': ''
     },
-    moduleOrder: ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'server'],
+    moduleOrder: ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'self-h', 'server'],
 
     // 界面设置
     opacity: 100,
@@ -49,6 +50,14 @@ export const store = reactive({
     navLayout: 'top', // 'sidebar' (左侧) or 'top' (顶部)
     showSettingsModal: false, // 设置面板显示状态
     mobileSettingsNavExpanded: false, // 移动端设置导航展开状态
+
+    // Self-H (Self-Hosted) module state
+    selfHCurrentTab: 'openlist',
+    openListSubTab: 'overview',
+    openListAccounts: [],
+    openListStats: { onlineCount: 0 },
+    currentOpenListAccount: null,
+    newOpenListAcc: { name: '', api_url: '', api_token: '' },
 
     // 全局数据刷新控制
     serverList: [],

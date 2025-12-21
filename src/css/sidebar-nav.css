@@ -244,6 +244,18 @@
   box-shadow: 0 4px 12px rgba(71, 85, 105, 0.3);
 }
 
+/* Self-H Tab */
+.sidebar-tab.self-h-tab:hover {
+  background: rgba(16, 185, 129, 0.08); /* --success-color rgb approx */
+  color: var(--success-color);
+}
+
+.sidebar-tab.self-h-tab.active {
+  background: linear-gradient(135deg, var(--success-color) 0%, #059669 100%);
+  color: white;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+}
+
 /* Antigravity Tab */
 .sidebar-tab.antigravity-tab:hover {
   background: rgba(var(--ag-primary-rgb), 0.08);

@@ -49,6 +49,7 @@ function registerRoutes(app) {
     'cloudflare-dns': '/api/cf-dns',
     'fly-api': '/api',
     'openai-api': '/api/openai',
+    'openlist-api': '/api/openlist',
     'server-management': '/api/server',
     'antigravity-api': '/api/antigravity',
     'gemini-cli-api': '/api/gemini-cli-api'

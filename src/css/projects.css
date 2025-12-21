@@ -461,7 +461,7 @@
 
 .service-actions {
   display: flex;
-  gap: 8px;
+  gap: 5px;
   flex-wrap: wrap;
 }
 

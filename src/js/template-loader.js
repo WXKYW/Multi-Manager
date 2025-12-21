@@ -15,6 +15,7 @@ const TemplateLoader = {
         'gemini-cli.html': '#template-gemini-cli',
         'openai.html': '#template-openai',
         'server.html': '#template-server',
+        'self-h.html': '#template-self-h',
         'antigravity.html': '#template-antigravity',
         'settings.html': '#template-settings',
         'modals.html': '#template-modals',
