@@ -347,7 +347,7 @@ export const koyebMethods = {
     /**
      * 导出所有 Koyeb 账号
      */
-    async exportAllAccounts() {
+    async exportKoyebAccounts() {
         try {
             const response = await fetch('/api/koyeb/accounts/export');
             const result = await response.json();
@@ -373,7 +373,7 @@ export const koyebMethods = {
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
 
-            toast.success(`已导出 ${accounts.length} 个账号`);
+            toast.success(`已导出 ${accounts.length} 个 Koyeb 账号`);
         } catch (error) {
             console.error('导出失败:', error);
             toast.error('导出失败: ' + error.message);
@@ -383,7 +383,7 @@ export const koyebMethods = {
     /**
      * 导入 Koyeb 账号
      */
-    async importAllAccounts() {
+    async importKoyebAccounts() {
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = '.txt';
@@ -409,7 +409,7 @@ export const koyebMethods = {
                     if (batchPanel) {
                         batchPanel.scrollIntoView({ behavior: 'smooth' });
                     }
-                    toast.info('文件已加载到批量添加区域，请查看并点击“批量添加”');
+                    toast.info('文件已加载到 Koyeb 批量添加区域，请查看并点击“批量添加”');
                 });
             };
             reader.readAsText(file);

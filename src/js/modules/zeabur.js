@@ -1233,8 +1233,8 @@ export const zeaburMethods = {
       });
     },
 
-  // 导出所有账号
-  async exportAllAccounts() {
+  // 导出所有 Zeabur 账号
+  async exportZeaburAccounts() {
       try {
         if (this.managedAccounts.length === 0) {
           this.showGlobalToast('没有可导出的账号', 'warning');
@@ -1244,6 +1244,7 @@ export const zeaburMethods = {
         const now = new Date();
         const exportData = {
           version: '1.0',
+          provider: 'zeabur',
           exportTime: now.toISOString(),
           exportTimeLocal: now.toLocaleString('zh-CN', { hour12: false }),
           accounts: this.managedAccounts
@@ -1269,17 +1270,17 @@ export const zeaburMethods = {
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
 
-        this.showGlobalToast('账号导出成功', 'success');
+        this.showGlobalToast('Zeabur 账号导出成功', 'success');
       } catch (error) {
         this.showGlobalToast('导出失败: ' + error.message, 'error');
       }
     },
 
-  // 导入所有账号
-  async importAllAccounts() {
+  // 导入所有 Zeabur 账号
+  async importZeaburAccounts() {
       const confirmed = await this.showConfirm({
         title: '确认导入',
-        message: '导入账号将覆盖当前所有账号配置，是否继续？',
+        message: '导入 Zeabur 账号将覆盖当前所有账号配置，是否继续？',
         icon: 'fa-exclamation-triangle',
         confirmText: '确定导入',
         confirmClass: 'btn-warning'
@@ -1300,7 +1301,7 @@ export const zeaburMethods = {
             const importedData = JSON.parse(e.target.result);
 
             // 验证数据格式
-            if (!importedData.version || !importedData.accounts) {
+            if (!importedData.accounts) {
               this.showGlobalToast('无效的备份文件格式', 'error');
               return;
             }
@@ -1309,7 +1310,7 @@ export const zeaburMethods = {
             this.managedAccounts = importedData.accounts;
             await this.saveManagedAccounts();
 
-            this.showGlobalToast(`成功导入 ${importedData.accounts.length} 个账号`, 'success');
+            this.showGlobalToast(`成功导入 ${importedData.accounts.length} 个 Zeabur 账号`, 'success');
             await this.fetchData();
           } catch (error) {
             this.showGlobalToast('导入失败: ' + error.message, 'error');

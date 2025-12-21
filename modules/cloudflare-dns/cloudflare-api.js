@@ -15,57 +15,94 @@ const CF_API_BASE = 'api.cloudflare.com';
  */
 function cfRequest(auth, method, path, body = null) {
   return new Promise((resolve, reject) => {
-    // 支持两种认证方式
     const headers = {
-      'Content-Type': 'application/json'
+      'Accept': 'application/json'
     };
 
-    if (typeof auth === 'string') {
-      // API Token 方式
-      headers['Authorization'] = `Bearer ${auth}`;
-    } else if (auth && auth.email && auth.key) {
-      // Global API Key 方式
-      headers['X-Auth-Email'] = auth.email;
-      headers['X-Auth-Key'] = auth.key;
+    // 只有在有 body 时才设置 Content-Type
+    if (body && ['POST', 'PUT', 'PATCH'].includes(method.toUpperCase())) {
+      headers['Content-Type'] = 'application/json';
     }
+
+    // 认证处理
+    if (typeof auth === 'string') {
+      headers['Authorization'] = `Bearer ${auth.toString().trim()}`;
+    } else if (auth && auth.email && auth.key) {
+      headers['X-Auth-Email'] = auth.email.toString().trim();
+      headers['X-Auth-Key'] = auth.key.toString().trim();
+    }
+
+    // 严格清理 Headers: 移除不可见字符和非 ASCII 字符
+    Object.keys(headers).forEach(key => {
+      if (typeof headers[key] === 'string') {
+        headers[key] = headers[key].replace(/[^\x20-\x7E]/g, '').trim();
+      }
+    });
+
+    // 处理 GraphQL 路径
+    const fullPath = path.startsWith('/graphql') ? path : `/client/v4${path}`;
 
     const options = {
       hostname: CF_API_BASE,
-      path: `/client/v4${path}`,
+      path: fullPath,
       method: method,
       headers: headers,
       timeout: 15000
     };
 
-    const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try {
-          const json = JSON.parse(data);
-          if (json.success) {
-            resolve(json);
-          } else {
-            const errors = json.errors || [];
-            const errorMsg = errors.map(e => e.message).join(', ') || 'Unknown error';
-            reject(new Error(errorMsg));
+    // 调试日志
+    // console.log(`[CF-API] REQUEST: ${method} ${fullPath}`);
+
+    try {
+      const req = https.request(options, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            const json = JSON.parse(data);
+            if (json.success || (res.statusCode >= 200 && res.statusCode < 300 && json.result)) {
+              resolve(json);
+            } else {
+              const errors = json.errors || [];
+              let errorMsg = errors.map(e => e.message).join(', ') || json.message || 'Unknown error';
+
+              // 如果是 400 错误且有特定的错误信息
+              if (res.statusCode === 400 && data.includes('invalid_request_headers')) {
+                console.error('[CF-API] 原始报错数据:', data);
+                errorMsg = 'Invalid request headers (可能由不必要的 Content-Type 或 Accept 引起)';
+              }
+
+              const error = new Error(errorMsg);
+              error.statusCode = res.statusCode;
+              error.response = data;
+              error.path = path;
+              reject(error);
+            }
+          } catch (e) {
+            if (res.statusCode >= 200 && res.statusCode < 300) {
+              resolve({ success: true, result: data });
+            } else {
+              reject(new Error(`HTTP ${res.statusCode}: Invalid JSON response`));
+            }
           }
-        } catch (e) {
-          reject(new Error('Invalid JSON response'));
-        }
+        });
       });
-    });
 
-    req.on('error', reject);
-    req.on('timeout', () => {
-      req.destroy();
-      reject(new Error('Request timeout'));
-    });
+      req.on('error', reject);
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error('Request timeout'));
+      });
 
-    if (body) {
-      req.write(JSON.stringify(body));
+      if (body) {
+        req.write(JSON.stringify(body));
+      }
+      req.end();
+    } catch (syncError) {
+      console.error('[CF-API] https.request 同步报错:', syncError.message);
+      console.error('[CF-API] 当前 Headers:', JSON.stringify(headers));
+      reject(syncError);
     }
-    req.end();
   });
 }
 
@@ -588,8 +625,8 @@ function validateDnsRecord(record) {
 /**
  * 获取账号 ID (Workers API 需要)
  */
-async function getAccountId(apiToken) {
-  const result = await cfRequest(apiToken, 'GET', '/accounts?page=1&per_page=1');
+async function getAccountId(auth) {
+  const result = await cfRequest(auth, 'GET', '/accounts?page=1&per_page=1');
   if (result.result && result.result.length > 0) {
     return result.result[0].id;
   }

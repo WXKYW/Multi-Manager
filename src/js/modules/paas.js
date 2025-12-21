@@ -28,6 +28,10 @@ export const paasMethods = {
                 if (this.koyebAccounts.length === 0) {
                     this.loadKoyebData();
                 }
+            } else if (platform === 'fly') {
+                if (this.flyAccounts.length === 0) {
+                    this.loadFlyData();
+                }
             }
         });
     },
@@ -88,6 +92,15 @@ export const paasMethods = {
                 services: this.koyebTotalServices,
                 running: this.koyebRunningServices,
                 cost: this.koyebTotalBalance
+            };
+        } else if (this.paasCurrentPlatform === 'fly') {
+            const accounts = this.flyAccounts || [];
+            return {
+                accounts: accounts.length,
+                projects: accounts.reduce((acc, curr) => acc + (curr.projects?.length || 0), 0),
+                services: accounts.reduce((acc, curr) => acc + (curr.projects?.length || 0), 0),
+                running: accounts.reduce((acc, curr) => acc + (curr.projects?.filter(p => p.status === 'deployed' || p.status === 'running')?.length || 0), 0),
+                cost: 0
             };
         }
         return { accounts: 0, projects: 0, services: 0, running: 0, cost: 0 };

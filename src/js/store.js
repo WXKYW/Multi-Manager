@@ -106,6 +106,26 @@ export const store = reactive({
     koyebBatchAddError: '',
     koyebBatchAddSuccess: '',
 
+    // Fly.io 子模块
+    flyAccounts: [],
+    flyManagedAccounts: [],
+    flyLoading: false,
+    flyRefreshing: false,
+    flyLastUpdate: '',
+    flyRefreshInterval: 30000,
+    flyRefreshCountdown: 30,
+    flyRefreshProgress: 100,
+    flyDataRefreshPaused: false,
+    flyExpandedAccounts: {},
+    showAddFlyAccountModal: false,
+    newFlyAccount: { name: '', token: '' },
+    flyAddingAccount: false,
+    flyAddAccountError: '',
+    flyAddAccountSuccess: '',
+    flyBatchAccounts: '',
+    flyBatchAddError: '',
+    flyBatchAddSuccess: '',
+
     // DNS
     dnsAccounts: [],
     dnsZones: [],
@@ -128,6 +148,21 @@ export const store = reactive({
     dnsSelectedRecords: [],
     dnsSearchText: '',
     isEditingWorker: false, // 是否正在编辑现有 Worker
+
+    // R2 存储
+    r2Buckets: [],
+    r2Objects: [],
+    r2SelectedBucketName: null,
+    r2LoadingBuckets: false,
+    r2LoadingObjects: false,
+    r2PrefixStack: [], // 用于对象浏览的路径栈
+    r2CurrentPrefix: '', // 当前浏览的前缀
+    r2SearchText: '',
+    showR2CreateBucketModal: false,
+    newR2BucketName: '',
+    r2Uploading: false,
+    r2DeletingBucket: false,
+    r2DeletingObject: false,
 
     // OpenAI
     openaiEndpoints: [],
