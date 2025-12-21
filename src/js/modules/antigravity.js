@@ -426,26 +426,30 @@ export const antigravityMethods = {
         return '';
     },
 
+    // 格式化重置时间显示 (前端本地时区)
+    formatDisplayDate(isoTime) {
+        if (!isoTime) return '无';
+        try {
+            const date = new Date(isoTime);
+            if (isNaN(date.getTime())) return isoTime;
+            
+            return date.toLocaleString('zh-CN', {
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
+            }).replace(/\//g, '-');
+        } catch (e) {
+            return isoTime;
+        }
+    },
+
     // 将重置时间转换为倒计时格式 (自动适配时区)
     formatResetCountdown(isoTime) {
         if (!isoTime) return '无';
         try {
-            let timeStr = isoTime;
-            let resetDate;
-
-            // 如果是 MM-DD HH:mm 格式，补全当前年份并假定为 UTC
-            if (/^\d{1,2}-\d{1,2}\s\d{1,2}:\d{1,2}$/.test(timeStr)) {
-                const year = new Date().getUTCFullYear();
-                // 补全为 YYYY-MM-DDTHH:mm:ssZ (UTC)
-                timeStr = `${year}-${timeStr.replace(' ', 'T')}:00Z`;
-                resetDate = new Date(timeStr);
-            } else if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(timeStr)) {
-                // SQLite 格式补全
-                resetDate = new Date(timeStr.replace(' ', 'T') + 'Z');
-            } else {
-                resetDate = new Date(timeStr);
-            }
-
+            const resetDate = new Date(isoTime);
             if (isNaN(resetDate.getTime())) return '无';
             
             const now = new Date();
@@ -453,16 +457,21 @@ export const antigravityMethods = {
 
             if (diffMs <= 0) return '已重置';
 
-            const hours = Math.floor(diffMs / (1000 * 60 * 60));
-            const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+            const totalMinutes = Math.floor(diffMs / (1000 * 60));
+            const totalHours = Math.floor(totalMinutes / 60);
+            const remainMinutes = totalMinutes % 60;
 
-            if (hours > 24) {
-                const days = Math.floor(hours / 24);
-                const remainHours = hours % 24;
+            if (totalHours >= 24) {
+                const days = Math.floor(totalHours / 24);
+                const remainHours = totalHours % 24;
                 return `${days}天${remainHours}时`;
             }
 
-            return `${hours}时${minutes}分`;
+            if (totalHours > 0) {
+                return `${totalHours}时${remainMinutes}分`;
+            }
+            
+            return `${remainMinutes}分`;
         } catch (e) {
             return '无';
         }

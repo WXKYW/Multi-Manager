@@ -46,6 +46,7 @@
                 module === 'dns' ? 'dns-tab' : '',
                 module === 'openai' ? 'openai-tab' : '',
                 module === 'server' ? 'server-tab' : '',
+                module === 'self-h' ? 'self-h-tab' : '',
                 module === 'antigravity' ? 'antigravity-tab' : '',
                 module === 'gemini-cli' ? 'gemini-cli-tab' : ''
               ]" @click="handleTabSwitch(module)" :title="getModuleName(module)">
@@ -101,6 +102,7 @@
                   module === 'dns' ? 'dns-tab' : '',
                   module === 'openai' ? 'openai-tab' : '',
                   module === 'server' ? 'server-tab' : '',
+                  module === 'self-h' ? 'self-h-tab' : '',
                   module === 'antigravity' ? 'antigravity-tab' : '',
                   module === 'gemini-cli' ? 'gemini-cli-tab' : ''
                 ]" @click="handleTabSwitch(module)">
@@ -118,6 +120,7 @@
           <div id="template-antigravity"></div>
           <div id="template-gemini-cli"></div>
           <div id="template-server"></div>
+          <div id="template-self-h"></div>
         </div>
 
         <!-- 未登录占位符 -->
@@ -139,7 +142,7 @@
   <%- cdnScriptTags %>
 
     <!-- 模块化 JavaScript -->
-    <script type="module" src="/js/main.js"></script>
+    <script type="module" src="/js/main.js?v=1734793500"></script>
 </body>
 
 </html>

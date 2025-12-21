@@ -247,7 +247,7 @@
             <div v-if="group.resetTime"
               style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px; display: flex; align-items: center; gap: 4px;">
               <i class="far fa-clock"></i>
-              <span>重置: {{ group.resetTime }} <span style="opacity: 0.8;">({{
+              <span>重置: {{ formatDisplayDate(group.resetTime) }} <span style="opacity: 0.8;">({{
                   formatResetCountdown(group.resetTime)
                   }})</span></span>
             </div>
@@ -306,9 +306,13 @@
                         :style="{ color: getAgQuotaColor(model.remaining) }">{{ model.remaining }}%</span>
                     </div>
                   </td>
-                  <td style="text-align: center; font-size: 12px;">
-                    {{ model.resetTime }} <span style="opacity: 0.7; font-size: 0.9em;">({{
-                      formatResetCountdown(model.resetTime) }})</span>
+                  <td style="text-align: center; vertical-align: middle;">
+                    <div v-if="model.resetTime"
+                      style="font-size: 11px; color: var(--text-secondary); display: flex; flex-direction: column; align-items: center; gap: 2px;">
+                      <span style="font-weight: 500;">{{ formatDisplayDate(model.resetTime) }}</span>
+                      <span style="opacity: 0.7; font-size: 10px;">({{ formatResetCountdown(model.resetTime) }})</span>
+                    </div>
+                    <span v-else style="color: var(--text-tertiary); font-size: 11px;">无</span>
                   </td>
                   <td style="text-align: center;">
                     <label class="switch">

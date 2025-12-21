@@ -38,7 +38,7 @@ export const settingsMethods = {
           }
 
           // 应用模块设置 (过滤掉已废弃的模块)
-          const validModules = ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'server'];
+          const validModules = ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'self-h', 'server'];
           if (settings.moduleVisibility) {
             // 过滤掉不再支持的模块
             const filtered = {};
@@ -346,6 +346,7 @@ export const settingsMethods = {
       dns: 'CF DNS',
       openai: 'OpenAPI',
       server: 'Hosts',
+      'self-h': '自建服务',
       antigravity: 'Antigravity', 'gemini-cli': 'GCLI',
     };
     return names[module] || module;
@@ -358,6 +359,7 @@ export const settingsMethods = {
       dns: 'fa-globe',
       openai: 'fa-robot',
       server: 'fa-server',
+      'self-h': 'fa-house-laptop',
       antigravity: 'fa-atom',
       'gemini-cli': 'fa-terminal'
     };

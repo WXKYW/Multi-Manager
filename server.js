@@ -88,11 +88,13 @@ try {
 app.use(loggerMiddleware);
 app.use(corsMiddleware);
 app.use(express.json({ limit: '50mb' }));
-// 静态文件服务 - 优先服务 dist (生产构建)，否则 serving public (开发/旧版)
+// 静态文件服务 - 优先服务 dist (生产构建)，否则 serving src (开发模式)
 if (fs.existsSync(path.join(__dirname, 'dist'))) {
   app.use(express.static('dist'));
 } else {
+  // 按照 Vite 的逻辑，根目录资源在 public，源代码在 src
   app.use(express.static('public'));
+  app.use(express.static('src'));
 }
 
 // 文件上传中间件
@@ -106,6 +108,15 @@ app.use(fileUpload({
 // 注册所有路由
 // Fly.io module integrated - v4
 registerRoutes(app);
+
+// 调试路由：捕获异常的 POST /accounts 请求
+app.post('/accounts', (req, res) => {
+  logger.error('捕获到可疑的 POST /accounts 请求！');
+  logger.error('Headers: ' + JSON.stringify(req.headers));
+  logger.error('Body: ' + JSON.stringify(req.body));
+  res.status(404).json({ error: 'Route not found at root, please use /api/openlist/accounts' });
+});
+
 logger.success('所有系统路由及功能模块已就绪 (v4)');
 
 // Favicon 处理

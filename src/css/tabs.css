@@ -68,6 +68,18 @@
   color: var(--server-primary);
 }
 
+.main-tab.self-h-tab:hover {
+  color: var(--success-color);
+}
+
+.main-tab.self-h-tab.active {
+  color: var(--success-color);
+}
+
+.main-tab.self-h-tab::after {
+  background-color: var(--success-color);
+}
+
 .main-tab.antigravity-tab:hover {
   color: var(--ag-primary);
 }
@@ -158,6 +170,10 @@
 
 .main-tabs-sidebar .sidebar-tab.server-tab.active {
   color: var(--server-primary);
+}
+
+.main-tabs-sidebar .sidebar-tab.self-h-tab.active {
+  color: var(--success-color);
 }
 
 .main-tabs-sidebar .sidebar-tab.antigravity-tab.active {

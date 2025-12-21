@@ -819,16 +819,8 @@ async function listQuotas(accountId) {
             }
             const date = new Date(val);
             if (isNaN(date.getTime())) return null;
-            // 转换为北京时间显示格式 (MM-DD HH:mm) 匹配参考项目
-            // 明确指定时区，确保云端服务器也使用北京时间
-            return date.toLocaleString('zh-CN', {
-                timeZone: 'Asia/Shanghai',
-                hour12: false,
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit'
-            }).replace(/\//g, '-');
+            // 返回 ISO 字符串，由前端根据本地时区进行显示和倒计时计算
+            return date.toISOString();
         } catch (e) {
             return null;
         }

@@ -1,0 +1,146 @@
+<!-- ==================== 自建服务模块 (Self-H) ==================== -->
+<div v-show="mainActiveTab === 'self-h'" class="tab-content self-h-tab-content" :class="getTabAnimationClass('self-h')">
+  <!-- 子标签页导航 -->
+  <div class="sec-tabs">
+    <button class="tab-btn" :class="{ active: selfHCurrentTab === 'openlist' }" @click="selfHCurrentTab = 'openlist'">
+      <i class="fas fa-folder-tree"></i> OpenList
+    </button>
+  </div>
+
+  <!-- OpenList 内容区 -->
+  <div v-show="selfHCurrentTab === 'openlist'" class="sub-tab-content quick-fade-in">
+    <!-- OpenList 内部子导航 -->
+    <div class="inner-tabs" style="margin-bottom: 20px; display: flex; gap: 10px; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">
+        <button class="btn btn-sm" :class="openListSubTab === 'overview' ? 'btn-primary' : 'btn-secondary'" @click="openListSubTab = 'overview'">
+            <i class="fas fa-th-large"></i> 概览
+        </button>
+        <button class="btn btn-sm" :class="openListSubTab === 'files' ? 'btn-primary' : 'btn-secondary'" @click="openListSubTab = 'files'">
+            <i class="fas fa-file-alt"></i> 文件管理
+        </button>
+        <button class="btn btn-sm" :class="openListSubTab === 'offline' ? 'btn-primary' : 'btn-secondary'" @click="openListSubTab = 'offline'">
+            <i class="fas fa-download"></i> 离线下载
+        </button>
+        <button class="btn btn-sm" :class="openListSubTab === 'config' ? 'btn-primary' : 'btn-secondary'" @click="openListSubTab = 'config'" style="margin-left: auto;">
+            <i class="fas fa-cog"></i> 账号配置
+        </button>
+    </div>
+
+    <!-- 1. 概览面板 -->
+    <div v-if="openListSubTab === 'overview'" class="openlist-overview">
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value">{{ openListAccounts.length }}</div>
+                <div class="stat-label">连接实例</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ openListStats.onlineCount || 0 }}</div>
+                <div class="stat-label">在线实例</div>
+            </div>
+        </div>
+
+        <div class="panel" style="margin-top: 20px;">
+            <div class="panel-header">
+                <div class="panel-title">实例列表</div>
+            </div>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>状态</th>
+                            <th>名称</th>
+                            <th>地址</th>
+                            <th>版本</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="acc in openListAccounts" :key="acc.id">
+                            <td>
+                                <span class="ag-status-badge" :class="acc.status === 'online' ? 'ag-status-online' : 'ag-status-error'">
+                                    {{ acc.status === 'online' ? '在线' : '离线' }}
+                                </span>
+                            </td>
+                            <td><strong>{{ acc.name }}</strong></td>
+                            <td><code>{{ acc.api_url }}</code></td>
+                            <td>{{ acc.version || '-' }}</td>
+                            <td class="actions">
+                                <button class="btn btn-icon-refined" @click="testOpenListAccount(acc.id)" title="测试连接">
+                                    <i class="fas fa-sync-alt"></i>
+                                </button>
+                                <button class="btn btn-icon-refined" @click="selectOpenListAccount(acc)" title="管理文件">
+                                    <i class="fas fa-folder-open"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        <tr v-if="openListAccounts.length === 0">
+                            <td colspan="5" class="text-center" style="padding: 40px;">
+                                <p style="color: var(--text-tertiary);">暂无配置，请前往“账号配置”添加</p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. 文件管理 -->
+    <div v-if="openListSubTab === 'files'" class="openlist-files">
+        <div v-if="!currentOpenListAccount" class="empty-state">
+            <i class="fas fa-mouse-pointer"></i>
+            <p>请先在概览中选择一个实例进行管理</p>
+        </div>
+        <div v-else>
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title">
+                        <i class="fas fa-hdd"></i> {{ currentOpenListAccount.name }}
+                    </div>
+                </div>
+                <div class="file-browser-placeholder" style="height: 400px; display: flex; align-items: center; justify-content: center; background: var(--bg-secondary); border: 2px dashed var(--border-color); border-radius: 8px;">
+                    <div class="text-center">
+                        <i class="fas fa-tools" style="font-size: 48px; opacity: 0.3; margin-bottom: 15px;"></i>
+                        <p>文件浏览器开发中...</p>
+                        <p style="font-size: 12px; opacity: 0.5;">已对接后端代理路由 <code>/api/openlist/proxy/{{currentOpenListAccount.id}}/*</code></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. 离线下载 -->
+    <div v-if="openListSubTab === 'offline'" class="openlist-offline">
+        <div class="empty-state" style="padding: 40px; text-align: center;">
+            <i class="fas fa-download" style="font-size: 40px; opacity: 0.2; margin-bottom: 20px;"></i>
+            <p>离线下载管理模块开发中...</p>
+        </div>
+    </div>
+
+    <!-- 4. 账号配置 -->
+    <div v-if="openListSubTab === 'config'" class="openlist-config">
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title">添加 OpenList 实例</div>
+            </div>
+            <div style="padding: 20px;">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>实例名称</label>
+                        <input type="text" v-model="newOpenListAcc.name" class="form-input" placeholder="例如: 我的私有云">
+                    </div>
+                    <div class="form-group">
+                        <label>API 地址</label>
+                        <input type="text" v-model="newOpenListAcc.api_url" class="form-input" placeholder="https://pan.example.com">
+                    </div>
+                    <div class="form-group">
+                        <label>API Token</label>
+                        <input type="password" v-model="newOpenListAcc.api_token" class="form-input" placeholder="在 OpenList 后台生成的 Token">
+                    </div>
+                </div>
+                <button class="btn btn-primary" style="margin-top: 20px; width: 100%;" @click="doAddOpenListAccount">
+                    <i class="fas fa-plus"></i> 保存配置
+                </button>
+            </div>
+        </div>
+    </div>
+  </div>
+</div>

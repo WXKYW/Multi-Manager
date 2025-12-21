@@ -21,6 +21,7 @@ function loadUserSettings() {
       dns: true,
       openai: true,
       server: true,
+      'self-h': true,
       antigravity: true,
       'gemini-cli': true
     };
@@ -35,14 +36,27 @@ function loadUserSettings() {
       'gemini-cli': ''
     };
 
-    const order = settings.module_order || ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'server'];
+    const order = settings.module_order || ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'self-h', 'server'];
 
-    // 确保 gemini-cli 在现有设置中
+    // 确保 gemini-cli 和 self-h 在现有设置中
     if (!('gemini-cli' in visibility)) {
       visibility['gemini-cli'] = true;
     }
+    if (!('self-h' in visibility)) {
+      visibility['self-h'] = true;
+    }
+    
     if (!order.includes('gemini-cli')) {
       order.push('gemini-cli');
+    }
+    if (!order.includes('self-h')) {
+      // 插入到 server 之前，如果存在的话
+      const serverIdx = order.indexOf('server');
+      if (serverIdx !== -1) {
+        order.splice(serverIdx, 0, 'self-h');
+      } else {
+        order.push('self-h');
+      }
     }
 
     return {
@@ -108,6 +122,7 @@ function getDefaultSettings() {
       dns: true,
       openai: true,
       server: true,
+      'self-h': true,
       antigravity: true,
       'gemini-cli': true
     },
@@ -119,7 +134,7 @@ function getDefaultSettings() {
       antigravity: '',
       'gemini-cli': ''
     },
-    moduleOrder: ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'server'],
+    moduleOrder: ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'self-h', 'server'],
     load_balancing_strategy: 'random',
     serverIpDisplayMode: 'normal',
     navLayout: 'top'

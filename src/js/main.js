@@ -48,6 +48,7 @@ import { renderMarkdown } from './modules/utils.js';
 import { paasMethods } from './modules/paas.js';
 import { koyebMethods } from './modules/koyeb.js';
 import { flyMethods } from './modules/fly.js';
+import { selfHMethods } from './modules/self-h.js';
 import { dnsMethods } from './modules/dns.js';
 import { r2Methods } from './modules/r2.js';
 import { openaiMethods } from './modules/openai.js';
@@ -345,6 +346,14 @@ const app = createApp({
       },
       logSettingsSaving: false,
       logLimitsEnforcing: false,
+
+      // Self-H (Self-Hosted) module state
+      selfHCurrentTab: 'openlist',
+      openListSubTab: 'overview',
+      openListAccounts: [],
+      openListStats: { onlineCount: 0 },
+      currentOpenListAccount: null,
+      newOpenListAcc: { name: '', api_url: '', api_token: '' },
 
       // CDN 配置状态 (构建时注入)
       cdnEnabled: typeof __USE_CDN__ !== 'undefined' ? __USE_CDN__ : false,
@@ -815,6 +824,9 @@ const app = createApp({
                   this.loadServerList();
                 }
                 break;
+              case 'self-h':
+                this.loadOpenListAccounts();
+                break;
               case 'antigravity':
                 if (this.antigravityCurrentTab === 'quotas') {
                   if (this.loadAntigravityQuotas) this.loadAntigravityQuotas();
@@ -868,6 +880,9 @@ const app = createApp({
               // 优先加载缓存，然后后台刷新
               this.loadFromOpenaiCache();
               this.loadOpenaiEndpoints(true);
+              break;
+            case 'self-h':
+              this.loadOpenListAccounts();
               break;
             case 'server':
               this.loadServerList();
@@ -3111,6 +3126,7 @@ const app = createApp({
     ...paasMethods,
     ...koyebMethods,
     ...flyMethods,
+    ...selfHMethods,
     ...dnsMethods,
     ...r2Methods,
     ...openaiMethods,
