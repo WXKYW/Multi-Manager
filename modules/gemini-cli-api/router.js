@@ -144,13 +144,13 @@ function getAvailableModels(prefix) {
 
                 // 2.2 添加假流式变体
                 if (config.fakeStream) {
-                    const id2 = prefix + '假流式/' + variantId;
+                    const id2 = prefix + '假流/' + variantId;
                     if (!disabledModels.includes(id2)) models.push(createModelObject(id2));
                 }
 
                 // 2.3 添加抗截断变体
                 if (config.antiTrunc) {
-                    const id3 = prefix + '流式抗截断/' + variantId;
+                    const id3 = prefix + '流抗/' + variantId;
                     if (!disabledModels.includes(id3)) models.push(createModelObject(id3));
                 }
             });
@@ -158,11 +158,11 @@ function getAvailableModels(prefix) {
             // 如果没有任何基础变体（base/maxThinking/noThinking 都为 false），
             // 但有功能性开关开启，则直接生成功能性变体
             if (config.fakeStream) {
-                const id = prefix + '假流式/' + baseModelId;
+                const id = prefix + '假流/' + baseModelId;
                 if (!disabledModels.includes(id)) models.push(createModelObject(id));
             }
             if (config.antiTrunc) {
-                const id = prefix + '流式抗截断/' + baseModelId;
+                const id = prefix + '流抗/' + baseModelId;
                 if (!disabledModels.includes(id)) models.push(createModelObject(id));
             }
         }
@@ -646,7 +646,7 @@ router.post('/settings', async (req, res) => {
 router.get('/stats', async (req, res) => {
     try {
         const accounts = await storage.getAccounts();
-        const logs = await storage.getLogs(10, 0);
+        const logs = storage.getRecentLogs(10);
 
         // 简单统计过去 24 小时调用量 (这里为了演示简单处理)
         const stats = {

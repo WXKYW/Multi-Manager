@@ -1037,9 +1037,9 @@ export const zeaburMethods = {
 
     // 检查账号是否展开
     isAccountExpanded(accountName) {
-      // 如果没有设置过，默认为展开状态
+      // 如果没有设置过，默认为展开状态（手机端默认折叠）
       if (!(accountName in this.expandedAccounts)) {
-        return true;
+        return window.innerWidth > 768;
       }
       return this.expandedAccounts[accountName];
     },

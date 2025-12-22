@@ -1,97 +1,31 @@
 <!-- ==================== PaaS 管理部分 ==================== -->
-<div v-show="mainActiveTab === 'paas'" class="tab-content paas-tab-content theme-paas" :class="getTabAnimationClass('paas')">
+<div v-if="mainActiveTab === 'paas'" class="tab-content paas-tab-content theme-paas" :class="getTabAnimationClass('paas')">
   <!-- PaaS 子标签页 -->
-  <div class="sec-tabs paas-sec-tabs" style="display: flex; align-items: center; justify-content: space-between;">
-    <button class="tab-btn" :class="{ active: paasCurrentTab === 'zeabur' }"
-      @click="paasCurrentTab = 'zeabur'; paasCurrentPlatform = 'zeabur'">
-      <i class="fas fa-rocket"></i> Zeabur
-    </button>
-    <button class="tab-btn" :class="{ active: paasCurrentTab === 'koyeb' }"
-      @click="paasCurrentTab = 'koyeb'; paasCurrentPlatform = 'koyeb'">
-      <i class="fas fa-cube"></i> Koyeb
-    </button>
-    <button class="tab-btn" :class="{ active: paasCurrentTab === 'fly' }"
-      @click="paasCurrentTab = 'fly'; paasCurrentPlatform = 'fly'">
-      <i class="fas fa-paper-plane"></i> Fly.io
-    </button>
-    <button class="tab-btn" :class="{ active: paasCurrentTab === 'accounts' }" @click="paasCurrentTab = 'accounts'">
-      <i class="fas fa-users"></i> 账号管理
-    </button>
-    <button class="tab-btn" :class="{ active: paasCurrentTab === 'settings' }" @click="paasCurrentTab = 'settings'">
-      <i class="fas fa-cog"></i> 模块配置
-    </button>
-
-    <!-- 弹性占位符，将后续元素推向右侧 -->
-    <div style="flex: 1;"></div>
-
-    <!-- 嵌入式刷新控制条 -->
-    <div v-if="paasCurrentTab === 'zeabur' || paasCurrentTab === 'koyeb' || paasCurrentTab === 'fly'"
-      class="integrated-control-bar"
-      style="display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,0.03); padding: 3px 10px; border-radius: 20px; border: 1px solid var(--border-color); box-shadow: inset 0 1px 3px rgba(0,0,0,0.05); transform: scale(0.95); transform-origin: right;">
-
-      <!-- Zeabur 版逻辑 -->
-      <template v-if="paasCurrentTab === 'zeabur'">
-        <button class="btn-icon-mini" @click="toggleDataRefresh" :data-tooltip="dataRefreshPaused ? '继续更新' : '暂停更新'"
-          style="border: none; background: transparent; cursor: pointer; color: var(--text-secondary); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;">
-          <i class="fas" :class="dataRefreshPaused ? 'fa-play' : 'fa-pause'" style="font-size: 10px;"
-            :style="{ color: dataRefreshPaused ? 'var(--success-color)' : 'inherit' }"></i>
-        </button>
-        <div style="width: 1px; height: 12px; background: var(--border-color); opacity: 0.5;"></div>
-        <div class="refresh-clickable-area" @click="fetchData(true)" data-tooltip="点击强制刷新"
-          style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-          <span style="font-family: var(--font-mono); font-size: 11px; min-width: 25px; opacity: 0.8;">{{ loading ?
-            '...' : refreshCountdown + 's' }}</span>
-          <div style="width: 60px; height: 4px; background: rgba(0,0,0,0.05); border-radius: 2px; overflow: hidden;">
-            <div
-              :style="{ width: refreshProgress + '%', background: dataRefreshPaused ? '#999' : 'var(--zeabur-primary)' }"
-              style="height: 100%; transition: width 1s linear;"></div>
-          </div>
-          <i class="fas fa-sync-alt" :class="{'fa-spin': loading}" style="font-size: 10px; opacity: 0.4;"></i>
-        </div>
-      </template>
-
-      <!-- Koyeb 版逻辑 -->
-      <template v-else-if="paasCurrentTab === 'koyeb'">
-        <button class="btn-icon-mini" @click="toggleKoyebDataRefresh"
-          :data-tooltip="koyebDataRefreshPaused ? '继续更新' : '暂停更新'"
-          style="border: none; background: transparent; cursor: pointer; color: var(--text-secondary); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;">
-          <i class="fas" :class="koyebDataRefreshPaused ? 'fa-play' : 'fa-pause'" style="font-size: 10px;"
-            :style="{ color: koyebDataRefreshPaused ? 'var(--success-color)' : 'inherit' }"></i>
-        </button>
-        <div style="width: 1px; height: 12px; background: var(--border-color); opacity: 0.5;"></div>
-        <div class="refresh-clickable-area" @click="loadKoyebData(true)" data-tooltip="点击强制刷新"
-          style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-          <span style="font-family: var(--font-mono); font-size: 11px; min-width: 25px; opacity: 0.8;">{{
-            koyebRefreshing ? '...' : koyebRefreshCountdown + 's' }}</span>
-          <div style="width: 60px; height: 4px; background: rgba(0,0,0,0.05); border-radius: 2px; overflow: hidden;">
-            <div :style="{ width: koyebRefreshProgress + '%', background: koyebDataRefreshPaused ? '#999' : '#4f46e5' }"
-              style="height: 100%; transition: width 1s linear;"></div>
-          </div>
-          <i class="fas fa-sync-alt" :class="{'fa-spin': koyebRefreshing}" style="font-size: 10px; opacity: 0.4;"></i>
-        </div>
-      </template>
-
-      <!-- Fly.io 版逻辑 -->
-      <template v-else-if="paasCurrentTab === 'fly'">
-        <button class="btn-icon-mini" @click="toggleFlyDataRefresh"
-          :data-tooltip="flyDataRefreshPaused ? '继续更新' : '暂停更新'"
-          style="border: none; background: transparent; cursor: pointer; color: var(--text-secondary); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;">
-          <i class="fas" :class="flyDataRefreshPaused ? 'fa-play' : 'fa-pause'" style="font-size: 10px;"
-            :style="{ color: flyDataRefreshPaused ? 'var(--success-color)' : 'inherit' }"></i>
-        </button>
-        <div style="width: 1px; height: 12px; background: var(--border-color); opacity: 0.5;"></div>
-        <div class="refresh-clickable-area" @click="loadFlyData(true)" data-tooltip="点击强制刷新"
-          style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-          <span style="font-family: var(--font-mono); font-size: 11px; min-width: 25px; opacity: 0.8;">{{ flyRefreshing
-            ? '...' : flyRefreshCountdown + 's' }}</span>
-          <div style="width: 60px; height: 4px; background: rgba(0,0,0,0.05); border-radius: 2px; overflow: hidden;">
-            <div :style="{ width: flyRefreshProgress + '%', background: flyDataRefreshPaused ? '#999' : '#8b5cf6' }"
-              style="height: 100%; transition: width 1s linear;"></div>
-          </div>
-          <i class="fas fa-sync-alt" :class="{'fa-spin': flyRefreshing}" style="font-size: 10px; opacity: 0.4;"></i>
-        </div>
-      </template>
+  <div class="sec-tabs paas-sec-tabs">
+    <div class="paas-tabs-scroll-wrapper">
+      <button class="tab-btn" :class="{ active: paasCurrentTab === 'zeabur' }"
+        @click="paasCurrentTab = 'zeabur'; paasCurrentPlatform = 'zeabur'">
+        <i class="fas fa-rocket"></i> Zeabur
+      </button>
+      <button class="tab-btn" :class="{ active: paasCurrentTab === 'koyeb' }"
+        @click="paasCurrentTab = 'koyeb'; paasCurrentPlatform = 'koyeb'">
+        <i class="fas fa-cube"></i> Koyeb
+      </button>
+      <button class="tab-btn" :class="{ active: paasCurrentTab === 'fly' }"
+        @click="paasCurrentTab = 'fly'; paasCurrentPlatform = 'fly'">
+        <i class="fas fa-paper-plane"></i> Fly.io
+      </button>
+      <button class="tab-btn" :class="{ active: paasCurrentTab === 'accounts' }" @click="paasCurrentTab = 'accounts'">
+        <i class="fas fa-users"></i> 账号管理
+      </button>
+      <button class="tab-btn" :class="{ active: paasCurrentTab === 'settings' }" @click="paasCurrentTab = 'settings'">
+        <i class="fas fa-cog"></i> 模块配置
+      </button>
     </div>
+
+    <!-- 弹性占位符 -->
+    <div class="paas-tabs-spacer"></div>
+
   </div>
 
   <!-- ========== Zeabur 服务监控 ========== -->

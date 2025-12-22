@@ -823,12 +823,12 @@ router.post('/v1/chat/completions', requireApiAuth, async (req, res) => {
 
         // 记录功能性前缀，用于验证时使用
         let funcPrefix = '';
-        if (rawModel.startsWith('假流式/')) {
-            funcPrefix = '假流式/';
-            rawModel = rawModel.substring(4);
-        } else if (rawModel.startsWith('流式抗截断/')) {
-            funcPrefix = '流式抗截断/';
-            rawModel = rawModel.substring(6);
+        if (rawModel.startsWith('假流/')) {
+            funcPrefix = '假流/';
+            rawModel = rawModel.substring(3);
+        } else if (rawModel.startsWith('流抗/')) {
+            funcPrefix = '流抗/';
+            rawModel = rawModel.substring(3);
         }
         model = rawModel;
 

@@ -1,0 +1,414 @@
+/* ==================== SSH 终端现代化设计 ==================== */
+
+/* SSH 终端子页面容器 - 简洁设计 */
+.ssh-terminal-sub-page {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    height: calc(100vh - 215px) !important;
+    min-height: 400px;
+    padding: 0;
+    animation: ssh-view-fade 0.4s ease-out;
+    background: transparent;
+    overflow: hidden;
+}
+
+@keyframes ssh-view-fade {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* 主容器 - 简洁框架 */
+
+.ssh-ide-layout {
+
+    display: flex;
+
+    flex-direction: column;
+
+    width: 100%;
+
+    max-width: 1400px;
+
+    height: 100%;
+
+    min-height: 0;
+
+    max-height: none;
+
+    background: var(--card-bg); /* 使用卡片背景色 */
+
+    border-radius: 16px;
+
+    overflow: hidden;
+
+    border: 2px solid rgba(var(--current-rgb, var(--primary-rgb)), 0.5); /* 使用动态模块主题色 */
+
+    position: relative;
+
+    z-index: 1;
+
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+}
+
+
+
+/* 全屏状态样式 */
+
+.ssh-ide-layout.fullscreen {
+
+    position: fixed;
+
+    top: 0;
+
+    left: 0;
+
+    width: 100vw !important;
+
+    height: 100vh !important;
+
+    max-width: none !important;
+
+    border-radius: 0;
+
+    z-index: 9999;
+
+    border: none;
+
+}
+
+
+
+@keyframes ssh-frame-entrance {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+/* 顶部工具栏 */
+.ssh-top-bar {
+    display: flex;
+    /* align-items: center; */
+    justify-content: space-between;
+    height: 52px;
+    min-height: 52px;
+    background: var(--bg-secondary);
+    /* 使用二级背景色 */
+    border-bottom: 1px solid var(--border-color);
+    padding: 0 16px;
+    flex-shrink: 0;
+    z-index: 100;
+    position: relative;
+}
+
+/* 工具栏底部高光线 */
+.ssh-top-bar::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 20px;
+    right: 20px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent 0%, rgba(56, 139, 253, 0.2) 50%, transparent 100%);
+    opacity: 0.5;
+    /* 降低透明度适应浅色模式 */
+}
+
+/* 会话标签容器 */
+.ssh-session-tabs {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    overflow-x: auto;
+    padding: 0;
+    scrollbar-width: none;
+}
+
+.ssh-session-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+/* 会话标签 */
+
+.ssh-session-tab {
+
+    display: flex;
+
+    align-items: center;
+
+    gap: 8px;
+
+    padding: 0 14px;
+
+    height: 34px;
+
+    background: rgba(var(--primary-rgb), 0.02); /* 更浅的背景 */
+
+    border: 1px solid var(--border-color);
+
+    border-radius: 10px;
+
+    color: var(--text-secondary);
+
+    font-size: 12px;
+
+    cursor: pointer;
+
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+
+    white-space: nowrap;
+
+    max-width: 180px;
+
+    position: relative;
+
+    overflow: hidden;
+
+}
+
+.ssh-session-tab::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(var(--primary-rgb), 0.05) 0%, transparent 50%);
+    opacity: 0;
+    transition: opacity 0.25s;
+}
+
+.ssh-session-tab:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-color: var(--primary-color);
+    transform: translateY(-1px);
+}
+
+.ssh-session-tab:hover::before {
+    opacity: 1;
+}
+
+.ssh-session-tab.active {
+    background: var(--bg-tertiary);
+    color: var(--primary-color);
+    border-color: var(--primary-color);
+    box-shadow: none;
+}
+
+.ssh-session-tab.active::before {
+    opacity: 1;
+}
+
+.ssh-tab-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 600;
+}
+
+.ssh-tab-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    opacity: 0.3;
+    transition: all 0.2s;
+    font-size: 9px;
+    color: var(--text-secondary);
+}
+
+.ssh-session-tab:hover .ssh-tab-close {
+    opacity: 0.6;
+}
+
+.ssh-tab-close:hover {
+    opacity: 1 !important;
+    background: rgba(248, 81, 73, 0.15);
+    color: #f85149;
+}
+
+.ssh-add-tab {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: var(--bg-primary);
+    border: 1px dashed var(--border-color);
+    border-radius: 50%;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    transition: all 0.3s;
+    flex-shrink: 0;
+}
+
+.ssh-add-tab:hover {
+    background: rgba(var(--primary-rgb), 0.1);
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+    border-style: solid;
+}
+
+/* 操作按钮 */
+.ssh-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: 15px;
+}
+
+.ssh-connection-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px;
+    background: var(--bg-primary);
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+}
+
+.ssh-status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-tertiary);
+}
+
+.ssh-status-dot.connected {
+    background: #3fb950;
+    box-shadow: 0 0 8px rgba(63, 185, 80, 0.4);
+}
+
+.ssh-host-info {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-tertiary);
+}
+
+.ssh-icon-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.ssh-icon-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    transform: translateY(-1px);
+}
+
+/* 终端区域 */
+.ssh-terminal-wrapper {
+    flex: 1;
+    overflow: hidden;
+    background: var(--bg-primary);
+    /* 使用背景色变量 */
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: 0;
+}
+
+.ssh-terminal-instance {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--bg-primary);
+    /* 使用背景色变量 */
+}
+
+/* 修复：强制终端挂载点填满容器 */
+.ssh-terminal-instance>div {
+    width: 100%;
+    height: 100%;
+}
+
+/* 强制 xterm 容器填满父容器 */
+.ssh-terminal-instance .terminal.xterm {
+    height: 100% !important;
+    padding: 10px 0 0 10px !important;
+}
+
+.ssh-terminal-instance .xterm-screen {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.ssh-terminal-instance .xterm-screen canvas {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.ssh-terminal-instance .xterm-viewport {
+    background-color: var(--bg-primary) !important;
+    /* 使用背景色变量 */
+    width: 100% !important;
+}
+
+.xterm-viewport::-webkit-scrollbar {
+    display: none !important;
+}
+
+/* 欢迎页 */
+.ssh-welcome-screen {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+}
+
+.ssh-welcome-icon {
+    font-size: 60px;
+    color: #58a6ff;
+    opacity: 0.15;
+}
+
+.ssh-welcome-text {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.3);
+}
+
+/* 响应式适配 */
+@media (max-width: 768px) {
+    .ssh-terminal-sub-page {
+        /* padding: 10px 5px; */
+    }
+
+    .ssh-ide-layout {
+        height: 55vh;
+        border-radius: 16px;
+    }
+
+    .ssh-top-bar {
+        padding: 0 12px;
+    }
+
+    .ssh-host-info {
+        display: none;
+    }
+}

@@ -1,9 +1,9 @@
 <!-- ==================== 主机管理部分 ==================== -->
-<div v-show="mainActiveTab === 'server'" class="tab-content server-tab-content theme-server" :class="getTabAnimationClass('server')">
+<div v-if="mainActiveTab === 'server'" class="tab-content server-tab-content theme-server"
+  :class="[getTabAnimationClass('server')]">
   <!-- 主机子标签页 -->
-  <div class="sec-tabs server-sec-tabs"
-    style="display: flex; justify-content: space-between; align-items: center; padding-right: 15px;">
-    <div style="display: flex; gap: 5px;">
+  <div class="sec-tabs server-sec-tabs">
+    <div class="server-tabs-scroll-wrapper">
       <button class="tab-btn" :class="{ active: serverCurrentTab === 'list' }" @click="serverCurrentTab = 'list'">
         <i class="fas fa-server"></i> 主机列表
       </button>
@@ -11,47 +11,53 @@
         @click="serverCurrentTab = 'management'">
         <i class="fas fa-cog"></i> 后台管理
       </button>
-      <!-- 动态SSH终端标签页 -->
-      <template v-for="session in sshSessions" :key="session.id">
-        <button class="tab-btn ssh-session-tab" :class="{ active: serverCurrentTab === 'ssh_' + session.id }"
-          @click="switchToSSHTab(session.id)" @dblclick.stop="closeSSHSession(session.id)">
-          <i class="fas fa-terminal"></i>
-          <span>{{ session.server.name }}</span>
+      <button class="tab-btn" :class="{ active: serverCurrentTab === 'terminal' }"
+        @click="serverCurrentTab = 'terminal'" v-if="sshSessions.length > 0">
+        <i class="fas fa-terminal"></i> SSH 终端
+        <span class="badge" v-if="sshSessions.length > 0"
+          style="background: var(--server-primary); color: white; padding: 1px 6px; border-radius: 10px; font-size: 10px; margin-left: 6px;">{{
+          sshSessions.length }}</span>
+      </button>
+
+      <!-- SSH 快速连接下拉按钮 -->
+      <div class="ssh-quick-connect-wrapper" style="position: relative;">
+        <button class="ssh-quick-connect-btn" @click="showSSHQuickMenu = !showSSHQuickMenu" title="快速连接">
+          <i class="fas fa-plus"></i>
         </button>
-      </template>
-      <!-- 新建SSH终端按钮 -->
-      <button class="tab-btn ssh-add-tab" @click="showAddSessionModal" title="新建SSH终端" v-if="serverList.length > 0">
-        <i class="fas fa-plus"></i>
-      </button>
-    </div>
 
-    <!-- 嵌入式主机监测控制条 (仅在列表页显示) -->
-    <div v-if="serverCurrentTab === 'list'" class="integrated-control-bar"
-      style="display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,0.03); padding: 3px 10px; border-radius: 20px; border: 1px solid var(--border-color); box-shadow: inset 0 1px 3px rgba(0,0,0,0.05); transform: scale(0.95); transform-origin: right;">
-
-      <button class="btn-icon-mini"
-        @click="serverPollingEnabled = !serverPollingEnabled; serverPollingEnabled ? startServerPolling() : stopServerPolling()"
-        :data-tooltip="serverPollingEnabled ? '暂停自动监测' : '开启自动监测'"
-        style="border: none; background: transparent; cursor: pointer; color: var(--text-secondary); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;">
-        <i class="fas" :class="serverPollingEnabled ? 'fa-pause' : 'fa-play'" style="font-size: 10px;"
-          :style="{ color: !serverPollingEnabled ? 'var(--warning-color)' : 'inherit' }"></i>
-      </button>
-
-      <div style="width: 1px; height: 12px; background: var(--border-color); opacity: 0.5;"></div>
-
-      <div class="refresh-clickable-area" @click="loadServerList" data-tooltip="立即刷新主机状态"
-        style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-        <span style="font-family: var(--font-mono); font-size: 11px; min-width: 25px; opacity: 0.8;">{{ serverLoading ?
-          '...' : serverRefreshCountdown + 's' }}</span>
-        <div style="width: 60px; height: 4px; background: rgba(0,0,0,0.05); border-radius: 2px; overflow: hidden;">
-          <div
-            :style="{ width: serverRefreshProgress + '%', background: !serverPollingEnabled ? '#999' : 'var(--primary-color)' }"
-            style="height: 100%; transition: width 1s linear;"></div>
-        </div>
-        <i class="fas fa-sync-alt" :class="{'fa-spin': serverLoading}" style="font-size: 10px; opacity: 0.4;"></i>
+        <!-- 下拉菜单 -->
+        <transition name="dropdown-fade">
+          <div v-if="showSSHQuickMenu" class="ssh-quick-menu">
+            <div class="ssh-quick-menu-header">
+              <i class="fas fa-terminal"></i>
+              选择主机
+            </div>
+            <div class="ssh-quick-menu-list">
+              <div v-for="server in serverList" :key="'ssh-quick-' + server.id"
+                @click="openSSHTerminal(server); showSSHQuickMenu = false" class="ssh-quick-item">
+                <div :class="['server-status-indicator', server.status || 'unknown']"></div>
+                <div class="ssh-quick-item-info">
+                  <div class="ssh-quick-item-name">{{ server.name }}</div>
+                  <div class="ssh-quick-item-host">{{ server.username }}@{{ server.host }}</div>
+                </div>
+                <i class="fas fa-arrow-right"></i>
+              </div>
+              <div v-if="serverList.length === 0" class="ssh-quick-empty">
+                <i class="fas fa-server"></i>
+                暂无主机
+              </div>
+            </div>
+          </div>
+        </transition>
       </div>
     </div>
   </div>
+
+  <!-- 点击其他区域关闭下拉菜单 (带淡入淡出) -->
+  <transition name="fade">
+    <div v-if="showSSHQuickMenu" @click="showSSHQuickMenu = false"
+      style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 999;"></div>
+  </transition>
 
   <!-- 主机列表标签页 -->
   <div v-show="serverCurrentTab === 'list'" class="sub-tab-content quick-fade-in">
@@ -380,6 +386,10 @@
               </td>
               <td class="actions text-center">
                 <div class="flex-cell">
+                  <button class="btn btn-icon-refined" @click="openSSHTerminal(server)" title="SSH 连接"
+                    style="color: var(--server-primary);">
+                    <i class="fas fa-terminal"></i>
+                  </button>
                   <button class="btn btn-icon-refined" @click="openEditServerModal(server.id)" title="编辑主机">
                     <i class="fas fa-edit"></i>
                   </button>
@@ -502,36 +512,76 @@ Web服务器,192.168.1.100,22,root,password123
     </div>
   </div>
 
-  <!-- SSH 终端子标签页内容 - 使用v-show保持连接 -->
-  <template v-for="session in sshSessions" :key="'content-' + session.id">
-    <div v-show="serverCurrentTab === 'ssh_' + session.id" class="sub-tab-content ssh-tab-content">
-      <!-- 使用 panel 布局 -->
-      <div class="panel">
-        <div class="panel-header">
-          <div class="panel-title"><i class="fas fa-terminal"
-              style="margin-right: 8px; color: var(--server-primary);"></i>SSH 终端 - {{ session.server.name }}</div>
-          <div style="display: flex; gap: 8px;">
-            <button class="btn btn-danger" style="padding: 6px 12px;" @click="closeSSHSession(session.id)" title="关闭会话">
+  <!-- SSH 终端布局 - 嵌入式设计 -->
+  <div v-show="serverCurrentTab === 'terminal'" class="sub-tab-content ssh-terminal-sub-page">
+    <div class="ssh-ide-layout" :class="{ fullscreen: sshIdeFullscreen }">
+      <!-- 顶部工具栏 -->
+      <div class="ssh-top-bar">
+        <!-- 会话标签 -->
+        <div class="ssh-session-tabs">
+          <div v-for="session in sshSessions" :key="session.id" class="ssh-session-tab"
+            :class="{ active: activeSSHSessionId === session.id }" 
+            @click="switchToSSHTab(session.id)"
+            @dblclick="closeSSHSession(session.id)"
+            @mousedown.middle.stop="closeSSHSession(session.id)">
+            <i class="fas fa-terminal"></i>
+            <span class="ssh-tab-name">{{ session.server.name }}</span>
+            <div class="ssh-tab-close" @click.stop="closeSSHSession(session.id)" title="关闭">
               <i class="fas fa-times"></i>
-            </button>
-            <button class="btn btn-secondary" style="padding: 6px 12px;" @click="reconnectSSHSession(session.id)"
-              title="重新连接">
-              <!-- :disabled="session.connected"  -->
-              <i class="fas fa-sync-alt"></i>
-            </button>
+            </div>
           </div>
         </div>
 
-        <!-- 内容容器 -->
-        <div class="ssh-content-wrapper">
-          <!-- 终端视图 -->
-          <div class="ssh-terminal-container">
-            <div :id="'ssh-terminal-' + session.id" class="ssh-terminal-pane-embedded"></div>
+        <!-- 操作按钮 -->
+        <div class="ssh-header-actions" v-if="currentSSHSession">
+          <div class="ssh-connection-info">
+            <div class="ssh-status-dot" :class="currentSSHSession.connected ? 'connected' : 'disconnected'"></div>
+            <span class="ssh-host-info">
+              {{ currentSSHSession.server.username }}
+            </span>
           </div>
+          <button class="ssh-icon-btn" @click="reconnectSSHSession(currentSSHSession.id)" title="重新连接">
+            <i class="fas fa-sync-alt"></i>
+          </button>
+          <button class="ssh-icon-btn" @click="toggleSSHTerminalFullscreen" :title="sshIdeFullscreen ? '退出全屏' : '全屏显示'">
+            <i class="fas" :class="sshIdeFullscreen ? 'fa-compress-arrows-alt' : 'fa-expand-arrows-alt'"></i>
+          </button>
+          <button class="ssh-icon-btn" @click="serverCurrentTab = 'list'" title="返回列表">
+            <i class="fas fa-arrow-left"></i>
+          </button>
+          <button class="ssh-icon-btn danger" @click="closeSSHSession(currentSSHSession.id)" title="断开并关闭">
+            <i class="fas fa-power-off"></i>
+          </button>
+        </div>
+        <!-- 无会话时的退出按钮 -->
+        <div class="ssh-header-actions" v-else>
+          <button class="ssh-icon-btn" @click="serverCurrentTab = 'list'" title="退出终端">
+            <i class="fas fa-times"></i>
+          </button>
         </div>
       </div>
+
+      <!-- 终端区域 -->
+      <div class="ssh-terminal-wrapper" v-if="sshSessions.length > 0">
+        <template v-for="session in sshSessions" :key="'term-' + session.id">
+          <div v-show="activeSSHSessionId === session.id" class="ssh-terminal-instance">
+            <div :id="'ssh-terminal-' + session.id"></div>
+          </div>
+        </template>
+      </div>
+
+      <!-- 空状态欢迎页 -->
+      <div v-else class="ssh-welcome-screen">
+        <div class="ssh-welcome-icon">
+          <i class="fas fa-terminal"></i>
+        </div>
+        <div class="ssh-welcome-text">选择一个会话或新建连接</div>
+        <button class="btn btn-primary" @click="showAddSessionModal">
+          <i class="fas fa-plus"></i> 新建会话
+        </button>
+      </div>
     </div>
-  </template>
+  </div> <!-- 关闭 ssh-terminal-sub-page -->
 
 </div>
 <!-- ==================== 主机管理部分结束 ==================== -->

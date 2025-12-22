@@ -19,7 +19,7 @@
   <!-- DNS 记录标签页 -->
   <div v-if="dnsCurrentTab === 'dns'" class="sub-tab-content quick-fade-in">
     <!-- 账号选择 - 卡片式 -->
-    <div style="margin-bottom: 16px;">
+    <div style="margin-bottom: 16px;" v-if="dnsAccounts.length > 1">
       <div class="zones-grid">
         <div v-for="acc in dnsAccounts" :key="acc.id" class="zone-card"
           :class="{ active: dnsSelectedAccountId === acc.id }" @click="selectDnsAccount(acc)">
@@ -48,6 +48,10 @@
       </button>
       <button v-if="dnsSelectedZoneId" class="btn btn-danger" style="padding: 6px 12px;" @click="deleteZone">
         <i class="fas fa-trash"></i> 删除域名
+      </button>
+      <button v-if="dnsSelectedZoneId" class="btn btn-secondary" style="padding: 6px 12px;"
+        @click="showSslModal = true">
+        <i class="fas fa-shield-alt"></i> SSL: {{ formatSslMode(dnsSelectedZoneSsl?.mode) }}
       </button>
     </div>
 
@@ -88,69 +92,6 @@
       <button class="btn btn-cf" style="padding: 6px 12px;" @click="dnsQuickSwitch" :disabled="dnsSwitching">
         {{ dnsSwitching ? '切换中...' : '切换' }}
       </button>
-    </div>
-
-    <!-- SSL/TLS 状态卡片 -->
-    <div v-if="dnsSelectedZoneId && dnsSelectedZoneSsl" class="ssl-status-card quick-fade-in">
-      <div class="ssl-header">
-        <div class="ssl-title">
-          <i class="fas fa-lock"></i>
-          <h3>SSL/TLS 证书</h3>
-        </div>
-        <div v-if="dnsLoadingSsl" class="ssl-loading">
-          <i class="fas fa-spinner fa-spin"></i>
-        </div>
-      </div>
-
-      <div class="ssl-body">
-        <!-- SSL模式选择 -->
-        <div class="ssl-row">
-          <span class="ssl-label">
-            <i class="fas fa-shield-alt"></i>
-            SSL模式:
-          </span>
-          <div class="ssl-mode-selector">
-            <select :value="dnsSelectedZoneSsl.mode" @change="updateSslMode($event.target.value)"
-              :disabled="dnsLoadingSsl" class="ssl-mode-select">
-              <option value="off">Off (关闭)</option>
-              <option value="flexible">Flexible (灵活)</option>
-              <option value="full">Full (完全)</option>
-              <option value="strict">Full (strict)</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- 证书信息 -->
-        <div v-if="dnsSelectedZoneSsl.certificates && dnsSelectedZoneSsl.certificates.length > 0">
-          <div v-for="cert in dnsSelectedZoneSsl.certificates.filter(c => c.primary)" :key="cert.id"
-            class="ssl-cert-info">
-            <div class="ssl-row">
-              <span class="ssl-label">
-                <i class="fas fa-certificate"></i>
-                证书类型:
-              </span>
-              <span class="ssl-value ssl-cert-type">{{ cert.type || 'Universal' }}</span>
-            </div>
-            <div class="ssl-row">
-              <span class="ssl-label">
-                <i class="fas fa-check-circle"></i>
-                状态:
-              </span>
-              <span class="ssl-status" :class="'status-' + (cert.status || 'active').toLowerCase()">
-                <i class="fas" :class="cert.status === 'active' ? 'fa-check' : 'fa-clock'"></i>
-                {{ cert.status || 'Active' }}
-              </span>
-            </div>
-            <div class="ssl-row" v-if="cert.validityDays">
-              <span class="ssl-label">
-                <i class="fas fa-calendar-alt"></i>
-                有效期:
-              </span>
-              <span class="ssl-value">还剩 {{ cert.validityDays }} 天</span>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- Analytics 仪表板（暂时隐藏，待完善） -->
@@ -212,12 +153,12 @@
       <div class="panel-header">
         <div class="panel-title"><i class="fas fa-list-alt" style="margin-right: 8px; color: var(--cf-color);"></i>DNS
           记录列表</div>
-        <div style="display: flex; gap: 8px;">
+        <div class="panel-actions-group dns-header-controls">
           <!-- NS 记录按钮 -->
           <div style="position: relative;">
             <button class="btn btn-secondary paas-control-btn" style="padding: 6px 12px;" @click="toggleNsPopover"
               title="查看 NS 记录">
-              <i class="fas fa-server"></i> NS
+              <i class="fas fa-server"></i> <span>NS</span>
             </button>
             <div v-if="showNsPopover" class="ns-popover quick-fade-in">
               <div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px;">Name
@@ -244,25 +185,24 @@
           <!-- 清除缓存按钮 -->
           <button class="btn btn-warning paas-control-btn" style="padding: 6px 12px;" @click="purgeZoneCache"
             :disabled="dnsPurgingCache" title="清除全部缓存">
-            <i class="fas" :class="dnsPurgingCache ? 'fa-spinner fa-spin' : 'fa-broom'"></i> 清缓存
+            <i class="fas" :class="dnsPurgingCache ? 'fa-spinner fa-spin' : 'fa-broom'"></i> <span>清缓存</span>
           </button>
 
-          <button class="btn btn-success paas-control-btn" style="padding: 6px 12px;" @click="openAddDnsRecordModal">
-            <i class="fas fa-plus"></i> 添加
+          <button class="btn btn-success paas-control-btn" style="padding: 6px 12px;" @click="openAddDnsRecordModal"
+            title="添加记录">
+            <i class="fas fa-plus"></i> <span>添加</span>
           </button>
           <button v-if="dnsSelectedRecords.length > 0" class="btn btn-danger paas-control-btn"
-            style="padding: 6px 12px;" @click="batchDeleteDnsRecords">
-            <i class="fas fa-trash-alt"></i> 删除 ({{ dnsSelectedRecords.length }})
+            style="padding: 6px 12px;" @click="batchDeleteDnsRecords" title="批量删除">
+            <i class="fas fa-trash-alt"></i> <span>删除</span> ({{ dnsSelectedRecords.length }})
           </button>
-          <button class="btn btn-secondary paas-control-btn" style="padding: 6px 12px;" @click="exportDnsRecords">
-            <i class="fas fa-upload"></i> 导出
+          <button class="btn btn-secondary paas-control-btn" style="padding: 6px 12px;" @click="exportDnsRecords"
+            title="导出记录">
+            <i class="fas fa-upload"></i> <span>导出</span>
           </button>
-          <button class="btn btn-secondary paas-control-btn" style="padding: 6px 12px;" @click="importDnsRecords">
-            <i class="fas fa-download"></i> 导入
-          </button>
-          <button class="btn btn-secondary paas-control-btn" style="padding: 6px 10px;" @click="loadDnsRecords"
-            :disabled="dnsLoadingRecords">
-            <i class="fas fa-sync-alt" :class="{ 'fa-spin': dnsLoadingRecords }"></i>
+          <button class="btn btn-secondary paas-control-btn" style="padding: 6px 12px;" @click="importDnsRecords"
+            title="导入记录">
+            <i class="fas fa-download"></i> <span>导入</span>
           </button>
         </div>
       </div>
@@ -713,6 +653,42 @@
         <div v-if="dnsTemplates.length === 0" class="empty-state">
           <i class="fas fa-copy" style="font-size: 48px; margin-bottom: 16px;"></i>
           <div>暂无模板，添加常用 DNS 配置模板以快速应用</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SSL 模式选择模态框 -->
+  <div v-if="showSslModal" class="modal-overlay" @click="showSslModal = false" style="z-index: 2000;">
+    <div class="modal ssl-modal" @click.stop style="max-width: 400px;">
+      <button class="modal-close" @click="showSslModal = false">
+        <i class="fas fa-times"></i>
+      </button>
+      <div class="modal-header">
+        <h3>选择 SSL/TLS 加密模式</h3>
+      </div>
+      <div class="modal-body">
+        <div class="ssl-mode-btn-group" style="flex-direction: column; gap: 8px;">
+          <button @click="updateSslMode('off'); showSslModal = false"
+            :class="['ssl-mode-btn', { active: dnsSelectedZoneSsl.mode === 'off' }]" :disabled="dnsLoadingSsl" style="flex-direction: column; align-items: flex-start; padding: 12px;">
+            <div style="font-weight: bold;">关闭 (Off)</div>
+            <div style="font-size: 11px; opacity: 0.7;">不加密，仅 HTTP</div>
+          </button>
+          <button @click="updateSslMode('flexible'); showSslModal = false"
+            :class="['ssl-mode-btn', { active: dnsSelectedZoneSsl.mode === 'flexible' }]" :disabled="dnsLoadingSsl" style="flex-direction: column; align-items: flex-start; padding: 12px;">
+            <div style="font-weight: bold;">灵活 (Flexible)</div>
+            <div style="font-size: 11px; opacity: 0.7;">浏览器到 Cloudflare 加密，源站不加密</div>
+          </button>
+          <button @click="updateSslMode('full'); showSslModal = false"
+            :class="['ssl-mode-btn', { active: dnsSelectedZoneSsl.mode === 'full' }]" :disabled="dnsLoadingSsl" style="flex-direction: column; align-items: flex-start; padding: 12px;">
+            <div style="font-weight: bold;">完全 (Full)</div>
+            <div style="font-size: 11px; opacity: 0.7;">全程加密，源站证书可自签</div>
+          </button>
+          <button @click="updateSslMode('strict'); showSslModal = false"
+            :class="['ssl-mode-btn', { active: dnsSelectedZoneSsl.mode === 'strict' }]" :disabled="dnsLoadingSsl" style="flex-direction: column; align-items: flex-start; padding: 12px;">
+            <div style="font-weight: bold;">严格 (Full Strict)</div>
+            <div style="font-size: 11px; opacity: 0.7;">全程加密，源站证书必须有效</div>
+          </button>
         </div>
       </div>
     </div>

@@ -319,11 +319,11 @@ function cleanJsonSchema(schema) {
 function convertOpenAIToAntigravityRequest(openaiRequest, token) {
     let { model, messages, temperature, max_tokens, top_p, top_k, stop, tools } = openaiRequest;
 
-    // 剥离功能性前缀（假流式/、流式抗截断/），获取基础模型名
-    if (model.startsWith('假流式/')) {
-        model = model.substring(4);
-    } else if (model.startsWith('流式抗截断/')) {
-        model = model.substring(6);
+    // 剥离功能性前缀（假流/、流抗/），获取基础模型名
+    if (model.startsWith('假流/')) {
+        model = model.substring(3);
+    } else if (model.startsWith('流抗/')) {
+        model = model.substring(3);
     }
 
     // 获取矩阵配置进行硬核校验

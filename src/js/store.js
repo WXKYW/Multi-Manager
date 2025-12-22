@@ -77,6 +77,7 @@ export const store = reactive({
         logRetentionDays: 7
     },
     serverCredentials: [],
+    showSSHQuickMenu: false, // SSH 快速连接下拉菜单
 
 
 
@@ -150,6 +151,7 @@ export const store = reactive({
     dnsLoadingZones: false,
     dnsLoadingRecords: false,
     dnsLoadingSsl: false, // SSL信息加载中
+    showSslModal: false, // SSL 模式选择弹窗
     dnsLoadingAnalytics: false, // Analytics加载中
     dnsAnalyticsTimeRange: '24h', // Analytics时间范围
     dnsPurgingCache: false, // 缓存清除中状态

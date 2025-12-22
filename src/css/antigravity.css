@@ -96,7 +96,8 @@
 .chat-history-modern {
     box-sizing: border-box;
     width: 100%;
-    overflow-x: hidden; /* 核心：禁止水平溢出 */
+    overflow-x: hidden;
+    /* 核心：禁止水平溢出 */
 }
 
 .chat-history-modern .msg-bubble {
@@ -105,11 +106,13 @@
     font-size: 13px;
     line-height: 1.5;
     position: relative;
-    word-break: break-all; /* 强制所有字符换行 */
+    word-break: break-all;
+    /* 强制所有字符换行 */
     overflow-wrap: break-word;
     max-width: 100%;
     box-sizing: border-box;
-    min-width: 0; /* 允许在 flex 容器中收缩 */
+    min-width: 0;
+    /* 允许在 flex 容器中收缩 */
 }
 
 .chat-history-modern .user-bubble {
@@ -151,47 +154,58 @@
     min-width: 0;
 }
 
-.msg-bubble p, .response-content p {
+.msg-bubble p,
+.response-content p {
     margin: 0 0 10px 0;
     max-width: 100%;
 }
 
-.msg-bubble ul, .msg-bubble ol,
-.response-content ul, .response-content ol {
+.msg-bubble ul,
+.msg-bubble ol,
+.response-content ul,
+.response-content ol {
     margin: 8px 0;
-    padding-left: 1.5em; 
+    padding-left: 1.5em;
     max-width: 100%;
     box-sizing: border-box;
 }
 
-.msg-bubble li, .response-content li {
+.msg-bubble li,
+.response-content li {
     margin-bottom: 4px;
-    word-break: break-all; /* 确保列表项内容也强制换行 */
+    word-break: break-all;
+    /* 确保列表项内容也强制换行 */
     white-space: normal;
     max-width: 100%;
 }
 
 /* 针对长代码块的额外保护 */
-.msg-bubble pre, .response-content pre {
+.msg-bubble pre,
+.response-content pre {
     max-width: 100%;
     overflow-x: auto;
-    white-space: pre-wrap; /* 如果希望代码也自动换行，取消此行的注释或保持 pre 内的滚动 */
+    white-space: pre-wrap;
+    /* 如果希望代码也自动换行，取消此行的注释或保持 pre 内的滚动 */
     word-break: normal;
 }
 
 /* Markdown Table 处理 */
-.msg-bubble table, .response-content table {
+.msg-bubble table,
+.response-content table {
     width: 100%;
     border-collapse: collapse;
     margin: 10px 0;
     font-size: 12px;
     table-layout: auto;
-    display: block; /* 允许横向滚动 */
+    display: block;
+    /* 允许横向滚动 */
     overflow-x: auto;
 }
 
-.msg-bubble th, .response-content th,
-.msg-bubble td, .response-content td {
+.msg-bubble th,
+.response-content th,
+.msg-bubble td,
+.response-content td {
     border: 1px solid var(--border-color);
     padding: 6px 10px;
     text-align: left;
@@ -230,7 +244,7 @@
     color: white;
 }
 
-.chat-history-compact ul, 
+.chat-history-compact ul,
 .chat-history-compact ol {
     margin: 8px 0;
     padding-left: 20px;
@@ -255,7 +269,7 @@
     max-height: 200px;
     border-radius: 8px;
     border: 1px solid var(--border-color);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     transition: transform 0.2s, box-shadow 0.2s;
     cursor: zoom-in;
     display: block;
@@ -263,12 +277,12 @@
 
 .msg-inline-image:hover {
     transform: scale(1.02);
-    box-shadow: 0 6px 16px rgba(0,0,0,0.15);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
 }
 
 /* 用户蓝底消息气泡中的图片处理 */
 [style*="var(--ag-primary)"] .msg-inline-image {
-    border-color: rgba(255,255,255,0.3);
+    border-color: rgba(255, 255, 255, 0.3);
 }
 
 /* 思考过程展开框优化 */
@@ -286,11 +300,13 @@
     cursor: pointer;
     color: var(--text-tertiary);
     outline: none;
-    list-style: none; /* 移除默认箭头 */
+    list-style: none;
+    /* 移除默认箭头 */
 }
 
 .reasoning-details summary::-webkit-details-marker {
-    display: none; /* 兼容 Safari 移除箭头 */
+    display: none;
+    /* 兼容 Safari 移除箭头 */
 }
 
 .reasoning-details .reasoning-content-inner {
@@ -299,10 +315,12 @@
     color: var(--text-secondary);
     line-height: 1.6;
     border-top: 1px dashed var(--border-color);
-    background: rgba(255, 255, 255, 0.3); /* 半透明，适配暗色模式 */
+    background: rgba(255, 255, 255, 0.3);
+    /* 半透明，适配暗色模式 */
     white-space: pre-wrap;
     font-style: italic;
-    overflow-wrap: break-word; /* 防止溢出 */
+    overflow-wrap: break-word;
+    /* 防止溢出 */
     word-break: break-word;
     max-width: 100%;
     box-sizing: border-box;
@@ -409,66 +427,66 @@
 
 /* Antigravity Model Matrix Styles */
 .model-matrix-table th {
-  vertical-align: middle;
-  padding: 8px 4px;
-  background: var(--bg-secondary);
+    vertical-align: middle;
+    padding: 8px 4px;
+    background: var(--bg-secondary);
 }
 
 .model-matrix-table td {
-  vertical-align: middle;
-  height: 50px;
-  padding: 0 4px;
+    vertical-align: middle;
+    height: 50px;
+    padding: 0 4px;
 }
 
 .model-matrix-table td.text-center {
-  text-align: center;
+    text-align: center;
 }
 
 .model-matrix-table td.text-center .switch {
-  display: inline-block;
-  vertical-align: middle;
-  margin: 0;
+    display: inline-block;
+    vertical-align: middle;
+    margin: 0;
 }
 
 /* Fix Model Name alignment */
 .model-matrix-table th:first-child,
 .model-matrix-table td:first-child {
-  padding-left: 16px;
-  text-align: left;
+    padding-left: 16px;
+    text-align: left;
 }
 
 .matrix-header-cell {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  cursor: pointer;
-  padding: 6px 12px;
-  border-radius: 6px;
-  transition: background-color 0.2s;
-  user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    cursor: pointer;
+    padding: 6px 12px;
+    border-radius: 6px;
+    transition: background-color 0.2s;
+    user-select: none;
 }
 
 .matrix-header-cell:hover {
-  background-color: rgba(0, 0, 0, 0.05);
+    background-color: rgba(0, 0, 0, 0.05);
 }
 
 @media (prefers-color-scheme: dark) {
-  .matrix-header-cell:hover {
-    background-color: rgba(255, 255, 255, 0.05);
-  }
+    .matrix-header-cell:hover {
+        background-color: rgba(255, 255, 255, 0.05);
+    }
 }
 
 .matrix-header-cell .switch {
-  display: none;
-  margin: 0;
-  pointer-events: none;
+    display: none;
+    margin: 0;
+    pointer-events: none;
 }
 
 .matrix-header-cell span {
-  font-size: 13px;
-  font-weight: 600;
-  opacity: 0.9;
+    font-size: 13px;
+    font-weight: 600;
+    opacity: 0.9;
 }
 
 /* Switch 开关样式 - 紧凑 */
@@ -538,7 +556,8 @@ input:checked+.slider:before {
 .progress-bar-fill {
     height: 100%;
     border-radius: 3px;
-    background: linear-gradient(90deg, var(--ag-primary), #ff9800);
+    transition: width 0.3s ease, background 0.3s ease;
+    /* 颜色由内联样式控制 */
 }
 
 .quota-percent {

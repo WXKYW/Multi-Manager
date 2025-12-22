@@ -118,6 +118,7 @@
 .batch-textarea::-webkit-scrollbar-thumb:hover {
     background: var(--text-tertiary);
 }
+
 /* Self-H 模块二级标签页样式 */
 .self-h-sec-tabs {
     display: flex;
@@ -132,4 +133,76 @@
     background: linear-gradient(135deg, var(--selfh-primary), var(--success-dark)) !important;
     color: white !important;
     box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+}
+
+/* ==================== PWA & Native App Polish ==================== */
+
+/* 1. 沉浸式安全区适配 (iOS/Android Notch) */
+:root {
+    --safe-area-inset-top: env(safe-area-inset-top, 0px);
+    --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* 独立应用模式下的顶部间距补偿（避免状态栏重叠） */
+@media (display-mode: standalone) {
+    .header {
+        padding-top: calc(15px + var(--safe-area-inset-top)) !important;
+    }
+}
+
+/* 2. 禁止移动端长按弹出系统菜单 (像真正的 App 一样) */
+body,
+.main-tab,
+.tab-btn,
+button {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+/* 允许输入框和代码区域选中文本 */
+input,
+textarea,
+code,
+pre,
+.log-content {
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+/* 3. 优化移动端点击反馈 */
+.main-tab,
+.tab-btn,
+.btn,
+.hosts-action-btn {
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.1s ease;
+}
+
+.main-tab:active,
+.tab-btn:active,
+.btn:active {
+    transform: scale(0.96) !important;
+    opacity: 0.8;
+}
+
+/* 4. 禁止橡皮筋回弹效果（仅针对主体） */
+html,
+body {
+    overscroll-behavior-y: none;
+    position: fixed;
+    overflow: hidden;
+    width: 100%;
+}
+
+.app-main {
+    overscroll-behavior-y: contain;
+    padding-bottom: var(--safe-area-inset-bottom) !important;
+}
+
+/* 5. 滚动条美化（在 standalone 模式下彻底隐藏以模拟原生感） */
+@media (display-mode: standalone) {
+    ::-webkit-scrollbar {
+        display: none !important;
+    }
 }
