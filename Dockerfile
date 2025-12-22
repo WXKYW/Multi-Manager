@@ -12,6 +12,9 @@ WORKDIR /app
 # 1. 复制依赖定义
 COPY package.json package-lock.json ./
 
+# 设置镜像源
+RUN npm config set registry https://registry.npmmirror.com
+
 # 2. 直接安装所有依赖 (确保 vite 可用)
 # 注意：不使用 --only=production，确保安装 devDependencies
 RUN npm install --legacy-peer-deps
@@ -44,6 +47,9 @@ RUN mkdir -p /app/config /app/data && chown -R nodejs:nodejs /app
 
 # 1. 复制依赖定义
 COPY package.json package-lock.json ./
+
+# 设置镜像源
+RUN npm config set registry https://registry.npmmirror.com
 
 # 2. 仅安装生产依赖 (减小体积)
 RUN npm install --only=production --legacy-peer-deps && npm cache clean --force
