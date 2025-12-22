@@ -608,8 +608,8 @@ export const antigravityMethods = {
             // 使用 Object.assign 而非直接赋值，以保留已有的全局设置（如负载均衡策略）
             Object.assign(this.agSettingsForm, form);
 
-            // 并行加载重定向配置
-            await this.loadModelRedirects();
+            // 后台异步加载重定向配置，不阻塞主设置加载
+            this.loadModelRedirects();
 
             if (store.mainActiveTab === 'antigravity' && store.antigravityCurrentTab === 'settings') {
                 toast.success('模块配置已同步');

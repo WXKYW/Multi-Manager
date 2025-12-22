@@ -227,6 +227,27 @@ function log(level, module, message, data) {
   logEmitter.emit('log', logEntry);
 }
 
+function getModuleColor(module) {
+  if (!useColor) return (t) => t;
+  const mod = (module || 'core').toLowerCase();
+  
+  // 语义化配色映射
+  if (mod.includes('servermoni')) return chalk.green;      // 监控 - 绿色
+  if (mod.includes('ssh')) return chalk.white.bold;        // SSH - 粗体白
+  if (mod.includes('zeabur') || mod.includes('paas')) return chalk.cyan; // PaaS - 青色
+  if (mod.includes('antigravit')) return chalk.magenta;    // Antigravity - 品红
+  if (mod.includes('gemini')) return chalk.blueBright;     // Gemini - 亮蓝
+  if (mod.includes('openai')) return chalk.greenBright;    // OpenAI - 亮绿
+  if (mod.includes('dns') || mod.includes('cloudflar')) return chalk.orange || chalk.yellow; // DNS - 橙/黄
+  if (mod.includes('auth')) return chalk.redBright;        // 认证 - 亮红
+  if (mod.includes('database') || mod.includes('db')) return chalk.yellow; // 数据库 - 黄色
+  if (mod.includes('http')) return chalk.blue;             // HTTP - 蓝色
+  if (mod.includes('log')) return chalk.magentaBright;     // 日志服务 - 亮紫
+  if (mod.includes('session')) return chalk.gray;          // 会话 - 灰色
+  
+  return chalk.cyanBright; // 默认颜色
+}
+
 function renderTerminal(level, module, timestamp, traceId, message, data) {
   const levelColors = {
     'DEBUG': useColor ? chalk.gray : (t) => t,
@@ -239,32 +260,42 @@ function renderTerminal(level, module, timestamp, traceId, message, data) {
   const colorFn = levelColors[level] || ((t) => t);
   const displayTime = formatDisplayTimestamp(timestamp);
 
-  // 固定宽度定义
-  const COL_TIME = 12;    // HH:mm:ss.SSS
-  const COL_LEVEL = 5;    // ERROR
-  const COL_MODULE = 12;  // ModuleName
-  const COL_TRACE = 8;    // [abc12]
+  // 固定宽度定义，确保完美对齐
+  const COL_SYSTEM = 4;   // [0]
+  const COL_TIME = 13;    // HH:mm:ss.SSS
+  const COL_LEVEL = 6;    // ERROR
+  const COL_MODULE = 13;  // [ModuleName]
 
+  // 1. 系统 ID (默认为 [0])
+  const sysStr = useColor ? chalk.gray('[0]'.padEnd(COL_SYSTEM)) : '[0]'.padEnd(COL_SYSTEM);
+  
+  // 2. 时间戳
   const timeStr = useColor ? chalk.gray(displayTime.padEnd(COL_TIME)) : displayTime.padEnd(COL_TIME);
+  
+  // 3. 级别
   const levelStr = colorFn(level.padEnd(COL_LEVEL));
 
+  // 4. 模块名 (动态配色)
   const rawModule = (module || 'core').substring(0, 10);
-  const formattedModule = `[${rawModule}]`.padEnd(12);
-  const moduleStr = useColor ? chalk.magenta(formattedModule) : formattedModule;
+  const formattedModule = `[${rawModule}]`.padEnd(COL_MODULE);
+  const moduleColorFn = getModuleColor(module);
+  const moduleStr = moduleColorFn(formattedModule);
 
-  const output = `${timeStr} ${levelStr} ${moduleStr} ${message}`;
+  // 组合输出
+  const output = `${sysStr} ${timeStr} ${levelStr} ${moduleStr} ${message}`;
   console.log(output);
 
   if (data !== undefined && level !== 'INFO') {
+    const indent = ' '.repeat(COL_SYSTEM + COL_TIME + COL_LEVEL + COL_MODULE + 4);
     if (typeof data === 'object') {
       try {
-        const json = JSON.stringify(data, null, 2).split('\n').map(line => ' '.repeat(COL_TIME + COL_LEVEL + COL_MODULE + 2) + line).join('\n');
+        const json = JSON.stringify(data, null, 2).split('\n').map(line => indent + line).join('\n');
         console.log(colorFn(json));
       } catch (e) {
-        console.log(colorFn('   [Complex Data]'));
+        console.log(colorFn(indent + '[Complex Data]'));
       }
     } else {
-      console.log(colorFn('   ' + data));
+      console.log(colorFn(indent + data));
     }
   }
 }

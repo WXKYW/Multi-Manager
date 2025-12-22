@@ -1540,6 +1540,9 @@ export default {
     });
   },
 
+
+
+
   /**
    * 打开编辑 Worker 模态框
    */
@@ -1559,28 +1562,54 @@ export default {
       if (response.ok && data.success) {
         const script = data.worker.script;
 
-        // 初始化/更新 Monaco Editor
+        // 初始化/更新 Monaco Editor (带重试机制)
         this.$nextTick(async () => {
           try {
             await loadMonaco();
-            const container = document.getElementById('monaco-editor-container');
-            if (container) {
-              if (monacoEditorInstance) {
-                monacoEditorInstance.dispose();
+
+            let attempts = 0;
+            const initEditor = () => {
+              const container = document.getElementById('monaco-editor-container');
+              if (container) {
+                // 清理旧实例
+                if (monacoEditorInstance) {
+                  try { monacoEditorInstance.dispose(); } catch (e) { console.warn('Dispose error:', e); }
+                  monacoEditorInstance = null;
+                }
+
+                // 确保容器为空
+                container.innerHTML = '';
+
+                try {
+                  monacoEditorInstance = monaco.editor.create(container, {
+                    value: script,
+                    language: 'javascript',
+                    theme: 'vs-dark',
+                    automaticLayout: true,
+                    minimap: { enabled: true },
+                    fontSize: 13,
+                    scrollBeyondLastLine: false,
+                    readOnly: false
+                  });
+                } catch (createError) {
+                  console.error('Create editor error:', createError);
+                  toast.error('创建编辑器实例失败');
+                }
+              } else if (attempts < 20) {
+                // 如果容器未找到，等待 50ms 后重试（最多 1秒）
+                attempts++;
+                setTimeout(initEditor, 50);
+              } else {
+                console.error('Monaco container not found after 20 attempts');
+                toast.error('编辑器容器加载超时');
               }
-              monacoEditorInstance = monaco.editor.create(container, {
-                value: script,
-                language: 'javascript',
-                theme: 'vs-dark',
-                automaticLayout: true,
-                minimap: { enabled: true },
-                fontSize: 13,
-                scrollBeyondLastLine: false
-              });
-            }
+            };
+
+            initEditor();
+
           } catch (e) {
             console.error('Monaco Editor 加载失败:', e);
-            toast.error('编辑器加载失败，请检查网络');
+            toast.error('编辑器资源加载失败');
           }
         });
       } else {
@@ -1636,7 +1665,7 @@ export default {
         toast.success('Worker 已创建，正在打开 Cloudflare 编辑器...');
         this.showNewWorkerModal = false;
         await this.loadWorkers();
-        // 自动打开 Cloudflare 编辑器（使用新版链接格式）
+        // 自动打开 Cloudflare 编辑器
         if (this.workersCfAccountId) {
           this.openExternalLink(`https://dash.cloudflare.com/${this.workersCfAccountId}/workers/services/edit/${name}/production`);
         }
@@ -1648,64 +1677,6 @@ export default {
       toast.error('创建失败: ' + error.message);
     }
   },
-
-
-  /**
-   * 打开编辑 Worker 模态框
-   */
-  async openEditWorkerModal(worker) {
-    store.isEditingWorker = true;
-    this.newWorkerName = worker.name;
-    this.showNewWorkerModal = true;
-    this.workersLoading = true;
-
-    try {
-      // 获取脚本内容
-      const response = await fetch(`/api/cf-dns/accounts/${store.dnsSelectedAccountId}/workers/${encodeURIComponent(worker.name)}`, {
-        headers: store.getAuthHeaders()
-      });
-      const data = await response.json();
-
-      if (response.ok && data.success) {
-        const script = data.worker.script;
-
-        // 初始化/更新 Monaco Editor
-        this.$nextTick(async () => {
-          try {
-            await loadMonaco();
-            const container = document.getElementById('monaco-editor-container');
-            if (container) {
-              if (monacoEditorInstance) {
-                monacoEditorInstance.dispose();
-              }
-              monacoEditorInstance = monaco.editor.create(container, {
-                value: script,
-                language: 'javascript',
-                theme: 'vs-dark',
-                automaticLayout: true,
-                minimap: { enabled: true },
-                fontSize: 13,
-                scrollBeyondLastLine: false
-              });
-            }
-          } catch (e) {
-            console.error('Monaco Editor 加载失败:', e);
-            toast.error('编辑器加载失败，请检查网络');
-          }
-        });
-      } else {
-        toast.error(data.error || '获取脚本内容失败');
-        this.showNewWorkerModal = false;
-      }
-    } catch (error) {
-      toast.error('请求脚本失败: ' + error.message);
-      this.showNewWorkerModal = false;
-    } finally {
-      this.workersLoading = false;
-    }
-  },
-
-
 
   // ==================== Pages 管理 ====================
 

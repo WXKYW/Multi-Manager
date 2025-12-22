@@ -14,6 +14,15 @@ class MonitorService {
     constructor() {
         this.task = null;
         this.isRunning = false;
+        // 内存缓存：serverId -> metrics
+        this.metricsCache = new Map();
+    }
+
+    /**
+     * 获取内存中的实时指标 (前端极速访问入口)
+     */
+    getMetrics(serverId) {
+        return this.metricsCache.get(serverId) || null;
     }
 
     /**
@@ -104,58 +113,42 @@ class MonitorService {
      */
     async probeServer(server) {
         const startTime = Date.now();
+        const systemInfoService = require('./system-info-service');
 
         try {
-            // 测试 SSH 连接
-            const result = await sshService.testConnection(server);
-
+            // 优化：直接尝试获取详细信息，获取成功即代表连接正常且在线
+            const info = await systemInfoService.getServerInfo(server.id, server);
             const responseTime = Date.now() - startTime;
 
-            let cachedInfo = null;
+            if (info.success) {
+                const metrics = {
+                    ...info,
+                    cached_at: new Date().toISOString()
+                };
 
-            // 如果连接成功，获取详细信息并缓存
-            if (result.success) {
-                try {
-                    const systemInfoService = require('./system-info-service');
-                    const info = await systemInfoService.getServerInfo(server.id, server);
-                    if (info.success) {
-                        cachedInfo = {
-                            system: info.system,
-                            cpu: info.cpu,
-                            memory: info.memory,
-                            disk: info.disk,
-                            docker: info.docker,
-                            cached_at: new Date().toISOString()
-                        };
-                    }
-                } catch (infoError) {
-                    logger.warn(`获取主机 ${server.name} 详细信息失败: ${infoError.message}`);
-                }
+                // 1. 更新内存缓存 (极速访问)
+                this.metricsCache.set(server.id, metrics);
+
+                // 2. 异步更新数据库缓存 (持久化)
+                ServerAccount.updateStatus(server.id, {
+                    status: 'online',
+                    last_check_time: new Date().toISOString(),
+                    last_check_status: 'success',
+                    response_time: responseTime,
+                    cached_info: metrics
+                });
+
+                // 3. 记录日志
+                ServerMonitorLog.create({
+                    server_id: server.id,
+                    status: 'success',
+                    response_time: responseTime
+                });
+
+                return { success: true, serverId: server.id, responseTime };
+            } else {
+                throw new Error(info.error);
             }
-
-            // 更新主机状态（包含缓存信息）
-            ServerAccount.updateStatus(server.id, {
-                status: result.success ? 'online' : 'offline',
-                last_check_time: new Date().toISOString(),
-                last_check_status: result.success ? 'success' : 'failed',
-                response_time: responseTime,
-                cached_info: cachedInfo
-            });
-
-            // 记录监控日志
-            ServerMonitorLog.create({
-                server_id: server.id,
-                status: result.success ? 'success' : 'failed',
-                response_time: responseTime,
-                error_message: result.error || null
-            });
-
-            return {
-                success: result.success,
-                serverId: server.id,
-                serverName: server.name,
-                responseTime
-            };
         } catch (error) {
             const responseTime = Date.now() - startTime;
 
@@ -167,7 +160,6 @@ class MonitorService {
                 response_time: responseTime
             });
 
-            // 记录监控日志
             ServerMonitorLog.create({
                 server_id: server.id,
                 status: 'failed',
@@ -178,7 +170,6 @@ class MonitorService {
             return {
                 success: false,
                 serverId: server.id,
-                serverName: server.name,
                 error: error.message,
                 responseTime
             };

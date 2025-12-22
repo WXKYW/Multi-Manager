@@ -27,10 +27,7 @@ function registerRoutes(app) {
   // 健康检查（不需要认证）
   app.use('/health', healthRouter);
 
-  // 认证相关路由
-  app.use('/api', authRouter);
-
-  // 用户设置路由（需要认证）- 挂载到精确路径避免拦截其他 API 请求
+  // 系统设置路由（需要认证）
   app.use('/api/settings', requireAuth, settingsRouter);
 
   // 系统日志路由
@@ -42,12 +39,12 @@ function registerRoutes(app) {
   // 动态加载模块路由
   const modulesDir = path.join(__dirname, '../../modules');
 
-  // 模块路由映射配置 (保持向后兼容)
+  // 模块路由映射配置
   const moduleRouteMap = {
-    'zeabur-api': '/api', // 注意：Zeabur 模块内部路由可能以 /zeabur 开头，或者直接挂载在 /api 下
-    'koyeb-api': '/api', // Koyeb 模块 - 内部路由以 /koyeb 开头
+    'zeabur-api': '/api/zeabur',
+    'koyeb-api': '/api/koyeb',
     'cloudflare-dns': '/api/cf-dns',
-    'fly-api': '/api',
+    'fly-api': '/api/fly',
     'openai-api': '/api/openai',
     'openlist-api': '/api/openlist',
     'server-management': '/api/server',
@@ -66,23 +63,26 @@ function registerRoutes(app) {
       if (fs.existsSync(routerPath)) {
         try {
           const moduleRouter = require(routerPath);
-          // 使用配置的路径，如果未配置则默认使用 /api/${moduleName}
+          // 强制从映射表获取路径
           const routePath = moduleRouteMap[moduleName] || `/api/${moduleName}`;
+          
+          console.log(`[Router] 正在挂载模块: ${moduleName} -> ${routePath}`);
 
           if (moduleName === 'antigravity-api' || moduleName === 'gemini-cli-api') {
-            // 这些模块需要自定义认证逻辑（API Key 支持），挂载到各自的 API 路径
             app.use(routePath, moduleRouter);
-            // 注意：/v1 路径现在由 v1Router 统一接管，不再在此处单独挂载
           } else {
             app.use(routePath, requireAuth, moduleRouter);
           }
-          logger.success(`模块已挂载 -> ${moduleName}`);
+          logger.success(`模块已挂载 -> ${moduleName} [${routePath}]`);
         } catch (e) {
           logger.error(`模块加载失败: ${moduleName}`, e);
         }
       }
     });
   }
+
+  // 认证相关路由 (放在最后作为兜底)
+  app.use('/api', authRouter);
 }
 
 module.exports = {

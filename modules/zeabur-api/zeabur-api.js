@@ -84,6 +84,7 @@ async function fetchAccountData(token) {
               domains {
                 domain
                 isGenerated
+                environmentID
               }
             }
           }
