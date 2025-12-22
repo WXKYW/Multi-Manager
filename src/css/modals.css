@@ -142,22 +142,21 @@
 }
 
 .modal-header {
-  padding: 14px 20px;
+  padding: 12px 16px;
   background-color: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
   display: flex;
   justify-content: space-between;
   align-items: center;
   flex-shrink: 0;
+  min-height: 48px;
 }
 
-.modal-close {
-  position: absolute;
-  top: 14px;
-  /* 固定定位 */
-  right: 16px;
-  width: 32px;
-  height: 32px;
+/* 全站统一关闭按钮样式 - 使用 Flex 子项确保居中 */
+.modal-close,
+.close-btn {
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -167,18 +166,53 @@
   border: none;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  z-index: 100;
-  /* 确保层级足够高 */
+  margin-left: auto; /* 靠右对齐 */
+  flex-shrink: 0;
 }
 
-.modal-close:hover {
+/* 移除特定的绝对定位偏移，让 Flex 生效 */
+.modal .modal-close {
+  position: static !important;
+}
+
+/* 兜底：如果不在 header 内，则保持绝对定位但位置优化 */
+.modal > .modal-close:only-child,
+.modal > .close-btn {
+  position: absolute !important;
+  top: 10px;
+  right: 10px;
+}
+
+.modal-close:hover,
+.close-btn:hover {
   background-color: rgba(239, 68, 68, 0.1);
   color: var(--danger-color);
   transform: rotate(90deg) scale(1.1);
 }
 
-.modal-close:active {
+.modal-close:active,
+.close-btn:active {
   transform: rotate(90deg) scale(0.9);
+}
+
+/* 针对标签页和特殊位置的微调 */
+.ssh-tab-close,
+.close-split-btn {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.ssh-tab-close:hover,
+.close-split-btn:hover {
+  background-color: rgba(248, 81, 73, 0.15);
+  color: #f85149;
+  transform: rotate(90deg);
 }
 
 /* Forms */

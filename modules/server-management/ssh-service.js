@@ -5,6 +5,9 @@
 
 const { Client } = require('ssh2');
 const { ServerMonitorConfig } = require('../../src/db/models');
+const { createLogger } = require('../../src/utils/logger');
+
+const logger = createLogger('SSH');
 
 class SSHService {
     constructor() {
@@ -65,36 +68,71 @@ class SSHService {
      * @returns {Promise<Client>} SSH 客户端
      */
     async getConnection(serverId, serverConfig) {
-        // 检查连接池中是否有可用连接
+        // 1. 检查连接池中是否有可用连接
         if (this.connections.has(serverId)) {
             const conn = this.connections.get(serverId);
-
-            // 更新最后使用时间
-            conn.lastUsed = Date.now();
-
-            return conn.client;
+            
+            try {
+                // 验证连接是否仍然可用
+                await new Promise((resolve, reject) => {
+                    const timer = setTimeout(() => reject(new Error('Connection check timeout')), 1500);
+                    conn.client.exec('true', (err, stream) => {
+                        if (err) {
+                            clearTimeout(timer);
+                            reject(err);
+                            return;
+                        }
+                        stream.on('close', () => {
+                            clearTimeout(timer);
+                            resolve();
+                        });
+                    });
+                });
+                
+                conn.lastUsed = Date.now();
+                return conn.client;
+            } catch (e) {
+                this.closeConnection(serverId);
+            }
         }
 
-        // 检查连接数是否超过限制
-        const config = ServerMonitorConfig.get();
-        const maxConnections = config?.max_connections || 10;
-
+        // 2. 检查连接数限制
+        const maxConnections = 50;
         if (this.connections.size >= maxConnections) {
-            // 清理最久未使用的连接
             this.cleanupOldestConnection();
         }
 
-        // 创建新连接
-        const client = await this.connect(serverConfig);
+        // 3. 准备认证信息并记录诊断日志 (不记录密码明文)
+        try {
+            const hasPwd = !!serverConfig.password;
+            const pwdLen = serverConfig.password ? serverConfig.password.length : 0;
+            const hasKey = !!serverConfig.private_key;
 
-        // 添加到连接池
-        this.connections.set(serverId, {
-            client,
-            lastUsed: Date.now(),
-            serverId
-        });
+            logger.info(`尝试连接: ${serverConfig.username}@${serverConfig.host}:${serverConfig.port}`);
+            logger.debug(`认证诊断: 方式=${serverConfig.auth_type}, 密码已就绪=${hasPwd}(长度:${pwdLen}), 私钥已就绪=${hasKey}`);
 
-        return client;
+            const client = await this.connect(serverConfig);
+            
+            // 监听连接断开事件
+            client.on('error', (err) => {
+                console.error(`[SSH] 连接异常断开 (${serverId}):`, err.message);
+                this.connections.delete(serverId);
+            });
+            client.on('end', () => this.connections.delete(serverId));
+            client.on('close', () => this.connections.delete(serverId));
+
+            // 添加到连接池
+            this.connections.set(serverId, {
+                client,
+                lastUsed: Date.now(),
+                serverId
+            });
+
+            return client;
+        } catch (error) {
+            logger.error(`连接失败 (${serverConfig.host}): ${error.message}`);
+            throw error;
+        }
     }
 
     /**
@@ -230,6 +268,7 @@ class SSHService {
             const conn = this.connections.get(serverId);
             conn.client.end();
             this.connections.delete(serverId);
+            logger.info(`已断开并清理连接: ${serverId}`);
         }
     }
 

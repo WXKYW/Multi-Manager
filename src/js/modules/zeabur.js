@@ -48,7 +48,7 @@ export const zeaburMethods = {
   async loadManagedAccounts() {
     try {
       // 从主机加载账号
-      const response = await fetch('/api/server-accounts', {
+      const response = await fetch('/api/zeabur/server-accounts', {
         headers: store.getAuthHeaders()
       });
       const accounts = await response.json();
@@ -65,7 +65,7 @@ export const zeaburMethods = {
       // 并行刷新所有账号的余额信息
       const promises = (store.managedAccounts || []).map(async (account, i) => {
         try {
-          const response = await fetch('/api/validate-account', {
+          const response = await fetch('/api/zeabur/validate-account', {
             method: 'POST',
             headers: store.getAuthHeaders(),
             body: JSON.stringify({
@@ -110,7 +110,7 @@ export const zeaburMethods = {
   async saveManagedAccounts() {
       try {
         // 保存到主机
-        const response = await fetch('/api/server-accounts', {
+        const response = await fetch('/api/zeabur/server-accounts', {
           method: 'POST',
           headers: store.getAuthHeaders(),
           body: JSON.stringify({ accounts: store.managedAccounts })
@@ -201,12 +201,12 @@ export const zeaburMethods = {
           }));
 
           const [accountsRes, projectsRes] = await Promise.all([
-            fetch('/api/temp-accounts', {
+            fetch('/api/zeabur/temp-accounts', {
               method: 'POST',
               headers: store.getAuthHeaders(),
               body: JSON.stringify({ accounts: accountsWithoutManualBalance })
             }).then(r => r.json()),
-            fetch('/api/temp-projects', {
+            fetch('/api/zeabur/temp-projects', {
               method: 'POST',
               headers: store.getAuthHeaders(),
               body: JSON.stringify({
@@ -233,8 +233,8 @@ export const zeaburMethods = {
         } else {
           // 否则使用主机配置的账号
           const [accountsRes, projectsRes] = await Promise.all([
-            fetch('/api/accounts').then(r => r.json()),
-            fetch('/api/projects').then(r => r.json())
+            fetch('/api/zeabur/accounts').then(r => r.json()),
+            fetch('/api/zeabur/projects').then(r => r.json())
           ]);
 
           // 使用Vue.set或直接重新赋值确保响应式更新
@@ -399,7 +399,7 @@ export const zeaburMethods = {
       // 逐个验证并添加
       for (const account of accounts) {
         try {
-          const response = await fetch('/api/validate-account', {
+          const response = await fetch('/api/zeabur/validate-account', {
             method: 'POST',
             headers: store.getAuthHeaders(),
             body: JSON.stringify({
@@ -508,7 +508,10 @@ export const zeaburMethods = {
               if (d.domain) {
                 domains.push({
                   domain: d.domain,
-                  isGenerated: d.isGenerated || false
+                  isGenerated: d.isGenerated || false,
+                  serviceId: service._id,
+                  serviceName: service.name,
+                  environmentId: d.environmentID
                 });
               }
             });
@@ -516,6 +519,195 @@ export const zeaburMethods = {
         });
       }
       return domains;
+    },
+
+    // 辅助：根据 ID 获取服务对象
+    getServiceById(project, serviceId) {
+      if (!project || !project.services) return null;
+      return project.services.find(s => s._id === serviceId);
+    },
+
+    // 快速添加域名 (当列表为空时)
+    async quickAddDomain(account, project) {
+      if (!project.services || project.services.length === 0) {
+        toast.error('该项目下没有可用的服务');
+        return;
+      }
+
+      // 获取环境 ID (必填)
+      const environmentId = project.environments && project.environments[0] ? project.environments[0]._id : null;
+      if (!environmentId) {
+        toast.error('找不到项目环境 ID');
+        return;
+      }
+
+      // 默认选择第一个服务
+      const service = project.services[0];
+
+      // 弹出提示框
+      const choice = await store.showConfirm({
+        title: '配置新域名',
+        message: `项目 "${project.name}" 当前未绑定域名。\n您可以选择生成一个带前缀的免费域名，或添加您已有的自定义域名。`,
+        icon: 'fa-globe',
+        confirmText: '生成免费域名',
+        cancelText: '添加自定义域名'
+      });
+
+      if (choice) {
+        const prefixInput = await this.showPrompt({
+          title: '生成免费域名',
+          message: '请输入您心仪的域名子域前缀：',
+          placeholder: '例如: my-awesome-app',
+          icon: 'fa-wand-magic-sparkles'
+        });
+
+        if (prefixInput && prefixInput.trim()) {
+          // 核心优化：对于自动域名，仅发送前缀，由 Zeabur 补全后缀
+          const targetDomain = prefixInput.trim();
+
+          toast.info('正在请求生成...');
+          const addRes = await fetch('/api/zeabur/domain/add', {
+            method: 'POST',
+            headers: this.getAuthHeaders(),
+            body: JSON.stringify({
+              token: (store.managedAccounts.find(acc => acc.name === account.name))?.token,
+              serviceId: service._id,
+              domain: targetDomain,
+              isGenerated: true,
+              environmentId: environmentId
+            })
+          });
+          const result = await addRes.json();
+          if (result.success) {
+            toast.success(`域名已生成: ${result.domainInfo.domain}`);
+            await this.fetchData();
+          } else {
+            toast.error('生成失败: ' + (result.error || '未知错误'));
+          }
+        }
+      } else {
+        // 用户选择：添加自定义域名
+        await this.addCustomDomain(account, project, service);
+      }
+    },
+
+    // 修改域名 (支持自动域名前缀自定义)
+    async editDomain(account, project, domainInfo) {
+      // 1. 获取账号原始令牌
+      const accountData = store.managedAccounts.find(acc => acc.name === account.name);
+      if (!accountData || !accountData.token) {
+        toast.error('无法获取账号令牌，请尝试重新添加账号');
+        return;
+      }
+
+      // 找到对应的 service
+      const service = project.services.find(s => s._id === domainInfo.serviceId);
+      if (!service) {
+        toast.error('找不到关联的服务');
+        return;
+      }
+
+      let res;
+      if (domainInfo.isGenerated) {
+        // 自动生成的域名
+        const currentPrefix = domainInfo.domain.split('.')[0];
+        res = await this.showPrompt({
+          title: '管理自动域名',
+          message: `当前域名: ${domainInfo.domain}\n请输入新前缀：`,
+          placeholder: '例如：my-awesome-app',
+          icon: 'fa-wand-magic-sparkles',
+          promptValue: currentPrefix,
+          deleteText: '删除该域名',
+          confirmText: '更新前缀'
+        });
+      } else {
+        // 自定义域名
+        res = await this.showPrompt({
+          title: '管理自定义域名',
+          message: `当前域名: ${domainInfo.domain}\n请输入新域名：`,
+          placeholder: '例如：api.example.com',
+          icon: 'fa-edit',
+          promptValue: domainInfo.domain,
+          deleteText: '删除该域名',
+          confirmText: '保存修改'
+        });
+      }
+
+      const { action, value: newDomain } = res;
+
+      // 处理删除逻辑
+      if (action === 'delete') {
+        const confirmed = await store.showConfirm({
+          title: '确认删除',
+          message: `确定要永久删除域名 "${domainInfo.domain}" 吗？`,
+          icon: 'fa-trash-alt',
+          confirmText: '确认删除',
+          confirmClass: 'btn-danger'
+        });
+        if (confirmed) {
+          await this.deleteDomain(account, project, service, domainInfo.domain);
+        }
+        return;
+      }
+
+      if (action !== 'confirm' || !newDomain || !newDomain.trim()) return;
+      
+      const trimmedDomain = newDomain.trim();
+      // 检查是否有变化
+      if (domainInfo.isGenerated && trimmedDomain === domainInfo.domain.split('.')[0]) return;
+      if (!domainInfo.isGenerated && trimmedDomain === domainInfo.domain) return;
+
+      toast.info('正在更新域名...');
+      
+      try {
+        // 1. 先移除旧域名
+        const delRes = await fetch('/api/zeabur/domain/delete', {
+          method: 'POST',
+          headers: this.getAuthHeaders(),
+          body: JSON.stringify({
+            token: accountData.token,
+            serviceId: service._id,
+            domain: domainInfo.domain,
+            environmentId: domainInfo.environmentId
+          })
+        });
+
+        if (!delRes.ok) {
+          const errData = await delRes.json();
+          toast.error('移除原域名失败: ' + (errData.error || '未知错误'));
+          return;
+        }
+
+        // 2. 挂载新域名 (前缀或完整域名)
+        const addRes = await fetch('/api/zeabur/domain/add', {
+          method: 'POST',
+          headers: this.getAuthHeaders(),
+          body: JSON.stringify({
+            token: accountData.token,
+            serviceId: service._id,
+            domain: trimmedDomain,
+            isGenerated: domainInfo.isGenerated,
+            environmentId: domainInfo.environmentId
+          })
+        });
+
+        const addResult = await addRes.json();
+        if (addResult.success) {
+          if (domainInfo.isGenerated) {
+            toast.success(`域名已更新为: ${addResult.domainInfo.domain}`);
+          } else {
+            const dnsInfo = addResult.domainInfo.dnsRecord;
+            const message = `域名已更新！\n\n新域名: ${trimmedDomain}\n解析类型: ${dnsInfo.type}\n主机记录: ${dnsInfo.name}\n记录值: ${dnsInfo.value}`;
+            await store.showAlert(message, '请配置 DNS', 'fa-check-circle');
+          }
+          await this.fetchData();
+        } else {
+          toast.error('添加新域名失败: ' + (addResult.error || '未知错误'));
+          await this.fetchData();
+        }
+      } catch (error) {
+        toast.error('操作异常: ' + error.message);
+      }
     },
 
     startEditProjectName(project) {
@@ -1091,7 +1283,7 @@ export const zeaburMethods = {
           return;
         }
 
-        const response = await fetch('/api/service/pause', {
+        const response = await fetch('/api/zeabur/service/pause', {
           method: 'POST',
           headers: this.getAuthHeaders(),
           body: JSON.stringify({
@@ -1139,7 +1331,7 @@ export const zeaburMethods = {
           return;
         }
 
-        const response = await fetch('/api/service/restart', {
+        const response = await fetch('/api/zeabur/service/restart', {
           method: 'POST',
           headers: this.getAuthHeaders(),
           body: JSON.stringify({
@@ -1176,7 +1368,7 @@ export const zeaburMethods = {
         subtitle: `${project.name} / ${account.name}`,
         source: 'zeabur',
         fetcher: async () => {
-          const response = await fetch('/api/service/logs', {
+          const response = await fetch('/api/zeabur/service/logs', {
             method: 'POST',
             headers: this.getAuthHeaders(),
             body: JSON.stringify({
@@ -1371,7 +1563,7 @@ export const zeaburMethods = {
           return;
         }
 
-        const response = await fetch('/api/domain/generate', {
+        const response = await fetch('/api/zeabur/domain/generate', {
           method: 'POST',
           headers: this.getAuthHeaders(),
           body: JSON.stringify({
@@ -1412,13 +1604,17 @@ export const zeaburMethods = {
           return;
         }
 
-        const response = await fetch('/api/domain/add', {
+        // 获取环境 ID
+        const environmentId = project.environments && project.environments[0] ? project.environments[0]._id : null;
+
+        const response = await fetch('/api/zeabur/domain/add', {
           method: 'POST',
           headers: this.getAuthHeaders(),
           body: JSON.stringify({
             token: accountData.token,
             serviceId: service._id,
-            domain: domain.trim()
+            domain: domain.trim(),
+            environmentId: environmentId
           })
         });
 

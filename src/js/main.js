@@ -25,7 +25,6 @@ import '../css/koyeb.css'; // Koyeb 专属样式
 import '../css/fly.css'; // Fly.io 专属样式
 import '../css/r2.css'; // R2 存储专属样式
 import '../css/chat.css'; // 聊天界面样式
-import '../css/welcome.css'; // 欢迎页面样式
 import '../css/template.css'; // 模块模板通用样式
 import '../css/refined-ui.css'; // 精选组件样式
 
@@ -296,11 +295,29 @@ const app = createApp({
       // 服务器当前标签页
       serverCurrentTab: 'list',
       activeSSHSessionId: null, // 当前激活的 SSH 会话 ID
+      visibleSessionIds: [],    // 分屏显示的会话 ID 列表
+      sshViewLayout: 'single',  // 'single', 'split-h', 'split-v'
+      sshSyncEnabled: false,    // 是否开启多屏同步操作
+      draggedSessionId: null,   // 正在拖拽的会话 ID
+      dropTargetId: null,       // 正在悬停的目标容器 ID
+      dropHint: '',             // 拖拽位置提示 ('left', 'right', 'top', 'bottom', 'center')
       sshIdeFullscreen: false, // SSH 屏幕全屏模式
       sshWindowFullscreen: false, // SSH 窗口全屏模式
       showSSHQuickMenu: false,    // SSH 快速连接下拉菜单
+      showSnippetsSidebar: false, // 代码片段侧边栏显隐
 
-
+      // 代码片段相关
+      sshSnippets: [],
+      showSnippetModal: false,
+      snippetSaving: false,
+      snippetError: '',
+      snippetForm: {
+        id: null,
+        title: '',
+        content: '',
+        category: 'common',
+        description: ''
+      },
 
       // SSH 终端相关
       showSSHTerminalModal: false,
@@ -495,8 +512,15 @@ const app = createApp({
     }
   },
 
-  async mounted() {
-    // 保存 Vue 实例到全局，供其他模块使用
+    async mounted() {
+      // 加载代码片段和凭据
+      this.loadSnippets();
+      this.loadServerCredentials();
+      
+      // 初始化 SSH 终端自动挂载观察者
+      this.initSshMountObserver();
+      
+      // 定期刷新数据
     window.vueApp = this;
 
     // 1. 全局图片点击代理 (针对 Markdown 动态生成的图片)
@@ -716,6 +740,24 @@ const app = createApp({
   },
 
   watch: {
+    mainActiveTab(newVal, oldVal) {
+      // 1. [离开保护] 如果离开主机管理模块，强制将 DOM 节点搬回仓库，防止被销毁
+      if (oldVal === 'server') {
+        this.saveTerminalsToWarehouse();
+      }
+
+      // 2. [切回恢复] 当重新进入时，重新挂载
+      if (newVal === 'server') {
+        this.$nextTick(() => {
+          this.syncTerminalDOM();
+          this.fitAllVisibleSessions();
+          setTimeout(() => {
+            this.syncTerminalDOM();
+            this.fitAllVisibleSessions();
+          }, 300);
+        });
+      }
+    },
     // 监听全局模态框状态，控制背景滚动
     isAnyModalOpen(newVal) {
       if (newVal) {
@@ -766,10 +808,11 @@ const app = createApp({
         } else if (newVal === 'list') {
           // 切换回列表时重新加载
           this.loadServerList();
-        } else if (newVal === 'terminal' && this.activeSSHSessionId) {
-          // 切换到SSH终端视图时，为当前活动会话调整大小并聚焦
+        } else if (newVal === 'terminal') {
+          // 切换到SSH终端视图时，恢复 DOM 挂载并调整大小
           this.$nextTick(() => {
-            const session = this.sshSessions.find(s => s.id === this.activeSSHSessionId);
+            this.syncTerminalDOM();
+            const session = this.getSessionById(this.activeSSHSessionId);
             if (session) {
               // 延迟确保 DOM 渲染完成
               setTimeout(() => {
@@ -1111,10 +1154,11 @@ const app = createApp({
       }
     },
 
-    // 监听欢迎页状态，更新主题色
-    showWelcomeScreen(newVal) {
-      this.updateBrowserThemeColor();
+    opacity(newVal) {
+      localStorage.setItem('card_opacity', newVal);
+      this.updateOpacity();
     },
+
 
     showAddSessionSelectModal(newVal) {
       if (newVal) {
@@ -1189,34 +1233,48 @@ const app = createApp({
     safeTerminalFit(session) {
       if (!session || !session.fit || !session.terminal) return;
 
-      const terminal = session.terminal;
-      const fit = session.fit;
+      // 防止同一帧内重复执行
+      if (session._fitting) return;
+      session._fitting = true;
 
-      // 如果终端尚未挂载或不可见，跳过
-      if (!terminal.element || terminal.element.offsetWidth === 0 || terminal.element.offsetHeight === 0) {
-        return;
-      }
+      window.requestAnimationFrame(() => {
+        session._fitting = false;
+        const terminal = session.terminal;
+        const fit = session.fit;
 
-      try {
-        const oldCols = terminal.cols;
-        const oldRows = terminal.rows;
-        
-        fit.fit();
-        
-        // 只有当尺寸真正发生变化且 WebSocket 开启时才通知后端
-        if ((terminal.cols !== oldCols || terminal.rows !== oldRows) && session.ws && session.ws.readyState === WebSocket.OPEN) {
-          console.log(`[SSH]通知服务端 Resize: ${terminal.cols}x${terminal.rows}`);
-          session.ws.send(JSON.stringify({
-            type: 'resize',
-            cols: terminal.cols,
-            rows: terminal.rows
-          }));
+        // 如果终端尚未挂载或不可见，跳过
+        if (!terminal.element || terminal.element.offsetWidth === 0 || terminal.element.offsetHeight === 0) {
+          return;
         }
-      } catch (e) {
-        if (!(e instanceof TypeError && (e.message.includes('scrollBarWidth') || e.message.includes('undefined')))) {
-          console.warn('终端自适应调整失败:', e);
+
+        try {
+          const oldCols = terminal.cols;
+          const oldRows = terminal.rows;
+          
+          fit.fit();
+          
+          // 仅在尺寸确实发生变化或初次渲染时刷新，且只刷新可见区域
+          if (terminal.cols !== oldCols || terminal.rows !== oldRows || !session._initialFitDone) {
+            session._initialFitDone = true;
+            if (terminal.buffer && terminal.buffer.active) {
+              terminal.refresh(0, terminal.rows - 1);
+            }
+          }
+          
+          // 只有当尺寸真正发生变化且 WebSocket 开启时才通知后端
+          if ((terminal.cols !== oldCols || terminal.rows !== oldRows) && session.ws && session.ws.readyState === WebSocket.OPEN) {
+            session.ws.send(JSON.stringify({
+              type: 'resize',
+              cols: terminal.cols,
+              rows: terminal.rows
+            }));
+          }
+        } catch (e) {
+          if (!(e instanceof TypeError && (e.message.includes('scrollBarWidth') || e.message.includes('undefined')))) {
+            console.warn('终端自适应调整失败:', e);
+          }
         }
-      }
+      });
     },
 
     async logout() {
@@ -1448,8 +1506,8 @@ const app = createApp({
         if (bgColor) {
           this._setMetaThemeColor(bgColor);
         } else {
-          // 回退逻辑：欢迎页或出错时使用默认深色
-          this._setMetaThemeColor(this.showWelcomeScreen ? '#0d1117' : '#f4f6f8');
+          // 回退逻辑：使用默认浅色
+          this._setMetaThemeColor('#f4f6f8');
         }
       });
     },
@@ -1930,18 +1988,15 @@ const app = createApp({
      * 打开 SSH 终端(切换到 IDE 视图)
      */
     openSSHTerminal(server) {
-      // 加载主机列表用于新建会话
-      this.loadServerList();
+      if (!server) return;
 
-      // 检查是否已存在该主机的会话
+      // 检查是否已经打开了该主机的终端
       const existingSession = this.sshSessions.find(s => s.server.id === server.id);
       if (existingSession) {
-        // 如果已存在，直接切换到该会话
         this.switchToSSHTab(existingSession.id);
         return;
       }
 
-      // 创建新会话
       const sessionId = 'session_' + Date.now();
       const session = {
         id: sessionId,
@@ -1949,23 +2004,18 @@ const app = createApp({
         terminal: null,
         fit: null,
         ws: null,
-        connected: false,
-        heartbeatInterval: null,
-        resizeHandler: null
+        connected: false
       };
 
       this.sshSessions.push(session);
-
-      // 切换到SSH IDE视图并激活会话
-      this.serverCurrentTab = 'terminal';
       this.activeSSHSessionId = sessionId;
+      this.serverCurrentTab = 'terminal';
 
-      // 等待 DOM 更新后初始化终端
       this.$nextTick(() => {
-        // 增加延迟确保 DOM 完全渲染
-        setTimeout(() => {
-          this.initSessionTerminal(sessionId);
-        }, 100);
+        this.initSessionTerminal(sessionId);
+        // 延迟同步 DOM 确保 Vue 渲染完成
+        setTimeout(() => this.syncTerminalDOM(), 50);
+        setTimeout(() => this.syncTerminalDOM(), 200);
       });
     },
 
@@ -1976,15 +2026,16 @@ const app = createApp({
       this.serverCurrentTab = 'terminal';
       this.activeSSHSessionId = sessionId;
 
+      // 如果目标会话不在当前分屏中，自动退出分屏返回单屏模式
+      if (this.sshViewLayout !== 'single' && !this.visibleSessionIds.includes(sessionId)) {
+        this.resetToSingleLayout();
+      }
+
       this.$nextTick(() => {
-        const session = this.sshSessions.find(s => s.id === sessionId);
-        if (session) {
-          // 增加微小延迟，确保 CSS 过渡不会干扰尺寸计算
-          setTimeout(() => {
-            this.safeTerminalFit(session);
-            if (session.terminal) session.terminal.focus();
-          }, 100);
-        }
+        this.syncTerminalDOM(); // 同步 DOM 节点位置
+        this.fitAllVisibleSessions();
+        const session = this.getSessionById(sessionId);
+        if (session && session.terminal) session.terminal.focus();
       });
     },
 
@@ -2024,6 +2075,12 @@ const app = createApp({
       // 销毁终端实例
       if (session.terminal) {
         session.terminal.dispose();
+      }
+
+      // 核心修复：从全局仓库中彻底删除该节点的 DOM 元素
+      const terminalEl = document.getElementById('ssh-terminal-' + sessionId);
+      if (terminalEl) {
+        terminalEl.remove();
       }
 
       // 从数组中移除
@@ -2142,6 +2199,312 @@ const app = createApp({
       };
     },
 
+    // ==================== SSH 分屏拖拽逻辑 ====================
+
+    handleTabDragStart(sessionId) {
+      this.draggedSessionId = sessionId;
+      this.dropHint = '';
+      this.dropTargetId = null;
+      
+      // 增强某些浏览器的兼容性
+      if (event && event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', sessionId);
+      }
+    },
+
+    handleTabDragEnd() {
+      this.draggedSessionId = null;
+      this.dropHint = '';
+      this.dropTargetId = null;
+    },
+
+    setDropHint(pos, targetId = null) {
+      this.dropHint = pos;
+      this.dropTargetId = targetId;
+    },
+
+    clearDropHint() {
+      this.dropHint = '';
+      this.dropTargetId = null;
+    },
+
+    handleTerminalDragOver(e) {
+      e.preventDefault();
+    },
+
+    handleTerminalDrop(targetId = null, position = 'center') {
+      const effectivePosition = position || this.dropHint || 'center';
+      if (!this.draggedSessionId) {
+        this.handleTabDragEnd();
+        return;
+      }
+
+      const draggedId = this.draggedSessionId;
+      const isAlreadyVisible = this.visibleSessionIds.includes(draggedId);
+      
+      // --- 1. 重复性检查 (仅针对从标签栏新拖入的情况) ---
+      if (!isAlreadyVisible) {
+        const draggedSession = this.getSessionById(draggedId);
+        if (draggedSession) {
+          // 检查该服务器是否已经有其他会话在显示了
+          const isServerShown = this.visibleSessionIds.some(id => {
+            if (id === targetId && effectivePosition === 'center') return false; // 允许替换
+            const s = this.getSessionById(id);
+            return s && s.server.id === draggedSession.server.id;
+          });
+
+          // 如果是单屏模式切分屏，检查 active 会话
+          const activeSession = this.getSessionById(this.activeSSHSessionId);
+          const isActiveSameServer = this.sshViewLayout === 'single' && 
+                                    activeSession && 
+                                    activeSession.server.id === draggedSession.server.id;
+
+          if (isServerShown || (isActiveSameServer && effectivePosition !== 'center')) {
+            toast.info('该服务器已在分屏显示中');
+            this.handleTabDragEnd();
+            return;
+          }
+        }
+      }
+
+      // --- 2. 布局逻辑处理 ---
+      if (this.sshViewLayout === 'single') {
+        if (effectivePosition === 'center') {
+          this.activeSSHSessionId = draggedId;
+        } else {
+          // 单屏切分屏
+          this.visibleSessionIds = (effectivePosition === 'left' || effectivePosition === 'top') 
+            ? [draggedId, this.activeSSHSessionId] 
+            : [this.activeSSHSessionId, draggedId];
+          this.sshViewLayout = (effectivePosition === 'left' || effectivePosition === 'right') ? 'split-h' : 'split-v';
+          this.activeSSHSessionId = draggedId;
+        }
+      } else {
+        // 分屏模式下的 移动/替换/交换
+        const draggedIndex = this.visibleSessionIds.indexOf(draggedId);
+        const targetIndex = this.visibleSessionIds.indexOf(targetId);
+
+        if (effectivePosition === 'center') {
+          // 替换或交换
+          if (targetIndex !== -1) {
+            if (isAlreadyVisible && draggedIndex !== -1) {
+              // 交换位置 (Swap)
+              const newVisibleIds = [...this.visibleSessionIds];
+              [newVisibleIds[draggedIndex], newVisibleIds[targetIndex]] = [newVisibleIds[targetIndex], newVisibleIds[draggedIndex]];
+              this.visibleSessionIds = newVisibleIds;
+            } else {
+              // 外部替换
+              this.visibleSessionIds.splice(targetIndex, 1, draggedId);
+            }
+          }
+        } else {
+          // 拆分或重新排序 (Rearrange)
+          let newVisibleIds = this.visibleSessionIds.filter(id => id !== draggedId);
+          let targetIdx = newVisibleIds.indexOf(targetId);
+          
+          if (targetIdx !== -1) {
+            let insertAt = targetIdx;
+            
+            // 核心修复：针对 2 列 Grid 布局计算索引
+            // 在 Grid 中，索引 0|1 是第一行，2|3 是第二行
+            if (effectivePosition === 'right' || effectivePosition === 'bottom') {
+              insertAt = targetIdx + 1;
+            }
+            
+            // 特殊处理：如果当前是 2 屏左右(H) 且 向下拆分左侧窗口(0)
+            // 我们希望结果是：[0, 1] 变成 [0, 1, new]，在网格中 new 就会出现在 0 的下方
+            if (this.sshViewLayout === 'split-h' && effectivePosition === 'bottom' && targetIdx === 0) {
+              insertAt = 2; 
+            }
+            
+            newVisibleIds.splice(insertAt, 0, draggedId);
+          } else {
+            // 边缘放置
+            newVisibleIds.push(draggedId);
+          }
+          
+          this.visibleSessionIds = newVisibleIds;
+          
+          // 智能布局切换
+          if (this.visibleSessionIds.length === 2) {
+            if (effectivePosition === 'left' || effectivePosition === 'right') {
+              this.sshViewLayout = 'split-h';
+            } else {
+              this.sshViewLayout = 'split-v';
+            }
+          } else if (this.visibleSessionIds.length === 3) {
+            // 核心修复：根据当前布局趋势决定 3 屏方向
+            // 如果已经在左右分屏，向下拆分应保持左右结构 (Master-Stack)
+            if (this.sshViewLayout === 'split-h') {
+              this.sshViewLayout = 'grid'; 
+            } else if (this.sshViewLayout === 'split-v') {
+              this.sshViewLayout = 'grid-v';
+            } else {
+              // 兜底逻辑
+              this.sshViewLayout = (effectivePosition === 'top' || effectivePosition === 'bottom') ? 'grid-v' : 'grid';
+            }
+          } else if (this.visibleSessionIds.length > 3) {
+            this.sshViewLayout = 'grid';
+          }
+        }
+        this.activeSSHSessionId = draggedId;
+      }
+
+      this.handleTabDragEnd();
+
+      // --- 4. 同步与适配 ---
+      this.$nextTick(() => {
+        this.syncTerminalDOM();
+        
+        // 针对复杂的 3 屏/4 屏布局，二次同步确保万无一失
+        setTimeout(() => this.syncTerminalDOM(), 100);
+
+        this.fitAllVisibleSessions();
+      });
+    },
+
+    closeSplitView(sessionId) {
+      this.visibleSessionIds = this.visibleSessionIds.filter(id => id !== sessionId);
+      
+      // 自适应：如果只剩一个会话，或没有会话了，自动恢复到 single 模式
+      if (this.visibleSessionIds.length <= 1) {
+        this.resetToSingleLayout();
+      } else {
+        // 如果还剩多个，更新网格计数变量并重新 Fit
+        this.$nextTick(() => {
+          this.syncTerminalDOM(); // 同步 DOM 节点位置
+          this.fitAllVisibleSessions();
+        });
+      }
+    },
+
+    getSessionById(id) {
+      return this.sshSessions.find(s => s.id === id);
+    },
+
+    resetToSingleLayout() {
+      // 1. [核心修复] 在销毁分屏 Slot 之前，抢先将所有终端节点撤回全局仓库保护
+      this.saveTerminalsToWarehouse();
+
+      this.sshViewLayout = 'single';
+      this.visibleSessionIds = [];
+      
+      this.$nextTick(() => {
+        this.syncTerminalDOM(); // 2. 重新挂载到单屏 Slot
+        this.fitAllVisibleSessions();
+        
+        // 3. 二次补偿同步
+        setTimeout(() => {
+          this.syncTerminalDOM();
+          this.fitAllVisibleSessions();
+        }, 150);
+      });
+    },
+
+    /**
+     * 同步终端 DOM 节点，将其实际挂载点移动到当前布局的槽位中
+     */
+    syncTerminalDOM() {
+      const isTerminalTab = this.serverCurrentTab === 'terminal';
+      const idsToShow = (this.mainActiveTab === 'server' && isTerminalTab)
+        ? (this.sshViewLayout === 'single' ? (this.activeSSHSessionId ? [this.activeSSHSessionId] : []) : this.visibleSessionIds)
+        : [];
+
+      idsToShow.forEach(id => {
+        if (!id) return;
+        const slot = document.getElementById('ssh-slot-' + id);
+        const terminalEl = document.getElementById('ssh-terminal-' + id);
+        const session = this.getSessionById(id);
+        
+        if (slot && terminalEl && session && session.terminal) {
+          if (terminalEl.parentElement !== slot) {
+            // 将终端节点移动到可见的槽位中
+            slot.appendChild(terminalEl);
+            
+            this.$nextTick(() => {
+              this.safeTerminalFit(session);
+              if (id === this.activeSSHSessionId) {
+                setTimeout(() => session.terminal.focus(), 50);
+              }
+            });
+          }
+        }
+      });
+
+      // 将其余终端放回仓库保活
+      const warehouse = document.getElementById('ssh-terminal-warehouse');
+      if (warehouse) {
+        this.sshSessions.forEach(session => {
+          if (!idsToShow.includes(session.id)) {
+            const terminalEl = document.getElementById('ssh-terminal-' + session.id);
+            if (terminalEl && terminalEl.parentElement !== warehouse) {
+              warehouse.appendChild(terminalEl);
+            }
+          }
+        });
+      }
+    },
+
+    /**
+     * 强制将所有终端节点撤回仓库保活
+     */
+    saveTerminalsToWarehouse() {
+      const warehouse = document.getElementById('ssh-terminal-warehouse');
+      if (!warehouse) return;
+      this.sshSessions.forEach(session => {
+        const el = document.getElementById('ssh-terminal-' + session.id);
+        if (el && el.parentElement !== warehouse) {
+          warehouse.appendChild(el);
+        }
+      });
+    },
+
+    /**
+     * 初始化监听器，自动发现新 Slot 并挂载终端
+     */
+    initSshMountObserver() {
+      if (this.sshMountObserver) this.sshMountObserver.disconnect();
+      
+      const observer = new MutationObserver((mutations) => {
+        // 只有当有子节点变化时才尝试同步
+        const hasRelevantChange = mutations.some(m => m.type === 'childList');
+        if (hasRelevantChange && this.mainActiveTab === 'server' && this.serverCurrentTab === 'terminal') {
+          this.syncTerminalDOM();
+        }
+      });
+
+      // 缩小监听范围到具体的主机管理容器，而不是 body
+      const container = document.getElementById('server-list-container');
+      if (container) {
+        observer.observe(container, { childList: true, subtree: true });
+      } else {
+        // Fallback
+        observer.observe(document.body, { childList: true, subtree: true });
+      }
+      this.sshMountObserver = observer;
+    },
+
+    /**
+     * 对所有当前可见的终端执行 Fit 序列，解决布局切换时的尺寸计算错位
+     */
+    fitAllVisibleSessions() {
+      const ids = this.sshViewLayout === 'single' 
+        ? (this.activeSSHSessionId ? [this.activeSSHSessionId] : [])
+        : this.visibleSessionIds;
+
+      const runFit = () => {
+        ids.forEach(id => {
+          const session = this.getSessionById(id);
+          if (session) this.safeTerminalFit(session);
+        });
+      };
+
+      // 仅执行少量必要序列，配合 safeTerminalFit 内部的 rAF
+      runFit();
+      setTimeout(runFit, 150);
+    },
+
     /**
      * 重新调整当前终端尺寸
      */
@@ -2257,35 +2620,78 @@ const app = createApp({
     },
 
     /**
+     * 更新所有终端的主题并强制重新渲染
+     */
+    updateAllTerminalThemes() {
+      // 获取当前最新的主题配置
+      const theme = this.getTerminalTheme();
+      
+      this.sshSessions.forEach(session => {
+        if (session.terminal) {
+          try {
+            // 核心修复：显式创建新对象，触发 xterm.js 的 options 监听器
+            session.terminal.options.theme = { ...theme };
+            
+            // 确保渲染器重绘
+            if (session.terminal.buffer && session.terminal.buffer.active) {
+              session.terminal.refresh(0, session.terminal.rows - 1);
+            }
+          } catch (err) {
+            console.error('更新终端主题失败:', err);
+          }
+        }
+      });
+    },
+
+    /**
      * 获取终端主题配置 - 支持深色/浅色模式自动切换
      */
     getTerminalTheme() {
-      // 动态获取当前 CSS 变量定义的背景色
+      // 1. 获取 Body 上的实时计算样式
       const computedStyle = getComputedStyle(document.body);
-      const bg = computedStyle.getPropertyValue('--bg-primary').trim();
-      const fg = computedStyle.getPropertyValue('--text-primary').trim();
+      let bg = computedStyle.getPropertyValue('--bg-primary').trim();
+      let fg = computedStyle.getPropertyValue('--text-primary').trim();
       
-      // 改进深色模式检测：优先判断当前背景色是否为深色，再参考系统偏好
-      // 大多数深色背景色以 #1, #0 或 rgb(较小数值) 开头
-      const isDarkBackground = bg && (bg.startsWith('#0') || bg.startsWith('#1') || bg.includes('rgb(17') || bg.includes('rgb(31'));
-      const isDark = isDarkBackground || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      // 2. 转换颜色为规范的 RGB 格式以便计算亮度
+      const parseToRGB = (colorStr) => {
+        if (!colorStr) return [255, 255, 255];
+        if (colorStr.startsWith('rgb')) {
+          return colorStr.match(/\d+/g).map(Number);
+        }
+        if (colorStr.startsWith('#')) {
+          let hex = colorStr.substring(1);
+          if (hex.length === 3) hex = hex.split('').map(s => s + s).join('');
+          return [
+            parseInt(hex.substring(0, 2), 16),
+            parseInt(hex.substring(2, 4), 16),
+            parseInt(hex.substring(4, 6), 16)
+          ];
+        }
+        return [255, 255, 255];
+      };
+
+      const rgb = parseToRGB(bg);
+      // 精确亮度计算 (W3C 标准)
+      const brightness = (rgb[0] * 299 + rgb[1] * 587 + rgb[2] * 114) / 1000;
+      const isDark = brightness < 128;
 
       if (isDark) {
+        // 深色模式 - 高对比度调优
         return {
           background: bg || '#0d1117',
-          foreground: '#ffffff', // 强制使用纯白前景色，确保最高对比度
+          foreground: '#ffffff',
           cursor: '#ffffff',
           selection: 'rgba(56, 139, 253, 0.5)',
           selectionBackground: 'rgba(56, 139, 253, 0.5)',
           black: '#000000',
-          red: '#ff6b6b', // 稍微调亮红色
-          green: '#4ade80', // 调亮绿色
-          yellow: '#fbbf24', // 调亮黄色
-          blue: '#60a5fa', // 调亮蓝色
-          magenta: '#e879f9', // 调亮品红
-          cyan: '#22d3ee', // 调亮青色
-          white: '#ffffff', // 调亮白色
-          brightBlack: '#94a3b8', // 调亮亮黑（灰色），常用于自动补全提示
+          red: '#ff6b6b',
+          green: '#4ade80',
+          yellow: '#fbbf24',
+          blue: '#60a5fa',
+          magenta: '#e879f9',
+          cyan: '#22d3ee',
+          white: '#ffffff',
+          brightBlack: '#94a3b8',
           brightRed: '#f87171',
           brightGreen: '#4ade80',
           brightYellow: '#fbbf24',
@@ -2295,50 +2701,31 @@ const app = createApp({
           brightWhite: '#ffffff'
         };
       } else {
-        // 浅色主题配置 - 高对比度优化
+        // 浅色模式 - 极致对比度 (针对白底黑字优化)
         return {
           background: bg || '#ffffff',
-          foreground: fg || '#111827',
+          foreground: '#000000',
           cursor: '#000000',
-          selection: 'rgba(99, 102, 241, 0.4)', // 增加透明度到 0.4
-          selectionBackground: 'rgba(99, 102, 241, 0.4)', // 显式设置 selectionBackground
-          
+          selection: 'rgba(99, 102, 241, 0.3)',
+          selectionBackground: 'rgba(99, 102, 241, 0.3)',
           black: '#000000',
-          red: '#dc2626',
-          green: '#15803d',
-          yellow: '#b45309',
-          blue: '#1d4ed8',
-          magenta: '#7e22ce',
-          cyan: '#0e7490',
-          white: '#374151',
-          
+          red: '#b91c1c',
+          green: '#166534',
+          yellow: '#92400e',
+          blue: '#1e40af',
+          magenta: '#701a75',
+          cyan: '#155e75',
+          white: '#1f2937',
           brightBlack: '#4b5563',
-          brightRed: '#ef4444',
-          brightGreen: '#16a34a',
-          brightYellow: '#d97706',
+          brightRed: '#dc2626',
+          brightGreen: '#15803d',
+          brightYellow: '#b45309',
           brightBlue: '#2563eb',
           brightMagenta: '#9333ea',
-          brightCyan: '#06b6d4',
+          brightCyan: '#0891b2',
           brightWhite: '#6b7280'
         };
       }
-    },
-
-    /**
-     * 更新所有终端的主题
-     */
-    updateAllTerminalThemes() {
-      const theme = this.getTerminalTheme();
-
-      this.sshSessions.forEach(session => {
-        if (session.terminal) {
-          try {
-            session.terminal.options.theme = theme;
-          } catch (err) {
-            console.error('更新终端主题失败:', err);
-          }
-        }
-      });
     },
 
     /**
@@ -2347,11 +2734,11 @@ const app = createApp({
     setupThemeObserver() {
       // 1. 监听系统主题变化 (prefers-color-scheme)
       const darkModeQuery = window.matchMedia('(prefers-color-scheme: dark)');
-      const handleThemeChange = (e) => {
+      const handleThemeChange = () => {
         if (this.themeUpdateTimer) clearTimeout(this.themeUpdateTimer);
         this.themeUpdateTimer = setTimeout(() => {
           this.updateAllTerminalThemes();
-        }, 100);
+        }, 150);
       };
       
       if (darkModeQuery.addEventListener) {
@@ -2360,49 +2747,34 @@ const app = createApp({
         darkModeQuery.addListener(handleThemeChange);
       }
 
-      // 2. 使用 MutationObserver 监听 style 元素的变化 (用户自定义 CSS)
-      const observer = new MutationObserver((mutations) => {
-        mutations.forEach(mutation => {
-          if (mutation.type === 'childList' || mutation.type === 'characterData') {
-            // 延迟更新,避免过于频繁
-            if (this.themeUpdateTimer) {
-              clearTimeout(this.themeUpdateTimer);
-            }
-            this.themeUpdateTimer = setTimeout(() => {
-              this.updateAllTerminalThemes();
-            }, 100);
-          }
-        });
-      });
+      // 2. 核心增强：监听 body 和 html 的属性变化 (类名、style 等)
+      const attrObserver = new MutationObserver(handleThemeChange);
+      attrObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
+      attrObserver.observe(document.body, { attributes: true, attributeFilter: ['class', 'style'] });
 
-      // 监听 custom-css style 元素的变化
+      // 3. 监听自定义 CSS 样式表的变化
+      const observer = new MutationObserver(handleThemeChange);
       const customCssElement = document.getElementById('custom-css');
       if (customCssElement) {
-        observer.observe(customCssElement, {
-          childList: true,
-          characterData: true,
-          subtree: true
-        });
+        observer.observe(customCssElement, { childList: true, characterData: true, subtree: true });
       }
 
-      // 同时监听 document.documentElement 的 style 属性变化
-      const docObserver = new MutationObserver(() => {
-        if (this.themeUpdateTimer) {
-          clearTimeout(this.themeUpdateTimer);
-        }
-        this.themeUpdateTimer = setTimeout(() => {
+      // 4. 兜底方案：周期性校准主题 (每1秒检查一次)
+      // 解决某些主题切换仅修改 CSS 变量而不触发 DOM 事件的问题
+      let lastBg = '';
+      this.themePollingInterval = setInterval(() => {
+        const currentBg = getComputedStyle(document.body).getPropertyValue('--bg-primary').trim();
+        if (currentBg && currentBg !== lastBg) {
+          lastBg = currentBg;
           this.updateAllTerminalThemes();
-        }, 100);
-      });
+          // 额外的 500ms 延迟刷新，确保 CSS 变量完全生效
+          setTimeout(() => this.updateAllTerminalThemes(), 500);
+        }
+      }, 1000);
 
-      docObserver.observe(document.documentElement, {
-        attributes: true,
-        attributeFilter: ['style']
-      });
-
-      // 保存观察器以便后续清理
+      // 保存观察器
       this.themeObserver = observer;
-      this.docObserver = docObserver;
+      this.attrObserver = attrObserver;
     },
 
     /**
@@ -2412,10 +2784,18 @@ const app = createApp({
       const session = this.sshSessions.find(s => s.id === sessionId);
       if (!session) return;
 
-      const terminalContainer = document.getElementById('ssh-terminal-' + sessionId);
+      // 核心修复：如果全局仓库中不存在该节点的挂载点，则手动创建一个
+      let terminalContainer = document.getElementById('ssh-terminal-' + sessionId);
       if (!terminalContainer) {
-        console.error('终端容器不存在');
-        return;
+        // console.log(`[SSH] 为新会话 ${sessionId} 手动创建全局保活挂载点`);
+        const warehouse = document.getElementById('ssh-terminal-warehouse');
+        if (!warehouse) {
+          console.error('全局仓库 #ssh-terminal-warehouse 不存在！');
+          return;
+        }
+        terminalContainer = document.createElement('div');
+        terminalContainer.id = 'ssh-terminal-' + sessionId;
+        warehouse.appendChild(terminalContainer);
       }
 
       // 清空容器
@@ -2560,13 +2940,29 @@ const app = createApp({
         session.connected = false;
       };
 
-      // 监听终端输入，发送到 WebSocket
+      // 监听终端输入，发送到 WebSocket (包含多屏同步逻辑)
       terminal.onData(data => {
+        // 1. 发送到当前会话
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({
             type: 'input',
             data: data
           }));
+        }
+
+        // 2. 多屏同步：如果开启了同步且当前会话在可见分屏中，则广播输入
+        if (this.sshSyncEnabled && this.sshViewLayout !== 'single' && this.visibleSessionIds.includes(sessionId)) {
+          this.visibleSessionIds.forEach(targetId => {
+            if (targetId === sessionId) return; // 避免重复发送给原始会话
+            
+            const targetSession = this.getSessionById(targetId);
+            if (targetSession && targetSession.ws && targetSession.ws.readyState === WebSocket.OPEN) {
+              targetSession.ws.send(JSON.stringify({
+                type: 'input',
+                data: data
+              }));
+            }
+          });
         }
       });
 
@@ -2592,6 +2988,66 @@ const app = createApp({
     showAddSessionModal() {
       this.loadServerList();
       this.showAddSessionSelectModal = true;
+    },
+
+    /**
+     * 全部打开主机列表中的所有 SSH 会话
+     */
+    async openAllServersInSSH() {
+      if (this.serverList.length === 0) return;
+      
+      const count = this.serverList.length;
+      this.showGlobalToast(`正在批量建立 ${count} 个连接...`, 'info');
+      
+      // 切换到终端标签页
+      this.serverCurrentTab = 'terminal';
+      this.showSSHQuickMenu = false;
+
+      // 准备批量会话
+      let newSessionIds = [];
+      
+      for (const server of this.serverList) {
+        // 检查是否已经打开
+        let session = this.sshSessions.find(s => s.server.id === server.id);
+        if (!session) {
+          const sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+          session = {
+            id: sessionId,
+            server: server,
+            terminal: null,
+            fit: null,
+            ws: null,
+            connected: false
+          };
+          this.sshSessions.push(session);
+        }
+        newSessionIds.push(session.id);
+      }
+
+      // 设置布局模式：如果多于 1 个，使用 grid
+      if (newSessionIds.length > 1) {
+        this.sshViewLayout = 'grid';
+        this.visibleSessionIds = [...newSessionIds];
+      } else {
+        this.sshViewLayout = 'single';
+        this.activeSSHSessionId = newSessionIds[0];
+      }
+
+      // 初始化所有新终端
+      this.$nextTick(() => {
+        newSessionIds.forEach(id => {
+          const session = this.getSessionById(id);
+          if (session && !session.terminal) {
+            this.initSessionTerminal(id);
+          }
+        });
+
+        // 统一同步 DOM 并适配
+        setTimeout(() => {
+          this.syncTerminalDOM();
+          this.fitAllVisibleSessions();
+        }, 300);
+      });
     },
 
     /**
@@ -2626,43 +3082,43 @@ const app = createApp({
 
       this.$nextTick(() => {
         this.initSessionTerminal(sessionId);
+        // 初始化后强制同步一次 DOM，将其从仓库移动到 Slot (如果它当前被激活)
+        this.syncTerminalDOM();
       });
+    },
+
+    /**
+     * 关闭所有 SSH 会话并返回列表
+     */
+    async closeAllSSHSessions() {
+      if (this.sshSessions.length === 0) return;
+      
+      const confirmed = await this.showConfirm({
+        title: '关闭所有会话',
+        message: `确定要断开并关闭所有 ${this.sshSessions.length} 个 SSH 会话吗？`,
+        icon: 'fa-power-off',
+        confirmText: '全部关闭',
+        confirmClass: 'btn-danger'
+      });
+
+      if (!confirmed) return;
+
+      // 循环关闭所有，不带参数调用 closeSSHTerminal 即可
+      this.closeSSHTerminal();
+      this.showGlobalToast('所有 SSH 会话已关闭', 'info');
     },
 
     /**
      * 关闭 SSH 终端（关闭所有会话）
      */
     closeSSHTerminal() {
-      // 关闭所有会话
-      for (const session of this.sshSessions) {
-        // 断开 SSH 连接
-        fetch('/api/server/ssh/disconnect', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ serverId: session.server.id })
-        }).catch(err => console.error('断开连接失败:', err));
-
-        // 移除 resize 监听器
-        if (session.resizeHandler) {
-          window.removeEventListener('resize', session.resizeHandler);
-        }
-
-        // 销毁终端实例
-        if (session.terminal) {
-          session.terminal.dispose();
-        }
+      // 逆序遍历并逐个关闭，以确保数组删除过程安全
+      for (let i = this.sshSessions.length - 1; i >= 0; i--) {
+        this.closeSSHSession(this.sshSessions[i].id);
       }
-
-      // 重置状态
-      this.sshSessions = [];
+      // 最终确认状态
       this.activeSSHSessionId = null;
-      this.showSSHTerminalModal = false;
-      this.sshTerminalServer = null;
-      this.sshTerminal = null;
-      this.sshTerminalFit = null;
-      this.sshCommandHistory = [];
-      this.sshHistoryIndex = -1;
-      this.sshCurrentCommand = '';
+      this.serverCurrentTab = 'list';
     },
 
     // ==================== 主机列表展开相关 ====================
@@ -2692,20 +3148,12 @@ const app = createApp({
 
         // 如果有缓存数据，立即使用（零等待）
         if (server.cached_info && !server.info) {
-          server.info = {
-            system: server.cached_info.system,
-            cpu: server.cached_info.cpu,
-            memory: server.cached_info.memory,
-            disk: server.cached_info.disk,
-            docker: server.cached_info.docker
-          };
+          server.info = { ...server.cached_info };
           // 后台静默刷新最新数据（不显示 loading）
-          this.loadServerInfo(serverId);
-        } else if (!server.info && !server.error) {
+          this.loadServerInfo(serverId, false, true);
+        } else if (!server.info) {
           // 无缓存，显示 loading 并加载
-          server.loading = true;
-          await this.loadServerInfo(serverId);
-          server.loading = false;
+          this.loadServerInfo(serverId, false, false);
         }
       }
     },
@@ -2713,50 +3161,53 @@ const app = createApp({
     /**
      * 加载主机详细信息
      */
-    async loadServerInfo(serverId) {
+    async loadServerInfo(serverId, force = false, silent = false) {
       const server = this.serverList.find(s => s.id === serverId);
       if (!server) return;
+
+      // 仅在非静默模式且没有数据时显示加载动画
+      if (!silent && !server.info) {
+        server.loading = true;
+      }
 
       try {
         const response = await fetch('/api/server/info', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ serverId })
+          body: JSON.stringify({ serverId, force })
         });
 
         const data = await response.json();
-
         if (data.success) {
-          server.info = {
-            system: data.system,
-            cpu: data.cpu,
-            memory: data.memory,
-            disk: data.disk,
-            docker: data.docker
-          };
+          // 确保 Vue 响应式更新
+          server.info = { ...data };
           server.error = null;
+          
+          // 如果拿到的是后端缓存数据且不是强制同步，自动在后台发起一次真实采集以确保数据最新
+          if (data.is_cached && !force) {
+            setTimeout(() => this.loadServerInfo(serverId, true, true), 300);
+          }
         } else {
           server.error = data.error || '加载失败';
-          server.info = null;
         }
       } catch (error) {
         console.error('加载主机信息失败:', error);
         server.error = error.message;
-        server.info = null;
+      } finally {
+        if (!silent) {
+          server.loading = false;
+        }
       }
     },
 
     /**
-     * 刷新主机信息（静默刷新，保留现有数据）
+     * 刷新主机信息（强制刷新）
      */
     async refreshServerInfo(serverId) {
       const server = this.serverList.find(s => s.id === serverId);
       if (server) {
-        // 设置 loading 状态但不清空现有数据，避免 UI 闪烁
-        server.loading = true;
-        showToast('正在刷新主机信息...', 'info');
-        await this.loadServerInfo(serverId);
-        server.loading = false;
+        if (server.loading) return;
+        await this.loadServerInfo(serverId, true, false);
       }
     },
 
@@ -3365,12 +3816,189 @@ const app = createApp({
       }
     },
 
-    // ==================== 哪吒监控相关方法 ====================
+    /**
+     * 加载代码片段列表
+     */
+    async loadSnippets() {
+      try {
+        const response = await fetch('/api/server/snippets');
+        const data = await response.json();
+        if (data.success) {
+          this.sshSnippets = data.data;
+        }
+      } catch (error) {
+        console.error('加载代码片段失败:', error);
+      }
+    },
 
     /**
-     * 加载哪吒配置列表
+     * 加载服务器凭据列表
      */
+    async loadServerCredentials() {
+      try {
+        const response = await fetch('/api/server/credentials');
+        const data = await response.json();
+        if (data.success) {
+          this.serverCredentials = data.data;
+        }
+      } catch (error) {
+        console.error('加载凭据失败:', error);
+      }
+    },
 
+    /**
+     * 设置默认凭据
+     */
+    async setDefaultCredential(id) {
+      try {
+        const response = await fetch(`/api/server/credentials/${id}/default`, {
+          method: 'PUT'
+        });
+        const data = await response.json();
+        if (data.success) {
+          this.showGlobalToast('已设置为默认凭据', 'success');
+          await this.loadServerCredentials();
+        }
+      } catch (error) {
+        this.showGlobalToast('设置失败', 'error');
+      }
+    },
+
+    /**
+     * 删除凭据
+     */
+    async deleteCredential(id) {
+      const confirmed = await this.showConfirm({
+        title: '删除凭据',
+        message: '确定要删除这个访问凭据吗？',
+        icon: 'fa-trash',
+        confirmText: '删除',
+        confirmClass: 'btn-danger'
+      });
+
+      if (!confirmed) return;
+
+      try {
+        const response = await fetch(`/api/server/credentials/${id}`, {
+          method: 'DELETE'
+        });
+        const data = await response.json();
+        if (data.success) {
+          this.showGlobalToast('已删除', 'success');
+          await this.loadServerCredentials();
+        }
+      } catch (error) {
+        this.showGlobalToast('删除失败', 'error');
+      }
+    },
+
+    /**
+     * 保存代码片段 (新增或更新)
+     */
+    async saveSnippet() {
+      if (!this.snippetForm.title || !this.snippetForm.content) {
+        this.snippetError = '标题和内容不能为空';
+        return;
+      }
+
+      this.snippetSaving = true;
+      this.snippetError = '';
+
+      try {
+        const isEdit = !!this.snippetForm.id;
+        const url = isEdit ? `/api/server/snippets/${this.snippetForm.id}` : '/api/server/snippets';
+        const method = isEdit ? 'PUT' : 'POST';
+
+        const response = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.snippetForm)
+        });
+
+        const data = await response.json();
+        if (data.success) {
+          this.showGlobalToast(isEdit ? '更新成功' : '创建成功', 'success');
+          this.showSnippetModal = false;
+          await this.loadSnippets();
+        } else {
+          this.snippetError = data.error || '保存失败';
+        }
+      } catch (error) {
+        this.snippetError = '请求失败: ' + error.message;
+      } finally {
+        this.snippetSaving = false;
+      }
+    },
+
+    /**
+     * 删除代码片段
+     */
+    async deleteSnippet(id) {
+      const confirmed = await this.showConfirm({
+        title: '删除片段',
+        message: '确定要删除这个代码片段吗？',
+        icon: 'fa-trash',
+        confirmText: '删除',
+        confirmClass: 'btn-danger'
+      });
+
+      if (!confirmed) return;
+
+      try {
+        const response = await fetch(`/api/server/snippets/${id}`, {
+          method: 'DELETE'
+        });
+        const data = await response.json();
+        if (data.success) {
+          this.showGlobalToast('已删除', 'success');
+          await this.loadSnippets();
+        }
+      } catch (error) {
+        this.showGlobalToast('删除失败', 'error');
+      }
+    },
+
+    /**
+     * 发送代码片段到当前激活或所有可见终端
+     */
+    sendSnippet(content) {
+      if (!content) return;
+      
+      // 处理换行符 (发送 \r 以执行命令)
+      const dataToSend = content.endsWith('\n') ? content.replace(/\n$/, '\r') : content + '\r';
+
+      if (this.sshSyncEnabled && this.sshViewLayout !== 'single') {
+        // 同步模式：发送到所有可见窗口
+        this.visibleSessionIds.forEach(id => {
+          const session = this.getSessionById(id);
+          if (session && session.ws && session.ws.readyState === WebSocket.OPEN) {
+            session.ws.send(JSON.stringify({ type: 'input', data: dataToSend }));
+          }
+        });
+        this.showGlobalToast('指令已同步广播', 'success');
+      } else {
+        // 单发模式：发送到当前激活窗口
+        const session = this.getSessionById(this.activeSSHSessionId);
+        if (session && session.ws && session.ws.readyState === WebSocket.OPEN) {
+          session.ws.send(JSON.stringify({ type: 'input', data: dataToSend }));
+          this.showGlobalToast('指令已发送', 'success');
+        } else {
+          this.showGlobalToast('未连接 SSH 会话', 'warning');
+        }
+      }
+    },
+
+    openAddSnippetModal() {
+      this.snippetForm = { id: null, title: '', content: '', category: 'common', description: '' };
+      this.snippetError = '';
+      this.showSnippetModal = true;
+    },
+
+    openEditSnippetModal(snippet) {
+      this.snippetForm = { ...snippet };
+      this.snippetError = '';
+      this.showSnippetModal = true;
+    },
 
     // 整合所有模块的方法
     ...authMethods,

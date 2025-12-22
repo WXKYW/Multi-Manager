@@ -249,16 +249,25 @@ class ServerAccount {
 
         const decrypted = { ...account };
 
+        const tryDecrypt = (val) => {
+            if (!val) return val;
+            // 简单检查是否符合 iv:authTag:data 格式
+            if (typeof val === 'string' && val.split(':').length === 3) {
+                try {
+                    return decrypt(val);
+                } catch (e) {
+                    // console.warn('[SSH Models] 解密失败，可能已是明文或损坏');
+                    return val;
+                }
+            }
+            return val;
+        };
+
         try {
-            if (account.password) {
-                decrypted.password = decrypt(account.password);
-            }
-            if (account.private_key) {
-                decrypted.private_key = decrypt(account.private_key);
-            }
-            if (account.passphrase) {
-                decrypted.passphrase = decrypt(account.passphrase);
-            }
+            decrypted.password = tryDecrypt(account.password);
+            decrypted.private_key = tryDecrypt(account.private_key);
+            decrypted.passphrase = tryDecrypt(account.passphrase);
+
             if (account.tags) {
                 decrypted.tags = JSON.parse(account.tags);
             }
@@ -266,7 +275,7 @@ class ServerAccount {
                 decrypted.cached_info = JSON.parse(account.cached_info);
             }
         } catch (error) {
-            console.error('解密主机账号数据失败:', error);
+            console.error('解析主机账号附加数据失败:', error);
         }
 
         return decrypted;
@@ -522,9 +531,60 @@ class ServerCredential {
     }
 }
 
+/**
+ * ServerSnippet 模型 - 代码片段管理
+ */
+class ServerSnippet {
+    static getAll() {
+        const stmt = getDb().prepare('SELECT * FROM server_snippets ORDER BY category, title ASC');
+        return stmt.all();
+    }
+
+    static create(data) {
+        const now = new Date().toISOString();
+        const stmt = getDb().prepare(`
+            INSERT INTO server_snippets (title, content, category, description, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        `);
+        const result = stmt.run(
+            data.title,
+            data.content,
+            data.category || 'common',
+            data.description || null,
+            now,
+            now
+        );
+        return { id: result.lastInsertRowid, ...data, created_at: now, updated_at: now };
+    }
+
+    static update(id, data) {
+        const now = new Date().toISOString();
+        const stmt = getDb().prepare(`
+            UPDATE server_snippets
+            SET title = ?, content = ?, category = ?, description = ?, updated_at = ?
+            WHERE id = ?
+        `);
+        const result = stmt.run(
+            data.title,
+            data.content,
+            data.category,
+            data.description,
+            now,
+            id
+        );
+        return result.changes > 0;
+    }
+
+    static delete(id) {
+        const stmt = getDb().prepare('DELETE FROM server_snippets WHERE id = ?');
+        return stmt.run(id).changes > 0;
+    }
+}
+
 module.exports = {
     ServerAccount,
     ServerMonitorLog,
     ServerMonitorConfig,
-    ServerCredential
+    ServerCredential,
+    ServerSnippet
 };

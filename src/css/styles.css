@@ -281,13 +281,6 @@ pre,
     background: var(--current-primary) !important;
   }
 
-  /* 状态徽章动态配色 */
-  [class*="theme-"] .ag-status-online {
-    background: color-mix(in srgb, var(--current-primary), transparent 90%);
-    color: var(--current-primary);
-    border-color: color-mix(in srgb, var(--current-primary), transparent 80%);
-  }
-
   /* 模块专属激活态阴影适配 */
   .theme-openai .tab-btn.active {
     background: linear-gradient(135deg, var(--openai-primary), var(--openai-dark)) !important;

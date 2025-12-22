@@ -78,3 +78,14 @@ INSERT OR IGNORE INTO server_monitor_config (
     1800,
     1
 );
+
+-- 17. 主机代码片段表
+CREATE TABLE IF NOT EXISTS server_snippets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL, -- 片段标题
+    content TEXT NOT NULL, -- 指令内容
+    category TEXT DEFAULT 'common', -- 分类
+    description TEXT, -- 描述
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);

@@ -1,11 +1,8 @@
 <transition name="fade-slide">
-  <div v-if="showWelcomeScreen" class="welcome-screen">
-    <div class="welcome-content">
-      <div class="welcome-header">
-        <img src="/logo.svg" alt="Logo" class="welcome-logo">
-        <h1>API Monitor</h1>
-        <p>一站式云服务管理与 API 监控平台</p>
-      </div>
+<div v-if="!isAuthenticated && showWelcome" class="welcome-screen">
+  <div class="welcome-content">
+    <img src="./logo.svg" alt="Logo" class="welcome-logo">
+    <h1 class="welcome-title">API Monitor</h1>
 
       <div class="welcome-grid">
         <div class="welcome-card" @click="enterModule('paas')">

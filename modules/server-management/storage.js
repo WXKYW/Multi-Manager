@@ -3,7 +3,7 @@
  * 封装数据库操作
  */
 
-const { ServerAccount, ServerMonitorLog, ServerMonitorConfig, ServerCredential } = require('../../src/db/models');
+const { ServerAccount, ServerMonitorLog, ServerMonitorConfig, ServerCredential, ServerSnippet } = require('../../src/db/models');
 
 /**
  * 主机账号存储操作
@@ -147,9 +147,28 @@ const credentialStorage = {
     }
 };
 
+/**
+ * 代码片段存储操作
+ */
+const snippetStorage = {
+    getAll() {
+        return ServerSnippet.getAll();
+    },
+    create(data) {
+        return ServerSnippet.create(data);
+    },
+    update(id, data) {
+        return ServerSnippet.update(id, data);
+    },
+    delete(id) {
+        return ServerSnippet.delete(id);
+    }
+};
+
 module.exports = {
     serverStorage,
     monitorLogStorage,
     monitorConfigStorage,
-    credentialStorage
+    credentialStorage,
+    snippetStorage
 };

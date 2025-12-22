@@ -1,4 +1,5 @@
-<div v-if="mainActiveTab === 'dns'" class="tab-content dns-tab-content theme-cf-dns" :class="getTabAnimationClass('dns')">
+<div class="tab-content dns-tab-content theme-cf-dns"
+  :class="getTabAnimationClass('dns')">
   <!-- DNS 子标签页 -->
   <div class="sec-tabs">
     <button class="tab-btn" :class="{ active: dnsCurrentTab === 'dns' }" @click="dnsCurrentTab = 'dns'">
@@ -305,7 +306,7 @@
   <!-- 计算标签页 (Workers + Pages) -->
   <div v-if="dnsCurrentTab === 'compute'" class="sub-tab-content quick-fade-in">
     <!-- 账号选择 - 卡片式 -->
-    <div style="margin-bottom: 16px;">
+    <div style="margin-bottom: 16px;" v-if="dnsAccounts.length > 1">
       <div class="zones-grid">
         <div v-for="acc in dnsAccounts" :key="acc.id" class="zone-card"
           :class="{ active: dnsSelectedAccountId === acc.id }"
@@ -474,7 +475,9 @@
                   <span v-else style="opacity: 0.4;">直接上传</span>
                 </td>
                 <td class="text-center">
-                  <div class="log-time">{{ formatWorkerDate(project.created_on) }}</div>
+                  <div class="log-time" :title="project.latestDeployment ? '最新部署时间' : '创建时间'">
+                    {{ formatWorkerDate(project.latestDeployment?.createdOn || project.created_on) }}
+                  </div>
                 </td>
                 <td class="actions text-center">
                   <div class="flex-cell">
@@ -656,41 +659,56 @@
         </div>
       </div>
     </div>
-  </div>
+  </div> <!-- 关闭 tab-content -->
 
-  <!-- SSL 模式选择模态框 -->
-  <div v-if="showSslModal" class="modal-overlay" @click="showSslModal = false" style="z-index: 2000;">
-    <div class="modal ssl-modal" @click.stop style="max-width: 400px;">
-      <button class="modal-close" @click="showSslModal = false">
-        <i class="fas fa-times"></i>
-      </button>
+</div> <!-- 关闭 theme-cf-dns -->
+
+<!-- SSL 模式选择模态框 (绝对顶层) -->
+<transition name="modal-fade">
+  <div v-if="showSslModal" class="modal-overlay" @click="showSslModal = false" style="z-index: 9999;">
+    <div class="modal ssl-modal modal-sm" @click.stop>
       <div class="modal-header">
-        <h3>选择 SSL/TLS 加密模式</h3>
+        <div class="modal-title">SSL/TLS 加密模式</div>
+        <button class="close-btn" @click="showSslModal = false">
+          <i class="fas fa-times"></i>
+        </button>
       </div>
       <div class="modal-body">
-        <div class="ssl-mode-btn-group" style="flex-direction: column; gap: 8px;">
+        <div v-if="dnsLoadingSsl" class="loading" style="padding: 30px;">
+          <div class="spinner-sm"></div>
+          <p style="margin-top: 15px; font-size: 13px; color: var(--text-secondary);">正在获取当前配置...</p>
+        </div>
+        <div v-else-if="dnsSelectedZoneSsl" class="ssl-mode-btn-group" style="flex-direction: column; gap: 10px;">
           <button @click="updateSslMode('off'); showSslModal = false"
-            :class="['ssl-mode-btn', { active: dnsSelectedZoneSsl.mode === 'off' }]" :disabled="dnsLoadingSsl" style="flex-direction: column; align-items: flex-start; padding: 12px;">
-            <div style="font-weight: bold;">关闭 (Off)</div>
-            <div style="font-size: 11px; opacity: 0.7;">不加密，仅 HTTP</div>
+            :class="['ssl-mode-btn', { active: dnsSelectedZoneSsl.mode === 'off' }]"
+            style="flex-direction: column; align-items: flex-start; padding: 12px; height: auto;">
+            <div style="font-weight: 700; font-size: 14px;">关闭 (Off)</div>
+            <div style="font-size: 11px; opacity: 0.7; margin-top: 2px;">不加密，仅通过 HTTP 访问</div>
           </button>
           <button @click="updateSslMode('flexible'); showSslModal = false"
-            :class="['ssl-mode-btn', { active: dnsSelectedZoneSsl.mode === 'flexible' }]" :disabled="dnsLoadingSsl" style="flex-direction: column; align-items: flex-start; padding: 12px;">
-            <div style="font-weight: bold;">灵活 (Flexible)</div>
-            <div style="font-size: 11px; opacity: 0.7;">浏览器到 Cloudflare 加密，源站不加密</div>
+            :class="['ssl-mode-btn', { active: dnsSelectedZoneSsl.mode === 'flexible' }]"
+            style="flex-direction: column; align-items: flex-start; padding: 12px; height: auto;">
+            <div style="font-weight: 700; font-size: 14px;">灵活 (Flexible)</div>
+            <div style="font-size: 11px; opacity: 0.7; margin-top: 2px;">浏览器到 Cloudflare 加密，源站不加密</div>
           </button>
           <button @click="updateSslMode('full'); showSslModal = false"
-            :class="['ssl-mode-btn', { active: dnsSelectedZoneSsl.mode === 'full' }]" :disabled="dnsLoadingSsl" style="flex-direction: column; align-items: flex-start; padding: 12px;">
-            <div style="font-weight: bold;">完全 (Full)</div>
-            <div style="font-size: 11px; opacity: 0.7;">全程加密，源站证书可自签</div>
+            :class="['ssl-mode-btn', { active: dnsSelectedZoneSsl.mode === 'full' }]"
+            style="flex-direction: column; align-items: flex-start; padding: 12px; height: auto;">
+            <div style="font-weight: 700; font-size: 14px;">完全 (Full)</div>
+            <div style="font-size: 11px; opacity: 0.7; margin-top: 2px;">全程加密，源站证书可以是自签名证书</div>
           </button>
           <button @click="updateSslMode('strict'); showSslModal = false"
-            :class="['ssl-mode-btn', { active: dnsSelectedZoneSsl.mode === 'strict' }]" :disabled="dnsLoadingSsl" style="flex-direction: column; align-items: flex-start; padding: 12px;">
-            <div style="font-weight: bold;">严格 (Full Strict)</div>
-            <div style="font-size: 11px; opacity: 0.7;">全程加密，源站证书必须有效</div>
+            :class="['ssl-mode-btn', { active: dnsSelectedZoneSsl.mode === 'strict' }]"
+            style="flex-direction: column; align-items: flex-start; padding: 12px; height: auto;">
+            <div style="font-weight: 700; font-size: 14px;">严格 (Full Strict)</div>
+            <div style="font-size: 11px; opacity: 0.7; margin-top: 2px;">全程加密，源站必须安装有效的 CA 证书</div>
           </button>
+        </div>
+        <div v-else class="error-state" style="padding: 30px; text-align: center;">
+          <i class="fas fa-exclamation-circle" style="font-size: 28px; color: var(--danger-color); margin-bottom: 12px;"></i>
+          <p style="color: var(--text-secondary);">获取当前配置失败，请关闭重试</p>
         </div>
       </div>
     </div>
   </div>
-</div>
+</transition>

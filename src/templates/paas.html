@@ -1,5 +1,5 @@
 <!-- ==================== PaaS 管理部分 ==================== -->
-<div v-if="mainActiveTab === 'paas'" class="tab-content paas-tab-content theme-paas" :class="getTabAnimationClass('paas')">
+<div class="tab-content theme-paas" :class="getTabAnimationClass('paas')">
   <!-- PaaS 子标签页 -->
   <div class="sec-tabs paas-sec-tabs">
     <div class="paas-tabs-scroll-wrapper">
@@ -179,13 +179,27 @@
                   </div>
                 </div>
               </div>
-              <div v-if="getProjectDomains(project).length > 0" class="domains-container">
-                <a v-for="domainInfo in getProjectDomains(project)" :key="domainInfo.domain"
-                  :href="'https://' + domainInfo.domain" target="_blank" class="domain-link">
-                  <i class="fas fa-globe"></i>
-                  <span>{{ domainInfo.domain }}</span>
-                  <span v-if="domainInfo.isGenerated" class="domain-badge">自动</span>
-                </a>
+              <div class="domains-container">
+                <!-- 已有域名列表 -->
+                <div v-for="domainInfo in getProjectDomains(project)" :key="domainInfo.domain" class="domain-item-wrapper">
+                  <div class="domain-link-group">
+                    <a :href="'https://' + domainInfo.domain" target="_blank" class="domain-link">
+                      <i class="fas fa-globe"></i>
+                      <span>{{ domainInfo.domain }}</span>
+                    </a>
+                    <button class="domain-op-btn edit" @click.stop="editDomain(account, project, domainInfo)" title="管理域名">
+                      <i class="fas fa-edit"></i>
+                    </button>
+                  </div>
+                </div>
+                
+                <!-- 无域名时的快速添加入口 -->
+                <div v-if="getProjectDomains(project).length === 0" class="domain-empty-state">
+                  <button class="btn-quick-add-domain" @click="quickAddDomain(account, project)">
+                    <i class="fas fa-plus-circle"></i>
+                    <span>添加或生成域名</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>

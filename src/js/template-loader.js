@@ -20,7 +20,6 @@ const TemplateLoader = {
         'settings.html': '#template-settings',
         'modals.html': '#template-modals',
         'r2.html': '#template-r2',
-        'welcome.html': '#template-welcome',
     },
 
     /**

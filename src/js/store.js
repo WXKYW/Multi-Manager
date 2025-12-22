@@ -16,7 +16,6 @@ export const store = reactive({
     isCheckingAuth: true,
     showLoginModal: false,
     showSetPasswordModal: false,
-    showWelcomeScreen: false,
     loginError: '',
     loginPassword: '',
     setPassword: '',
@@ -297,12 +296,14 @@ export const store = reactive({
         icon: '',
         confirmText: '',
         cancelText: '',
+        deleteText: '', // 新增删除按钮文本
         confirmClass: '',
         isPrompt: false,
         promptValue: '',
         placeholder: '',
         onConfirm: null,
-        onCancel: null
+        onCancel: null,
+        onDelete: null  // 新增删除回调
     },
 
     // 常用工具方法
@@ -322,12 +323,14 @@ export const store = reactive({
                 icon: icon,
                 confirmText: '确定',
                 cancelText: '',
+                deleteText: '',
                 confirmClass: 'btn-primary',
                 onConfirm: () => {
                     this.customDialog.show = false;
                     resolve(true);
                 },
-                onCancel: null
+                onCancel: null,
+                onDelete: null
             };
         });
     },
@@ -341,6 +344,7 @@ export const store = reactive({
                 icon: options.icon || 'fa-question-circle',
                 confirmText: options.confirmText || '确定',
                 cancelText: options.cancelText || '取消',
+                deleteText: options.deleteText || '',
                 confirmClass: options.confirmClass || 'btn-primary',
                 onConfirm: () => {
                     this.customDialog.show = false;
@@ -349,6 +353,38 @@ export const store = reactive({
                 onCancel: () => {
                     this.customDialog.show = false;
                     resolve(false);
+                },
+                onDelete: options.onDelete || null
+            };
+        });
+    },
+
+    showPrompt(options) {
+        return new Promise((resolve) => {
+            this.customDialog = {
+                show: true,
+                title: options.title || '输入',
+                message: options.message || '',
+                icon: options.icon || 'fa-edit',
+                confirmText: options.confirmText || '确定',
+                cancelText: options.cancelText || '取消',
+                deleteText: options.deleteText || '',
+                isPrompt: true,
+                promptValue: options.promptValue || '',
+                placeholder: options.placeholder || '',
+                confirmClass: options.confirmClass || 'btn-primary',
+                onConfirm: () => {
+                    const val = this.customDialog.promptValue;
+                    this.customDialog.show = false;
+                    resolve({ action: 'confirm', value: val });
+                },
+                onCancel: () => {
+                    this.customDialog.show = false;
+                    resolve({ action: 'cancel' });
+                },
+                onDelete: () => {
+                    this.customDialog.show = false;
+                    resolve({ action: 'delete' });
                 }
             };
         });

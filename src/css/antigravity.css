@@ -62,34 +62,41 @@
     background-color: currentColor;
 }
 
-.ag-status-online,
-.ag-status-success,
-.status-2xx {
-    background: rgba(76, 175, 80, 0.1);
-    color: #4caf50;
-    border: 1px solid rgba(76, 175, 80, 0.2);
+/* 状态标签配色 - 强化优先级 */
+body .ag-status-online,
+body .ag-status-success,
+body .status-2xx {
+    background: rgba(16, 185, 129, 0.1) !important;
+    color: #10b981 !important;
+    border: 1px solid rgba(16, 185, 129, 0.2) !important;
 }
 
-.ag-status-error,
-.ag-status-danger,
-.status-5xx {
-    background: rgba(244, 67, 54, 0.1);
-    color: #f44336;
-    border: 1px solid rgba(244, 67, 54, 0.2);
+body .ag-status-error,
+body .ag-status-danger,
+body .status-5xx {
+    background: rgba(239, 68, 68, 0.1) !important;
+    color: #ef4444 !important;
+    border: 1px solid rgba(239, 68, 68, 0.2) !important;
 }
 
-.ag-status-warning,
-.status-4xx {
-    background: rgba(255, 152, 0, 0.1);
-    color: #ff9800;
-    border: 1px solid rgba(255, 152, 0, 0.2);
+body .ag-status-warning,
+body .status-4xx {
+    background: rgba(245, 158, 11, 0.1) !important;
+    color: #f59e0b !important;
+    border: 1px solid rgba(245, 158, 11, 0.2) !important;
 }
 
-.ag-status-info,
-.status-3xx {
-    background: rgba(33, 150, 243, 0.1);
-    color: #2196f3;
-    border: 1px solid rgba(33, 150, 243, 0.2);
+body .ag-status-info,
+body .status-3xx {
+    background: rgba(59, 130, 246, 0.1) !important;
+    color: #3b82f6 !important;
+    border: 1px solid rgba(59, 130, 246, 0.2) !important;
+}
+
+body .ag-status-unknown {
+    background: rgba(107, 114, 128, 0.1) !important;
+    color: #6b7280 !important;
+    border: 1px solid rgba(107, 114, 128, 0.2) !important;
 }
 
 /* Markdown Content Styles in Log Detail */

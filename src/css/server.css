@@ -1,8 +1,4 @@
-/**
- * 主机管理模块样式
- */
-
-/* ==================== 主机列表容器 ==================== */
+/* ==================== 进度条 ==================== */
 .server-list-container {
     overflow: visible;
 }
@@ -341,38 +337,78 @@
 }
 
 .server-detail-label {
-    font-size: 13px;
-    color: var(--text-secondary);
+    font-size: 12px;
+    color: var(--text-tertiary);
+    font-weight: 500;
 }
 
 .server-detail-value {
     font-size: 13px;
-    color: var(--text-primary);
-    font-weight: 500;
+    color: var(--server-primary, #00d4aa);
+    font-weight: 700;
+    font-family: var(--font-mono, 'JetBrains Mono', monospace);
 }
 
 /* 进度条 */
 .progress-bar {
     width: 100%;
-    height: 8px;
-    background: var(--border-color);
-    border-radius: 4px;
+    height: 10px;
+    background: rgba(var(--text-primary-rgb, 0, 0, 0), 0.08);
+    border-radius: 6px;
     overflow: hidden;
     margin-top: 8px;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
+    border: 1px solid rgba(var(--text-primary-rgb, 0, 0, 0), 0.05);
 }
 
 .progress-bar-fill {
     height: 100%;
-    background: linear-gradient(90deg, var(--server-primary), var(--server-primary-light));
-    transition: width 0.3s ease;
+    background: linear-gradient(90deg, #00d4aa, #00ffcc);
+    transition: width 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+    position: relative;
+    box-shadow: 0 0 8px rgba(0, 212, 170, 0.4);
+}
+
+/* 进度条流动纹理效果 */
+.progress-bar-fill::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    right: 0;
+    background-image: linear-gradient(45deg,
+            rgba(255, 255, 255, 0.2) 25%,
+            transparent 25%,
+            transparent 50%,
+            rgba(255, 255, 255, 0.2) 50%,
+            rgba(255, 255, 255, 0.2) 75%,
+            transparent 75%,
+            transparent);
+    background-size: 15px 15px;
+    z-index: 1;
+    animation: progress-bar-stripes 1s linear infinite;
+    opacity: 0.3;
+}
+
+@keyframes progress-bar-stripes {
+    from {
+        background-position: 15px 0;
+    }
+
+    to {
+        background-position: 0 0;
+    }
 }
 
 .progress-bar-fill.warning {
-    background: linear-gradient(90deg, #f59e0b, #ef4444);
+    background: linear-gradient(90deg, #f59e0b, #fbbf24);
+    box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
 }
 
 .progress-bar-fill.danger {
-    background: linear-gradient(90deg, #ef4444, #dc2626);
+    background: linear-gradient(90deg, #ef4444, #f87171);
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
 }
 
 /* Docker 容器列表 */
@@ -841,7 +877,7 @@
 .form-row {
     display: flex;
     gap: 12px;
-    margin-bottom: 10px;
+    /* margin-bottom: 10px; */
 }
 
 .flex-1 {
@@ -2119,15 +2155,6 @@
     font-size: 18px;
 }
 
-.server-modal .modal-close {
-    font-size: 24px;
-    line-height: 1;
-}
-
-.server-modal .modal-close:hover {
-    background: rgba(255, 255, 255, 0.15);
-}
-
 .server-modal .modal-body {
     padding: 9px 9px 0px 9px;
     max-height: calc(80vh - 100px);
@@ -2540,16 +2567,22 @@
 }
 
 .ssh-quick-empty {
-    padding: 32px;
+    padding: 40px 20px;
     text-align: center;
     color: var(--text-tertiary);
     font-size: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    width: 100%;
 }
 
 .ssh-quick-empty i {
-    font-size: 28px;
-    opacity: 0.2;
-    margin-bottom: 10px;
+    font-size: 32px;
+    opacity: 0.15;
+    margin: 0;
     display: block;
 }
 

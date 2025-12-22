@@ -1,5 +1,5 @@
 <!-- ==================== 主机管理部分 ==================== -->
-<div v-if="mainActiveTab === 'server'" class="tab-content server-tab-content theme-server"
+<div class="tab-content server-tab-content theme-server"
   :class="[getTabAnimationClass('server')]">
   <!-- 主机子标签页 -->
   <div class="sec-tabs server-sec-tabs">
@@ -12,7 +12,10 @@
         <i class="fas fa-cog"></i> 后台管理
       </button>
       <button class="tab-btn" :class="{ active: serverCurrentTab === 'terminal' }"
-        @click="serverCurrentTab = 'terminal'" v-if="sshSessions.length > 0">
+        @click="serverCurrentTab = 'terminal'" 
+        @dblclick="closeAllSSHSessions"
+        @auxclick.middle="closeAllSSHSessions"
+        v-if="sshSessions.length > 0">
         <i class="fas fa-terminal"></i> SSH 终端
         <span class="badge" v-if="sshSessions.length > 0"
           style="background: var(--server-primary); color: white; padding: 1px 6px; border-radius: 10px; font-size: 10px; margin-left: 6px;">{{
@@ -28,13 +31,15 @@
         <!-- 下拉菜单 -->
         <transition name="dropdown-fade">
           <div v-if="showSSHQuickMenu" class="ssh-quick-menu">
-            <div class="ssh-quick-menu-header">
-              <i class="fas fa-terminal"></i>
-              选择主机
+            <div class="ssh-quick-menu-header" style="display: flex; justify-content: space-between; align-items: center;">
+              <span><i class="fas fa-terminal"></i> 选择主机</span>
+              <button class="mini-btn-primary" @click="openAllServersInSSH" v-if="serverList.length > 0">
+                <i class="fas fa-layer-group" style="margin-right: 4px;"></i> 全部打开
+              </button>
             </div>
             <div class="ssh-quick-menu-list">
               <div v-for="server in serverList" :key="'ssh-quick-' + server.id"
-                @click="openSSHTerminal(server); showSSHQuickMenu = false" class="ssh-quick-item">
+                @click="openSSHTerminal(server)" class="ssh-quick-item">
                 <div :class="['server-status-indicator', server.status || 'unknown']"></div>
                 <div class="ssh-quick-item-info">
                   <div class="ssh-quick-item-name">{{ server.name }}</div>
@@ -154,7 +159,6 @@
 
       <!-- 卡片展开详情区域 -->
       <div class="server-card-body">
-        <div class="divider" style="margin: 0; opacity: 0.5;"></div>
         <div class="server-details" style="border: none; padding: 8px 3px;">
 
           <div v-if="server.loading" class="loading" style="padding: 8px 3px;">
@@ -172,6 +176,10 @@
               <!-- 系统信息 -->
               <div class="server-detail-section">
                 <h4><i class="fas fa-microchip"></i> 硬件载荷</h4>
+                <div v-if="server.info.cpu.Load" class="server-detail-item" style="border:none; padding-bottom: 4px;">
+                  <span class="server-detail-label">系统负载 (1/5/15min)</span>
+                  <span class="server-detail-value">{{ server.info.cpu.Load }}</span>
+                </div>
                 <div class="server-detail-item">
                   <span class="server-detail-label">CPU 负载 ({{ server.info.cpu.Cores }} 核心)</span>
                   <span class="server-detail-value">{{ server.info.cpu.Usage }}</span>
@@ -222,71 +230,71 @@
                     }}</span>
                 </div>
               </div>
-            </div>
 
-            <!-- 容器虚拟化 - 可折叠面板 -->
-            <div class="server-detail-section docker-section">
-              <div class="docker-section-header" @click.stop="toggleDockerPanel(server.id)" style="cursor: pointer;">
-                <h4>
-                  <i class="fab fa-docker"></i> 容器虚拟化
-                  <i class="fas fa-chevron-right toggle-icon"
-                    :style="{ transform: isDockerPanelExpanded(server.id) ? 'rotate(90deg)' : 'rotate(0deg)' }"></i>
-                </h4>
-                <div class="docker-section-status">
-                  <span class="docker-status-badge"
-                    :class="server.info.docker.installed ? 'installed' : 'not-installed'">
-                    {{ server.info.docker.installed ? '已安装' : '未检测到' }}
-                  </span>
-                  <span v-if="server.info.docker.installed && server.info.docker.containers.length > 0"
-                    class="docker-container-count">
-                    <span style="color: var(--success-color);">●</span>
-                    {{ getRunningContainers(server.info.docker.containers) }} 运行
-                    <span v-if="getPausedContainers(server.info.docker.containers) > 0"
-                      style="margin-left: 8px; color: var(--warning-color);">●</span>
-                    <span v-if="getPausedContainers(server.info.docker.containers) > 0">
-                      {{ getPausedContainers(server.info.docker.containers) }} 暂停
+              <!-- 容器虚拟化 - 可折叠面板 -->
+              <div class="server-detail-section docker-section" style="grid-column: 1 / -1; margin-top: 4px;">
+                <div class="docker-section-header" @click.stop="toggleDockerPanel(server.id)" style="cursor: pointer;">
+                  <h4>
+                    <i class="fab fa-docker"></i> 容器虚拟化
+                    <i class="fas fa-chevron-right toggle-icon"
+                      :style="{ transform: isDockerPanelExpanded(server.id) ? 'rotate(90deg)' : 'rotate(0deg)' }"></i>
+                  </h4>
+                  <div class="docker-section-status">
+                    <span class="docker-status-badge"
+                      :class="server.info.docker.installed ? 'installed' : 'not-installed'">
+                      {{ server.info.docker.installed ? '已安装' : '未检测到' }}
                     </span>
-                  </span>
-                </div>
-              </div>
-
-              <!-- 展开的容器面板 - 使用类似 modal 的样式 -->
-              <div v-if="isDockerPanelExpanded(server.id) && server.info.docker.installed" class="docker-panel-content">
-                <div v-if="server.info.docker.containers.length > 0" class="docker-containers-grid">
-                  <div v-for="container in server.info.docker.containers" :key="container.id"
-                    class="docker-container-mini-card" :class="{ 
-                            'running': container.status.includes('Up') && !container.status.includes('Paused'),
-                            'paused': container.status.includes('Paused')
-                          }">
-                    <div class="container-info">
-                      <span class="container-status-dot"
-                        :class="{ 'online': container.status.includes('Up') && !container.status.includes('Paused'), 'paused': container.status.includes('Paused') }"></span>
-                      <span class="container-name" :title="container.name">{{ container.name }}</span>
-                    </div>
-                    <div class="container-actions">
-                      <button v-if="container.status.includes('Up') && !container.status.includes('Paused')"
-                        class="btn btn-xs btn-warning icon-only"
-                        @click.stop="handleDockerAction(server.id, container.id, 'pause')" title="暂停">
-                        <i class="fas fa-pause"></i>
-                      </button>
-                      <button v-else-if="container.status.includes('Paused')" class="btn btn-xs btn-success icon-only"
-                        @click.stop="handleDockerAction(server.id, container.id, 'unpause')" title="恢复">
-                        <i class="fas fa-play"></i>
-                      </button>
-                      <button v-else class="btn btn-xs btn-success icon-only"
-                        @click.stop="handleDockerAction(server.id, container.id, 'start')" title="启动">
-                        <i class="fas fa-play"></i>
-                      </button>
-                      <button class="btn btn-xs btn-secondary icon-only"
-                        @click.stop="handleDockerAction(server.id, container.id, 'restart')" title="重启">
-                        <i class="fas fa-redo-alt"></i>
-                      </button>
-                    </div>
+                    <span v-if="server.info.docker.installed && server.info.docker.containers.length > 0"
+                      class="docker-container-count">
+                      <span style="color: var(--success-color);">●</span>
+                      {{ getRunningContainers(server.info.docker.containers) }} 运行
+                      <span v-if="getPausedContainers(server.info.docker.containers) > 0"
+                        style="margin-left: 8px; color: var(--warning-color);">●</span>
+                      <span v-if="getPausedContainers(server.info.docker.containers) > 0">
+                        {{ getPausedContainers(server.info.docker.containers) }} 暂停
+                      </span>
+                    </span>
                   </div>
                 </div>
-                <div v-else class="docker-empty-mini">
-                  <i class="fab fa-docker"></i>
-                  <span>暂无容器</span>
+
+                <!-- 展开的容器面板 - 使用类似 modal 的样式 -->
+                <div v-if="isDockerPanelExpanded(server.id) && server.info.docker.installed" class="docker-panel-content">
+                  <div v-if="server.info.docker.containers.length > 0" class="docker-containers-grid">
+                    <div v-for="container in server.info.docker.containers" :key="container.id"
+                      class="docker-container-mini-card" :class="{ 
+                              'running': container.status.includes('Up') && !container.status.includes('Paused'),
+                              'paused': container.status.includes('Paused')
+                            }">
+                      <div class="container-info">
+                        <span class="container-status-dot"
+                          :class="{ 'online': container.status.includes('Up') && !container.status.includes('Paused'), 'paused': container.status.includes('Paused') }"></span>
+                        <span class="container-name" :title="container.name">{{ container.name }}</span>
+                      </div>
+                      <div class="container-actions">
+                        <button v-if="container.status.includes('Up') && !container.status.includes('Paused')"
+                          class="btn btn-xs btn-warning icon-only"
+                          @click.stop="handleDockerAction(server.id, container.id, 'pause')" title="暂停">
+                          <i class="fas fa-pause"></i>
+                        </button>
+                        <button v-else-if="container.status.includes('Paused')" class="btn btn-xs btn-success icon-only"
+                          @click.stop="handleDockerAction(server.id, container.id, 'unpause')" title="恢复">
+                          <i class="fas fa-play"></i>
+                        </button>
+                        <button v-else class="btn btn-xs btn-success icon-only"
+                          @click.stop="handleDockerAction(server.id, container.id, 'start')" title="启动">
+                          <i class="fas fa-play"></i>
+                        </button>
+                        <button class="btn btn-xs btn-secondary icon-only"
+                          @click.stop="handleDockerAction(server.id, container.id, 'restart')" title="重启">
+                          <i class="fas fa-redo-alt"></i>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-else class="docker-empty-mini">
+                    <i class="fab fa-docker"></i>
+                    <span>暂无容器</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -448,17 +456,17 @@ Web服务器,192.168.1.100,22,root,password123
           <div class="config-card-title">
             <i class="fas fa-clock"></i> 自动拨测策略
           </div>
-          <div class="form-row">
-            <div class="form-group flex-1">
-              <label>探测周期 (S)</label>
+          <div class="form-row" style="gap: 15px;">
+            <div class="form-group flex-1" style="margin-bottom: 0;">
+              <label style="display: block; margin-bottom: 8px;">探测周期 (S)</label>
               <input type="number" v-model="monitorConfig.interval" class="form-input" min="10" />
             </div>
-            <div class="form-group flex-1">
-              <label>响应超时 (S)</label>
+            <div class="form-group flex-1" style="margin-bottom: 0;">
+              <label style="display: block; margin-bottom: 8px;">响应超时 (S)</label>
               <input type="number" v-model="monitorConfig.timeout" class="form-input" min="1" />
             </div>
-            <div class="form-group flex-1">
-              <label>日志存量 (天)</label>
+            <div class="form-group flex-1" style="margin-bottom: 0;">
+              <label style="display: block; margin-bottom: 8px;">日志存量 (天)</label>
               <input type="number" v-model="monitorConfig.logRetentionDays" class="form-input" min="1" />
             </div>
           </div>
@@ -521,6 +529,9 @@ Web服务器,192.168.1.100,22,root,password123
         <div class="ssh-session-tabs">
           <div v-for="session in sshSessions" :key="session.id" class="ssh-session-tab"
             :class="{ active: activeSSHSessionId === session.id }" 
+            draggable="true"
+            @dragstart="handleTabDragStart(session.id)"
+            @dragend="handleTabDragEnd"
             @click="switchToSSHTab(session.id)"
             @dblclick="closeSSHSession(session.id)"
             @mousedown.middle.stop="closeSSHSession(session.id)">
@@ -533,14 +544,25 @@ Web服务器,192.168.1.100,22,root,password123
         </div>
 
         <!-- 操作按钮 -->
-        <div class="ssh-header-actions" v-if="currentSSHSession">
-          <div class="ssh-connection-info">
-            <div class="ssh-status-dot" :class="currentSSHSession.connected ? 'connected' : 'disconnected'"></div>
-            <span class="ssh-host-info">
-              {{ currentSSHSession.server.username }}
-            </span>
-          </div>
-          <button class="ssh-icon-btn" @click="reconnectSSHSession(currentSSHSession.id)" title="重新连接">
+        <div class="ssh-header-actions" v-if="sshSessions.length > 0">
+          <!-- 退出分屏按钮 -->
+          <button class="ssh-icon-btn" v-if="sshViewLayout !== 'single'" 
+                  @click="resetToSingleLayout" title="退出分屏">
+            <i class="fas fa-th-large"></i>
+          </button>
+          <!-- 同步操作按钮 -->
+          <button class="ssh-icon-btn" v-if="sshViewLayout !== 'single'" 
+                  @click="sshSyncEnabled = !sshSyncEnabled" 
+                  :class="{ 'active-primary': sshSyncEnabled }"
+                  :title="sshSyncEnabled ? '关闭同步操作' : '开启多屏同步操作'">
+            <i class="fas fa-broadcast-tower"></i>
+          </button>
+          <button class="ssh-icon-btn" @click="showSnippetsSidebar = !showSnippetsSidebar" 
+                  :class="{ 'active-primary': showSnippetsSidebar }"
+                  title="代码片段">
+            <i class="fas fa-code"></i>
+          </button>
+          <button class="ssh-icon-btn" @click="reconnectSSHSession(activeSSHSessionId)" v-if="currentSSHSession" title="重新连接">
             <i class="fas fa-sync-alt"></i>
           </button>
           <button class="ssh-icon-btn" @click="toggleSSHTerminalFullscreen" :title="sshIdeFullscreen ? '退出全屏' : '全屏显示'">
@@ -549,7 +571,7 @@ Web服务器,192.168.1.100,22,root,password123
           <button class="ssh-icon-btn" @click="serverCurrentTab = 'list'" title="返回列表">
             <i class="fas fa-arrow-left"></i>
           </button>
-          <button class="ssh-icon-btn danger" @click="closeSSHSession(currentSSHSession.id)" title="断开并关闭">
+          <button class="ssh-icon-btn danger" @click="closeSSHSession(activeSSHSessionId)" v-if="currentSSHSession" title="断开并关闭">
             <i class="fas fa-power-off"></i>
           </button>
         </div>
@@ -561,13 +583,74 @@ Web服务器,192.168.1.100,22,root,password123
         </div>
       </div>
 
-      <!-- 终端区域 -->
-      <div class="ssh-terminal-wrapper" v-if="sshSessions.length > 0">
-        <template v-for="session in sshSessions" :key="'term-' + session.id">
-          <div v-show="activeSSHSessionId === session.id" class="ssh-terminal-instance">
-            <div :id="'ssh-terminal-' + session.id"></div>
+      <!-- 终端主区域 (包含侧边栏) -->
+      <div class="ssh-main-container" v-if="sshSessions.length > 0">
+        <!-- 终端网格区域 (核心修复：使用 Vue 绑定属性确保状态持久) -->
+        <div class="ssh-terminal-wrapper" 
+             :class="['layout-' + sshViewLayout, { 'dragging-active': draggedSessionId }]"
+             :data-pane-count="visibleSessionIds.length"
+             @dragover.prevent="handleTerminalDragOver">
+          
+          <div v-for="(sessionId, index) in (sshViewLayout === 'single' ? [activeSSHSessionId] : visibleSessionIds)" 
+               :key="'slot-' + sessionId"
+               class="ssh-terminal-instance"
+               :class="{ 'active': activeSSHSessionId === sessionId }"
+               @mousedown="activeSSHSessionId = sessionId">
+            
+            <div class="ssh-instance-header" v-if="sshViewLayout !== 'single'"
+                 draggable="true"
+                 @dragstart="handleTabDragStart(sessionId)"
+                 @dragend="handleTabDragEnd">
+               <span class="ssh-instance-title">
+                 <i class="fas fa-terminal"></i> {{ getSessionById(sessionId)?.server.name }}
+               </span>
+               <div class="ssh-instance-actions">
+                 <button class="mini-btn" @click.stop="closeSplitView(sessionId)" title="关闭分屏"><i class="fas fa-times"></i></button>
+               </div>
+            </div>
+
+            <div class="instance-drop-overlay" v-if="draggedSessionId && draggedSessionId !== sessionId">
+               <div class="drop-zone pos-top" @dragover.prevent.stop="setDropHint('top', sessionId)" @dragleave="clearDropHint" @drop.stop="handleTerminalDrop(sessionId, 'top')"></div>
+               <div class="drop-zone pos-bottom" @dragover.prevent.stop="setDropHint('bottom', sessionId)" @dragleave="clearDropHint" @drop.stop="handleTerminalDrop(sessionId, 'bottom')"></div>
+               <div class="drop-zone pos-left" @dragover.prevent.stop="setDropHint('left', sessionId)" @dragleave="clearDropHint" @drop.stop="handleTerminalDrop(sessionId, 'left')"></div>
+               <div class="drop-zone pos-right" @dragover.prevent.stop="setDropHint('right', sessionId)" @dragleave="clearDropHint" @drop.stop="handleTerminalDrop(sessionId, 'right')"></div>
+               <div class="drop-zone pos-center" @dragover.prevent.stop="setDropHint('center', sessionId)" @dragleave="clearDropHint" @drop.stop="handleTerminalDrop(sessionId, 'center')"></div>
+               <div class="instance-drop-indicator" v-if="dropTargetId === sessionId" :class="'hint-' + dropHint">
+                  <span v-if="dropHint === 'center'">替换</span><span v-else>拆分</span>
+               </div>
+            </div>
+
+            <div :id="'ssh-slot-' + sessionId" class="ssh-slot"></div>
           </div>
-        </template>
+        </div>
+
+        <!-- 代码片段侧边栏 -->
+        <transition name="slide-right">
+          <div class="ssh-snippets-sidebar" v-if="showSnippetsSidebar">
+            <div class="sidebar-header">
+              <span><i class="fas fa-code"></i> 代码片段</span>
+              <button class="mini-btn-primary" @click="openAddSnippetModal" title="添加片段">
+                <i class="fas fa-plus"></i>
+              </button>
+            </div>
+            <div class="snippets-list">
+              <div v-for="snippet in sshSnippets" :key="snippet.id" class="snippet-item" @click="sendSnippet(snippet.content)">
+                <div class="snippet-info">
+                  <div class="snippet-title">{{ snippet.title }}</div>
+                  <div class="snippet-category" v-if="snippet.category">{{ snippet.category }}</div>
+                </div>
+                <div class="snippet-actions">
+                  <button class="icon-btn" @click.stop="openEditSnippetModal(snippet)"><i class="fas fa-edit"></i></button>
+                  <button class="icon-btn danger" @click.stop="deleteSnippet(snippet.id)"><i class="fas fa-trash"></i></button>
+                </div>
+              </div>
+              <div v-if="sshSnippets.length === 0" class="empty-text">
+                <i class="fas fa-terminal" style="opacity: 0.2; font-size: 24px; display: block; margin-bottom: 8px;"></i>
+                暂无代码片段
+              </div>
+            </div>
+          </div>
+        </transition>
       </div>
 
       <!-- 空状态欢迎页 -->
@@ -581,7 +664,44 @@ Web服务器,192.168.1.100,22,root,password123
         </button>
       </div>
     </div>
-  </div> <!-- 关闭 ssh-terminal-sub-page -->
+  </div>
+
+  <!-- 代码片段编辑模态框 -->
+  <transition name="modal-fade">
+    <div v-if="showSnippetModal" class="modal-overlay" @click.self="showSnippetModal = false">
+      <div class="modal modal-sm">
+        <div class="modal-header">
+          <div class="modal-title">{{ snippetForm.id ? '编辑代码片段' : '添加代码片段' }}</div>
+          <button class="close-btn" @click="showSnippetModal = false"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>标题</label>
+            <input v-model="snippetForm.title" class="form-input" placeholder="例如：更新系统" />
+          </div>
+          <div class="form-group">
+            <label>内容 (指令)</label>
+            <textarea v-model="snippetForm.content" class="form-textarea code-font" 
+                      style="min-height: 120px;" placeholder="apt update && apt upgrade -y"></textarea>
+            <small style="color: var(--text-tertiary);">提示：指令会自动追加回车键发送</small>
+          </div>
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label>分类</label>
+              <input v-model="snippetForm.category" class="form-input" placeholder="common" />
+            </div>
+          </div>
+          <div v-if="snippetError" class="form-error">{{ snippetError }}</div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" @click="showSnippetModal = false">取消</button>
+          <button class="btn btn-primary" @click="saveSnippet" :disabled="snippetSaving">
+            {{ snippetSaving ? '保存中...' : '保存' }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </transition>
 
 </div>
 <!-- ==================== 主机管理部分结束 ==================== -->

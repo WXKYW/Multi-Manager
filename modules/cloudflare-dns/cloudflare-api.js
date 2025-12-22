@@ -652,14 +652,23 @@ async function listWorkers(apiToken, accountId) {
 async function getWorkerScript(apiToken, accountId, scriptName) {
   // 获取脚本代码
   return new Promise((resolve, reject) => {
+    const headers = {
+      'Accept': 'application/javascript'  // 请求纯 JavaScript 格式
+    };
+
+    // 认证处理
+    if (typeof apiToken === 'string') {
+      headers['Authorization'] = `Bearer ${apiToken}`;
+    } else if (apiToken && apiToken.email && apiToken.key) {
+      headers['X-Auth-Email'] = apiToken.email;
+      headers['X-Auth-Key'] = apiToken.key;
+    }
+
     const options = {
       hostname: CF_API_BASE,
       path: `/client/v4/accounts/${accountId}/workers/scripts/${scriptName}`,
       method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${apiToken}`,
-        'Accept': 'application/javascript'  // 请求纯 JavaScript 格式
-      }
+      headers: headers
     };
 
     const req = https.request(options, (res) => {
@@ -772,15 +781,24 @@ async function putWorkerScript(apiToken, accountId, scriptName, scriptContent, m
     body += scriptContent + '\r\n';
     body += `--${boundary}--\r\n`;
 
+    const headers = {
+      'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      'Content-Length': Buffer.byteLength(body)
+    };
+
+    // 认证处理
+    if (typeof apiToken === 'string') {
+      headers['Authorization'] = `Bearer ${apiToken}`;
+    } else if (apiToken && apiToken.email && apiToken.key) {
+      headers['X-Auth-Email'] = apiToken.email;
+      headers['X-Auth-Key'] = apiToken.key;
+    }
+
     const options = {
       hostname: CF_API_BASE,
       path: `/client/v4/accounts/${accountId}/workers/scripts/${scriptName}`,
       method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${apiToken}`,
-        'Content-Type': `multipart/form-data; boundary=${boundary}`,
-        'Content-Length': Buffer.byteLength(body)
-      }
+      headers: headers
     };
 
     const req = https.request(options, (res) => {

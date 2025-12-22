@@ -613,49 +613,43 @@ router.post('/domain/generate', async (req, res) => {
 });
 
 /**
- * 添加自定义域名
+ * 添加域名 (支持自定义域名和自动域名前缀)
  */
 router.post('/domain/add', async (req, res) => {
-  const { token, serviceId, domain } = req.body;
+  const { token, serviceId, domain, isGenerated = false, environmentId } = req.body;
 
   if (!token || !serviceId || !domain) {
-    return res.status(400).json({ error: '缺少必要参数' });
+    return res.status(400).json({ error: '缺少必要参数 (token, serviceId 或 domain)' });
   }
 
   try {
+    // 严格对齐用户提供的 AddDomain Mutation 结构
     const mutation = `mutation {
-      addCustomDomain(serviceID: "${serviceId}", domain: "${domain}") {
+      addDomain(serviceID: "${serviceId}", domain: "${domain}", isGenerated: ${isGenerated}) {
         domain
-        status
-        dnsRecord {
-          type
-          name
-          value
-        }
       }
     }`;
 
-    logger.info(`添加自定义域名: ${domain} -> serviceId=${serviceId.slice(0, 8)}...`);
+    logger.info(`执行添加域名: ${domain} (Generated: ${isGenerated})`);
     const result = await zeaburApi.queryZeabur(token, mutation);
 
-    if (result.data?.addCustomDomain) {
-      logger.success(`自定义域名已添加: ${domain}`);
+    if (result.data?.addDomain) {
+      logger.success(`域名已添加: ${result.data.addDomain.domain}`);
       res.json({
         success: true,
-        message: '自定义域名已添加',
-        domainInfo: result.data.addCustomDomain
+        message: '域名已添加',
+        domainInfo: result.data.addDomain
       });
     } else if (result.errors) {
-      logger.error(`添加自定义域名失败: ${domain}`, result);
+      logger.error('Zeabur GraphQL 错误详情:', JSON.stringify(result.errors, null, 2));
       const errorMsg = result.errors[0]?.message || '添加失败';
-      res.status(400).json({ error: errorMsg, details: result });
+      res.status(400).json({ error: errorMsg, details: result.errors });
     } else {
-      logger.error(`添加自定义域名失败: ${domain}`);
       res.status(400).json({ error: '添加失败', details: result });
     }
   } catch (error) {
-    logger.error(`添加自定义域名异常: ${error.message}`);
-    res.status(500).json({ error: '添加自定义域名失败: ' + error.message });
+    logger.error(`添加域名异常: ${error.message}`);
+    res.status(500).json({ error: '添加域名失败: ' + error.message });
   }
 });
 
@@ -663,29 +657,40 @@ router.post('/domain/add', async (req, res) => {
  * 删除域名
  */
 router.post('/domain/delete', async (req, res) => {
-  const { token, serviceId, domain } = req.body;
+  const { token, serviceId, domain, environmentId } = req.body;
 
-  if (!token || !serviceId || !domain) {
-    return res.status(400).json({ error: '缺少必要参数' });
+  if (!token || !domain) {
+    return res.status(400).json({ error: '缺少必要参数 (token 或 domain)' });
   }
 
   try {
-    const mutation = `mutation {
-      removeDomain(serviceID: "${serviceId}", domain: "${domain}")
-    }`;
+    // 优先使用带 environmentID 的精准删除方案
+    let mutation;
+    if (environmentId && serviceId) {
+      mutation = `mutation { removeDomain(domain: "${domain}", serviceID: "${serviceId}", environmentID: "${environmentId}") }`;
+    } else if (serviceId) {
+      mutation = `mutation { removeDomain(domain: "${domain}", serviceID: "${serviceId}") }`;
+    } else {
+      mutation = `mutation { removeDomain(domain: "${domain}") }`;
+    }
 
-    logger.info(`删除域名: ${domain} (serviceId=${serviceId.slice(0, 8)}...)`);
-    const result = await zeaburApi.queryZeabur(token, mutation);
+    logger.info(`执行删除域名: ${domain} (Env: ${environmentId || 'None'})`);
+    let result = await zeaburApi.queryZeabur(token, mutation);
+
+    // 如果带 environmentID/serviceID 的调用报错，尝试全局删除作为备选方案 (适配用户提供的 Mutation 格式)
+    if (result.errors && (environmentId || serviceId)) {
+      logger.warn('精准删除失败，尝试全局删除方案...');
+      const fallbackMutation = `mutation { removeDomain(domain: "${domain}") }`;
+      result = await zeaburApi.queryZeabur(token, fallbackMutation);
+    }
 
     if (result.data?.removeDomain !== undefined) {
       logger.success(`域名已删除: ${domain}`);
       res.json({ success: true, message: '域名已删除' });
     } else if (result.errors) {
-      logger.error(`删除域名失败: ${domain}`, result);
       const errorMsg = result.errors[0]?.message || '删除失败';
       res.status(400).json({ error: errorMsg, details: result });
     } else {
-      logger.error(`删除域名失败: ${domain}`);
       res.status(400).json({ error: '删除失败', details: result });
     }
   } catch (error) {

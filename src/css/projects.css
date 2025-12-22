@@ -562,9 +562,9 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-color);
+  margin-top: 10px;
+  /* padding-top: 12px; */
+  /* border-top: 1px solid var(--border-color); */
 }
 
 .domain-link {
@@ -580,13 +580,19 @@
   font-weight: 500;
   transition: all 0.2s;
   border: 1px solid var(--border-color);
+  min-width: 0;
+  /* 允许在 flex 容器中收缩 */
 }
 
-.domain-link:hover {
-  background-color: var(--bg-tertiary);
+.domain-link span:not(.domain-badge) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
 }
 
 .domain-badge {
+  flex-shrink: 0;
   background-color: var(--zeabur-primary);
   color: white;
   padding: 2px 6px;
@@ -871,13 +877,13 @@
 
 /* PaaS 模块二级标签页样式 */
 .paas-sec-tabs {
-    /* 继承全局 .sec-tabs 布局 */
+  /* 继承全局 .sec-tabs 布局 */
 }
 
 .theme-paas .tab-btn.active {
-    background: linear-gradient(135deg, var(--paas-primary), var(--paas-dark)) !important;
-    color: white !important;
-    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+  background: linear-gradient(135deg, var(--paas-primary), var(--paas-dark)) !important;
+  color: white !important;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
 }
 
 /* Koyeb 特定颜色 */
@@ -919,4 +925,95 @@
 .service-item.status-error {
   background-color: rgba(239, 68, 68, 0.1);
   border-color: rgba(239, 68, 68, 0.2);
+}
+
+/* ==================== 域名管理模块样式 ==================== */
+.domain-item-wrapper {
+  position: relative;
+  width: 100%;
+  /* margin-bottom: 6px; */
+}
+
+.domain-link-group {
+  display: flex;
+  align-items: stretch;
+  /* 强制子项等高 */
+  gap: 6px;
+  width: 100%;
+}
+
+.domain-link-group .domain-link {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  /* 减小上下边距以降低高度 */
+  background-color: var(--bg-secondary);
+  border-radius: 8px;
+  color: var(--zeabur-primary);
+  text-decoration: none;
+  font-size: 12px;
+  /* 略微减小字号 */
+  font-weight: 600;
+  border: 1px solid var(--border-color);
+  transition: all 0.2s;
+  box-sizing: border-box;
+}
+
+.domain-op-btn {
+  background: rgba(var(--text-primary-rgb, 0, 0, 0), 0.04);
+  border: 1px solid var(--border-color);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  /* 极致对齐方案：同步缩小到 32px */
+  padding: 0 !important;
+  margin: 0;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  /* 同步调小图标 */
+  transition: all 0.2s;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.domain-op-btn:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--zeabur-primary);
+  border-color: var(--zeabur-primary);
+}
+
+/* 快速添加占位符 */
+.domain-empty-state {
+  width: 100%;
+}
+
+.btn-quick-add-domain {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px;
+  background: rgba(var(--primary-rgb, 0, 212, 170), 0.02);
+  border: 1px dashed var(--border-color);
+  border-radius: 10px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.btn-quick-add-domain:hover {
+  background: rgba(var(--primary-rgb, 0, 212, 170), 0.08);
+  border-color: var(--zeabur-primary);
+  color: var(--zeabur-primary);
 }
