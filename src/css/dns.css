@@ -466,36 +466,53 @@
   font-size: 12px;
 }
 
-.ssl-mode-selector select {
-  padding: 4px 24px 4px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--border-color);
-  background: var(--bg-primary);
-  color: var(--text-primary);
+/* SSL 模式按钮组样式 - 实体按钮风格 */
+.ssl-mode-btn-group {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  max-width: 400px;
+}
+
+.ssl-mode-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  border-radius: 8px;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='%23999' d='M5 7L1 3h8z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 6px center;
-  appearance: none;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+  
+  /* 默认状态 */
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 }
 
-.ssl-mode-selector select:hover:not(:disabled) {
+.ssl-mode-btn:hover:not(.active):not(:disabled) {
   border-color: var(--cf-color);
-  background-color: var(--bg-secondary);
+  color: var(--cf-color);
+  background: var(--bg-secondary);
+  transform: translateY(-1px);
 }
 
-.ssl-mode-selector select:focus {
-  outline: none;
+.ssl-mode-btn.active {
+  background: var(--cf-color);
   border-color: var(--cf-color);
-  box-shadow: 0 0 0 2px rgba(243, 128, 32, 0.1);
+  color: white;
+  box-shadow: 0 4px 12px rgba(243, 128, 32, 0.3);
+  font-weight: 600;
 }
 
-.ssl-mode-selector select:disabled {
+.ssl-mode-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+  transform: none !important;
 }
 
 .ssl-status {
@@ -525,46 +542,106 @@
 }
 
 .ssl-cert-info {
+  background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--card-bg) 100%);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 16px;
   display: flex;
-  gap: 16px;
-  align-items: center;
-  padding-left: 16px;
-  border-left: 2px solid var(--border-light);
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease;
 }
 
-/* Responsive */
-@media (max-width: 1200px) {
-  .ssl-status-card {
-    flex-wrap: wrap;
+.ssl-cert-info:hover {
+  border-color: rgba(243, 128, 32, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.ssl-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ssl-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  min-width: 90px;
+}
+
+.ssl-label i {
+  width: 14px;
+  text-align: center;
+  opacity: 0.7;
+}
+
+.ssl-value {
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.ssl-cert-type {
+  background: rgba(243, 128, 32, 0.1);
+  color: var(--cf-color);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+/* 响应式调整 */
+@media (min-width: 769px) {
+  .ssl-body {
+    display: grid;
+    grid-template-columns: 1fr 1.5fr; /* 模式选择占小部分，证书信息占大部分 */
+    gap: 24px;
+    align-items: start;
   }
 
   .ssl-cert-info {
-    border-left: none;
-    border-top: 1px solid var(--border-light);
-    padding-left: 0;
-    padding-top: 12px;
+    margin-top: 0; /* 移除顶部间距，因为是并排 */
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 20px;
+    height: 100%; /* 填满高度 */
+  }
+  
+  .ssl-row {
     width: 100%;
-    flex-wrap: wrap;
   }
 }
 
 @media (max-width: 768px) {
-  .ssl-status-card {
+  .ssl-body {
+    display: flex;
     flex-direction: column;
-    align-items: flex-start;
     gap: 12px;
   }
 
-  .ssl-body {
-    flex-direction: column;
-    align-items: flex-start;
+  .ssl-cert-info {
+    padding: 12px;
     gap: 8px;
     width: 100%;
+    box-sizing: border-box;
   }
-
-  .ssl-row {
-    width: 100%;
+  
+  .ssl-cert-info .ssl-row {
     justify-content: space-between;
+  }
+  
+  .ssl-label {
+    min-width: auto;
+  }
+  
+  .ssl-value {
+    font-size: 13px;
   }
 
   .ssl-mode-selector {

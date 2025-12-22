@@ -8,7 +8,8 @@
       @click="switchAntigravityTab('quotas')">
       <i class="fas fa-chart-pie"></i> 额度使用
     </button>
-    <button class="tab-btn" :class="{ active: antigravityCurrentTab === 'matrix' }" @click="switchAntigravityTab('matrix')">
+    <button class="tab-btn" :class="{ active: antigravityCurrentTab === 'matrix' }"
+      @click="switchAntigravityTab('matrix')">
       <i class="fas fa-th"></i> 模型矩阵
     </button>
     <button class="tab-btn" :class="{ active: antigravityCurrentTab === 'accounts' }"
@@ -373,7 +374,7 @@
                 </th>
                 <th class="text-center">
                   <div class="matrix-header-cell" @click="toggleAgMatrixColumn('fakeStream')">
-                    <span>假流式</span>
+                    <span>假流</span>
                     <label class="switch">
                       <input type="checkbox" :checked="isAgMatrixColumnAllChecked('fakeStream')" readonly>
                       <span class="slider round"></span>
@@ -382,7 +383,7 @@
                 </th>
                 <th class="text-center">
                   <div class="matrix-header-cell" @click="toggleAgMatrixColumn('antiTrunc')">
-                    <span>抗截断</span>
+                    <span>流抗</span>
                     <label class="switch">
                       <input type="checkbox" :checked="isAgMatrixColumnAllChecked('antiTrunc')" readonly>
                       <span class="slider round"></span>
@@ -393,9 +394,8 @@
             </thead>
             <tbody>
               <tr v-for="row in getAntigravityMatrixList()" :key="row.id">
-                <td style="font-family: var(--font-mono); font-weight: 600; cursor: pointer; user-select: none;" 
-                    @click="toggleAgMatrixRow(row.id)" 
-                    title="点击切换整行开关">
+                <td style="font-family: var(--font-mono); font-weight: 600; cursor: pointer; user-select: none;"
+                  @click="toggleAgMatrixRow(row.id)" title="点击切换整行开关">
                   {{ row.id }}
                 </td>
                 <td class="text-center">
@@ -525,7 +525,8 @@
             </tr>
             <tr v-if="getFilteredAntigravityLogs().length === 0">
               <td colspan="7" style="padding: 60px;">
-                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-tertiary);">
+                <div
+                  style="display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-tertiary);">
                   <i class="fas fa-inbox" style="font-size: 40px; margin-bottom: 12px; opacity: 0.3;"></i>
                   <span>暂无调用日志</span>
                 </div>
@@ -678,11 +679,13 @@
             </div>
             <div style="display: grid; grid-template-columns: 1fr; gap: 12px;">
               <div>
-                <label style="font-size: 11px; opacity: 0.7; display: block; margin-bottom: 7px;">API 访问密钥 (v1/*)</label>
+                <label style="font-size: 11px; opacity: 0.7; display: block; margin-bottom: 7px;">API 访问密钥
+                  (v1/*)</label>
                 <div class="input-group">
                   <input :type="agShowApiKey ? 'text' : 'password'" v-model="agSettingsForm.API_KEY" class="form-input"
                     style="width: 100%; padding: 6px 10px; font-size: 13px;" placeholder="用于分发接口的 Bearer Token">
-                  <button class="btn btn-secondary btn-sm" @click="agShowApiKey = !agShowApiKey" style="padding: 0 10px;">
+                  <button class="btn btn-secondary btn-sm" @click="agShowApiKey = !agShowApiKey"
+                    style="padding: 0 10px;">
                     <i class="fas" :class="agShowApiKey ? 'fa-eye-slash' : 'fa-eye'"></i>
                   </button>
                 </div>

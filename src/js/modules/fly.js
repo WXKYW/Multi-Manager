@@ -272,9 +272,12 @@ export const flyMethods = {
     }
   },
 
-  isFlyAccountExpanded(accountName) {
-    return store.flyExpandedAccounts[accountName] !== false; // 默认为 true
-  },
+    isFlyAccountExpanded(accountName) {
+        if (store.flyExpandedAccounts[accountName] === undefined) {
+            return window.innerWidth > 768; // 手机端默认折叠
+        }
+        return store.flyExpandedAccounts[accountName];
+    },
 
     // 重启应用
     async restartFlyApp(account, app) {

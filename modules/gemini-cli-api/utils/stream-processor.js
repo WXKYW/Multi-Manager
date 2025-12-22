@@ -50,7 +50,7 @@ class StreamProcessor {
      * 核心流式处理入口
      */
     async *processStream(openaiRequest, accountId, maxAttempts = 3) {
-        const isAntiTrunc = openaiRequest.model.includes('流式抗截断/');
+        const isAntiTrunc = openaiRequest.model.includes('流抗/');
         let currentAttempt = 0;
         let fullContent = '';
         let foundDone = !isAntiTrunc; // 如果不开启抗截断，默认视为已找到结束标记（即不循环）

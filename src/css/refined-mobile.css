@@ -2,10 +2,12 @@
 
 /* --- 基础布局 --- */
 @media (max-width: 768px) {
+
     /* 容器调整 */
-    .main-container {
+    .container {
         padding: 12px !important;
-        margin-top: 10px !important; /* 移除侧边栏后不再需要那么大的 margin */
+        margin-top: 10px !important;
+        /* 移除侧边栏后不再需要那么大的 margin */
         width: 100% !important;
         overflow-x: hidden;
     }
@@ -15,9 +17,10 @@
     }
 
     .btn-settings-toggle span {
-        display: none; /* 移动端隐藏“设置”文字，仅留图标 */
+        display: none;
+        /* 移动端隐藏“设置”文字，仅留图标 */
     }
-    
+
     .btn-settings-toggle {
         padding: 8px 12px !important;
     }
@@ -46,7 +49,7 @@
         width: 100%;
     }
 
-    .panel-actions-group .btn, 
+    .panel-actions-group .btn,
     .panel-actions-group .form-input,
     .panel-actions-group .select-sm-adaptive {
         width: 100% !important;
@@ -63,23 +66,27 @@
     }
 
     .data-table {
-        min-width: 600px; /* 保证最小宽度，防止内容过度挤压 */
-        white-space: nowrap; /* 防止文字换行撑高行高 */
+        min-width: 600px;
+        /* 保证最小宽度，防止内容过度挤压 */
+        white-space: nowrap;
+        /* 防止文字换行撑高行高 */
     }
 
-    .data-table th, .data-table td {
+    .data-table th,
+    .data-table td {
         padding: 8px 10px !important;
         font-size: 12px !important;
     }
 
     /* 模型矩阵特殊优化 */
     .model-matrix-table {
-        min-width: 700px; 
+        min-width: 700px;
     }
 
     /* --- 模型矩阵特殊优化 --- */
     .model-matrix-table {
-        min-width: 600px; /* 保证列不被压缩得太难看 */
+        min-width: 600px;
+        /* 保证列不被压缩得太难看 */
     }
 
     .matrix-header-cell span {
@@ -90,21 +97,171 @@
     .sec-tabs {
         overflow-x: auto;
         display: flex;
+        justify-content: flex-start !important;
         white-space: nowrap;
         padding-bottom: 8px !important;
-        margin-bottom: 12px !important;
+        margin-bottom: 10px !important;
         scrollbar-width: none;
+        position: relative;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior-x: contain;
+        /* 防止滚动触底触发页面切换 */
+        /* 移除 padding-right */
     }
-    
+
     .sec-tabs::-webkit-scrollbar {
         display: none;
     }
 
+    /* 已移除通用滚动引导箭头 */
+
     .tab-btn {
-        flex: 0 0 auto;
+        flex: 0 0 auto !important;
+        /* 强制不压缩，确保可滚动 */
         min-width: 80px;
         padding: 6px 12px !important;
         font-size: 12px !important;
+    }
+
+    /* --- 域名/账号网格双列显示 --- */
+    .zones-grid {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+        gap: 8px !important;
+    }
+
+    .zone-card,
+    .zone-card.active {
+        padding: 10px 12px !important;
+        padding-right: 24px !important;
+        /* 留出箭头空间 */
+        flex-direction: row !important;
+        /* 改回横向排列，让内部 div 自然填充 */
+        align-items: center !important;
+        /* 垂直居中 */
+        gap: 8px !important;
+        min-height: auto !important;
+        justify-content: flex-start !important;
+        position: relative !important;
+        background: var(--card-bg) !important;
+        border: 1px solid var(--border-color) !important;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02) !important;
+        border-radius: 10px !important;
+    }
+
+    .zone-card.active {
+        background: rgba(var(--primary-rgb), 0.04) !important;
+        border-color: rgba(var(--primary-rgb), 0.4) !important;
+    }
+
+    .zone-name {
+        font-size: 13px !important;
+        font-weight: 600 !important;
+        line-height: 1.3 !important;
+        margin: 0 !important;
+        color: var(--text-primary) !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: 6px !important;
+        width: 100% !important;
+        overflow: hidden !important;
+    }
+
+    .zone-name i {
+        flex-shrink: 0 !important;
+        /* 防止图标被压缩 */
+    }
+
+    /* 手机端将箭头固定在右侧中心 */
+    .zones-grid .zone-card .fa-chevron-right {
+        display: block !important;
+        position: absolute !important;
+        right: 8px !important;
+        top: 50% !important;
+        transform: translateY(-50%) !important;
+        opacity: 0.4 !important;
+        font-size: 10px !important;
+        margin: 0 !important;
+        pointer-events: none;
+        /* 防止遮挡点击 */
+    }
+
+    /* 调整内部图标位置 */
+    .zone-card .badge {
+        font-size: 10px !important;
+        padding: 2px 6px !important;
+        height: auto !important;
+        margin-top: 2px !important;
+    }
+
+    /* --- DNS 头部控制按钮优化 --- */
+    /* 提高优先级：使用双类名选择器 */
+    .panel-actions-group.dns-header-controls {
+        display: flex !important;
+        flex-direction: row !important;
+        /* 恢复一行 */
+        flex-wrap: nowrap !important;
+        overflow-x: auto !important;
+        justify-content: center !important;
+        /* 居中显示图标 */
+        gap: 8px !important;
+        width: 100% !important;
+        padding: 4px 0 !important;
+        scrollbar-width: none;
+    }
+
+    .panel-actions-group.dns-header-controls::-webkit-scrollbar {
+        display: none;
+    }
+
+    /* 提高优先级覆盖 .panel-actions-group .btn */
+    .panel-actions-group.dns-header-controls .btn {
+        width: 40px !important;
+        /* 增大触摸目标 */
+        height: 40px !important;
+        padding: 0 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        flex: 0 0 auto !important;
+        border-radius: 8px !important;
+        margin: 0 !important;
+    }
+
+    .panel-actions-group.dns-header-controls .btn span {
+        display: none !important;
+        /* 隐藏文字 */
+    }
+
+    .panel-actions-group.dns-header-controls i {
+        margin: 0 !important;
+        font-size: 16px !important;
+        /* 稍微放大图标 */
+    }
+
+    .zone-card {
+        cursor: pointer !important;
+        /* 修复可能的点击穿透问题 */
+        z-index: 1;
+    }
+
+    /* 修复 NS Popover 在 overflow 容器中被遮挡的问题 */
+    .ns-popover {
+        position: fixed !important;
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        width: 80% !important;
+        max-width: 300px !important;
+        z-index: 1000 !important;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2) !important;
+        border: 1px solid var(--border-color) !important;
+    }
+
+    /* 确保 Popover 遮罩层有效 */
+    .popover-overlay {
+        position: fixed !important;
+        z-index: 999 !important;
     }
 
     /* --- 模态框全屏化 --- */
@@ -121,13 +278,74 @@
     }
 
     .info-grid {
-        grid-template-columns: 1fr !important; /* 详情网格单列显示 */
+        grid-template-columns: 1fr !important;
+        /* 详情网格单列显示 */
     }
 
     /* --- 登录页适配 --- */
     .login-card {
         width: 90% !important;
         padding: 24px !important;
+    }
+
+    /* --- Zeabur 组件优化 --- */
+    .zeabur-balance-item {
+        padding: 0 !important;
+    }
+
+    /* --- 统计网格两列显示 --- */
+    .stats-grid {
+        gap: 8px !important;
+        margin-bottom: 12px !important;
+        grid-template-columns: repeat(2, 1fr) !important;
+        /* 恢复双列 */
+    }
+
+    .stat-card {
+        padding: 6px 10px !important;
+        gap: 8px !important;
+        border-radius: 12px !important;
+        min-height: auto !important;
+    }
+
+    /* --- 隐藏头像 --- */
+    .zeabur-account-avatar,
+    .koyeb-account-avatar,
+    .fly-account-avatar,
+    .openai-endpoint-avatar,
+    .cf-account-avatar,
+    .server-select-avatar {
+        display: none !important;
+    }
+
+    /* --- PaaS 标签页移动端适配 --- */
+    .paas-sec-tabs {
+        flex-direction: row !important;
+        align-items: center !important;
+        gap: 10px !important;
+        overflow-x: auto !important;
+        white-space: nowrap !important;
+        padding-bottom: 8px !important;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        position: relative !important;
+        width: 100% !important;
+        /* 强制宽度限制 */
+        max-width: 100% !important;
+        /* 防止溢出撑开父容器 */
+        box-sizing: border-box !important;
+    }
+
+    .paas-tabs-scroll-wrapper {
+        display: flex !important;
+        flex: 0 0 auto !important;
+        gap: 8px !important;
+        overscroll-behavior-x: contain;
+        align-items: center !important;
+        width: auto !important;
+        /* 让内容自然撑开宽度 */
+        min-width: 100% !important;
+        /* 至少占满容器 */
     }
 }
 
@@ -136,7 +354,7 @@
     .ag-quota-grid {
         grid-template-columns: 1fr 1fr !important;
     }
-    
+
     .modal {
         width: 80% !important;
     }

@@ -759,20 +759,55 @@
 
 .secondary-config-row {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     gap: 15px;
+    align-items: start;
 }
 
-@media (max-width: 1200px) {
-    .secondary-config-row {
-        grid-template-columns: 1fr 1fr;
-    }
-}
-
-@media (max-width: 768px) {
+@media (max-width: 900px) {
     .secondary-config-row {
         grid-template-columns: 1fr;
     }
+}
+
+/* 配置卡片样式 */
+.config-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 15px;
+    transition: all 0.2s ease;
+}
+
+.config-card:hover {
+    border-color: var(--server-primary);
+    box-shadow: 0 4px 12px rgba(0, 212, 170, 0.08);
+}
+
+.config-card-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px dashed var(--border-color);
+}
+
+.config-card-title i {
+    color: var(--server-primary);
+    font-size: 14px;
+}
+
+.empty-state-mini {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    text-align: center;
 }
 
 .glass-panel {
@@ -1674,12 +1709,36 @@
 
 /* SSH 会话标签页按钮样式 */
 .server-sec-tabs {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 4px;
+    overflow: visible !important;
 }
 
-.server-sec-tabs {
-    /* 继承全局 .sec-tabs 布局 */
+/* 滚动包装器 */
+.server-tabs-scroll-wrapper {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    overflow: visible;
+    /* 允许快速连接下拉菜单溢出显示 */
+    max-width: 100%;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+}
+
+.server-tabs-scroll-wrapper::-webkit-scrollbar {
+    display: none;
+}
+
+@media (max-width: 768px) {
+    .server-sec-tabs {
+        align-items: stretch;
+    }
+
+    .server-tabs-scroll-wrapper {
+        justify-content: flex-start;
+    }
 }
 
 .theme-server .tab-btn.active {
@@ -2116,4 +2175,428 @@
 
 .server-form-section.collapsed-section {
     background: transparent;
+}
+
+/* 认证方式切换按钮组 */
+.server-auth-toggle {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.server-auth-toggle button {
+    flex: 1;
+    padding: 10px 16px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.server-auth-toggle button:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--server-primary);
+    color: var(--text-primary);
+}
+
+.server-auth-toggle button.active {
+    background: linear-gradient(135deg, var(--server-primary), var(--server-primary-dark));
+    border-color: var(--server-primary);
+    color: white;
+    box-shadow: 0 4px 12px rgba(0, 212, 170, 0.25);
+}
+
+.server-auth-toggle button i {
+    font-size: 14px;
+}
+
+/* 表单字段样式 */
+.server-form-field {
+    margin-bottom: 12px;
+}
+
+.server-form-field label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.server-form-field label i {
+    font-size: 11px;
+    color: var(--text-tertiary);
+}
+
+.server-form-field .optional-tag {
+    font-size: 10px;
+    color: var(--text-tertiary);
+    font-weight: 400;
+    opacity: 0.7;
+}
+
+.server-form-field input,
+.server-form-field textarea {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--text-primary);
+    transition: all 0.2s ease;
+}
+
+.server-form-field input:focus,
+.server-form-field textarea:focus {
+    outline: none;
+    border-color: var(--server-primary);
+    box-shadow: 0 0 0 3px rgba(0, 212, 170, 0.1);
+}
+
+.server-form-field input::placeholder,
+.server-form-field textarea::placeholder {
+    color: var(--text-tertiary);
+    opacity: 0.7;
+}
+
+.server-form-field textarea {
+    min-height: 100px;
+    resize: vertical;
+    font-family: var(--font-mono);
+}
+
+/* 表单错误提示 */
+.server-form-error {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 8px;
+    color: #ef4444;
+    font-size: 13px;
+    margin-top: 8px;
+}
+
+.server-form-error i {
+    font-size: 14px;
+}
+
+/* 模态框底部操作栏 */
+.server-modal-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: var(--section-bg);
+    border-top: 1px solid var(--border-color);
+    gap: 12px;
+}
+
+.server-modal-actions {
+    display: flex;
+    gap: 10px;
+}
+
+/* 模态框按钮样式 */
+.btn-server-cancel {
+    padding: 10px 20px;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-server-cancel:hover:not(:disabled) {
+    background: var(--bg-secondary);
+    border-color: var(--text-tertiary);
+    color: var(--text-primary);
+}
+
+.btn-server-cancel:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-server-test {
+    padding: 10px 18px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.btn-server-test:hover:not(:disabled) {
+    background: var(--bg-tertiary);
+    border-color: var(--server-primary);
+    color: var(--server-primary);
+    transform: translateY(-1px);
+}
+
+.btn-server-test:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-server-save {
+    padding: 10px 22px;
+    background: linear-gradient(135deg, var(--server-primary), var(--server-primary-dark));
+    border: none;
+    border-radius: 8px;
+    color: white;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 4px 12px rgba(0, 212, 170, 0.25);
+}
+
+.btn-server-save:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0, 212, 170, 0.35);
+}
+
+.btn-server-save:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* ==================== SSH 快速连接下拉菜单动画 ==================== */
+/* 下拉菜单展开动画 */
+.dropdown-fade-enter-active {
+    animation: dropdownSlideIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dropdown-fade-leave-active {
+    animation: dropdownSlideOut 0.15s cubic-bezier(0.4, 0, 1, 1);
+}
+
+@keyframes dropdownSlideIn {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-8px) scale(0.95);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0) scale(1);
+    }
+}
+
+@keyframes dropdownSlideOut {
+    from {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0) scale(1);
+    }
+
+    to {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-8px) scale(0.95);
+    }
+}
+
+/* 遮罩层淡入淡出 */
+.fade-enter-active,
+.fade-leave-active {
+    transition: opacity 0.15s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+    opacity: 0;
+}
+
+/* ==================== SSH 快速连接按钮样式 ==================== */
+.ssh-quick-connect-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 36px;
+    height: 36px;
+    padding: 8px 12px;
+    background: rgba(71, 85, 105, 0.1);
+    border: 1px dashed rgba(71, 85, 105, 0.4);
+    border-radius: 8px;
+    color: var(--server-primary);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.ssh-quick-connect-btn:hover {
+    background: var(--server-primary);
+    border-style: solid;
+    border-color: var(--server-primary);
+    color: white;
+    transform: scale(1.05);
+}
+
+/* 快速连接下拉菜单 */
+.ssh-quick-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    min-width: 280px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    z-index: 10000;
+    overflow: hidden;
+}
+
+.ssh-quick-menu-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 12px;
+    color: var(--text-tertiary);
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-secondary);
+}
+
+.ssh-quick-menu-header i {
+    color: var(--server-primary);
+}
+
+.ssh-quick-menu-list {
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.ssh-quick-item {
+    padding: 12px 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    transition: background 0.15s;
+}
+
+.ssh-quick-item:hover {
+    background: var(--bg-secondary);
+}
+
+.ssh-quick-item .server-status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.ssh-quick-item-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.ssh-quick-item-name {
+    font-weight: 600;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-primary);
+}
+
+.ssh-quick-item-host {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-family: var(--font-mono);
+}
+
+.ssh-quick-item>i {
+    font-size: 10px;
+    opacity: 0.3;
+}
+
+.ssh-quick-empty {
+    padding: 32px;
+    text-align: center;
+    color: var(--text-tertiary);
+    font-size: 12px;
+}
+
+.ssh-quick-empty i {
+    font-size: 28px;
+    opacity: 0.2;
+    margin-bottom: 10px;
+    display: block;
+}
+
+/* ==================== 快速连接响应式适配 ==================== */
+@media (max-width: 768px) {
+    .ssh-quick-connect-btn {
+        min-width: 32px;
+        height: 32px;
+        padding: 6px 10px;
+        font-size: 12px;
+    }
+
+    .ssh-quick-menu {
+        min-width: 240px;
+        left: auto;
+        right: 0;
+        transform: none;
+    }
+}
+
+@media (max-width: 480px) {
+    .ssh-quick-connect-btn {
+        min-width: 28px;
+        height: 28px;
+        padding: 5px 8px;
+        font-size: 11px;
+    }
+
+    .ssh-quick-menu {
+        min-width: 200px;
+    }
+
+    .ssh-quick-menu-header {
+        padding: 10px 12px;
+        font-size: 11px;
+    }
+
+    .ssh-quick-item {
+        padding: 10px 12px;
+        gap: 10px;
+    }
+
+    .ssh-quick-item-name {
+        font-size: 12px;
+    }
+
+    .ssh-quick-item-host {
+        font-size: 10px;
+    }
 }

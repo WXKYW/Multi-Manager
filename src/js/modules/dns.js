@@ -2321,6 +2321,19 @@ export default {
     } catch (error) {
       toast.error('删除域名失败: ' + error.message);
     }
+  },
+
+  /**
+   * 格式化 SSL 模式显示
+   */
+  formatSslMode(mode) {
+    const modes = {
+      'off': '关闭',
+      'flexible': '灵活',
+      'full': '完全',
+      'strict': '严格'
+    };
+    return modes[mode] || mode || '加载中...';
   }
 };
 

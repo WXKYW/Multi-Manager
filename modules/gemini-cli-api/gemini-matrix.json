@@ -28,7 +28,7 @@
     "maxThinking": false,
     "noThinking": false,
     "search": false,
-    "fakeStream": false,
+    "fakeStream": true,
     "antiTrunc": true
   }
 }

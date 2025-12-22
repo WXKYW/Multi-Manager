@@ -120,6 +120,15 @@ export const geminiCliMethods = {
         return 'ag-status-unknown';
     },
 
+    // 格式化冻结状态的 tooltip 文本
+    formatCoolDownTitle(coolDowns) {
+        if (!coolDowns || coolDowns.length === 0) return '';
+        return coolDowns.map(c => {
+            const time = new Date(c.resetTime).toLocaleTimeString();
+            return `${c.model} → ${time}`;
+        }).join(', ');
+    },
+
     // 获取过滤后的 Gemini CLI 日志
     getFilteredGeminiCliLogs() {
         let logs = store.geminiCliLogs || [];

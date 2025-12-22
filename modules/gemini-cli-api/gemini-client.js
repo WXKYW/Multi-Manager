@@ -217,7 +217,7 @@ class GeminiCliClient {
      */
     _getBaseModelName(model) {
         // 移除前缀
-        const prefixes = ['假流式/', '流式抗截断/'];
+        const prefixes = ['假流/', '流抗/'];
         for (const prefix of prefixes) {
             if (model.startsWith(prefix)) {
                 model = model.substring(prefix.length);

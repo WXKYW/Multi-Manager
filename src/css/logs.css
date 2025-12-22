@@ -315,6 +315,7 @@
     flex: 1;
     overflow-y: auto;
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
     background-color: var(--bg-primary);
     padding: 16px 0;
     position: relative;
@@ -325,6 +326,7 @@
 }
 
 .log-viewport::-webkit-scrollbar {
+    display: block !important;
     width: 8px;
     height: 8px;
 }
@@ -346,6 +348,11 @@
 .log-viewport.wrap-text .message {
     white-space: pre-wrap;
     word-break: break-all;
+}
+
+.log-viewport:not(.wrap-text) .log-lines {
+    width: max-content;
+    min-width: 100%;
 }
 
 .log-loading,
@@ -370,7 +377,7 @@
     flex-direction: row;
     align-items: center;
     justify-content: flex-start;
-    /* padding: 3px 12px; */
+    padding: 2px 12px;
     font-size: 13px;
     line-height: 1.6;
     transition: background 0.1s;
@@ -445,9 +452,6 @@
     flex: 1;
     white-space: pre;
     min-width: 0;
-    /* 允许收缩 */
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
 
 /* 日志模块标签 */

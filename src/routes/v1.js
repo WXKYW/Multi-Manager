@@ -157,8 +157,8 @@ router.get('/models', requireApiAuth, async (req, res) => {
                         if (variants.length > 0) {
                             variants.forEach(v => {
                                 const possibleIds = [v];
-                                if (config.fakeStream) possibleIds.push('假流式/' + v);
-                                if (config.antiTrunc) possibleIds.push('流式抗截断/' + v);
+                                if (config.fakeStream) possibleIds.push('假流/' + v);
+                                if (config.antiTrunc) possibleIds.push('流抗/' + v);
 
                                 possibleIds.forEach(id => {
                                     const fullId = gcliPrefix + id;
@@ -172,13 +172,13 @@ router.get('/models', requireApiAuth, async (req, res) => {
                         } else {
                             // base/maxThinking/noThinking 都为 false 时，直接生成功能性变体
                             if (config.fakeStream) {
-                                const fullId = gcliPrefix + '假流式/' + baseId;
+                                const fullId = gcliPrefix + '假流/' + baseId;
                                 if (!disabledModels.includes(fullId) && !allModelsMap.has(fullId)) {
                                     allModelsMap.set(fullId, { id: fullId, object: 'model', created: now, owned_by: 'google' });
                                 }
                             }
                             if (config.antiTrunc) {
-                                const fullId = gcliPrefix + '流式抗截断/' + baseId;
+                                const fullId = gcliPrefix + '流抗/' + baseId;
                                 if (!disabledModels.includes(fullId) && !allModelsMap.has(fullId)) {
                                     allModelsMap.set(fullId, { id: fullId, object: 'model', created: now, owned_by: 'google' });
                                 }

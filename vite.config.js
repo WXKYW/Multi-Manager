@@ -35,7 +35,7 @@ module.exports = defineConfig(({ mode }) => {
 
     return {
         root: 'src',
-        publicDir: path.resolve(__dirname, 'public'),
+        publicDir: false, // 已删除 public 目录，资源已移入 src
         resolve: {
             alias: {
                 // CDN 模式下仍需要别名，但会被 external 排除

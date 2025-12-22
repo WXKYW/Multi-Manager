@@ -80,10 +80,10 @@ function getAvailableModels(prefix = '') {
                 models.push({ id: prefix + modelId, object: 'model', created: now, owned_by: 'antigravity' });
             }
             if (config.fakeStream === true) {
-                models.push({ id: prefix + '假流式/' + modelId, object: 'model', created: now, owned_by: 'antigravity' });
+                models.push({ id: prefix + '假流/' + modelId, object: 'model', created: now, owned_by: 'antigravity' });
             }
             if (config.antiTrunc === true) {
-                models.push({ id: prefix + '流式抗截断/' + modelId, object: 'model', created: now, owned_by: 'antigravity' });
+                models.push({ id: prefix + '流抗/' + modelId, object: 'model', created: now, owned_by: 'antigravity' });
             }
         } else {
             // 如果矩阵中没有配置，默认开启基础功能
@@ -116,13 +116,13 @@ function getAvailableModels(prefix = '') {
                 }
             }
             if (targetConfig.fakeStream === true) {
-                const id = prefix + '假流式/' + r.source_model;
+                const id = prefix + '假流/' + r.source_model;
                 if (!models.find(m => m.id === id)) {
                     models.push({ id, object: 'model', created: now, owned_by: 'system-redirect' });
                 }
             }
             if (targetConfig.antiTrunc === true) {
-                const id = prefix + '流式抗截断/' + r.source_model;
+                const id = prefix + '流抗/' + r.source_model;
                 if (!models.find(m => m.id === id)) {
                     models.push({ id, object: 'model', created: now, owned_by: 'system-redirect' });
                 }

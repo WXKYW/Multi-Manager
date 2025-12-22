@@ -16,7 +16,7 @@
   },
   "gemini-3-pro-high": {
     "base": false,
-    "fakeStream": false,
+    "fakeStream": true,
     "antiTrunc": true
   },
   "gemini-3-pro-low": {
@@ -41,7 +41,7 @@
   },
   "claude-opus-4-5-thinking": {
     "base": false,
-    "fakeStream": false,
+    "fakeStream": true,
     "antiTrunc": true
   },
   "claude-sonnet-4-5-thinking": {
@@ -51,12 +51,12 @@
   },
   "rev19-uic3-1p": {
     "base": false,
-    "fakeStream": false,
+    "fakeStream": true,
     "antiTrunc": true
   },
   "gemini-3-flash": {
     "base": false,
-    "fakeStream": false,
+    "fakeStream": true,
     "antiTrunc": true
   }
 }

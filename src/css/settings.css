@@ -71,9 +71,9 @@
 /* 针对移动端的特殊原点处理 */
 @media (max-width: 768px) {
   .settings-sidebar {
-    width: 100vw;
-    max-width: 100vw;
-    height: 100vh;
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
     border-radius: 0;
     transform-origin: calc(100% - 30px) 30px;
     /* 移动端原点微调 */
@@ -277,6 +277,9 @@
 .settings-main {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden; /* 防止水平溢出 */
+  width: 100%;
+  box-sizing: border-box;
   padding: 12px;
   background-color: var(--bg-primary);
 }
