@@ -7,7 +7,8 @@
       <i class="fas" :class="customDialog.icon || 'fa-question-circle'"></i>
       {{ customDialog.title || '确认' }}
     </div>
-    <div class="custom-dialog-message">{{ customDialog.message }}</div>
+    <div v-if="customDialog.isHtml" class="custom-dialog-message" v-html="customDialog.message"></div>
+    <div v-else class="custom-dialog-message">{{ customDialog.message }}</div>
     <input v-if="customDialog.isPrompt" v-model="customDialog.promptValue" :placeholder="customDialog.placeholder"
       @keyup.enter="customDialog.onConfirm" class="custom-dialog-input" ref="promptInput" />
     <div class="custom-dialog-buttons">

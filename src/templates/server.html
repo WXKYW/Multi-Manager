@@ -318,7 +318,7 @@
                   </div>
                 </div>
                 <div
-                  style="height: 140px; position: relative; background: var(--bg-tertiary); border-radius: 12px; padding: 8px; border: 1px solid var(--border-color);">
+                  style="height: 145px; position: relative; background: var(--bg-tertiary); border-radius: 12px; padding: 8px; border: 1px solid var(--border-color);">
                   <canvas :id="'metrics-chart-card-' + server.id"></canvas>
                   <!-- 无数据状态提示 -->
                   <div v-if="!server.info || server.loading"
@@ -424,16 +424,23 @@
 
   <!-- 历史记录标签页 -->
   <div v-show="serverCurrentTab === 'history'" class="sub-tab-content quick-fade-in">
-    <!-- 图表展示区 -->
+    <!-- 图表展示区 (可折叠，默认收起) -->
     <div class="panel" style="margin-bottom: 16px;" v-if="Object.keys(groupedMetricsHistory).length > 0">
-      <div class="panel-header"
-        style="margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-        <div class="panel-title">
-          <i class="fas fa-chart-area" style="margin-right: 8px; color: var(--server-primary);"></i>负载趋势概览
+      <div class="panel-header" @click="showMetricsCharts = !showMetricsCharts"
+        style="margin-bottom: 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; cursor: pointer; user-select: none;">
+        <div class="panel-title" style="display: flex; align-items: center; gap: 8px;">
+          <i class="fas fa-chart-area" style="color: var(--server-primary);"></i>
+          <span>负载趋势概览</span>
+          <span style="font-size: 11px; color: var(--text-tertiary); font-weight: 400;">
+            ({{ Object.keys(groupedMetricsHistory).length }} 台主机)
+          </span>
+          <i class="fas" :class="showMetricsCharts ? 'fa-chevron-up' : 'fa-chevron-down'"
+            style="font-size: 12px; color: var(--text-tertiary); margin-left: 4px;"></i>
         </div>
 
-        <!-- 移动到此处的快捷时间选择 -->
-        <div class="metrics-history-toolbar" style="border: none; padding: 0; margin: 0; background: transparent;">
+        <!-- 时间选择（仅在展开时显示） -->
+        <div v-show="showMetricsCharts" class="metrics-history-toolbar" @click.stop
+          style="border: none; padding: 0; margin: 0; background: transparent;">
           <div class="time-range-pills">
             <button class="pill-btn" :class="{ active: metricsHistoryTimeRange === '1h' }"
               @click="setMetricsTimeRange('1h')">1h</button>
@@ -453,8 +460,10 @@
           </button>
         </div>
       </div>
-      <div class="metrics-charts-grid"
-        style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 8px;">
+
+      <!-- 图表网格（展开时才渲染） -->
+      <div v-show="showMetricsCharts" class="metrics-charts-grid" style="margin-top: 15px;
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(min(400px, 100%), 1fr)); gap: 8px;">
         <div v-for="(records, serverId) in groupedMetricsHistory" :key="'chart-' + serverId" class="metrics-chart-card"
           style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 16px; padding: 15px; min-height: 250px;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">

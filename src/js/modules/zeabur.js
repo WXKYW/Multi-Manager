@@ -54,19 +54,8 @@ export const zeaburMethods = {
       const accounts = await response.json();
       if (accounts && accounts.length > 0) {
         store.managedAccounts = accounts;
-
-        // 检查是否需要刷新余额 (10 分钟频率限制)
-        const now = Date.now();
-        const tenMinutes = 10 * 60 * 1000;
-        const needsRefresh = accounts.some(acc => !acc.lastValidated || (now - acc.lastValidated > tenMinutes));
-
-        if (needsRefresh) {
-          console.log('[Zeabur] 在后台刷新账号余额...');
-          // 在后台异步刷新账号余额信息，不阻塞页面显示
-          this.refreshManagedAccountsBalance().catch(err => { });
-        } else {
-          console.log('[Zeabur] 账号余额尚在有效期内，跳过后台刷新');
-        }
+        // 余额会在 fetchData -> /temp-accounts 请求时由后端自动获取
+        // 不再在这里单独刷新，避免并行请求导致数据不一致
       }
     } catch (error) { }
   },
@@ -139,11 +128,12 @@ export const zeaburMethods = {
 
   startAutoRefresh() {
     try {
-      if (this.refreshInterval) {
-        clearInterval(this.refreshInterval);
+      // 使用模块级静态变量确保全局只有一个定时器
+      if (window._zeaburRefreshInterval) {
+        clearInterval(window._zeaburRefreshInterval);
       }
-      if (this.countdownInterval) {
-        clearInterval(this.countdownInterval);
+      if (window._zeaburCountdownInterval) {
+        clearInterval(window._zeaburCountdownInterval);
       }
 
       // 获取刷新间隔（秒），默认为30
@@ -154,13 +144,13 @@ export const zeaburMethods = {
       store.refreshProgress = 100;
 
       // 自动刷新 (仅在可见时触发)
-      this.refreshInterval = setInterval(() => {
+      window._zeaburRefreshInterval = setInterval(() => {
         if (document.visibilityState !== 'visible') return;
         this.fetchData();
       }, store.zeaburRefreshInterval || 30000);
 
       // 1s倒计时更新，到0时立即重置 (仅在可见时更新)
-      this.countdownInterval = setInterval(() => {
+      window._zeaburCountdownInterval = setInterval(() => {
         if (document.visibilityState !== 'visible') return;
 
         store.refreshCountdown--;
@@ -174,17 +164,22 @@ export const zeaburMethods = {
           store.refreshProgress = (store.refreshCountdown / intervalSeconds) * 100;
         }
       }, 1000);
+
+      // 首次进入时立即加载数据（延迟 100ms 避免与其他初始化冲突）
+      setTimeout(() => {
+        this.fetchData();
+      }, 100);
     } catch (e) { }
   },
 
   stopAutoRefresh() {
-    if (this.refreshInterval) {
-      clearInterval(this.refreshInterval);
-      this.refreshInterval = null;
+    if (window._zeaburRefreshInterval) {
+      clearInterval(window._zeaburRefreshInterval);
+      window._zeaburRefreshInterval = null;
     }
-    if (this.countdownInterval) {
-      clearInterval(this.countdownInterval);
-      this.countdownInterval = null;
+    if (window._zeaburCountdownInterval) {
+      clearInterval(window._zeaburCountdownInterval);
+      window._zeaburCountdownInterval = null;
     }
   },
 

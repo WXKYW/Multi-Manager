@@ -3,11 +3,36 @@ const router = express.Router();
 const storage = require('./storage');
 const axios = require('axios');
 
+// 辅助函数：获取账号并创建 axios 实例
+const getClient = (accountId) => {
+    const account = storage.getAccountById(accountId);
+    if (!account) throw new Error('Account not found');
+    
+    // 处理 Base URL，去掉末尾斜杠
+    const baseURL = account.api_url.endsWith('/') ? account.api_url.slice(0, -1) : account.api_url;
+    
+    const client = axios.create({
+        baseURL: baseURL,
+        headers: { 
+            'Authorization': account.api_token,
+            'Content-Type': 'application/json'
+        },
+        timeout: 15000
+    });
+    
+    return { client, account }; // 返回 account 以便需要时使用
+};
+
 // 获取所有账号
 router.get('/manage-accounts', (req, res) => {
     try {
         const accounts = storage.getAllAccounts();
-        res.json({ success: true, data: accounts });
+        // 隐藏 token
+        const safeAccounts = accounts.map(acc => ({
+            ...acc,
+            api_token: acc.api_token ? '******' : ''
+        }));
+        res.json({ success: true, data: safeAccounts });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
@@ -36,46 +61,95 @@ router.delete('/manage-accounts/:id', (req, res) => {
 // 账号连通性测试 (探活)
 router.post('/manage-accounts/:id/test', async (req, res) => {
     try {
-        const account = storage.getAccountById(req.params.id);
-        if (!account) return res.status(404).json({ success: false, error: 'Account not found' });
+        const { client, account } = getClient(req.params.id);
 
-        const response = await axios.get(`${account.api_url}/api/public/settings`, {
-            headers: { 'Authorization': account.api_token },
-            timeout: 5000
-        });
+        // 使用 /api/me 验证 Token 有效性
+        const response = await client.get('/api/me');
 
         const status = response.status === 200 ? 'online' : 'error';
-        const version = response.data?.data?.version || 'unknown';
+        // 尝试从响应头或数据中获取版本，如果没有则为 unknown
+        const version = response.headers['server'] || 'unknown'; 
         
         storage.updateStatus(account.id, status, version);
-        res.json({ success: true, data: { status, version } });
+        res.json({ success: true, data: { status, version, user: response.data.data } });
     } catch (error) {
-        storage.updateStatus(req.params.id, 'offline', null);
-        res.json({ success: true, data: { status: 'offline', error: error.message } });
+        // 如果是 401，说明 token 无效但在线
+        const status = error.response?.status === 401 ? 'auth_failed' : 'offline';
+        storage.updateStatus(req.params.id, status, null);
+        res.json({ success: true, data: { status, error: error.message } });
     }
 });
 
-// 通用 API 转发 (用于前端直接调用 OpenList 接口)
-router.all('/proxy/:id/*', async (req, res) => {
-    const { id } = req.params;
-    const subPath = req.params[0];
-    const account = storage.getAccountById(id);
+// --- OpenList 功能接口 ---
 
-    if (!account) return res.status(404).json({ success: false, error: 'Account not found' });
-
+// 1. 获取当前用户信息
+router.get('/:id/me', async (req, res) => {
     try {
-        const url = `${account.api_url}/api/${subPath}`;
-        const response = await axios({
-            method: req.method,
-            url: url,
-            headers: { 
-                'Authorization': account.api_token,
-                'Content-Type': 'application/json'
-            },
-            params: req.query,
-            data: req.body,
-            timeout: 10000
-        });
+        const { client } = getClient(req.params.id);
+        const response = await client.get('/api/me');
+        res.json(response.data);
+    } catch (error) {
+        res.status(error.response?.status || 500).json(error.response?.data || { success: false, error: error.message });
+    }
+});
+
+// 2. 列出文件/目录
+router.post('/:id/fs/list', async (req, res) => {
+    try {
+        const { client } = getClient(req.params.id);
+        // 构造请求体，设置默认值
+        const payload = {
+            path: req.body.path || '/',
+            password: req.body.password || '',
+            page: req.body.page || 1,
+            per_page: req.body.per_page || 0,
+            refresh: req.body.refresh || false
+        };
+        const response = await client.post('/api/fs/list', payload);
+        res.json(response.data);
+    } catch (error) {
+        res.status(error.response?.status || 500).json(error.response?.data || { success: false, error: error.message });
+    }
+});
+
+// 3. 获取文件/目录详情
+router.post('/:id/fs/get', async (req, res) => {
+    try {
+        const { client } = getClient(req.params.id);
+        const payload = {
+            path: req.body.path,
+            password: req.body.password || ''
+        };
+        const response = await client.post('/api/fs/get', payload);
+        res.json(response.data);
+    } catch (error) {
+        res.status(error.response?.status || 500).json(error.response?.data || { success: false, error: error.message });
+    }
+});
+
+// 4. 管理员: 列出存储
+router.get('/:id/admin/storages', async (req, res) => {
+    try {
+        const { client } = getClient(req.params.id);
+        const response = await client.get('/api/admin/storage/list');
+        res.json(response.data);
+    } catch (error) {
+        res.status(error.response?.status || 500).json(error.response?.data || { success: false, error: error.message });
+    }
+});
+
+// 5. 搜索文件
+router.post('/:id/fs/search', async (req, res) => {
+    try {
+        const { client } = getClient(req.params.id);
+        const payload = {
+            parent: req.body.parent || '/',
+            keywords: req.body.keywords,
+            page: req.body.page || 1,
+            per_page: req.body.per_page || 100,
+            scope: req.body.scope || 0 // 0: all, 1: folder, 2: file
+        };
+        const response = await client.post('/api/fs/search', payload);
         res.json(response.data);
     } catch (error) {
         res.status(error.response?.status || 500).json(error.response?.data || { success: false, error: error.message });

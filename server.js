@@ -134,6 +134,15 @@ app.get('/favicon.ico', (req, res) => {
   return res.sendStatus(204);
 });
 
+// Logo 处理 - 为生产环境提供 logo.svg
+app.get('/logo.svg', (req, res) => {
+  const logoPath = path.join(__dirname, 'src', 'logo.svg');
+  if (fs.existsSync(logoPath)) {
+    return res.sendFile(logoPath);
+  }
+  return res.sendStatus(404);
+});
+
 
 // 加载持久化 session
 loadSessions();

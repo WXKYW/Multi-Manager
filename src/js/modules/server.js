@@ -840,6 +840,51 @@ function escapeHtml(text) {
  */
 export const serverMethods = {
     /**
+     * 从本地缓存加载主机列表（首屏瞬显）
+     */
+    loadFromServerListCache() {
+        try {
+            const cacheKey = 'server_list_cache';
+            const saved = localStorage.getItem(cacheKey);
+            if (saved) {
+                const cached = JSON.parse(saved);
+                if (cached && Array.isArray(cached) && cached.length > 0) {
+                    this.serverList = cached;
+                    console.log('[Cache] 主机列表已从缓存恢复:', cached.length, '台');
+                    return true;
+                }
+            }
+        } catch (e) {
+            console.warn('[Cache] 读取主机列表缓存失败:', e);
+        }
+        return false;
+    },
+
+    /**
+     * 保存主机列表到本地缓存
+     */
+    saveServerListCache() {
+        try {
+            const cacheKey = 'server_list_cache';
+            // 只保存基础数据，不保存 loading 等临时状态
+            const toCache = this.serverList.map(s => ({
+                id: s.id,
+                name: s.name,
+                host: s.host,
+                port: s.port,
+                username: s.username,
+                status: s.status,
+                response_time: s.response_time,
+                tags: s.tags,
+                info: s.info // 保留指标信息
+            }));
+            localStorage.setItem(cacheKey, JSON.stringify(toCache));
+        } catch (e) {
+            console.warn('[Cache] 保存主机列表缓存失败:', e);
+        }
+    },
+
+    /**
      * 加载主机列表
      */
     async loadServerList() {
@@ -850,23 +895,37 @@ export const serverMethods = {
             });
             const data = await response.json();
             if (data.success) {
-                // 智能合并数据，保留 loading 等 UI 状态
                 const newList = data.data;
-                if (this.serverList.length === 0) {
-                    this.serverList = newList;
-                } else {
-                    newList.forEach(newServer => {
-                        const existing = this.serverList.find(s => s.id === newServer.id);
-                        if (existing) {
-                            // 更新基础属性，但保留 info 等可能正在实时更新的数据（如果新数据里没有）
-                            Object.assign(existing, newServer);
-                        } else {
-                            this.serverList.push(newServer);
+
+                // 智能合并：后端可能返回带有 info 的缓存数据
+                newList.forEach(newServer => {
+                    const existing = this.serverList.find(s => s.id === newServer.id);
+                    if (existing) {
+                        // 只更新基础属性
+                        existing.name = newServer.name;
+                        existing.host = newServer.host;
+                        existing.port = newServer.port;
+                        existing.username = newServer.username;
+                        existing.tags = newServer.tags;
+                        existing.description = newServer.description;
+                        // 仅当新数据有状态/延迟时更新
+                        if (newServer.status) existing.status = newServer.status;
+                        if (newServer.response_time) existing.response_time = newServer.response_time;
+                        // 如果后端返回了缓存的 info 且当前没有，则使用
+                        if (newServer.info && !existing.info) {
+                            existing.info = newServer.info;
                         }
-                    });
-                    // 移除已删除的主机
-                    this.serverList = this.serverList.filter(s => newList.find(ns => ns.id === s.id));
-                }
+                    } else {
+                        // 新主机直接添加（包含后端返回的 info）
+                        this.serverList.push(newServer);
+                    }
+                });
+
+                // 移除已删除的主机
+                this.serverList = this.serverList.filter(s => newList.find(ns => ns.id === s.id));
+
+                // 保存到本地缓存
+                this.saveServerListCache();
             }
         } catch (error) {
             console.error('加载主机列表失败:', error);

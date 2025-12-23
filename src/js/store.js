@@ -30,7 +30,7 @@ export const store = reactive({
         'gemini-cli': true,
         paas: true,
         dns: true,
-        'self-h': false,
+        'self-h': true,
         server: true
     },
     channelEnabled: {
@@ -57,6 +57,12 @@ export const store = reactive({
     openListStats: { onlineCount: 0 },
     currentOpenListAccount: null,
     newOpenListAcc: { name: '', api_url: '', api_token: '' },
+    openListFiles: [],
+    openListFilesLoading: false,
+    openListPath: '/',
+    openListReadme: '',
+    openListSortKey: 'name', // 'name', 'size', 'modified'
+    openListSortOrder: 'asc', // 'asc', 'desc'
 
     // 全局数据刷新控制
     serverList: [],
@@ -323,7 +329,7 @@ export const store = reactive({
         };
     },
 
-    showAlert(message, title = '提示', icon = 'fa-info-circle') {
+    showAlert(message, title = '提示', icon = 'fa-info-circle', isHtml = false) {
         return new Promise((resolve) => {
             this.customDialog = {
                 show: true,
@@ -334,6 +340,7 @@ export const store = reactive({
                 cancelText: '',
                 deleteText: '',
                 confirmClass: 'btn-primary',
+                isHtml: isHtml,
                 onConfirm: () => {
                     this.customDialog.show = false;
                     resolve(true);

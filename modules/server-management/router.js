@@ -25,9 +25,35 @@ router.use('/credentials', credentialsRouter);
 router.get('/accounts', (req, res) => {
     try {
         const servers = serverStorage.getAll();
+
+        // 附带后端缓存的最新指标（用于首屏瞬显）
+        const metricsService = require('./metrics-service');
+        const serversWithMetrics = servers.map(server => {
+            const cachedMetrics = metricsService.latestMetrics?.get(server.id);
+            if (cachedMetrics) {
+                return {
+                    ...server,
+                    info: {
+                        load: cachedMetrics.load,
+                        cores: cachedMetrics.cores,
+                        mem_usage: cachedMetrics.mem,
+                        cpu_usage: cachedMetrics.cpu + '%',
+                        disk_usage: cachedMetrics.disk,
+                        docker: {
+                            installed: cachedMetrics.docker_installed,
+                            running: cachedMetrics.docker_running,
+                            stopped: cachedMetrics.docker_stopped
+                        },
+                        lastUpdate: new Date(cachedMetrics.timestamp).toLocaleTimeString()
+                    }
+                };
+            }
+            return server;
+        });
+
         res.json({
             success: true,
-            data: servers
+            data: serversWithMetrics
         });
     } catch (error) {
         res.status(500).json({
@@ -414,7 +440,7 @@ router.get('/metrics/history', (req, res) => {
             pageSize = 50
         } = req.query;
 
-        const limit = Math.min(parseInt(pageSize) || 50, 200);
+        const limit = Math.min(parseInt(pageSize) || 50, 10000);
         const offset = ((parseInt(page) || 1) - 1) * limit;
 
         const records = ServerMetricsHistory.getHistory({

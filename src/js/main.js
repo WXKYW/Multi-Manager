@@ -18,6 +18,7 @@ import '../css/ssh-ide.css'; // SSH IDE 终端样式
 import '../css/antigravity.css';
 import '../css/gemini-cli.css';
 import '../css/openai.css';
+import '../css/self-h.css';
 import '../css/login.css';
 import '../css/sidebar-nav.css';
 import '../css/zeabur.css'; // Zeabur 专属样式
@@ -48,7 +49,7 @@ import { renderMarkdown } from './modules/utils.js';
 import { paasMethods } from './modules/paas.js';
 import { koyebMethods } from './modules/koyeb.js';
 import { flyMethods } from './modules/fly.js';
-import { selfHMethods } from './modules/self-h.js';
+import { selfHMethods, selfHComputed } from './modules/self-h.js';
 import { dnsMethods } from './modules/dns.js';
 import { r2Methods } from './modules/r2.js';
 import { openaiMethods } from './modules/openai.js';
@@ -68,15 +69,20 @@ import { formatDateTime, formatFileSize, maskAddress, formatRegion } from './mod
 
 // 导入全局状态
 import { store } from './store.js';
+import { computed } from 'vue';
 
 
 
 // 创建并配置 Vue 应用
 const app = createApp({
   setup() {
+    // 自定义计算属性
+    const openListPathParts = computed(() => selfHComputed.openListPathParts(store));
+
     // 将 store 的所有属性转换为 refs，这样在模板中可以直接使用且保持响应式
     return {
-      ...toRefs(store)
+      ...toRefs(store),
+      openListPathParts
     };
   },
   data() {
@@ -95,7 +101,7 @@ const app = createApp({
       refreshInterval: null,
       refreshing: false,
       lastFetchAt: 0,
-      minFetchInterval: 2000,
+      minFetchInterval: 10000, // Zeabur 数据刷新最小间隔 10 秒
       // 批量添加
       batchAccounts: '',
       maskedBatchAccounts: '',
@@ -367,6 +373,7 @@ const app = createApp({
       metricsCollectorStatus: null,
       expandedMetricsServers: [], // 展开的主机 ID 列表
       metricsCollectInterval: 5, // 采集间隔（分钟）
+      showMetricsCharts: false, // 负载趋势图表区域默认折叠
 
       // 拖拽状态 (UI only)
       draggedIndex: null,
@@ -602,6 +609,14 @@ const app = createApp({
 
   watch: {
 
+    // 监听图表区域展开状态，展开时渲染图表
+    showMetricsCharts(newVal) {
+      if (newVal) {
+        this.$nextTick(() => {
+          this.renderMetricsCharts();
+        });
+      }
+    },
 
     // 监听全局模态框状态，控制背景滚动
     isAnyModalOpen(newVal) {
@@ -644,11 +659,10 @@ const app = createApp({
 
     serverCurrentTab: {
       handler(newVal) {
-        // 1. 指标流连接管理
+        // 1. 指标流连接管理 - 仅在列表页时连接，不在此处关闭（避免切换子标签时断开）
+        // 关闭操作由 mainActiveTab watcher 在离开 server 模块时负责
         if (newVal === 'list' && this.mainActiveTab === 'server') {
           this.connectMetricsStream();
-        } else {
-          this.closeMetricsStream();
         }
 
         // 2. 标签页特定数据加载
@@ -787,9 +801,12 @@ const app = createApp({
                 }
                 break;
               case 'server':
+                // 先从缓存恢复（瞬间展示）
                 if (this.serverList.length === 0) {
-                  this.loadServerList();
+                  this.loadFromServerListCache();
                 }
+                // 始终加载最新数据
+                this.loadServerList();
                 // 如果当前选中的是管理子标签，确保加载配置和相关数据
                 if (this.serverCurrentTab === 'management') {
                   this.loadMonitorConfig();
@@ -1089,6 +1106,7 @@ const app = createApp({
     // ==================== 工具函数 ====================
     formatDateTime,
     formatRegion,
+    renderMarkdown,
   }
 });
 

@@ -102,6 +102,7 @@
   .main-tab {
     padding: 12px 16px;
     min-width: auto;
+    position: relative; /* 为子元素绝对定位提供参考 */
   }
 
   .main-tab i {
@@ -110,6 +111,15 @@
 
   .main-tab span {
     display: none;
+  }
+
+  /* 移动端呼吸灯：绝对定位到图标右上角 */
+  .main-tab .nav-live-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    margin: 0;
+    align-self: auto;
   }
 }
 

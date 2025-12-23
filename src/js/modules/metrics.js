@@ -342,8 +342,19 @@ export const metricsMethods = {
 
     // ==================== 图表渲染 ====================
 
-    renderMetricsCharts() {
-        if (!window.Chart || !this.groupedMetricsHistory) return;
+    renderMetricsCharts(retryCount = 0) {
+        // CDN 模式下 Chart.js 可能还未加载，等待并重试
+        if (!window.Chart) {
+            if (retryCount < 3) {
+                console.log(`[Charts] Chart.js 未就绪，${(retryCount + 1) * 300}ms 后重试...`);
+                setTimeout(() => this.renderMetricsCharts(retryCount + 1), 300);
+            } else {
+                console.warn('[Charts] Chart.js 加载超时，跳过图表渲染');
+            }
+            return;
+        }
+
+        if (!this.groupedMetricsHistory) return;
 
         Object.entries(this.groupedMetricsHistory).forEach(([serverId, records]) => {
             // 渲染历史页面的大图表
@@ -366,7 +377,14 @@ export const metricsMethods = {
         if (!canvas) return;
 
         // 由于记录通常是记录时间倒序排列的，绘图前先克隆并正序排列
-        const sortedRecords = [...records].sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
+        let sortedRecords = [...records].sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
+
+        // 性能优化：数据点过多时进行降采样 (最多保留 100 个点)
+        const MAX_POINTS = 50;
+        if (sortedRecords.length > MAX_POINTS) {
+            const step = Math.ceil(sortedRecords.length / MAX_POINTS);
+            sortedRecords = sortedRecords.filter((_, index) => index % step === 0);
+        }
 
         // 准备数据
         const labels = sortedRecords.map(r => {
