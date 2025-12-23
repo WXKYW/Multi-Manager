@@ -1,208 +1,99 @@
-/* ==================== Refined UI Components ==================== */
+/* ==================== Antigravity Modern Loader V3.1 (Core Mode) ==================== */
 
-/* --- Batch Input Area --- */
-.batch-input-wrapper {
-    position: relative;
-    /* margin-bottom: 16px; */
-    border-radius: 12px;
-    overflow: hidden;
-    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-color);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+:root {
+    --loader-size: 48px;
+    --loader-color-primary: var(--primary-color);
+    --loader-color-secondary: rgba(var(--primary-rgb), 0.4);
 }
 
-.batch-textarea {
-    width: 100%;
-    min-height: 180px;
-    padding: 12px 16px;
-    padding-top: 40px;
-    /* Offset for indicator */
-    background: transparent;
-    border: none;
-    color: var(--text-primary);
-    font-family: var(--font-mono);
-    font-size: 13px;
-    line-height: 1.6;
-    resize: none;
-    outline: none;
-    display: block;
-    white-space: pre;
-}
-
-.batch-input-wrapper:focus-within {
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.1), 0 4px 12px rgba(0, 0, 0, 0.05);
-    transform: translateY(-1px);
-}
-
-.batch-input-indicator {
+/* 全屏/板块遮罩 */
+.ag-loader-overlay {
     position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 32px;
-    background: rgba(var(--primary-rgb), 0.05);
-    border-bottom: 1px solid var(--border-color);
-    display: flex;
-    align-items: center;
-    padding: 0 12px;
-    gap: 8px;
-    pointer-events: none;
-    z-index: 10;
-}
-
-.batch-input-indicator i {
-    font-size: 12px;
-    color: var(--primary-color);
-}
-
-.batch-input-indicator span {
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: 1px;
-    color: var(--text-tertiary);
-    text-transform: uppercase;
-}
-
-.batch-textarea::placeholder {
-    color: var(--text-tertiary);
-    opacity: 0.5;
-}
-
-/* --- Refined Empty State --- */
-.empty-state-refined {
+    inset: 0;
+    background: rgba(var(--bg-primary-rgb), 0.6);
+    backdrop-filter: blur(10px) saturate(180%);
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 59px 28px;
-    text-align: center;
+    justify-content: center;
+    z-index: 999;
+    animation: ag-fade-in 0.3s ease-out;
 }
 
-.empty-state-refined i {
-    font-size: 48px;
-    color: var(--text-tertiary);
-    margin-bottom: 16px;
-    opacity: 0.5;
-}
-
-.empty-state-refined h3 {
-    font-size: 18px;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin-bottom: 8px;
-}
-
-.empty-state-refined p {
-    font-size: 14px;
-    color: var(--text-secondary);
-    max-width: 500px;
-    line-height: 1.6;
-}
-
-/* --- Scrollbar --- */
-.batch-textarea::-webkit-scrollbar {
-    width: 8px;
-    display: block !important;
-}
-
-.batch-textarea::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.batch-textarea::-webkit-scrollbar-thumb {
-    background: var(--border-color);
-    border-radius: 10px;
-}
-
-.batch-textarea::-webkit-scrollbar-thumb:hover {
-    background: var(--text-tertiary);
-}
-
-/* Self-H 模块二级标签页样式 */
-.self-h-sec-tabs {
+/* 核心旋涡加载器 */
+.ag-modern-loader {
+    position: relative;
+    width: var(--loader-size);
+    height: var(--loader-size);
     display: flex;
-    gap: 6px;
-    margin-bottom: 10px;
-    margin-top: 10px;
-    border-bottom: 1px solid var(--border-color);
-    padding-bottom: 12px;
+    align-items: center;
+    justify-content: center;
 }
 
-.theme-self-h .tab-btn.active {
-    background: linear-gradient(135deg, var(--selfh-primary), var(--success-dark)) !important;
-    color: white !important;
-    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+/* 紧致双旋轨 */
+.ag-loader-inner {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    border-top-color: var(--loader-color-primary);
+    border-right-color: var(--loader-color-primary);
+    animation: ag-spin 0.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
-/* ==================== PWA & Native App Polish ==================== */
-
-/* 1. 沉浸式安全区适配 (iOS/Android Notch) */
-:root {
-    --safe-area-inset-top: env(safe-area-inset-top, 0px);
-    --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+.ag-loader-inner-sub {
+    position: absolute;
+    inset: 8px;
+    border-radius: 50%;
+    border: 1.5px solid transparent;
+    border-bottom-color: var(--loader-color-secondary);
+    border-left-color: var(--loader-color-secondary);
+    animation: ag-spin-reverse 1.2s linear infinite;
+    opacity: 0.6;
 }
 
-/* 独立应用模式下的顶部间距补偿（避免状态栏重叠） */
-@media (display-mode: standalone) {
-    .header {
-        padding-top: calc(15px + var(--safe-area-inset-top)) !important;
-    }
+/* 强效中心核心 */
+.ag-loader-core {
+    width: 8px;
+    height: 8px;
+    background: var(--loader-color-primary);
+    border-radius: 50%;
+    box-shadow: 0 0 12px var(--loader-color-primary);
+    animation: ag-pulse 1s ease-in-out infinite;
 }
 
-/* 2. 禁止移动端长按弹出系统菜单 (像真正的 App 一样) */
-body,
-.main-tab,
-.tab-btn,
-button {
-    -webkit-touch-callout: none;
-    -webkit-user-select: none;
-    user-select: none;
-}
-
-/* 允许输入框和代码区域选中文本 */
-input,
-textarea,
-code,
-pre,
-.log-content {
-    -webkit-user-select: text;
-    user-select: text;
-}
-
-/* 3. 优化移动端点击反馈 */
-.main-tab,
-.tab-btn,
-.btn,
-.hosts-action-btn {
-    -webkit-tap-highlight-color: transparent;
-    transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.1s ease;
-}
-
-.main-tab:active,
-.tab-btn:active,
-.btn:active {
-    transform: scale(0.96) !important;
+/* 文本光泽 */
+.ag-loader-text {
+    margin-top: 20px;
+    font-size: 10px;
+    font-weight: 800;
+    color: var(--text-primary);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    background: linear-gradient(90deg, var(--text-tertiary), var(--text-primary), var(--text-tertiary));
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: ag-text-shine 2s linear infinite;
     opacity: 0.8;
 }
 
-/* 4. 禁止橡皮筋回弹效果（仅针对主体） */
-html,
-body {
-    overscroll-behavior-y: none;
-    position: fixed;
-    overflow: hidden;
-    width: 100%;
+/* 关键帧 */
+@keyframes ag-spin { to { transform: rotate(360deg); } }
+@keyframes ag-spin-reverse { to { transform: rotate(-360deg); } }
+@keyframes ag-pulse {
+    0%, 100% { transform: scale(1); filter: brightness(1); }
+    50% { transform: scale(1.4); filter: brightness(1.2); }
 }
+@keyframes ag-text-shine { to { background-position: 200% center; } }
+@keyframes ag-fade-in { from { opacity: 0; } to { opacity: 1; } }
 
-.app-main {
-    overscroll-behavior-y: contain;
-    padding-bottom: var(--safe-area-inset-bottom) !important;
-}
-
-/* 5. 滚动条美化（在 standalone 模式下彻底隐藏以模拟原生感） */
-@media (display-mode: standalone) {
-    ::-webkit-scrollbar {
-        display: none !important;
-    }
+/* 紧凑型加载器 */
+.ag-spinner-mini {
+    width: 18px;
+    height: 18px;
+    border: 2px solid rgba(var(--primary-rgb), 0.1);
+    border-top-color: var(--primary-color);
+    border-radius: 50%;
+    animation: ag-spin 0.6s linear infinite;
 }

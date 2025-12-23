@@ -29,7 +29,9 @@ export const metricsMethods = {
                 params.append('status', this.logFilter.status);
             }
 
-            const response = await fetch(`/api/server/monitor/logs?${params}`);
+            const response = await fetch(`/api/server/monitor/logs?${params}`, {
+                headers: this.getAuthHeaders()
+            });
             const data = await response.json();
 
             if (data.success) {
@@ -270,9 +272,10 @@ export const metricsMethods = {
 
             console.log('[History] 查询时间范围:', this.metricsHistoryTimeRange, '起始时间:', startTime);
 
+            // 移除分页逻辑，一次性加载所有数据
             const params = new URLSearchParams({
-                page: this.metricsHistoryPagination.page,
-                pageSize: this.metricsHistoryPagination.pageSize
+                page: 1, // 始终第一页
+                pageSize: 10000 // 足够大的页容量以获取该时间段内所有数据
             });
 
             if (this.metricsHistoryFilter.serverId) {
@@ -283,7 +286,9 @@ export const metricsMethods = {
                 params.append('startTime', startTime);
             }
 
-            const response = await fetch(`/api/server/metrics/history?${params}`);
+            const response = await fetch(`/api/server/metrics/history?${params}`, {
+                headers: this.getAuthHeaders()
+            });
             const data = await response.json();
 
             if (data.success) {
@@ -341,114 +346,161 @@ export const metricsMethods = {
         if (!window.Chart || !this.groupedMetricsHistory) return;
 
         Object.entries(this.groupedMetricsHistory).forEach(([serverId, records]) => {
-            // 由于记录是倒序排列的，绘图前先克隆并正序排列
-            const sortedRecords = [...records].reverse();
+            // 渲染历史页面的大图表
+            this.renderSingleChart(serverId, records, `metrics-chart-${serverId}`);
+            // 同时尝试渲染卡片图表 (如果 DOM 存在)
+            this.renderSingleChart(serverId, records, `metrics-chart-card-${serverId}`);
+        });
+    },
 
-            // 准备数据
-            const labels = sortedRecords.map(r => {
-                const d = new Date(r.recorded_at);
-                return d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0');
-            });
-            const cpuData = sortedRecords.map(r => r.cpu_usage || 0);
-            const memData = sortedRecords.map(r => r.mem_usage || 0);
+    /**
+     * 渲染单个指标图表
+     * @param {string} serverId 主机 ID
+     * @param {Array} records 历史记录数据
+     * @param {string} canvasId Canvas 元素 ID
+     */
+    renderSingleChart(serverId, records, canvasId) {
+        if (!window.Chart || !records || records.length === 0) return;
 
-            this.$nextTick(() => {
-                const canvasId = `metrics-chart-${serverId}`;
-                const canvas = document.getElementById(canvasId);
-                if (!canvas) return;
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return;
 
-                // 销毁已存在的实例
-                const existingChart = Chart.getChart(canvas);
-                if (existingChart) {
-                    existingChart.destroy();
-                }
+        // 由于记录通常是记录时间倒序排列的，绘图前先克隆并正序排列
+        const sortedRecords = [...records].sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
 
-                // 创建新图表
-                new Chart(canvas, {
-                    type: 'line',
-                    data: {
-                        labels: labels,
-                        datasets: [
-                            {
-                                label: 'CPU (%)',
-                                data: cpuData,
-                                borderColor: '#10b981',
-                                backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                                borderWidth: 2,
-                                fill: true,
-                                tension: 0.4,
-                                pointRadius: 0,
-                                pointHoverRadius: 4
-                            },
-                            {
-                                label: '内存 (%)',
-                                data: memData,
-                                borderColor: '#3b82f6',
-                                backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                                borderWidth: 2,
-                                fill: true,
-                                tension: 0.4,
-                                pointRadius: 0,
-                                pointHoverRadius: 4
-                            }
-                        ]
+        // 准备数据
+        const labels = sortedRecords.map(r => {
+            const d = new Date(r.recorded_at);
+            return d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0');
+        });
+        const cpuData = sortedRecords.map(r => r.cpu_usage || 0);
+        const memData = sortedRecords.map(r => r.mem_usage || 0);
+
+        // 销毁已存在的实例
+        const existingChart = Chart.getChart(canvas);
+        if (existingChart) {
+            existingChart.destroy();
+        }
+
+        // 创建新图表
+        new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'CPU (%)',
+                        data: cpuData,
+                        borderColor: '#10b981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 1,
+                        pointHoverRadius: 4
                     },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: { display: false },
-                            tooltip: {
-                                mode: 'index',
-                                intersect: false,
-                                padding: 10,
-                                backgroundColor: 'rgba(13, 17, 23, 0.9)',
-                                titleColor: '#8b949e',
-                                bodyColor: '#e6edf3',
-                                borderColor: 'rgba(255, 255, 255, 0.1)',
-                                borderWidth: 1
-                            }
-                        },
-                        scales: {
-                            x: {
-                                display: true,
-                                grid: { display: false },
-                                ticks: {
-                                    maxRotation: 0,
-                                    autoSkip: true,
-                                    maxTicksLimit: 6,
-                                    font: { size: 10 },
-                                    color: '#8b949e'
-                                }
-                            },
-                            y: {
-                                display: true,
-                                min: 0,
-                                max: 100,
-                                grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                                ticks: {
-                                    font: { size: 10 },
-                                    color: '#8b949e',
-                                    stepSize: 20
-                                }
-                            }
-                        },
-                        interaction: {
-                            mode: 'nearest',
-                            axis: 'x',
-                            intersect: false
+                    {
+                        label: '内存 (%)',
+                        data: memData,
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 1,
+                        pointHoverRadius: 4
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        padding: 10,
+                        backgroundColor: 'rgba(13, 17, 23, 0.9)',
+                        titleColor: '#8b949e',
+                        bodyColor: '#e6edf3',
+                        borderColor: 'rgba(255, 255, 255, 0.1)',
+                        borderWidth: 1
+                    }
+                },
+                scales: {
+                    x: {
+                        display: true,
+                        grid: { display: false },
+                        ticks: {
+                            maxRotation: 0,
+                            autoSkip: true,
+                            maxTicksLimit: 6,
+                            font: { size: 11 },
+                            color: '#8b949e'
+                        }
+                    },
+                    y: {
+                        display: true,
+                        min: 0,
+                        max: 100,
+                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                        ticks: {
+                            font: { size: 11 },
+                            color: '#8b949e',
+                            stepSize: 20
                         }
                     }
-                });
-            });
+                },
+                interaction: {
+                    mode: 'nearest',
+                    axis: 'x',
+                    intersect: false
+                }
+            }
         });
+    },
+
+    /**
+     * 为特定主机加载指标历史数据（用于卡片展示）
+     */
+    async loadCardMetrics(serverId) {
+        if (!serverId) return;
+
+        try {
+            const params = new URLSearchParams({
+                serverId: serverId,
+                page: 1,
+                pageSize: 30 // 获取最近 30 条记录
+            });
+
+            const response = await fetch(`/api/server/metrics/history?${params}`, {
+                headers: this.getAuthHeaders()
+            });
+            const data = await response.json();
+
+            if (data.success && data.data.length > 0) {
+                // 如果当前已经在 history 列表里了，则合并，否则直接放入
+                // 为了简单起见，我们直接看 groupedMetricsHistory 能否拿到
+                // 我们把获取到的数据放入一个临时的缓存或直接渲染
+                const records = data.data;
+
+                this.$nextTick(() => {
+                    this.renderSingleChart(serverId, records, `metrics-chart-card-${serverId}`);
+                });
+            }
+        } catch (error) {
+            console.error('加载卡片指标失败:', error);
+        }
     },
 
     // ==================== 采集器管理 ====================
 
     async loadCollectorStatus() {
         try {
-            const response = await fetch('/api/server/metrics/collector/status');
+            const response = await fetch('/api/server/metrics/collector/status', {
+                headers: this.getAuthHeaders()
+            });
             const data = await response.json();
 
             if (data.success) {
@@ -498,6 +550,55 @@ export const metricsMethods = {
         } catch (error) {
             console.error('更新采集间隔失败:', error);
             this.showGlobalToast('更新采集间隔失败', 'error');
+        }
+    },
+
+    /**
+     * 加载监控配置
+     */
+    async loadMonitorConfig() {
+        try {
+            const response = await fetch('/api/server/monitor/config', {
+                headers: this.getAuthHeaders()
+            });
+            const data = await response.json();
+            if (data.success) {
+                this.monitorConfig = data.data;
+                // 同步更新显示用的采集间隔
+                if (data.data.metrics_collect_interval) {
+                    this.metricsCollectInterval = Math.floor(data.data.metrics_collect_interval / 60);
+                }
+                // 加载采集器运行状态
+                this.loadCollectorStatus();
+            }
+        } catch (error) {
+            console.error('加载监控配置失败:', error);
+        }
+    },
+
+    /**
+     * 更新监控全局配置
+     */
+    async updateMonitorConfig() {
+        try {
+            const response = await fetch('/api/server/monitor/config', {
+                method: 'PUT',
+                headers: {
+                    ...this.getAuthHeaders(),
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(this.monitorConfig)
+            });
+            const data = await response.json();
+            if (data.success) {
+                this.showGlobalToast('配置已更新', 'success');
+                this.loadCollectorStatus();
+                // 重新加载配置以确保同步
+                this.loadMonitorConfig();
+            }
+        } catch (error) {
+            this.showGlobalToast('配置更新失败', 'error');
+            console.error('更新配置失败:', error);
         }
     }
 };

@@ -129,6 +129,7 @@ router.post('/', (req, res) => {
   try {
     const settings = req.body;
 
+    // 保存完整的 JSON 配置 (包含 channelModelPrefix 等)
     const result = saveUserSettings(settings);
 
     if (result.success) {

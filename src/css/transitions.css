@@ -145,12 +145,15 @@
   --module-color: rgba(16, 163, 127, 0.06);
 }
 
-/* 主机管理模块 - 青绿色主题 */
+/* 主机管理模块 - 青绿色主题 - 核心优化：彻底禁用水平移动动画，仅保留纯淡入以配合 Canvas 渲染，防止极其缓慢的位移感 */
 .server-tab-content.slide-in-left,
 .server-tab-content.slide-in-right,
 .server-tab-content.slide-out-left,
 .server-tab-content.slide-out-right {
   --module-color: rgba(0, 212, 170, 0.06);
+  animation-duration: 0.15s !important;
+  animation-name: fadeIn !important;
+  /* 强制覆盖 slideIn，防止横向移动 */
 }
 
 /* Antigravity 模块 - 橙色主题 */

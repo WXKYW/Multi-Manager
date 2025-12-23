@@ -347,7 +347,7 @@ class MetricsService {
 
     /**
      * 启动历史数据采集定时器
-     * @param {number} intervalMs - 采集间隔（毫秒），默认 5 分钟
+     * @param {number} intervalMs - 采集间隔（毫秒），默认从数据库读取
      */
     startHistoryCollector(intervalMs = null) {
         if (this.historyCollectTimer) {
@@ -355,7 +355,22 @@ class MetricsService {
             return;
         }
 
-        const interval = intervalMs || this.historyCollectInterval;
+        // 优先使用传入参数，否则从数据库读取配置
+        let interval = intervalMs;
+        if (!interval) {
+            try {
+                const { ServerMonitorConfig } = require('./models');
+                const config = ServerMonitorConfig.get();
+                if (config && config.metrics_collect_interval) {
+                    interval = config.metrics_collect_interval * 1000;
+                    this.historyCollectInterval = interval;
+                }
+            } catch (err) {
+                logger.error('从数据库加载采集间隔失败，使用默认值:', err.message);
+            }
+        }
+
+        interval = interval || this.historyCollectInterval;
         logger.info(`📊 启动历史指标采集器 (间隔: ${interval / 1000}s)`);
 
         // 立即执行一次采集
@@ -437,10 +452,31 @@ class MetricsService {
         if (records.length > 0) {
             try {
                 const count = ServerMetricsHistory.createMany(records);
-                logger.info(`📊 已采集 ${count} 条历史指标记录`);
+                logger.debug(`📊 已采集 ${count} 条历史指标记录`);
+
+                // 顺便执行定期清理
+                this.cleanupOldMetrics();
             } catch (error) {
-                logger.error('历史指标采集失败:', error.message);
+                logger.error('历史指标采集或清理失败:', error.message);
             }
+        }
+    }
+
+    /**
+     * 清理过期历史指标记录
+     */
+    cleanupOldMetrics() {
+        try {
+            const { ServerMonitorConfig, ServerMetricsHistory } = require('./models');
+            const config = ServerMonitorConfig.get();
+            const retentionDays = config?.metrics_retention_days || 30;
+
+            const deletedCount = ServerMetricsHistory.deleteOldRecords(retentionDays);
+            if (deletedCount > 0) {
+                logger.info(`🧹 清理过期历史指标: ${deletedCount} 条 (保留天数: ${retentionDays})`);
+            }
+        } catch (err) {
+            logger.error('清理过期指标失败:', err.message);
         }
     }
 

@@ -48,7 +48,7 @@
     background: var(--auth-card-bg);
     width: 100%;
     max-width: 420px;
-    padding: 48px 40px;
+    padding: 30px 30px;
     border-radius: 32px;
     box-shadow: var(--auth-shadow);
     overflow: hidden;
@@ -83,7 +83,7 @@
     justify-content: center;
     margin: 0 auto 24px;
     font-size: 32px;
-    box-shadow: 0 8px 20px var(--auth-primary-glow);
+    box-shadow: 6px 6px 9px 0px var(--auth-primary-glow);
     position: relative;
     z-index: 2;
 }

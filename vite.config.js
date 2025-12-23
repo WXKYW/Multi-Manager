@@ -82,13 +82,16 @@ module.exports = defineConfig(({ mode }) => {
                     target: 'http://127.0.0.1:3000',
                     changeOrigin: true
                 },
+                // OpenAI 兼容接口代理
                 '/v1': {
                     target: 'http://127.0.0.1:3000',
                     changeOrigin: true
                 },
+                // 增加针对 SSH 和指标流的 WebSocket 代理
                 '/ws': {
-                    target: 'ws://127.0.0.1:3000',
-                    ws: true
+                    target: 'http://127.0.0.1:3000',
+                    ws: true,
+                    changeOrigin: true
                 }
             }
         },

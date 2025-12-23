@@ -181,18 +181,20 @@
               </div>
               <div class="domains-container">
                 <!-- 已有域名列表 -->
-                <div v-for="domainInfo in getProjectDomains(project)" :key="domainInfo.domain" class="domain-item-wrapper">
+                <div v-for="domainInfo in getProjectDomains(project)" :key="domainInfo.domain"
+                  class="domain-item-wrapper">
                   <div class="domain-link-group">
                     <a :href="'https://' + domainInfo.domain" target="_blank" class="domain-link">
                       <i class="fas fa-globe"></i>
                       <span>{{ domainInfo.domain }}</span>
                     </a>
-                    <button class="domain-op-btn edit" @click.stop="editDomain(account, project, domainInfo)" title="管理域名">
+                    <button class="domain-op-btn edit" @click.stop="editDomain(account, project, domainInfo)"
+                      title="管理域名">
                       <i class="fas fa-edit"></i>
                     </button>
                   </div>
                 </div>
-                
+
                 <!-- 无域名时的快速添加入口 -->
                 <div v-if="getProjectDomains(project).length === 0" class="domain-empty-state">
                   <button class="btn-quick-add-domain" @click="quickAddDomain(account, project)">
@@ -296,7 +298,8 @@
         :class="{ 'expanded': isFlyAccountExpanded(account.name) }" style="margin-bottom: 12px;">
         <div class="account-header fly-account-header" @click="toggleFlyAccount(account.name)">
           <div class="account-info">
-            <i class="fas fa-chevron-right toggle-icon fly-toggle" :style="{ transform: isFlyAccountExpanded(account.name) ? 'rotate(90deg)' : 'rotate(0deg)' }"></i>
+            <i class="fas fa-chevron-right toggle-icon fly-toggle"
+              :style="{ transform: isFlyAccountExpanded(account.name) ? 'rotate(90deg)' : 'rotate(0deg)' }"></i>
             <div class="zeabur-account-avatar fly-account-avatar">
               <span class="avatar-letter">{{ (account.name || 'F').charAt(0).toUpperCase() }}</span>
             </div>
@@ -305,21 +308,27 @@
             </div>
           </div>
           <!-- 新建应用按钮 -->
-          <button class="create-project-btn fly-btn" @click.stop="createFlyApp(account)" style="padding: 4px 10px; font-size: 11px;">
+          <button class="create-project-btn fly-btn" @click.stop="createFlyApp(account)"
+            style="padding: 4px 10px; font-size: 11px;">
             <i class="fas fa-plus"></i> 新建应用
           </button>
         </div>
         <div class="account-card-body">
-          <div v-if="account.projects" class="projects-grid fly-projects-grid" :class="{ 'collapsed': !isFlyAccountExpanded(account.name), 'single-app': account.projects.length === 1 }">
+          <div v-if="account.projects" class="projects-grid fly-projects-grid"
+            :class="{ 'collapsed': !isFlyAccountExpanded(account.name), 'single-app': account.projects.length === 1 }">
             <div v-for="app in account.projects" :key="app.id" class="project-card fly-project-card">
               <div class="project-header fly-project-header">
                 <div class="project-name-wrapper fly-project-name-wrapper">
                   <span class="project-name-icon">✈️</span>
-                  <span v-if="!app.isEditing" class="project-name-text fly-project-name-text" @dblclick.stop="startEditFlyAppName(app)">{{ app.name }}</span>
-                  <input v-else v-model="app.editingName" @keyup.enter="saveFlyAppName(account, app)" @keyup.esc="cancelEditFlyAppName(app)" @blur="saveFlyAppName(account, app)" class="project-name-input" ref="flyAppNameInput" @click.stop />
+                  <span v-if="!app.isEditing" class="project-name-text fly-project-name-text"
+                    @dblclick.stop="startEditFlyAppName(app)">{{ app.name }}</span>
+                  <input v-else v-model="app.editingName" @keyup.enter="saveFlyAppName(account, app)"
+                    @keyup.esc="cancelEditFlyAppName(app)" @blur="saveFlyAppName(account, app)"
+                    class="project-name-input" ref="flyAppNameInput" @click.stop />
                 </div>
                 <div class="project-actions">
-                  <button v-if="!app.isEditing" @click.stop="deleteFlyApp(account, app)" class="project-delete-btn"><i class="fas fa-trash"></i></button>
+                  <button v-if="!app.isEditing" @click.stop="deleteFlyApp(account, app)" class="project-delete-btn"><i
+                      class="fas fa-trash"></i></button>
                 </div>
               </div>
               <div class="services-container">
@@ -425,7 +434,8 @@
               <td><strong>{{ account.name }}</strong></td>
               <td><span style="font-size: 13px; color: var(--text-secondary);">{{ account.email || '-' }}</span></td>
               <td class="text-center">
-                <span style="font-weight: 600; color: var(--info-color);">${{ (account.balance || 0).toFixed(2) }}</span>
+                <span style="font-weight: 600; color: var(--info-color);">${{ (account.balance || 0).toFixed(2)
+                  }}</span>
               </td>
               <td class="text-center">
                 <span class="ag-status-badge ag-status-online">正常</span>
@@ -444,7 +454,8 @@
       </div>
 
       <!-- Zeabur 批量导入 -->
-      <div style="margin-top: 20px; padding: 15px; background: var(--bg-tertiary); border-radius: 12px; border: 1px dashed var(--border-color);">
+      <div
+        style="margin-top: 10px; padding: 15px; background: var(--bg-tertiary); border-radius: 12px; border: 1px dashed var(--border-color);">
         <div style="font-size: 13px; font-weight: 600; margin-bottom: 10px; color: var(--text-secondary);">
           批量添加 Zeabur 账号 (格式: 备注,Sk-Token)
         </div>
@@ -452,7 +463,8 @@
 我的账号2,sk-yyyy..." style="min-height: 80px; font-size: 12px; font-family: var(--font-mono);"></textarea>
         <div v-if="batchAddError" class="form-error" style="margin-top: 8px;">{{ batchAddError }}</div>
         <div v-if="batchAddSuccess" class="form-success" style="margin-top: 8px;">{{ batchAddSuccess }}</div>
-        <button class="btn btn-primary btn-sm" @click="batchAddAccounts" :disabled="addingAccount" style="width: 100%; margin-top: 12px;">
+        <button class="btn btn-primary btn-sm" @click="batchAddAccounts" :disabled="addingAccount"
+          style="width: 100%; margin-top: 12px;">
           <i class="fas fa-layer-group"></i> 批量验证并添加
         </button>
       </div>
@@ -507,7 +519,8 @@
       </div>
 
       <!-- Koyeb 批量导入 -->
-      <div style="margin-top: 20px; padding: 15px; background: var(--bg-tertiary); border-radius: 12px; border: 1px dashed var(--border-color);">
+      <div
+        style="margin-top: 10px; padding: 15px; background: var(--bg-tertiary); border-radius: 12px; border: 1px dashed var(--border-color);">
         <div style="font-size: 13px; font-weight: 600; margin-bottom: 10px; color: var(--text-secondary);">
           批量添加 Koyeb 账号 (格式: 备注,koyeb_xxxx...)
         </div>
@@ -515,7 +528,8 @@
 我的Koyeb2,koyeb_yyyy..." style="min-height: 80px; font-size: 12px; font-family: var(--font-mono);"></textarea>
         <div v-if="koyebBatchAddError" class="form-error" style="margin-top: 8px;">{{ koyebBatchAddError }}</div>
         <div v-if="koyebBatchAddSuccess" class="form-success" style="margin-top: 8px;">{{ koyebBatchAddSuccess }}</div>
-        <button class="btn btn-primary btn-sm" @click="batchAddKoyebAccounts" :disabled="koyebAddingAccount" style="width: 100%; margin-top: 12px;">
+        <button class="btn btn-primary btn-sm" @click="batchAddKoyebAccounts" :disabled="koyebAddingAccount"
+          style="width: 100%; margin-top: 12px;">
           <i class="fas fa-layer-group"></i> 批量验证并添加
         </button>
       </div>
@@ -554,8 +568,7 @@
               </td>
               <td class="actions text-center">
                 <div class="flex-cell">
-                  <button class="btn btn-icon-refined"
-                    @click="removeFlyAccount(account.id, account.name)" title="删除账号"
+                  <button class="btn btn-icon-refined" @click="removeFlyAccount(account.id, account.name)" title="删除账号"
                     style="color: var(--danger-color);">
                     <i class="fas fa-trash"></i>
                   </button>
@@ -567,7 +580,8 @@
       </div>
 
       <!-- Fly.io 批量导入 -->
-      <div style="margin-top: 20px; padding: 15px; background: var(--bg-tertiary); border-radius: 12px; border: 1px dashed var(--border-color);">
+      <div
+        style="margin-top: 10px; padding: 15px; background: var(--bg-tertiary); border-radius: 12px; border: 1px dashed var(--border-color);">
         <div style="font-size: 13px; font-weight: 600; margin-bottom: 10px; color: var(--text-secondary);">
           批量添加 Fly.io 账号 (格式: 备注,Fly-Token)
         </div>
@@ -575,7 +589,8 @@
 我的Fly2,flyv1_yyyy..." style="min-height: 80px; font-size: 12px; font-family: var(--font-mono);"></textarea>
         <div v-if="flyBatchAddError" class="form-error" style="margin-top: 8px;">{{ flyBatchAddError }}</div>
         <div v-if="flyBatchAddSuccess" class="form-success" style="margin-top: 8px;">{{ flyBatchAddSuccess }}</div>
-        <button class="btn btn-primary btn-sm" @click="batchAddFlyAccounts" :disabled="flyAddingAccount" style="width: 100%; margin-top: 12px;">
+        <button class="btn btn-primary btn-sm" @click="batchAddFlyAccounts" :disabled="flyAddingAccount"
+          style="width: 100%; margin-top: 12px;">
           <i class="fas fa-layer-group"></i> 批量验证并添加
         </button>
       </div>

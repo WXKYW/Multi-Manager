@@ -455,6 +455,8 @@ class ServerMonitorConfig {
                 max_connections = ?,
                 session_timeout = ?,
                 auto_start = ?,
+                metrics_collect_interval = ?,
+                metrics_retention_days = ?,
                 updated_at = ?
             WHERE id = 1
         `);
@@ -466,6 +468,8 @@ class ServerMonitorConfig {
             data.max_connections,
             data.session_timeout,
             data.auto_start !== undefined ? (data.auto_start ? 1 : 0) : 1,
+            data.metrics_collect_interval !== undefined ? data.metrics_collect_interval : 300,
+            data.metrics_retention_days !== undefined ? data.metrics_retention_days : 30,
             now
         );
 

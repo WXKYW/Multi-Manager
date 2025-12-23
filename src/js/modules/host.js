@@ -575,6 +575,9 @@ export const hostMethods = {
             const server = this.serverList.find(s => s.id === serverId);
             if (!server) return;
 
+            // 展开时加载历史指标图表
+            this.loadCardMetrics(serverId);
+
             // 判断是否已经加载了完整详情（不仅仅是实时流的指标）
             const hasFullInfo = server.info && server.info.system && Object.keys(server.info.system).length > 0;
 

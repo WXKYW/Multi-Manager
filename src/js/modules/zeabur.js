@@ -245,8 +245,8 @@ export const zeaburMethods = {
       } else {
         // 否则使用主机配置的账号
         const [accountsRes, projectsRes] = await Promise.all([
-          fetch('/api/zeabur/accounts').then(r => r.json()),
-          fetch('/api/zeabur/projects').then(r => r.json())
+          fetch('/api/zeabur/accounts', { headers: store.getAuthHeaders() }).then(r => r.json()),
+          fetch('/api/zeabur/projects', { headers: store.getAuthHeaders() }).then(r => r.json())
         ]);
 
         // 使用Vue.set或直接重新赋值确保响应式更新
@@ -297,7 +297,7 @@ export const zeaburMethods = {
 
     try {
       // 验证账号
-      const response = await fetch('/api/validate-account', {
+      const response = await fetch('/api/zeabur/validate-account', {
         method: 'POST',
         headers: store.getAuthHeaders(),
         body: JSON.stringify({
@@ -778,7 +778,7 @@ export const zeaburMethods = {
         return;
       }
 
-      const response = await fetch('/api/project/rename', {
+      const response = await fetch('/api/zeabur/project/rename', {
         method: 'POST',
         headers: store.getAuthHeaders(),
         body: JSON.stringify({
@@ -819,7 +819,7 @@ export const zeaburMethods = {
         return;
       }
 
-      const response = await fetch('/api/project/delete', {
+      const response = await fetch('/api/zeabur/project/delete', {
         method: 'POST',
         headers: store.getAuthHeaders(),
         body: JSON.stringify({
@@ -858,7 +858,7 @@ export const zeaburMethods = {
         return;
       }
 
-      const response = await fetch('/api/service/delete', {
+      const response = await fetch('/api/zeabur/service/delete', {
         method: 'POST',
         headers: this.getAuthHeaders(),
         body: JSON.stringify({
@@ -920,7 +920,7 @@ export const zeaburMethods = {
         return;
       }
 
-      const response = await fetch('/api/service/rename', {
+      const response = await fetch('/api/zeabur/service/rename', {
         method: 'POST',
         headers: this.getAuthHeaders(),
         body: JSON.stringify({
@@ -1168,7 +1168,7 @@ export const zeaburMethods = {
       const accountData = this.managedAccounts.find(acc => acc.name === this.logsCurrentAccount.name);
       if (!accountData || !accountData.token) return;
 
-      const response = await fetch('/api/service/logs', {
+      const response = await fetch('/api/zeabur/service/logs', {
         method: 'POST',
         headers: this.getAuthHeaders(),
         body: JSON.stringify({
@@ -1665,7 +1665,7 @@ export const zeaburMethods = {
         return;
       }
 
-      const response = await fetch('/api/domain/delete', {
+      const response = await fetch('/api/zeabur/domain/delete', {
         method: 'POST',
         headers: this.getAuthHeaders(),
         body: JSON.stringify({

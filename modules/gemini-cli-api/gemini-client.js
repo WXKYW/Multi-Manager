@@ -39,13 +39,15 @@ class GeminiCliClient {
         const settings = storage ? await storage.getSettings() : {};
 
         const contents = [];
-        let systemInstruction = null;
+        const systemParts = []; // 收集所有 system 消息
 
         messages.forEach(msg => {
             if (msg.role === 'system') {
-                // system 消息只取文本部分
+                // 收集所有 system 消息内容
                 const textContent = this._extractTextContent(msg.content);
-                systemInstruction = { parts: [{ text: textContent }] };
+                if (textContent.trim()) {
+                    systemParts.push(textContent);
+                }
             } else {
                 const role = msg.role === 'assistant' ? 'model' : 'user';
                 const parts = this._convertContentToParts(msg.content);
@@ -55,6 +57,12 @@ class GeminiCliClient {
                 });
             }
         });
+
+        // 合并所有 system 消息（用双换行符分隔）
+        let systemInstruction = null;
+        if (systemParts.length > 0) {
+            systemInstruction = { parts: [{ text: systemParts.join('\n\n') }] };
+        }
 
         // 如果没有消息中的 system 指令，尝试使用设置中的默认指令
         if (!systemInstruction && settings.SYSTEM_INSTRUCTION) {

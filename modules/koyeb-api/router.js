@@ -7,14 +7,12 @@ const router = express.Router();
 const koyebApi = require('./koyeb-api');
 const { KoyebAccount } = require('./models');
 
-const { requireAuth } = require('../../src/middleware/auth');
-
 // ============ 账号管理 API ============
 
 /**
  * 获取所有 Koyeb 账号列表 (导出用，包含 Token)
  */
-router.get('/koyeb/accounts/export', requireAuth, (req, res) => {
+router.get('/accounts/export', (req, res) => {
     try {
         const accounts = KoyebAccount.findAll();
         res.json({ success: true, accounts });
@@ -27,7 +25,7 @@ router.get('/koyeb/accounts/export', requireAuth, (req, res) => {
 /**
  * 获取所有 Koyeb 账号列表 (展示用，隐藏 Token)
  */
-router.get('/koyeb/accounts', requireAuth, (req, res) => {
+router.get('/accounts', (req, res) => {
     try {
         const accounts = KoyebAccount.findAll();
         // 隐藏敏感信息
@@ -49,12 +47,12 @@ router.get('/koyeb/accounts', requireAuth, (req, res) => {
 /**
  * 添加 Koyeb 账号
  */
-router.post('/koyeb/accounts', async (req, res) => {
+router.post('/accounts', async (req, res) => {
     try {
         const { name, token } = req.body;
 
         if (!name || !token) {
-            return res.status(400).json({ success: false, error: '名称和 Token 不能为空' });
+            return res.status(400).json({ success: false, error: 'Name and Token are required' });
         }
 
         // 验证 Token
@@ -88,7 +86,7 @@ router.post('/koyeb/accounts', async (req, res) => {
 /**
  * 删除 Koyeb 账号
  */
-router.delete('/koyeb/accounts/:id', (req, res) => {
+router.delete('/accounts/:id', (req, res) => {
     try {
         const { id } = req.params;
         KoyebAccount.deleteAccount(id);
@@ -104,7 +102,7 @@ router.delete('/koyeb/accounts/:id', (req, res) => {
 /**
  * 获取所有账号的完整数据（用于监控页面）
  */
-router.get('/koyeb/data', async (req, res) => {
+router.get('/data', async (req, res) => {
     try {
         const accounts = KoyebAccount.findAll();
 
@@ -120,7 +118,7 @@ router.get('/koyeb/data', async (req, res) => {
                 });
 
                 return {
-                    id: acc.id,  // 添加账号 ID
+                    id: acc.id,
                     name: acc.name,
                     data: data.user,
                     projects: data.projects,
@@ -134,7 +132,7 @@ router.get('/koyeb/data', async (req, res) => {
                 KoyebAccount.updateAccount(acc.id, { status: 'error' });
 
                 return {
-                    id: acc.id,  // 添加账号 ID
+                    id: acc.id,
                     name: acc.name,
                     data: null,
                     projects: [],
@@ -154,13 +152,13 @@ router.get('/koyeb/data', async (req, res) => {
 /**
  * 刷新单个账号数据
  */
-router.post('/koyeb/accounts/:id/refresh', async (req, res) => {
+router.post('/accounts/:id/refresh', async (req, res) => {
     try {
         const { id } = req.params;
         const account = KoyebAccount.findById(id);
 
         if (!account) {
-            return res.status(404).json({ success: false, error: '账号不存在' });
+            return res.status(404).json({ success: false, error: 'Account not found' });
         }
 
         const data = await koyebApi.fetchAccountData(account.token);
@@ -183,14 +181,14 @@ router.post('/koyeb/accounts/:id/refresh', async (req, res) => {
 /**
  * 暂停服务
  */
-router.post('/koyeb/services/:serviceId/pause', async (req, res) => {
+router.post('/services/:serviceId/pause', async (req, res) => {
     try {
         const { serviceId } = req.params;
         const { accountId } = req.body;
 
         const account = KoyebAccount.findById(accountId);
         if (!account) {
-            return res.status(404).json({ success: false, error: '账号不存在' });
+            return res.status(404).json({ success: false, error: 'Account not found' });
         }
 
         await koyebApi.pauseService(account.token, serviceId);
@@ -204,14 +202,14 @@ router.post('/koyeb/services/:serviceId/pause', async (req, res) => {
 /**
  * 重启/恢复服务
  */
-router.post('/koyeb/services/:serviceId/restart', async (req, res) => {
+router.post('/services/:serviceId/restart', async (req, res) => {
     try {
         const { serviceId } = req.params;
         const { accountId } = req.body;
 
         const account = KoyebAccount.findById(accountId);
         if (!account) {
-            return res.status(404).json({ success: false, error: '账号不存在' });
+            return res.status(404).json({ success: false, error: 'Account not found' });
         }
 
         await koyebApi.restartService(account.token, serviceId);
@@ -225,14 +223,14 @@ router.post('/koyeb/services/:serviceId/restart', async (req, res) => {
 /**
  * 重新部署服务
  */
-router.post('/koyeb/services/:serviceId/redeploy', async (req, res) => {
+router.post('/services/:serviceId/redeploy', async (req, res) => {
     try {
         const { serviceId } = req.params;
         const { accountId } = req.body;
 
         const account = KoyebAccount.findById(accountId);
         if (!account) {
-            return res.status(404).json({ success: false, error: '账号不存在' });
+            return res.status(404).json({ success: false, error: 'Account not found' });
         }
 
         await koyebApi.redeployService(account.token, serviceId);
@@ -246,14 +244,14 @@ router.post('/koyeb/services/:serviceId/redeploy', async (req, res) => {
 /**
  * 删除服务
  */
-router.delete('/koyeb/services/:serviceId', async (req, res) => {
+router.delete('/services/:serviceId', async (req, res) => {
     try {
         const { serviceId } = req.params;
         const { accountId } = req.body;
 
         const account = KoyebAccount.findById(accountId);
         if (!account) {
-            return res.status(404).json({ success: false, error: '账号不存在' });
+            return res.status(404).json({ success: false, error: 'Account not found' });
         }
 
         await koyebApi.deleteService(account.token, serviceId);
@@ -267,14 +265,14 @@ router.delete('/koyeb/services/:serviceId', async (req, res) => {
 /**
  * 删除应用
  */
-router.delete('/koyeb/apps/:appId', async (req, res) => {
+router.delete('/apps/:appId', async (req, res) => {
     try {
         const { appId } = req.params;
         const { accountId } = req.body;
 
         const account = KoyebAccount.findById(accountId);
         if (!account) {
-            return res.status(404).json({ success: false, error: '账号不存在' });
+            return res.status(404).json({ success: false, error: 'Account not found' });
         }
 
         await koyebApi.deleteApp(account.token, appId);
@@ -288,14 +286,14 @@ router.delete('/koyeb/apps/:appId', async (req, res) => {
 /**
  * 重命名应用
  */
-router.post('/koyeb/apps/:appId/rename', async (req, res) => {
+router.post('/apps/:appId/rename', async (req, res) => {
     try {
         const { appId } = req.params;
         const { accountId, name } = req.body;
 
         const account = KoyebAccount.findById(accountId);
         if (!account) {
-            return res.status(404).json({ success: false, error: '账号不存在' });
+            return res.status(404).json({ success: false, error: 'Account not found' });
         }
 
         await koyebApi.renameApp(account.token, appId, name);
@@ -309,14 +307,14 @@ router.post('/koyeb/apps/:appId/rename', async (req, res) => {
 /**
  * 重命名服务
  */
-router.post('/koyeb/services/:serviceId/rename', async (req, res) => {
+router.post('/services/:serviceId/rename', async (req, res) => {
     try {
         const { serviceId } = req.params;
         const { accountId, name } = req.body;
 
         const account = KoyebAccount.findById(accountId);
         if (!account) {
-            return res.status(404).json({ success: false, error: '账号不存在' });
+            return res.status(404).json({ success: false, error: 'Account not found' });
         }
 
         await koyebApi.renameService(account.token, serviceId, name);
@@ -330,14 +328,14 @@ router.post('/koyeb/services/:serviceId/rename', async (req, res) => {
 /**
  * 获取服务日志
  */
-router.get('/koyeb/services/:serviceId/logs', async (req, res) => {
+router.get('/services/:serviceId/logs', async (req, res) => {
     try {
         const { serviceId } = req.params;
         const { accountId, limit = 100 } = req.query;
 
         const account = KoyebAccount.findById(accountId);
         if (!account) {
-            return res.status(404).json({ success: false, error: '账号不存在' });
+            return res.status(404).json({ success: false, error: 'Account not found' });
         }
 
         const logs = await koyebApi.fetchServiceLogs(account.token, serviceId, limit);
@@ -351,14 +349,14 @@ router.get('/koyeb/services/:serviceId/logs', async (req, res) => {
 /**
  * 获取服务实例
  */
-router.get('/koyeb/services/:serviceId/instances', async (req, res) => {
+router.get('/services/:serviceId/instances', async (req, res) => {
     try {
         const { serviceId } = req.params;
         const { accountId } = req.query;
 
         const account = KoyebAccount.findById(accountId);
         if (!account) {
-            return res.status(404).json({ success: false, error: '账号不存在' });
+            return res.status(404).json({ success: false, error: 'Account not found' });
         }
 
         const instances = await koyebApi.fetchServiceInstances(account.token, serviceId);
@@ -372,14 +370,14 @@ router.get('/koyeb/services/:serviceId/instances', async (req, res) => {
 /**
  * 获取服务指标
  */
-router.get('/koyeb/services/:serviceId/metrics', async (req, res) => {
+router.get('/services/:serviceId/metrics', async (req, res) => {
     try {
         const { serviceId } = req.params;
         const { accountId, instanceId, name, start, end } = req.query;
 
         const account = KoyebAccount.findById(accountId);
         if (!account) {
-            return res.status(404).json({ success: false, error: '账号不存在' });
+            return res.status(404).json({ success: false, error: 'Account not found' });
         }
 
         const metrics = await koyebApi.fetchServiceMetrics(account.token, serviceId, instanceId, name, start, end);
@@ -393,13 +391,13 @@ router.get('/koyeb/services/:serviceId/metrics', async (req, res) => {
 /**
  * 获取组织用量
  */
-router.get('/koyeb/usage', async (req, res) => {
+router.get('/usage', async (req, res) => {
     try {
         const { accountId, start, end } = req.query;
 
         const account = KoyebAccount.findById(accountId);
         if (!account) {
-            return res.status(404).json({ success: false, error: '账号不存在' });
+            return res.status(404).json({ success: false, error: 'Account not found' });
         }
 
         const usage = await koyebApi.fetchOrganizationUsage(account.token, start, end);

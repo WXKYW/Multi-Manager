@@ -8,6 +8,8 @@ const { serverStorage, monitorLogStorage, monitorConfigStorage, snippetStorage }
 const sshService = require('./ssh-service');
 const monitorService = require('./monitor-service');
 const systemInfoService = require('./system-info-service');
+const metricsService = require('./metrics-service');
+const { ServerMonitorConfig, ServerMetricsHistory } = require('./models');
 
 // ==================== 主机凭据接口 ====================
 
@@ -190,11 +192,47 @@ router.post('/check-all', async (req, res) => {
 });
 
 /**
+ * 获取监控日志 (带分页)
+ */
+router.get('/monitor/logs', (req, res) => {
+    try {
+        const { serverId, status, page = 1, pageSize = 50 } = req.query;
+        const limit = parseInt(pageSize);
+        const offset = (parseInt(page) - 1) * limit;
+
+        const logs = monitorLogStorage.getAll({
+            serverId: serverId || null,
+            status: status || null,
+            limit,
+            offset
+        });
+
+        const total = monitorLogStorage.getCount({
+            serverId: serverId || null,
+            status: status || null
+        });
+
+        res.json({
+            success: true,
+            data: logs,
+            pagination: {
+                total,
+                page: parseInt(page),
+                pageSize: limit,
+                totalPages: Math.ceil(total / limit)
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
  * 批量 TCP ping 测量延迟
  */
 router.post('/ping-all', async (req, res) => {
     try {
-        const servers = ServerAccount.getAll();
+        const servers = serverStorage.getAll();
         const results = [];
 
         // 并发 ping 所有主机
@@ -202,7 +240,7 @@ router.post('/ping-all', async (req, res) => {
             try {
                 const latency = await metricsService.tcpPing(server.host, server.port || 22);
                 // 更新数据库
-                ServerAccount.updateStatus(server.id, { response_time: latency });
+                serverStorage.updateStatus(server.id, { response_time: latency });
                 results.push({ serverId: server.id, latency, success: true });
             } catch (error) {
                 results.push({ serverId: server.id, latency: null, success: false, error: error.message });
@@ -363,9 +401,6 @@ router.put('/monitor/config', (req, res) => {
 
 // ==================== 历史指标接口 ====================
 
-const { ServerMetricsHistory } = require('./models');
-const metricsService = require('./metrics-service');
-
 /**
  * 获取历史指标记录
  */
@@ -459,8 +494,20 @@ router.put('/metrics/collector/interval', (req, res) => {
         if (!interval || interval < 60000) {
             return res.status(400).json({ success: false, error: '采集间隔至少为 1 分钟' });
         }
+
+        // 1. 同步到内存服务
         metricsService.setCollectInterval(interval);
-        res.json({ success: true, message: '采集间隔已更新' });
+
+        // 2. 持久化到数据库
+        const config = ServerMonitorConfig.get();
+        if (config) {
+            ServerMonitorConfig.update({
+                ...config,
+                metrics_collect_interval: Math.floor(interval / 1000) // 转为秒存储
+            });
+        }
+
+        res.json({ success: true, message: '采集间隔已更新并保存' });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }

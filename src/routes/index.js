@@ -3,15 +3,15 @@
  */
 
 const express = require('express');
+const path = require('path');
+const fs = require('fs');
 const { requireAuth } = require('../middleware/auth');
 
-// 导入各个路由模块
+// 导入核心路由模块
 const authRouter = require('./auth');
 const healthRouter = require('./health');
 const settingsRouter = require('./settings');
 const logService = require('../services/log-service');
-
-// 导入聚合的 v1 路由
 const v1Router = require('./v1');
 const { createLogger } = require('../utils/logger');
 
@@ -21,25 +21,19 @@ const logger = createLogger('Router');
  * 注册所有路由
  */
 function registerRoutes(app) {
-  const fs = require('fs');
-  const path = require('path');
-
-  // 健康检查（不需要认证）
+  // 1. 基础系统路由 (无需/需认证)
   app.use('/health', healthRouter);
-
-  // 系统设置路由（需要认证）
   app.use('/api/settings', requireAuth, settingsRouter);
-
-  // 系统日志路由
   app.use('/api/logs', logService.router);
-
-  // 挂载聚合的 OpenAI 兼容接口
   app.use('/v1', v1Router);
 
-  // 动态加载模块路由
-  const modulesDir = path.join(__dirname, '../../modules');
+  // 2. 独立认证路由 (避免干扰 /api/xxxx)
+  app.use('/api/auth', authRouter);
 
-  // 模块路由映射配置
+  // 3. 动态加载功能模块路由
+  const modulesDir = path.join(__dirname, '../../modules');
+  
+  // 模块路由映射配置 (精准匹配目录名)
   const moduleRouteMap = {
     'zeabur-api': '/api/zeabur',
     'koyeb-api': '/api/koyeb',
@@ -63,26 +57,25 @@ function registerRoutes(app) {
       if (fs.existsSync(routerPath)) {
         try {
           const moduleRouter = require(routerPath);
-          // 强制从映射表获取路径
-          const routePath = moduleRouteMap[moduleName] || `/api/${moduleName}`;
+          const routePath = moduleRouteMap[moduleName] || `/api/${moduleName.replace('-api', '')}`;
           
-          console.log(`[Router] 正在挂载模块: ${moduleName} -> ${routePath}`);
-
+          // 根据模块特性决定是否应用认证中间件
           if (moduleName === 'antigravity-api' || moduleName === 'gemini-cli-api') {
             app.use(routePath, moduleRouter);
           } else {
+            // 模块路由优先挂载
             app.use(routePath, requireAuth, moduleRouter);
           }
           logger.success(`模块已挂载 -> ${moduleName} [${routePath}]`);
         } catch (e) {
-          logger.error(`模块加载失败: ${moduleName}`, e);
+          logger.error(`模块加载失败: ${moduleName}`, e.message);
         }
       }
     });
   }
 
-  // 认证相关路由 (放在最后作为兜底)
-  app.use('/api', authRouter);
+  // 4. 核心认证路由兼容旧版 (放在最后作为兜底，防止拦截模块路由)
+  app.use('/api', authRouter); 
 }
 
 module.exports = {

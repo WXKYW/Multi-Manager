@@ -155,7 +155,7 @@ function getLatencyBadgeHtml(rt) {
     const num = parseInt(rt);
     const bg = num < 100 ? 'rgba(16, 185, 129, 0.1)' : (num < 300 ? 'rgba(245, 158, 11, 0.1)' : 'rgba(239, 68, 68, 0.1)');
     const color = num < 100 ? '#10b981' : (num < 300 ? '#f59e0b' : '#ef4444');
-    
+
     return `
         <div style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border-radius: 10px; font-size: 11px; font-weight: 700; font-family: var(--font-mono); background: ${bg}; color: ${color};">
             ${rt}ms
@@ -1126,6 +1126,27 @@ export const serverMethods = {
     },
 
     /**
+     * 加载监控配置
+     */
+    async loadMonitorConfig() {
+        try {
+            const response = await fetch('/api/server/monitor/config', {
+                headers: this.getAuthHeaders()
+            });
+            const data = await response.json();
+            if (data.success) {
+                this.monitorConfig = data.data;
+                // 同步更新显示用的采集间隔
+                if (data.data.metrics_collect_interval) {
+                    this.metricsCollectInterval = Math.floor(data.data.metrics_collect_interval / 60);
+                }
+            }
+        } catch (error) {
+            console.error('加载监控配置失败:', error);
+        }
+    },
+
+    /**
      * 加载采集器状态
      */
     async loadCollectorStatus() {
@@ -1147,23 +1168,37 @@ export const serverMethods = {
      */
     async updateMetricsCollectInterval() {
         try {
+            // 更新 monitorConfig 中的值
+            this.monitorConfig.metrics_collect_interval = parseInt(this.metricsCollectInterval) * 60;
+            await this.updateMonitorConfig();
+        } catch (error) {
+            console.error('更新采集间隔失败:', error);
+        }
+    },
+
+    /**
+     * 更新监控全局配置
+     */
+    async updateMonitorConfig() {
+        try {
             const response = await fetch('/api/server/monitor/config', {
                 method: 'PUT',
                 headers: {
                     ...this.getAuthHeaders(),
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    probe_interval: parseInt(this.metricsCollectInterval)
-                })
+                body: JSON.stringify(this.monitorConfig)
             });
             const data = await response.json();
             if (data.success) {
-                this.showGlobalToast('采集间隔已更新', 'success');
+                this.showGlobalToast('配置已更新', 'success');
                 this.loadCollectorStatus();
+                // 重新加载配置以确保同步
+                this.loadMonitorConfig();
             }
         } catch (error) {
-            this.showGlobalToast('更新失败', 'error');
+            this.showGlobalToast('配置更新失败', 'error');
+            console.error('更新配置失败:', error);
         }
     }
 };

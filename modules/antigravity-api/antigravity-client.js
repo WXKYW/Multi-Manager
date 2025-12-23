@@ -355,11 +355,15 @@ function convertOpenAIToAntigravityRequest(openaiRequest, token) {
 
     // 转换 messages 到 contents
     const contents = [];
-    let systemText = '';
+    const systemParts = []; // 收集所有 system 消息
 
     for (const msg of messages || []) {
         if (msg.role === 'system') {
-            systemText = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+            // 收集所有 system 消息内容
+            const text = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+            if (text.trim()) {
+                systemParts.push(text);
+            }
         } else if (msg.role === 'user') {
             const parts = [];
             if (typeof msg.content === 'string') {
@@ -491,11 +495,16 @@ function convertOpenAIToAntigravityRequest(openaiRequest, token) {
 
     const sessionId = token?.sessionId || String(-Math.floor(Math.random() * 9e18));
 
+    // 合并所有 system 消息（用双换行符分隔），如果没有则使用默认配置
+    const mergedSystemText = systemParts.length > 0
+        ? systemParts.join('\n\n')
+        : (getConfig().SYSTEM_INSTRUCTION || '');
+
     const request = {
         contents,
         systemInstruction: {
             role: 'user',
-            parts: [{ text: systemText || getConfig().SYSTEM_INSTRUCTION || '' }]
+            parts: [{ text: mergedSystemText }]
         },
         generationConfig,
         sessionId

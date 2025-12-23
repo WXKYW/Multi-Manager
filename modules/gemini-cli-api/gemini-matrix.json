@@ -1,6 +1,6 @@
 {
   "gemini-2.5-pro": {
-    "base": false,
+    "base": true,
     "maxThinking": false,
     "noThinking": false,
     "search": false,
@@ -8,7 +8,7 @@
     "antiTrunc": false
   },
   "gemini-2.5-flash": {
-    "base": false,
+    "base": true,
     "maxThinking": false,
     "noThinking": false,
     "search": false,
@@ -16,7 +16,7 @@
     "antiTrunc": false
   },
   "gemini-3-pro-preview": {
-    "base": false,
+    "base": true,
     "maxThinking": false,
     "noThinking": false,
     "search": false,
@@ -24,7 +24,7 @@
     "antiTrunc": false
   },
   "gemini-3-flash-preview": {
-    "base": false,
+    "base": true,
     "maxThinking": false,
     "noThinking": false,
     "search": false,

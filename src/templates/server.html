@@ -19,7 +19,7 @@
         v-if="sshSessions.length > 0">
         <i class="fas fa-terminal"></i> SSH 终端
         <span class="badge" v-if="sshSessions.length > 0"
-          style="background: var(--server-primary); color: white; padding: 1px 6px; border-radius: 10px; font-size: 10px; margin-left: 6px;">{{
+          style="background: var(--server-primary); color: white; padding: 1px 6px; border-radius: 10px; font-size: 12px; margin-left: 6px;">{{
           sshSessions.length }}</span>
       </button>
 
@@ -113,16 +113,17 @@
 
     <!-- 主机卡片列表 -->
     <div v-for="server in filteredServerList" :key="server.id" class="server-card"
-      :class="{ expanded: isServerExpanded(server.id) }" style="padding: 0; margin-bottom: 12px; border: 1px solid var(--border-color); background: var(--card-bg); transition: transform 0.2s, box-shadow 0.2s;">
-      
+      :class="{ expanded: isServerExpanded(server.id) }"
+      style="padding: 0; margin-bottom: 12px; border: 1px solid var(--border-color); background: var(--card-bg); transition: transform 0.2s, box-shadow 0.2s;">
+
       <!-- Card Header: Fully Responsive -->
-      <div class="server-card-header" @click="toggleServer(server.id)" 
+      <div class="server-card-header" @click="toggleServer(server.id)"
         style="padding: 14px 16px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer;">
-        
+
         <!-- Identity Group (Left) -->
         <div class="id-group" style="display: flex; align-items: center; gap: 15px; flex: 1; min-width: 180px;">
           <!-- Elegant Breathing Status Light -->
-          <div class="status-indicator-modern" :class="server.status || 'unknown'" 
+          <div class="status-indicator-modern" :class="server.status || 'unknown'"
             style="width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; position: relative;">
             <div class="status-glow" :class="{ 'ag-pulse': server.status === 'online' }" :style="{ 
               position: 'absolute', top: '-4px', left: '-4px', right: '-4px', bottom: '-4px', borderRadius: '50%',
@@ -136,10 +137,12 @@
               zIndex: '2'
             }"></div>
           </div>
-          
+
           <div style="display: flex; flex-direction: column; min-width: 0;">
             <div style="display: flex; align-items: baseline; gap: 8px;">
-              <span style="font-size: 15px; font-weight: 700; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ server.name }}</span>
+              <span
+                style="font-size: 15px; font-weight: 700; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{
+                server.name }}</span>
               <!-- Latency Pill Badge -->
               <div v-if="server.response_time" :style="{
                 display: 'inline-flex',
@@ -157,17 +160,22 @@
               </div>
             </div>
             <!-- Tags -->
-            <div v-if="server.tags && server.tags.length > 0" style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px;">
-              <span v-for="tag in server.tags" :key="tag" style="font-size: 8px; padding: 0 4px; border-radius: 3px; background: var(--bg-tertiary); color: var(--text-tertiary); border: 1px solid var(--border-color);">{{ tag }}</span>
+            <div v-if="server.tags && server.tags.length > 0"
+              style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px;">
+              <span v-for="tag in server.tags" :key="tag"
+                style="font-size: 8px; padding: 0 4px; border-radius: 3px; background: var(--bg-tertiary); color: var(--text-tertiary); border: 1px solid var(--border-color);">{{
+                tag }}</span>
             </div>
           </div>
         </div>
 
         <!-- Telemetry Group (Center/Responsive) -->
-        <div class="metrics-row" style="display: flex; align-items: center; gap: 12px; flex: 2; justify-content: flex-end; min-width: 240px;">
+        <div class="metrics-row"
+          style="display: flex; align-items: center; gap: 12px; flex: 2; justify-content: flex-end; min-width: 240px;">
           <!-- CPU Micro-meter -->
           <div style="flex: 1; max-width: 80px;">
-            <div style="display: flex; justify-content: space-between; font-size: 8px; font-weight: 800; color: var(--text-tertiary); margin-bottom: 4px; text-transform: uppercase;">
+            <div
+              style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 800; color: var(--text-tertiary); margin-bottom: 4px; text-transform: uppercase;">
               <span>CPU</span>
               <span v-if="server.info" style="color: #10b981;">{{ parseInt(server.info.cpu.Usage) }}%</span>
             </div>
@@ -179,10 +187,11 @@
               }"></div>
             </div>
           </div>
-          
+
           <!-- MEM Micro-meter -->
           <div style="flex: 1; max-width: 80px;">
-            <div style="display: flex; justify-content: space-between; font-size: 8px; font-weight: 800; color: var(--text-tertiary); margin-bottom: 4px; text-transform: uppercase;">
+            <div
+              style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 800; color: var(--text-tertiary); margin-bottom: 4px; text-transform: uppercase;">
               <span>MEM</span>
               <span v-if="server.info" style="color: #3b82f6;">{{ parseInt(server.info.memory.Usage) }}%</span>
             </div>
@@ -197,9 +206,11 @@
 
           <!-- DISK Micro-meter -->
           <div style="flex: 1; max-width: 80px;">
-            <div style="display: flex; justify-content: space-between; font-size: 8px; font-weight: 800; color: var(--text-tertiary); margin-bottom: 4px; text-transform: uppercase;">
+            <div
+              style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 800; color: var(--text-tertiary); margin-bottom: 4px; text-transform: uppercase;">
               <span>DSK</span>
-              <span v-if="server.info && server.info.disk && server.info.disk.length > 0" style="color: #a855f7;">{{ parseInt(server.info.disk[0].usage) }}%</span>
+              <span v-if="server.info && server.info.disk && server.info.disk.length > 0" style="color: #a855f7;">{{
+                parseInt(server.info.disk[0].usage) }}%</span>
             </div>
             <div style="height: 4px; background: var(--bg-tertiary); border-radius: 2px; overflow: hidden;">
               <div v-if="server.info && server.info.disk && server.info.disk.length > 0" :style="{ 
@@ -213,13 +224,17 @@
 
         <!-- Action Group (Right) -->
         <div class="action-group" @click.stop style="display: flex; align-items: center; gap: 6px;">
-          <button class="btn-icon-refined" @click="refreshServerInfo(server.id)" style="width: 34px; height: 34px; background: var(--bg-tertiary);">
+          <button class="btn-icon-refined" @click="refreshServerInfo(server.id)"
+            style="width: 34px; height: 34px; background: var(--bg-tertiary);">
             <i class="fas" :class="server.loading ? 'fa-spinner fa-spin' : 'fa-sync-alt'" style="font-size: 13px;"></i>
           </button>
-          <button class="btn-icon-refined" @click="openSSHTerminal(server)" style="width: 34px; height: 34px; background: var(--bg-tertiary);">
+          <button class="btn-icon-refined" @click="openSSHTerminal(server)"
+            style="width: 34px; height: 34px; background: var(--bg-tertiary);">
             <i class="fas fa-terminal" style="font-size: 13px;"></i>
           </button>
-          <button class="btn-icon-refined" @click="toggleServer(server.id)" :style="{ transform: isServerExpanded(server.id) ? 'rotate(180deg)' : 'none', background: 'var(--bg-tertiary)' }" style="width: 34px; height: 34px;">
+          <button class="btn-icon-refined" @click="toggleServer(server.id)"
+            :style="{ transform: isServerExpanded(server.id) ? 'rotate(180deg)' : 'none', background: 'var(--bg-tertiary)' }"
+            style="width: 34px; height: 34px;">
             <i class="fas fa-chevron-down" style="font-size: 12px;"></i>
           </button>
         </div>
@@ -227,11 +242,12 @@
 
       <!-- 卡片展开详情区域 -->
       <div class="server-card-body">
-        <div class="server-details" style="border: none; padding: 3px 3px;">
+        <div class="server-details" style="border: none; padding: 10px;">
 
-          <div v-if="server.loading" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 0; gap: 16px;">
+          <div v-if="server.loading"
+            style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 0; gap: 16px;">
             <div class="ag-spinner-elegant ag-spinner-elegant-sm"></div>
-            <p class="loading-text-elegant" style="font-size: 10px;">Retrieving Telemetry</p>
+            <p class="loading-text-elegant" style="font-size: 12px;">Retrieving Telemetry</p>
           </div>
 
           <div v-else-if="server.error" class="error" style="margin: 0px 3px;">
@@ -288,19 +304,33 @@
                 </div>
               </div>
 
-              <!-- 节点概览 -->
-              <div class="server-detail-section">
-                <h4><i class="fas fa-info-circle"></i> 系统摘要</h4>
-                <div v-for="(value, key) in server.info.system" :key="key" class="server-detail-item"
-                  style="padding: 4px 0;">
-                  <span class="server-detail-label">{{ translateInfoKey(key) }}</span>
-                  <span class="server-detail-value">{{ key === 'Uptime' ? formatUptime(value) : value
-                    }}</span>
+              <!-- 监控图表 (替换系统摘要) -->
+              <div class="server-detail-section" style="min-width: 280px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                  <h4 style="margin-bottom: 0;"><i class="fas fa-chart-line"></i> 负载趋势 (24h)</h4>
+                  <div style="display: flex; gap: 8px;">
+                    <span style="font-size: 10px; color: #10b981; display: flex; align-items: center; gap: 4px;">
+                      <span style="width: 6px; height: 6px; border-radius: 50%; background: #10b981;"></span> CPU
+                    </span>
+                    <span style="font-size: 10px; color: #3b82f6; display: flex; align-items: center; gap: 4px;">
+                      <span style="width: 6px; height: 6px; border-radius: 50%; background: #3b82f6;"></span> Mem
+                    </span>
+                  </div>
+                </div>
+                <div
+                  style="height: 140px; position: relative; background: var(--bg-tertiary); border-radius: 12px; padding: 8px; border: 1px solid var(--border-color);">
+                  <canvas :id="'metrics-chart-card-' + server.id"></canvas>
+                  <!-- 无数据状态提示 -->
+                  <div v-if="!server.info || server.loading"
+                    style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-tertiary); gap: 8px; background: var(--bg-tertiary); border-radius: 12px;">
+                    <div class="ag-spinner-elegant ag-spinner-elegant-sm"></div>
+                    <span style="font-size: 10px; opacity: 0.6; letter-spacing: 1px;">LOADING METRICS</span>
+                  </div>
                 </div>
               </div>
 
               <!-- 容器虚拟化 - 可折叠面板 -->
-              <div class="server-detail-section docker-section" style="grid-column: 1 / -1; margin-top: 4px;">
+              <div class="server-detail-section docker-section" style="grid-column: 1 / -1;">
                 <div class="docker-section-header" @click.stop="toggleDockerPanel(server.id)" style="cursor: pointer;">
                   <h4>
                     <i class="fab fa-docker"></i> 容器虚拟化
@@ -396,11 +426,12 @@
   <div v-show="serverCurrentTab === 'history'" class="sub-tab-content quick-fade-in">
     <!-- 图表展示区 -->
     <div class="panel" style="margin-bottom: 16px;" v-if="Object.keys(groupedMetricsHistory).length > 0">
-      <div class="panel-header" style="margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+      <div class="panel-header"
+        style="margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
         <div class="panel-title">
           <i class="fas fa-chart-area" style="margin-right: 8px; color: var(--server-primary);"></i>负载趋势概览
         </div>
-        
+
         <!-- 移动到此处的快捷时间选择 -->
         <div class="metrics-history-toolbar" style="border: none; padding: 0; margin: 0; background: transparent;">
           <div class="time-range-pills">
@@ -415,28 +446,29 @@
             <button class="pill-btn" :class="{ active: metricsHistoryTimeRange === 'all' }"
               @click="setMetricsTimeRange('all')">全部</button>
           </div>
-          
+
           <button class="metrics-toolbar-btn" @click="loadMetricsHistory()" :disabled="metricsHistoryLoading"
             title="刷新数据" style="margin-left: 8px;">
             <i class="fas fa-sync-alt" :class="{ 'fa-spin': metricsHistoryLoading }"></i>
           </button>
         </div>
       </div>
-      <div class="metrics-charts-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 16px;">
-        <div v-for="(records, serverId) in groupedMetricsHistory" :key="'chart-' + serverId" class="metrics-chart-card" 
+      <div class="metrics-charts-grid"
+        style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 8px;">
+        <div v-for="(records, serverId) in groupedMetricsHistory" :key="'chart-' + serverId" class="metrics-chart-card"
           style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 16px; padding: 15px; min-height: 250px;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
             <div style="font-weight: 700; font-size: 13px;">{{ records[0]?.server_name }}</div>
             <div style="display: flex; gap: 8px;">
-              <span style="font-size: 10px; display: flex; align-items: center; gap: 4px; color: #10b981;">
+              <span style="font-size: 12px; display: flex; align-items: center; gap: 4px; color: #10b981;">
                 <span style="width: 8px; height: 8px; border-radius: 2px; background: #10b981;"></span> CPU
               </span>
-              <span style="font-size: 10px; display: flex; align-items: center; gap: 4px; color: #3b82f6;">
+              <span style="font-size: 12px; display: flex; align-items: center; gap: 4px; color: #3b82f6;">
                 <span style="width: 8px; height: 8px; border-radius: 2px; background: #3b82f6;"></span> Mem
               </span>
             </div>
           </div>
-          <div style="height: 180px; position: relative;">
+          <div style="height: 190px; position: relative;">
             <canvas :id="'metrics-chart-' + serverId"></canvas>
           </div>
         </div>
@@ -479,20 +511,38 @@
       </div>
 
       <!-- 采集器状态提示 -->
+      <!-- 采集器状态提示 (美化版) -->
       <div v-if="metricsCollectorStatus" class="collector-status-bar"
-        style="display: flex; align-items: center; gap: 16px; padding: 10px 12px; background: var(--bg-secondary); border-radius: 8px; margin-bottom: 16px; font-size: 12px;">
-        <div style="display: flex; align-items: center; gap: 6px;">
-          <span :class="metricsCollectorStatus.isRunning ? 'status-dot online' : 'status-dot offline'"></span>
-          <span>采集器：{{ metricsCollectorStatus.isRunning ? '运行中' : '已停止' }}</span>
+        style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 16px;">
+
+        <!-- 状态胶囊 -->
+        <div :class="metricsCollectorStatus.isRunning ? 'status-pill-running' : 'status-pill-stopped'"
+          style="display: flex; align-items: center; gap: 8px; padding: 6px 16px; border-radius: 20px; font-size: 12px; font-weight: 600; border: 1px solid;">
+          <span :class="metricsCollectorStatus.isRunning ? 'status-dot online' : 'status-dot offline'"
+            style="box-shadow: none;"></span>
+          <span>{{ metricsCollectorStatus.isRunning ? '采集服务运行中' : '采集服务已停止' }}</span>
         </div>
-        <div style="color: var(--text-tertiary);">
-          <i class="fas fa-clock"></i> 间隔：{{ Math.floor(metricsCollectorStatus.interval / 60000) }} 分钟
-        </div>
-        <div style="color: var(--text-tertiary);">
-          <i class="fas fa-database"></i> 缓存主机数：{{ metricsCollectorStatus.cachedServers }}
-        </div>
-        <div style="color: var(--text-tertiary);">
-          <i class="fas fa-stream"></i> 活跃流：{{ metricsCollectorStatus.activeStreams }}
+
+        <!-- 信息胶囊组 -->
+        <div style="display: flex; gap: 8px;">
+          <div
+            style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 8px; font-size: 11px; color: var(--text-secondary);">
+            <i class="fas fa-clock" style="color: var(--server-primary);"></i>
+            <span>采集间隔 <span style="font-weight: 700; color: var(--text-primary);">{{
+                Math.floor(metricsCollectorStatus.interval / 60000) }}m</span></span>
+          </div>
+          <div
+            style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 8px; font-size: 11px; color: var(--text-secondary);">
+            <i class="fas fa-database" style="color: #a855f7;"></i>
+            <span>已缓存 <span style="font-weight: 700; color: var(--text-primary);">{{
+                metricsCollectorStatus.cachedServers }}</span></span>
+          </div>
+          <div
+            style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 8px; font-size: 11px; color: var(--text-secondary);">
+            <i class="fas fa-stream" style="color: #3b82f6;"></i>
+            <span>活跃流 <span style="font-weight: 700; color: var(--text-primary);">{{
+                metricsCollectorStatus.activeStreams }}</span></span>
+          </div>
         </div>
       </div>
 
@@ -569,28 +619,7 @@
         </div>
 
         <!-- 分页 -->
-        <div v-if="metricsHistoryPagination.totalPages > 1" class="pagination"
-          style="margin-top: 16px; display: flex; justify-content: center; gap: 8px; align-items: center;">
-          <button class="metrics-toolbar-btn" @click="loadMetricsHistory(1)"
-            :disabled="metricsHistoryPagination.page === 1">
-            <i class="fas fa-angle-double-left"></i>
-          </button>
-          <button class="metrics-toolbar-btn" @click="loadMetricsHistory(metricsHistoryPagination.page - 1)"
-            :disabled="metricsHistoryPagination.page === 1">
-            <i class="fas fa-angle-left"></i>
-          </button>
-          <span style="font-size: 12px; color: var(--text-secondary); padding: 0 12px;">
-            第 {{ metricsHistoryPagination.page }} / {{ metricsHistoryPagination.totalPages }} 页
-          </span>
-          <button class="metrics-toolbar-btn" @click="loadMetricsHistory(metricsHistoryPagination.page + 1)"
-            :disabled="metricsHistoryPagination.page >= metricsHistoryPagination.totalPages">
-            <i class="fas fa-angle-right"></i>
-          </button>
-          <button class="metrics-toolbar-btn" @click="loadMetricsHistory(metricsHistoryPagination.totalPages)"
-            :disabled="metricsHistoryPagination.page >= metricsHistoryPagination.totalPages">
-            <i class="fas fa-angle-double-right"></i>
-          </button>
-        </div>
+
       </div>
     </div>
   </div>
@@ -612,19 +641,19 @@
               style="display: flex; background: var(--bg-secondary); padding: 2px; border-radius: 8px; border: 1px solid var(--border-color); margin-left: 8px;">
               <button class="chip-btn" :class="{ active: serverIpDisplayMode === 'normal' }"
                 @click="serverIpDisplayMode = 'normal'"
-                style="padding: 2px 8px; font-size: 10px; border-radius: 6px; border: none; cursor: pointer; transition: all 0.2s;"
+                style="padding: 2px 8px; font-size: 12px; border-radius: 6px; border: none; cursor: pointer; transition: all 0.2s;"
                 :style="{ background: serverIpDisplayMode === 'normal' ? 'var(--server-primary)' : 'transparent', color: serverIpDisplayMode === 'normal' ? 'white' : 'var(--text-tertiary)' }">
                 明文
               </button>
               <button class="chip-btn" :class="{ active: serverIpDisplayMode === 'masked' }"
                 @click="serverIpDisplayMode = 'masked'"
-                style="padding: 2px 8px; font-size: 10px; border-radius: 6px; border: none; cursor: pointer; transition: all 0.2s;"
+                style="padding: 2px 8px; font-size: 12px; border-radius: 6px; border: none; cursor: pointer; transition: all 0.2s;"
                 :style="{ background: serverIpDisplayMode === 'masked' ? 'var(--server-primary)' : 'transparent', color: serverIpDisplayMode === 'masked' ? 'white' : 'var(--text-tertiary)' }">
                 打码
               </button>
               <button class="chip-btn" :class="{ active: serverIpDisplayMode === 'hidden' }"
                 @click="serverIpDisplayMode = 'hidden'"
-                style="padding: 2px 8px; font-size: 10px; border-radius: 6px; border: none; cursor: pointer; transition: all 0.2s;"
+                style="padding: 2px 8px; font-size: 12px; border-radius: 6px; border: none; cursor: pointer; transition: all 0.2s;"
                 :style="{ background: serverIpDisplayMode === 'hidden' ? 'var(--server-primary)' : 'transparent', color: serverIpDisplayMode === 'hidden' ? 'white' : 'var(--text-tertiary)' }">
                 隐藏
               </button>
@@ -648,7 +677,8 @@
         </div>
       </div>
 
-      <div v-if="serverLoading" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 0; gap: 16px;">
+      <div v-if="serverLoading"
+        style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 0; gap: 16px;">
         <div class="ag-spinner-elegant"></div>
         <div class="loading-text-elegant">Loading System Config</div>
       </div>
@@ -769,23 +799,30 @@ Web服务器,192.168.1.100,22,root,password123
 
     <!-- 快捷配置 -->
     <div class="panel" style="margin-top: 16px; background: transparent; border: none; box-shadow: none; padding: 0;">
-      <div class="secondary-config-row" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 16px;">
-        
+      <div class="secondary-config-row"
+        style="display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 16px;">
+
         <!-- 主机凭据管理 -->
-        <div class="config-card" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 16px; padding: 20px; display: flex; flex-direction: column; height: 100%;">
-          <div class="config-card-title" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; padding-bottom: 12px; border-bottom: 1px dashed var(--border-color); font-weight: 700; color: var(--text-primary); font-size: 14px;">
+        <div class="config-card"
+          style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 16px; padding: 20px; display: flex; flex-direction: column; height: 100%;">
+          <div class="config-card-title"
+            style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; padding-bottom: 12px; border-bottom: 1px dashed var(--border-color); font-weight: 700; color: var(--text-primary); font-size: 14px;">
             <div style="display: flex; align-items: center; gap: 10px;">
-              <div style="width: 32px; height: 32px; background: rgba(0, 212, 170, 0.1); border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+              <div
+                style="width: 32px; height: 32px; background: rgba(0, 212, 170, 0.1); border-radius: 8px; display: flex; align-items: center; justify-content: center;">
                 <i class="fas fa-shield-alt" style="color: var(--server-primary); font-size: 14px;"></i>
               </div>
               <span>预设访问凭据</span>
             </div>
-            <button class="btn btn-primary btn-sm" style="padding: 4px 12px; border-radius: 8px; font-size: 11px; background: var(--server-primary); border-color: var(--server-primary);" @click="showAddCredentialModal = true">
+            <button class="btn btn-primary btn-sm"
+              style="padding: 4px 12px; border-radius: 8px; font-size: 11px; background: var(--server-primary); border-color: var(--server-primary);"
+              @click="showAddCredentialModal = true">
               <i class="fas fa-plus" style="margin-right: 4px; color: white;"></i>添加凭据
             </button>
           </div>
-          
-          <div v-if="serverCredentials.length > 0" class="credential-list" style="display: flex; flex-direction: column; gap: 8px; flex: 1; max-height: 200px; overflow-y: auto; padding-right: 4px;">
+
+          <div v-if="serverCredentials.length > 0" class="credential-list"
+            style="display: flex; flex-direction: column; gap: 8px; flex: 1; max-height: 200px; overflow-y: auto; padding-right: 4px;">
             <div v-for="cred in serverCredentials" :key="cred.id" class="credential-item"
               style="display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 12px; transition: all 0.2s;"
               :style="{ borderColor: cred.is_default ? 'var(--server-primary)' : 'var(--border-color)', background: cred.is_default ? 'rgba(0, 212, 170, 0.03)' : 'var(--bg-tertiary)' }">
@@ -800,64 +837,90 @@ Web服务器,192.168.1.100,22,root,password123
                 </div>
               </div>
               <div class="cred-actions" style="display: flex; gap: 6px;">
-                <button v-if="!cred.is_default" class="btn btn-icon-refined" @click="setDefaultCredential(cred.id)" title="设为默认" style="width: 28px; height: 28px; font-size: 10px;">
+                <button v-if="!cred.is_default" class="btn btn-icon-refined" @click="setDefaultCredential(cred.id)"
+                  title="设为默认" style="width: 28px; height: 28px; font-size: 12px;">
                   <i class="far fa-star"></i>
                 </button>
-                <button class="btn btn-icon-refined" @click="deleteCredential(cred.id)" title="删除" style="width: 28px; height: 28px; font-size: 10px; color: var(--danger-color);">
+                <button class="btn btn-icon-refined" @click="deleteCredential(cred.id)" title="删除"
+                  style="width: 28px; height: 28px; font-size: 12px; color: var(--danger-color);">
                   <i class="fas fa-trash"></i>
                 </button>
               </div>
             </div>
           </div>
-          <div v-else class="empty-state-mini" style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 30px; opacity: 0.5;">
+          <div v-else class="empty-state-mini"
+            style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 30px; opacity: 0.5;">
             <i class="fas fa-key" style="font-size: 24px; margin-bottom: 10px; color: var(--server-primary);"></i>
             <div style="font-size: 12px;">暂无预设凭据</div>
           </div>
         </div>
 
         <!-- 历史记录采集 -->
-        <div class="config-card" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 16px; padding: 20px; display: flex; flex-direction: column; height: 100%;">
-          <div class="config-card-title" style="display: flex; align-items: center; margin-bottom: 15px; padding-bottom: 12px; border-bottom: 1px dashed var(--border-color); font-weight: 700; color: var(--text-primary); font-size: 14px;">
+        <div class="config-card"
+          style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 16px; padding: 20px; display: flex; flex-direction: column; height: 100%;">
+          <div class="config-card-title"
+            style="display: flex; align-items: center; margin-bottom: 15px; padding-bottom: 12px; border-bottom: 1px dashed var(--border-color); font-weight: 700; color: var(--text-primary); font-size: 14px;">
             <div style="display: flex; align-items: center; gap: 10px;">
-              <div style="width: 32px; height: 32px; background: rgba(0, 212, 170, 0.1); border-radius: 8px; display: flex; align-items: center; justify-content: center;">
+              <div
+                style="width: 32px; height: 32px; background: rgba(0, 212, 170, 0.1); border-radius: 8px; display: flex; align-items: center; justify-content: center;">
                 <i class="fas fa-history" style="color: var(--server-primary); font-size: 14px;"></i>
               </div>
               <span>历史指标采集</span>
             </div>
           </div>
-          
+
           <div style="flex: 1;">
-            <div class="form-group" style="margin-bottom: 15px;">
-              <label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; display: block; font-weight: 600;">
+            <div class="form-group">
+              <label
+                style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; display: block; font-weight: 600;">
                 自动采集间隔
               </label>
-              
+
               <!-- 药片式间隔选择器 -->
               <div class="interval-pills" style="display: flex; flex-wrap: wrap; gap: 8px;">
                 <div v-for="interval in [1, 2, 5, 10, 15, 30, 60]" :key="interval"
                   @click="metricsCollectInterval = interval; updateMetricsCollectInterval()"
                   style="padding: 6px 12px; border-radius: 10px; font-size: 11px; cursor: pointer; border: 1px solid var(--border-color); transition: all 0.2s; font-weight: 600;"
-                                    :style="{ 
+                  :style="{ 
                                       background: metricsCollectInterval === interval ? 'var(--server-primary)' : 'var(--bg-tertiary)',
                                       color: metricsCollectInterval === interval ? 'white' : 'var(--text-secondary)',
                                       borderColor: metricsCollectInterval === interval ? 'var(--server-primary)' : 'var(--border-color)',
                                       boxShadow: metricsCollectInterval === interval ? '0 4px 10px rgba(0, 212, 170, 0.2)' : 'none'
-                                    }">                  {{ interval >= 60 ? (interval/60 + '小时') : (interval + '分钟') }}
+                                    }"> {{ interval >= 60 ? (interval/60 + '小时') : (interval + '分钟') }}
                 </div>
               </div>
-              
-              <div style="margin-top: 15px; padding: 12px; background: var(--bg-tertiary); border-radius: 12px; border: 1px solid var(--border-color);">
+
+              <div
+                style="margin-top: 15px; padding: 12px; background: var(--bg-tertiary); border-radius: 12px; border: 1px solid var(--border-color);">
+                <label
+                  style="font-size: 11px; color: var(--text-tertiary); margin-bottom: 8px; display: block; font-weight: 600;">
+                  最大保留天数 ({{ monitorConfig.metrics_retention_days || 30 }} 天)
+                </label>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <input type="range" v-model="monitorConfig.metrics_retention_days" min="1" max="180" step="1"
+                    @change="updateMonitorConfig" style="flex: 1; accent-color: var(--server-primary);">
+                  <span style="font-family: var(--font-mono); font-size: 11px; min-width: 30px; text-align: right;">{{
+                    monitorConfig.metrics_retention_days || 30 }}d</span>
+                </div>
+              </div>
+
+              <div
+                style="margin-top: 15px; padding: 12px; background: var(--bg-tertiary); border-radius: 12px; border: 1px solid var(--border-color);">
                 <div v-if="metricsCollectorStatus" style="display: flex; flex-direction: column; gap: 8px;">
                   <div style="display: flex; align-items: center; gap: 8px; font-size: 12px;">
-                    <span :class="metricsCollectorStatus.isRunning ? 'status-dot online' : 'status-dot offline'" style="width: 8px; height: 8px;"></span>
-                    <span style="font-weight: 600; color: var(--text-primary);">{{ metricsCollectorStatus.isRunning ? '采集服务运行中' : '采集服务已停止' }}</span>
+                    <span :class="metricsCollectorStatus.isRunning ? 'status-dot online' : 'status-dot offline'"
+                      style="width: 8px; height: 8px;"></span>
+                    <span style="font-weight: 600; color: var(--text-primary);">{{ metricsCollectorStatus.isRunning ?
+                      '采集服务运行中' : '采集服务已停止' }}</span>
                   </div>
                   <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px;">
-                    <div style="font-size: 11px; color: var(--text-tertiary); display: flex; align-items: center; gap: 6px;">
+                    <div
+                      style="font-size: 11px; color: var(--text-tertiary); display: flex; align-items: center; gap: 6px;">
                       <i class="fas fa-database" style="width: 12px;"></i>
                       <span>缓存 {{ metricsCollectorStatus.cachedServers }} 台主机</span>
                     </div>
-                    <div style="font-size: 11px; color: var(--text-tertiary); display: flex; align-items: center; gap: 6px;">
+                    <div
+                      style="font-size: 11px; color: var(--text-tertiary); display: flex; align-items: center; gap: 6px;">
                       <i class="fas fa-stream" style="width: 12px;"></i>
                       <span>活跃流 {{ metricsCollectorStatus.activeStreams }} 条</span>
                     </div>

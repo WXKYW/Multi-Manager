@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS server_monitor_config (
     max_connections INTEGER DEFAULT 10, -- 最大连接数
     session_timeout INTEGER DEFAULT 1800, -- 会话超时（秒，默认30分钟）
     auto_start INTEGER DEFAULT 1, -- 是否自动启动监控
+    metrics_collect_interval INTEGER DEFAULT 300, -- 历史指标采集间隔（秒，默认5分钟）
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

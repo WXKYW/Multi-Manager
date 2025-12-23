@@ -539,10 +539,10 @@
         <div class="form-row">
           <div class="form-group flex-1">
             <label>常用凭据</label>
-            <select class="form-input" @change="applyCredential($event)">
+            <select class="form-input" v-model="selectedCredentialId" @change="applyCredential($event)">
               <option value="">-- 选择预设凭据 --</option>
               <option v-for="cred in serverCredentials" :key="cred.id" :value="cred.id">
-                {{ cred.name }} ({{ cred.username }})
+                {{ cred.name }} ({{ cred.username }}) {{ cred.is_default ? '★' : '' }}
               </option>
             </select>
           </div>

@@ -81,10 +81,10 @@ function loadUserSettings() {
  */
 function saveUserSettings(settings) {
   try {
-    // 转换字段名
+    // 转换字段名，并确保即便字段不存在也能保留默认结构
     const dbSettings = {
-      custom_css: settings.customCss || settings.custom_css || '',
-      zeabur_refresh_interval: settings.zeaburRefreshInterval || settings.zeabur_refresh_interval || 30000,
+      custom_css: settings.customCss !== undefined ? settings.customCss : (settings.custom_css || ''),
+      zeabur_refresh_interval: settings.zeaburRefreshInterval !== undefined ? settings.zeaburRefreshInterval : (settings.zeabur_refresh_interval || 30000),
       module_visibility: settings.moduleVisibility || settings.module_visibility,
       channel_enabled: settings.channelEnabled || settings.channel_enabled,
       channel_model_prefix: settings.channelModelPrefix || settings.channel_model_prefix,
@@ -94,14 +94,7 @@ function saveUserSettings(settings) {
       main_tabs_layout: settings.navLayout || settings.mainTabsLayout || settings.main_tabs_layout || 'top'
     };
 
-    // 确保 channel_model_prefix 是字符串，如果不是则进行 JSON.stringify
-    if (dbSettings.channel_model_prefix && typeof dbSettings.channel_model_prefix !== 'string') {
-      const originalPrefix = dbSettings.channel_model_prefix;
-      dbSettings.channel_model_prefix = JSON.stringify(dbSettings.channel_model_prefix);
-
-    }
-
-
+    // 直接交给 Model 层处理，Model 层会自动处理 JSON 序列化和数据库列更新
     UserSettings.updateSettings(dbSettings);
     return { success: true };
   } catch (error) {

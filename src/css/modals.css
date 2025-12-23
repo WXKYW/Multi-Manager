@@ -1,23 +1,25 @@
 /* Modal & Form Styles */
 
 .modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: var(--modal-overlay);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000000; /* 绝对置顶，压制所有终端和菜单 */
+    padding: 20px;
 }
 
 .modal-overlay.logs-fullscreen-overlay {
   align-items: stretch;
   justify-content: stretch;
   padding: 0;
-  z-index: 1000;
+  z-index: 1000000;
   position: fixed;
   top: 0;
   left: 0;
@@ -406,7 +408,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 2001;
+  z-index: 1000001;
   animation: fadeIn 0.2s;
 }
 

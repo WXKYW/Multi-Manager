@@ -73,7 +73,8 @@ export const store = reactive({
     monitorConfig: {
         interval: 60,
         timeout: 10,
-        logRetentionDays: 7
+        logRetentionDays: 7,
+        metrics_retention_days: 30
     },
     serverCredentials: [],
     showSSHQuickMenu: false, // SSH 快速连接下拉菜单
@@ -90,6 +91,7 @@ export const store = reactive({
     zeaburCurrentTab: 'monitor',
     loading: false, // Zeabur loading
     zeaburRefreshInterval: 30000,
+    zeaburRefreshIntervalSec: 30, // 秒（用于表单绑定）
     refreshCountdown: 30,
     refreshProgress: 100,
     dataRefreshPaused: false,
@@ -102,6 +104,7 @@ export const store = reactive({
     koyebRefreshing: false,
     koyebLastUpdate: '',
     koyebRefreshInterval: 30000,
+    koyebRefreshIntervalSec: 30, // 秒（用于表单绑定）
     koyebRefreshCountdown: 30,
     koyebRefreshProgress: 100,
     koyebDataRefreshPaused: false,
@@ -122,6 +125,7 @@ export const store = reactive({
     flyRefreshing: false,
     flyLastUpdate: '',
     flyRefreshInterval: 30000,
+    flyRefreshIntervalSec: 30, // 秒（用于表单绑定）
     flyRefreshCountdown: 30,
     flyRefreshProgress: 100,
     flyDataRefreshPaused: false,

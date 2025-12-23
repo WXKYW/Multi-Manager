@@ -601,39 +601,8 @@ const app = createApp({
   },
 
   watch: {
-    mainActiveTab(newVal, oldVal) {
-      // 1. [离开保护] 如果离开主机管理模块，强制将 DOM 节点搬回仓库，防止被销毁
-      if (oldVal === 'server') {
-        this.saveTerminalsToWarehouse();
-      }
 
-      // 2. [切回恢复] 当重新进入时，重新挂载
-      if (newVal === 'server') {
-        this.$nextTick(() => {
-          this.syncTerminalDOM();
-          this.fitAllVisibleSessions();
-          setTimeout(() => {
-            this.syncTerminalDOM();
-            this.fitAllVisibleSessions();
-          }, 300);
-        });
 
-        // 如果在主机列表页，开启实时指标流
-        if (this.serverCurrentTab === 'list') {
-          this.connectMetricsStream();
-        }
-      } else {
-        // 离开主机管理模块，关闭实时指标流
-        this.closeMetricsStream();
-      }
-    },
-    serverCurrentTab(newVal) {
-      if (newVal === 'list' && this.mainActiveTab === 'server') {
-        this.connectMetricsStream();
-      } else {
-        this.closeMetricsStream();
-      }
-    },
     // 监听全局模态框状态，控制背景滚动
     isAnyModalOpen(newVal) {
       if (newVal) {
@@ -643,16 +612,9 @@ const app = createApp({
       }
     },
 
-    opacity(newVal) {
-      localStorage.setItem('card_opacity', newVal);
-      this.updateOpacity();
-    },
 
-    zeaburRefreshInterval(newVal) {
-      if (this.mainActiveTab === 'paas' && this.paasCurrentPlatform === 'zeabur' && !this.dataRefreshPaused) {
-        this.startAutoRefresh();
-      }
-    },
+
+
 
     'monitorConfig.interval'(newVal) {
       console.log('主机刷新间隔变更为:', newVal, '秒，重启轮询');
@@ -682,20 +644,28 @@ const app = createApp({
 
     serverCurrentTab: {
       handler(newVal) {
+        // 1. 指标流连接管理
+        if (newVal === 'list' && this.mainActiveTab === 'server') {
+          this.connectMetricsStream();
+        } else {
+          this.closeMetricsStream();
+        }
+
+        // 2. 标签页特定数据加载
         if (newVal === 'management') {
           this.loadMonitorConfig();
           this.loadServerList();
           this.loadMonitorLogs();
+          this.loadCredentials();
         } else if (newVal === 'list') {
-          // 切换回列表时重新加载
           this.loadServerList();
         } else if (newVal === 'terminal') {
-          // 切换到SSH终端视图时，恢复 DOM 挂载并调整大小
+          // 切换到 SSH 终端视图时，恢复 DOM 挂载并调整大小
           this.$nextTick(() => {
             this.syncTerminalDOM();
-            const session = this.getSessionById(this.activeSSHSessionId);
+            const session = this.sshSessions.find(s => s.id === this.activeSSHSessionId);
             if (session) {
-              // 延迟确保 DOM 渲染完成
+              // 延迟一次确保容器尺寸稳定
               setTimeout(() => {
                 this.safeTerminalFit(session);
                 if (session.terminal) session.terminal.focus();
@@ -734,11 +704,35 @@ const app = createApp({
     },
 
     mainActiveTab: {
-      handler(newVal) {
-        // 更新浏览器标题栏颜色
+      handler(newVal, oldVal) {
+        // 1. 终端保护与恢复逻辑
+        // [离开保护] 如果离开主机管理模块，强制将 DOM 节点搬回仓库，防止被销毁
+        if (oldVal === 'server') {
+          this.saveTerminalsToWarehouse();
+          this.closeMetricsStream();
+        }
+
+        // [切回恢复] 当重新进入时，重新挂载
+        if (newVal === 'server') {
+          this.$nextTick(() => {
+            this.syncTerminalDOM();
+            this.fitAllVisibleSessions();
+            setTimeout(() => {
+              this.syncTerminalDOM();
+              this.fitAllVisibleSessions();
+            }, 300);
+          });
+
+          // 如果在主机列表页，开启实时指标流
+          if (this.serverCurrentTab === 'list') {
+            this.connectMetricsStream();
+          }
+        }
+
+        // 2. 浏览器与 UI 适配
         this.updateBrowserThemeColor();
 
-        // 通用的数据加载逻辑（需已认证）
+        // 3. 通用的数据加载逻辑（需已认证）
         if (this.isAuthenticated) {
           this.$nextTick(() => {
             switch (newVal) {
@@ -751,14 +745,12 @@ const app = createApp({
                     this.startAutoRefresh();
                   }
                 } else if (this.paasCurrentPlatform === 'koyeb') {
-                  // 优先加载缓存
                   if (this.koyebAccounts.length === 0) {
                     this.loadFromKoyebCache();
                   }
-                  // 启动刷新
                   if (!this.koyebDataRefreshPaused) {
                     this.startKoyebAutoRefresh();
-                    this.loadKoyebData(); // 立即触发一次
+                    this.loadKoyebData();
                   }
                 } else if (this.paasCurrentPlatform === 'fly') {
                   if (this.flyAccounts.length === 0) {
@@ -769,9 +761,9 @@ const app = createApp({
                     this.loadFlyData();
                   }
                 }
-                break; case 'dns':
+                break;
+              case 'dns':
                 if (this.dnsAccounts.length === 0) {
-                  // 优先加载缓存实现即时显示
                   this.loadFromDnsAccountsCache();
                   this.loadDnsAccounts(true);
                   this.loadDnsTemplates();
@@ -790,7 +782,6 @@ const app = createApp({
                 break;
               case 'openai':
                 if (this.openaiEndpoints.length === 0) {
-                  // 优先加载缓存实现即时显示
                   this.loadFromOpenaiCache();
                   this.loadOpenaiEndpoints(true);
                 }
@@ -798,6 +789,11 @@ const app = createApp({
               case 'server':
                 if (this.serverList.length === 0) {
                   this.loadServerList();
+                }
+                // 如果当前选中的是管理子标签，确保加载配置和相关数据
+                if (this.serverCurrentTab === 'management') {
+                  this.loadMonitorConfig();
+                  this.loadMonitorLogs();
                 }
                 break;
               case 'self-h':
@@ -815,17 +811,14 @@ const app = createApp({
           });
         }
 
-        // Antigravity 模块额度轮询管理
-        if (newVal === 'antigravity' && this.antigravityCurrentTab === 'quotas') {
-          // logic already handled above or needs to be specific?
-          // The polling start logic is distinct from initial load.
-        } else {
+        // 4. 轮询管理
+        if (newVal !== 'antigravity' || this.antigravityCurrentTab !== 'quotas') {
           if (this.stopAntigravityQuotaPolling) {
             this.stopAntigravityQuotaPolling();
           }
         }
       },
-      immediate: true // 初始化时也触发
+      immediate: true
     },
 
     // 认证成功后加载当前标签页数据
@@ -1047,22 +1040,7 @@ const app = createApp({
       }
     },
 
-    serverCurrentTab(newVal) {
-      if (newVal === 'management') {
-        this.loadMonitorConfig();
-        this.loadCredentials();
-      }
-      // 切换到终端标签时，重新 fit 当前激活的终端
-      if (newVal === 'terminal') {
-        this.$nextTick(() => {
-          const session = this.sshSessions.find(s => s.id === this.activeSSHSessionId);
-          if (session) {
-            setTimeout(() => this.safeTerminalFit(session), 100);
-            setTimeout(() => this.safeTerminalFit(session), 300);
-          }
-        });
-      }
-    }
+
   },
 
   beforeUnmount() {
