@@ -21,10 +21,10 @@ import '../css/openai.css';
 import '../css/self-h.css';
 import '../css/login.css';
 import '../css/sidebar-nav.css';
-import '../css/zeabur.css'; // Zeabur 专属样式
-import '../css/koyeb.css'; // Koyeb 专属样式
-import '../css/fly.css'; // Fly.io 专属样式
-import '../css/r2.css'; // R2 存储专属样式
+import '../css/zeabur.css'; // Zeabur 样式
+import '../css/koyeb.css'; // Koyeb 样式
+import '../css/fly.css'; // Fly.io 样式
+import '../css/r2.css'; // R2 存储样式
 import '../css/chat.css'; // 聊天界面样式
 import '../css/template.css'; // 模块模板通用样式
 import '../css/refined-ui.css'; // 精选组件样式

@@ -272,6 +272,7 @@
 }
 
 .server-card.expanded>.server-card-body {
+  padding: 0px 0px 10px 0px;
   grid-template-rows: 1fr;
   opacity: 1;
 }

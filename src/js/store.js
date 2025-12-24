@@ -9,6 +9,77 @@ import { reactive } from 'vue';
 // 纯 Vue 3 (ESM) 不需要 window.Vue 检测，直接使用导入的 reactive
 // const reactive = (obj) => { ... } - REMOVED
 
+/**
+ * 模块配置 - 统一管理所有模块的元数据
+ * @type {Object<string, {name: string, shortName: string, icon: string, description: string}>}
+ */
+export const MODULE_CONFIG = {
+    'openai': {
+        name: 'OpenAI',
+        shortName: 'OpenAPI',
+        icon: 'fa-robot',
+        description: 'OpenAI 兼容 API 管理与聊天'
+    },
+    'antigravity': {
+        name: 'Antigravity',
+        shortName: 'AG',
+        icon: 'fa-rocket',
+        description: 'Antigravity API 代理服务'
+    },
+    'gemini-cli': {
+        name: 'GCLI',
+        shortName: 'GCLI',
+        icon: 'fa-terminal',
+        description: 'Gemini CLI API 代理服务'
+    },
+    'paas': {
+        name: 'PaaS',
+        shortName: 'PaaS',
+        icon: 'fa-cloud',
+        description: 'Zeabur / Koyeb / Fly.io 平台监控'
+    },
+    'dns': {
+        name: 'DNS',
+        shortName: 'CF DNS',
+        icon: 'fa-globe',
+        description: 'Cloudflare DNS / Workers / Pages 管理'
+    },
+    'self-h': {
+        name: 'SelfH',
+        shortName: 'Self-H',
+        icon: 'fa-server',
+        description: 'OpenList 等自建服务管理'
+    },
+    'server': {
+        name: 'Hosts',
+        shortName: 'Hosts',
+        icon: 'fa-hdd',
+        description: 'SSH 终端与服务器监控'
+    }
+};
+
+/**
+ * 获取模块名称
+ * @param {string} moduleId - 模块 ID
+ * @param {boolean} short - 是否返回简短名称
+ * @returns {string}
+ */
+export function getModuleName(moduleId, short = false) {
+    const config = MODULE_CONFIG[moduleId];
+    if (!config) return moduleId;
+    return short ? config.shortName : config.name;
+}
+
+/**
+ * 获取模块图标
+ * @param {string} moduleId - 模块 ID
+ * @returns {string} FontAwesome 图标类名
+ */
+export function getModuleIcon(moduleId) {
+    const config = MODULE_CONFIG[moduleId];
+    return config ? config.icon : 'fa-cube';
+}
+
 
 export const store = reactive({
     // 认证与基础状态
@@ -71,6 +142,14 @@ export const store = reactive({
     // 临时标签页状态 (支持多个)
     openListTempTabs: [], // 数组项: { id, name, path, files: [], loading: false, pathParts: [] }
     openListActiveTempTabId: null,
+    // 右键菜单状态
+    openListContextMenu: {
+        visible: false,
+        x: 0,
+        y: 0,
+        file: null,
+        baseDir: '/'
+    },
 
     // 全局数据刷新控制
     serverList: [],

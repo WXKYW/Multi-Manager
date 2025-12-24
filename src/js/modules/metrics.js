@@ -342,16 +342,69 @@ export const metricsMethods = {
 
     // ==================== 图表渲染 ====================
 
-    renderMetricsCharts(retryCount = 0) {
-        // CDN 模式下 Chart.js 可能还未加载，等待并重试
+    /**
+     * 动态加载 Chart.js 的 CDN 回退机制
+     * 依次尝试多个 CDN 源，直到成功加载
+     */
+    async loadChartJsFallback() {
+        // 如果已加载则跳过
+        if (window.Chart) return true;
+
+        const CDN_SOURCES = [
+            'https://registry.npmmirror.com/chart.js/4.4.7/files/dist/chart.umd.js', // npmmirror
+            'https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.js',         // jsDelivr
+            'https://unpkg.com/chart.js@4.4.7/dist/chart.umd.js',                    // unpkg
+            'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.7/chart.umd.js'     // cdnjs
+        ];
+
+        for (let i = 0; i < CDN_SOURCES.length; i++) {
+            const src = CDN_SOURCES[i];
+            console.log(`[Charts] 尝试加载 Chart.js (${i + 1}/${CDN_SOURCES.length}): ${src.split('/')[2]}`);
+
+            try {
+                await new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.src = src;
+                    script.async = true;
+                    script.onload = () => {
+                        if (window.Chart) {
+                            console.log(`[Charts] ✅ Chart.js 加载成功 (来源: ${src.split('/')[2]})`);
+                            resolve();
+                        } else {
+                            reject(new Error('Script loaded but Chart not available'));
+                        }
+                    };
+                    script.onerror = () => reject(new Error(`Failed to load: ${src}`));
+                    // 超时保护 (5秒)
+                    setTimeout(() => reject(new Error('Timeout')), 5000);
+                    document.head.appendChild(script);
+                });
+                return true; // 成功加载
+            } catch (err) {
+                console.warn(`[Charts] ❌ CDN 源不可用: ${src.split('/')[2]} - ${err.message}`);
+            }
+        }
+
+        console.error('[Charts] 所有 CDN 源均不可用，图表功能已禁用');
+        return false;
+    },
+
+    async renderMetricsCharts(retryCount = 0) {
+        // CDN 模式下 Chart.js 可能还未加载，使用回退机制动态加载
         if (!window.Chart) {
-            if (retryCount < 3) {
+            if (retryCount < 2) {
                 console.log(`[Charts] Chart.js 未就绪，${(retryCount + 1) * 300}ms 后重试...`);
                 setTimeout(() => this.renderMetricsCharts(retryCount + 1), 300);
-            } else {
-                console.warn('[Charts] Chart.js 加载超时，跳过图表渲染');
+                return;
             }
-            return;
+
+            // 重试用尽，启动多源回退加载
+            console.log('[Charts] 正在启动 CDN 多源回退加载...');
+            const loaded = await this.loadChartJsFallback();
+            if (!loaded) {
+                console.warn('[Charts] Chart.js 加载失败，跳过图表渲染');
+                return;
+            }
         }
 
         if (!this.groupedMetricsHistory) return;
@@ -370,8 +423,13 @@ export const metricsMethods = {
      * @param {Array} records 历史记录数据
      * @param {string} canvasId Canvas 元素 ID
      */
-    renderSingleChart(serverId, records, canvasId) {
-        if (!window.Chart || !records || records.length === 0) return;
+    async renderSingleChart(serverId, records, canvasId) {
+        // 确保 Chart.js 已加载，否则触发回退加载
+        if (!window.Chart) {
+            const loaded = await this.loadChartJsFallback();
+            if (!loaded) return;
+        }
+        if (!records || records.length === 0) return;
 
         const canvas = document.getElementById(canvasId);
         if (!canvas) return;

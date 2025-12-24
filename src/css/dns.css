@@ -486,12 +486,12 @@
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   white-space: nowrap;
-  
+
   /* 默认状态 */
   background: var(--card-bg);
   border: 1px solid var(--border-color);
   color: var(--text-secondary);
-  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .ssl-mode-btn:hover:not(.active):not(:disabled) {
@@ -599,20 +599,23 @@
 @media (min-width: 769px) {
   .ssl-body {
     display: grid;
-    grid-template-columns: 1fr 1.5fr; /* 模式选择占小部分，证书信息占大部分 */
+    grid-template-columns: 1fr 1.5fr;
+    /* 模式选择占小部分，证书信息占大部分 */
     gap: 24px;
     align-items: start;
   }
 
   .ssl-cert-info {
-    margin-top: 0; /* 移除顶部间距，因为是并排 */
+    margin-top: 0;
+    /* 移除顶部间距，因为是并排 */
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
     padding: 12px 20px;
-    height: 100%; /* 填满高度 */
+    height: 100%;
+    /* 填满高度 */
   }
-  
+
   .ssl-row {
     width: 100%;
   }
@@ -631,15 +634,15 @@
     width: 100%;
     box-sizing: border-box;
   }
-  
+
   .ssl-cert-info .ssl-row {
     justify-content: space-between;
   }
-  
+
   .ssl-label {
     min-width: auto;
   }
-  
+
   .ssl-value {
     font-size: 13px;
   }
@@ -657,6 +660,7 @@
     gap: 8px;
   }
 }
+
 /* ==================== Analytics 仪表板（紧凑版） ==================== */
 
 .analytics-card {
@@ -818,12 +822,12 @@
     align-items: flex-start;
     gap: 12px;
   }
-  
+
   .analytics-controls {
     width: 100%;
     justify-content: space-between;
   }
-  
+
   .analytics-metrics {
     grid-template-columns: 1fr;
     gap: 8px;

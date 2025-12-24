@@ -24,7 +24,10 @@ COPY . .
 
 # 4. 执行构建
 # 显式设置 PATH (虽然 npm run 通常不需要，但以防万一)
-ENV PATH /app/node_modules/.bin:$PATH
+# 设置 CDN 环境变量，启用 CDN 模式以减小打包体积
+ENV PATH=/app/node_modules/.bin:$PATH \
+    VITE_USE_CDN=true \
+    VITE_CDN_PROVIDER=npmmirror
 RUN npm run build
 
 # 阶段 2: 运行时镜像 (Runner)

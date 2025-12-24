@@ -3,7 +3,7 @@
  * 负责系统设置、模块配置和数据导入导出
  */
 
-import { store } from '../store.js';
+import { store, MODULE_CONFIG } from '../store.js';
 
 export const settingsMethods = {
   // 从后端加载所有设置
@@ -345,31 +345,16 @@ export const settingsMethods = {
     this.saveModuleSettings(); // 复用保存逻辑
   },
 
-  // 获取模块名称
+  // 获取模块名称 (使用统一配置，设置页面使用简短名称)
   getModuleName(module) {
-    const names = {
-      paas: 'PaaS',
-      dns: 'CF DNS',
-      openai: 'OpenAPI',
-      server: 'Hosts',
-      'self-h': '自建服务',
-      antigravity: 'Antigravity', 'gemini-cli': 'GCLI',
-    };
-    return names[module] || module;
+    const config = MODULE_CONFIG[module];
+    return config ? config.shortName : module;
   },
 
-  // 获取模块图标
+  // 获取模块图标 (使用统一配置)
   getModuleIcon(module) {
-    const icons = {
-      paas: 'fa-cloud',
-      dns: 'fa-globe',
-      openai: 'fa-robot',
-      server: 'fa-server',
-      'self-h': 'fa-house-laptop',
-      antigravity: 'fa-atom',
-      'gemini-cli': 'fa-terminal'
-    };
-    return icons[module] || 'fa-cube';
+    const config = MODULE_CONFIG[module];
+    return config ? config.icon : 'fa-cube';
   },
 
   // 拖拽开始

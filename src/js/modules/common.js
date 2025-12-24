@@ -5,6 +5,7 @@
 
 import { toast } from './toast.js';
 import { formatDateTime, formatFileSize, maskAddress, formatRegion } from './utils.js';
+import { MODULE_CONFIG } from '../store.js';
 
 /**
  * 通用工具方法集合
@@ -90,7 +91,26 @@ export const commonMethods = {
 
         window.addEventListener('touchstart', (e) => {
             if (window.innerWidth > 768 || this.isAnyModalOpen) return;
-            if (e.target.closest('#monaco-editor-container') || e.target.closest('.log-stream-container') || e.target.closest('.table-container')) return;
+
+            // 排除需要横向滚动的区域，防止滑动切换标签页
+            const scrollableSelectors = [
+                '#monaco-editor-container',
+                '.log-stream-container',
+                '.table-container',
+                '.table-wrapper',
+                'table',
+                '.overflow-x-auto',
+                '.horizontal-scroll',
+                '.dns-records-table',
+                '.data-table',
+                '.scroll-container',
+                '[style*="overflow-x"]',
+                '[style*="overflow: auto"]',
+                '.xterm',
+                '.terminal'
+            ];
+
+            if (scrollableSelectors.some(sel => e.target.closest(sel))) return;
 
             touchStartX = e.changedTouches[0].screenX;
             touchStartY = e.changedTouches[0].screenY;
@@ -296,22 +316,24 @@ export const commonMethods = {
         return host;
     },
 
-    getModuleName(id) {
-        const names = {
-            'openai': 'OpenAI API',
-            'antigravity': 'Antigravity',
-            'gemini-cli': 'Gemini CLI',
-            'paas': 'PaaS',
-            'dns': 'DNS 管理',
-            'server': '主机管理'
-        };
-        return names[id] || id;
+    getModuleName(id, short = false) {
+        const config = MODULE_CONFIG[id];
+        if (!config) return id;
+        return short ? config.shortName : config.name;
+    },
+
+    getModuleIcon(id) {
+        const config = MODULE_CONFIG[id];
+        return config ? config.icon : 'fa-cube';
     },
 
     // ==================== Toast 系统 ====================
 
     showGlobalToast(message, type = 'success', duration = 3000, isManual = false) {
-        toast[type](message, { duration, isManual });
+        // 用户主动触发的 info 提示（如"正在导出..."）应该显示
+        // 只有自动化过程中的 info 提示才会被过滤
+        const effectiveIsManual = type === 'info' ? true : isManual;
+        toast[type](message, { duration, isManual: effectiveIsManual });
     },
 
     showDnsToast(message, type = 'success') {

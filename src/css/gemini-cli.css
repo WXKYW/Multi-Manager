@@ -6,17 +6,17 @@
 
 /* Gemini CLI Secondary Tabs */
 .gemini-sec-tabs {
-    /* 继承全局 .sec-tabs 布局 */
+  /* 继承全局 .sec-tabs 布局 */
 }
 
 .theme-gemini-cli .tab-btn:hover:not(.active) {
-    color: var(--gemini-primary);
+  color: var(--gemini-primary);
 }
 
 .theme-gemini-cli .tab-btn.active {
-    background: linear-gradient(135deg, var(--gemini-primary), var(--gemini-dark)) !important;
-    color: white !important;
-    box-shadow: 0 2px 8px rgba(66, 133, 244, 0.3);
+  background: linear-gradient(135deg, var(--gemini-primary), var(--gemini-dark)) !important;
+  color: white !important;
+  box-shadow: 0 2px 8px rgba(66, 133, 244, 0.3);
 }
 
 .gemini-card {
