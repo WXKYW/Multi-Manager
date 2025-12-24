@@ -208,7 +208,10 @@ export const metricsMethods = {
                 if (item.metrics.disk_usage && typeof item.metrics.disk_usage === 'string') {
                     const diskMatch = item.metrics.disk_usage.match(/([^\/]+)\/([^\s]+)\s\(([\d%.]+)\)/);
                     if (diskMatch) {
-                        if (!info.disk || !info.disk[0]) info.disk = [{}];
+                        // 确保 info.disk 是数组类型（可能从后端传来的是字符串）
+                        if (!Array.isArray(info.disk)) {
+                            info.disk = [{}];
+                        }
                         info.disk[0] = {
                             device: '/',
                             used: diskMatch[1],
@@ -221,11 +224,11 @@ export const metricsMethods = {
                 // 5. 更新 Docker 概要信息 (确保 containers 数组始终存在)
                 if (item.metrics.docker) {
                     info.docker = {
-                        containers: [], // 始终提供默认空数组，防止 v-for 遍历 undefined
-                        ...info.docker,
+                        ...(info.docker || {}),
                         installed: !!item.metrics.docker.installed,
                         runningCount: item.metrics.docker.running || 0,
-                        stoppedCount: item.metrics.docker.stopped || 0
+                        stoppedCount: item.metrics.docker.stopped || 0,
+                        containers: Array.isArray(item.metrics.docker.containers) ? item.metrics.docker.containers : (info.docker?.containers || [])
                     };
                 }
                 // 兜底：确保 docker.containers 始终是数组

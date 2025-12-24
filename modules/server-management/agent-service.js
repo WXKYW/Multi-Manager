@@ -3,44 +3,78 @@
  */
 
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { serverStorage } = require('./storage');
 
 class AgentService {
     constructor() {
-        // 存储每个服务器的 agent 密钥
-        this.agentKeys = new Map();
+        // 全局统一 Agent 密钥
+        this.globalAgentKey = null;
+        // 密钥存储路径
+        this.keyFilePath = path.join(__dirname, '../../data/agent-key.txt');
         // 存储最新的 agent 指标
         this.agentMetrics = new Map();
         // 存储 agent 连接状态
         this.agentStatus = new Map();
+
+        // 初始化加载或生成全局密钥
+        this.loadOrGenerateGlobalKey();
     }
 
     /**
-     * 生成 Agent 密钥
+     * 加载或生成全局 Agent 密钥
      */
-    generateAgentKey(serverId) {
-        const key = crypto.randomBytes(16).toString('hex');
-        this.agentKeys.set(serverId, key);
-        return key;
+    loadOrGenerateGlobalKey() {
+        try {
+            // 确保 data 目录存在
+            const dataDir = path.dirname(this.keyFilePath);
+            if (!fs.existsSync(dataDir)) {
+                fs.mkdirSync(dataDir, { recursive: true });
+            }
+
+            if (fs.existsSync(this.keyFilePath)) {
+                this.globalAgentKey = fs.readFileSync(this.keyFilePath, 'utf8').trim();
+                console.log('[AgentService] 已加载全局 Agent 密钥');
+            } else {
+                this.globalAgentKey = crypto.randomBytes(16).toString('hex');
+                fs.writeFileSync(this.keyFilePath, this.globalAgentKey);
+                console.log('[AgentService] 已生成新的全局 Agent 密钥');
+            }
+        } catch (error) {
+            console.error('[AgentService] 密钥管理失败:', error.message);
+            // 降级为内存密钥
+            this.globalAgentKey = crypto.randomBytes(16).toString('hex');
+        }
     }
 
     /**
-     * 获取或生成 Agent 密钥
+     * 获取全局 Agent 密钥
      */
     getAgentKey(serverId) {
-        if (!this.agentKeys.has(serverId)) {
-            return this.generateAgentKey(serverId);
-        }
-        return this.agentKeys.get(serverId);
+        // 忽略 serverId，返回全局统一密钥
+        return this.globalAgentKey;
     }
 
     /**
-     * 验证 Agent 请求
+     * 重新生成全局密钥
+     */
+    regenerateGlobalKey() {
+        this.globalAgentKey = crypto.randomBytes(16).toString('hex');
+        try {
+            fs.writeFileSync(this.keyFilePath, this.globalAgentKey);
+        } catch (e) {
+            console.error('[AgentService] 保存密钥失败:', e.message);
+        }
+        return this.globalAgentKey;
+    }
+
+    /**
+     * 验证 Agent 请求（使用全局密钥）
      */
     verifyAgent(serverId, providedKey) {
-        const storedKey = this.agentKeys.get(serverId);
-        if (!storedKey) return false;
-        return storedKey === providedKey;
+        // 验证全局密钥
+        return providedKey === this.globalAgentKey;
     }
 
     /**
@@ -82,30 +116,39 @@ class AgentService {
         const connections = parseInt(metrics.connections) || 0;
 
         // Docker 信息
-        const dockerInstalled = metrics.docker_installed === true || metrics.docker_installed === 'true';
+        const dockerInstalled = metrics.docker_installed === true || metrics.docker_installed === 'true' || parseInt(metrics.docker_installed) === 1;
         const dockerRunning = parseInt(metrics.docker_running) || 0;
         const dockerStopped = parseInt(metrics.docker_stopped) || 0;
 
         const processedMetrics = {
             timestamp,
             cpu: cpuUsage,
+            cpu_usage: `${cpuUsage}%`,
             mem: `${memUsed}/${memTotal}MB`,
-            mem_usage: memUsage,
+            mem_usage: `${memUsed}/${memTotal}MB`,
             disk: metrics.disk,
             disk_used: diskUsed,
             disk_total: diskTotal,
-            disk_usage: diskUsage,
+            disk_usage: metrics.disk,
             load: metrics.load || '0 0 0',
             cores: parseInt(metrics.cores) || 1,
-            rx_s: rxSpeed,
-            tx_s: txSpeed,
-            rx_t: rxTotal,
-            tx_t: txTotal,
-            connections,
-            docker_installed: dockerInstalled,
-            docker_running: dockerRunning,
-            docker_stopped: dockerStopped
+            network: {
+                rx_speed: rxSpeed,
+                tx_speed: txSpeed,
+                rx_total: rxTotal,
+                tx_total: txTotal,
+                connections: connections
+            },
+            docker: {
+                installed: dockerInstalled,
+                running: dockerRunning,
+                stopped: dockerStopped,
+                containers: Array.isArray(metrics.containers) ? metrics.containers : []
+            }
         };
+
+        // logger.debug(`[AgentService] 处理服务器 ${serverId} 的指标: CPU=${processedMetrics.cpu_usage}, MEM=${processedMetrics.mem_usage}, NET=${rxSpeed}/${txSpeed}, DOCKER=${dockerInstalled ? 'Installed' : 'None'}`);
+        console.log(`[AgentService] Broadcast: ${serverId} -> CPU: ${processedMetrics.cpu_usage}, MEM: ${processedMetrics.mem_usage}, RX: ${rxSpeed}, DOCKER: ${dockerInstalled ? (metrics.containers?.length || 0) + ' containers' : 'No'}`);
 
         // 存储指标
         this.agentMetrics.set(serverId, processedMetrics);
@@ -117,13 +160,7 @@ class AgentService {
             version: metrics.agent_version || 'unknown'
         });
 
-        // 同步到 metricsService 的 latestMetrics（供其他模块使用）
-        try {
-            const metricsService = require('./metrics-service');
-            metricsService.latestMetrics.set(serverId, processedMetrics);
-        } catch (e) {
-            // ignore
-        }
+        // 指标已存储到内存缓存中，前端通过 API 轮询获取
 
         return processedMetrics;
     }
@@ -144,8 +181,8 @@ class AgentService {
             return { connected: false, lastSeen: null };
         }
 
-        // 如果超过 30 秒没有收到数据，认为离线
-        const isOnline = Date.now() - status.lastSeen < 30000;
+        // 如果超过 10 秒没有收到数据，认为离线
+        const isOnline = Date.now() - status.lastSeen < 10000;
         return {
             ...status,
             connected: isOnline
@@ -178,7 +215,7 @@ cat > "$AGENT_DIR/config.env" << 'EOF'
 API_URL="${serverUrl}/api/server/agent/push"
 SERVER_ID="${serverId}"
 AGENT_KEY="${agentKey}"
-INTERVAL=5
+INTERVAL=2
 EOF
 
 # 写入 Agent 脚本

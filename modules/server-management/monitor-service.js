@@ -4,8 +4,7 @@
  */
 
 const cron = require('node-cron');
-const { ServerAccount, ServerMonitorLog, ServerMonitorConfig } = require('../../src/db/models');
-const sshService = require('./ssh-service');
+const { ServerAccount, ServerMonitorLog, ServerMonitorConfig } = require('./models');
 const { createLogger } = require('../../src/utils/logger');
 
 const logger = createLogger('ServerMonitor');
@@ -29,7 +28,7 @@ class MonitorService {
      * 启动监控服务 (已废弃自动拨测，仅保留占位符)
      */
     start() {
-        logger.info('监控服务已由「实时流」模式接管，后台拨测已停用');
+        logger.info('监控服务已启动（纯 Agent 模式）');
     }
 
     /**
@@ -86,18 +85,19 @@ class MonitorService {
      * @returns {Promise<Object>} 探测结果
      */
     async probeServer(server, silent = false) {
-        const systemInfoService = require('./system-info-service');
+        // 纯 Agent 模式，跳过 SSH 相关的后台探测
+        const agentService = require('./agent-service');
+        const agentStatus = agentService.getStatus(server.id);
+        const agentMetrics = agentService.getMetrics(server.id);
 
         try {
             // 1. 先用 TCP ping 测量网络延迟
             const responseTime = await this.tcpPing(server.host, server.port || 22);
 
-            // 2. 获取详细系统信息
-            const info = await systemInfoService.getServerInfo(server.id, server);
-
-            if (info.success) {
+            // 2. 检查 Agent 状态
+            if (agentStatus.connected && agentMetrics) {
                 const metrics = {
-                    ...info,
+                    ...agentMetrics,
                     cached_at: new Date().toISOString()
                 };
 
@@ -105,13 +105,11 @@ class MonitorService {
                 this.metricsCache.set(server.id, metrics);
 
                 if (!silent) {
-                    // 更新数据库
                     ServerAccount.updateStatus(server.id, {
                         status: 'online',
                         last_check_time: new Date().toISOString(),
                         last_check_status: 'success',
-                        response_time: responseTime,
-                        cached_info: metrics
+                        response_time: responseTime
                     });
 
                     ServerMonitorLog.create({
@@ -123,29 +121,31 @@ class MonitorService {
 
                 return { success: true, serverId: server.id, responseTime };
             } else {
-                throw new Error(info.error);
+                // Agent 未连接，但 TCP 可达
+                if (!silent) {
+                    ServerAccount.updateStatus(server.id, {
+                        status: 'pending',
+                        last_check_time: new Date().toISOString(),
+                        last_check_status: 'agent_offline',
+                        response_time: responseTime
+                    });
+                }
+                return { success: false, serverId: server.id, error: 'Agent 未连接', responseTime };
             }
         } catch (error) {
-            // 尝试获取 TCP 延迟，如果失败则为 null
-            let responseTime = null;
-            try {
-                responseTime = await this.tcpPing(server.host, server.port || 22);
-            } catch (e) {
-                // TCP ping 也失败
-            }
-
+            // TCP ping 失败
             if (!silent) {
                 ServerAccount.updateStatus(server.id, {
                     status: 'offline',
                     last_check_time: new Date().toISOString(),
                     last_check_status: 'failed',
-                    response_time: responseTime
+                    response_time: null
                 });
 
                 ServerMonitorLog.create({
                     server_id: server.id,
                     status: 'failed',
-                    response_time: responseTime,
+                    response_time: null,
                     error_message: error.message
                 });
             }
@@ -154,7 +154,7 @@ class MonitorService {
                 success: false,
                 serverId: server.id,
                 error: error.message,
-                responseTime
+                responseTime: null
             };
         }
     }

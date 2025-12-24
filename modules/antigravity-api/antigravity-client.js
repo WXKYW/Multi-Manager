@@ -642,6 +642,7 @@ async function chatCompletionsStream(accountId, requestBody, callback) {
         });
 
         let buffer = '';
+        let errorText = '';
         await new Promise((resolve, reject) => {
             stream
                 .onStart(({ status }) => { statusCode = status; })

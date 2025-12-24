@@ -5,10 +5,9 @@
 const express = require('express');
 const router = express.Router();
 const { serverStorage, monitorLogStorage, monitorConfigStorage, snippetStorage } = require('./storage');
-const sshService = require('./ssh-service');
 const monitorService = require('./monitor-service');
-const systemInfoService = require('./system-info-service');
-const metricsService = require('./metrics-service');
+const agentService = require('./agent-service');
+const sshService = require('./ssh-service');
 const { ServerMonitorConfig, ServerMetricsHistory } = require('./models');
 
 // ==================== 主机凭据接口 ====================
@@ -26,15 +25,14 @@ router.get('/accounts', (req, res) => {
     try {
         const servers = serverStorage.getAll();
 
-        // 附带后端缓存的最新指标（用于首屏瞬显）
-        const metricsService = require('./metrics-service');
+        // 附带后端缓存的最新指标（通过 agentService 获取）
         const serversWithMetrics = servers.map(server => {
-            const cachedMetrics = metricsService.latestMetrics?.get(server.id);
+            const cachedMetrics = agentService.getMetrics(server.id);
             if (cachedMetrics) {
                 // 解析 disk 字符串为结构化对象 (格式: "38G/40G (95%)")
                 let diskArray = [];
                 if (cachedMetrics.disk && typeof cachedMetrics.disk === 'string') {
-                    const diskMatch = cachedMetrics.disk.match(/([^\/]+)\/([^\s]+)\s\(([\d.]+%?)\)/);
+                    const diskMatch = cachedMetrics.disk.match(/([^/]+)\/([^\s]+)\s\((\d+\.?\d*%?)\)/);
                     if (diskMatch) {
                         diskArray = [{
                             device: '/',
@@ -51,21 +49,10 @@ router.get('/accounts', (req, res) => {
                         load: cachedMetrics.load,
                         cores: cachedMetrics.cores,
                         mem_usage: cachedMetrics.mem,
-                        cpu_usage: cachedMetrics.cpu + '%',
-                        disk_usage: cachedMetrics.disk,
+                        cpu_usage: cachedMetrics.cpu_usage,
                         disk: diskArray,
-                        docker: {
-                            installed: cachedMetrics.docker_installed,
-                            running: cachedMetrics.docker_running,
-                            stopped: cachedMetrics.docker_stopped
-                        },
-                        network: {
-                            connections: cachedMetrics.connections,
-                            rx_speed: cachedMetrics.rx_s,
-                            tx_speed: cachedMetrics.tx_s,
-                            rx_total: cachedMetrics.rx_t,
-                            tx_total: cachedMetrics.tx_t
-                        },
+                        docker: cachedMetrics.docker,
+                        network: cachedMetrics.network,
                         lastUpdate: new Date(cachedMetrics.timestamp).toLocaleTimeString()
                     }
                 };
@@ -286,7 +273,7 @@ router.post('/ping-all', async (req, res) => {
         // 并发 ping 所有主机
         await Promise.all(servers.map(async (server) => {
             try {
-                const latency = await metricsService.tcpPing(server.host, server.port || 22);
+                const latency = await monitorService.tcpPing(server.host, server.port || 22);
                 // 更新数据库
                 serverStorage.updateStatus(server.id, { response_time: latency });
                 results.push({ serverId: server.id, latency, success: true });
@@ -309,19 +296,20 @@ router.post('/info', async (req, res) => {
         const { serverId, force } = req.body;
         if (!serverId) return res.status(400).json({ success: false, error: '缺少服务器 ID' });
 
-        if (!force) {
-            const cachedMetrics = monitorService.getMetrics(serverId);
-            if (cachedMetrics) return res.json({ ...cachedMetrics, is_cached: true });
-        }
-
         const server = serverStorage.getById(serverId);
         if (!server) return res.status(404).json({ success: false, error: '服务器不存在' });
 
-        const info = await systemInfoService.getServerInfo(serverId, server);
-        if (info.success) {
-            monitorService.metricsCache.set(serverId, { ...info, cached_at: new Date().toISOString() });
+        // 纯 Agent 模式：直接返回内存中的最新指标作为服务器详情
+        const metrics = agentService.getMetrics(serverId);
+        if (!metrics) {
+            return res.status(404).json({ success: false, error: 'Agent 指标尚未就绪，请确保 Agent 已启动并在线' });
         }
-        res.json(info);
+
+        res.json({
+            success: true,
+            ...metrics,
+            is_agent: true
+        });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
@@ -330,47 +318,24 @@ router.post('/info', async (req, res) => {
 /**
  * Docker 容器操作
  */
+// Docker 容器操作目前仅支持 Agent 模式推送，不支持主动控制（因 SSH 已移除）
 router.post('/docker/action', async (req, res) => {
-    try {
-        const { serverId, containerId, action } = req.body;
-        if (!serverId || !containerId || !action) {
-            return res.status(400).json({ success: false, error: '缺少必填参数' });
-        }
-
-        const server = serverStorage.getById(serverId);
-        if (!server) return res.status(404).json({ success: false, error: '服务器不存在' });
-
-        // 构建 Docker 命令
-        let command = '';
-        switch (action) {
-            case 'start': command = `docker start ${containerId}`; break;
-            case 'stop': command = `docker stop ${containerId}`; break;
-            case 'restart': command = `docker restart ${containerId}`; break;
-            case 'pause': command = `docker pause ${containerId}`; break;
-            case 'unpause': command = `docker unpause ${containerId}`; break;
-            case 'remove': command = `docker rm -f ${containerId}`; break;
-            default:
-                return res.status(400).json({ success: false, error: '不支持的操作类型' });
-        }
-
-        const result = await sshService.executeCommand(serverId, server, command);
-        res.json({
-            success: result.success,
-            message: result.success ? '操作执行成功' : '操作执行失败',
-            output: result.stdout || result.stderr
-        });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
+    res.status(501).json({ success: false, error: '目前仅支持 Agent 监控，暂不支持主动控制容器' });
 });
 
 // ==================== SSH 终端接口 ====================
 
+/**
+ * 执行 SSH 命令（非交互式）
+ */
 router.post('/ssh/exec', async (req, res) => {
     try {
         const { serverId, command } = req.body;
+        if (!serverId || !command) return res.status(400).json({ success: false, error: '缺少参数' });
+
         const server = serverStorage.getById(serverId);
         if (!server) return res.status(404).json({ success: false, error: '服务器不存在' });
+
         const result = await sshService.executeCommand(serverId, server, command);
         res.json(result);
     } catch (error) {
@@ -379,13 +344,11 @@ router.post('/ssh/exec', async (req, res) => {
 });
 
 router.post('/ssh/disconnect', (req, res) => {
-    try {
-        const { serverId } = req.body;
+    const { serverId } = req.body;
+    if (serverId) {
         sshService.closeConnection(serverId);
-        res.json({ success: true, message: 'SSH 连接已关闭' });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
     }
+    res.json({ success: true, message: 'SSH 会话已请求断开' });
 });
 
 // ==================== 代码片段接口 ====================
@@ -514,7 +477,7 @@ router.get('/metrics/stats/:serverId', (req, res) => {
  */
 router.get('/metrics/collector/status', (req, res) => {
     try {
-        const status = metricsService.getCollectorStatus();
+        const status = monitorService.getStatus();
         res.json({ success: true, data: status });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
@@ -522,12 +485,41 @@ router.get('/metrics/collector/status', (req, res) => {
 });
 
 /**
- * 手动触发一次历史采集
+ * 手动触发一次指标采集并存入历史记录
  */
-router.post('/metrics/collect', (req, res) => {
+router.post('/metrics/collect', async (req, res) => {
     try {
-        metricsService.collectHistorySnapshot();
-        res.json({ success: true, message: '已触发历史指标采集' });
+        const servers = serverStorage.getAll();
+        const collected = [];
+
+        for (const server of servers) {
+            const metrics = agentService.getMetrics(server.id);
+            if (metrics) {
+                // 保存到历史记录
+                ServerMetricsHistory.create({
+                    server_id: server.id,
+                    cpu_usage: parseFloat(metrics.cpu) || 0,
+                    cpu_load: metrics.load || '',
+                    cpu_cores: metrics.cores || 0,
+                    mem_used: parseInt(metrics.mem?.split('/')[0]) || 0,
+                    mem_total: parseInt(metrics.mem?.split('/')[1]) || 0,
+                    mem_usage: metrics.mem_usage ? parseFloat(metrics.mem_usage.split('/')[0]) / parseFloat(metrics.mem_usage.split('/')[1].replace('MB', '')) * 100 : 0,
+                    disk_used: metrics.disk_used || '',
+                    disk_total: metrics.disk_total || '',
+                    disk_usage: parseFloat(metrics.disk_usage?.match(/\((\d+\.?\d*)%\)/)?.[1]) || 0,
+                    docker_installed: metrics.docker?.installed ? 1 : 0,
+                    docker_running: metrics.docker?.running || 0,
+                    docker_stopped: metrics.docker?.stopped || 0
+                });
+                collected.push(server.id);
+            }
+        }
+
+        res.json({
+            success: true,
+            message: `已采集 ${collected.length} 台在线主机的实时指标`,
+            collected: collected.length
+        });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
@@ -543,10 +535,7 @@ router.put('/metrics/collector/interval', (req, res) => {
             return res.status(400).json({ success: false, error: '采集间隔至少为 1 分钟' });
         }
 
-        // 1. 同步到内存服务
-        metricsService.setCollectInterval(interval);
-
-        // 2. 持久化到数据库
+        // 持久化到数据库
         const config = ServerMonitorConfig.get();
         if (config) {
             ServerMonitorConfig.update({

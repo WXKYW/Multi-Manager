@@ -115,7 +115,7 @@ router.post('/:id/fs/list', async (req, res) => {
         res.json(response.data);
     } catch (error) {
         // API 调用失败，更新状态为 offline
-        const account = storage.getAccount(req.params.id);
+        const account = storage.getAccountById(req.params.id);
         if (account) {
             storage.updateStatus(account.id, 'offline', account.version);
         }
