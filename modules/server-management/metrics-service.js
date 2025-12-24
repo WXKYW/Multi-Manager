@@ -184,36 +184,66 @@ class MetricsService {
     getStreamCommand() {
         return `
             # 开启循环采集
+            # 提高网卡识别兼容性：排除虚拟网桥、Docker、Loopback
+            IF=$(ip -o link show | awk -F': ' '$3 !~ /lo|docker|veth|br-|tap/ {print $2}' | head -1)
+            if [ -z "$IF" ]; then IF=$(ip route | grep default | awk '{print $5}' | head -1); fi
+
+            # 获取网速数据的辅助函数 (使用冒号锚定，防止 eth10 匹配到 eth1)
+            get_net_vals() {
+                grep "$1:" /proc/net/dev | awk -F: '{print $2}' | awk '{print $1, $9}'
+            }
+
+            # 初始采样
+            V=$(get_net_vals $IF)
+            P_RX=$(echo $V | awk '{print $1}'); P_TX=$(echo $V | awk '{print $2}'); P_T=$(date +%s%3N)
+
             while true; do
-                # 检查父进程 (sshd) 是否存在，不存在则自杀，防止孤儿进程
                 if [ ! -d "/proc/$PPID" ]; then exit 0; fi
+                sleep 2
                 
-                # 采集负载
+                V=$(get_net_vals $IF)
+                C_RX=$(echo $V | awk '{print $1}'); C_TX=$(echo $V | awk '{print $2}'); C_T=$(date +%s%3N)
+                
+                # 网络指标计算 (修复 awk 语法及 JSON 引用)
+                NET_INFO=$(echo "$P_RX $C_RX $P_TX $C_TX $P_T $C_T" | awk '{
+                    dt = ($6-$5)/1000;
+                    if(dt <= 0) dt = 1;
+                    rs = ($2-$1)/dt; ts = ($4-$3)/dt;
+                    if(rs < 0) rs = 0; if(ts < 0) ts = 0;
+
+                    # 格式化函数
+                    f_s = "if(v>=1048576) printf \"%.2f MB/s\", v/1048576; else if(v>=1024) printf \"%.2f KB/s\", v/1024; else printf \"%.0f B/s\", v";
+                    
+                    printf "\\\"rx_s\\\":\\\""; v=rs; if(v>=1048576) printf "%.2f MB/s", v/1048576; else if(v>=1024) printf "%.2f KB/s", v/1024; else printf "%.0f B/s", v;
+                    printf "\\\",\\\"tx_s\\\":\\\""; v=ts; if(v>=1048576) printf "%.2f MB/s", v/1048576; else if(v>=1024) printf "%.2f KB/s", v/1024; else printf "%.0f B/s", v;
+                    printf "\\\",\\\"rx_t\\\":\\\""; v=$2; if(v>=1073741824) printf "%.2f GB", v/1073741824; else if(v>=1048576) printf "%.2f MB", v/1048576; else printf "%.2f KB", v/1024;
+                    printf "\\\",\\\"tx_t\\\":\\\""; v=$4; if(v>=1073741824) printf "%.2f GB", v/1073741824; else if(v>=1048576) printf "%.2f MB", v/1048576; else printf "%.2f KB", v/1024;
+                    printf "\\\""
+                }')
+
+                # 循环更新采样点
+                P_RX=$C_RX; P_TX=$C_TX; P_T=$C_T;
+
+                # 其他指标
                 L=$(cat /proc/loadavg | awk '{print $1,$2,$3}')
-                # 采集核心数
                 N=$(nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo)
-                # 采集内存 (取已用和总量)
                 M=$(free -m | awk 'NR==2{printf "%d/%dMB", $3, $2}')
-                # 采集CPU
                 C=$(grep 'cpu ' /proc/stat | awk '{u=($2+$4)*100/($2+$4+$5)} END {printf "%.1f", u}')
-                # 采集磁盘
                 D=$(df -h / | awk 'NR==2{printf "%s/%s (%s)", $3, $2, $5}')
                 
-                # 采集 Docker (统计运行和停止数量)
+                # Docker
                 if command -v docker >/dev/null 2>&1; then
                     DR=$(docker ps -q | wc -l | tr -d ' ')
                     DT=$(docker ps -a -q | wc -l | tr -d ' ')
-                    DS=$((DT - DR))
-                    DI=true
+                    DS=$((DT - DR)); DI=true
                 else
-                    DR=0
-                    DS=0
-                    DI=false
+                    DR=0; DS=0; DI=false
                 fi
                 
-                # 输出包裹 JSON，加前缀防止流粘包
-                echo "STREAM_JSON:{\\\"load\\\":\\\"$L\\\",\\\"cores\\\":\\\"$N\\\",\\\"mem\\\":\\\"$M\\\",\\\"cpu\\\":\\\"$C\\\",\\\"disk\\\":\\\"$D\\\",\\\"docker_installed\\\":$DI,\\\"docker_running\\\":$DR,\\\"docker_stopped\\\":$DS}"
-                sleep 1
+                # 连接数采集
+                CONNS=$(ss -ant | grep -c ESTAB)
+                
+                echo "STREAM_JSON:{\\\"load\\\":\\\"$L\\\",\\\"cores\\\":\\\"$N\\\",\\\"mem\\\":\\\"$M\\\",\\\"cpu\\\":\\\"$C\\\",\\\"disk\\\":\\\"$D\\\",\\\"docker_installed\\\":$DI,\\\"docker_running\\\":$DR,\\\"docker_stopped\\\":$DS,\\\"connections\\\":$CONNS,$NET_INFO}"
             done
         `;
     }
@@ -251,6 +281,13 @@ class MetricsService {
                     mem_usage: metrics.mem,
                     cpu_usage: metrics.cpu + '%',
                     disk_usage: metrics.disk,
+                    network: {
+                        connections: metrics.connections,
+                        rx_speed: metrics.rx_s,
+                        tx_speed: metrics.tx_s,
+                        rx_total: metrics.rx_t,
+                        tx_total: metrics.tx_t
+                    },
                     docker: {
                         installed: metrics.docker_installed,
                         running: metrics.docker_running,

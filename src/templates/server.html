@@ -176,10 +176,11 @@
             <div
               style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 800; color: var(--text-tertiary); margin-bottom: 4px; text-transform: uppercase;">
               <span>CPU</span>
-              <span v-if="server.info" style="color: #10b981;">{{ parseInt(server.info.cpu.Usage) }}%</span>
+              <span v-if="server.info && server.info.cpu" style="color: #10b981;">{{ parseInt(server.info.cpu.Usage)
+                }}%</span>
             </div>
             <div style="height: 4px; background: var(--bg-tertiary); border-radius: 2px; overflow: hidden;">
-              <div v-if="server.info" :style="{ 
+              <div v-if="server.info && server.info.cpu" :style="{ 
                 width: server.info.cpu.Usage, height: '100%', 
                 background: parseFloat(server.info.cpu.Usage) > 85 ? '#ef4444' : '#10b981',
                 boxShadow: '0 0 4px ' + (parseFloat(server.info.cpu.Usage) > 85 ? 'rgba(239, 68, 68, 0.4)' : 'rgba(16, 185, 129, 0.2)')
@@ -192,10 +193,11 @@
             <div
               style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 800; color: var(--text-tertiary); margin-bottom: 4px; text-transform: uppercase;">
               <span>MEM</span>
-              <span v-if="server.info" style="color: #3b82f6;">{{ parseInt(server.info.memory.Usage) }}%</span>
+              <span v-if="server.info && server.info.memory" style="color: #3b82f6;">{{
+                parseInt(server.info.memory.Usage) }}%</span>
             </div>
             <div style="height: 4px; background: var(--bg-tertiary); border-radius: 2px; overflow: hidden;">
-              <div v-if="server.info" :style="{ 
+              <div v-if="server.info && server.info.memory" :style="{ 
                 width: server.info.memory.Usage, height: '100%', 
                 background: parseFloat(server.info.memory.Usage) > 85 ? '#ef4444' : '#3b82f6',
                 boxShadow: '0 0 4px ' + (parseFloat(server.info.memory.Usage) > 85 ? 'rgba(239, 68, 68, 0.4)' : 'rgba(59, 130, 246, 0.2)')
@@ -219,6 +221,27 @@
               }"></div>
             </div>
           </div>
+
+          <!-- Network Speed Mini -->
+          <div v-if="server.info && server.info.network"
+            style="flex: 0 0 auto; display: flex; flex-direction: column; gap: 2px; align-items: flex-end;">
+            <div
+              style="display: flex; align-items: center; font-size: 10px; font-family: var(--font-mono); color: #3b82f6;">
+              <span style="min-width: 30px; text-align: right;">{{ parseSpeed(server.info.network.tx_speed).num
+                }}</span>
+              <span style="width: 12px; text-align: center; opacity: 0.7;">{{
+                parseSpeed(server.info.network.tx_speed).unit }}</span>
+              <i class="fas fa-arrow-up" style="font-size: 7px; opacity: 0.6; margin-left: 2px;"></i>
+            </div>
+            <div
+              style="display: flex; align-items: center; font-size: 10px; font-family: var(--font-mono); color: #10b981;">
+              <span style="min-width: 30px; text-align: right;">{{ parseSpeed(server.info.network.rx_speed).num
+                }}</span>
+              <span style="width: 12px; text-align: center; opacity: 0.7;">{{
+                parseSpeed(server.info.network.rx_speed).unit }}</span>
+              <i class="fas fa-arrow-down" style="font-size: 7px; opacity: 0.6; margin-left: 2px;"></i>
+            </div>
+          </div>
         </div>
 
         <!-- Action Group (Right) -->
@@ -230,11 +253,6 @@
           <button class="btn-icon-refined" @click="openSSHTerminal(server)"
             style="width: 34px; height: 34px; background: var(--bg-tertiary);">
             <i class="fas fa-terminal" style="font-size: 13px;"></i>
-          </button>
-          <button class="btn-icon-refined" @click="toggleServer(server.id)"
-            :style="{ transform: isServerExpanded(server.id) ? 'rotate(180deg)' : 'none', background: 'var(--bg-tertiary)' }"
-            style="width: 34px; height: 34px;">
-            <i class="fas fa-chevron-down" style="font-size: 12px;"></i>
           </button>
         </div>
       </div>
@@ -259,26 +277,52 @@
               <!-- 系统信息 -->
               <div class="server-detail-section">
                 <h4><i class="fas fa-microchip"></i> 硬件载荷</h4>
-                <div v-if="server.info.cpu.Load" class="server-detail-item" style="border:none; padding-bottom: 4px;">
+                <div v-if="server.info.cpu && server.info.cpu.Load" class="server-detail-item"
+                  style="border:none; padding-bottom: 4px;">
                   <span class="server-detail-label">系统负载 (1/5/15min)</span>
                   <span class="server-detail-value">{{ server.info.cpu.Load }}</span>
                 </div>
-                <div class="server-detail-item">
-                  <span class="server-detail-label">CPU 负载 ({{ server.info.cpu.Cores }} 核心)</span>
-                  <span class="server-detail-value">{{ server.info.cpu.Usage }}</span>
+                <div v-if="server.info.cpu" class="server-detail-item">
+                  <span class="server-detail-label">CPU 负载 ({{ server.info.cpu.Cores || '-' }} 核心)</span>
+                  <span class="server-detail-value">{{ server.info.cpu.Usage || '-' }}</span>
                 </div>
-                <div class="progress-bar">
-                  <div class="progress-bar-fill" :style="{ width: server.info.cpu.Usage }"></div>
+                <div v-if="server.info.cpu" class="progress-bar">
+                  <div class="progress-bar-fill" :style="{ width: server.info.cpu.Usage || '0%' }"></div>
                 </div>
 
-                <div class="server-detail-item" style="margin-top: 12px;">
-                  <span class="server-detail-label">内存使用 ({{ server.info.memory.Used }} / {{
-                    server.info.memory.Total }})</span>
-                  <span class="server-detail-value">{{ server.info.memory.Usage }}</span>
+                <div v-if="server.info.memory" class="server-detail-item" style="margin-top: 12px;">
+                  <span class="server-detail-label">内存使用 ({{ server.info.memory.Used || '-' }} / {{
+                    server.info.memory.Total || '-' }})</span>
+                  <span class="server-detail-value">{{ server.info.memory.Usage || '-' }}</span>
                 </div>
-                <div class="progress-bar">
+                <div v-if="server.info.memory" class="progress-bar">
                   <div class="progress-bar-fill" :class="getMemoryClass(server.info.memory.Usage)"
-                    :style="{ width: server.info.memory.Usage }"></div>
+                    :style="{ width: server.info.memory.Usage || '0%' }"></div>
+                </div>
+              </div>
+
+              <!-- 监控图表 -->
+              <div class="server-detail-section" style="min-width: 280px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                  <h4 style="margin-bottom: 0;"><i class="fas fa-chart-line"></i> 负载趋势</h4>
+                  <div style="display: flex; gap: 8px;">
+                    <span style="font-size: 10px; color: #10b981; display: flex; align-items: center; gap: 4px;">
+                      <span style="width: 6px; height: 6px; border-radius: 50%; background: #10b981;"></span> CPU
+                    </span>
+                    <span style="font-size: 10px; color: #3b82f6; display: flex; align-items: center; gap: 4px;">
+                      <span style="width: 6px; height: 6px; border-radius: 50%; background: #3b82f6;"></span> Mem
+                    </span>
+                  </div>
+                </div>
+                <div
+                  style="height: 145px; position: relative; background: var(--bg-tertiary); border-radius: 12px; padding: 8px; border: 1px solid var(--border-color);">
+                  <canvas :id="'metrics-chart-card-' + server.id"></canvas>
+                  <!-- 无数据状态提示 -->
+                  <div v-if="!server.info || server.loading"
+                    style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-tertiary); gap: 8px; background: var(--bg-tertiary); border-radius: 12px;">
+                    <div class="ag-spinner-elegant ag-spinner-elegant-sm"></div>
+                    <span style="font-size: 10px; opacity: 0.6; letter-spacing: 1px;">LOADING METRICS</span>
+                  </div>
                 </div>
               </div>
 
@@ -303,27 +347,39 @@
                 </div>
               </div>
 
-              <!-- 监控图表 (替换系统摘要) -->
-              <div class="server-detail-section" style="min-width: 280px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                  <h4 style="margin-bottom: 0;"><i class="fas fa-chart-line"></i> 负载趋势 (24h)</h4>
-                  <div style="display: flex; gap: 8px;">
-                    <span style="font-size: 10px; color: #10b981; display: flex; align-items: center; gap: 4px;">
-                      <span style="width: 6px; height: 6px; border-radius: 50%; background: #10b981;"></span> CPU
+              <!-- 网络资源 -->
+              <div class="server-detail-section">
+                <h4><i class="fas fa-network-wired"></i> 网络速率</h4>
+                <div v-if="server.info.network">
+                  <div class="server-detail-item">
+                    <span class="server-detail-label">活跃连接数</span>
+                    <span class="server-detail-value"
+                      style="font-family: var(--font-mono); font-weight: 700; color: var(--paas-primary);">{{
+                      server.info.network.connections || 0 }}</span>
+                  </div>
+                  <div class="server-detail-item" style="padding: 6px 0;">
+                    <span class="server-detail-label">
+                      <i class="fas fa-arrow-down" style="color: #10b981; font-size: 10px;"></i> 下载速度
                     </span>
-                    <span style="font-size: 10px; color: #3b82f6; display: flex; align-items: center; gap: 4px;">
-                      <span style="width: 6px; height: 6px; border-radius: 50%; background: #3b82f6;"></span> Mem
+                    <span class="server-detail-value"
+                      style="color: #10b981; font-weight: 700; font-family: var(--font-mono);">
+                      {{ server.info.network.rx_speed }}
                     </span>
                   </div>
-                </div>
-                <div
-                  style="height: 145px; position: relative; background: var(--bg-tertiary); border-radius: 12px; padding: 8px; border: 1px solid var(--border-color);">
-                  <canvas :id="'metrics-chart-card-' + server.id"></canvas>
-                  <!-- 无数据状态提示 -->
-                  <div v-if="!server.info || server.loading"
-                    style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-tertiary); gap: 8px; background: var(--bg-tertiary); border-radius: 12px;">
-                    <div class="ag-spinner-elegant ag-spinner-elegant-sm"></div>
-                    <span style="font-size: 10px; opacity: 0.6; letter-spacing: 1px;">LOADING METRICS</span>
+                  <div class="server-detail-item" style="padding: 6px 0;">
+                    <span class="server-detail-label">
+                      <i class="fas fa-arrow-up" style="color: #3b82f6; font-size: 10px;"></i> 上传速度
+                    </span>
+                    <span class="server-detail-value"
+                      style="color: #3b82f6; font-weight: 700; font-family: var(--font-mono);">
+                      {{ server.info.network.tx_speed }}
+                    </span>
+                  </div>
+                  <div class="server-detail-item"
+                    style="border:none; padding: 4px 0 0 0; opacity: 0.8; font-size: 11px;">
+                    <span class="server-detail-label">累计流量 (RX/TX)</span>
+                    <span class="server-detail-value">{{ server.info.network.rx_total }} / {{
+                      server.info.network.tx_total }}</span>
                   </div>
                 </div>
               </div>
@@ -340,28 +396,29 @@
                       {{ server.info.docker.installed ? '已安装' : '未检测到' }}
                     </span>
                     <span
-                      v-if="server.info.docker.installed && (server.info.docker.containers.length > 0 || server.info.docker.runningCount !== undefined)"
+                      v-if="server.info.docker.installed && ((server.info.docker.containers && server.info.docker.containers.length > 0) || server.info.docker.runningCount !== undefined)"
                       class="docker-container-count">
                       <span style="color: var(--success-color);">● </span>
-                      {{ server.info.docker.containers.length > 0 ? getRunningContainers(server.info.docker.containers)
+                      {{ (server.info.docker.containers && server.info.docker.containers.length > 0) ?
+                      getRunningContainers(server.info.docker.containers)
                       : (server.info.docker.runningCount || 0) }} 运行
 
                       <!-- 暂停数量 (仅在加载了详情后显示精确数) -->
                       <span
-                        v-if="server.info.docker.containers.length > 0 && getPausedContainers(server.info.docker.containers) > 0"
+                        v-if="server.info.docker.containers && server.info.docker.containers.length > 0 && getPausedContainers(server.info.docker.containers) > 0"
                         style="margin-left: 8px; color: var(--warning-color);">● </span>
                       <span
-                        v-if="server.info.docker.containers.length > 0 && getPausedContainers(server.info.docker.containers) > 0">
+                        v-if="server.info.docker.containers && server.info.docker.containers.length > 0 && getPausedContainers(server.info.docker.containers) > 0">
                         {{ getPausedContainers(server.info.docker.containers) }} 暂停
                       </span>
 
                       <!-- 停止数量 (实时流支持) -->
                       <span
-                        v-if="server.info.docker.containers.length > 0 ? getStoppedContainers(server.info.docker.containers) > 0 : (server.info.docker.stoppedCount > 0)"
+                        v-if="(server.info.docker.containers && server.info.docker.containers.length > 0) ? getStoppedContainers(server.info.docker.containers) > 0 : (server.info.docker.stoppedCount > 0)"
                         style="margin-left: 8px; color: var(--danger-color);">● </span>
                       <span
-                        v-if="server.info.docker.containers.length > 0 ? getStoppedContainers(server.info.docker.containers) > 0 : (server.info.docker.stoppedCount > 0)">
-                        {{ server.info.docker.containers.length > 0 ?
+                        v-if="(server.info.docker.containers && server.info.docker.containers.length > 0) ? getStoppedContainers(server.info.docker.containers) > 0 : (server.info.docker.stoppedCount > 0)">
+                        {{ (server.info.docker.containers && server.info.docker.containers.length > 0) ?
                         getStoppedContainers(server.info.docker.containers) : server.info.docker.stoppedCount }} 停止
                       </span>
                     </span>
@@ -371,7 +428,8 @@
                 <!-- 展开的容器面板 - 使用类似 modal 的样式 -->
                 <div v-if="isDockerPanelExpanded(server.id) && server.info.docker.installed"
                   class="docker-panel-content">
-                  <div v-if="server.info.docker.containers.length > 0" class="docker-containers-grid">
+                  <div v-if="server.info.docker.containers && server.info.docker.containers.length > 0"
+                    class="docker-containers-grid">
                     <div v-for="container in server.info.docker.containers" :key="container.id"
                       class="docker-container-mini-card" :class="{ 
                               'running': container.status.includes('Up') && !container.status.includes('Paused'),

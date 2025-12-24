@@ -177,6 +177,7 @@ export const metricsMethods = {
                 cpu: { Load: '-', Usage: '0%', Cores: '-' },
                 memory: { Used: '-', Total: '-', Usage: '0%' },
                 disk: [{ device: '/', used: '-', total: '-', usage: '0%' }],
+                network: { connections: 0, rx_speed: '0 B/s', tx_speed: '0 B/s', rx_total: '-', tx_total: '-' },
                 system: {},
                 docker: { installed: false, containers: [] }
             };
@@ -217,13 +218,28 @@ export const metricsMethods = {
                     }
                 }
 
-                // 5. 更新 Docker 概要信息
+                // 5. 更新 Docker 概要信息 (确保 containers 数组始终存在)
                 if (item.metrics.docker) {
                     info.docker = {
+                        containers: [], // 始终提供默认空数组，防止 v-for 遍历 undefined
                         ...info.docker,
                         installed: !!item.metrics.docker.installed,
                         runningCount: item.metrics.docker.running || 0,
                         stoppedCount: item.metrics.docker.stopped || 0
+                    };
+                }
+                // 兜底：确保 docker.containers 始终是数组
+                if (!info.docker) {
+                    info.docker = { installed: false, containers: [] };
+                } else if (!Array.isArray(info.docker.containers)) {
+                    info.docker.containers = [];
+                }
+
+                // 6. 更新网络信息
+                if (item.metrics.network) {
+                    info.network = {
+                        ...(info.network || {}),
+                        ...item.metrics.network
                     };
                 }
 
@@ -342,6 +358,13 @@ export const metricsMethods = {
     setMetricsTimeRange(range) {
         this.metricsHistoryTimeRange = range;
         this.loadMetricsHistory(1);
+
+        // 如果主机列表有展开的卡片，同步刷新它们的图表
+        if (this.expandedServers && this.expandedServers.length > 0) {
+            this.expandedServers.forEach(serverId => {
+                this.loadCardMetrics(serverId);
+            });
+        }
     },
 
     async triggerMetricsCollect() {
@@ -492,23 +515,23 @@ export const metricsMethods = {
                         label: 'CPU (%)',
                         data: cpuData,
                         borderColor: '#10b981',
-                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                        borderWidth: 2,
-                        fill: true,
-                        tension: 0.4,
-                        pointRadius: 1,
-                        pointHoverRadius: 4
+                        backgroundColor: 'transparent',
+                        borderWidth: 2.5,
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        pointHoverRadius: 5
                     },
                     {
                         label: '内存 (%)',
                         data: memData,
                         borderColor: '#3b82f6',
-                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                        borderWidth: 2,
-                        fill: true,
-                        tension: 0.4,
-                        pointRadius: 1,
-                        pointHoverRadius: 4
+                        backgroundColor: 'transparent',
+                        borderWidth: 2.5,
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        pointHoverRadius: 5
                     }
                 ]
             },
@@ -531,24 +554,32 @@ export const metricsMethods = {
                 scales: {
                     x: {
                         display: true,
-                        grid: { display: false },
+                        grid: {
+                            display: true,
+                            color: 'rgba(255, 255, 255, 0.06)',
+                            drawBorder: false
+                        },
                         ticks: {
                             maxRotation: 0,
                             autoSkip: true,
                             maxTicksLimit: 6,
-                            font: { size: 11 },
-                            color: '#8b949e'
+                            font: { size: 10 },
+                            color: '#6e7681'
                         }
                     },
                     y: {
                         display: true,
                         min: 0,
                         max: 100,
-                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                        grid: {
+                            display: true,
+                            color: 'rgba(255, 255, 255, 0.06)',
+                            drawBorder: false
+                        },
                         ticks: {
-                            font: { size: 11 },
-                            color: '#8b949e',
-                            stepSize: 20
+                            font: { size: 10 },
+                            color: '#6e7681',
+                            stepSize: 25
                         }
                     }
                 },
@@ -568,11 +599,27 @@ export const metricsMethods = {
         if (!serverId) return;
 
         try {
+            // 计算时间范围 (使用与 loadMetricsHistory 相同的逻辑)
+            let startTime = null;
+            const now = Date.now();
+
+            switch (this.metricsHistoryTimeRange) {
+                case '1h': startTime = new Date(now - 60 * 60 * 1000).toISOString(); break;
+                case '6h': startTime = new Date(now - 6 * 60 * 60 * 1000).toISOString(); break;
+                case '24h': startTime = new Date(now - 24 * 60 * 60 * 1000).toISOString(); break;
+                case '7d': startTime = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString(); break;
+                case 'all': default: startTime = null;
+            }
+
             const params = new URLSearchParams({
                 serverId: serverId,
                 page: 1,
-                pageSize: 30 // 获取最近 30 条记录
+                pageSize: 10000 // 获取该段时间内所有记录以保证图表精细度
             });
+
+            if (startTime) {
+                params.append('startTime', startTime);
+            }
 
             const response = await fetch(`/api/server/metrics/history?${params}`, {
                 headers: this.getAuthHeaders()

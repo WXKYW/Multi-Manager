@@ -650,10 +650,10 @@ export const hostMethods = {
                     const existing = existingServersMap.get(server.id);
                     return {
                         ...server,
-                        // 如果已存在且有 info，保留 info；否则初始化为 null
-                        info: existing ? existing.info : null,
-                        error: existing ? existing.error : null,
-                        loading: existing ? existing.loading : false
+                        // 优先使用 API 返回的 info（首屏瞬显关键），如果本地已有且更新则保持本地
+                        info: (existing && existing.info && !server.info) ? existing.info : server.info,
+                        error: (existing && existing.error) ? existing.error : null,
+                        loading: (existing && existing.loading) ? existing.loading : false
                     };
                 });
             } else {
@@ -809,6 +809,21 @@ export const hostMethods = {
             this.showGlobalToast('Docker 操作异常', 'error');
         } finally {
             if (server) server.loading = false;
+        }
+    },
+
+    loadFromServerListCache() {
+        try {
+            const cached = localStorage.getItem('cached_server_list');
+            if (cached) {
+                const servers = JSON.parse(cached);
+                if (Array.isArray(servers) && servers.length > 0) {
+                    console.log('[Host] Loaded servers from cache');
+                    this.serverList = servers;
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to load server cache:', e);
         }
     },
 
