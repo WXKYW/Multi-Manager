@@ -835,17 +835,26 @@ export const hostMethods = {
 
     getRunningContainers(containers) {
         if (!containers || !Array.isArray(containers)) return 0;
-        return containers.filter(c => c.status && c.status.includes('Up') && !c.status.includes('Paused')).length;
+        return containers.filter(c => {
+            if (c.state) return c.state === 'running';
+            return c.status && c.status.includes('Up') && !c.status.includes('Paused');
+        }).length;
     },
 
     getPausedContainers(containers) {
         if (!containers || !Array.isArray(containers)) return 0;
-        return containers.filter(c => c.status && c.status.includes('Paused')).length;
+        return containers.filter(c => {
+            if (c.state) return c.state === 'paused';
+            return c.status && c.status.includes('Paused');
+        }).length;
     },
 
     getStoppedContainers(containers) {
         if (!containers || !Array.isArray(containers)) return 0;
-        return containers.filter(c => c.status && !c.status.includes('Up')).length;
+        return containers.filter(c => {
+            if (c.state) return c.state !== 'running' && c.state !== 'paused';
+            return c.status && !c.status.includes('Up');
+        }).length;
     },
 
     toggleDockerPanel(serverId) {

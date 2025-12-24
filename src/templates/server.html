@@ -495,21 +495,24 @@
                     class="docker-containers-grid">
                     <div v-for="container in server.info.docker.containers" :key="container.id"
                       class="docker-container-mini-card" :class="{ 
-                              'running': container.status.includes('Up') && !container.status.includes('Paused'),
-                              'paused': container.status.includes('Paused')
+                              'running': container.state === 'running' || (container.status && container.status.includes('Up') && !container.status.includes('Paused')),
+                              'paused': container.state === 'paused' || (container.status && container.status.includes('Paused'))
                             }">
                       <div class="container-info">
                         <span class="container-status-dot"
-                          :class="{ 'online': container.status.includes('Up') && !container.status.includes('Paused'), 'paused': container.status.includes('Paused') }"></span>
+                          :class="{ 'online': container.state === 'running' || (container.status && container.status.includes('Up') && !container.status.includes('Paused')), 'paused': container.state === 'paused' || (container.status && container.status.includes('Paused')) }"></span>
                         <span class="container-name" :title="container.name">{{ container.name }}</span>
                       </div>
                       <div class="container-actions">
-                        <button v-if="container.status.includes('Up') && !container.status.includes('Paused')"
+                        <button
+                          v-if="container.state === 'running' || (container.status && container.status.includes('Up') && !container.status.includes('Paused'))"
                           class="btn btn-xs btn-warning icon-only"
                           @click.stop="handleDockerAction(server.id, container.id, 'pause')" title="暂停">
                           <i class="fas fa-pause"></i>
                         </button>
-                        <button v-else-if="container.status.includes('Paused')" class="btn btn-xs btn-success icon-only"
+                        <button
+                          v-else-if="container.state === 'paused' || (container.status && container.status.includes('Paused'))"
+                          class="btn btn-xs btn-success icon-only"
                           @click.stop="handleDockerAction(server.id, container.id, 'unpause')" title="恢复">
                           <i class="fas fa-play"></i>
                         </button>
