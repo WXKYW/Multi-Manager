@@ -404,6 +404,10 @@ router.put('/monitor/config', (req, res) => {
     try {
         const config = monitorConfigStorage.update(req.body);
         monitorService.restart();
+        // 同时也重启历史指标采集，因为可能修改了采集间隔
+        if (req.body.metrics_collect_interval !== undefined) {
+            agentService.startHistoryCollector();
+        }
         res.json({ success: true, message: '监控配置更新成功', data: config });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
@@ -542,6 +546,8 @@ router.put('/metrics/collector/interval', (req, res) => {
                 ...config,
                 metrics_collect_interval: Math.floor(interval / 1000) // 转为秒存储
             });
+            // 关键修复：更新配置后必须立即重启采集定时器，否则新间隔不会生效
+            agentService.startHistoryCollector();
         }
 
         res.json({ success: true, message: '采集间隔已更新并保存' });

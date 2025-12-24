@@ -264,7 +264,7 @@ class MonitorService {
 
         return {
             isRunning: onlineAgents > 0,
-            interval: (config?.probe_interval || 60) * 1000, // 转换为毫秒
+            interval: (config?.metrics_collect_interval || 300) * 1000, // 转换为毫秒 (历史指标采集间隔)
             cachedServers: this.metricsCache.size,
             activeStreams: onlineAgents,
             config: {
