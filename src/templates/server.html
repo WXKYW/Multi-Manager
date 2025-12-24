@@ -138,10 +138,18 @@
           </div>
 
           <div style="display: flex; flex-direction: column; min-width: 0;">
-            <div style="display: flex; align-items: baseline; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
               <span
                 style="font-size: 15px; font-weight: 700; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{
                 server.name }}</span>
+
+              <!-- Tags (Moved to right of name) -->
+              <div v-if="server.tags && server.tags.length > 0" style="display: flex; gap: 4px;">
+                <span v-for="tag in server.tags" :key="tag"
+                  style="font-size: 8px; padding: 1px 5px; border-radius: 4px; background: rgba(var(--primary-rgb), 0.1); color: var(--primary-color); border: 1px solid rgba(var(--primary-rgb), 0.2); font-weight: 600;">{{
+                  tag }}</span>
+              </div>
+
               <!-- Latency Pill Badge -->
               <div v-if="server.response_time" :style="{
                 display: 'inline-flex',
@@ -158,22 +166,15 @@
                 {{ server.response_time }}ms
               </div>
             </div>
-            <!-- Tags -->
-            <div v-if="server.tags && server.tags.length > 0"
-              style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px;">
-              <span v-for="tag in server.tags" :key="tag"
-                style="font-size: 8px; padding: 0 4px; border-radius: 3px; background: var(--bg-tertiary); color: var(--text-tertiary); border: 1px solid var(--border-color);">{{
-                tag }}</span>
-            </div>
           </div>
         </div>
 
         <!-- Telemetry Group (Center/Responsive) -->
-        <div class="metrics-row"
-          style="display: flex; align-items: center; gap: 12px; flex: 2; justify-content: flex-end; min-width: 240px;">
+        <div class="network-metrics"
+          style="display: flex; align-items: center; gap: 12px; flex: 2; justify-content: flex-end; min-width: 140px;">
 
           <!-- Network Speed Mini -->
-          <div v-if="server.info && server.info.network"
+          <div v-if="server.info && server.info.network" class="network-speed-mini"
             style="flex: 0 0 auto; display: flex; flex-direction: column; gap: 2px; align-items: flex-end;">
             <div
               style="display: flex; align-items: center; font-size: 10px; font-family: var(--font-mono); color: #3b82f6;">
@@ -194,63 +195,67 @@
           </div>
         </div>
 
-        <!-- CPU Micro-meter -->
-        <div style="flex: 1; max-width: 80px;">
-          <div
-            style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 800; color: var(--text-tertiary); margin-bottom: 4px; text-transform: uppercase;">
-            <span>CPU</span>
-            <span v-if="server.info && server.info.cpu" style="color: #10b981;">{{ parseInt(server.info.cpu.Usage)
-              }}%</span>
+        <!-- 硬件负载指标组 (CPU/MEM/DISK) -->
+        <div class="metrics-meters"
+          style="display: flex; align-items: center; gap: 12px; flex: 3; justify-content: flex-end;">
+          <!-- CPU Micro-meter -->
+          <div class="meter-item" style="flex: 1; min-width: 60px; max-width: 80px;">
+            <div
+              style="display: flex; justify-content: space-between; font-size: 10px; font-weight: 800; color: var(--text-tertiary); margin-bottom: 4px; text-transform: uppercase;">
+              <span>CPU</span>
+              <span v-if="server.info && server.info.cpu" style="color: #10b981;">{{ parseInt(server.info.cpu.Usage)
+                }}%</span>
+            </div>
+            <div style="height: 4px; background: var(--bg-tertiary); border-radius: 2px; overflow: hidden;">
+              <div v-if="server.info && server.info.cpu" :style="{ 
+                  width: server.info.cpu.Usage, height: '100%', 
+                  transition: 'width 0.5s ease, background 0.3s ease',
+                  background: parseFloat(server.info.cpu.Usage) > 85 ? '#ef4444' : '#10b981',
+                  boxShadow: '0 0 4px ' + (parseFloat(server.info.cpu.Usage) > 85 ? 'rgba(239, 68, 68, 0.4)' : 'rgba(16, 185, 129, 0.2)')
+                }"></div>
+            </div>
           </div>
-          <div style="height: 4px; background: var(--bg-tertiary); border-radius: 2px; overflow: hidden;">
-            <div v-if="server.info && server.info.cpu" :style="{ 
-                width: server.info.cpu.Usage, height: '100%', 
-                transition: 'width 0.5s ease, background 0.3s ease',
-                background: parseFloat(server.info.cpu.Usage) > 85 ? '#ef4444' : '#10b981',
-                boxShadow: '0 0 4px ' + (parseFloat(server.info.cpu.Usage) > 85 ? 'rgba(239, 68, 68, 0.4)' : 'rgba(16, 185, 129, 0.2)')
-              }"></div>
-          </div>
-        </div>
 
-        <!-- MEM Micro-meter -->
-        <div style="flex: 1; max-width: 80px;">
-          <div
-            style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 800; color: var(--text-tertiary); margin-bottom: 4px; text-transform: uppercase;">
-            <span>MEM</span>
-            <span v-if="server.info && server.info.memory" style="color: #3b82f6;">{{
-              parseInt(server.info.memory.Usage) }}%</span>
+          <!-- MEM Micro-meter -->
+          <div class="meter-item" style="flex: 1; min-width: 60px; max-width: 80px;">
+            <div
+              style="display: flex; justify-content: space-between; font-size: 10px; font-weight: 800; color: var(--text-tertiary); margin-bottom: 4px; text-transform: uppercase;">
+              <span>MEM</span>
+              <span v-if="server.info && server.info.memory" style="color: #3b82f6;">{{
+                parseInt(server.info.memory.Usage) }}%</span>
+            </div>
+            <div style="height: 4px; background: var(--bg-tertiary); border-radius: 2px; overflow: hidden;">
+              <div v-if="server.info && server.info.memory" :style="{ 
+                  width: server.info.memory.Usage, height: '100%', 
+                  transition: 'width 0.5s ease, background 0.3s ease',
+                  background: parseFloat(server.info.memory.Usage) > 85 ? '#ef4444' : '#3b82f6',
+                  boxShadow: '0 0 4px ' + (parseFloat(server.info.memory.Usage) > 85 ? 'rgba(239, 68, 68, 0.4)' : 'rgba(59, 130, 246, 0.2)')
+                }"></div>
+            </div>
           </div>
-          <div style="height: 4px; background: var(--bg-tertiary); border-radius: 2px; overflow: hidden;">
-            <div v-if="server.info && server.info.memory" :style="{ 
-                width: server.info.memory.Usage, height: '100%', 
-                transition: 'width 0.5s ease, background 0.3s ease',
-                background: parseFloat(server.info.memory.Usage) > 85 ? '#ef4444' : '#3b82f6',
-                boxShadow: '0 0 4px ' + (parseFloat(server.info.memory.Usage) > 85 ? 'rgba(239, 68, 68, 0.4)' : 'rgba(59, 130, 246, 0.2)')
-              }"></div>
-          </div>
-        </div>
 
-        <!-- DISK Micro-meter -->
-        <div style="flex: 1; max-width: 80px;">
-          <div
-            style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 800; color: var(--text-tertiary); margin-bottom: 4px; text-transform: uppercase;">
-            <span>DSK</span>
-            <span v-if="server.info && server.info.disk && server.info.disk.length > 0" style="color: #a855f7;">{{
-              parseInt(server.info.disk[0].usage) }}%</span>
-          </div>
-          <div style="height: 4px; background: var(--bg-tertiary); border-radius: 2px; overflow: hidden;">
-            <div v-if="server.info && server.info.disk && server.info.disk.length > 0" :style="{ 
-                width: server.info.disk[0].usage, height: '100%', 
-                transition: 'width 0.5s ease, background 0.3s ease',
-                background: parseFloat(server.info.disk[0].usage) > 85 ? '#ef4444' : '#a855f7',
-                boxShadow: '0 0 4px ' + (parseFloat(server.info.disk[0].usage) > 85 ? 'rgba(239, 68, 68, 0.4)' : 'rgba(168, 85, 247, 0.2)')
-              }"></div>
+          <!-- DISK Micro-meter -->
+          <div class="meter-item" style="flex: 1; min-width: 60px; max-width: 80px;">
+            <div
+              style="display: flex; justify-content: space-between; font-size: 10px; font-weight: 800; color: var(--text-tertiary); margin-bottom: 4px; text-transform: uppercase;">
+              <span>DSK</span>
+              <span v-if="server.info && server.info.disk && server.info.disk.length > 0" style="color: #a855f7;">{{
+                parseInt(server.info.disk[0].usage) }}%</span>
+            </div>
+            <div style="height: 4px; background: var(--bg-tertiary); border-radius: 2px; overflow: hidden;">
+              <div v-if="server.info && server.info.disk && server.info.disk.length > 0" :style="{ 
+                  width: server.info.disk[0].usage, height: '100%', 
+                  transition: 'width 0.5s ease, background 0.3s ease',
+                  background: parseFloat(server.info.disk[0].usage) > 85 ? '#ef4444' : '#a855f7',
+                  boxShadow: '0 0 4px ' + (parseFloat(server.info.disk[0].usage) > 85 ? 'rgba(239, 68, 68, 0.4)' : 'rgba(168, 85, 247, 0.2)')
+                }"></div>
+            </div>
           </div>
         </div>
 
 
         <!-- Action Group (Right) -->
-        <div class="action-group" @click.stop style="display: flex; align-items: center; gap: 6px;">
+        <div class="action-group" @click.stop style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
           <button class="btn-icon-refined" @click="openSSHTerminal(server)"
             style="width: 34px; height: 34px; background: var(--bg-tertiary);" title="SSH 终端">
             <i class="fas fa-terminal" style="font-size: 13px;"></i>
@@ -798,21 +803,21 @@
             </div>
           </div>
 
-          <div style="display: flex; gap: 8px;">
-            <button class="btn btn-success btn-sm" @click="openAddServerModal">
-              <i class="fas fa-plus"></i> 添加主机
+          <div class="server-management-actions" style="display: flex; gap: 8px;">
+            <button class="btn btn-success btn-sm" @click="openAddServerModal" title="添加主机">
+              <i class="fas fa-plus"></i> <span>添加主机</span>
             </button>
-            <button class="btn btn-primary btn-sm" @click="showBatchAgentInstallModal">
-              <i class="fas fa-robot"></i> 批量部署 Agent
+            <button class="btn btn-primary btn-sm" @click="showBatchAgentInstallModal" title="批量部署 Agent">
+              <i class="fas fa-robot"></i> <span>批量部署 Agent</span>
             </button>
-            <button class="btn btn-secondary btn-sm" @click="loadServerList" :disabled="serverLoading">
+            <button class="btn btn-secondary btn-sm" @click="loadServerList" :disabled="serverLoading" title="刷新列表">
               <i class="fas fa-sync-alt" :class="{ 'fa-spin': serverLoading }"></i>
             </button>
-            <button class="btn btn-secondary btn-sm" @click="exportServers">
-              <i class="fas fa-upload"></i> 导出
+            <button class="btn btn-secondary btn-sm" @click="exportServers" title="导出">
+              <i class="fas fa-upload"></i> <span>导出</span>
             </button>
-            <button class="btn btn-secondary btn-sm" @click="openImportServerModal">
-              <i class="fas fa-download"></i> 导入
+            <button class="btn btn-secondary btn-sm" @click="openImportServerModal" title="导入">
+              <i class="fas fa-download"></i> <span>导入</span>
             </button>
           </div>
         </div>

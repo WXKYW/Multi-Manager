@@ -3465,11 +3465,113 @@
 
 /* 移动端适配 */
 @media (max-width: 768px) {
+    .server-card-header {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 10px !important;
+        padding: 12px 14px !important;
+        position: relative !important;
+    }
+
+    .server-card-header .id-group {
+        width: 100% !important;
+        min-width: 0 !important;
+        justify-content: flex-start !important;
+        padding-right: 40px !important;
+        /* 给绝对定位的按钮留位置 */
+    }
+
+    /* 将操作按钮固定在右侧 */
+    .server-card-header .action-group {
+        position: absolute !important;
+        right: 12px !important;
+        top: 10px !important;
+        margin: 0 !important;
+    }
+
+    .server-card-header .action-group .btn-icon-refined {
+        width: 30px !important;
+        height: 30px !important;
+        border-radius: 8px !important;
+        background: rgba(var(--bg-tertiary-rgb), 0.8) !important;
+    }
+
+    .server-card-header .action-group .btn-icon-refined i {
+        font-size: 11px !important;
+    }
+
+    /* 指标组重构 */
+    .server-card-header .metrics-meters {
+        width: 100% !important;
+        justify-content: space-between !important;
+        gap: 8px !important;
+        flex: none !important;
+        order: 2 !important;
+    }
+
+    .server-card-header .meter-item {
+        max-width: none !important;
+        flex: 1 !important;
+        background: var(--bg-secondary) !important;
+        padding: 6px 10px !important;
+        border-radius: 8px !important;
+        border: 1px solid var(--border-color) !important;
+    }
+
+    /* 网络指标重构 */
+    .server-card-header .network-metrics {
+        width: 100% !important;
+        justify-content: flex-start !important;
+        padding: 4px 0 !important;
+        order: 3 !important;
+        min-width: 0 !important;
+        flex: none !important;
+    }
+
+    .server-card-header .network-speed-mini {
+        flex-direction: row !important;
+        gap: 20px !important;
+        width: 100% !important;
+        align-items: center !important;
+        background: rgba(var(--primary-rgb), 0.03) !important;
+        padding: 4px 10px !important;
+        border-radius: 8px !important;
+    }
+
+    .server-card-header .network-speed-mini>div {
+        flex: 1 !important;
+    }
+
+    .server-management-actions span {
+        display: none !important;
+    }
+
+    .server-management-actions .btn {
+        width: 36px !important;
+        height: 36px !important;
+        padding: 0 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        border-radius: 10px !important;
+    }
+
+    .server-management-actions .btn i {
+        margin: 0 !important;
+        font-size: 14px !important;
+    }
+
+    .server-management-actions {
+        flex-wrap: wrap !important;
+        justify-content: flex-end !important;
+    }
+
     .server-quick-info {
         width: 100%;
         margin: 8px 0 0 0;
         justify-content: flex-start;
-        order: 3;
+        order: 4;
     }
 
     .metric-pill {

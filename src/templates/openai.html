@@ -96,19 +96,19 @@
     <div class="panel">
       <div class="panel-header">
         <div class="panel-title"><i class="fas fa-server" style="margin-right: 8px; color: #10a37f;"></i>API 端点管理</div>
-        <div style="display: flex; gap: 8px;">
-          <button class="btn btn-success paas-control-btn" @click="openAddOpenaiEndpointModal">
-            <i class="fas fa-plus"></i> 添加账号
+        <div class="openai-management-actions" style="display: flex; gap: 8px;">
+          <button class="btn btn-success paas-control-btn" @click="openAddOpenaiEndpointModal" title="添加账号">
+            <i class="fas fa-plus"></i> <span>添加账号</span>
           </button>
           <button class="btn btn-secondary paas-control-btn" @click="refreshAllOpenaiEndpoints"
-            :disabled="openaiRefreshing">
-            <i class="fas fa-sync-alt" :class="{ 'fa-spin': openaiRefreshing }"></i> 刷新全部
+            :disabled="openaiRefreshing" title="刷新全部">
+            <i class="fas fa-sync-alt" :class="{ 'fa-spin': openaiRefreshing }"></i> <span>刷新全部</span>
           </button>
-          <button class="btn btn-secondary paas-control-btn" @click="exportOpenaiEndpoints">
-            <i class="fas fa-upload"></i> 导出
+          <button class="btn btn-secondary paas-control-btn" @click="exportOpenaiEndpoints" title="导出">
+            <i class="fas fa-upload"></i> <span>导出</span>
           </button>
-          <button class="btn btn-secondary paas-control-btn" @click="importOpenaiEndpointsFromFile">
-            <i class="fas fa-download"></i> 导入
+          <button class="btn btn-secondary paas-control-btn" @click="importOpenaiEndpointsFromFile" title="导入">
+            <i class="fas fa-download"></i> <span>导入</span>
           </button>
         </div>
       </div>

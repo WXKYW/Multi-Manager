@@ -199,3 +199,30 @@
         transform: translateY(0);
     }
 }
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+    .openai-management-actions span {
+        display: none !important;
+    }
+
+    .openai-management-actions .btn {
+        width: 36px !important;
+        height: 36px !important;
+        padding: 0 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        border-radius: 10px !important;
+    }
+
+    .openai-management-actions .btn i {
+        margin: 0 !important;
+        font-size: 14px !important;
+    }
+
+    .openai-management-actions {
+        flex-wrap: wrap !important;
+        justify-content: flex-end !important;
+    }
+}
