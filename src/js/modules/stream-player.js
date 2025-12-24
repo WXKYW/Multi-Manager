@@ -16,15 +16,28 @@ import { toast } from './toast.js';
 
 // ==================== 配置常量 ====================
 
-// 可能可以直接播放的格式 (取决于编码或浏览器插件)
-MAYBE_NATIVE: ['mkv', 'ts', 'avi', 'wmv', 'rmvb', 'rm', 'asf', 'vob', '3gp', 'mov'],
+const PLAYER_CONFIG = {
+    // 浏览器原生支持度高的格式
+    NATIVE_FORMATS: ['mp4', 'webm', 'ogg'],
+
+    // 需要 Hls.js 支持的格式
+    HLS_FORMATS: ['m3u8'],
+
+    // 需要 flv.js 支持的格式
+    FLV_FORMATS: ['flv'],
+
+    // 需要 dash.js 支持 the 格式
+    DASH_FORMATS: ['mpd'],
+
+    // 可能可以直接播放的格式 (取决于编码或浏览器插件)
+    MAYBE_NATIVE: ['mkv', 'ts', 'avi', 'wmv', 'rmvb', 'rm', 'asf', 'vob', '3gp', 'mov'],
 
     // CDN 地址 (使用 npmmirror)
     CDN: {
-    hlsjs: 'https://registry.npmmirror.com/hls.js/1.5.7/files/dist/hls.min.js',
+        hlsjs: 'https://registry.npmmirror.com/hls.js/1.5.7/files/dist/hls.min.js',
         flvjs: 'https://registry.npmmirror.com/flv.js/1.6.2/files/dist/flv.min.js',
-            dashjs: 'https://registry.npmmirror.com/dashjs/4.7.4/files/dist/dash.all.min.js'
-}
+        dashjs: 'https://registry.npmmirror.com/dashjs/4.7.4/files/dist/dash.all.min.js'
+    }
 };
 
 // ==================== 状态管理 ====================
@@ -401,10 +414,11 @@ async function play(options) {
                 return { success: true };
 
             case 'maybe':
+            case 'unknown':
             default:
-                // 尝试直接播放
+                // 尝试直接播放 (针对 maybe 或未知格式)
                 try {
-                    console.log(`[StreamPlayer] Attempting direct playback for ${ext}`);
+                    console.log(`[StreamPlayer] Attempting playback for ${ext || 'unknown'} (type: ${formatType})`);
                     await playNative(videoElement, url);
                     return { success: true };
                 } catch (e) {
@@ -412,19 +426,10 @@ async function play(options) {
                     if (onUnsupported) {
                         onUnsupported(ext, url, filename);
                     }
-                    return { success: false, message: `${ext.toUpperCase()} 格式可能不受浏览器支持，请尝试下载后播放` };
-                }
-
-            default:
-                // 未知格式，尝试原生播放
-                try {
-                    await playNative(videoElement, url);
-                    return { success: true };
-                } catch (e) {
-                    if (onUnsupported) {
-                        onUnsupported(ext, url, filename);
-                    }
-                    return { success: false, message: '未知格式，播放失败' };
+                    const msg = formatType === 'maybe'
+                        ? `${ext.toUpperCase()} 格式可能不受浏览器支持，请尝试下载后播放`
+                        : '该视频格式可能不受支持，播放失败';
+                    return { success: false, message: msg };
                 }
         }
     } catch (error) {
