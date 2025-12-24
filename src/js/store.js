@@ -117,7 +117,7 @@ export const store = reactive({
     // 界面设置
     opacity: 100,
     serverIpDisplayMode: 'normal', // 'normal', 'masked', 'hidden'
-    navLayout: 'top', // 'sidebar' (左侧) or 'top' (顶部)
+    navLayout: 'bottom', // 'sidebar' (左侧), 'top' (顶部) or 'bottom' (底栏)
     showSettingsModal: false, // 设置面板显示状态
     mobileSettingsNavExpanded: false, // 移动端设置导航展开状态
 

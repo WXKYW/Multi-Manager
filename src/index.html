@@ -33,11 +33,11 @@
 
     <!-- 主界面布局 -->
     <div v-if="isAuthenticated" class="app-wrapper no-sidebar"
-      :class="{ 'settings-active-context': showSettingsModal }">
+      :class="[{ 'settings-active-context': showSettingsModal }, 'nav-layout-' + navLayout]">
 
       <!-- 主内容区 -->
       <main class="app-main">
-        <div v-if="isAuthenticated" class="container">
+        <div v-if="isAuthenticated" class="container" :class="'layout-' + navLayout">
           <!-- 页面头部 - 模块控制和设置 -->
           <div class="header">
             <div class="title-group" style="display: flex; align-items: center; gap: 12px;">
@@ -49,7 +49,8 @@
 
             <!-- 右侧操作区 -->
             <div class="header-actions">
-              <button class="btn-settings-toggle" :class="{ active: showSettingsModal }"
+              <button class="btn-settings-toggle"
+                :class="{ active: showSettingsModal, 'pc-hide': navLayout === 'bottom' }"
                 @click="showSettingsModal = !showSettingsModal" title="系统设置">
                 <i class="fas fa-cog"></i>
                 <span>设置</span>
@@ -57,28 +58,37 @@
             </div>
           </div>
 
-          <!-- 主标签页导航 (仅在有多个模块可见时显示) -->
-          <div class="main-tabs" v-if="Object.values(moduleVisibility).filter(v => v).length > 1">
-            <template v-for="module in moduleOrder" :key="module">
-              <button v-if="moduleVisibility[module]" class="main-tab" :class="[
-                  { active: mainActiveTab === module },
-                  module === 'paas' ? 'paas-tab' : '',
-                  module === 'dns' ? 'dns-tab' : '',
-                  module === 'openai' ? 'openai-tab' : '',
-                  module === 'server' ? 'server-tab' : '',
-                  module === 'self-h' ? 'self-h-tab' : '',
-                  module === 'antigravity' ? 'antigravity-tab' : '',
-                  module === 'gemini-cli' ? 'gemini-cli-tab' : ''
-                ]" @click="handleTabSwitch(module)">
-                <i class="fas" :class="getModuleIcon(module)"></i>
-                <span> {{ getModuleName(module) }}</span>
-                <!-- 实时监控流指示器 (仅针对 Hosts 模块) -->
-                <div v-if="module === 'server'" class="nav-live-badge" :class="{ disconnected: !metricsWsConnected }"
-                  :title="metricsWsConnected ? '实时指标流已连接' : '实时监控离线 (后台探测模式)'">
-                  <span class="pulse-dot"></span>
-                </div>
-              </button>
-            </template>
+          <!-- 主导航容器 (PC底栏模式固定定位) -->
+          <div class="main-nav-container" :class="{'nav-bottom-fixed': navLayout === 'bottom'}">
+            <!-- 主标签页导航 (仅在有多个模块可见时显示) -->
+            <div class="main-tabs" v-if="Object.values(moduleVisibility).filter(v => v).length > 1">
+              <template v-for="module in moduleOrder" :key="module">
+                <button v-if="moduleVisibility[module]" class="main-tab" :class="[
+                    { active: mainActiveTab === module },
+                    module === 'paas' ? 'paas-tab' : '',
+                    module === 'dns' ? 'dns-tab' : '',
+                    module === 'openai' ? 'openai-tab' : '',
+                    module === 'server' ? 'server-tab' : '',
+                    module === 'self-h' ? 'self-h-tab' : '',
+                    module === 'antigravity' ? 'antigravity-tab' : '',
+                    module === 'gemini-cli' ? 'gemini-cli-tab' : ''
+                  ]" @click="handleTabSwitch(module)">
+                  <i class="fas" :class="getModuleIcon(module)"></i>
+                  <span> {{ getModuleName(module) }}</span>
+                  <!-- 实时监控流指示器 (仅针对 Hosts 模块) -->
+                  <div v-if="module === 'server'" class="nav-live-badge" :class="{ disconnected: !metricsWsConnected }"
+                    :title="metricsWsConnected ? '实时指标流已连接' : '实时监控离线 (后台探测模式)'">
+                    <span class="pulse-dot"></span>
+                  </div>
+                </button>
+              </template>
+            </div>
+
+            <!-- PC 底栏专用设置按钮 -->
+            <button v-if="navLayout === 'bottom'" class="btn-settings-pc-bottom pc-only"
+              :class="{ active: showSettingsModal }" @click="showSettingsModal = !showSettingsModal" title="系统设置">
+              <i class="fas fa-cog"></i>
+            </button>
           </div>
 
           <!-- 模块模板占位符 (使用 v-show 实现持久化 DOM，解决切换卡顿) -->

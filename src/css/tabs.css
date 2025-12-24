@@ -281,6 +281,131 @@
   }
 }
 
+/* ==================== 底栏布局模式 (Bottom Bar) ==================== */
+
+/* 仅在非移动端（宽度 > 768px）且 navLayout 为 bottom 时生效 */
+@media (min-width: 769px) {
+
+  /* 新增：主导航固定定位容器 */
+  .nav-bottom-fixed {
+    position: fixed !important;
+    bottom: 24px !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    z-index: 1000 !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 12px !important;
+  }
+
+  .nav-layout-bottom .main-tabs {
+    position: relative !important;
+    bottom: auto !important;
+    left: auto !important;
+    transform: none !important;
+
+    /* 悬浮胶囊样式 */
+    background: rgba(17, 24, 39, 0.8) !important;
+    backdrop-filter: blur(20px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 100px !important;
+    padding: 6px 10px !important;
+    margin: 0 !important;
+    gap: 4px !important;
+    justify-content: center !important;
+    box-shadow:
+      0 10px 40px rgba(0, 0, 0, 0.3),
+      0 0 0 1px rgba(255, 255, 255, 0.05) inset !important;
+
+    width: auto !important;
+    min-width: 380px;
+    height: 56px !important;
+    display: flex !important;
+    align-items: center !important;
+    border-bottom: none !important;
+  }
+
+  /* PC 底栏模式专用设置按钮 - 圆形、高度一致 */
+  .btn-settings-pc-bottom {
+    width: 56px !important;
+    height: 56px !important;
+    border-radius: 50% !important;
+    background: rgba(17, 24, 39, 0.8) !important;
+    backdrop-filter: blur(20px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 20px !important;
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3) !important;
+    flex-shrink: 0 !important;
+  }
+
+  .btn-settings-pc-bottom:hover {
+    background: rgba(var(--current-rgb, var(--primary-rgb)), 0.2) !important;
+    color: var(--current-primary, var(--primary-color)) !important;
+    transform: translateY(-2px) rotate(30deg) !important;
+    border-color: var(--current-primary, var(--primary-color)) !important;
+  }
+
+  .btn-settings-pc-bottom.active {
+    background: var(--current-primary, var(--primary-color)) !important;
+    color: white !important;
+    border-color: var(--current-primary, var(--primary-color)) !important;
+  }
+
+  /* 隐藏特定场景下的按钮 */
+  .pc-hide {
+    display: none !important;
+  }
+
+  .nav-layout-bottom .main-tab {
+    border-radius: 50px !important;
+    padding: 8px 16px !important;
+    margin-bottom: 0 !important;
+    height: 42px !important;
+    font-size: 13px !important;
+    color: var(--text-tertiary);
+  }
+
+  .nav-layout-bottom .main-tab:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+  }
+
+  .nav-layout-bottom .main-tab.active {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--current-primary, var(--primary-color)) !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  }
+
+  /* 隐藏指示条 */
+  .nav-layout-bottom .main-tab::after {
+    display: none !important;
+  }
+
+  /* 容器边距 */
+  .layout-bottom.container {
+    padding-bottom: 110px !important;
+  }
+
+  /* 适配浅色模式 */
+  @media (prefers-color-scheme: light) {
+
+    .nav-layout-bottom .main-tabs,
+    .btn-settings-pc-bottom {
+      background: rgba(255, 255, 255, 0.85) !important;
+      border: 1px solid rgba(0, 0, 0, 0.08) !important;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1) !important;
+    }
+  }
+}
+
 /* 侧边栏模式响应式 - 小屏幕 */
 @media (max-width: 768px) {
   .container.sidebar-layout {

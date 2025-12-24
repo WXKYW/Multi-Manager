@@ -403,8 +403,8 @@
 
               <!-- 右侧列：组合多个独立功能卡片 -->
               <div style="display: flex; flex-direction: column; gap: 20px;">
-                <!-- 界面布局卡片 -->
-                <div class="settings-group" style="margin-bottom: 0; flex: 1;">
+                <!-- 界面布局卡片 (手机端隐藏，PC端可选) -->
+                <div class="settings-group pc-only" style="margin-bottom: 0; flex: 1;">
                   <div class="settings-group-title">
                     <i class="fas fa-columns" style="color: var(--primary-color);"></i> 界面布局
                   </div>
@@ -414,10 +414,10 @@
                   <div class="form-group" style="margin-top: 16px;">
                     <label class="form-label" style="font-size: 13px; font-weight: 600;">导航栏显示位置</label>
                     <div style="display: flex; gap: 10px;">
-                      <button class="btn btn-sm" :class="navLayout === 'sidebar' ? 'btn-primary' : 'btn-secondary'"
-                        @click="navLayout = 'sidebar'; saveUserSettingsToServer()"
+                      <button class="btn btn-sm" :class="navLayout === 'bottom' ? 'btn-primary' : 'btn-secondary'"
+                        @click="navLayout = 'bottom'; saveUserSettingsToServer()"
                         style="flex: 1; height: 40px; font-size: 13px;">
-                        <i class="fas fa-bars" style="margin-right: 6px;"></i> 左侧边栏
+                        <i class="fas fa-window-minimize" style="margin-right: 6px;"></i> 底栏风格
                       </button>
                       <button class="btn btn-sm" :class="navLayout === 'top' ? 'btn-primary' : 'btn-secondary'"
                         @click="navLayout = 'top'; saveUserSettingsToServer()"

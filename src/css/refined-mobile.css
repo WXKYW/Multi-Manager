@@ -589,6 +589,11 @@
         width: auto !important;
         min-width: 100% !important;
     }
+
+    /* 隐藏仅 PC 可见的元素 (如导航布局设置) */
+    .pc-only {
+        display: none !important;
+    }
 }
 
 /* 平板适配 (iPad etc) */

@@ -70,7 +70,8 @@ export const settingsMethods = {
             this.serverIpDisplayMode = settings.serverIpDisplayMode;
           }
           if (settings.navLayout) {
-            store.navLayout = settings.navLayout;
+            // 如果之前是侧边栏，或者没有设置，现在统一切换到底栏风格
+            store.navLayout = (settings.navLayout === 'sidebar' || !settings.navLayout) ? 'bottom' : settings.navLayout;
           }
 
           this.activateFirstVisibleModule();

@@ -708,7 +708,7 @@ body.modal-open {
   align-items: center;
   justify-content: center;
   width: 10px;
-  height: 10px;
+  height: 17px;
   align-self: flex-end;
   margin-bottom: 3px;
   /* 匹配文字基线 */
