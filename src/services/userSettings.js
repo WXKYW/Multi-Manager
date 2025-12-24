@@ -45,7 +45,7 @@ function loadUserSettings() {
     if (!('self-h' in visibility)) {
       visibility['self-h'] = false;
     }
-    
+
     if (!order.includes('gemini-cli')) {
       order.push('gemini-cli');
     }
@@ -82,16 +82,17 @@ function loadUserSettings() {
 function saveUserSettings(settings) {
   try {
     // 转换字段名，并确保即便字段不存在也能保留默认结构
+    // 注意：必须检查 undefined，因为空字符串 "" 是有效值，不能用 || 运算符覆盖
     const dbSettings = {
-      custom_css: settings.customCss !== undefined ? settings.customCss : (settings.custom_css || ''),
-      zeabur_refresh_interval: settings.zeaburRefreshInterval !== undefined ? settings.zeaburRefreshInterval : (settings.zeabur_refresh_interval || 30000),
-      module_visibility: settings.moduleVisibility || settings.module_visibility,
-      channel_enabled: settings.channelEnabled || settings.channel_enabled,
-      channel_model_prefix: settings.channelModelPrefix || settings.channel_model_prefix,
-      module_order: settings.moduleOrder || settings.module_order,
-      load_balancing_strategy: settings.load_balancing_strategy || settings.load_balancing_strategy_form || 'random',
-      server_ip_display_mode: settings.serverIpDisplayMode || settings.server_ip_display_mode || 'normal',
-      main_tabs_layout: settings.navLayout || settings.mainTabsLayout || settings.main_tabs_layout || 'top'
+      custom_css: settings.customCss !== undefined ? settings.customCss : settings.custom_css,
+      zeabur_refresh_interval: settings.zeaburRefreshInterval !== undefined ? settings.zeaburRefreshInterval : settings.zeabur_refresh_interval,
+      module_visibility: settings.moduleVisibility !== undefined ? settings.moduleVisibility : settings.module_visibility,
+      channel_enabled: settings.channelEnabled !== undefined ? settings.channelEnabled : settings.channel_enabled,
+      channel_model_prefix: settings.channelModelPrefix !== undefined ? settings.channelModelPrefix : settings.channel_model_prefix,
+      module_order: settings.moduleOrder !== undefined ? settings.moduleOrder : settings.module_order,
+      load_balancing_strategy: settings.load_balancing_strategy || settings.load_balancing_strategy_form,
+      server_ip_display_mode: settings.serverIpDisplayMode !== undefined ? settings.serverIpDisplayMode : settings.server_ip_display_mode,
+      main_tabs_layout: settings.navLayout || settings.mainTabsLayout || settings.main_tabs_layout
     };
 
     // 直接交给 Model 层处理，Model 层会自动处理 JSON 序列化和数据库列更新

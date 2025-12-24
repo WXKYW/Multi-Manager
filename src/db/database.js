@@ -316,13 +316,12 @@ class DatabaseService {
      */
     async backup(backupPath) {
         try {
-            // 使用文件复制方式备份，更可靠
-            // 先确保数据库已同步到磁盘
+            logger.info('开始执行数据库备份...');
             const db = this.getDatabase();
-            db.pragma('wal_checkpoint(TRUNCATE)');
 
-            // 复制数据库文件
-            await fs.promises.copyFile(this.dbPath, backupPath);
+            // 使用 better-sqlite3 原生备份 API
+            // 这会自动处理 WAL 合并和一致性，比直接复制文件更安全
+            await db.backup(backupPath);
 
             logger.success('数据库备份完成: ' + backupPath);
             return backupPath;

@@ -33,8 +33,6 @@ RUN npm run build
 # 阶段 2: 构建 Agent 二进制 (Agent Builder)
 FROM node:18-slim AS agent-builder
 WORKDIR /app/agent
-# 安装构建和压缩工具 (curl 用于下载 UPX, xz-utils 用于解压 .tar.xz)
-RUN apt-get update && apt-get install -y curl xz-utils && rm -rf /var/lib/apt/lists/*
 COPY agent/package.json agent/ ./
 # 设置镜像源并安装依赖
 RUN npm config set registry https://registry.npmmirror.com && \
