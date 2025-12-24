@@ -1,6 +1,5 @@
 /**
  * 系统信息服务
- * 获取主机的系统信息 (最终修复版 - 优化解析与字段对齐)
  */
 
 const sshService = require('./ssh-service');
@@ -66,6 +65,54 @@ class SystemInfoService {
                 echo "Installed: false"
             fi
             
+            echo "---NETWORK---"
+            # 获取默认网卡
+            INTERFACE=$(ip route | grep default | awk '{print $5}' | head -1)
+            if [ -z "$INTERFACE" ]; then INTERFACE=$(ls /sys/class/net | grep -v lo | head -1); fi
+            echo "Interface: $INTERFACE"
+            echo "connections: $(ss -ant | grep -c ESTAB)"
+            
+            # 实时网速采样 (200ms)
+            RX1=$(cat /proc/net/dev | grep $INTERFACE | awk "{print \$2}")
+            TX1=$(cat /proc/net/dev | grep $INTERFACE | awk "{print \$10}")
+            T1=$(date +%s%3N)
+            sleep 0.2
+            RX2=$(cat /proc/net/dev | grep $INTERFACE | awk "{print \$2}")
+            TX2=$(cat /proc/net/dev | grep $INTERFACE | awk "{print \$10}")
+            T2=$(date +%s%3N)
+            
+            # 使用 awk 处理所有网络数学运算，避免 bc 依赖
+            echo "$RX1 $RX2 $TX1 $TX2 $T1 $T2" | awk '{
+                rx_speed = ($2-$1)/(($6-$5)/1000);
+                tx_speed = ($4-$3)/(($6-$5)/1000);
+                
+                printf "rx_speed: ";
+                if (rx_speed >= 1048576) printf "%.2f MB/s", rx_speed/1048576;
+                else if (rx_speed >= 1024) printf "%.2f KB/s", rx_speed/1024;
+                else printf "%.0f B/s", rx_speed;
+                printf "\n";
+                
+                printf "tx_speed: ";
+                if (tx_speed >= 1048576) printf "%.2f MB/s", tx_speed/1048576;
+                else if (tx_speed >= 1024) printf "%.2f KB/s", tx_speed/1024;
+                else printf "%.0f B/s", tx_speed;
+                printf "\n";
+                
+                printf "rx_total: ";
+                if ($2 >= 1099511627776) printf "%.2f TB", $2/1099511627776;
+                else if ($2 >= 1073741824) printf "%.2f GB", $2/1073741824;
+                else if ($2 >= 1048576) printf "%.2f MB", $2/1048576;
+                else printf "%.2f KB", $2/1024;
+                printf "\n";
+                
+                printf "tx_total: ";
+                if ($4 >= 1099511627776) printf "%.2f TB", $4/1099511627776;
+                else if ($4 >= 1073741824) printf "%.2f GB", $4/1073741824;
+                else if ($4 >= 1048576) printf "%.2f MB", $4/1048576;
+                else printf "%.2f KB", $4/1024;
+                printf "\n";
+            }'
+            
             echo "END_METRICS"
         `;
 
@@ -96,6 +143,7 @@ class SystemInfoService {
             cpu: {},
             memory: {},
             disk: [],
+            network: {},
             docker: { installed: false, containers: [] }
         };
 
@@ -133,6 +181,7 @@ class SystemInfoService {
         data.system = parseKV(getSection('SYSTEM'));
         data.cpu = parseKV(getSection('CPU'));
         data.memory = parseKV(getSection('MEM'));
+        data.network = parseKV(getSection('NETWORK'));
 
         // 磁盘列表
         const diskText = getSection('DISK');

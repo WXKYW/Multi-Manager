@@ -335,6 +335,33 @@ export const commonMethods = {
         return host;
     },
 
+    /**
+     * 格式化网速为紧凑格式
+     * 例如: "1.5 MB/s" -> "1.5M", "10 KB/s" -> "10K", "0 B/s" -> "0B"
+     */
+    formatSpeedCompact(speed) {
+        if (!speed) return '0B';
+        // 移除 "/s" 后缀，移除空格，保留数字和单位字母
+        return speed
+            .replace(/\/s$/i, '')      // 移除 /s
+            .replace(/\s+/g, '')       // 移除空格
+            .replace(/(\d+\.?\d*)([KMGT]?)B?/i, '$1$2'); // 简化单位
+    },
+
+    /**
+     * 解析网速为数字和单位分离的对象
+     * 例如: "1.5 MB/s" -> { num: "1.5", unit: "M" }
+     */
+    parseSpeed(speed) {
+        if (!speed) return { num: '0', unit: 'B' };
+        const cleaned = speed.replace(/\/s$/i, '').replace(/\s+/g, '');
+        const match = cleaned.match(/^(\d+\.?\d*)([KMGT]?)B?$/i);
+        if (match) {
+            return { num: match[1], unit: match[2] ? match[2].toUpperCase() : 'B' };
+        }
+        return { num: '0', unit: 'B' };
+    },
+
     getModuleName(id, short = false) {
         const config = MODULE_CONFIG[id];
         if (!config) return id;

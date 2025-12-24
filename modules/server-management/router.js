@@ -31,6 +31,20 @@ router.get('/accounts', (req, res) => {
         const serversWithMetrics = servers.map(server => {
             const cachedMetrics = metricsService.latestMetrics?.get(server.id);
             if (cachedMetrics) {
+                // 解析 disk 字符串为结构化对象 (格式: "38G/40G (95%)")
+                let diskArray = [];
+                if (cachedMetrics.disk && typeof cachedMetrics.disk === 'string') {
+                    const diskMatch = cachedMetrics.disk.match(/([^\/]+)\/([^\s]+)\s\(([\d.]+%?)\)/);
+                    if (diskMatch) {
+                        diskArray = [{
+                            device: '/',
+                            used: diskMatch[1],
+                            total: diskMatch[2],
+                            usage: diskMatch[3]
+                        }];
+                    }
+                }
+
                 return {
                     ...server,
                     info: {
@@ -39,10 +53,18 @@ router.get('/accounts', (req, res) => {
                         mem_usage: cachedMetrics.mem,
                         cpu_usage: cachedMetrics.cpu + '%',
                         disk_usage: cachedMetrics.disk,
+                        disk: diskArray,
                         docker: {
                             installed: cachedMetrics.docker_installed,
                             running: cachedMetrics.docker_running,
                             stopped: cachedMetrics.docker_stopped
+                        },
+                        network: {
+                            connections: cachedMetrics.connections,
+                            rx_speed: cachedMetrics.rx_s,
+                            tx_speed: cachedMetrics.tx_s,
+                            rx_total: cachedMetrics.rx_t,
+                            tx_total: cachedMetrics.tx_t
                         },
                         lastUpdate: new Date(cachedMetrics.timestamp).toLocaleTimeString()
                     }

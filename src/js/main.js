@@ -378,7 +378,7 @@ const app = createApp({
         pageSize: 50,
         totalPages: 0
       },
-      metricsHistoryTimeRange: '24h', // '1h', '6h', '24h', '7d', 'all'
+      metricsHistoryTimeRange: '1h', // '1h', '6h', '24h', '7d', 'all'
       metricsCollectorStatus: null,
       expandedMetricsServers: [], // 展开的主机 ID 列表
       metricsCollectInterval: 5, // 采集间隔（分钟）

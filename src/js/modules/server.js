@@ -1100,23 +1100,23 @@ export const serverMethods = {
                                 label: 'CPU (%)',
                                 data: cpuData,
                                 borderColor: '#10b981',
-                                backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                                borderWidth: 2,
-                                fill: true,
-                                tension: 0.4,
+                                backgroundColor: 'transparent',
+                                borderWidth: 2.5,
+                                fill: false,
+                                tension: 0.3,
                                 pointRadius: 0,
-                                pointHoverRadius: 4
+                                pointHoverRadius: 5
                             },
                             {
                                 label: '内存 (%)',
                                 data: memData,
                                 borderColor: '#3b82f6',
-                                backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                                borderWidth: 2,
-                                fill: true,
-                                tension: 0.4,
+                                backgroundColor: 'transparent',
+                                borderWidth: 2.5,
+                                fill: false,
+                                tension: 0.3,
                                 pointRadius: 0,
-                                pointHoverRadius: 4
+                                pointHoverRadius: 5
                             }
                         ]
                     },
@@ -1139,24 +1139,32 @@ export const serverMethods = {
                         scales: {
                             x: {
                                 display: true,
-                                grid: { display: false },
+                                grid: {
+                                    display: true,
+                                    color: 'rgba(255, 255, 255, 0.06)',
+                                    drawBorder: false
+                                },
                                 ticks: {
                                     maxRotation: 0,
                                     autoSkip: true,
                                     maxTicksLimit: 6,
                                     font: { size: 10 },
-                                    color: '#8b949e'
+                                    color: '#6e7681'
                                 }
                             },
                             y: {
                                 display: true,
                                 min: 0,
                                 max: 100,
-                                grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                                grid: {
+                                    display: true,
+                                    color: 'rgba(255, 255, 255, 0.06)',
+                                    drawBorder: false
+                                },
                                 ticks: {
                                     font: { size: 10 },
-                                    color: '#8b949e',
-                                    stepSize: 20
+                                    color: '#6e7681',
+                                    stepSize: 25
                                 }
                             }
                         },
