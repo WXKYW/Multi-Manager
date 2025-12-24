@@ -1,5 +1,4 @@
-<div class="tab-content dns-tab-content theme-cf-dns"
-  :class="getTabAnimationClass('dns')">
+<div class="tab-content dns-tab-content theme-cf-dns" :class="getTabAnimationClass('dns')">
   <!-- DNS 子标签页 -->
   <div class="sec-tabs">
     <button class="tab-btn" :class="{ active: dnsCurrentTab === 'dns' }" @click="dnsCurrentTab = 'dns'">
@@ -708,7 +707,8 @@
           </button>
         </div>
         <div v-else class="error-state" style="padding: 30px; text-align: center;">
-          <i class="fas fa-exclamation-circle" style="font-size: 28px; color: var(--danger-color); margin-bottom: 12px;"></i>
+          <i class="fas fa-exclamation-circle"
+            style="font-size: 28px; color: var(--danger-color); margin-bottom: 12px;"></i>
           <p style="color: var(--text-secondary);">获取当前配置失败，请关闭重试</p>
         </div>
       </div>

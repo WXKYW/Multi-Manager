@@ -404,12 +404,24 @@ class ToastManager {
     show(options) {
         const config = { ...this.defaultOptions, ...options };
 
-        // 核心过滤器: 只有手动触发 (isManual: true) 或 错误提示 (type: 'error') 才会显示
-        // 自动生成的 'success', 'info', 'warning' 将被拦截，不在界面弹出
-        if (!config.isManual && config.type !== 'error') {
-            // 可以在控制台输出调试信息，但不展示 UI
-            // console.log(`[Toast Intercepted] ${config.title || ''}: ${config.message}`);
+        // 核心过滤器: 
+        // - 错误提示 (type: 'error') 始终显示
+        // - 成功提示 (type: 'success') 始终显示
+        // - 警告提示 (type: 'warning') 始终显示
+        // - 信息提示 (type: 'info') 只有手动触发 (isManual: true) 才显示
+        if (config.type === 'info' && !config.isManual) {
+            // info 类型的自动提示将被拦截，不在界面弹出
             return null;
+        }
+
+        // 去重逻辑：检查是否有相同类型和内容的 toast 正在显示
+        const duplicateKey = `${config.type}:${config.message}`;
+        for (const [existingId, existingToast] of this.toasts) {
+            const existingKey = `${existingToast.config.type}:${existingToast.config.message}`;
+            if (existingKey === duplicateKey) {
+                // 相同的 toast 已存在，跳过显示
+                return existingId;
+            }
         }
 
         // 检查是否超过最大数量,如果超过则移除最旧的toast
@@ -646,50 +658,46 @@ class ToastManager {
     }
 
     /**
-     * 快捷方法 - 成功提示
+     * 快捷方法 - 成功提示 (始终显示)
      */
     success(message, options = {}) {
         return this.show({
             type: 'success',
             message,
-            isManual: false, // 默认不显示，除非显式指定
             ...options,
         });
     }
 
     /**
-     * 快捷方法 - 错误提示
+     * 快捷方法 - 错误提示 (始终显示)
      */
     error(message, options = {}) {
         return this.show({
             type: 'error',
             message,
             duration: 4000, // 错误提示默认显示更久
-            isManual: true, // 错误始终显示
             ...options,
         });
     }
 
     /**
-     * 快捷方法 - 警告提示
+     * 快捷方法 - 警告提示 (始终显示)
      */
     warning(message, options = {}) {
         return this.show({
             type: 'warning',
             message,
-            isManual: false,
             ...options,
         });
     }
 
     /**
-     * 快捷方法 - 信息提示
+     * 快捷方法 - 信息提示 (默认不显示，需设置 isManual: true)
      */
     info(message, options = {}) {
         return this.show({
             type: 'info',
             message,
-            isManual: false,
             ...options,
         });
     }

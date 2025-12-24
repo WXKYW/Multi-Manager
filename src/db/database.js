@@ -181,6 +181,13 @@ class DatabaseService {
                         this.db.exec("ALTER TABLE user_settings ADD COLUMN main_tabs_layout TEXT DEFAULT 'top'");
                         logger.success('user_settings.main_tabs_layout 字段添加成功');
                     }
+
+                    const hasChannelModelPrefix = settingsColumns.some(col => col.name === 'channel_model_prefix');
+                    if (!hasChannelModelPrefix) {
+                        logger.info('正在为 user_settings 表添加 channel_model_prefix 字段...');
+                        this.db.exec("ALTER TABLE user_settings ADD COLUMN channel_model_prefix TEXT");
+                        logger.success('user_settings.channel_model_prefix 字段添加成功');
+                    }
                 }
             } catch (err) {
                 logger.error('User Settings 额外字段迁移失败:', err.message);

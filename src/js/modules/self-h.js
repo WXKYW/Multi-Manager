@@ -548,6 +548,27 @@ export const selfHMethods = {
         }
     },
 
+    // 双击（双触）检测用于关闭标签页
+    _lastTapTime: 0,
+    _lastTapTabId: null,
+
+    handleTabTap(tabId) {
+        const now = Date.now();
+        const doubleTapDelay = 300; // 300ms 内的两次点击视为双击
+
+        if (this._lastTapTabId === tabId && (now - this._lastTapTime) < doubleTapDelay) {
+            // 双击检测到，关闭标签页
+            this.closeOpenListTempTab(tabId);
+            this._lastTapTime = 0;
+            this._lastTapTabId = null;
+        } else {
+            // 第一次点击，选中标签页
+            this.selectTempTab(tabId);
+            this._lastTapTime = now;
+            this._lastTapTabId = tabId;
+        }
+    },
+
     // 加载临时标签页文件
     async loadTempTabFiles(path, refresh = false, tabId = null) {
         if (!this.currentOpenListAccount) return;
@@ -909,6 +930,131 @@ export const selfHMethods = {
 
         if (!file.size || file.size <= 0) return '';
         return this.formatFileSize(file.size);
+    },
+
+    // ==================== 右键菜单 ====================
+
+    // 显示右键菜单
+    showFileContextMenu(e, file, baseDir = store.openListPath) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        // 计算菜单位置
+        let x = e.clientX || e.touches?.[0]?.clientX || 0;
+        let y = e.clientY || e.touches?.[0]?.clientY || 0;
+
+        // 边界检测：确保菜单不会超出视口
+        const menuWidth = 160;
+        const menuHeight = 180; // 估算高度
+
+        if (x + menuWidth > window.innerWidth) {
+            x = window.innerWidth - menuWidth - 10;
+        }
+        if (y + menuHeight > window.innerHeight) {
+            y = window.innerHeight - menuHeight - 10;
+        }
+
+        store.openListContextMenu = {
+            visible: true,
+            x,
+            y,
+            file,
+            baseDir
+        };
+
+        // 添加点击外部关闭
+        setTimeout(() => {
+            document.addEventListener('click', this._closeContextMenuOnClick);
+            document.addEventListener('contextmenu', this._closeContextMenuOnClick);
+        }, 10);
+    },
+
+    // 隐藏右键菜单
+    hideFileContextMenu() {
+        store.openListContextMenu.visible = false;
+        store.openListContextMenu.file = null;
+        document.removeEventListener('click', this._closeContextMenuOnClick);
+        document.removeEventListener('contextmenu', this._closeContextMenuOnClick);
+    },
+
+    // 点击外部关闭菜单
+    _closeContextMenuOnClick(e) {
+        const menu = document.querySelector('.openlist-context-menu');
+        if (menu && !menu.contains(e.target)) {
+            store.openListContextMenu.visible = false;
+            store.openListContextMenu.file = null;
+            document.removeEventListener('click', this._closeContextMenuOnClick);
+            document.removeEventListener('contextmenu', this._closeContextMenuOnClick);
+        }
+    },
+
+    // 处理菜单操作
+    handleFileContextAction(action) {
+        const { file, baseDir } = store.openListContextMenu;
+        if (!file) return;
+
+        this.hideFileContextMenu();
+
+        switch (action) {
+            case 'open':
+                this.handleOpenFile(file);
+                break;
+            case 'open-new-tab':
+                if (file.is_dir) {
+                    const fileName = typeof file.name === 'string' ? file.name : String(file.name || '');
+                    const newPath = this._getFilePath(file, baseDir);
+                    this.openTempTab(fileName, newPath);
+                }
+                break;
+            case 'download':
+                this.downloadOpenListFile(file, baseDir);
+                break;
+            case 'rename':
+                this.renameOpenListFile(file);
+                break;
+            case 'delete':
+                this.deleteOpenListFile(file);
+                break;
+            case 'detail':
+                this.showOpenFileDetail(file, baseDir);
+                break;
+        }
+    },
+
+    // 长按处理（移动端）
+    _longPressTimer: null,
+    _longPressTriggered: false,
+
+    handleFileTouchStart(e, file, baseDir = store.openListPath) {
+        this._longPressTriggered = false;
+        this._longPressTimer = setTimeout(() => {
+            this._longPressTriggered = true;
+            // 触发震动反馈
+            if (navigator.vibrate) {
+                navigator.vibrate(30);
+            }
+            this.showFileContextMenu(e, file, baseDir);
+        }, 500); // 500ms 长按
+    },
+
+    handleFileTouchEnd(e) {
+        if (this._longPressTimer) {
+            clearTimeout(this._longPressTimer);
+            this._longPressTimer = null;
+        }
+        // 如果长按已触发，阻止默认点击行为
+        if (this._longPressTriggered) {
+            e.preventDefault();
+            this._longPressTriggered = false;
+        }
+    },
+
+    handleFileTouchMove() {
+        // 移动则取消长按
+        if (this._longPressTimer) {
+            clearTimeout(this._longPressTimer);
+            this._longPressTimer = null;
+        }
     }
 };
 
