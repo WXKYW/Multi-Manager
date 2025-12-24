@@ -316,7 +316,7 @@ while true; do
     fi
     
     # 推送数据
-    curl -s -X POST "$API_URL" \\
+    curl -s -L -X POST "$API_URL" \\
         -H "Content-Type: application/json" \\
         -H "X-Server-ID: $SERVER_ID" \\
         -H "X-Agent-Key: $AGENT_KEY" \\

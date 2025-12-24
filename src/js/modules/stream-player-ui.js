@@ -2,7 +2,6 @@
  * 流媒体播放器 UI 模块
  * 
  * 提供 Vue 组件方法和模板数据
- * 与 stream-player.js 和 transcoder.js 配合使用
  * 
  * @module stream-player-ui
  */
@@ -10,7 +9,6 @@
 import { store } from '../store.js';
 import { toast } from './toast.js';
 import { streamPlayer } from './stream-player.js';
-import { transcoder } from './transcoder.js';
 
 // ==================== 状态 ====================
 
@@ -31,16 +29,26 @@ if (!store.streamPlayer) {
             filename: '',
             url: '',
 
+            // 音频警告
+            audioWarning: false,
+            audioWarningMessage: '',
+
             // 不支持格式对话框
             showUnsupportedDialog: false,
             unsupportedFormat: '',
             unsupportedUrl: '',
             unsupportedFilename: '',
 
-            // 转码状态
-            transcoding: false,
-            transcodeProgress: 0,
-            transcodeStatus: ''
+            // 播放器 UI 交互
+            showControls: true,
+            controlsTimer: null,
+            isLongPressing: false,
+            lastTapTime: 0,
+            animationType: null,
+            animationText: '',
+
+            // 播放速度选项
+            playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]
         }
     });
 }
@@ -87,73 +95,12 @@ export const streamPlayerMethods = {
             }
         });
 
-        store.streamPlayer.loading = false;
-
-        if (!result.success && !result.needsTranscode) {
-            if (result.message) {
-                toast.warning(result.message);
-            }
+        if (!result.success) {
+            // 失败已经在回调中处理了对话框
+            console.warn('[StreamPlayerUI] Play failed:', result.message);
         }
-    },
 
-    /**
-     * 绑定视频事件
-     * @private
-     */
-    _bindVideoEvents(video) {
-        // 时间更新
-        video.ontimeupdate = () => {
-            store.streamPlayer.currentTime = video.currentTime;
-        };
-
-        // 加载元数据
-        video.onloadedmetadata = () => {
-            store.streamPlayer.duration = video.duration;
-            store.streamPlayer.loading = false;
-        };
-
-        // 播放/暂停状态
-        video.onplay = () => {
-            store.streamPlayer.playing = true;
-        };
-
-        video.onpause = () => {
-            store.streamPlayer.playing = false;
-        };
-
-        // 缓冲进度
-        video.onprogress = () => {
-            if (video.buffered.length > 0) {
-                store.streamPlayer.buffered = video.buffered.end(video.buffered.length - 1);
-            }
-        };
-
-        // 音量变化
-        video.onvolumechange = () => {
-            store.streamPlayer.volume = video.volume;
-            store.streamPlayer.muted = video.muted;
-        };
-
-        // 播放速度变化
-        video.onratechange = () => {
-            store.streamPlayer.playbackRate = video.playbackRate;
-        };
-
-        // 错误处理
-        video.onerror = (e) => {
-            console.error('[StreamPlayerUI] Video error:', e);
-            store.streamPlayer.loading = false;
-            toast.error('视频加载失败');
-        };
-
-        // 等待中
-        video.onwaiting = () => {
-            store.streamPlayer.loading = true;
-        };
-
-        video.oncanplay = () => {
-            store.streamPlayer.loading = false;
-        };
+        store.streamPlayer.loading = false;
     },
 
     /**
@@ -162,38 +109,189 @@ export const streamPlayerMethods = {
     closeVideoPlayer() {
         streamPlayer.destroyPlayer();
         store.streamPlayer.visible = false;
+        store.streamPlayer.playing = false;
         store.streamPlayer.showUnsupportedDialog = false;
-        store.streamPlayer.transcoding = false;
+
+        if (store.streamPlayer.controlsTimer) {
+            clearTimeout(store.streamPlayer.controlsTimer);
+        }
     },
 
     /**
-     * 切换播放/暂停
+     * 绑定视频事件
+     * @param {HTMLVideoElement} video - 视频元素
+     */
+    _bindVideoEvents(video) {
+        if (!video) return;
+
+        // 清除旧事件
+        video.onplay = null;
+        video.onpause = null;
+        video.ontimeupdate = null;
+        video.onprogress = null;
+        video.onvolumechange = null;
+        video.onloadedmetadata = null;
+        video.onerror = null;
+
+        // 交互手势支持
+        const container = video.parentElement;
+        if (container) {
+            // 简单点击显示/隐藏控制栏
+            container.onclick = (e) => {
+                // 如果点击的是按钮或进度条，不处理
+                if (e.target.closest('.stream-player-btn') || e.target.closest('.stream-player-progress')) {
+                    return;
+                }
+
+                // 处理双击
+                const now = Date.now();
+                if (now - store.streamPlayer.lastTapTime < 300) {
+                    // 双击：根据位置快进/快退/暂停
+                    const rect = container.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    if (x < rect.width * 0.3) {
+                        this.skipVideo(-10);
+                        this._showAnimation('seek', '-10s');
+                    } else if (x > rect.width * 0.7) {
+                        this.skipVideo(10);
+                        this._showAnimation('seek', '+10s');
+                    } else {
+                        this.toggleVideoPlay();
+                    }
+                    store.streamPlayer.lastTapTime = 0;
+                    return;
+                }
+                store.streamPlayer.lastTapTime = now;
+
+                // 单击：切换控制栏
+                store.streamPlayer.showControls = !store.streamPlayer.showControls;
+                if (store.streamPlayer.showControls) {
+                    this._autoHideControls();
+                }
+            };
+
+            // 长按 2x 加速
+            let longPressTimer = null;
+            container.onmousedown = (e) => {
+                if (e.button !== 0) return;
+                longPressTimer = setTimeout(() => {
+                    this.setVideoPlaybackRate(2);
+                    this._showAnimation('speed2x');
+                    store.streamPlayer.isLongPressing = true;
+                }, 500);
+            };
+
+            const stopLongPress = () => {
+                if (longPressTimer) clearTimeout(longPressTimer);
+                if (store.streamPlayer.isLongPressing) {
+                    this.setVideoPlaybackRate(1);
+                    this._hideAnimation('speed2x');
+                    store.streamPlayer.isLongPressing = false;
+                }
+            };
+
+            container.onmouseup = stopLongPress;
+            container.onmouseleave = stopLongPress;
+        }
+
+        // 核心事件
+        video.onplay = () => {
+            store.streamPlayer.playing = true;
+            this._autoHideControls();
+        };
+
+        video.onpause = () => {
+            store.streamPlayer.playing = false;
+            store.streamPlayer.showControls = true;
+        };
+
+        video.ontimeupdate = () => {
+            store.streamPlayer.currentTime = video.currentTime;
+            store.streamPlayer.duration = video.duration;
+        };
+
+        video.onprogress = () => {
+            if (video.buffered.length > 0) {
+                store.streamPlayer.buffered = video.buffered.end(video.buffered.length - 1);
+            }
+        };
+
+        video.onvolumechange = () => {
+            store.streamPlayer.volume = video.volume;
+            store.streamPlayer.muted = video.muted;
+        };
+
+        video.onerror = (e) => {
+            console.error('[StreamPlayerUI] Video error:', e);
+            // 不再自动报错，由 stream-player.js 处理
+        };
+
+        // 绑定键盘
+        const unbindKeys = streamPlayer.bindKeyboardShortcuts(container || document.body);
+
+        // 销毁时解绑
+        const originalClose = this.closeVideoPlayer;
+        this.closeVideoPlayer = () => {
+            unbindKeys();
+            originalClose.call(this);
+        };
+    },
+
+    /**
+     * 自动隐藏控制栏
+     */
+    _autoHideControls() {
+        if (store.streamPlayer.controlsTimer) {
+            clearTimeout(store.streamPlayer.controlsTimer);
+        }
+
+        if (store.streamPlayer.playing) {
+            store.streamPlayer.controlsTimer = setTimeout(() => {
+                if (store.streamPlayer.playing && !store.streamPlayer.isLongPressing) {
+                    store.streamPlayer.showControls = false;
+                }
+            }, 3000);
+        }
+    },
+
+    _showAnimation(type, text) {
+        store.streamPlayer.animationType = type;
+        store.streamPlayer.animationText = text || '';
+        if (type !== 'speed2x') {
+            setTimeout(() => {
+                if (store.streamPlayer.animationType === type) {
+                    store.streamPlayer.animationType = null;
+                }
+            }, 1000);
+        }
+    },
+
+    _hideAnimation(type) {
+        if (store.streamPlayer.animationType === type) {
+            store.streamPlayer.animationType = null;
+        }
+    },
+
+    /**
+     * 播放/暂停
      */
     toggleVideoPlay() {
         streamPlayer.togglePlay();
     },
 
     /**
-     * 视频跳转
-     * @param {Event} e - 点击事件
+     * 快进/快退
      */
-    handleProgressClick(e) {
-        const progressBar = e.currentTarget;
-        const rect = progressBar.getBoundingClientRect();
-        const percent = (e.clientX - rect.left) / rect.width;
-        const time = percent * store.streamPlayer.duration;
-        streamPlayer.seek(time);
+    skipVideo(seconds) {
+        streamPlayer.skip(seconds);
     },
 
     /**
-     * 设置音量
-     * @param {Event} e - 事件
+     * 设置播放速度
      */
-    handleVolumeChange(e) {
-        const slider = e.currentTarget;
-        const rect = slider.getBoundingClientRect();
-        const percent = (e.clientX - rect.left) / rect.width;
-        streamPlayer.setVolume(Math.max(0, Math.min(1, percent)));
+    setVideoPlaybackRate(rate) {
+        streamPlayer.setPlaybackRate(rate);
+        store.streamPlayer.playbackRate = rate;
     },
 
     /**
@@ -207,152 +305,83 @@ export const streamPlayerMethods = {
     },
 
     /**
-     * 设置播放速度
-     * @param {number} rate - 播放速度
+     * 调整音量
      */
-    setVideoPlaybackRate(rate) {
-        streamPlayer.setPlaybackRate(rate);
+    handleVolumeChange(e) {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const volume = Math.max(0, Math.min(1, x / rect.width));
+        streamPlayer.setVolume(volume);
+        const video = document.getElementById('stream-player-video');
+        if (video) video.muted = false;
+    },
+
+    /**
+     * 调整进度
+     */
+    handleProgressClick(e) {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const percent = Math.max(0, Math.min(1, x / rect.width));
+        if (store.streamPlayer.duration) {
+            streamPlayer.seek(percent * store.streamPlayer.duration);
+        }
     },
 
     /**
      * 切换全屏
      */
-    toggleVideoFullscreen() {
+    async toggleVideoFullscreen() {
         const container = document.querySelector('.stream-player-container');
-        streamPlayer.toggleFullscreen(container);
+        await streamPlayer.toggleFullscreen(container);
+        store.streamPlayer.fullscreen = !!document.fullscreenElement;
     },
 
     /**
-     * 画中画
+     * 切换画中画
      */
-    toggleVideoPiP() {
-        streamPlayer.togglePictureInPicture();
+    async toggleVideoPiP() {
+        await streamPlayer.togglePictureInPicture();
     },
 
     /**
-     * 快进/快退
-     * @param {number} seconds - 秒数
-     */
-    skipVideo(seconds) {
-        streamPlayer.skip(seconds);
-    },
-
-    /**
-     * 格式化时间显示
-     * @param {number} seconds - 秒数
-     * @returns {string}
+     * 格式化时间
      */
     formatVideoTime(seconds) {
         return streamPlayer.formatTime(seconds);
     },
 
     /**
-     * 显示不支持格式对话框
-     * @private
+     * 显示不支持格式提示
      */
     _showUnsupportedDialog(ext, url, filename) {
         store.streamPlayer.showUnsupportedDialog = true;
         store.streamPlayer.unsupportedFormat = ext.toUpperCase();
         store.streamPlayer.unsupportedUrl = url;
         store.streamPlayer.unsupportedFilename = filename;
+        store.streamPlayer.loading = false;
+        toast.error(`暂不支持直接播放 ${ext.toUpperCase()} 格式`);
     },
 
     /**
-     * 关闭不支持格式对话框
+     * 关闭对话框
      */
     closeUnsupportedDialog() {
         store.streamPlayer.showUnsupportedDialog = false;
     },
 
     /**
-     * 直接下载视频
+     * 下载视频
      */
     downloadVideo() {
-        const url = store.streamPlayer.unsupportedUrl || store.streamPlayer.url;
+        const url = store.streamPlayer.unsupportedUrl;
         if (url) {
             window.open(url, '_blank');
         }
-        this.closeUnsupportedDialog();
-        this.closeVideoPlayer();
-    },
-
-    /**
-     * 开始转码
-     * @param {string} preset - 转码预设 ('fast', 'balanced', 'quality')
-     */
-    async startTranscode(preset = 'balanced') {
-        const url = store.streamPlayer.unsupportedUrl;
-        const filename = store.streamPlayer.unsupportedFilename;
-
-        if (!url || !filename) {
-            toast.error('缺少文件信息');
-            return;
-        }
-
-        // 检查支持情况
-        const support = transcoder.checkSupport();
-        if (!support.supported) {
-            toast.error('您的浏览器不支持视频转码');
-            return;
-        }
-
-        if (support.warnings.length > 0) {
-            support.warnings.forEach(w => toast.warning(w));
-        }
-
-        // 关闭不支持对话框，显示转码进度
-        store.streamPlayer.showUnsupportedDialog = false;
-        store.streamPlayer.transcoding = true;
-        store.streamPlayer.transcodeProgress = 0;
-        store.streamPlayer.transcodeStatus = '准备中...';
-
-        try {
-            const result = await transcoder.transcode({
-                url,
-                filename,
-                preset,
-                onProgress: (progress, status) => {
-                    store.streamPlayer.transcodeProgress = progress;
-                    store.streamPlayer.transcodeStatus = status;
-                },
-                onLog: (log) => {
-                    console.log('[Transcoder]', log);
-                }
-            });
-
-            // 转码成功，播放转码后的视频
-            store.streamPlayer.transcoding = false;
-            store.streamPlayer.filename = result.filename;
-
-            // 重新播放
-            const videoElement = document.getElementById('stream-player-video');
-            if (videoElement) {
-                videoElement.src = result.url;
-                await videoElement.play();
-                store.streamPlayer.playing = true;
-            }
-
-            toast.success('转码完成，开始播放');
-
-        } catch (error) {
-            console.error('[StreamPlayerUI] Transcode error:', error);
-            store.streamPlayer.transcoding = false;
-            toast.error('转码失败: ' + error.message);
-        }
-    },
-
-    /**
-     * 取消转码
-     */
-    cancelTranscode() {
-        transcoder.cancelTranscode();
-        store.streamPlayer.transcoding = false;
-        store.streamPlayer.showUnsupportedDialog = true;
     },
 
     /**
      * 获取音量图标
-     * @returns {string} FontAwesome 图标类名
      */
     getVolumeIcon() {
         if (store.streamPlayer.muted || store.streamPlayer.volume === 0) {
@@ -365,7 +394,6 @@ export const streamPlayerMethods = {
 
     /**
      * 获取进度百分比
-     * @returns {number} 0-100
      */
     getPlayedPercent() {
         if (!store.streamPlayer.duration) return 0;
@@ -374,30 +402,11 @@ export const streamPlayerMethods = {
 
     /**
      * 获取缓冲百分比
-     * @returns {number} 0-100
      */
     getBufferedPercent() {
         if (!store.streamPlayer.duration) return 0;
         return (store.streamPlayer.buffered / store.streamPlayer.duration) * 100;
-    },
-
-    /**
-     * 获取转码进度百分比
-     * @returns {number} 0-100
-     */
-    getTranscodePercent() {
-        return Math.round(store.streamPlayer.transcodeProgress * 100);
-    },
-
-    /**
-     * 播放速度选项
-     */
-    playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2],
-
-    /**
-     * 转码预设列表
-     */
-    transcodePresets: transcoder.presets
+    }
 };
 
 export default streamPlayerMethods;

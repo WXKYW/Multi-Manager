@@ -266,16 +266,16 @@
                   </div>
                   <div class="service-actions">
                     <button @click="restartKoyebService(account, app, service)"
-                      class="service-btn btn-restart koyeb-btn"><i class="fas fa-redo"></i> 重启</button>
+                      class="service-btn btn-restart koyeb-btn"><i class="fas fa-redo"></i></button>
                     <button @click="redeployKoyebService(account, app, service)"
                       class="service-btn btn-restart koyeb-btn"
-                      style="background-color: rgba(79, 70, 229, 0.2); color: #4f46e5;"><i class="fas fa-rocket"></i>
-                      部署</button>
+                      style="background-color: rgba(79, 70, 229, 0.2); color: #4f46e5;"><i
+                        class="fas fa-rocket"></i></button>
                     <button @click="fetchKoyebServiceInstances(account, service)" class="service-btn koyeb-btn"
                       style="background-color: rgba(139, 92, 246, 0.2); color: #8b5cf6;"><i class="fas"
-                        :class="service.loadingInstances ? 'fa-spinner fa-spin' : 'fa-server'"></i> 实例</button>
+                        :class="service.loadingInstances ? 'fa-spinner fa-spin' : 'fa-server'"></i></button>
                     <button @click="showKoyebServiceLogs(account, app, service)" class="service-btn btn-logs"><i
-                        class="fas fa-file-alt"></i> 日志</button>
+                        class="fas fa-file-alt"></i></button>
                   </div>
                 </div>
               </div>
@@ -342,28 +342,28 @@
                   </div>
                   <div class="service-actions">
                     <button @click="restartFlyApp(account, app)" class="service-btn btn-restart fly-btn">
-                      <i class="fas fa-redo"></i> 重启
+                      <i class="fas fa-redo"></i>
                     </button>
                     <button @click="redeployFlyApp(account, app)" class="service-btn btn-restart fly-btn"
                       style="background-color: rgba(139, 92, 246, 0.2); color: #8b5cf6;">
-                      <i class="fas fa-rocket"></i> 部署
+                      <i class="fas fa-rocket"></i>
                     </button>
                     <button @click="fetchFlyMachines(account, app)" class="service-btn fly-btn"
                       style="background-color: rgba(139, 92, 246, 0.2); color: #8b5cf6;">
-                      <i class="fas" :class="app.loadingMachines ? 'fa-spinner fa-spin' : 'fa-server'"></i> 实例
+                      <i class="fas" :class="app.loadingMachines ? 'fa-spinner fa-spin' : 'fa-server'"></i>
                     </button>
                     <button @click="showFlyAppLogs(account, app)" class="service-btn btn-logs fly-btn">
-                      <i class="fas fa-file-alt"></i> 日志
+                      <i class="fas fa-file-alt"></i>
                     </button>
                     <button @click="viewFlyConfig(account, app)" class="service-btn fly-btn"
                       style="background-color: rgba(71, 85, 105, 0.1); color: #475569;">
-                      <i class="fas fa-code"></i> 配置
+                      <i class="fas fa-code"></i>
                     </button>
                   </div>
                   <div v-if="app.showMachines && app.machines && app.machines.length > 0"
                     class="instances-container fly-instances-container quick-fade-in">
                     <div class="instances-title fly-instances-title">
-                      <span>运行实例 ({{ app.machines.length }})</span>
+                      <span>运 ({{ app.machines.length }})</span>
                       <span style="cursor: pointer;" @click="app.showMachines = false">×</span>
                     </div>
                     <div v-for="machine in app.machines" :key="machine.id" class="instance-item fly-instance-item">

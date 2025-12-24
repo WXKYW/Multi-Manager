@@ -16,73 +16,25 @@ import { toast } from './toast.js';
 
 // ==================== 配置常量 ====================
 
-/**
- * 播放器配置
- */
-const PLAYER_CONFIG = {
-    // 可直接播放的格式 (浏览器原生支持)
-    NATIVE_FORMATS: ['mp4', 'webm', 'ogg', 'mov'],
-
-    // 需要 hls.js 的格式
-    HLS_FORMATS: ['m3u8'],
-
-    // 需要 flv.js 的格式
-    FLV_FORMATS: ['flv'],
-
-    // 需要 dash.js 的格式
-    DASH_FORMATS: ['mpd'],
-
-    // 可能可以直接播放的格式 (取决于编码)
-    MAYBE_NATIVE: ['mkv', 'ts'],
-
-    // 需要转码的格式
-    TRANSCODE_FORMATS: ['avi', 'wmv', 'rmvb', 'rm', 'asf', 'vob', '3gp'],
+// 可能可以直接播放的格式 (取决于编码或浏览器插件)
+MAYBE_NATIVE: ['mkv', 'ts', 'avi', 'wmv', 'rmvb', 'rm', 'asf', 'vob', '3gp', 'mov'],
 
     // CDN 地址 (使用 npmmirror)
     CDN: {
-        hlsjs: 'https://registry.npmmirror.com/hls.js/1.5.7/files/dist/hls.min.js',
+    hlsjs: 'https://registry.npmmirror.com/hls.js/1.5.7/files/dist/hls.min.js',
         flvjs: 'https://registry.npmmirror.com/flv.js/1.6.2/files/dist/flv.min.js',
-        dashjs: 'https://registry.npmmirror.com/dashjs/4.7.4/files/dist/dash.all.min.js',
-        ffmpeg_core: 'https://registry.npmmirror.com/@ffmpeg/core/0.12.6/files/dist/umd/ffmpeg-core.js',
-        ffmpeg_wasm: 'https://registry.npmmirror.com/@ffmpeg/core/0.12.6/files/dist/umd/ffmpeg-core.wasm'
-    },
-
-    // 转码预设
-    TRANSCODE_PRESETS: {
-        fast: {
-            name: '快速预览',
-            description: '480p, 快速转码',
-            args: ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-vf', 'scale=-2:480', '-c:a', 'aac', '-b:a', '128k']
-        },
-        balanced: {
-            name: '平衡',
-            description: '720p, 推荐',
-            args: ['-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-vf', 'scale=-2:720', '-c:a', 'aac', '-b:a', '192k']
-        },
-        quality: {
-            name: '高质量',
-            description: '原始分辨率',
-            args: ['-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-c:a', 'aac', '-b:a', '256k']
-        }
-    }
+            dashjs: 'https://registry.npmmirror.com/dashjs/4.7.4/files/dist/dash.all.min.js'
+}
 };
 
 // ==================== 状态管理 ====================
 
-/**
- * 播放器状态 (模块内部状态，不放入全局 store)
- */
 const playerState = {
     // 当前播放器实例
     videoElement: null,
     hlsInstance: null,
     flvPlayer: null,
     dashPlayer: null,
-
-    // FFmpeg 实例
-    ffmpeg: null,
-    ffmpegLoaded: false,
-    ffmpegLoading: false,
 
     // 库加载状态
     libsLoaded: {
@@ -97,14 +49,8 @@ const playerState = {
     isPlaying: false,
     isFullscreen: false,
 
-    // 转码状态
-    transcoding: false,
-    transcodeProgress: 0,
-
     // 用户偏好 (可持久化)
     userPreferences: {
-        defaultTranscodeAction: 'ask', // 'ask', 'transcode', 'download'
-        transcodePreset: 'balanced',
         volume: 1,
         playbackRate: 1
     }
@@ -123,18 +69,12 @@ function getFileExtension(filename) {
     return parts.length > 1 ? parts.pop().toLowerCase() : '';
 }
 
-/**
- * 判断格式类型
- * @param {string} ext - 文件扩展名
- * @returns {'native'|'hls'|'flv'|'dash'|'maybe'|'transcode'|'unknown'}
- */
 function getFormatType(ext) {
     if (PLAYER_CONFIG.NATIVE_FORMATS.includes(ext)) return 'native';
     if (PLAYER_CONFIG.HLS_FORMATS.includes(ext)) return 'hls';
     if (PLAYER_CONFIG.FLV_FORMATS.includes(ext)) return 'flv';
     if (PLAYER_CONFIG.DASH_FORMATS.includes(ext)) return 'dash';
     if (PLAYER_CONFIG.MAYBE_NATIVE.includes(ext)) return 'maybe';
-    if (PLAYER_CONFIG.TRANSCODE_FORMATS.includes(ext)) return 'transcode';
     return 'unknown';
 }
 
@@ -262,8 +202,60 @@ function destroyPlayer() {
  */
 async function playNative(video, url) {
     video.src = url;
+
+    // 监听音频轨道，检测不支持的编码
+    video.onloadedmetadata = () => {
+        checkAudioTracks(video);
+    };
+
     await video.play();
     playerState.isPlaying = true;
+}
+
+/**
+ * 检查音频轨道兼容性
+ * @param {HTMLVideoElement} video - 视频元素
+ */
+function checkAudioTracks(video) {
+    // 检查是否有音频
+    if (video.audioTracks && video.audioTracks.length === 0) {
+        console.warn('[StreamPlayer] No audio tracks detected');
+        return;
+    }
+
+    // 5秒后检查是否有声音（启发式检测）
+    setTimeout(() => {
+        // 如果视频正在播放但音量为0或静音状态不是用户设置的
+        if (!video.paused && video.volume > 0 && !video.muted) {
+            // 尝试通过 Web Audio API 检测音频
+            try {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const source = audioContext.createMediaElementSource(video);
+                const analyser = audioContext.createAnalyser();
+                source.connect(analyser);
+                analyser.connect(audioContext.destination);
+
+                // 采样检测
+                const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                analyser.getByteFrequencyData(dataArray);
+
+                const hasAudio = dataArray.some(v => v > 0);
+                if (!hasAudio && video.currentTime > 2) {
+                    showAudioWarning();
+                }
+            } catch (e) {
+                // Web Audio API 可能已经被使用过，忽略错误
+                console.log('[StreamPlayer] Audio check via Web Audio API failed:', e.message);
+            }
+        }
+    }, 3000);
+}
+
+/**
+ * 显示音频警告
+ */
+function showAudioWarning() {
+    toast.warning('⚠️ 此视频可能使用了不受支持的音频编码 (如 AC3/DTS)，建议下载后用本地播放器观看', 8000);
 }
 
 /**
@@ -409,24 +401,19 @@ async function play(options) {
                 return { success: true };
 
             case 'maybe':
-                // 尝试原生播放
+            default:
+                // 尝试直接播放
                 try {
+                    console.log(`[StreamPlayer] Attempting direct playback for ${ext}`);
                     await playNative(videoElement, url);
                     return { success: true };
                 } catch (e) {
-                    console.warn('[StreamPlayer] Native playback failed for', ext, e);
+                    console.warn('[StreamPlayer] Playback failed for', ext, e);
                     if (onUnsupported) {
                         onUnsupported(ext, url, filename);
                     }
-                    return { success: false, message: `${ext.toUpperCase()} 格式可能不兼容，尝试直接播放失败` };
+                    return { success: false, message: `${ext.toUpperCase()} 格式可能不受浏览器支持，请尝试下载后播放` };
                 }
-
-            case 'transcode':
-                // 触发不支持回调
-                if (onUnsupported) {
-                    onUnsupported(ext, url, filename);
-                }
-                return { success: false, message: `${ext.toUpperCase()} 格式需要转码才能播放`, needsTranscode: true };
 
             default:
                 // 未知格式，尝试原生播放
@@ -603,11 +590,6 @@ function bindKeyboardShortcuts(container) {
 
 // ==================== 格式检查工具 ====================
 
-/**
- * 检查格式是否可以直接播放
- * @param {string} filename - 文件名
- * @returns {Object} 检查结果
- */
 function checkFormatSupport(filename) {
     const ext = getFileExtension(filename);
     const formatType = getFormatType(ext);
@@ -618,18 +600,12 @@ function checkFormatSupport(filename) {
         canPlayNatively: formatType === 'native',
         needsLibrary: ['hls', 'flv', 'dash'].includes(formatType),
         maybePlayable: formatType === 'maybe',
-        needsTranscode: formatType === 'transcode',
         libraryName: formatType === 'hls' ? 'hls.js' :
             formatType === 'flv' ? 'flv.js' :
                 formatType === 'dash' ? 'dash.js' : null
     };
 }
 
-/**
- * 判断文件是否是视频
- * @param {string} filename - 文件名
- * @returns {boolean}
- */
 function isVideoFile(filename) {
     const ext = getFileExtension(filename);
     const allFormats = [
@@ -637,8 +613,7 @@ function isVideoFile(filename) {
         ...PLAYER_CONFIG.HLS_FORMATS,
         ...PLAYER_CONFIG.FLV_FORMATS,
         ...PLAYER_CONFIG.DASH_FORMATS,
-        ...PLAYER_CONFIG.MAYBE_NATIVE,
-        ...PLAYER_CONFIG.TRANSCODE_FORMATS
+        ...PLAYER_CONFIG.MAYBE_NATIVE
     ];
     return allFormats.includes(ext);
 }

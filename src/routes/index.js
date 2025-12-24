@@ -52,10 +52,33 @@ function registerRoutes(app) {
       const metrics = agentService.processMetrics(serverId, req.body);
       serverStorage.updateStatus(serverId, { status: 'online' });
 
+      logger.info(`[Agent Push] 收到来自服务器 ${serverId} 的指标数据`);
       res.json({ success: true, received: true });
     } catch (error) {
       res.status(500).json({ success: false, error: error.message });
     }
+  });
+
+  // 支持 GET 请求以供健康检查和调试
+  agentPublicRouter.get('/push', (req, res) => {
+    res.json({
+      success: true,
+      message: 'Agent 推送接口运行中',
+      method: 'POST',
+      tip: '请使用 POST 请求并携带正确的 Header (X-Server-ID, X-Agent-Key) 推送指标数据'
+    });
+  });
+
+  // Agent 路由根路径说明
+  agentPublicRouter.get('/', (req, res) => {
+    res.json({
+      success: true,
+      message: 'API Monitor Agent 公开接口',
+      endpoints: [
+        { path: '/push', method: 'POST', description: '数据推送' },
+        { path: '/install/:serverId', method: 'GET', description: '安装脚本下载' }
+      ]
+    });
   });
 
   // Agent 安装脚本下载 (由远程服务器通过 curl 调用)

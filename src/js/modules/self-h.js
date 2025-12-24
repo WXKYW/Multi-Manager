@@ -15,9 +15,11 @@ export const selfHMethods = {
                 this.openListAccounts = data.data;
                 this.openListStats.onlineCount = this.openListAccounts.filter(a => a.status === 'online').length;
 
-                // 如果当前没有选中的账号，但有可用账号，则自动选择第一个
+                // 如果当前没有选中的账号，尝试恢复上次选择的账号
                 if (!this.currentOpenListAccount && this.openListAccounts.length > 0) {
-                    this.selectOpenListAccount(this.openListAccounts[0]);
+                    const savedAccountId = localStorage.getItem('openlist_last_account');
+                    const savedAccount = savedAccountId ? this.openListAccounts.find(a => a.id === savedAccountId) : null;
+                    this.selectOpenListAccount(savedAccount || this.openListAccounts[0]);
                 }
 
                 // 尝试获取第一个在线账号的存储统计 (用于概览展示)
@@ -180,7 +182,16 @@ export const selfHMethods = {
         this.currentOpenListAccount = account;
         this.openListSubTab = 'files';
         this._clearOpenListSearch(); // 切换账号或回到根目录时清空搜索
-        this.loadOpenListFiles('/');
+
+        // 保存当前账号 ID
+        localStorage.setItem('openlist_last_account', account.id);
+
+        // 尝试恢复上次浏览的路径
+        const savedPath = localStorage.getItem(`openlist_path_${account.id}`);
+        const initialPath = savedPath || '/';
+
+        console.log('[OpenList] Restoring path for account:', account.id, '->', initialPath);
+        this.loadOpenListFiles(initialPath);
     },
 
     // 辅助：清空搜索框内容
@@ -201,6 +212,11 @@ export const selfHMethods = {
 
         // 1. 乐观更新路径
         this.openListPath = path;
+
+        // 2. 保存当前路径到 localStorage
+        if (this.currentOpenListAccount) {
+            localStorage.setItem(`openlist_path_${this.currentOpenListAccount.id}`, path);
+        }
 
         // 2. 检查缓存 (如果不是强制刷新)
         if (!refresh && store.openListFileCache[path]) {
@@ -271,6 +287,14 @@ export const selfHMethods = {
                         this.currentOpenListAccount.status = 'online';
                     }
                 } else {
+                    // 加载失败，如果不是根目录则尝试回退
+                    if (path !== '/') {
+                        console.warn('[OpenList] Path failed, falling back to root:', path);
+                        toast.warning('路径不可用，已返回根目录');
+                        localStorage.setItem(`openlist_path_${this.currentOpenListAccount.id}`, '/');
+                        this.loadOpenListFiles('/');
+                        return;
+                    }
                     toast.error('加载失败: ' + (data.message || '未知错误'));
                     this.openListFiles = [];
                 }

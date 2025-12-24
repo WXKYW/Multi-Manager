@@ -6,10 +6,13 @@
     flex-direction: column;
     align-items: center;
     justify-content: flex-start;
-    height: calc(100vh - 215px) !important;
-    min-height: 400px;
+    height: calc(100vh - 200px);
+    /* 固定高度 */
+    min-height: 300px;
+    /* 最小高度保证可见 */
     padding: 0;
     background: transparent;
+    overflow: hidden;
 }
 
 /* 涓诲鍣?*/
@@ -19,6 +22,7 @@
     width: 100%;
     max-width: 1400px;
     height: 100%;
+    /* 填满父容器高度 */
     background: var(--bg-primary);
     border-radius: 12px;
     overflow: hidden;
@@ -282,10 +286,15 @@
 .ssh-terminal-instance {
     display: flex;
     flex-direction: column;
+    flex: 1;
+    /* 填充可用空间 */
     background: var(--bg-primary);
     position: relative;
     min-height: 150px;
+    /* 确保最小可见高度 */
     min-width: 200px;
+    overflow: hidden;
+    /* 防止内容溢出 */
     /* 1px 宸ヤ笟妗嗘灦 */
     border: 1px solid var(--border-color);
     /* 杈规閲嶅彔娑堥櫎 */
@@ -375,6 +384,7 @@
     flex: 1;
     width: 100%;
     height: 100%;
+    /* 填充父容器 */
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -389,7 +399,7 @@ div[id^="ssh-terminal-"] {
     flex-direction: column !important;
 }
 
-/* xterm 鍐呭祵閫傞厤 - 鍍忕礌绾ц创鍚?*/
+/* xterm 内嵌适配 */
 .terminal.xterm {
     height: 100% !important;
     padding: 4px 0 0 6px !important;
@@ -397,6 +407,8 @@ div[id^="ssh-terminal-"] {
 
 .xterm-viewport {
     background-color: var(--bg-primary) !important;
+    overflow-y: auto !important;
+    /* 确保可滚动 */
 }
 
 .xterm-screen {

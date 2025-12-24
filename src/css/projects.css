@@ -493,7 +493,7 @@
 
 .service-btn {
   padding: 5px;
-  border-radius: 8px;
+  border-radius: 6px;
   font-size: 15px;
   /* 增大图标 */
   font-weight: 500;
@@ -503,8 +503,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 34px;
-  height: 34px;
+  min-width: 27px;
+  height: 27px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 

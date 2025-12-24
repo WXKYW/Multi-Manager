@@ -1763,8 +1763,9 @@
 
 <!-- 视频播放器模态框 -->
 <div v-if="streamPlayer.visible" class="stream-player-overlay" @keydown.esc="closeVideoPlayer" tabindex="-1">
-  <div class="stream-player-container" :class="{ 'controls-visible': streamPlayer.loading }">
-    
+  <div class="stream-player-container"
+    :class="{ 'controls-visible': streamPlayer.showControls || streamPlayer.loading }">
+
     <!-- 顶部信息栏 -->
     <div class="stream-player-header">
       <div class="stream-player-title">
@@ -1775,18 +1776,27 @@
         <i class="fas fa-times"></i>
       </button>
     </div>
-    
+
     <!-- 视频区域 -->
-    <div class="stream-player-video-wrapper" @click="toggleVideoPlay">
+    <div class="stream-player-video-wrapper">
       <video id="stream-player-video" class="stream-player-video" playsinline></video>
-      
+
+      <!-- 交互动画提示 -->
+      <div v-if="streamPlayer.animationType" class="stream-player-speed-tip">
+        <div class="speed-tip-badge">
+          <i v-if="streamPlayer.animationType === 'speed2x'" class="fas fa-bolt"></i>
+          <i v-if="streamPlayer.animationType === 'seek'" class="fas fa-search"></i>
+          {{ streamPlayer.animationType === 'speed2x' ? '2.0X 🚀' : streamPlayer.animationText }}
+        </div>
+      </div>
+
       <!-- 加载状态 -->
       <div v-if="streamPlayer.loading" class="stream-player-loading">
         <div class="stream-player-spinner"></div>
         <div class="stream-player-loading-text">正在加载...</div>
       </div>
     </div>
-    
+
     <!-- 控制栏 -->
     <div class="stream-player-controls">
       <!-- 进度条 -->
@@ -1795,16 +1805,17 @@
         <div class="stream-player-progress-played" :style="{ width: getPlayedPercent() + '%' }"></div>
         <div class="stream-player-progress-thumb" :style="{ left: getPlayedPercent() + '%' }"></div>
       </div>
-      
+
       <!-- 控制按钮 -->
       <div class="stream-player-controls-row">
         <!-- 左侧控制 -->
         <div class="stream-player-controls-left">
           <!-- 播放/暂停 -->
-          <button class="stream-player-btn large" @click.stop="toggleVideoPlay" :title="streamPlayer.playing ? '暂停 (空格)' : '播放 (空格)'">
+          <button class="stream-player-btn large" @click.stop="toggleVideoPlay"
+            :title="streamPlayer.playing ? '暂停 (空格)' : '播放 (空格)'">
             <i class="fas" :class="streamPlayer.playing ? 'fa-pause' : 'fa-play'"></i>
           </button>
-          
+
           <!-- 快退/快进 -->
           <button class="stream-player-btn" @click.stop="skipVideo(-10)" title="快退 10 秒 (←)">
             <i class="fas fa-backward"></i>
@@ -1812,23 +1823,25 @@
           <button class="stream-player-btn" @click.stop="skipVideo(10)" title="快进 10 秒 (→)">
             <i class="fas fa-forward"></i>
           </button>
-          
+
           <!-- 音量 -->
           <div class="stream-player-volume">
-            <button class="stream-player-btn" @click.stop="toggleMute" :title="streamPlayer.muted ? '取消静音 (M)' : '静音 (M)'">
+            <button class="stream-player-btn" @click.stop="toggleMute"
+              :title="streamPlayer.muted ? '取消静音 (M)' : '静音 (M)'">
               <i class="fas" :class="getVolumeIcon()"></i>
             </button>
             <div class="stream-player-volume-slider" @click.stop="handleVolumeChange">
-              <div class="stream-player-volume-level" :style="{ width: (streamPlayer.muted ? 0 : streamPlayer.volume * 100) + '%' }"></div>
+              <div class="stream-player-volume-level"
+                :style="{ width: (streamPlayer.muted ? 0 : streamPlayer.volume * 100) + '%' }"></div>
             </div>
           </div>
-          
+
           <!-- 时间显示 -->
           <div class="stream-player-time">
             {{ formatVideoTime(streamPlayer.currentTime) }} / {{ formatVideoTime(streamPlayer.duration) }}
           </div>
         </div>
-        
+
         <!-- 右侧控制 -->
         <div class="stream-player-controls-right">
           <!-- 播放速度 -->
@@ -1837,20 +1850,18 @@
               {{ streamPlayer.playbackRate }}x
             </button>
             <div class="stream-player-speed-menu">
-              <div v-for="rate in playbackRates" :key="rate" 
-                   class="stream-player-speed-option"
-                   :class="{ active: streamPlayer.playbackRate === rate }"
-                   @click.stop="setVideoPlaybackRate(rate)">
+              <div v-for="rate in streamPlayer.playbackRates" :key="rate" class="stream-player-speed-option"
+                :class="{ active: streamPlayer.playbackRate === rate }" @click.stop="setVideoPlaybackRate(rate)">
                 {{ rate }}x
               </div>
             </div>
           </div>
-          
+
           <!-- 画中画 -->
           <button class="stream-player-btn" @click.stop="toggleVideoPiP" title="画中画 (Shift+P)">
             <i class="fas fa-external-link-square-alt"></i>
           </button>
-          
+
           <!-- 全屏 -->
           <button class="stream-player-btn" @click.stop="toggleVideoFullscreen" title="全屏 (F)">
             <i class="fas" :class="streamPlayer.fullscreen ? 'fa-compress' : 'fa-expand'"></i>
@@ -1858,60 +1869,29 @@
         </div>
       </div>
     </div>
-  </div>
-</div>
 
-<!-- 不支持格式对话框 -->
-<div v-if="streamPlayer.showUnsupportedDialog" class="stream-player-unsupported">
-  <div class="stream-player-unsupported-dialog">
-    <div class="stream-player-unsupported-icon">
-      <i class="fas fa-exclamation-triangle"></i>
-    </div>
-    <div class="stream-player-unsupported-format">{{ streamPlayer.unsupportedFormat }}</div>
-    <div class="stream-player-unsupported-title">此格式需要转码</div>
-    <div class="stream-player-unsupported-message">
-      浏览器无法直接播放 {{ streamPlayer.unsupportedFormat }} 格式的视频。<br>
-      您可以选择在线转码或直接下载到本地播放。
-    </div>
-    
-    <div class="stream-player-unsupported-actions">
-      <!-- 转码选项 -->
-      <button class="stream-player-action-btn primary" @click="startTranscode('balanced')">
-        <i class="fas fa-magic"></i>
-        在线转码播放
-        <span class="stream-player-action-hint">(约 30 秒)</span>
-      </button>
-      
-      <button class="stream-player-action-btn secondary" @click="downloadVideo">
-        <i class="fas fa-download"></i>
-        直接下载
-      </button>
-      
-      <button class="stream-player-action-btn tertiary" @click="closeUnsupportedDialog">
-        取消
-      </button>
-    </div>
-  </div>
-</div>
+    <!-- 不支持格式对话框 -->
+    <div v-if="streamPlayer.showUnsupportedDialog" class="stream-player-unsupported">
+      <div class="stream-player-unsupported-dialog">
+        <div class="stream-player-unsupported-icon">
+          <i class="fas fa-exclamation-triangle"></i>
+        </div>
+        <div class="stream-player-unsupported-format">{{ streamPlayer.unsupportedFormat }}</div>
+        <div class="stream-player-unsupported-title">浏览器不支持此格式</div>
+        <div class="stream-player-unsupported-message">
+          浏览器无法直接播放 {{ streamPlayer.unsupportedFormat }} 格式的视频。<br>
+          请下载到本地使用专业播放器（如 VLC, PotPlayer）观看。
+        </div>
 
-<!-- 转码进度对话框 -->
-<div v-if="streamPlayer.transcoding" class="stream-player-transcode">
-  <div class="stream-player-transcode-dialog">
-    <div class="stream-player-transcode-icon">
-      <div class="stream-player-transcode-ring"></div>
-      <div class="stream-player-transcode-progress-ring"></div>
-      <div class="stream-player-transcode-percent">{{ getTranscodePercent() }}%</div>
+        <div class="stream-player-unsupported-actions">
+          <button class="stream-player-action-btn primary" @click="downloadVideo">
+            <i class="fas fa-download"></i>
+            下载视频
+          </button>
+
+          <button class="stream-player-action-btn tertiary" @click="closeUnsupportedDialog">
+            取消
+          </button>
+        </div>
+      </div>
     </div>
-    
-    <div class="stream-player-transcode-title">正在转码</div>
-    <div class="stream-player-transcode-status">{{ streamPlayer.transcodeStatus }}</div>
-    
-    <div class="stream-player-transcode-bar">
-      <div class="stream-player-transcode-bar-fill" :style="{ width: getTranscodePercent() + '%' }"></div>
-    </div>
-    
-    <button class="stream-player-transcode-cancel" @click="cancelTranscode">
-      取消转码
-    </button>
-  </div>
-</div>

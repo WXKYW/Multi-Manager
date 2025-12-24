@@ -44,6 +44,9 @@ const logService = require('./src/services/log-service');
 const metricsService = require('./src/services/metrics-service');
 
 const app = express();
+// 信任代理 (支持 Zeabur/Cloudflare 等反代获取正确的协议和 IP)
+app.set('trust proxy', true);
+
 const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 

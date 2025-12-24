@@ -35,7 +35,7 @@ module.exports = defineConfig(({ mode }) => {
 
     return {
         root: 'src',
-        publicDir: false, // 已删除 public 目录，资源已移入 src
+        publicDir: '../public', // 使用项目根目录的 public 文件夹
         resolve: {
             alias: {
                 // CDN 模式下仍需要别名，但会被 external 排除
@@ -77,6 +77,11 @@ module.exports = defineConfig(({ mode }) => {
         },
         server: {
             port: 5173,
+            // 暂时禁用隔离头，以确保 FFmpeg 0.11.x 稳定运行在单线程模式
+            // headers: {
+            //     'Cross-Origin-Opener-Policy': 'same-origin',
+            //     'Cross-Origin-Embedder-Policy': 'credentialless'
+            // },
             proxy: {
                 '/api': {
                     target: 'http://127.0.0.1:3000',
