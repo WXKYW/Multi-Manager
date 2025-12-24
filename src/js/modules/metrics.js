@@ -165,55 +165,76 @@ export const metricsMethods = {
 
         // 智能更新 serverList 中的数据
         data.forEach(item => {
+            if (!item || !item.serverId || !item.metrics) return;
+
             const server = this.serverList.find(s => s.id === item.serverId);
-            if (server) {
-                // 初始化结构（如果为空）
-                if (!server.info) {
-                    server.info = {
-                        cpu: { Load: '', Usage: '0%', Cores: '-' },
-                        memory: { Used: '-', Total: '-', Usage: '0%' },
-                        disk: [{ device: '/', used: '-', total: '-', usage: '0%' }],
-                        system: {},
-                        docker: { installed: false, containers: [] }
+            if (!server) return;
+
+            // 1. 准备/初始化结构
+            // 如果 server.info 不存在，先创建一个完整的基础镜像，避免多次触发 Fragment 更新
+            const isNewInfo = !server.info;
+            const info = server.info ? { ...server.info } : {
+                cpu: { Load: '-', Usage: '0%', Cores: '-' },
+                memory: { Used: '-', Total: '-', Usage: '0%' },
+                disk: [{ device: '/', used: '-', total: '-', usage: '0%' }],
+                system: {},
+                docker: { installed: false, containers: [] }
+            };
+
+            try {
+                // 2. 更新 CPU 数据
+                info.cpu = {
+                    Load: item.metrics.load || '-',
+                    Usage: item.metrics.cpu_usage || '0%',
+                    Cores: item.metrics.cores || '-'
+                };
+
+                // 3. 更新内存数据 (逻辑增强：解析 "123/1024MB")
+                if (item.metrics.mem_usage && typeof item.metrics.mem_usage === 'string') {
+                    const memMatch = item.metrics.mem_usage.match(/(\d+)\/(\d+)MB/);
+                    if (memMatch) {
+                        const used = parseInt(memMatch[1]);
+                        const total = parseInt(memMatch[2]);
+                        info.memory = {
+                            Used: used + ' MB',
+                            Total: total + ' MB',
+                            Usage: Math.round((used / total) * 100) + '%'
+                        };
+                    }
+                }
+
+                // 4. 更新磁盘数据 (逻辑增强：解析 "10G/50G (20%)")
+                if (item.metrics.disk_usage && typeof item.metrics.disk_usage === 'string') {
+                    const diskMatch = item.metrics.disk_usage.match(/([^\/]+)\/([^\s]+)\s\(([\d%.]+)\)/);
+                    if (diskMatch) {
+                        if (!info.disk || !info.disk[0]) info.disk = [{}];
+                        info.disk[0] = {
+                            device: '/',
+                            used: diskMatch[1],
+                            total: diskMatch[2],
+                            usage: diskMatch[3]
+                        };
+                    }
+                }
+
+                // 5. 更新 Docker 概要信息
+                if (item.metrics.docker) {
+                    info.docker = {
+                        ...info.docker,
+                        installed: !!item.metrics.docker.installed,
+                        runningCount: item.metrics.docker.running || 0,
+                        stoppedCount: item.metrics.docker.stopped || 0
                     };
                 }
 
-                // 1. 更新 CPU 负载
-                if (!server.info.cpu) server.info.cpu = {};
-                server.info.cpu.Load = item.metrics.load;
-                server.info.cpu.Usage = item.metrics.cpu_usage;
-                server.info.cpu.Cores = item.metrics.cores || '-';
-
-                // 2. 更新内存数据 (解析 "123/1024MB")
-                if (!server.info.memory) server.info.memory = {};
-                const memMatch = item.metrics.mem_usage.match(/(\d+)\/(\d+)MB/);
-                if (memMatch) {
-                    const used = parseInt(memMatch[1]);
-                    const total = parseInt(memMatch[2]);
-                    server.info.memory.Used = used + ' MB';
-                    server.info.memory.Total = total + ' MB';
-                    server.info.memory.Usage = Math.round((used / total) * 100) + '%';
-                }
-
-                // 3. 更新磁盘数据 (解析 "10G/50G (20%)")
-                if (!server.info.disk || !server.info.disk[0]) {
-                    server.info.disk = [{ device: '/', used: '-', total: '-', usage: '0%' }];
-                }
-                const diskMatch = item.metrics.disk_usage.match(/([^\/]+)\/([^\s]+)\s\(([\d%.]+)\)/);
-                if (diskMatch) {
-                    server.info.disk[0].used = diskMatch[1];
-                    server.info.disk[0].total = diskMatch[2];
-                    server.info.disk[0].usage = diskMatch[3];
-                }
-
-                // 4. 更新 Docker 概要信息
-                if (!server.info.docker) server.info.docker = { installed: false, containers: [] };
-                server.info.docker.installed = item.metrics.docker.installed;
-                server.info.docker.runningCount = item.metrics.docker.running;
-                server.info.docker.stoppedCount = item.metrics.docker.stopped;
-
+                // 赋值回响应式对象
+                // 如果是新对象，直接赋值；如果是旧对象，赋值新引用以触发更干净的 Patch
+                server.info = info;
                 server.status = 'online';
                 server.error = null;
+
+            } catch (err) {
+                console.warn('[Metrics] 数据转换失败:', err, item);
             }
         });
     },
@@ -390,6 +411,9 @@ export const metricsMethods = {
     },
 
     async renderMetricsCharts(retryCount = 0) {
+        // 手机端不渲染图表，以最大化内容显示并节省性能
+        if (window.innerWidth <= 768) return;
+
         // CDN 模式下 Chart.js 可能还未加载，使用回退机制动态加载
         if (!window.Chart) {
             if (retryCount < 2) {

@@ -1838,25 +1838,20 @@
     }
 }
 
-/* ==================== 鍐呭祵寮?SSH 缁堢瀛愭爣绛鹃〉鏍峰紡 ==================== */
-
-/* SSH 浼氳瘽鏍囩椤垫寜閽牱寮?*/
 .server-sec-tabs {
     flex-wrap: nowrap;
     gap: 4px;
     overflow: visible !important;
 }
 
-/* 婊氬姩鍖呰鍣?*/
 .server-tabs-scroll-wrapper {
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
     overflow: visible;
-    /* 鍏佽蹇€熻繛鎺ヤ笅鎷夎彍鍗曟孩鍑烘樉绀?*/
     max-width: 100%;
-    padding-bottom: 2px;
+    padding-bottom: 0px;
     scrollbar-width: none;
 }
 
@@ -2526,28 +2521,27 @@
 @keyframes dropdownSlideIn {
     from {
         opacity: 0;
-        transform: translateX(-50%) translateY(-8px) scale(0.95);
+        transform: translateY(-8px) scale(0.95);
     }
 
     to {
         opacity: 1;
-        transform: translateX(-50%) translateY(0) scale(1);
+        transform: translateY(0) scale(1);
     }
 }
 
 @keyframes dropdownSlideOut {
     from {
         opacity: 1;
-        transform: translateX(-50%) translateY(0) scale(1);
+        transform: translateY(0) scale(1);
     }
 
     to {
         opacity: 0;
-        transform: translateX(-50%) translateY(-8px) scale(0.95);
+        transform: translateY(-8px) scale(0.95);
     }
 }
 
-/* 閬僵灞傛贰鍏ユ贰鍑?*/
 .fade-enter-active,
 .fade-leave-active {
     transition: opacity 0.15s ease;
@@ -2558,32 +2552,38 @@
     opacity: 0;
 }
 
-/* ==================== SSH 蹇€熻繛鎺ユ寜閽牱寮?==================== */
+/* ==================== SSH 快速连接按钮样式 ==================== */
 .ssh-quick-connect-btn {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 36px;
-    height: 36px;
-    padding: 8px 12px;
+    min-width: 40px;
+    height: 37px;
+    padding: 8px 14px;
     background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
+    border: 1px dashed var(--border-color);
     border-radius: 8px;
     color: var(--server-primary);
     font-size: 13px;
+    font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
 }
 
 .ssh-quick-connect-btn:hover {
-    background: var(--server-primary);
+    background: var(--bg-tertiary);
     border-color: var(--server-primary);
-    color: white;
+    border-style: dashed;
+    color: var(--server-primary);
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0, 212, 170, 0.25);
 }
 
-/* 蹇€熻繛鎺ヤ笅鎷夎彍鍗?*/
+.ssh-quick-connect-btn:active {
+    transform: translateY(0);
+}
+
 .ssh-quick-menu {
     position: absolute;
     top: calc(100% + 8px);
@@ -2621,7 +2621,6 @@
     color: var(--server-primary);
 }
 
-/* 鍏ㄩ儴鎵撳紑鎸夐挳 */
 .ssh-quick-menu-header .mini-btn-primary {
     padding: 5px 10px;
     font-size: 10px;
@@ -2652,7 +2651,6 @@
     padding: 4px;
 }
 
-/* 绠€娲佹粴鍔ㄦ潯 */
 .ssh-quick-menu-list::-webkit-scrollbar {
     width: 4px;
 }
@@ -2662,7 +2660,6 @@
     border-radius: 2px;
 }
 
-/* 鍒楄〃椤?*/
 .ssh-quick-item {
     padding: 10px 12px;
     margin: 2px 0;
@@ -2748,29 +2745,49 @@
     opacity: 0.2;
 }
 
-/* ==================== 蹇€熻繛鎺ュ搷搴斿紡閫傞厤 ==================== */
+/* ==================== 快速连接响应式适配 ==================== */
 @media (max-width: 768px) {
     .ssh-quick-connect-btn {
-        min-width: 32px;
-        height: 32px;
-        padding: 6px 10px;
-        font-size: 12px;
+        min-width: 44px !important;
+        width: 44px !important;
+        height: 44px !important;
+        padding: 0 !important;
+        font-size: 16px !important;
+        border-radius: 12px !important;
+        border-style: dashed !important;
     }
 
+    /* 核心修复：使用 fixed 定位突破父容器的 overflow 裁剪 */
     .ssh-quick-menu {
-        min-width: 240px;
-        left: auto;
-        right: 0;
-        transform: none;
+        position: fixed !important;
+        top: 68px !important;
+        left: 12px !important;
+        right: 12px !important;
+        width: auto !important;
+        min-width: 0 !important;
+        transform: none !important;
+        z-index: 100000 !important;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3) !important;
+        max-height: 70vh !important;
+        display: flex !important;
+        flex-direction: column !important;
+    }
+
+    .ssh-quick-menu-list {
+        max-height: none !important;
+        /* 交由父容器控制 */
+        flex: 1;
+        overflow-y: auto;
     }
 }
 
 @media (max-width: 480px) {
     .ssh-quick-connect-btn {
-        min-width: 28px;
-        height: 28px;
-        padding: 5px 8px;
-        font-size: 11px;
+        min-width: 40px !important;
+        width: 40px !important;
+        height: 40px !important;
+        padding: 0 !important;
+        font-size: 14px !important;
     }
 
     .ssh-quick-menu {

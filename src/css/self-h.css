@@ -43,17 +43,25 @@
 }
 
 .toolbar-right .btn-icon-refined {
+    width: 36px;
+    height: 36px;
     border-radius: 8px;
     /* 圆角矩形 */
     color: var(--selfh-primary);
     /* background: rgba(6, 182, 212, 0.05); */
     border: 1px solid rgb(6 182 212 / 62%);
+    background: transparent;
 }
 
 .toolbar-right .btn-icon-refined:hover {
     background: var(--selfh-primary);
     color: white;
-    transform: translateY(-1px);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(6, 182, 212, 0.3);
+}
+
+.toolbar-right .btn-icon-refined:active {
+    transform: translateY(0);
 }
 
 .toolbar-left {
@@ -92,6 +100,11 @@
     border: 1px solid var(--border-color);
     white-space: nowrap;
     /* 极其重要：防止折叠时文字换行导致高度抖动 */
+}
+
+/* 修改时间列右对齐 */
+.col-time {
+    text-align: right !important;
 }
 
 .search-scope-segmented button {
@@ -160,11 +173,13 @@
     appearance: none;
 }
 
-/* 增强面包屑 */
+/* 增强面包屑 - 支持换行 */
 .breadcrumb-fluid-container {
     display: flex;
     align-items: center;
-    overflow-x: auto;
+    flex-wrap: wrap;
+    gap: 2px 0;
+    overflow-x: visible;
     scrollbar-width: none;
 }
 
@@ -172,9 +187,9 @@
     background: transparent;
     border: none;
     color: var(--text-secondary);
-    padding: 6px 10px;
+    padding: 4px 8px;
     border-radius: 6px;
-    font-size: 13.5px;
+    font-size: 13px;
     cursor: pointer;
     transition: all 0.2s;
     white-space: nowrap;
@@ -195,46 +210,86 @@
     font-size: 10px;
     color: var(--text-tertiary);
     opacity: 0.5;
-    margin: 0 4px;
+    margin: 0 2px;
+    flex-shrink: 0;
 }
 
-/* 集成搜索框 */
+/* 集成搜索框 - 与 btn-icon-refined 风格统一 */
 .integrated-search {
     position: relative;
-    width: 200px;
+    width: 36px;
+    height: 36px;
+    transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.integrated-search.expanded {
+    width: 220px;
 }
 
 .integrated-search i {
     position: absolute;
-    left: 12px;
+    left: 50%;
     top: 50%;
-    transform: translateY(-50%);
-    font-size: 12px;
+    transform: translate(-50%, -50%);
+    font-size: 14px;
     color: var(--selfh-primary);
-    /* 主题色图标 */
-    opacity: 0.8;
+    opacity: 1;
+    pointer-events: none;
+    transition: left 0.25s, transform 0.25s, color 0.2s;
+    z-index: 1;
 }
 
+.integrated-search.expanded i {
+    left: 14px;
+    transform: translateY(-50%);
+}
+
+/* 未展开状态 - 与 btn-icon-refined 一致 */
 .integrated-search input {
     width: 100%;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-color);
+    height: 100%;
+    background: transparent;
+    border: 1px solid rgb(6 182 212 / 62%);
     border-radius: 8px;
-    /* 圆角矩形 */
-    padding: 6px 12px 6px 32px;
-    font-size: 13px;
+    padding: 0;
+    font-size: 0;
     color: var(--text-primary);
-    transition: background 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-        border-color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-        box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 悬停状态 - 与 btn-icon-refined:hover 一致 */
+.integrated-search:not(.expanded):hover {
+    transform: translateY(-2px);
+}
+
+.integrated-search:not(.expanded):hover input {
+    background: var(--selfh-primary);
+    border-color: var(--selfh-primary);
+    box-shadow: 0 4px 12px rgba(6, 182, 212, 0.3);
+}
+
+.integrated-search:not(.expanded):hover i {
+    color: white;
+}
+
+.integrated-search:not(.expanded):active {
+    transform: translateY(0);
+}
+
+/* 展开状态 */
+.integrated-search.expanded input {
+    padding: 6px 12px 6px 36px;
+    font-size: 13px;
+    cursor: text;
+    background: var(--bg-tertiary);
+    border-color: var(--selfh-primary);
 }
 
 .integrated-search input:focus {
     outline: none;
-    /* 移除浏览器默认的黑色边框 */
     background: var(--bg-primary);
     border-color: var(--selfh-primary);
-    /* 模块主题色 */
     box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.15);
 }
 
@@ -425,9 +480,9 @@
         overflow-x: hidden;
     }
 
-    /* 名称列：自适应剩余空间 */
+    /* 名称列：自适应剩余空间，占比更大 */
     .self-h-tab-content .col-name {
-        width: auto !important;
+        width: 70% !important;
         max-width: none !important;
         min-width: 0 !important;
     }
@@ -447,24 +502,27 @@
 
     /* 文件名更紧凑 */
     .file-cell-main {
-        gap: 8px;
+        gap: 10px;
     }
 
+    /* 手机端缩略图占满整行高度 */
     .file-icon-wrapper {
-        width: 26px;
-        height: 26px;
-        min-width: 26px;
-        max-width: 26px;
-        font-size: 15px;
+        width: 40px;
+        height: 40px;
+        min-width: 40px;
+        max-width: 40px;
+        font-size: 18px;
+        border-radius: 8px;
     }
 
     .file-thumb-icon {
-        width: 26px;
-        height: 26px;
+        width: 40px;
+        height: 40px;
+        border-radius: 8px;
     }
 
     .file-name-text {
-        font-size: 13px;
+        font-size: 14px;
     }
 
     /* 表格行内边距 */
@@ -489,14 +547,27 @@
         gap: 6px;
     }
 
-    /* 搜索框缩小 */
-    .integrated-search {
-        width: 120px;
+    /* 搜索框手机端只显示图标 */
+    /* 手机端搜索框展开时的样式覆盖 */
+    .integrated-search.expanded {
+        width: 150px;
     }
 
-    .integrated-search input {
-        padding: 5px 10px 5px 28px;
+    .integrated-search.expanded input {
+        width: 100%;
+        padding: 6px 10px 6px 32px;
         font-size: 12px;
+        cursor: text;
+    }
+
+    .integrated-search.expanded i {
+        left: 12px;
+        transform: translateY(-50%);
+    }
+
+    /* 搜索范围选择器手机端隐藏，搜索结果在新页面展示时再显示 */
+    .search-scope-wrapper {
+        display: none !important;
     }
 
     /* 面包屑更紧凑 */

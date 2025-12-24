@@ -75,12 +75,12 @@
                                     @click="openListSearchScope = 2">文件</button>
                             </div>
                         </div>
-                        <div class="integrated-search">
+                        <div class="integrated-search" :class="{ expanded: openListSearchActive }">
                             <i class="fas fa-search"></i>
-                            <input type="text" placeholder="搜索文件..." @focus="openListSearchActive = true"
+                            <input type="text" placeholder="搜索文件..." @click="openListSearchActive = true"
+                                @focus="openListSearchActive = true"
                                 @blur="e => { if(!e.target.value) window.setTimeout(() => { openListSearchActive = false }, 200) }"
-                                @input="e => { if(!e.target.value) openListSearchActive = false; else openListSearchActive = true; }"
-                                @keyup.enter="e => searchOpenListFiles(e.target.value)">
+                                @keyup.enter="e => searchOpenListFilesNewTab(e.target.value)">
                         </div>
                         <button class="btn btn-icon-refined" @click="mkdirOpenList" title="新建文件夹"><i
                                 class="fas fa-folder-plus"></i></button>
@@ -194,7 +194,8 @@
                     <div class="setting-item" style="padding: 10px;">
                         <div
                             style="font-weight: 600; color: var(--text-primary); font-size: 14px; margin-bottom: 12px;">
-                            <i class="fas fa-plus-circle text-primary" style="margin-right: 6px;"></i> 添加新实例</div>
+                            <i class="fas fa-plus-circle text-primary" style="margin-right: 6px;"></i> 添加新实例
+                        </div>
                         <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                             <input type="text" v-model="newOpenListAcc.name" class="form-input" placeholder="名称"
                                 style="flex: 1; min-width: 100px;" />
