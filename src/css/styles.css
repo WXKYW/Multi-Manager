@@ -128,6 +128,7 @@ pre,
   }
 
   .sec-tabs::-webkit-scrollbar {
+
     display: none;
     /* 隐藏滚动条 (Chrome/Safari) */
   }
@@ -2405,9 +2406,21 @@ body.modal-open {
 }
 
 @media (max-width: 768px) {
+
+  /* 移动端主框架使用动态视口高度 */
   .app-wrapper {
     flex-direction: column-reverse;
-    /* Sidebar at bottom */
+    /* 使用 dvh 作为首选，vh 作为回退 */
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .app-main {
+    height: 100%;
+    overflow-y: auto;
+    /* 避免滚动穿透 */
+    overscroll-behavior: contain;
   }
 
   .app-sidebar {
@@ -2595,8 +2608,8 @@ body.modal-open {
 
 
   .app-main {
-    height: calc(100vh - 60px);
-    margin-bottom: 60px;
+    height: calc(100vh - 97px);
+    margin-bottom: 20px;
   }
 
   .container {
@@ -2778,7 +2791,6 @@ body.modal-open {
   overflow-x: auto;
   /* 允许横向滚动 */
   max-width: 100%;
-  padding-bottom: 2px;
   scrollbar-width: none;
   /* Firefox */
 }

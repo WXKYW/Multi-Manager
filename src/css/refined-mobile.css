@@ -2,27 +2,181 @@
 
 /* --- 基础布局 --- */
 @media (max-width: 768px) {
+    .main-tab.active::after {
+        width: 100%;
+        display: none;
+    }
 
-    /* 容器调整 */
+    /* --- 主标签栏底部导航 - 悬浮胶囊式 --- */
+    .main-tabs {
+        position: fixed !important;
+        /* 悬浮在底部，留出足够空间避开浏览器工具栏 */
+        bottom: 12px !important;
+        left: 12px !important;
+        right: 12px !important;
+        z-index: 1000 !important;
+        /* 深色主题默认样式 */
+        background: rgb(17 24 39) !important;
+        backdrop-filter: blur(40px) saturate(180%) !important;
+        -webkit-backdrop-filter: blur(40px) saturate(180%) !important;
+        border: 1px solid rgba(255, 255, 255, 0.708) !important;
+        /* 圆角胶囊 */
+        border-radius: 50px !important;
+        padding: 8px 12px !important;
+        margin: 0 !important;
+        gap: 4px !important;
+        justify-content: space-around !important;
+        /* 悬浮阴影 - 深色主题 */
+        box-shadow:
+            0 8px 32px rgba(0, 0, 0, 0.4),
+            0 0 0 1px rgba(255, 255, 255, 0.05) inset !important;
+        /* 确保有最小高度 */
+        min-height: 56px !important;
+        height: auto !important;
+        display: flex !important;
+        flex-wrap: nowrap !important;
+        align-items: center !important;
+    }
+
+    /* 浅色主题底栏适配 */
+    @media (prefers-color-scheme: light) {
+        .main-tabs {
+            background: rgba(255, 255, 255, 0.92) !important;
+            border: 1px solid rgba(0, 0, 0, 0.08) !important;
+            box-shadow:
+                0 8px 32px rgba(0, 0, 0, 0.12),
+                0 0 0 1px rgba(0, 0, 0, 0.03) inset !important;
+        }
+    }
+
+    .main-tabs .main-tab {
+        flex: 1 !important;
+        flex-direction: column !important;
+        gap: 2px !important;
+        padding: 6px 4px !important;
+        min-width: 0 !important;
+        min-height: 44px !important;
+        font-size: 10px !important;
+        border-radius: 10px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+
+    .main-tabs .main-tab i {
+        font-size: 18px !important;
+        margin: 0 !important;
+    }
+
+    .main-tabs .main-tab span {
+        display: block !important;
+        font-size: 10px !important;
+        font-weight: 500 !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        max-width: 100% !important;
+    }
+
+    /* 实时监控指示器在底部导航中的调整 */
+    .main-tabs .nav-live-badge {
+        position: absolute !important;
+        top: 4px !important;
+        right: 50% !important;
+        transform: translateX(12px) !important;
+    }
+
+    /* 容器调整 - 最大化可见区域 */
     .container {
-        padding: 12px !important;
-        margin-top: 10px !important;
-        /* 移除侧边栏后不再需要那么大的 margin */
+        padding: 6px !important;
+        padding-top: 4px !important;
+        padding-bottom: 100px !important;
+        margin-top: 0 !important;
         width: 100% !important;
         overflow-x: hidden;
     }
 
+    /* 仅隐藏 Logo 和标题内容，保持 Header 容器存在以避免 Vue 挂载点丢失 */
     .header {
-        padding: 10px 5px !important;
+        height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
+        overflow: visible !important;
+        display: block !important;
+        /* 确保它是块级元素而非 none */
+    }
+
+    .header .title-group {
+        display: none !important;
+    }
+
+
+
+    /* 设置按钮移到右上角 */
+    .header-actions {
+        margin-left: auto !important;
+    }
+
+    /* 手机端设置按钮 - 改为悬浮式设计 (FAB)，避免遮挡 sectab */
+    .btn-settings-toggle {
+        position: fixed !important;
+        /* 放在右下角，但要高于底栏导航 */
+        bottom: 85px !important;
+        right: 16px !important;
+        z-index: 1001 !important;
+        width: 44px !important;
+        height: 44px !important;
+        border-radius: 50% !important;
+        padding: 0 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        background: var(--primary-color) !important;
+        color: white !important;
+        border: none !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+        transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+    }
+
+    .btn-settings-toggle:active {
+        transform: scale(0.9) !important;
+    }
+
+    .btn-settings-toggle i {
+        font-size: 20px !important;
+        margin: 0 !important;
     }
 
     .btn-settings-toggle span {
-        display: none;
-        /* 移动端隐藏“设置”文字，仅留图标 */
+        display: none !important;
     }
 
-    .btn-settings-toggle {
-        padding: 8px 12px !important;
+
+    /* 手机端Toast放底部居中 - 略高于悬浮底栏和设置按钮 */
+    .toast-manager-container.bottom-right,
+    .toast-manager-container.bottom-left,
+    .toast-manager-container.bottom-center {
+        top: auto !important;
+        bottom: 140px !important;
+        left: 50% !important;
+        right: auto !important;
+        transform: translateX(-50%) !important;
+        align-items: center !important;
+        flex-direction: column !important;
+    }
+
+    /* Toast动画从下向上 */
+    .toast-manager-container.bottom-right .toast-manager-item,
+    .toast-manager-container.bottom-left .toast-manager-item,
+    .toast-manager-container.bottom-center .toast-manager-item {
+        animation: toast-slide-in-bottom 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
+    }
+
+    .toast-manager-container.bottom-right .toast-manager-item.removing,
+    .toast-manager-container.bottom-left .toast-manager-item.removing,
+    .toast-manager-container.bottom-center .toast-manager-item.removing {
+        animation: toast-fade-out 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards !important;
     }
 
     .panel {
@@ -94,20 +248,49 @@
     }
 
     /* --- 二级标签栏优化 --- */
-    .sec-tabs {
-        overflow-x: auto;
-        display: flex;
+    /* 统一所有模块二级标签栏高度与间距 (通用的 + 各模块专用的) */
+    .sec-tabs,
+    .server-sec-tabs,
+    .paas-sec-tabs,
+    .openai-sec-tabs,
+    .gemini-sec-tabs,
+    .dns-sec-tabs,
+    .antigravity-sec-tabs {
+        overflow-x: auto !important;
+        overflow-y: visible !important;
+        /* 额外强调 Y 轴可见 */
+        display: flex !important;
         justify-content: flex-start !important;
-        white-space: nowrap;
+        white-space: nowrap !important;
+        padding-top: 8px !important;
         padding-bottom: 8px !important;
         margin-bottom: 10px !important;
-        scrollbar-width: none;
-        position: relative;
-        -webkit-overflow-scrolling: touch;
-        overscroll-behavior-x: contain;
-        /* 防止滚动触底触发页面切换 */
-        /* 移除 padding-right */
+        scrollbar-width: none !important;
+        position: relative !important;
+        -webkit-overflow-scrolling: touch !important;
+        overscroll-behavior-x: contain !important;
+        border-bottom: 1px solid var(--border-color) !important;
+        box-sizing: border-box !important;
+        height: 60px !important;
+        /* 增加到 60px */
+        align-items: center !important;
     }
+
+    /* 关键修复：重置包装层并允许溢出 */
+    .sec-tabs>div,
+    .server-tabs-scroll-wrapper,
+    .paas-tabs-scroll-wrapper {
+        padding: 0 !important;
+        margin: 0 !important;
+        display: flex !important;
+        align-items: center !important;
+        height: 100% !important;
+        overflow: visible !important;
+        /* 强制允许子元素溢出包装层 */
+    }
+
+    /* 移除 padding-right */
+
 
     .sec-tabs::-webkit-scrollbar {
         display: none;
@@ -117,11 +300,40 @@
 
     .tab-btn {
         flex: 0 0 auto !important;
-        /* 强制不压缩，确保可滚动 */
-        min-width: 80px;
-        padding: 6px 12px !important;
-        font-size: 12px !important;
+        /* 强制不压缩 */
+        min-width: 44px !important;
+        width: 44px !important;
+        height: 44px !important;
+        padding: 0 !important;
+        font-size: 0 !important;
+        /* 隐藏文字节点 */
+        font-weight: 700 !important;
+        border-radius: 12px !important;
+        background: var(--bg-tertiary) !important;
+        color: var(--text-tertiary) !important;
+        border: 1px solid var(--border-color) !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        gap: 0 !important;
+        /* 仅显示图标时不需要间距 */
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1) !important;
     }
+
+    .tab-btn i {
+        font-size: 18px !important;
+        margin: 0 !important;
+    }
+
+    .tab-btn.active {
+        background: var(--primary-color) !important;
+        color: white !important;
+        border-color: transparent !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2) !important;
+        transform: translateY(-1px);
+    }
+
 
     /* --- 域名/账号网格双列显示 --- */
     .zones-grid {
@@ -366,23 +578,7 @@
     }
 
     /* --- PaaS 标签页移动端适配 --- */
-    .paas-sec-tabs {
-        flex-direction: row !important;
-        align-items: center !important;
-        gap: 10px !important;
-        overflow-x: auto !important;
-        white-space: nowrap !important;
-        padding-bottom: 8px !important;
-        -webkit-overflow-scrolling: touch;
-        scrollbar-width: none;
-        position: relative !important;
-        width: 100% !important;
-        /* 强制宽度限制 */
-        max-width: 100% !important;
-        /* 防止溢出撑开父容器 */
-        box-sizing: border-box !important;
-    }
-
+    /* PaaS 标签内容滚动容器 */
     .paas-tabs-scroll-wrapper {
         display: flex !important;
         flex: 0 0 auto !important;
@@ -390,9 +586,7 @@
         overscroll-behavior-x: contain;
         align-items: center !important;
         width: auto !important;
-        /* 让内容自然撑开宽度 */
         min-width: 100% !important;
-        /* 至少占满容器 */
     }
 }
 
@@ -404,5 +598,27 @@
 
     .modal {
         width: 80% !important;
+    }
+}
+
+@keyframes toast-slide-in-bottom {
+    from {
+        transform: translate(-50%, 20px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translate(-50%, 0);
+        opacity: 1;
+    }
+}
+
+@keyframes toast-fade-out {
+    from {
+        opacity: 1;
+    }
+
+    to {
+        opacity: 0;
     }
 }

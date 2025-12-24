@@ -85,6 +85,24 @@ export const commonMethods = {
     },
 
     initMobileGestures() {
+        // 为移动端所有可交互元素添加震动反馈
+        window.addEventListener('click', (e) => {
+            if (window.innerWidth > 768) return;
+
+            // 匹配常见的可点击元素
+            const interactiveSelectors = 'button, a.btn, .tab-btn, .main-tab, .clickable, .ssh-quick-item, .project-card, .service-card, .server-card-header, .btn-icon-refined, .stat-pill, .chip-btn';
+            const target = e.target.closest(interactiveSelectors);
+
+            if (target && navigator.vibrate) {
+                navigator.vibrate(12);
+            }
+        }, true);
+
+        // 禁用滑动切换标签页功能
+        console.log('[System] Mobile interaction feedback initialized, swipe navigation disabled');
+        return;
+
+        /*
         let touchStartX = null;
         let touchStartY = null;
         const swipeThreshold = 80;
@@ -141,6 +159,7 @@ export const commonMethods = {
                 }
             }
         }, { passive: true });
+        */
     },
 
     // ==================== 图片预览 ====================

@@ -28,6 +28,7 @@ import '../css/r2.css'; // R2 存储样式
 import '../css/chat.css'; // 聊天界面样式
 import '../css/template.css'; // 模块模板通用样式
 import '../css/refined-ui.css'; // 精选组件样式
+import '../css/refined-mobile.css'; // 移动端适配 (必须最后加载)
 
 // 导入模板加载器
 import './template-loader.js';
