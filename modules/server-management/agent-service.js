@@ -237,11 +237,11 @@ get_net_bytes() {
 format_bytes() {
     local bytes=$1
     if [ $bytes -ge 1073741824 ]; then
-        echo "$(echo "scale=2; $bytes/1073741824" | bc) GB"
+        echo "$(awk "BEGIN {printf \\"%.2f\\", $bytes/1073741824}") GB"
     elif [ $bytes -ge 1048576 ]; then
-        echo "$(echo "scale=2; $bytes/1048576" | bc) MB"
+        echo "$(awk "BEGIN {printf \\"%.2f\\", $bytes/1048576}") MB"
     elif [ $bytes -ge 1024 ]; then
-        echo "$(echo "scale=2; $bytes/1024" | bc) KB"
+        echo "$(awk "BEGIN {printf \\"%.2f\\", $bytes/1024}") KB"
     else
         echo "$bytes B"
     fi
@@ -250,9 +250,9 @@ format_bytes() {
 format_speed() {
     local bps=$1
     if [ $bps -ge 1048576 ]; then
-        echo "$(echo "scale=2; $bps/1048576" | bc) MB/s"
+        echo "$(awk "BEGIN {printf \\"%.2f\\", $bps/1048576}") MB/s"
     elif [ $bps -ge 1024 ]; then
-        echo "$(echo "scale=2; $bps/1024" | bc) KB/s"
+        echo "$(awk "BEGIN {printf \\"%.2f\\", $bps/1024}") KB/s"
     else
         echo "$bps B/s"
     fi

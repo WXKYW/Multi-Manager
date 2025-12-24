@@ -3,6 +3,7 @@
  */
 import { store } from '../store.js';
 import { toast } from './toast.js';
+import { streamPlayer } from './stream-player.js';
 
 export const selfHMethods = {
     // 加载所有 OpenList 账号
@@ -468,7 +469,12 @@ export const selfHMethods = {
             console.log('[OpenList] Resolved target path:', newPath);
             this.loadOpenListFiles(newPath);
         } else {
-            this.showOpenFileDetail(file, file.parent || store.openListPath);
+            // 检查是否为视频文件
+            if (streamPlayer.isVideoFile(file.name)) {
+                this._playVideoFile(file, file.parent || store.openListPath);
+            } else {
+                this.showOpenFileDetail(file, file.parent || store.openListPath);
+            }
         }
     },
 
@@ -889,6 +895,36 @@ export const selfHMethods = {
         }
 
         return null;
+    },
+
+    // 播放视频文件
+    async _playVideoFile(file, baseDir = store.openListPath) {
+        const fullPath = this._getFilePath(file, baseDir);
+
+        try {
+            toast.info('正在获取视频链接...');
+
+            const response = await fetch(`/api/openlist/${this.currentOpenListAccount.id}/fs/get`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: fullPath })
+            });
+
+            if (!response.ok) {
+                toast.error(`获取视频链接失败 (${response.status})`);
+                return;
+            }
+
+            const data = await response.json();
+            if (data.code === 200 && data.data.raw_url) {
+                // 调用播放器
+                this.openVideoPlayer(data.data.raw_url, file.name);
+            } else {
+                toast.error('获取视频链接失败: ' + (data.message || '未知错误'));
+            }
+        } catch (e) {
+            toast.error('获取视频失败: ' + e.message);
+        }
     },
 
     // 下载文件
