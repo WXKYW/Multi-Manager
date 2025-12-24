@@ -64,24 +64,6 @@
 
                     <!-- 右侧搜索 -->
                     <div class="toolbar-right">
-                        <!-- 搜索范围选择 (仅在搜索激活时显示) -->
-                        <div class="search-scope-wrapper quick-fade-in" v-show="openListSearchActive">
-                            <div class="search-scope-segmented">
-                                <button :class="{ active: openListSearchScope === 0 }"
-                                    @click="openListSearchScope = 0">全部</button>
-                                <button :class="{ active: openListSearchScope === 1 }"
-                                    @click="openListSearchScope = 1">文件夹</button>
-                                <button :class="{ active: openListSearchScope === 2 }"
-                                    @click="openListSearchScope = 2">文件</button>
-                            </div>
-                        </div>
-                        <div class="integrated-search" :class="{ expanded: openListSearchActive }">
-                            <i class="fas fa-search"></i>
-                            <input type="text" placeholder="搜索文件..." @click="openListSearchActive = true"
-                                @focus="openListSearchActive = true"
-                                @blur="e => { if(!e.target.value) window.setTimeout(() => { openListSearchActive = false }, 200) }"
-                                @keyup.enter="e => searchOpenListFilesNewTab(e.target.value)">
-                        </div>
                         <button class="btn btn-icon-refined" @click="mkdirOpenList" title="新建文件夹"><i
                                 class="fas fa-folder-plus"></i></button>
                         <button class="btn btn-icon-refined" @click="loadOpenListFiles(openListPath, true)"
@@ -118,7 +100,9 @@
                                             <img v-if="getFileThumbnail(file)" :src="getFileThumbnail(file)"
                                                 class="file-thumb-icon" referrerpolicy="no-referrer" loading="lazy"
                                                 @mouseenter="showHoverPreview($event, getFileThumbnail(file))"
-                                                @mouseleave="hideHoverPreview" />
+                                                @mousemove="moveHoverPreview($event)" @mouseleave="hideHoverPreview"
+                                                @touchstart.stop="showHoverPreview($event, getFileThumbnail(file))"
+                                                @touchend.stop="hideHoverPreview" />
                                             <i v-else :class="getFileIconClass(file)"></i>
                                         </div>
                                         <span class="file-name-text" :title="file.name">{{ file.name }}</span>
@@ -157,10 +141,6 @@
             </div>
         </div>
 
-        <!-- 缩略图悬停预览容器 -->
-        <div id="file-hover-preview" class="file-hover-preview">
-            <img id="file-hover-img" src="" alt="Preview" />
-        </div>
 
         <!-- 2. 设置 -->
         <div v-if="openListSubTab === 'settings'" class="openlist-settings animate-fade-in">
@@ -300,7 +280,7 @@
 </div>
 
 <!-- 悬停预览图容器 -->
-<div id="file-hover-preview" class="file-hover-preview" style="display: none;">
+<div id="file-hover-preview" class="file-hover-preview">
     <img id="file-hover-img" src="" referrerpolicy="no-referrer" />
 </div>
 

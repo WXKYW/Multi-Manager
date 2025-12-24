@@ -87,9 +87,9 @@ module.exports = defineConfig(({ mode }) => {
                     target: 'http://127.0.0.1:3000',
                     changeOrigin: true
                 },
-                // 增加针对 SSH 和指标流的 WebSocket 代理
+                // WebSocket 代理 (SSH, Metrics, Logs)
                 '/ws': {
-                    target: 'http://127.0.0.1:3000',
+                    target: 'ws://127.0.0.1:3000',
                     ws: true,
                     changeOrigin: true
                 }

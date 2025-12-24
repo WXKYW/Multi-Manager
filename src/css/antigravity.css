@@ -643,9 +643,10 @@ input:checked+.slider:before {
 
 .ag-expandable-panel.expanded {
     max-height: 800px;
+    margin-top: 10px;
     /* Sufficiently large value */
     opacity: 1;
-    margin-bottom: 16px;
+    margin-bottom: 10px;
     border: 1px solid var(--border-color);
 }
 

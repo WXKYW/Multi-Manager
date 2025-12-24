@@ -228,7 +228,8 @@
 
     .data-table th,
     .data-table td {
-        padding: 8px 10px !important;
+        /* 对通用的数据表格缩减内边距，但不再使用 !important 以允许模块内覆盖 */
+        padding: 6px 8px;
         font-size: 12px !important;
     }
 

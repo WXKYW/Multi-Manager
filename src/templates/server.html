@@ -247,11 +247,11 @@
         <!-- Action Group (Right) -->
         <div class="action-group" @click.stop style="display: flex; align-items: center; gap: 6px;">
           <button class="btn-icon-refined" @click="refreshServerInfo(server.id)"
-            style="width: 34px; height: 34px; background: var(--bg-tertiary);">
+            style="width: 34px; height: 34px; background: var(--bg-tertiary);" title="刷新">
             <i class="fas" :class="server.loading ? 'fa-spinner fa-spin' : 'fa-sync-alt'" style="font-size: 13px;"></i>
           </button>
           <button class="btn-icon-refined" @click="openSSHTerminal(server)"
-            style="width: 34px; height: 34px; background: var(--bg-tertiary);">
+            style="width: 34px; height: 34px; background: var(--bg-tertiary);" title="SSH 终端">
             <i class="fas fa-terminal" style="font-size: 13px;"></i>
           </button>
         </div>
@@ -261,10 +261,72 @@
       <div class="server-card-body">
         <div class="server-details">
 
-          <div v-if=" server.loading"
-            style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 0; gap: 16px;">
-            <div class="ag-spinner-elegant ag-spinner-elegant-sm"></div>
-            <p class="loading-text-elegant" style="font-size: 12px;">Retrieving Telemetry</p>
+          <div v-if="server.loading" class="skeleton-container">
+            <div class="skeleton-grid">
+              <!-- 硬件载荷骨架 -->
+              <div class="skeleton-section">
+                <div class="skeleton-title">
+                  <div class="skeleton-icon"></div>
+                  <div class="skeleton-text title"></div>
+                </div>
+                <div class="skeleton-row">
+                  <div class="skeleton-text label" style="width: 120px;"></div>
+                  <div class="skeleton-text value" style="width: 80px;"></div>
+                </div>
+                <div class="skeleton-row">
+                  <div class="skeleton-text label" style="width: 100px;"></div>
+                  <div class="skeleton-text value" style="width: 60px;"></div>
+                </div>
+                <div class="skeleton-progress"></div>
+                <div class="skeleton-row" style="margin-top: 12px;">
+                  <div class="skeleton-text label" style="width: 140px;"></div>
+                  <div class="skeleton-text value" style="width: 70px;"></div>
+                </div>
+                <div class="skeleton-progress"></div>
+              </div>
+
+              <!-- 图表骨架 -->
+              <div class="skeleton-section" style="min-width: 280px;">
+                <div class="skeleton-title">
+                  <div class="skeleton-icon"></div>
+                  <div class="skeleton-text title"></div>
+                </div>
+                <div class="skeleton-chart"></div>
+              </div>
+
+              <!-- 存储资源骨架 -->
+              <div class="skeleton-section">
+                <div class="skeleton-title">
+                  <div class="skeleton-icon"></div>
+                  <div class="skeleton-text title"></div>
+                </div>
+                <div class="skeleton-row">
+                  <div class="skeleton-text label" style="width: 100px;"></div>
+                  <div class="skeleton-text value" style="width: 90px;"></div>
+                </div>
+                <div class="skeleton-progress"></div>
+              </div>
+
+              <!-- 网络资源骨架 -->
+              <div class="skeleton-section">
+                <div class="skeleton-title">
+                  <div class="skeleton-icon"></div>
+                  <div class="skeleton-text title"></div>
+                </div>
+                <div class="skeleton-row">
+                  <div class="skeleton-text label" style="width: 70px;"></div>
+                  <div class="skeleton-text value" style="width: 50px;"></div>
+                </div>
+                <div class="skeleton-row">
+                  <div class="skeleton-text label" style="width: 80px;"></div>
+                  <div class="skeleton-text value" style="width: 70px;"></div>
+                </div>
+                <div class="skeleton-row">
+                  <div class="skeleton-text label" style="width: 80px;"></div>
+                  <div class="skeleton-text value" style="width: 70px;"></div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div v-else-if="server.error" class="error" style="margin: 0px 3px;">
@@ -730,6 +792,9 @@
             <button class="btn btn-success btn-sm" @click="openAddServerModal">
               <i class="fas fa-plus"></i> 添加主机
             </button>
+            <button class="btn btn-primary btn-sm" @click="showBatchAgentInstallModal">
+              <i class="fas fa-robot"></i> 批量部署 Agent
+            </button>
             <button class="btn btn-secondary btn-sm" @click="loadServerList" :disabled="serverLoading">
               <i class="fas fa-sync-alt" :class="{ 'fa-spin': serverLoading }"></i>
             </button>
@@ -756,8 +821,9 @@
               <th class="text-center" style="width: 80px;">状态</th>
               <th>主机名称</th>
               <th>连接地址</th>
+              <th class="text-center" style="width: 100px;">监控</th>
               <th class="text-center">延迟</th>
-              <th class="text-center" style="width: 120px;">操作</th>
+              <th class="text-center" style="width: 150px;">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -781,6 +847,12 @@
                   style="background: var(--bg-secondary); border: 1px solid var(--border-color); padding: 2px 8px; border-radius: 6px; font-size: 11px; font-family: var(--font-mono); color: var(--text-secondary);">
                   {{ server.username }}@{{ formatHost(server.host) }}:{{ server.port }}
                 </code>
+              </td>
+              <td class="text-center">
+                <span
+                  style="padding: 4px 12px; font-size: 11px; border-radius: 6px; background: rgba(0, 212, 170, 0.1); color: var(--server-primary); font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">
+                  <i class="fas fa-robot" style="font-size: 10px;"></i> Agent
+                </span>
               </td>
               <td class="text-center">
                 <div v-if="server.response_time" :style="{
@@ -816,6 +888,10 @@
                   <button class="btn btn-icon-refined" @click="openSSHTerminal(server)" title="SSH 连接"
                     style="color: var(--server-primary);">
                     <i class="fas fa-terminal"></i>
+                  </button>
+                  <button class="btn btn-icon-refined" @click="showAgentInstallModal(server.id)" title="部署 Agent"
+                    style="color: var(--success-color);">
+                    <i class="fas fa-robot"></i>
                   </button>
                   <button class="btn btn-icon-refined" @click="openEditServerModal(server.id)" title="编辑主机">
                     <i class="fas fa-edit"></i>

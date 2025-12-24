@@ -138,7 +138,9 @@ export const store = reactive({
     openListFileCache: {}, // 路径 -> 文件列表缓存
     openListPreviewSize: 800, // 预览图最大尺寸
     openListSearchScope: 0, // 0: 全部, 1: 文件夹, 2: 文件
-    openListSearchActive: false, // 是否处于搜索激活状态
+    openListSearchActive: false, // 是否处于搜索激活状态 (主列表)
+    openListSearchInput: '', // 搜索输入框内容
+    openListSearchExpanded: false, // 搜索框展开状态
     // 临时标签页状态 (支持多个)
     openListTempTabs: [], // 数组项: { id, name, path, files: [], loading: false, pathParts: [] }
     openListActiveTempTabId: null,
@@ -169,6 +171,16 @@ export const store = reactive({
         logRetentionDays: 7,
         metrics_retention_days: 30
     },
+    // Agent 部署弹窗
+    showAgentModal: false,
+    agentModalData: null,
+    agentInstallLoading: false,
+
+    // 批量 Agent 部署
+    showBatchAgentModal: false,
+    selectedBatchServers: [],
+    batchInstallResults: [],
+
     serverCredentials: [],
     showSSHQuickMenu: false, // SSH 快速连接下拉菜单
 

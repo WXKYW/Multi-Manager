@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS server_accounts (
     private_key TEXT, -- 加密存储的私钥
     passphrase TEXT, -- 加密存储的私钥密码
     status TEXT DEFAULT 'unknown' CHECK(status IN ('online', 'offline', 'unknown')), -- 主机状态
+    monitor_mode TEXT DEFAULT 'agent' CHECK(monitor_mode IN ('agent')), -- 监控模式：纯 Agent
     last_check_time DATETIME, -- 最后探测时间
     last_check_status TEXT, -- 最后探测状态
     response_time INTEGER, -- 响应时间（毫秒）
@@ -114,3 +115,7 @@ CREATE TABLE IF NOT EXISTS server_metrics_history (
 -- 索引优化历史查询
 CREATE INDEX IF NOT EXISTS idx_metrics_history_server_time ON server_metrics_history(server_id, recorded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_metrics_history_time ON server_metrics_history(recorded_at DESC);
+
+-- 迁移：monitor_mode 已简化为纯 Agent 模式，移除了 SSH 和双模式选项
+-- 旧数据库可能仍包含 'ssh' 或 'both' 值，应用层会统一按 Agent 模式处理
+-- ALTER TABLE server_accounts ADD COLUMN monitor_mode TEXT DEFAULT 'agent';

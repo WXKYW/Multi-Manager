@@ -43,6 +43,24 @@ class ServerAccount {
     }
 
     /**
+     * 获取在线主机数量
+     * @returns {number} 在线主机数
+     */
+    static getOnlineCount() {
+        const stmt = getDb().prepare("SELECT COUNT(*) as count FROM server_accounts WHERE status = 'online'");
+        return stmt.get().count;
+    }
+
+    /**
+     * 获取离线主机数量
+     * @returns {number} 离线主机数
+     */
+    static getOfflineCount() {
+        const stmt = getDb().prepare("SELECT COUNT(*) as count FROM server_accounts WHERE status != 'online'");
+        return stmt.get().count;
+    }
+
+    /**
      * 创建主机账号
      * @param {Object} data - 主机账号数据
      * @returns {Object} 创建的主机账号
@@ -113,6 +131,7 @@ class ServerAccount {
                 passphrase = ?,
                 tags = ?,
                 description = ?,
+                monitor_mode = ?,
                 updated_at = ?
             WHERE id = ?
         `);
@@ -128,6 +147,7 @@ class ServerAccount {
             encryptedData.passphrase !== undefined ? encryptedData.passphrase : existingRaw.passphrase,
             data.tags !== undefined ? JSON.stringify(data.tags) : existingRaw.tags,
             data.description !== undefined ? data.description : existing.description,
+            data.monitor_mode !== undefined ? data.monitor_mode : (existing.monitor_mode || 'agent'),
             now,
             id
         );

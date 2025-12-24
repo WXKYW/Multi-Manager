@@ -38,43 +38,40 @@ const {
 // 导入路由
 const { registerRoutes } = require('./src/routes');
 
-// 导入 SSH 终端服务
-const sshTerminalService = require('./modules/server-management/ssh-terminal-service');
-
 // 导入日志服务
 const logService = require('./src/services/log-service');
-
-// 导入实时监控服务
-const metricsService = require('./modules/server-management/metrics-service');
+// 导入 Metrics 服务
+const metricsService = require('./src/services/metrics-service');
 
 const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 
 // 初始化 WebSocket 服务
-const sshWss = sshTerminalService.init(server);
 const logWss = logService.init(server);
 const metricsWss = metricsService.init(server);
+const sshService = require('./modules/server-management/ssh-service');
+const sshWss = sshService.init(server);
 
 // 统一处理 WebSocket 升级请求
 server.on('upgrade', (request, socket, head) => {
   const pathname = request.url.split('?')[0];
   logger.info(`[WS Upgrade] 路径: ${pathname} (来自 ${socket.remoteAddress})`);
 
-  if (pathname === '/ws/ssh') {
-    sshWss.handleUpgrade(request, socket, head, (ws) => {
-      logger.info(`[WS Upgrade] SSH 握手完成`);
-      sshWss.emit('connection', ws, request);
-    });
-  } else if (pathname === '/ws/logs') {
+  if (pathname === '/ws/logs') {
     logWss.handleUpgrade(request, socket, head, (ws) => {
       logger.info(`[WS Upgrade] 日志 握手完成`);
       logWss.emit('connection', ws, request);
     });
   } else if (pathname === '/ws/metrics') {
     metricsWss.handleUpgrade(request, socket, head, (ws) => {
-      logger.info(`[WS Upgrade] 监控指标 握手完成`);
+      logger.info(`[WS Upgrade] Metrics 握手完成`);
       metricsWss.emit('connection', ws, request);
+    });
+  } else if (pathname === '/ws/ssh') {
+    sshWss.handleUpgrade(request, socket, head, (ws) => {
+      logger.info(`[WS Upgrade] SSH 握手完成`);
+      sshWss.emit('connection', ws, request);
     });
   } else {
     logger.warn(`[WS Upgrade] 拦截未知路径: ${pathname}`);
@@ -228,12 +225,7 @@ server.listen(PORT, '0.0.0.0', () => {
     logger.warn('主机监控服务启动失败:', error.message);
   }
 
-  // 启动历史指标采集器
-  try {
-    metricsService.startHistoryCollector();
-  } catch (error) {
-    logger.warn('历史指标采集器启动失败:', error.message);
-  }
+
 
   // 启动自动日志清理任务 (每 12 小时执行一次)
   const AUTO_CLEANUP_INTERVAL = 12 * 60 * 60 * 1000;

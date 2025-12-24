@@ -251,6 +251,21 @@ class DatabaseService {
             } catch (err) {
                 logger.error('Operation Logs 额外字段迁移失败:', err.message);
             }
+
+            // Server Accounts 迁移: 添加 monitor_mode 字段
+            try {
+                const serverColumns = this.db.pragma('table_info(server_accounts)');
+                if (serverColumns.length > 0) {
+                    const hasMonitorMode = serverColumns.some(col => col.name === 'monitor_mode');
+                    if (!hasMonitorMode) {
+                        logger.info('正在为 server_accounts 表添加 monitor_mode 字段...');
+                        this.db.exec("ALTER TABLE server_accounts ADD COLUMN monitor_mode TEXT DEFAULT 'ssh'");
+                        logger.success('server_accounts.monitor_mode 字段添加成功');
+                    }
+                }
+            } catch (err) {
+                logger.error('Server Accounts monitor_mode 迁移失败:', err.message);
+            }
         } catch (error) {
             logger.error('数据库迁移失败', error.message);
             // 不抛出错误，避免影响应用启动

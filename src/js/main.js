@@ -1110,6 +1110,19 @@ const app = createApp({
       }
     },
 
+    // 搜索范围变更后自动刷新结果
+    openListSearchScope() {
+      if (this.mainActiveTab === 'self-h') {
+        if (this.openListSubTab === 'files' && store.openListSearchActive) {
+          // 如果在主列表且搜索激活，刷新主列表搜索
+          this.searchOpenListFiles(store.openListSearchText);
+        } else if (this.openListSubTab === 'temp' && this.currentOpenListTempTab?.isSearch) {
+          // 如果在临时搜索标签页，刷新该标签页
+          this.loadTempTabFiles(this.currentOpenListTempTab.path, false, this.currentOpenListTempTab.id);
+        }
+      }
+    },
+
 
   },
 

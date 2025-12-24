@@ -577,24 +577,27 @@ export const hostMethods = {
             // 展开时加载历史指标图表
             this.loadCardMetrics(serverId);
 
-            // 判断是否已经加载了完整详情（不仅仅是实时流的指标）
-            const hasFullInfo = server.info && server.info.system && Object.keys(server.info.system).length > 0;
+            // 彻底摒弃 SSH 缓存机制：点击展开即触发强制刷新 (Agent 模式除外，因为 Agent 有实时推送)
+            const isAgent = server.monitor_mode === 'agent';
+            const hasLiveUpdate = server.info && server.info.cpu_usage; // 如果已经有实时规律跳动的数据
 
-            // 如果有缓存数据且当前没有完整详情，立即使用
-            if (server.cached_info && !hasFullInfo) {
-                server.info = { ...server.cached_info };
-                // 后台静默刷新最新数据
-                this.loadServerInfo(serverId, false, true);
-            } else if (!hasFullInfo) {
-                // 确实没有详情数据，去拉取
-                this.loadServerInfo(serverId, false, false);
+            if (isAgent && hasLiveUpdate) {
+                // Agent 且已有实时数据，无需操作
+                return;
             }
+
+            // 强制刷新：显示 loading 并拉取最新数据
+            this.loadServerInfo(serverId, true, false);
         }
     },
 
     async loadServerInfo(serverId, force = false, silent = false) {
         const server = this.serverList.find(s => s.id === serverId);
         if (!server) return;
+
+        if (force) {
+            server.info = null; // 强制刷新时清除旧数据，显示 loading
+        }
 
         if (!silent && !server.info) {
             server.loading = true;
@@ -1060,5 +1063,311 @@ export const hostMethods = {
             'Version': '版本'
         };
         return translations[key] || key;
+    },
+
+    // ==================== Agent 部署 ====================
+
+    /**
+     * 显示 Agent 安装命令弹窗
+     */
+    async showAgentInstallModal(serverId) {
+        const server = this.serverList.find(s => s.id === serverId);
+        if (!server) {
+            this.showGlobalToast('服务器不存在', 'error');
+            return;
+        }
+
+        this.agentInstallLoading = true;
+        this.showAgentModal = true;
+        this.agentModalData = {
+            serverId,
+            serverName: server.name,
+            installCommand: '',
+            apiUrl: '',
+            agentKey: ''
+        };
+
+        try {
+            const response = await fetch(`/api/server/agent/command/${serverId}`);
+            const data = await response.json();
+
+            if (data.success) {
+                this.agentModalData = {
+                    ...this.agentModalData,
+                    ...data.data
+                };
+            } else {
+                this.showGlobalToast('获取安装命令失败: ' + data.error, 'error');
+            }
+        } catch (error) {
+            console.error('获取 Agent 安装命令失败:', error);
+            this.showGlobalToast('获取安装命令失败', 'error');
+        } finally {
+            this.agentInstallLoading = false;
+        }
+    },
+
+    closeAgentModal() {
+        this.showAgentModal = false;
+        this.agentModalData = null;
+    },
+
+    /**
+     * 复制安装命令到剪贴板
+     */
+    async copyAgentCommand() {
+        if (!this.agentModalData?.installCommand) return;
+
+        try {
+            await navigator.clipboard.writeText(this.agentModalData.installCommand);
+            this.showGlobalToast('安装命令已复制到剪贴板', 'success');
+        } catch (error) {
+            // 降级方案
+            const textarea = document.createElement('textarea');
+            textarea.value = this.agentModalData.installCommand;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            this.showGlobalToast('安装命令已复制', 'success');
+        }
+    },
+
+    /**
+     * 重新生成 Agent 密钥 (全局统一密钥)
+     */
+    async regenerateAgentKey(serverId) {
+        const confirmed = await this.showConfirm({
+            title: '重新生成全局密钥',
+            message: '警告：重新生成密钥后，所有已部署的 Agent 将无法连接，必须全部重新部署方能恢复监控。确定继续？',
+            icon: 'fa-exclamation-triangle',
+            confirmText: '确定重置',
+            confirmClass: 'btn-danger'
+        });
+
+        if (!confirmed) return;
+
+        try {
+            const response = await fetch(`/api/server/agent/regenerate-key`, {
+                method: 'POST'
+            });
+            const data = await response.json();
+
+            if (data.success) {
+                this.showGlobalToast('全局密钥已重新生成', 'success');
+                // 如果是从单个安装弹窗触发，刷新弹窗数据
+                if (serverId) {
+                    await this.showAgentInstallModal(serverId);
+                }
+            } else {
+                this.showGlobalToast('重新生成失败: ' + data.error, 'error');
+            }
+        } catch (error) {
+            console.error('重新生成密钥失败:', error);
+            this.showGlobalToast('重新生成失败', 'error');
+        }
+    },
+
+    /**
+     * 自动安装 Agent（通过 SSH）
+     */
+    async autoInstallAgent(serverId) {
+        const confirmed = await this.showConfirm({
+            title: '自动安装 Agent',
+            message: '将通过 SSH 在目标服务器上自动安装 Agent，安装过程可能需要几秒钟。确定继续？',
+            icon: 'fa-download',
+            confirmText: '开始安装',
+            confirmClass: 'btn-primary'
+        });
+
+        if (!confirmed) return;
+
+        this.agentInstallLoading = true;
+        this.showGlobalToast('正在安装 Agent...', 'info');
+
+        try {
+            const response = await fetch(`/api/server/agent/auto-install/${serverId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const data = await response.json();
+
+            if (data.success) {
+                this.showGlobalToast('Agent 安装成功！', 'success');
+                this.closeAgentModal();
+            } else {
+                this.showGlobalToast('安装失败: ' + (data.error || '未知错误'), 'error');
+                console.error('Agent 安装输出:', data.output);
+            }
+        } catch (error) {
+            console.error('自动安装 Agent 失败:', error);
+            this.showGlobalToast('安装失败: ' + error.message, 'error');
+        } finally {
+            this.agentInstallLoading = false;
+        }
+    },
+
+    /**
+     * 卸载 Agent（通过 SSH）
+     */
+    async uninstallAgent(serverId) {
+        const confirmed = await this.showConfirm({
+            title: '卸载 Agent',
+            message: '确定要从目标服务器上卸载 Agent 吗？',
+            icon: 'fa-trash',
+            confirmText: '确定卸载',
+            confirmClass: 'btn-danger'
+        });
+
+        if (!confirmed) return;
+
+        this.agentInstallLoading = true;
+
+        try {
+            const response = await fetch(`/api/server/agent/uninstall/${serverId}`, {
+                method: 'POST'
+            });
+            const data = await response.json();
+
+            if (data.success) {
+                this.showGlobalToast('Agent 已卸载', 'success');
+                this.closeAgentModal();
+            } else {
+                this.showGlobalToast('卸载失败: ' + (data.error || '未知错误'), 'error');
+            }
+        } catch (error) {
+            console.error('卸载 Agent 失败:', error);
+            this.showGlobalToast('卸载失败: ' + error.message, 'error');
+        } finally {
+            this.agentInstallLoading = false;
+        }
+    },
+
+    /**
+     * 更新服务器监控模式
+     */
+    async updateMonitorMode(serverId, mode) {
+        try {
+            const response = await fetch(`/api/server/accounts/${serverId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ monitor_mode: mode })
+            });
+            const data = await response.json();
+
+            if (data.success) {
+                // 更新本地状态
+                const server = this.serverList.find(s => s.id === serverId);
+                if (server) {
+                    server.monitor_mode = mode;
+                }
+
+                const modeNames = { ssh: 'SSH', agent: 'Agent', both: '双模式' };
+                this.showGlobalToast(`监控模式已切换为 ${modeNames[mode]}`, 'success');
+            } else {
+                this.showGlobalToast('切换失败: ' + data.error, 'error');
+            }
+        } catch (error) {
+            console.error('更新监控模式失败:', error);
+            this.showGlobalToast('切换失败', 'error');
+        }
+    },
+
+    /**
+     * 显示批量 Agent 安装弹窗
+     */
+    showBatchAgentInstallModal() {
+        this.selectedBatchServers = [];
+        this.batchInstallResults = [];
+        this.showBatchAgentModal = true;
+    },
+
+    /**
+     * 关闭批量 Agent 安装弹窗
+     */
+    closeBatchAgentModal() {
+        if (this.agentInstallLoading) return;
+        this.showBatchAgentModal = false;
+    },
+
+    /**
+     * 切换批量服务器选中状态
+     */
+    toggleBatchServerSelection(serverId) {
+        const index = this.selectedBatchServers.indexOf(serverId);
+        if (index === -1) {
+            this.selectedBatchServers.push(serverId);
+        } else {
+            this.selectedBatchServers.splice(index, 1);
+        }
+    },
+
+    /**
+     * 全选所有服务器进行批量安装
+     */
+    selectAllBatchServers() {
+        this.selectedBatchServers = this.serverList.map(s => s.id);
+    },
+
+    /**
+     * 执行批量 Agent 安装
+     */
+    async runBatchAgentInstall() {
+        if (this.selectedBatchServers.length === 0) return;
+
+        const confirmed = await this.showConfirm({
+            title: '批量安装 Agent',
+            message: `确定在选中的 ${this.selectedBatchServers.length} 台主机上批量安装 Agent 吗？这可能需要一些时间。`,
+            icon: 'fa-robot',
+            confirmText: '开始部署',
+            confirmClass: 'btn-primary'
+        });
+
+        if (!confirmed) return;
+
+        this.agentInstallLoading = true;
+        this.batchInstallResults = this.selectedBatchServers.map(id => {
+            const server = this.serverList.find(s => s.id === id);
+            return {
+                serverId: id,
+                serverName: server ? server.name : '未知主机',
+                status: 'waiting',
+                error: null
+            };
+        });
+
+        try {
+            // 我们采用逐个调用的方式，以便在 UI 上展示每个的进度，或者直接调用后端的批量接口
+            // 考虑到 UX，逐个调用能看到实时的"处理中"状态
+            for (let i = 0; i < this.batchInstallResults.length; i++) {
+                const item = this.batchInstallResults[i];
+                item.status = 'processing';
+
+                try {
+                    const response = await fetch(`/api/server/agent/auto-install/${item.serverId}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                    const data = await response.json();
+
+                    if (data.success) {
+                        item.status = 'success';
+                    } else {
+                        item.status = 'failed';
+                        item.error = data.error || '安装失败';
+                    }
+                } catch (err) {
+                    item.status = 'failed';
+                    item.error = err.message;
+                }
+            }
+
+            this.showGlobalToast('批量 Agent 部署任务已完成', 'info');
+        } catch (error) {
+            console.error('批量安装 Agent 任务异常:', error);
+            this.showGlobalToast('批量任务执行异常', 'error');
+        } finally {
+            this.agentInstallLoading = false;
+        }
     }
 };

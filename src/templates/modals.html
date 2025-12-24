@@ -753,6 +753,174 @@
   </div>
 </div>
 
+<!-- Agent 安装命令弹窗 -->
+<transition name="modal-fade">
+  <div v-if="showAgentModal" class="modal-overlay theme-server" @click.self="closeAgentModal">
+    <div class="modal" style="max-width: 600px;">
+      <div class="modal-header">
+        <div class="modal-title">
+          <i class="fas fa-download"></i> 部署 Agent
+        </div>
+        <button class="modal-close" @click="closeAgentModal"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <div v-if="agentInstallLoading" style="text-align: center; padding: 40px;">
+          <div class="ag-spinner-elegant ag-spinner-elegant-sm"></div>
+          <p style="margin-top: 16px; color: var(--text-secondary);">正在生成安装命令...</p>
+        </div>
+
+        <div v-else-if="agentModalData">
+          <div class="info-block"
+            style="margin-bottom: 20px; padding: 16px; background: var(--bg-tertiary); border-radius: 12px;">
+            <p style="margin: 0 0 8px 0; color: var(--text-secondary);"><i class="fas fa-server"
+                style="margin-right: 8px;"></i>目标服务器</p>
+            <p style="margin: 0; font-weight: 600; color: var(--text-primary);">{{ agentModalData.serverName }}</p>
+          </div>
+
+          <div style="margin-bottom: 20px;">
+            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: var(--text-secondary);">
+              <i class="fas fa-terminal" style="margin-right: 8px;"></i>一键安装命令
+            </label>
+            <div style="position: relative;">
+              <pre
+                style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; padding-right: 50px; overflow-x: auto; font-size: 12px; color: var(--text-primary); margin: 0; white-space: pre-wrap; word-break: break-all;">{{ agentModalData.installCommand }}</pre>
+              <button class="btn-icon-refined" @click="copyAgentCommand"
+                style="position: absolute; top: 10px; right: 10px; background: rgba(var(--current-rgb, 59, 130, 246), 0.1); border: 1px solid rgba(var(--current-rgb, 59, 130, 246), 0.2); color: var(--server-primary);"
+                title="复制">
+                <i class="fas fa-copy"></i>
+              </button>
+            </div>
+          </div>
+
+          <div
+            style="background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(16, 185, 129, 0.1)); border-radius: 12px; padding: 16px; margin-bottom: 20px;">
+            <p style="margin: 0 0 12px 0; font-weight: 600; color: var(--text-primary);">
+              <i class="fas fa-lightbulb" style="color: #f59e0b; margin-right: 8px;"></i>使用说明
+            </p>
+            <ol style="margin: 0; padding-left: 20px; color: var(--text-secondary); line-height: 1.8;">
+              <li><strong>一键安装</strong>：点击下方按钮自动通过 SSH 安装</li>
+              <li><strong>手动安装</strong>：复制上方命令到服务器执行</li>
+              <li>Agent 会自动安装为 systemd 服务</li>
+              <li>数据每 2 秒推送一次，无需保持 SSH 连接</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; padding: 16px 20px;">
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-danger btn-sm" @click="uninstallAgent(agentModalData.serverId)"
+            :disabled="agentInstallLoading">
+            <i class="fas fa-trash"></i> 卸载
+          </button>
+          <button class="btn btn-secondary btn-sm" @click="regenerateAgentKey(agentModalData.serverId)"
+            :disabled="agentInstallLoading">
+            <i class="fas fa-key"></i> 重新生成密钥
+          </button>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <button class="btn btn-secondary" @click="closeAgentModal">关闭</button>
+          <button class="btn btn-primary" @click="autoInstallAgent(agentModalData.serverId)"
+            :disabled="agentInstallLoading">
+            <i class="fas" :class="agentInstallLoading ? 'fa-spinner fa-spin' : 'fa-rocket'"></i>
+            {{ agentInstallLoading ? '安装中...' : '一键安装' }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</transition>
+
+<!-- 批量安装 Agent 弹窗 -->
+<transition name="modal-fade">
+  <div v-if="showBatchAgentModal" class="modal-overlay" @click.self="closeBatchAgentModal">
+    <div class="modal" style="max-width: 700px; max-height: 85vh; display: flex; flex-direction: column;">
+      <div class="modal-header">
+        <div class="modal-title">
+          <i class="fas fa-robot"></i> 批量部署 Agent
+        </div>
+        <button class="modal-close" @click="closeBatchAgentModal"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body" style="overflow-y: auto;">
+        <div class="alert alert-info" style="margin-bottom: 20px;">
+          <i class="fas fa-info-circle"></i> 系统将通过 SSH 在选中的主机上自动执行 Agent 安装脚本。请确保主机已配置正确的 SSH 凭据。
+        </div>
+
+        <div class="batch-server-selector">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h4 style="margin: 0; font-size: 14px;">选择目标主机 ({{ selectedBatchServers.length }}/{{ serverList.length }})
+            </h4>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-secondary btn-xs" @click="selectAllBatchServers">全选</button>
+              <button class="btn btn-secondary btn-xs" @click="selectedBatchServers = []">清空</button>
+            </div>
+          </div>
+
+          <div class="server-grid-mini"
+            style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; border: 1px solid var(--border-color); padding: 10px; border-radius: 8px; background: var(--bg-tertiary);">
+            <div v-for="server in serverList" :key="server.id" class="mini-server-item"
+              :class="{ active: selectedBatchServers.includes(server.id) }"
+              @click="toggleBatchServerSelection(server.id)"
+              style="padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-secondary); cursor: pointer; display: flex; align-items: center; gap: 10px; transition: all 0.2s;">
+              <div class="checkbox-box"
+                :style="{ width: '16px', height: '16px', borderRadius: '4px', border: '2px solid' + (selectedBatchServers.includes(server.id) ? 'var(--server-primary)' : 'var(--text-tertiary)'), background: selectedBatchServers.includes(server.id) ? 'var(--server-primary)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }">
+                <i v-if="selectedBatchServers.includes(server.id)" class="fas fa-check"
+                  style="font-size: 10px; color: white;"></i>
+              </div>
+              <div style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                <span style="font-size: 13px; font-weight: 600;">{{ server.name }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="batchInstallResults.length > 0" style="margin-top: 25px;">
+          <h4 style="margin-bottom: 10px; font-size: 14px;">安装进度</h4>
+          <div class="results-list"
+            style="border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden;">
+            <div v-for="res in batchInstallResults" :key="res.serverId"
+              style="padding: 10px 15px; border-bottom: 1px solid var(--border-color); background: var(--bg-secondary); display: flex; justify-content: space-between; align-items: center;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <i class="fas fa-server" style="color: var(--text-tertiary);"></i>
+                <span style="font-size: 13px;">{{ res.serverName }}</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span v-if="res.status === 'waiting'" class="status-badge"
+                  style="background: var(--bg-tertiary); color: var(--text-tertiary);">等待中</span>
+                <span v-else-if="res.status === 'processing'" class="status-badge"
+                  style="background: rgba(59, 130, 246, 0.1); color: #3b82f6;">
+                  <i class="fas fa-spinner fa-spin"></i> 处理中
+                </span>
+                <span v-else-if="res.status === 'success'" class="status-badge"
+                  style="background: rgba(16, 185, 129, 0.1); color: #10b981;">
+                  <i class="fas fa-check-circle"></i> 成功
+                </span>
+                <span v-else-if="res.status === 'failed'" class="status-badge"
+                  style="background: rgba(239, 68, 68, 0.1); color: #ef4444;" :title="res.error">
+                  <i class="fas fa-exclamation-circle"></i> 失败
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; padding: 16px 20px;">
+        <div style="color: var(--text-tertiary); font-size: 12px;">
+          <span v-if="agentInstallLoading"><i class="fas fa-spinner fa-spin"
+              style="margin-right: 6px;"></i>正在执行批量任务，请勿关闭弹窗...</span>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <button class="btn btn-secondary" @click="closeBatchAgentModal" :disabled="agentInstallLoading">关闭</button>
+          <button class="btn btn-primary" @click="runBatchAgentInstall"
+            :disabled="agentInstallLoading || selectedBatchServers.length === 0">
+            <i class="fas" :class="agentInstallLoading ? 'fa-spinner fa-spin' : 'fa-play'"></i>
+            开始批量安装
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</transition>
+
 <!-- 新建终端会话选择模态框 -->
 <div v-if="showAddSessionSelectModal" class="modal-overlay" @click.self="showAddSessionSelectModal = false"
   @keydown.esc="showAddSessionSelectModal = false" tabindex="-1">

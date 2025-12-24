@@ -294,15 +294,22 @@ export const selfHMethods = {
 
         if (!preview || !img || !src) return;
 
-        // 立即显示骨架屏，并定位
-        preview.classList.add('loading');
-        preview.style.display = 'block';
-        preview.style.width = '200px';
-        preview.style.height = '150px';
-        img.src = ''; // 清除上一张图，防止闪烁
+        // 获取位置坐标 (兼容鼠标和触摸)
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
 
-        this.updatePreviewPosition(e, 200, 150);
-        preview.style.opacity = '1';
+        // 初始化预览窗
+        preview.classList.add('loading');
+        preview.classList.add('active'); // 触发 CSS 展开动画
+
+        // 初始大小（骨架屏尺寸）
+        const initW = 200;
+        const initH = 150;
+        preview.style.width = initW + 'px';
+        preview.style.height = initH + 'px';
+
+        img.src = ''; // 清除上一张图
+        this._updatePreviewPos(clientX, clientY, initW, initH);
 
         img.onload = () => {
             const size = parseInt(store.openListPreviewSize) || 800;
@@ -324,13 +331,12 @@ export const selfHMethods = {
             preview.style.width = targetWidth + 'px';
             preview.style.height = targetHeight + 'px';
 
-            // 加载完成后再次修正位置
-            this.updatePreviewPosition(e, targetWidth, targetHeight);
+            // 更新到最新位置（考虑加载期间鼠标可能移动了）
+            this._updatePreviewPos(this._lastMouseX || clientX, this._lastMouseY || clientY, targetWidth, targetHeight);
         };
 
         img.onerror = () => {
-            preview.classList.remove('loading');
-            preview.style.display = 'none';
+            this.hideHoverPreview();
         };
 
         img.src = src;
@@ -339,41 +345,45 @@ export const selfHMethods = {
     // 跟随鼠标移动
     moveHoverPreview(e) {
         const preview = document.getElementById('file-hover-preview');
-        if (!preview || preview.style.display === 'none') return;
+        if (!preview || !preview.classList.contains('active')) return;
+
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+        // 记录最后位置，供图片加载完校准用
+        this._lastMouseX = clientX;
+        this._lastMouseY = clientY;
 
         const width = parseFloat(preview.style.width) || 200;
         const height = parseFloat(preview.style.height) || 150;
 
-        this.updatePreviewPosition(e, width, height);
+        this._updatePreviewPos(clientX, clientY, width, height);
     },
 
-    // 核心定位算法：确保在视口内且不遮挡鼠标
-    updatePreviewPosition(e, width, height) {
+    // 内部定位核心 (x, y 为鼠标坐标)
+    _updatePreviewPos(x, y, width, height) {
         const preview = document.getElementById('file-hover-preview');
         if (!preview) return;
 
-        const mouseX = e.clientX;
-        const mouseY = e.clientY;
-        const margin = 15;
-        const screenMargin = 5;
+        const margin = 20; // 与鼠标的间距
+        const screenMargin = 10; // 与窗口边缘的最小间距
 
-        // 默认放在右侧居中
-        let left = mouseX + margin;
-        let top = mouseY - (height / 2);
+        let left = x + margin;
+        let top = y - (height / 2);
 
-        // 如果右侧放不下，放到左侧
+        // 水平检测：如果右边放不下，就放左边
         if (left + width + screenMargin > window.innerWidth) {
-            left = mouseX - width - margin;
+            left = x - width - margin;
         }
 
-        // 垂直边界检测
+        // 垂直检测：防止超出顶边或底边
         if (top < screenMargin) {
             top = screenMargin;
         } else if (top + height + screenMargin > window.innerHeight) {
             top = window.innerHeight - height - screenMargin;
         }
 
-        // 极端情况：两边都放不下，强行贴左/右最宽处
+        // 兜底：如果左边也超出了，强行贴边
         if (left < screenMargin) left = screenMargin;
 
         preview.style.left = left + 'px';
@@ -383,18 +393,21 @@ export const selfHMethods = {
     hideHoverPreview() {
         const preview = document.getElementById('file-hover-preview');
         if (preview) {
-            // 立刻隐藏
+            // 立即移除 active 类。由于 CSS 设了 transition: none，它会立即消失。
+            preview.classList.remove('active');
             preview.classList.remove('loading');
-            preview.style.display = 'none';
-            preview.style.opacity = '0';
-            preview.style.left = '';
-            preview.style.top = '';
-            preview.style.width = '';
-            preview.style.height = '';
-            preview.style.transition = '';
 
-            // 移除滚动监听
-            window.removeEventListener('scroll', this.hideHoverPreview, { capture: true });
+            // 重置状态
+            this._lastMouseX = null;
+            this._lastMouseY = null;
+
+            // 清理样式，防止下次干扰
+            setTimeout(() => {
+                if (!preview.classList.contains('active')) {
+                    preview.style.width = '';
+                    preview.style.height = '';
+                }
+            }, 100);
         }
     },
 
@@ -569,7 +582,7 @@ export const selfHMethods = {
         }
     },
 
-    // 加载临时标签页文件
+    // 加载临时标签页文件 (支持列表和搜索刷新)
     async loadTempTabFiles(path, refresh = false, tabId = null) {
         if (!this.currentOpenListAccount) return;
 
@@ -581,12 +594,26 @@ export const selfHMethods = {
         tab.loading = true;
 
         try {
-            console.log(`[OpenList] Loading temp tab files for path: ${path} (refresh: ${refresh})`);
-            const response = await fetch(`/api/openlist/${this.currentOpenListAccount.id}/fs/list`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ path, refresh: !!refresh })
-            });
+            let response;
+            if (tab.isSearch) {
+                // 如果是搜索标签页，执行搜索请求
+                response = await fetch(`/api/openlist/${this.currentOpenListAccount.id}/fs/search`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        keywords: tab.keywords,
+                        parent: tab.path,
+                        scope: store.openListSearchScope || 0
+                    })
+                });
+            } else {
+                // 普通列表请求
+                response = await fetch(`/api/openlist/${this.currentOpenListAccount.id}/fs/list`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path, refresh: !!refresh })
+                });
+            }
 
             if (!response.ok) {
                 toast.error(`加载失败 (${response.status})`);
@@ -597,12 +624,10 @@ export const selfHMethods = {
             const data = await response.json();
             if (data.code === 200) {
                 const content = data.data.content || [];
-                // 确保数据修正（与主列表一致）
                 tab.files = content.map(f => {
                     if (typeof f.name !== 'string') f.name = String(f.name || 'unknown');
                     return f;
                 });
-                console.log(`[OpenList] Loaded ${tab.files.length} files for path ${path}`);
             } else {
                 toast.error('加载失败: ' + (data.message || '未知错误'));
             }
@@ -611,6 +636,36 @@ export const selfHMethods = {
         } finally {
             tab.loading = false;
         }
+    },
+    // 切换搜索框展开/收起
+    toggleOpenListSearch() {
+        if (!store.openListSearchExpanded) {
+            store.openListSearchExpanded = true;
+            // 聚焦输入框
+            this.$nextTick(() => {
+                if (this.$refs.openListSearchInputRef) {
+                    this.$refs.openListSearchInputRef.focus();
+                }
+            });
+        } else {
+            // 如果已经展开，再次点击则收起，且如果已输入内容则清空
+            store.openListSearchExpanded = false;
+        }
+    },
+
+    // 执行搜索 (回车触发)
+    performOpenListSearch() {
+        if (store.openListSearchInput && store.openListSearchInput.trim()) {
+            this.searchOpenListFilesNewTab(store.openListSearchInput.trim());
+        }
+    },
+
+    // 失去焦点时的处理
+    handleSearchBlur() {
+        // 可选：如果输入框为空，自动收起
+        // if (!store.openListSearchInput) {
+        //    store.openListSearchExpanded = false;
+        // }
     },
 
     // 处理临时标签页文件点击
@@ -637,19 +692,48 @@ export const selfHMethods = {
         }
     },
 
-    // 搜索文件
+    // 搜索并在新标签页展示结果
+    searchOpenListFilesNewTab(keywords) {
+        // 如果有参数直接用参数，否则使用 store 中的 input
+        let kw = typeof keywords === 'string' ? keywords : store.openListSearchInput;
+        // 如果仍然没有，则不做任何事情（由 UI 控制展开和输入）
+        if (!kw || !this.currentOpenListAccount) return;
+
+        // 关闭搜索框
+        store.openListSearchExpanded = false;
+        store.openListSearchInput = ''; // 可选：清空搜索框
+
+        const id = 'search-' + Date.now();
+        const newTab = {
+            id,
+            name: `🔍 ${kw}`,
+            path: store.openListPath,
+            isSearch: true,
+            keywords: kw,
+            files: [],
+            loading: true
+        };
+
+        store.openListTempTabs.push(newTab);
+        store.openListActiveTempTabId = id;
+        this.openListSubTab = 'temp';
+
+        // 复用 loadTempTabFiles 的搜索逻辑
+        this.loadTempTabFiles(store.openListPath, false, id);
+    },
+
+    // 搜索文件 (原主界面内搜，暂保留以兼容)
     async searchOpenListFiles(keywords) {
         if (!keywords || !this.currentOpenListAccount) {
             if (store.openListSearchActive) {
                 store.openListSearchActive = false;
-                this.loadOpenListFiles(this.openListPath); // 恢复正常列表
+                this.loadOpenListFiles(this.openListPath);
             }
             return;
         }
 
         store.openListSearchActive = true;
         this.openListFilesLoading = true;
-        // 搜索时，路径保持不变，但列表内容替换
         try {
             const response = await fetch(`/api/openlist/${this.currentOpenListAccount.id}/fs/search`, {
                 method: 'POST',
@@ -660,11 +744,6 @@ export const selfHMethods = {
                     scope: store.openListSearchScope
                 })
             });
-
-            if (!response.ok) {
-                toast.error(`搜索失败 (${response.status})`);
-                return;
-            }
 
             const data = await response.json();
             if (data.code === 200) {
