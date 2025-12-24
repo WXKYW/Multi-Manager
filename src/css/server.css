@@ -2520,24 +2520,24 @@
 @keyframes dropdownSlideIn {
     from {
         opacity: 0;
-        transform: translateY(-8px) scale(0.95);
+        transform: translateX(-50%) translateY(-10px) scale(0.95);
     }
 
     to {
         opacity: 1;
-        transform: translateY(0) scale(1);
+        transform: translateX(-50%) translateY(0) scale(1);
     }
 }
 
 @keyframes dropdownSlideOut {
     from {
         opacity: 1;
-        transform: translateY(0) scale(1);
+        transform: translateX(-50%) translateY(0) scale(1);
     }
 
     to {
         opacity: 0;
-        transform: translateY(-8px) scale(0.95);
+        transform: translateX(-50%) translateY(-10px) scale(0.95);
     }
 }
 

@@ -312,11 +312,8 @@ export const metricsMethods = {
                 if (info.docker.runningCount !== running) info.docker.runningCount = running;
                 if (info.docker.stoppedCount !== stopped) info.docker.stoppedCount = stopped;
 
-                // 容器列表只在数量变化时更新
-                const newContainers = Array.isArray(metrics.docker.containers) ? metrics.docker.containers : [];
-                if (!info.docker.containers || info.docker.containers.length !== newContainers.length) {
-                    info.docker.containers = newContainers;
-                }
+                // 始终更新容器列表，因为即使数量不变，单个容器的状态也可能已改变
+                info.docker.containers = Array.isArray(metrics.docker.containers) ? metrics.docker.containers : [];
             }
 
             // 增量更新网络

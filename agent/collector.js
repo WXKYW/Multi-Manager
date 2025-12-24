@@ -228,7 +228,8 @@ async function collectDockerInfo() {
                 id: c.id.substring(0, 12),
                 name: c.name,
                 image: c.image,
-                status: c.state,
+                state: c.state,
+                status: c.status || c.state,
                 created: c.created
             }))
         };
