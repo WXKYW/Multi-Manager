@@ -872,7 +872,7 @@ cat > config.json << EOF
 EOF
 
 # 5. 创建 systemd 服务
-echo -e "${YELLOW}⚙️ 注册 systemd 服务...${NC}"
+echo -e "\${YELLOW}⚙️ 注册 systemd 服务...\${NC}"
 cat > /etc/systemd/system/$SERVICE_NAME.service << EOF
 [Unit]
 Description=API Monitor Agent
@@ -891,19 +891,19 @@ WantedBy=multi-user.target
 EOF
 
 # 6. 启动服务
-echo -e "${YELLOW}🚀 启动服务...${NC}"
+echo -e "\${YELLOW}🚀 启动服务...\${NC}"
 systemctl daemon-reload
 systemctl enable $SERVICE_NAME
 systemctl restart $SERVICE_NAME
 
 if systemctl is-active --quiet $SERVICE_NAME; then
-    echo -e "${GREEN}================================================${NC}"
-    echo -e "${GREEN}  ✅ API Monitor Agent 安装成功并已作为服务启动!${NC}"
-    echo -e "${GREEN}  使用状态: systemctl status $SERVICE_NAME${NC}"
-    echo -e "${GREEN}  查看日志: journalctl -u $SERVICE_NAME -f${NC}"
-    echo -e "${GREEN}================================================${NC}"
+    echo -e "\${GREEN}================================================\${NC}"
+    echo -e "\${GREEN}  ✅ API Monitor Agent 安装成功并已作为服务启动!\${NC}"
+    echo -e "\${GREEN}  使用状态: systemctl status $SERVICE_NAME\${NC}"
+    echo -e "\${GREEN}  查看日志: journalctl -u $SERVICE_NAME -f\${NC}"
+    echo -e "\${GREEN}================================================\${NC}"
 else
-    echo -e "${RED}❌ 服务启动失败，请检查日志: journalctl -u $SERVICE_NAME${NC}"
+    echo -e "\${RED}❌ 服务启动失败，请检查日志: journalctl -u $SERVICE_NAME\${NC}"
 fi
 `;
     }
