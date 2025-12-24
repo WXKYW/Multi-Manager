@@ -10,6 +10,7 @@ const state = {
     servers: [],
     expandedServers: new Set(),
     serverInfo: new Map(),
+    metrics: new Map(), // 实时监控数据
     loading: false
 };
 
@@ -20,6 +21,9 @@ export function initServerModule() {
     console.log('初始化主机管理模块');
     loadServers();
     setupEventListeners();
+    
+    // 启动 WebSocket 连接
+    connectMetricsWS();
 
     // 监听显示模式变化事件
     window.addEventListener('server-display-mode-changed', () => {
@@ -331,6 +335,7 @@ function renderServerCard(server) {
                     </div>
                 </div>
                 <div class="server-quick-info">
+                    ${renderQuickMetrics(state.metrics.get(server.id))}
                 </div>
                 <div class="server-card-actions" onclick="event.stopPropagation()">
                     <button class="btn btn-sm btn-primary" onclick="window.serverModule.connectSSH('${server.id}')" title="SSH 连接">
@@ -355,7 +360,62 @@ function renderServerCard(server) {
  * 渲染主机详情
  */
 function renderServerDetails(server, info) {
+    // 优先尝试从 state.metrics 获取 Agent 数据
+    const agentMetrics = state.metrics.get(server.id);
+
     if (!info) {
+        if (agentMetrics) {
+            // 如果没有 SSH 信息但有 Agent 数据，渲染简版详情
+            return `
+                <div class="server-details">
+                    <div class="server-details-grid">
+                        <div class="server-detail-section">
+                            <h4>⚡ 实时指标 (Agent)</h4>
+                            <div class="server-detail-item">
+                                <span class="server-detail-label">CPU 使用率</span>
+                                <span class="server-detail-value">${agentMetrics.cpu_usage || '-'}</span>
+                            </div>
+                            <div class="server-detail-item">
+                                <span class="server-detail-label">负载 (Load)</span>
+                                <span class="server-detail-value">${agentMetrics.load || '-'}</span>
+                            </div>
+                            <div class="server-detail-item">
+                                <span class="server-detail-label">内存使用</span>
+                                <span class="server-detail-value">${agentMetrics.mem_usage || '-'}</span>
+                            </div>
+                            <div class="server-detail-item">
+                                <span class="server-detail-label">磁盘状态</span>
+                                <span class="server-detail-value">${agentMetrics.disk_usage || '-'}</span>
+                            </div>
+                        </div>
+                        <div class="server-detail-section">
+                            <h4>🌐 网络实时流量</h4>
+                            <div class="server-detail-item">
+                                <span class="server-detail-label">下行速度</span>
+                                <span class="server-detail-value">⬇️ ${agentMetrics.network?.rx_speed || '-'}</span>
+                            </div>
+                            <div class="server-detail-item">
+                                <span class="server-detail-label">上行速度</span>
+                                <span class="server-detail-value">⬆️ ${agentMetrics.network?.tx_speed || '-'}</span>
+                            </div>
+                            <div class="server-detail-item">
+                                <span class="server-detail-label">活动连接</span>
+                                <span class="server-detail-value">${agentMetrics.network?.connections || '-'}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="server-actions-bar">
+                        <p style="font-size: 12px; color: var(--text-tertiary); margin-bottom: 10px;">
+                            提示: 该数据由服务器上的 Agent 实时推送。如需查看完整硬件详情，请点击下方刷新信息。
+                        </p>
+                        <button class="btn btn-sm btn-primary" onclick="window.serverModule.refreshServerInfo('${server.id}')">
+                            🔄 SSH 深度探测
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
         return `
             <div class="server-details">
                 <div style="text-align: center; padding: 8px 3px;">
@@ -1283,6 +1343,160 @@ export const serverMethods = {
         }
     }
 };
+
+/**
+ * 连接 Metrics WebSocket
+ */
+function connectMetricsWS() {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws/metrics`;
+    
+    console.log('[Metrics] Connecting to WebSocket:', wsUrl);
+    const ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+        console.log('[Metrics] WebSocket connected');
+    };
+
+    ws.onmessage = (event) => {
+        try {
+            const message = JSON.parse(event.data);
+            if (message.type === 'metrics_update') {
+                handleMetricsUpdate(message.data);
+            }
+        } catch (e) {
+            console.error('[Metrics] Failed to parse message:', e);
+        }
+    };
+
+    ws.onclose = () => {
+        console.log('[Metrics] WebSocket closed, reconnecting in 5s...');
+        setTimeout(connectMetricsWS, 5000);
+    };
+
+    ws.onerror = (error) => {
+        console.error('[Metrics] WebSocket error:', error);
+    };
+}
+
+/**
+ * 处理 Metrics 更新
+ */
+function handleMetricsUpdate(metricsData) {
+    if (!Array.isArray(metricsData)) return;
+
+    let hasUpdates = false;
+    
+    metricsData.forEach(item => {
+        const { serverId, metrics } = item;
+        
+        // 1. 更新内部状态
+        state.metrics.set(serverId, metrics);
+        
+        // 2. 更新服务器在线状态 (如果 metrics 存在，说明在线)
+        const server = state.servers.find(s => s.id === serverId);
+        if (server) {
+            if (server.status !== 'online') {
+                server.status = 'online';
+                hasUpdates = true;
+            }
+            
+            // 3. 更新 UI
+            updateServerCardMetrics(serverId, metrics);
+        }
+    });
+}
+
+/**
+ * 更新单个主机卡片的 Metrics 显示
+ */
+function updateServerCardMetrics(serverId, metrics) {
+    const card = document.querySelector(`.server-card[data-server-id="${serverId}"]`);
+    if (!card) return;
+
+    // 1. 更新 .server-quick-info 区域
+    const quickInfo = card.querySelector('.server-quick-info');
+    if (quickInfo) {
+        quickInfo.innerHTML = renderQuickMetrics(metrics);
+    }
+
+    // 2. 更新状态指示灯和徽标
+    const indicator = card.querySelector('.server-status-indicator');
+    if (indicator && !indicator.classList.contains('online')) {
+        indicator.className = 'server-status-indicator online';
+    }
+
+    const badge = card.querySelector('.proxied-badge');
+    if (badge && !badge.classList.contains('proxied-on')) {
+        badge.className = 'proxied-badge proxied-on';
+        badge.textContent = '在线';
+    }
+
+    // 3. 如果卡片当前处于展开状态，且正在显示“加载中”，则刷新整个卡片内容以显示详情
+    const isExpanded = card.classList.contains('expanded');
+    const detailsContainer = card.querySelector('.server-card-body');
+    if (isExpanded && detailsContainer && detailsContainer.innerText.includes('正在加载')) {
+        const server = state.servers.find(s => s.id === serverId);
+        if (server) {
+            detailsContainer.innerHTML = renderServerDetails(server, state.serverInfo.get(serverId));
+        }
+    }
+    
+    // 4. 同步更新后台管理表格中的状态（如果存在）
+    const tableRow = document.querySelector(`tr:has(button[onclick*="'${serverId}'"])`);
+    if (tableRow) {
+        const rowBadge = tableRow.querySelector('.proxied-badge');
+        if (rowBadge && !rowBadge.classList.contains('proxied-on')) {
+            rowBadge.className = 'proxied-badge proxied-on';
+            rowBadge.textContent = '在线';
+        }
+    }
+}
+
+/**
+ * 渲染快速指标 HTML
+ */
+function renderQuickMetrics(metrics) {
+    if (!metrics) return '';
+
+    // 解析 CPU
+    const cpu = metrics.cpu_usage || '0%';
+    const cpuVal = parseFloat(cpu);
+    const cpuClass = cpuVal > 80 ? 'text-danger' : (cpuVal > 50 ? 'text-warning' : 'text-success');
+
+    // 解析内存
+    // metrics.mem_usage 格式可能是 "512/1024MB"
+    let memPercent = 0;
+    const memStr = metrics.mem_usage || '';
+    if (memStr.includes('/')) {
+        const [used, total] = memStr.replace('MB', '').split('/');
+        if (total > 0) memPercent = (used / total) * 100;
+    }
+    const memClass = memPercent > 80 ? 'text-danger' : (memPercent > 50 ? 'text-warning' : 'text-success');
+
+    // 网络
+    const rx = metrics.network?.rx_speed || '0B/s';
+    const tx = metrics.network?.tx_speed || '0B/s';
+
+    return `
+        <div class="metric-pill" title="CPU 使用率">
+            <i class="fas fa-microchip ${cpuClass}"></i>
+            <span>${cpu}</span>
+        </div>
+        <div class="metric-pill" title="内存使用率">
+            <i class="fas fa-memory ${memClass}"></i>
+            <span>${Math.round(memPercent)}%</span>
+        </div>
+        <div class="metric-pill" title="网络下行">
+            <i class="fas fa-download"></i>
+            <span>${rx}</span>
+        </div>
+        <div class="metric-pill" title="网络上行">
+            <i class="fas fa-upload"></i>
+            <span>${tx}</span>
+        </div>
+    `;
+}
 
 // 导出函数到全局作用域...
 window.serverModule = {
