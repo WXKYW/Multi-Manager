@@ -433,33 +433,12 @@ func (a *AgentClient) reportLoop() {
 	}
 }
 
-// heartbeat 心跳 - 保持 WebSocket 连接活跃
+// heartbeat 心跳监控 - 只处理停止信号，ping响应在handleMessage中处理
 func (a *AgentClient) heartbeat() {
-	// 立即发送第一次心跳
-	a.mu.Lock()
-	if a.conn != nil {
-		a.conn.WriteMessage(websocket.TextMessage, []byte("2"))
-	}
-	a.mu.Unlock()
-
-	// 每 10 秒发送一次心跳 (Socket.IO ping interval)
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-a.stopChan:
-			return
-		case <-ticker.C:
-			a.mu.Lock()
-			if a.conn != nil {
-				if err := a.conn.WriteMessage(websocket.TextMessage, []byte("2")); err != nil {
-					log.Printf("[Agent] 心跳发送失败: %v", err)
-				}
-			}
-			a.mu.Unlock()
-		}
-	}
+	// Socket.IO 中只有服务端发送 ping (2)，客户端只需响应 pong (3)
+	// 我们在 handleMessage 中已经处理了 ping 响应
+	// 这个 goroutine 只是为了监听 stopChan
+	<-a.stopChan
 }
 
 // handleTask 处理任务
