@@ -196,6 +196,25 @@ func (a *AgentClient) dial() error {
 		return err
 	}
 
+	// 等待命名空间确认 (40/agent,{...})
+	_, nsMsg, err := conn.ReadMessage()
+	if err != nil {
+		return fmt.Errorf("命名空间确认失败: %v", err)
+	}
+	nsStr := string(nsMsg)
+	if !strings.HasPrefix(nsStr, "40/agent") {
+		// 可能是 ping 消息，继续读取
+		if nsStr == "2" {
+			conn.WriteMessage(websocket.TextMessage, []byte("3"))
+			_, nsMsg, err = conn.ReadMessage()
+			if err != nil {
+				return fmt.Errorf("命名空间确认失败: %v", err)
+			}
+			nsStr = string(nsMsg)
+		}
+	}
+
+	log.Printf("[Agent] 命名空间已确认: %s", nsStr)
 	log.Println("[Agent] 已连接，正在认证...")
 
 	// 发送认证
