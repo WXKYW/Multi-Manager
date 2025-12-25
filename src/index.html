@@ -50,7 +50,7 @@
             <!-- 右侧操作区 -->
             <div class="header-actions">
               <button class="btn-settings-toggle"
-                :class="{ active: showSettingsModal, 'pc-hide': navLayout === 'bottom' }"
+                :class="{ active: showSettingsModal, 'pc-hide': navLayout === 'bottom' || navLayout === 'top-capsule' }"
                 @click="showSettingsModal = !showSettingsModal" title="系统设置">
                 <i class="fas fa-cog"></i>
                 <span>设置</span>
@@ -58,9 +58,10 @@
             </div>
           </div>
 
-          <!-- 主导航容器 (PC底栏模式固定定位) -->
+          <!-- 主导航容器 (底部模式固定定位) -->
           <div class="main-nav-container" :class="[
-            {'nav-bottom-fixed': navLayout === 'bottom'},
+            {'nav-bottom-fixed': navLayout === 'bottom' || navLayout === 'bottom-normal'},
+            {'nav-capsule': navLayout === 'bottom' || navLayout === 'top-capsule'},
             'theme-' + (mainActiveTab === 'self-h' ? 'self-h' : mainActiveTab === 'gemini-cli' ? 'gemini-cli' : mainActiveTab === 'dns' ? 'cf-dns' : mainActiveTab)
           ]">
             <!-- 主标签页导航 (仅在有多个模块可见时显示) -->
@@ -87,8 +88,8 @@
               </template>
             </div>
 
-            <!-- PC 底栏专用设置按钮 -->
-            <button v-if="navLayout === 'bottom'" class="btn-settings-pc-bottom pc-only"
+            <!-- 胶囊模式专用设置按钮 -->
+            <button v-if="navLayout === 'bottom' || navLayout === 'top-capsule'" class="btn-settings-pc-bottom pc-only"
               :class="{ active: showSettingsModal }" @click="showSettingsModal = !showSettingsModal" title="系统设置">
               <i class="fas fa-cog"></i>
             </button>

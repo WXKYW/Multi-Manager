@@ -411,16 +411,26 @@
                   </div>
                   <div class="form-group" style="margin-top: 16px;">
                     <label class="form-label" style="font-size: 13px; font-weight: 600;">导航栏显示位置</label>
-                    <div style="display: flex; gap: 10px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                      <button class="btn btn-sm" :class="navLayout === 'top' ? 'btn-primary' : 'btn-secondary'"
+                        @click="navLayout = 'top'; saveUserSettingsToServer()" style="height: 40px; font-size: 12px;">
+                        <i class="fas fa-grip-lines" style="margin-right: 4px;"></i> 顶部普通
+                      </button>
+                      <button class="btn btn-sm" :class="navLayout === 'top-capsule' ? 'btn-primary' : 'btn-secondary'"
+                        @click="navLayout = 'top-capsule'; saveUserSettingsToServer()"
+                        style="height: 40px; font-size: 12px;">
+                        <i class="fas fa-capsules" style="margin-right: 4px;"></i> 顶部胶囊
+                      </button>
+                      <button class="btn btn-sm"
+                        :class="navLayout === 'bottom-normal' ? 'btn-primary' : 'btn-secondary'"
+                        @click="navLayout = 'bottom-normal'; saveUserSettingsToServer()"
+                        style="height: 40px; font-size: 12px;">
+                        <i class="fas fa-grip-lines" style="margin-right: 4px;"></i> 底部普通
+                      </button>
                       <button class="btn btn-sm" :class="navLayout === 'bottom' ? 'btn-primary' : 'btn-secondary'"
                         @click="navLayout = 'bottom'; saveUserSettingsToServer()"
-                        style="flex: 1; height: 40px; font-size: 13px;">
-                        <i class="fas fa-window-minimize" style="margin-right: 6px;"></i> 底栏风格
-                      </button>
-                      <button class="btn btn-sm" :class="navLayout === 'top' ? 'btn-primary' : 'btn-secondary'"
-                        @click="navLayout = 'top'; saveUserSettingsToServer()"
-                        style="flex: 1; height: 40px; font-size: 13px;">
-                        <i class="fas fa-window-maximize" style="margin-right: 6px;"></i> 顶部栏
+                        style="height: 40px; font-size: 12px;">
+                        <i class="fas fa-capsules" style="margin-right: 4px;"></i> 底部胶囊
                       </button>
                     </div>
                   </div>

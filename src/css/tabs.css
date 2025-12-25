@@ -283,10 +283,10 @@
 
 /* ==================== 底栏布局模式 (Bottom Bar) ==================== */
 
-/* 仅在非移动端（宽度 > 768px）且 navLayout 为 bottom 时生效 */
+/* 仅在非移动端（宽度 > 768px）时生效 */
 @media (min-width: 769px) {
 
-  /* 新增：主导航固定定位容器 */
+  /* 底部固定定位容器 (bottom & bottom-normal) */
   .nav-bottom-fixed {
     position: fixed !important;
     bottom: 24px !important;
@@ -298,25 +298,36 @@
     gap: 12px !important;
   }
 
-  .nav-layout-bottom .main-tabs {
+  /* 顶部胶囊模式容器 */
+  .nav-layout-top-capsule .main-nav-container {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 12px !important;
+    margin: 0 auto !important;
+    width: fit-content !important;
+  }
+
+  /* 胶囊样式 (bottom & top-capsule) */
+  .nav-capsule .main-tabs {
     position: relative !important;
     bottom: auto !important;
     left: auto !important;
     transform: none !important;
 
     /* 悬浮胶囊样式 */
-    background: rgba(17, 24, 39, 0.8) !important;
-    backdrop-filter: blur(20px) saturate(180%) !important;
-    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    background: rgba(30, 41, 59, 0.65) !important;
+    backdrop-filter: blur(16px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(16px) saturate(150%) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
     border-radius: 100px !important;
     padding: 2px 7px !important;
     margin: 0 !important;
     gap: 4px !important;
     justify-content: center !important;
     box-shadow:
-      0 10px 40px rgba(0, 0, 0, 0.3),
-      0 0 0 1px rgba(255, 255, 255, 0.05) inset !important;
+      0 2px 8px rgba(0, 0, 0, 0.08),
+      0 0 0 1px rgba(255, 255, 255, 0.03) inset !important;
 
     width: auto !important;
     min-width: 380px;
@@ -331,10 +342,10 @@
     width: 56px !important;
     height: 56px !important;
     border-radius: 50% !important;
-    background: rgba(17, 24, 39, 0.8) !important;
-    backdrop-filter: blur(20px) saturate(180%) !important;
-    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    background: rgba(30, 41, 59, 0.65) !important;
+    backdrop-filter: blur(16px) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(16px) saturate(150%) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
     color: var(--text-secondary);
     cursor: pointer;
     display: flex !important;
@@ -342,7 +353,7 @@
     justify-content: center !important;
     font-size: 20px !important;
     transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3) !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
     flex-shrink: 0 !important;
   }
 
@@ -364,7 +375,7 @@
     display: none !important;
   }
 
-  .nav-layout-bottom .main-tab {
+  .nav-capsule .main-tab {
     border-radius: 50px !important;
     padding: 8px 16px !important;
     margin-bottom: 0 !important;
@@ -373,36 +384,64 @@
     color: var(--text-tertiary);
   }
 
-  .nav-layout-bottom .main-tab:hover {
+  .nav-capsule .main-tab:hover {
     background: rgba(255, 255, 255, 0.05);
     color: var(--text-primary);
   }
 
-  .nav-layout-bottom .main-tab.active {
+  .nav-capsule .main-tab.active {
     background: rgba(var(--current-rgb), 0.2) !important;
     color: var(--current-primary) !important;
-    box-shadow: 0 4px 12px rgba(var(--current-rgb), 0.2);
+    box-shadow: 0 4px 12px rgba(var(--current-rgb), 0.1);
   }
 
-  /* 隐藏指示条 */
-  .nav-layout-bottom .main-tab::after {
+  /* 隐藏指示条 (胶囊模式) */
+  .nav-capsule .main-tab::after {
     display: none !important;
   }
 
-  /* 容器边距 */
-  .layout-bottom.container {
+  /* 容器边距 (底部布局) */
+  .layout-bottom.container,
+  .layout-bottom-normal.container {
     padding-bottom: 110px !important;
+  }
+
+  /* 顶部胶囊模式隐藏页面头部 */
+  .nav-layout-top-capsule .header {
+    display: none !important;
   }
 
   /* 适配浅色模式 */
   @media (prefers-color-scheme: light) {
 
-    .nav-layout-bottom .main-tabs,
+    .nav-capsule .main-tabs,
     .btn-settings-pc-bottom {
       background: rgba(255, 255, 255, 0.85) !important;
       border: 1px solid rgba(0, 0, 0, 0.08) !important;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.03) !important;
+    }
+
+    /* 底部普通模式浅色适配 */
+    .nav-bottom-fixed:not(.nav-capsule) .main-tabs {
+      background: rgba(255, 255, 255, 0.95) !important;
+      border: 1px solid rgba(0, 0, 0, 0.1) !important;
       box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1) !important;
     }
+  }
+
+  /* 底部普通样式 (bottom-normal) - 保持原有 tab 样式但固定在底部 */
+  .nav-bottom-fixed:not(.nav-capsule) .main-tabs {
+    background: rgba(13, 17, 23, 0.98) !important;
+    backdrop-filter: blur(20px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    border-radius: 16px !important;
+    padding: 8px 16px !important;
+    box-shadow:
+      0 10px 40px rgba(0, 0, 0, 0.4),
+      0 0 0 1px rgba(255, 255, 255, 0.05) inset !important;
+    margin: 0 !important;
+    border-bottom: none !important;
   }
 }
 
