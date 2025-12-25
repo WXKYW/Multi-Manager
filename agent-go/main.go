@@ -320,11 +320,14 @@ func (a *AgentClient) handleEvent(event string, data json.RawMessage) {
 		a.authenticated = true
 		a.mu.Unlock()
 
-		// 发送主机信息
-		go a.reportHostInfo()
-
-		// 启动上报循环
-		go a.reportLoop()
+		// 稍微延迟后再发送数据，避免与 ping/pong 竞争
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			// 发送主机信息
+			a.reportHostInfo()
+			// 启动上报循环
+			a.reportLoop()
+		}()
 
 	case EventDashboardAuthFail:
 		var failData struct {

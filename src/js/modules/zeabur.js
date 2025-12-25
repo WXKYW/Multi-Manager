@@ -1397,10 +1397,11 @@ export const zeaburMethods = {
         }
       },
       streamer: (appendLog) => {
-        // Zeabur 实时日志轮询 (2秒间隔)
-        let lastLogCount = 0;
+        // Zeabur 实时日志轮询 (1秒间隔)
+        let lastTimestamp = 0;
         this._zeaburLogTimer = setInterval(async () => {
           if (document.visibilityState !== 'visible') return;
+          if (!store.logViewer.visible) return; // 面板关闭时停止
           try {
             const response = await fetch('/api/zeabur/service/logs', {
               method: 'POST',
@@ -1414,23 +1415,32 @@ export const zeaburMethods = {
               })
             });
             const result = await response.json();
-            if (result.success && result.logs) {
-              // 只追加新日志 (如果数量变化)
-              if (result.logs.length !== lastLogCount) {
+            if (result.success && result.logs && result.logs.length > 0) {
+              // 获取最新日志的时间戳
+              const latestTs = new Date(result.logs[result.logs.length - 1].timestamp).getTime();
+
+              // 只有有新日志时才更新
+              if (latestTs > lastTimestamp) {
                 const newLogs = result.logs.map(l => ({
+                  id: l.timestamp + Math.random().toString(36).substr(2, 9),
                   timestamp: new Date(l.timestamp).getTime(),
+                  level: 'INFO',
                   message: l.message
                 }));
-                // 清空并重新加载所有日志 (因为 Zeabur API 不支持增量)
-                store.logViewer.logs = [];
-                this.appendLogs(newLogs);
-                lastLogCount = result.logs.length;
+                // 直接替换日志数组
+                store.logViewer.logs.splice(0, store.logViewer.logs.length, ...newLogs);
+                lastTimestamp = latestTs;
+
+                // 自动滚动到底部
+                if (store.logViewer.autoScroll) {
+                  this.scrollToLogBottom();
+                }
               }
             }
           } catch (e) {
             console.warn('实时日志刷新失败:', e);
           }
-        }, 2000);
+        }, 1000);
       },
       cleaner: () => {
         if (this._zeaburLogTimer) {
