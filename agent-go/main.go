@@ -254,7 +254,13 @@ func (a *AgentClient) messageLoop() {
 			return
 		}
 
-		a.handleMessage(string(message))
+		msg := string(message)
+		// 调试日志：显示收到的消息（排除心跳）
+		if msg != "2" && msg != "3" {
+			log.Printf("[Agent] 收到消息: %s", msg)
+		}
+
+		a.handleMessage(msg)
 	}
 }
 
