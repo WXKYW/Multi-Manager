@@ -316,18 +316,16 @@
     transform: none !important;
 
     /* 悬浮胶囊样式 */
-    background: rgba(30, 41, 59, 0.65) !important;
+    background: rgba(var(--bg-secondary-rgb), 0.65) !important;
     backdrop-filter: blur(16px) saturate(150%) !important;
     -webkit-backdrop-filter: blur(16px) saturate(150%) !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    border: 1px solid var(--border-color) !important;
     border-radius: 100px !important;
     padding: 2px 7px !important;
     margin: 0 !important;
     gap: 4px !important;
     justify-content: center !important;
-    box-shadow:
-      0 2px 8px rgba(0, 0, 0, 0.08),
-      0 0 0 1px rgba(255, 255, 255, 0.03) inset !important;
+    box-shadow: var(--card-shadow) !important;
 
     width: auto !important;
     min-width: 380px;
@@ -342,10 +340,10 @@
     width: 56px !important;
     height: 56px !important;
     border-radius: 50% !important;
-    background: rgba(30, 41, 59, 0.65) !important;
+    background: rgba(var(--bg-secondary-rgb), 0.65) !important;
     backdrop-filter: blur(16px) saturate(150%) !important;
     -webkit-backdrop-filter: blur(16px) saturate(150%) !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    border: 1px solid var(--border-color) !important;
     color: var(--text-secondary);
     cursor: pointer;
     display: flex !important;
@@ -353,7 +351,7 @@
     justify-content: center !important;
     font-size: 20px !important;
     transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+    box-shadow: var(--card-shadow) !important;
     flex-shrink: 0 !important;
   }
 
@@ -411,35 +409,17 @@
     display: none !important;
   }
 
-  /* 适配浅色模式 */
-  @media (prefers-color-scheme: light) {
 
-    .nav-capsule .main-tabs,
-    .btn-settings-pc-bottom {
-      background: rgba(255, 255, 255, 0.85) !important;
-      border: 1px solid rgba(0, 0, 0, 0.08) !important;
-      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.03) !important;
-    }
-
-    /* 底部普通模式浅色适配 */
-    .nav-bottom-fixed:not(.nav-capsule) .main-tabs {
-      background: rgba(255, 255, 255, 0.95) !important;
-      border: 1px solid rgba(0, 0, 0, 0.1) !important;
-      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1) !important;
-    }
-  }
 
   /* 底部普通样式 (bottom-normal) - 保持原有 tab 样式但固定在底部 */
   .nav-bottom-fixed:not(.nav-capsule) .main-tabs {
-    background: rgba(13, 17, 23, 0.98) !important;
+    background: rgba(var(--bg-secondary-rgb), 0.95) !important;
     backdrop-filter: blur(20px) saturate(180%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    border: 1px solid var(--border-color) !important;
     border-radius: 16px !important;
     padding: 8px 16px !important;
-    box-shadow:
-      0 10px 40px rgba(0, 0, 0, 0.4),
-      0 0 0 1px rgba(255, 255, 255, 0.05) inset !important;
+    box-shadow: var(--card-shadow) !important;
     margin: 0 !important;
     border-bottom: none !important;
   }
