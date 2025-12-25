@@ -310,7 +310,7 @@
     -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
     border: 1px solid rgba(255, 255, 255, 0.1) !important;
     border-radius: 100px !important;
-    padding: 6px 10px !important;
+    padding: 2px 7px !important;
     margin: 0 !important;
     gap: 4px !important;
     justify-content: center !important;

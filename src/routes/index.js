@@ -353,20 +353,34 @@ function registerRoutes(app) {
 
       if (!server) return res.status(404).json({ success: false, error: '主机不存在' });
 
+      logger.info(`[Auto-Install] 开始安装 Agent: ${server.name} (${serverId})`);
+
       const protocol = req.protocol;
       const host = req.get('host');
       const serverUrl = `${protocol}://${host}`;
       const script = agentService.generateInstallScript(serverId, serverUrl);
 
-      const result = await sshService.executeCommand(serverId, server, `cat << 'EOF' > /tmp/agent_install.sh\n${script}\nEOF\nsudo bash /tmp/agent_install.sh`);
+      // 120秒超时，下载+安装需要时间
+      const result = await sshService.executeCommand(serverId, server, `cat << 'EOF' > /tmp/agent_install.sh\n${script}\nEOF\nsudo bash /tmp/agent_install.sh`, 120000);
+
+      logger.info(`[Auto-Install] 执行结果: success=${result.success}, code=${result.code}`);
+      if (result.stdout) logger.info(`[Auto-Install] stdout: ${result.stdout.substring(0, 500)}`);
+      if (result.stderr) logger.warn(`[Auto-Install] stderr: ${result.stderr.substring(0, 500)}`);
 
       if (result.success) {
         serverStorage.updateStatus(serverId, { status: 'online' });
         res.json({ success: true, message: 'Agent 安装命令已执行', output: result.stdout });
       } else {
-        res.status(500).json({ success: false, error: '安装执行失败', details: result.stderr || result.error });
+        res.status(500).json({
+          success: false,
+          error: '安装执行失败',
+          details: result.stderr || result.error,
+          stdout: result.stdout,
+          code: result.code
+        });
       }
     } catch (error) {
+      logger.error(`[Auto-Install] 异常: ${error.message}`);
       res.status(500).json({ success: false, error: error.message });
     }
   });

@@ -395,9 +395,17 @@ func (a *AgentClient) reportLoop() {
 	}
 }
 
-// heartbeat 心跳
+// heartbeat 心跳 - 保持 WebSocket 连接活跃
 func (a *AgentClient) heartbeat() {
-	ticker := time.NewTicker(25 * time.Second)
+	// 立即发送第一次心跳
+	a.mu.Lock()
+	if a.conn != nil {
+		a.conn.WriteMessage(websocket.TextMessage, []byte("2"))
+	}
+	a.mu.Unlock()
+
+	// 每 10 秒发送一次心跳 (Socket.IO ping interval)
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -407,7 +415,9 @@ func (a *AgentClient) heartbeat() {
 		case <-ticker.C:
 			a.mu.Lock()
 			if a.conn != nil {
-				a.conn.WriteMessage(websocket.TextMessage, []byte("2"))
+				if err := a.conn.WriteMessage(websocket.TextMessage, []byte("2")); err != nil {
+					log.Printf("[Agent] 心跳发送失败: %v", err)
+				}
 			}
 			a.mu.Unlock()
 		}
