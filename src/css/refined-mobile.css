@@ -78,13 +78,6 @@
         max-width: 100% !important;
     }
 
-    /* 实时监控指示器在底部导航中的调整 */
-    .main-tabs .nav-live-badge {
-        position: absolute !important;
-        top: 4px !important;
-        right: 50% !important;
-        transform: translateX(12px) !important;
-    }
 
     /* 容器调整 - 最大化可见区域 */
     .container {

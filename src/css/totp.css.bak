@@ -1,9 +1,9 @@
 /**
- * TOTP/HOTP 验证器模块样式
+ * TOTP/HOTP 验证器模块样�?
  * 全站统一风格
  */
 
-/* ==================== 搜索框 ==================== */
+/* ==================== 搜索�?==================== */
 .totp-search-box {
     position: relative;
     min-width: 180px;
@@ -35,7 +35,7 @@
     box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
 }
 
-/* ==================== 验证码卡片网格 ==================== */
+/* ==================== 验证码卡片网�?==================== */
 .totp-cards-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -126,7 +126,7 @@
     }
 }
 
-/* 点击反馈 - 适用于所有设备 */
+/* 点击反馈 - 适用于所有设�?*/
 .totp-card:active {
     transform: scale(0.98) !important;
     background: var(--bg-hover) !important;
@@ -211,7 +211,7 @@
     color: #10b981;
 }
 
-/* ==================== 验证码显示 ==================== */
+/* ==================== 验证码显�?==================== */
 .totp-code-area {
     text-align: center;
 }
@@ -247,11 +247,11 @@
     }
 }
 
-/* 隐藏验证码样式 */
+/* 隐藏验证码样�?*/
 .totp-code-display.code-hidden {
     cursor: pointer;
     line-height: 1;
-    /* 修正星号偏高的问题 */
+    /* 修正星号偏高的问�?*/
 }
 
 /* 下一个验证码预览 */
@@ -273,7 +273,7 @@
     font-weight: 500;
 }
 
-/* ==================== TOTP 计时器 ==================== */
+/* ==================== TOTP 计时�?==================== */
 .totp-timer {
     display: flex;
     align-items: center;
@@ -282,7 +282,7 @@
     height: 16px;
 }
 
-/* 进度条轨道容器 */
+/* 进度条轨道容�?*/
 .totp-timer-track {
     flex: 1;
     height: 4px;
@@ -311,7 +311,7 @@
     flex-shrink: 0;
 }
 
-/* ==================== HOTP 计数器 ==================== */
+/* ==================== HOTP 计数�?==================== */
 .totp-counter {
     display: flex;
     align-items: center;
@@ -383,7 +383,7 @@
     color: var(--danger-color);
 }
 
-/* ==================== 分组颜色点 ==================== */
+/* ==================== 分组颜色�?==================== */
 .group-color-dot {
     width: 20px;
     height: 20px;
@@ -391,7 +391,7 @@
     border: 2px solid rgba(255, 255, 255, 0.3);
 }
 
-/* ==================== 类型选择器 ==================== */
+/* ==================== 类型选择�?==================== */
 .totp-type-selector {
     display: flex;
     gap: 10px;
@@ -450,8 +450,8 @@
 /* ==================== 高级选项 ==================== */
 .totp-advanced {
     margin-top: 16px;
-    /* border: 1px solid var(--border-color); */
-    /* border-radius: 10px; */
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
     overflow: hidden;
 }
 
@@ -473,7 +473,7 @@
 
 .totp-advanced-content {
     padding: 20px !important;
-    /* 修正内边距 */
+    /* 修正内边�?*/
 }
 
 .totp-grid-three {
@@ -494,12 +494,12 @@
 }
 
 .totp-modal .modal-body {
-    padding: 15px;
-    /* 增大全局内边距，提升呼吸感 */
+    padding: 24px 28px;
+    /* 增大全局内边距，提升呼吸�?*/
 }
 
 .totp-modal .form-group {
-    margin-bottom: 10px;
+    margin-bottom: 20px;
     /* 增大字段间距 */
 }
 
@@ -529,7 +529,7 @@
 }
 
 .totp-modal .totp-advanced-content {
-    padding: 0 !important;
+    padding: 20px 0 0 0 !important;
 }
 
 /* 主题色输入框样式 */
@@ -643,7 +643,7 @@
     border-radius: 8px;
 }
 
-/* ==================== 二维码导入 ==================== */
+/* ==================== 二维码导�?==================== */
 .qr-paste-zone {
     border: 2px dashed var(--border-color);
     border-radius: 12px;
@@ -709,7 +709,7 @@
     background: var(--border-color);
 }
 
-/* ==================== 响应式 - 手机端列表布局 ==================== */
+/* ==================== 响应�?- 手机端列表布局 ==================== */
 @media (max-width: 768px) {
 
     /* 列表布局 */
@@ -720,7 +720,7 @@
         padding: 0;
     }
 
-    /* 卡片变成列表项 */
+    /* 卡片变成列表�?*/
     .totp-card {
         border-radius: 0;
         border: none;
@@ -766,7 +766,7 @@
         color: var(--text-tertiary);
     }
 
-    /* 验证码右侧 */
+    /* 验证码右�?*/
     .totp-code-area {
         text-align: right;
         flex-shrink: 0;
@@ -780,7 +780,7 @@
         border-radius: 0;
     }
 
-    /* 进度条紧凑显示 */
+    /* 进度条紧凑显�?*/
     .totp-timer {
         justify-content: flex-end;
         margin-top: 4px;
@@ -833,63 +833,5 @@
 
     .totp-tab-content .panel-header .btn {
         flex-shrink: 0;
-    }
-}
-
-/* ==================== 模态框 Tabs ==================== */
-.modal-tabs {
-    display: flex;
-    border-bottom: 1px solid var(--border-color);
-    /* margin-bottom: 20px; */
-    background: var(--bg-secondary);
-}
-
-.modal-tab {
-    flex: 1;
-    padding: 12px;
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--text-tertiary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    transition: all 0.2s;
-}
-
-.modal-tab:hover {
-    color: var(--text-primary);
-    background: rgba(0, 0, 0, 0.02);
-}
-
-.modal-tab.active {
-    color: var(--totp-primary);
-    border-bottom-color: var(--totp-primary);
-    background: var(--bg-primary);
-    font-weight: 600;
-}
-
-.modal-tab i {
-    font-size: 16px;
-}
-
-/* 模态框动画 */
-.fade-in {
-    animation: fadeIn 0.2s ease-out;
-}
-
-@keyframes fadeIn {
-    from {
-        opacity: 0;
-        transform: translateY(4px);
-    }
-
-    to {
-        opacity: 1;
-        transform: translateY(0);
     }
 }

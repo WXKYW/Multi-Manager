@@ -36,10 +36,7 @@
                     </div>
                     <!-- 添加按钮 -->
                     <button class="btn btn-primary" @click="openAddTotpModal">
-                        <i class="fas fa-plus"></i> 添加
-                    </button>
-                    <button class="btn btn-secondary" @click="showTotpImportModal = true" title="导入">
-                        <i class="fas fa-file-import"></i>
+                        <i class="fas fa-plus"></i> 添加 / 导入
                     </button>
                 </div>
             </div>
@@ -338,112 +335,186 @@
 
 </div>
 
-<!-- ==================== 添加/编辑账号模态框 ==================== -->
+<!-- ==================== 统一添加/编辑模态框 ==================== -->
 <div v-if="showTotpModal" class="modal-overlay" @keydown.esc="closeTotpModal" @click.self="closeTotpModal"
     tabindex="-1">
     <div class="modal totp-modal">
         <div class="modal-header">
             <div class="modal-title">
-                <i class="fas fa-shield-alt"></i>
-                {{ totpModalMode === 'add' ? '添加 2FA 账号' : '编辑账号' }}
+                <i class="fas" :class="totpModalMode === 'add' ? 'fa-plus-circle' : 'fa-edit'"></i>
+                {{ totpModalMode === 'add' ? '添加 / 导入账号' : '编辑账号' }}
             </div>
             <button class="modal-close" @click="closeTotpModal"><i class="fas fa-times"></i></button>
         </div>
+
+        <!-- 模态框 Tabs (仅在添加模式显示) -->
+        <div class="modal-tabs" v-if="totpModalMode === 'add'">
+            <button class="modal-tab" :class="{ active: totpAddTab === 'scan' }" @click="switchTotpAddTab('scan')">
+                <i class="fas fa-qrcode"></i> 扫码导入
+            </button>
+            <button class="modal-tab" :class="{ active: totpAddTab === 'manual' }" @click="switchTotpAddTab('manual')">
+                <i class="fas fa-keyboard"></i> 手动录入
+            </button>
+        </div>
+
         <div class="modal-body">
-            <!-- OTP 类型选择 -->
-            <div class="form-group">
-                <label>类型</label>
-                <div class="totp-type-selector">
-                    <button class="type-btn" :class="{ active: totpForm.otp_type === 'totp' }"
-                        @click="totpForm.otp_type = 'totp'">
-                        <i class="fas fa-clock"></i> TOTP (基于时间)
-                    </button>
-                    <button class="type-btn" :class="{ active: totpForm.otp_type === 'hotp' }"
-                        @click="totpForm.otp_type = 'hotp'">
-                        <i class="fas fa-hashtag"></i> HOTP (基于计数器)
-                    </button>
-                </div>
-            </div>
 
-            <div class="form-group">
-                <label><i class="fas fa-building"></i> 发行商</label>
-                <input v-model="totpForm.issuer" type="text" class="form-input"
-                    placeholder="如: GitHub, Microsoft, Google" />
-            </div>
-            <div class="form-group">
-                <label><i class="fas fa-user"></i> 账户名</label>
-                <input v-model="totpForm.account" type="text" class="form-input" placeholder="如: your@email.com" />
-            </div>
-            <div class="form-group">
-                <label><i class="fas fa-key"></i> 密钥 (Base32)</label>
-                <div class="totp-secret-input">
-                    <input v-model="totpForm.secret" :type="totpShowSecret ? 'text' : 'password'" class="form-input"
-                        placeholder="JBSWY3DPEHPK3PXP" :disabled="totpModalMode === 'edit'" />
-                    <button type="button" class="totp-toggle-secret" @click="totpShowSecret = !totpShowSecret">
-                        <i class="fas" :class="totpShowSecret ? 'fa-eye-slash' : 'fa-eye'"></i>
-                    </button>
-                </div>
-            </div>
-            <div class="form-group">
-                <label><i class="fas fa-folder"></i> 分组</label>
-                <select v-model="totpForm.group_id" class="form-input">
-                    <option :value="null">无分组</option>
-                    <option v-for="g in totpGroups" :key="g.id" :value="g.id">{{ g.name }}</option>
-                </select>
-            </div>
+            <!-- Tab 1: 扫码/批量导入 -->
+            <div v-show="totpModalMode === 'add' && totpAddTab === 'scan'" class="tab-pane fade-in">
+                <div class="form-group">
+                    <div class="qr-import-controls"
+                        style="display: flex; gap: 8px; margin-bottom: 12px; align-items: center;">
+                        <button class="btn btn-secondary btn-sm" @click="toggleQrScan"
+                            :class="{ 'btn-primary': isScanning }">
+                            <i class="fas" :class="isScanning ? 'fa-stop-circle' : 'fa-camera'"></i>
+                            <span>{{ isScanning ? '停止扫码' : '扫码导入' }}</span>
+                        </button>
+                        <button class="btn btn-secondary btn-sm" @click="$refs.qrFileInput.click()">
+                            <i class="fas fa-image"></i>
+                            <span>图片导入</span>
+                            <input type="file" ref="qrFileInput" accept="image/*" @change="handleQrUpload"
+                                style="display: none;" />
+                        </button>
+                    </div>
 
-            <!-- 高级选项 -->
-            <details class="totp-advanced">
-                <summary><i class="fas fa-sliders-h"></i> 高级选项</summary>
-                <div class="totp-advanced-content">
-                    <div class="totp-grid-three">
-                        <div class="form-group">
-                            <label>算法</label>
-                            <select v-model="totpForm.algorithm" class="form-input">
-                                <option value="SHA1">SHA1</option>
-                                <option value="SHA256">SHA256</option>
-                                <option value="SHA512">SHA512</option>
-                            </select>
+                    <!-- 扫码预览 -->
+                    <div v-show="isScanning" id="qr-reader"
+                        style="width: 100%; border-radius: 12px; overflow: hidden; margin-bottom: 12px; border: 1px solid var(--border-color); background: #000;">
+                    </div>
+
+                    <div class="qr-paste-zone" v-show="!isScanning" @paste="handleQrPaste" @dragover.prevent
+                        @drop.prevent="handleQrUpload({ target: { files: $event.dataTransfer.files } })" tabindex="0">
+                        <div v-if="qrParsing" class="qr-loading">
+                            <i class="fas fa-spinner fa-spin"></i> 解析中...
                         </div>
-                        <div class="form-group">
-                            <label>位数</label>
-                            <select v-model="totpForm.digits" class="form-input">
-                                <option :value="6">6 位</option>
-                                <option :value="8">8 位</option>
-                            </select>
-                        </div>
-                        <div class="form-group" v-if="totpForm.otp_type === 'totp'">
-                            <label>周期</label>
-                            <select v-model="totpForm.period" class="form-input">
-                                <option :value="30">30 秒</option>
-                                <option :value="60">60 秒</option>
-                            </select>
-                        </div>
-                        <div class="form-group" v-if="totpForm.otp_type === 'hotp'">
-                            <label>初始计数</label>
-                            <input v-model.number="totpForm.counter" type="number" class="form-input" min="0" />
+                        <div v-else class="qr-hint">
+                            <i class="fas fa-paste"></i>
+                            <span>粘贴二维码截图 (Ctrl+V)</span>
+                            <span class="qr-hint-sub">或拖拽图片到此处</span>
                         </div>
                     </div>
-                    <div class="form-group">
-                        <label style="display: block; margin-bottom: 8px;">主题色</label>
-                        <div style="display: flex; gap: 8px; align-items: center;">
-                            <input v-model="totpForm.color" type="color" class="form-input color-input" />
-                            <button type="button" class="btn btn-secondary btn-sm" @click="totpForm.color = ''"
-                                :disabled="!totpForm.color" title="使用平台默认颜色">
-                                <i class="fas fa-undo"></i> 默认
-                            </button>
-                        </div>
+
+                    <div v-if="qrError" class="form-error" style="margin-top: 8px;">
+                        <i class="fas fa-exclamation-circle"></i> {{ qrError }}
                     </div>
                 </div>
-            </details>
 
-            <div v-if="totpModalError" class="form-error">
-                <i class="fas fa-exclamation-circle"></i> {{ totpModalError }}
+                <div class="form-divider">
+                    <span>或批量导入 URI</span>
+                </div>
+
+                <div class="form-group">
+                    <textarea v-model="totpImportUris" class="form-input" rows="4"
+                        placeholder="每行一个 URI，例如:&#10;otpauth://totp/GitHub:user@example.com?secret=XXXX&issuer=GitHub"></textarea>
+                </div>
+            </div>
+
+            <!-- Tab 2: 手动录入 (编辑模式默认显示此内容) -->
+            <div v-show="totpModalMode === 'edit' || totpAddTab === 'manual'" class="tab-pane fade-in">
+                <!-- OTP 类型选择 -->
+                <div class="form-group">
+                    <label>类型</label>
+                    <div class="totp-type-selector">
+                        <button class="type-btn" :class="{ active: totpForm.otp_type === 'totp' }"
+                            @click="totpForm.otp_type = 'totp'">
+                            <i class="fas fa-clock"></i> TOTP (时间)
+                        </button>
+                        <button class="type-btn" :class="{ active: totpForm.otp_type === 'hotp' }"
+                            @click="totpForm.otp_type = 'hotp'">
+                            <i class="fas fa-hashtag"></i> HOTP (计数)
+                        </button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label><i class="fas fa-building"></i> 发行商</label>
+                    <input v-model="totpForm.issuer" type="text" class="form-input" placeholder="如: GitHub, Google" />
+                </div>
+                <div class="form-group">
+                    <label><i class="fas fa-user"></i> 账户名</label>
+                    <input v-model="totpForm.account" type="text" class="form-input"
+                        placeholder="如: user@example.com" />
+                </div>
+                <div class="form-group">
+                    <label><i class="fas fa-key"></i> 密钥 (Base32)</label>
+                    <div class="totp-secret-input">
+                        <input v-model="totpForm.secret" :type="totpShowSecret ? 'text' : 'password'" class="form-input"
+                            placeholder="JBSWY3DPEHPK3PXP" :disabled="totpModalMode === 'edit'" />
+                        <button type="button" class="totp-toggle-secret" @click="totpShowSecret = !totpShowSecret">
+                            <i class="fas" :class="totpShowSecret ? 'fa-eye-slash' : 'fa-eye'"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label><i class="fas fa-folder"></i> 分组</label>
+                    <select v-model="totpForm.group_id" class="form-input">
+                        <option :value="null">无分组</option>
+                        <option v-for="g in totpGroups" :key="g.id" :value="g.id">{{ g.name }}</option>
+                    </select>
+                </div>
+
+                <!-- 高级选项 -->
+                <details class="totp-advanced">
+                    <summary><i class="fas fa-sliders-h"></i> 高级选项</summary>
+                    <div class="totp-advanced-content">
+                        <div class="totp-grid-three">
+                            <div class="form-group">
+                                <label>算法</label>
+                                <select v-model="totpForm.algorithm" class="form-input">
+                                    <option value="SHA1">SHA1 (默认)</option>
+                                    <option value="SHA256">SHA256</option>
+                                    <option value="SHA512">SHA512</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>位数</label>
+                                <select v-model="totpForm.digits" class="form-input">
+                                    <option :value="6">6 位</option>
+                                    <option :value="8">8 位</option>
+                                </select>
+                            </div>
+                            <div class="form-group" v-if="totpForm.otp_type === 'totp'">
+                                <label>周期</label>
+                                <select v-model="totpForm.period" class="form-input">
+                                    <option :value="30">30 秒</option>
+                                    <option :value="60">60 秒</option>
+                                </select>
+                            </div>
+                            <div class="form-group" v-if="totpForm.otp_type === 'hotp'">
+                                <label>初始计数</label>
+                                <input v-model.number="totpForm.counter" type="number" class="form-input" min="0" />
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label style="display: block; margin-bottom: 8px;">主题色</label>
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <input :value="totpForm.color || '#000000'"
+                                    @input="totpForm.color = $event.target.value" type="color"
+                                    class="form-input color-input" />
+                                <button type="button" class="btn btn-secondary btn-sm" @click="totpForm.color = ''"
+                                    :disabled="!totpForm.color" title="使用平台默认颜色">
+                                    <i class="fas fa-undo"></i> 默认
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </details>
+
+                <div v-if="totpModalError" class="form-error">
+                    <i class="fas fa-exclamation-circle"></i> {{ totpModalError }}
+                </div>
             </div>
         </div>
+
         <div class="modal-footer">
             <button class="btn btn-secondary" @click="closeTotpModal" :disabled="totpModalSaving">取消</button>
-            <button class="btn btn-primary" @click="saveTotpAccount" :disabled="totpModalSaving">
+            <!-- 扫码模式下显示“导入”按钮 -->
+            <button v-if="totpModalMode === 'add' && totpAddTab === 'scan'" class="btn btn-primary"
+                @click="importTotpAccounts" :disabled="!totpImportUris.trim()">
+                <i class="fas fa-file-import"></i> 导入
+            </button>
+            <!-- 手动录入/编辑模式下显示“保存”按钮 -->
+            <button v-else class="btn btn-primary" @click="saveTotpAccount" :disabled="totpModalSaving">
                 <i class="fas" :class="totpModalSaving ? 'fa-spinner fa-spin' : 'fa-check'"></i>
                 {{ totpModalSaving ? '保存中...' : '保存' }}
             </button>
@@ -469,67 +540,14 @@
             </div>
             <div class="form-group">
                 <label>主题色</label>
-                <input v-model="totpGroupForm.color" type="color" class="form-input color-input" />
+                <input :value="totpGroupForm.color || '#000000'" @input="totpGroupForm.color = $event.target.value"
+                    type="color" class="form-input color-input" />
             </div>
         </div>
         <div class="modal-footer">
             <button class="btn btn-secondary" @click="showTotpGroupModal = false">取消</button>
             <button class="btn btn-primary" @click="saveGroup">
                 <i class="fas fa-check"></i> 保存
-            </button>
-        </div>
-    </div>
-</div>
-
-<!-- ==================== 导入模态框 ==================== -->
-<div v-if="showTotpImportModal" class="modal-overlay" @keydown.esc="showTotpImportModal = false"
-    @click.self="showTotpImportModal = false" tabindex="-1">
-    <div class="modal totp-modal">
-        <div class="modal-header">
-            <div class="modal-title"><i class="fas fa-file-import"></i> 导入账号</div>
-            <button class="modal-close" @click="showTotpImportModal = false"><i class="fas fa-times"></i></button>
-        </div>
-        <div class="modal-body">
-            <!-- 二维码导入区域 -->
-            <div class="form-group">
-                <label><i class="fas fa-qrcode"></i> 二维码导入</label>
-                <div class="qr-paste-zone" @paste="handleQrPaste" @dragover.prevent
-                    @drop.prevent="handleQrUpload({ target: { files: $event.dataTransfer.files } })" tabindex="0">
-                    <div v-if="qrParsing" class="qr-loading">
-                        <i class="fas fa-spinner fa-spin"></i> 解析中...
-                    </div>
-                    <div v-else class="qr-hint">
-                        <i class="fas fa-paste"></i>
-                        <span>粘贴二维码截图 (Ctrl+V)</span>
-                        <span class="qr-hint-sub">或拖拽图片到此处</span>
-                    </div>
-                </div>
-                <div class="qr-actions">
-                    <label class="btn btn-secondary btn-sm">
-                        <i class="fas fa-upload"></i> 上传图片
-                        <input type="file" accept="image/*" @change="handleQrUpload" style="display: none;" />
-                    </label>
-                </div>
-                <div v-if="qrError" class="form-error" style="margin-top: 8px;">
-                    <i class="fas fa-exclamation-circle"></i> {{ qrError }}
-                </div>
-            </div>
-
-            <div class="form-divider">
-                <span>或手动输入 URI</span>
-            </div>
-
-            <div class="form-group">
-                <label><i class="fas fa-link"></i> otpauth:// URI</label>
-                <textarea v-model="totpImportUris" class="form-input" rows="5"
-                    placeholder="每行一个 URI，例如:&#10;otpauth://totp/GitHub:user@example.com?secret=XXXX&issuer=GitHub"></textarea>
-                <small class="form-hint">支持 TOTP 和 HOTP 格式</small>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-secondary" @click="showTotpImportModal = false">取消</button>
-            <button class="btn btn-primary" @click="importTotpAccounts" :disabled="!totpImportUris.trim()">
-                <i class="fas fa-file-import"></i> 导入
             </button>
         </div>
     </div>

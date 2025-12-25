@@ -68,6 +68,12 @@ const cdnDependencies = {
         file: '/font/simple-icons.min.css',
         global: null,
         css: true
+    },
+    'html5-qrcode': {
+        version: '2.3.8',
+        file: '/html5-qrcode.min.js',
+        global: 'Html5Qrcode',
+        css: false
     }
 };
 
