@@ -369,8 +369,14 @@ router.post('/accounts/:accountId/zones/:zoneId/records', async (req, res) => {
     }
 
     storage.touchAccount(accountId);
+
+    // 根据账号配置选择认证方式
+    const auth = account.email
+      ? { email: account.email, key: account.apiToken }  // Global API Key
+      : account.apiToken;  // API Token
+
     const record = await cfApi.createDnsRecord(
-      account.apiToken,
+      auth,
       zoneId,
       { type, name, content, ttl, proxied, priority }
     );
@@ -405,8 +411,14 @@ router.put('/accounts/:accountId/zones/:zoneId/records/:recordId', async (req, r
     }
 
     storage.touchAccount(accountId);
+
+    // 根据账号配置选择认证方式
+    const auth = account.email
+      ? { email: account.email, key: account.apiToken }  // Global API Key
+      : account.apiToken;  // API Token
+
     const record = await cfApi.updateDnsRecord(
-      account.apiToken,
+      auth,
       zoneId,
       recordId,
       { type, name, content, ttl, proxied, priority }
@@ -441,6 +453,12 @@ router.delete('/accounts/:accountId/zones/:zoneId/records/:recordId', async (req
     }
 
     storage.touchAccount(accountId);
+
+    // 根据账号配置选择认证方式
+    const auth = account.email
+      ? { email: account.email, key: account.apiToken }  // Global API Key
+      : account.apiToken;  // API Token
+
     await cfApi.deleteDnsRecord(auth, zoneId, recordId);
 
     res.json({ success: true });

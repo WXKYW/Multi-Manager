@@ -1,18 +1,19 @@
 /* Modal & Form Styles */
 
 .modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    background: rgba(0, 0, 0, 0.7);
-    backdrop-filter: blur(4px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 2000000; /* 绝对置顶，压制所有终端和菜单 */
-    padding: 20px;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000000;
+  /* 绝对置顶，压制所有终端和菜单 */
+  padding: 20px;
 }
 
 .modal-overlay.logs-fullscreen-overlay {
@@ -227,6 +228,7 @@
 }
 
 .form-input {
+  margin-bottom: 8px;
   width: 100%;
   padding: 10px 12px;
   border: 1px solid var(--input-border);
