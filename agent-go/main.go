@@ -261,11 +261,21 @@ func (a *AgentClient) messageLoop() {
 // handleMessage 处理消息
 func (a *AgentClient) handleMessage(msg string) {
 	// Socket.IO 消息格式解析
-	if len(msg) < 2 {
+	if len(msg) < 1 {
 		return
 	}
 
-	// 心跳响应
+	// 服务端发送的 ping，需要立即回复 pong
+	if msg == "2" {
+		a.mu.Lock()
+		if a.conn != nil {
+			a.conn.WriteMessage(websocket.TextMessage, []byte("3"))
+		}
+		a.mu.Unlock()
+		return
+	}
+
+	// 心跳响应 (服务端回复的 pong)
 	if msg == "3" {
 		return
 	}

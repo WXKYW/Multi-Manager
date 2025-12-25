@@ -1397,13 +1397,40 @@ export const zeaburMethods = {
         }
       },
       streamer: (appendLog) => {
-        // Zeabur 的实时日志需要轮询或 WebSocket，这里暂时使用简单的轮询模拟实时流
-        // 实际生产环境应使用 WebSocket
+        // Zeabur 实时日志轮询 (2秒间隔)
+        let lastLogCount = 0;
         this._zeaburLogTimer = setInterval(async () => {
           if (document.visibilityState !== 'visible') return;
-          // 这里应该调用获取增量日志的 API
-          // 暂时略过，避免过度请求
-        }, 5000);
+          try {
+            const response = await fetch('/api/zeabur/service/logs', {
+              method: 'POST',
+              headers: this.getAuthHeaders(),
+              body: JSON.stringify({
+                token: accountData.token,
+                serviceId: service._id,
+                environmentId: environmentId,
+                projectId: project._id,
+                limit: 200
+              })
+            });
+            const result = await response.json();
+            if (result.success && result.logs) {
+              // 只追加新日志 (如果数量变化)
+              if (result.logs.length !== lastLogCount) {
+                const newLogs = result.logs.map(l => ({
+                  timestamp: new Date(l.timestamp).getTime(),
+                  message: l.message
+                }));
+                // 清空并重新加载所有日志 (因为 Zeabur API 不支持增量)
+                store.logViewer.logs = [];
+                this.appendLogs(newLogs);
+                lastLogCount = result.logs.length;
+              }
+            }
+          } catch (e) {
+            console.warn('实时日志刷新失败:', e);
+          }
+        }, 2000);
       },
       cleaner: () => {
         if (this._zeaburLogTimer) {
