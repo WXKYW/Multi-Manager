@@ -38,8 +38,11 @@ module.exports = defineConfig(({ mode }) => {
         publicDir: '../public', // 使用项目根目录的 public 文件夹
         resolve: {
             alias: {
-                // CDN 模式下仍需要别名，但会被 external 排除
-                'vue': 'vue/dist/vue.esm-bundler.js'
+                // CDN 模式下使用 shim 从全局变量导出 Vue API
+                // 非 CDN 模式下使用正常的 ESM bundler 版本
+                'vue': useCdn
+                    ? path.resolve(__dirname, 'src/js/vue-shim.js')
+                    : 'vue/dist/vue.esm-bundler.js'
             }
         },
         plugins: [
@@ -62,17 +65,8 @@ module.exports = defineConfig(({ mode }) => {
             rollupOptions: {
                 input: {
                     main: path.resolve(__dirname, 'src/index.html')
-                },
-                // CDN 模式下排除这些依赖
-                external: useCdn ? getExternals() : [],
-                output: {
-                    // CDN 模式下使用 IIFE 格式以兼容全局变量
-                    format: useCdn ? 'iife' : 'es',
-                    // CDN 模式下需要映射全局变量
-                    globals: useCdn ? getGlobals() : {},
-                    // IIFE 格式需要指定名称
-                    name: useCdn ? 'ApiMonitor' : undefined
                 }
+                // CDN 模式下不再需要 external/globals，因为 shim 会处理
             }
         },
         server: {
