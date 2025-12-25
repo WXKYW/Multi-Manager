@@ -813,13 +813,13 @@ class AgentService {
     // ==================== 安装脚本生成 ====================
 
     /**
-     * 生成新版 Agent 安装脚本 (Node.js Agent)
+     * 生成新版 Agent 安装脚本 (Go Agent)
      */
     generateInstallScript(serverId, serverUrl) {
         const agentKey = this.getAgentKey(serverId);
 
         return `#!/bin/bash
-# API Monitor Agent 自动安装脚本 (二进制版)
+# API Monitor Agent 自动安装脚本 (Go 版)
 
 # 颜色定义
 RED='\\033[0;31m'
@@ -827,7 +827,7 @@ GREEN='\\033[0;32m'
 YELLOW='\\033[1;33m'
 NC='\\033[0m'
 
-echo -e "\${GREEN}>>> 正在安装 API Monitor Agent (二进制版)...\${NC}"
+echo -e "\${GREEN}>>> 正在安装 API Monitor Agent (Go 版)...\${NC}"
 
 # 配置信息
 SERVER_URL="${serverUrl}"
@@ -835,8 +835,22 @@ SERVER_ID="${serverId}"
 AGENT_KEY="${agentKey}"
 INSTALL_DIR="/opt/api-monitor-agent"
 SERVICE_NAME="api-monitor-agent"
-# 根据架构选择二进制文件名 (目前仅支持 x86_64)
-BINARY_URL="\${SERVER_URL}/agent/api-monitor-agent-linux"
+
+# 检测系统架构
+ARCH=$(uname -m)
+case $ARCH in
+    x86_64)
+        BINARY_NAME="agent-linux-amd64"
+        ;;
+    aarch64|arm64)
+        BINARY_NAME="agent-linux-arm64"
+        ;;
+    *)
+        echo -e "\${RED}错误: 不支持的架构 $ARCH\${NC}"
+        exit 1
+        ;;
+esac
+BINARY_URL="\${SERVER_URL}/agent/\${BINARY_NAME}"
 
 # 1. 检查权限
 if [ "$EUID" -ne 0 ]; then 
@@ -850,14 +864,14 @@ mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
 # 3. 下载二进制文件
-echo -e "\${YELLOW}📥 正在从主控端下载 Agent 二进制文件...\${NC}"
-curl -L -f -s "\$BINARY_URL" -o agent-bin
+echo -e "\${YELLOW}📥 正在从主控端下载 Agent 二进制文件 (\$BINARY_NAME)...\${NC}"
+curl -L -f -s "\$BINARY_URL" -o agent
 if [ $? -ne 0 ]; then
     echo -e "\${RED}❌ 错误: 无法从 \$BINARY_URL 下载二进制文件。\${NC}"
-    echo -e "\${YELLOW}请确保主控端已完成打包并放置在 public/agent 目录下。\${NC}"
+    echo -e "\${YELLOW}请确保主控端已完成构建。\${NC}"
     exit 1
 fi
-chmod +x agent-bin
+chmod +x agent
 
 # 4. 生成配置文件
 echo -e "\${YELLOW}📝 生成配置文件...\${NC}"
@@ -867,7 +881,7 @@ cat > config.json << EOF
     "serverId": "\$SERVER_ID",
     "agentKey": "\$AGENT_KEY",
     "reportInterval": 1500,
-    "reconnectInterval": 4000
+    "reconnectDelay": 4000
 }
 EOF
 
@@ -875,14 +889,14 @@ EOF
 echo -e "\${YELLOW}⚙️ 注册 systemd 服务...\${NC}"
 cat > /etc/systemd/system/$SERVICE_NAME.service << EOF
 [Unit]
-Description=API Monitor Agent
+Description=API Monitor Agent (Go)
 After=network.target
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=$INSTALL_DIR
-ExecStart=$INSTALL_DIR/agent-bin
+ExecStart=$INSTALL_DIR/agent
 Restart=always
 RestartSec=10
 
@@ -898,8 +912,9 @@ systemctl restart $SERVICE_NAME
 
 if systemctl is-active --quiet $SERVICE_NAME; then
     echo -e "\${GREEN}================================================\${NC}"
-    echo -e "\${GREEN}  ✅ API Monitor Agent 安装成功并已作为服务启动!\${NC}"
-    echo -e "\${GREEN}  使用状态: systemctl status $SERVICE_NAME\${NC}"
+    echo -e "\${GREEN}  ✅ API Monitor Agent (Go) 安装成功!\${NC}"
+    echo -e "\${GREEN}  架构: $ARCH\${NC}"  
+    echo -e "\${GREEN}  查看状态: systemctl status $SERVICE_NAME\${NC}"
     echo -e "\${GREEN}  查看日志: journalctl -u $SERVICE_NAME -f\${NC}"
     echo -e "\${GREEN}================================================\${NC}"
 else
@@ -915,16 +930,16 @@ fi
         const agentKey = this.getAgentKey(serverId);
 
         return `
-# API Monitor Agent Windows 自动安装脚本
+# API Monitor Agent Windows 自动安装脚本 (Go 版)
 $ErrorActionPreference = "Stop"
 
 $SERVER_URL = "${serverUrl}"
 $SERVER_ID = "${serverId}"
 $AGENT_KEY = "${agentKey}"
 $INSTALL_DIR = "$env:LOCALAPPDATA\\api-monitor-agent"
-$BINARY_URL = "$SERVER_URL/agent/api-monitor-agent-win.exe"
+$BINARY_URL = "$SERVER_URL/agent/agent-windows-amd64.exe"
 
-Write-Host ">>> 正在安装 API Monitor Agent (Windows 二进制版)..." -ForegroundColor Green
+Write-Host ">>> 正在安装 API Monitor Agent (Go 版)..." -ForegroundColor Green
 
 # 1. 创建目录
 if (-not (Test-Path $INSTALL_DIR)) {
@@ -935,7 +950,7 @@ Set-Location $INSTALL_DIR
 
 # 2. 下载二进制文件
 Write-Host "📥 正在从主控端下载 Agent 二进制文件..." -ForegroundColor Yellow
-Invoke-WebRequest -Uri $BINARY_URL -OutFile "api-monitor-agent.exe"
+Invoke-WebRequest -Uri $BINARY_URL -OutFile "agent.exe"
 
 # 3. 生成配置文件
 Write-Host "📝 生成配置文件..." -ForegroundColor Yellow
@@ -944,7 +959,7 @@ $config = @{
     serverId = $SERVER_ID
     agentKey = $AGENT_KEY
     reportInterval = 1500
-    reconnectInterval = 4000
+    reconnectDelay = 4000
 } | ConvertTo-Json
 
 $config | Out-File -FilePath "config.json" -Encoding ASCII -Force
@@ -952,7 +967,7 @@ $config | Out-File -FilePath "config.json" -Encoding ASCII -Force
 # 4. 设置并启动服务 (开机自启)
 Write-Host "⚙️ 正在配置开机自启..." -ForegroundColor Yellow
 $taskName = "APIMonitorAgent"
-$executablePath = Join-Path $INSTALL_DIR "api-monitor-agent.exe"
+$executablePath = Join-Path $INSTALL_DIR "agent.exe"
 
 # 停止并删除已存在的同名任务
 Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false
