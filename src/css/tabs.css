@@ -349,7 +349,7 @@
   .btn-settings-pc-bottom:hover {
     background: rgba(var(--current-rgb, var(--primary-rgb)), 0.2) !important;
     color: var(--current-primary, var(--primary-color)) !important;
-    transform: translateY(-2px) rotate(30deg) !important;
+    transform: rotate(30deg) !important;
     border-color: var(--current-primary, var(--primary-color)) !important;
   }
 
@@ -379,9 +379,9 @@
   }
 
   .nav-layout-bottom .main-tab.active {
-    background: rgba(255, 255, 255, 0.1);
-    color: var(--current-primary, var(--primary-color)) !important;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    background: rgba(var(--current-rgb), 0.2) !important;
+    color: var(--current-primary) !important;
+    box-shadow: 0 4px 12px rgba(var(--current-rgb), 0.2);
   }
 
   /* 隐藏指示条 */

@@ -59,7 +59,10 @@
           </div>
 
           <!-- 主导航容器 (PC底栏模式固定定位) -->
-          <div class="main-nav-container" :class="{'nav-bottom-fixed': navLayout === 'bottom'}">
+          <div class="main-nav-container" :class="[
+            {'nav-bottom-fixed': navLayout === 'bottom'},
+            'theme-' + (mainActiveTab === 'self-h' ? 'self-h' : mainActiveTab === 'gemini-cli' ? 'gemini-cli' : mainActiveTab === 'dns' ? 'cf-dns' : mainActiveTab)
+          ]">
             <!-- 主标签页导航 (仅在有多个模块可见时显示) -->
             <div class="main-tabs" v-if="Object.values(moduleVisibility).filter(v => v).length > 1">
               <template v-for="module in moduleOrder" :key="module">
