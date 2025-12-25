@@ -115,14 +115,6 @@
     display: none;
   }
 
-  /* 移动端呼吸灯：绝对定位到图标右上角 */
-  .main-tab .nav-live-badge {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    margin: 0;
-    align-self: auto;
-  }
 }
 
 /* ==================== 侧边栏布局模式 ==================== */

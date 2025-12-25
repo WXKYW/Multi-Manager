@@ -319,6 +319,10 @@ class DatabaseService {
             logger.info('开始执行数据库备份...');
             const db = this.getDatabase();
 
+            // 在备份前强制执行 Checkpoint，确保 WAL 中的数据全部写入主数据库文件
+            // 这能解决某些情况下导出数据丢失近期修改的问题
+            this.db.pragma('wal_checkpoint(TRUNCATE)');
+
             // 使用 better-sqlite3 原生备份 API
             // 这会自动处理 WAL 合并和一致性，比直接复制文件更安全
             await db.backup(backupPath);

@@ -98,6 +98,17 @@ export const totpMethods = {
 
     openAddTotpModal() {
         this.totpModalMode = 'add';
+        // 默认 Tab：如果设置了锁定模式，则使用默认模式；否则默认为 'scan' (扫码/导入)
+        // 注意：'scan' 对应原来的导入模态框，'manual' 对应原来的添加表单
+        const defaultMode = this.totpSettings.lockInputMode ? this.totpSettings.defaultInputMode : 'scan';
+
+        // 映射设置值到 Tab 值
+        if (defaultMode === 'manual') {
+            this.totpAddTab = 'manual';
+        } else {
+            this.totpAddTab = 'scan'; // 'qr' 或 'upload' 都归为 'scan' tab
+        }
+
         this.totpForm = {
             otp_type: 'totp',
             issuer: '',
@@ -112,11 +123,20 @@ export const totpMethods = {
         };
         this.totpModalError = '';
         this.totpShowSecret = false;
+        this.totpImportUris = '';
+        this.qrError = '';
         this.showTotpModal = true;
+
+        // 如果是扫码模式，且未锁定或锁定为 qr，尝试自动开启
+        if (this.totpAddTab === 'scan' && (!this.totpSettings.lockInputMode || this.totpSettings.defaultInputMode === 'qr')) {
+            // 可选：自动启动扫码？暂时还是让用户点击比较好，或者根据需求自动启动
+            // this.startQrScan(); 
+        }
     },
 
     editTotpAccount(account) {
         this.totpModalMode = 'edit';
+        this.totpAddTab = 'manual'; // 编辑模式强制为手动表单
         this.totpEditingId = account.id;
         this.totpForm = {
             otp_type: account.otp_type || 'totp',
@@ -135,10 +155,20 @@ export const totpMethods = {
         this.showTotpModal = true;
     },
 
+    switchTotpAddTab(tab) {
+        this.totpAddTab = tab;
+        if (tab !== 'scan') {
+            this.stopQrScan();
+        }
+    },
+
     closeTotpModal() {
+        this.stopQrScan(); // 关闭模态框时确保停止扫码
         this.showTotpModal = false;
         this.totpModalError = '';
         this.totpEditingId = null;
+        this.totpImportUris = '';
+        this.qrError = '';
     },
 
     async saveTotpAccount() {
@@ -365,8 +395,7 @@ export const totpMethods = {
 
             if (data.success) {
                 this.showGlobalToast(`导入完成: 成功 ${data.data.success} 个`, 'success');
-                this.showTotpImportModal = false;
-                this.totpImportUris = '';
+                this.closeTotpModal(); // 关闭统一模态框
                 await this.loadTotpAccounts();
             } else {
                 this.showGlobalToast('导入失败: ' + data.error, 'error');
@@ -375,6 +404,11 @@ export const totpMethods = {
             console.error('[TOTP] 导入失败:', error);
             this.showGlobalToast('导入失败', 'error');
         }
+    },
+
+    // 旧的 closeTotpImportModal 已合并至 closeTotpModal，此处移除或保留为空以防调用报错
+    closeTotpImportModal() {
+        this.closeTotpModal();
     },
 
     // ==================== 导出 ====================
@@ -501,6 +535,121 @@ export const totpMethods = {
         } finally {
             this.qrParsing = false;
         }
+    },
+
+    /**
+     * 切换扫码状态
+     */
+    async toggleQrScan() {
+        if (this.isScanning) {
+            await this.stopQrScan();
+        } else {
+            await this.startQrScan();
+        }
+    },
+
+    /**
+     * 启动扫码
+     */
+    async startQrScan() {
+        if (!window.Html5Qrcode) {
+            this.showGlobalToast('扫码库加载失败', 'error');
+            return;
+        }
+
+        // 安全上下文检查 (HTTPS 或 localhost)
+        if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+            this.qrError = '摄像头功能仅支持 HTTPS 环境。如果是移动端访问，请确认服务器域名已开启 SSL。';
+            this.showGlobalToast('环境不受支持', 'warning');
+            return;
+        }
+
+        this.isScanning = true;
+        this.qrError = '';
+
+        this.$nextTick(async () => {
+            try {
+                this.html5QrCode = new Html5Qrcode("qr-reader");
+                const config = {
+                    fps: 15,
+                    qrbox: { width: 250, height: 250 }
+                };
+
+                const successCallback = async (decodedText) => {
+                    if (decodedText.startsWith('otpauth://')) {
+                        if (window.navigator && window.navigator.vibrate) {
+                            window.navigator.vibrate(100);
+                        }
+
+                        await this.stopQrScan();
+
+                        if (this.totpSettings.autoSave) {
+                            this.totpImportUris = decodedText;
+                            await this.importTotpAccounts();
+                            this.showGlobalToast('扫码成功，已自动导入', 'success');
+                        } else {
+                            if (this.totpImportUris) {
+                                this.totpImportUris += '\n' + decodedText;
+                            } else {
+                                this.totpImportUris = decodedText;
+                            }
+                            this.showGlobalToast('扫码成功', 'success');
+                        }
+                    }
+                };
+
+                // 尝试优先级：1. 后置 -> 2. 前置 -> 3. 枚举设备
+                const startCamera = async (constraints) => {
+                    await this.html5QrCode.start(constraints, config, successCallback, () => { });
+                };
+
+                try {
+                    // 1. 尝试后置 (手机首选)
+                    await startCamera({ facingMode: "environment" });
+                } catch (err1) {
+                    console.warn('[TOTP] 后置摄像头不可用:', err1);
+                    try {
+                        // 2. 尝试前置 (PC 默认)
+                        await startCamera({ facingMode: "user" });
+                    } catch (err2) {
+                        console.warn('[TOTP] 前置摄像头不可用:', err2);
+                        // 3. 枚举所有设备并尝试第一个 (最终兜底)
+                        const devices = await Html5Qrcode.getCameras();
+                        if (devices && devices.length > 0) {
+                            await startCamera(devices[0].id);
+                        } else {
+                            throw new Error('未检测到任何摄像头设备');
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error('[TOTP] 启动扫码失败:', err);
+
+                let friendlyMsg = '启动摄像头失败';
+                if (err.name === 'NotAllowedError') friendlyMsg = '未获得摄像头访问权限';
+                else if (err.name === 'NotFoundError') friendlyMsg = '未发现可用的摄像头';
+                else if (err.name === 'NotReadableError') friendlyMsg = '摄像头已被占用或故障';
+                else if (err.name === 'OverconstrainedError') friendlyMsg = '摄像头规格不匹配';
+
+                this.qrError = friendlyMsg + ' (' + (err.name || 'UnknownError') + '): ' + (err.message || '无详细信息');
+                this.isScanning = false;
+            }
+        });
+    },
+
+    /**
+     * 停止扫码
+     */
+    async stopQrScan() {
+        if (this.html5QrCode && this.isScanning) {
+            try {
+                await this.html5QrCode.stop();
+                this.html5QrCode = null;
+            } catch (err) {
+                console.error('[TOTP] 停止扫码失败:', err);
+            }
+        }
+        this.isScanning = false;
     },
 
     // ==================== 工具方法 ====================
@@ -921,6 +1070,8 @@ export const totpData = {
     // 二维码导入
     qrParsing: false,
     qrError: '',
+    isScanning: false,
+    html5QrCode: null,
 
     // TOTP 设置 (从 store 获取响应式状态)
     get totpSettings() { return store.totpSettings; }

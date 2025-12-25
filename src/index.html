@@ -13,8 +13,9 @@
   <!-- CDN 样式 (由 Vite 注入) -->
   <%- cdnStyleTags %>
 
-    <!-- jsQR 二维码解析库 -->
+    <!-- 二维码解析库 -->
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 
     <!-- Template Loader imported in main.js -->
     <link rel="stylesheet" href="css/refined-mobile.css">
@@ -84,11 +85,6 @@
                   ]" @click="handleTabSwitch(module)">
                   <i class="fas" :class="getModuleIcon(module)"></i>
                   <span> {{ getModuleName(module) }}</span>
-                  <!-- 实时监控流指示器 (仅针对 Hosts 模块) -->
-                  <div v-if="module === 'server'" class="nav-live-badge" :class="{ disconnected: !metricsWsConnected }"
-                    :title="metricsWsConnected ? '实时指标流已连接' : '实时监控离线 (后台探测模式)'">
-                    <span class="pulse-dot"></span>
-                  </div>
                 </button>
               </template>
             </div>
