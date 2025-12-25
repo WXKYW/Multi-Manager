@@ -884,7 +884,6 @@ export const totpData = {
     totpFilterGroup: '',
     totpTimer: null,
     totpCurrentTab: 'accounts',
-    totpGroupByIssuer: true,  // 是否按平台分组显示
 
     // 账号模态框
     showTotpModal: false,
