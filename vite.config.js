@@ -62,6 +62,11 @@ module.exports = defineConfig(({ mode }) => {
             outDir: '../dist',
             emptyOutDir: true,
             assetsDir: 'assets',
+            // 生产构建时移除 console.log 和 console.warn
+            minify: 'esbuild',
+            esbuild: {
+                drop: ['console', 'debugger']
+            },
             rollupOptions: {
                 input: {
                     main: path.resolve(__dirname, 'src/index.html')
@@ -72,11 +77,6 @@ module.exports = defineConfig(({ mode }) => {
         server: {
             port: 5173,
             host: true,
-            // 暂时禁用隔离头，以确保 FFmpeg 0.11.x 稳定运行在单线程模式
-            // headers: {
-            //     'Cross-Origin-Opener-Policy': 'same-origin',
-            //     'Cross-Origin-Embedder-Policy': 'credentialless'
-            // },
             proxy: {
                 '/api': {
                     target: 'http://127.0.0.1:3000',
