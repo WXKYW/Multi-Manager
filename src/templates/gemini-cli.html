@@ -165,7 +165,7 @@
   <!-- 账号管理标签页 -->
   <div v-if="geminiCliCurrentTab === 'accounts'" class="sub-tab-content quick-fade-in">
     <div class="panel">
-      <div class="panel-header">
+      <div class="panel-header" style="padding-bottom: 6px;">
         <div style="display: flex; gap: 8px;">
           <button class="btn btn-gemini" @click="showGeminiCliOAuthExpand = !showGeminiCliOAuthExpand">
             <i class="fab fa-google"></i> OAuth 授权
@@ -176,6 +176,13 @@
           <button class="btn btn-secondary" @click="refreshGeminiCliAccounts" :disabled="geminiCliLoading"
             title="刷新全部账号" style="padding: 0 12px;">
             <i class="fas fa-sync-alt" :class="{ 'fa-spin': geminiCliLoading }"></i>
+          </button>
+          <button class="btn btn-secondary" @click="exportGeminiCliAccounts" title="导出账号" style="padding: 0 12px;">
+            <i class="fas fa-upload"></i>
+          </button>
+          <button class="btn btn-secondary" @click="importGeminiCliAccountsFromFile" title="导入账号"
+            style="padding: 0 12px;">
+            <i class="fas fa-download"></i>
           </button>
         </div>
       </div>
@@ -196,6 +203,11 @@
               <button class="btn btn-gemini btn-block" @click="openGeminiCliAuthUrl">
                 <i class="fab fa-google"></i> 获取授权链接
               </button>
+              <div
+                style="margin-top: 8px; font-size: 11px; color: var(--text-tertiary); display: flex; align-items: flex-start; gap: 6px;">
+                <i class="fas fa-info-circle" style="margin-top: 2px; opacity: 0.7;"></i>
+                <span>登录时显示 "Google Antigravity" 为正常现象，因该模块共用内部 OAuth 应用。两者访问的 API 端点不同，模型列表也有差异。</span>
+              </div>
             </div>
           </div>
 
