@@ -15,14 +15,26 @@ const logger = createLogger('TOTP');
 /**
  * GET /accounts
  * 获取所有账号（不含密钥）
+ * 支持 ?withCodes=true 参数同时返回实时验证码（用于浏览器扩展）
  */
 router.get('/accounts', async (req, res) => {
     try {
         const accounts = storage.loadAccounts();
+        const withCodes = req.query.withCodes === 'true';
+
+        // 如果需要验证码，先批量生成
+        let codes = {};
+        if (withCodes) {
+            codes = totpService.generateAllCodes(accounts);
+        }
+
         const safeAccounts = accounts.map(acc => ({
             ...acc,
             secret: undefined,
-            hasSecret: !!acc.secret
+            hasSecret: !!acc.secret,
+            // 附加验证码（如果请求了）
+            currentCode: withCodes && codes[acc.id] ? codes[acc.id].code : undefined,
+            remaining: withCodes && codes[acc.id] ? codes[acc.id].remaining : undefined
         }));
         res.json({ success: true, data: safeAccounts });
     } catch (error) {
@@ -388,6 +400,43 @@ router.post('/generate-secret', async (req, res) => {
         res.json({ success: true, data: { secret } });
     } catch (error) {
         logger.error('生成密钥失败', error.message);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * GET /extension/download
+ * 下载浏览器扩展程序 ZIP
+ */
+router.get('/extension/download', async (req, res) => {
+    try {
+        const path = require('path');
+        const fs = require('fs');
+        const { exec } = require('child_process');
+
+        const pluginDir = path.join(__dirname, '../../plugin');
+        const tempDir = path.join(__dirname, '../../tmp');
+        const zipFile = path.join(tempDir, `api-monitor-2fa-extension.zip`);
+
+        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
+
+        // 使用 PowerShell 进行压缩
+        const cmd = `powershell -Command "Compress-Archive -Path '${pluginDir}\\*' -DestinationPath '${zipFile}' -Force"`;
+
+        exec(cmd, (error, stdout, stderr) => {
+            if (error) {
+                logger.error('压缩扩展失败', error.message);
+                return res.status(500).json({ success: false, error: '压缩失败' });
+            }
+
+            res.download(zipFile, 'api-monitor-2fa-extension.zip', (err) => {
+                if (err) logger.error('发送扩展失败', err.message);
+                // 发送后删除临时文件
+                try { fs.unlinkSync(zipFile); } catch (e) { }
+            });
+        });
+    } catch (error) {
+        logger.error('下载扩展异常', error.message);
         res.status(500).json({ success: false, error: error.message });
     }
 });

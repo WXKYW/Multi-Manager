@@ -339,6 +339,68 @@
 
                 <div class="settings-divider"></div>
 
+                <!-- 浏览器扩展程序 -->
+                <div class="setting-item extension-setup-item" style="display: block;">
+                    <div class="setting-text" style="margin-bottom: 16px;">
+                        <span class="setting-title"><i class="fas fa-puzzle-piece"
+                                style="color: var(--accent-color);"></i> 浏览器扩展程序</span>
+                        <span class="setting-desc">安装浏览器扩展，即可在网页登录时自动识别并一键填充 2FA 验证码。</span>
+                    </div>
+
+                    <div class="extension-card"
+                        style="background: var(--bg-secondary); border-radius: 12px; padding: 20px; border: 1px solid var(--border-color);">
+                        <div style="display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap;">
+                            <div class="extension-icon-box"
+                                style="background: white; padding: 10px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); flex-shrink: 0;">
+                                <img src="/carbon--gateway-api.png" style="width: 48px; height: 48px; display: block;"
+                                    onerror="this.src='https://cdn.simpleicons.org/blueprint'" />
+                            </div>
+                            <div style="flex: 1; min-width: 200px;">
+                                <h4
+                                    style="margin: 0 0 8px 0; font-size: 16px; display: flex; align-items: center; gap: 8px;">
+                                    API Monitor 2FA 助手
+                                    <span
+                                        style="font-size: 10px; background: var(--accent-color); color: white; padding: 2px 6px; border-radius: 10px; font-weight: normal;">本地专用</span>
+                                </h4>
+                                <p
+                                    style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5;">
+                                    支持自动识别、实时同步，提供更高效的二步验证体验。
+                                </p>
+                                <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                                    <a href="/api/totp/extension/download" class="btn btn-primary btn-sm"
+                                        style="text-decoration: none;">
+                                        <i class="fas fa-download"></i> 下载扩展程序 ZIP
+                                    </a>
+                                    <button class="btn btn-secondary btn-sm"
+                                        @click="totpShowExtensionGuide = !totpShowExtensionGuide">
+                                        <i class="fas"
+                                            :class="totpShowExtensionGuide ? 'fa-chevron-up' : 'fa-info-circle'"></i> {{
+                                        totpShowExtensionGuide ? '隐藏教程' : '安装教程' }}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 安装教程 -->
+                        <div v-if="totpShowExtensionGuide" class="extension-guide-content"
+                            style="margin-top: 20px; padding-top: 20px; border-top: 1px dashed var(--border-color); font-size: 13px;">
+                            <p style="font-weight: bold; margin-bottom: 12px;"><i class="fas fa-magic"></i> 安装只需三步：</p>
+                            <ol style="padding-left: 20px; color: var(--text-secondary); line-height: 1.8;">
+                                <li>下载并解压获取的 ZIP 文件到本地文件夹。</li>
+                                <li>浏览器访问 <code>chrome://extensions</code> 并开启右侧的 <strong>“开发者模式”</strong>。</li>
+                                <li>点击 <strong>“加载已解压的扩展程序”</strong>，选择刚才解压的文件夹即可。</li>
+                            </ol>
+                            <div
+                                style="margin-top: 12px; padding: 10px; background: rgba(139, 92, 246, 0.1); border-radius: 8px; color: var(--accent-color);">
+                                <i class="fas fa-lightbulb"></i> <strong>提示：</strong> 安装后请在扩展选项中配置服务器地址
+                                <code>{{ location.origin }}</code>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="settings-divider"></div>
+
                 <!-- 操作按钮 -->
                 <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                     <button class="btn btn-secondary" @click="showTotpImportModal = true">

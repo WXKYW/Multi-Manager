@@ -135,6 +135,7 @@ const app = createApp({
 
       // 响应式状态
       isMobile: window.innerWidth <= 768,
+      location: window.location,
 
       // DNS 管理相关 - 表单状态
       showAddDnsAccountModal: false,

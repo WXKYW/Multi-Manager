@@ -1178,6 +1178,7 @@ export const totpData = {
         account: null
     },
     totpLongPressTimer: null,
+    totpShowExtensionGuide: false,
 
     // TOTP 设置 (从 store 获取响应式状态)
     get totpSettings() { return store.totpSettings; }
