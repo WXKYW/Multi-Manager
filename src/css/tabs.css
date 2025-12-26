@@ -99,6 +99,15 @@
   background-color: var(--gemini-primary) !important;
 }
 
+.main-tab.totp-tab:hover,
+.main-tab.totp-tab.active {
+  color: var(--totp-primary) !important;
+}
+
+.main-tab.totp-tab::after {
+  background-color: var(--totp-primary) !important;
+}
+
 @media (max-width: 768px) {
   .main-tab {
     padding: 12px 16px;
@@ -196,6 +205,10 @@
 
 .main-tabs-sidebar .sidebar-tab.gemini-cli-tab.active {
   color: var(--gemini-primary) !important;
+}
+
+.main-tabs-sidebar .sidebar-tab.totp-tab.active {
+  color: var(--totp-primary) !important;
 }
 
 
