@@ -575,6 +575,74 @@ router.post('/accounts/:id/toggle', async (req, res) => {
 });
 
 /**
+ * 账号管理 - 导出账号
+ */
+router.get('/accounts/export', async (req, res) => {
+    try {
+        const accounts = storage.getAccounts();
+        const exportData = {
+            version: '1.0',
+            type: 'gemini-cli-accounts',
+            exportTime: new Date().toISOString(),
+            accounts: accounts.map(acc => ({
+                name: acc.name,
+                email: acc.email,
+                client_id: acc.client_id,
+                client_secret: acc.client_secret,
+                refresh_token: acc.refresh_token,
+                project_id: acc.project_id
+            }))
+        };
+        res.json(exportData);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * 账号管理 - 导入账号
+ */
+router.post('/accounts/import', async (req, res) => {
+    try {
+        const { accounts } = req.body;
+        if (!Array.isArray(accounts)) {
+            return res.status(400).json({ error: 'Invalid format: accounts must be an array' });
+        }
+
+        let imported = 0;
+        let skipped = 0;
+        const errors = [];
+
+        for (const acc of accounts) {
+            if (!acc.refresh_token) {
+                skipped++;
+                continue;
+            }
+            try {
+                const id = `acc_${Math.random().toString(36).slice(2, 7)}`;
+                storage.addAccount({
+                    id,
+                    name: acc.name || `Imported ${imported + 1}`,
+                    email: acc.email || '',
+                    client_id: acc.client_id || '',
+                    client_secret: acc.client_secret || '',
+                    refresh_token: acc.refresh_token,
+                    project_id: acc.project_id || ''
+                });
+                imported++;
+            } catch (e) {
+                errors.push({ name: acc.name, error: e.message });
+                skipped++;
+            }
+        }
+
+        res.json({ success: true, imported, skipped, errors: errors.length > 0 ? errors : undefined });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
  * 日志管理 - 获取列表（与 Antigravity 格式一致）
  */
 router.get('/logs', async (req, res) => {
@@ -832,7 +900,7 @@ router.post(['/v1/chat/completions', '/chat/completions'], requireApiKey, async 
                     // 记录成功日志（包含累积的回复内容）
                     const originalMessages = JSON.parse(JSON.stringify(req.body.messages || []));
                     const settings = await storage.getSettings();
-                    
+
                     // 确保合并系统指令到日志中
                     if (!originalMessages.some(m => m.role === 'system') && settings.SYSTEM_INSTRUCTION) {
                         originalMessages.unshift({ role: 'system', content: settings.SYSTEM_INSTRUCTION });
@@ -912,10 +980,10 @@ router.post(['/v1/chat/completions', '/chat/completions'], requireApiKey, async 
                         durationMs: Date.now() - startTime,
                         clientIp: req.ip,
                         userAgent: req.get('user-agent'),
-                        detail: { 
-                            model: req.body.model, 
+                        detail: {
+                            model: req.body.model,
                             messages: originalMessages,
-                            response: responseData 
+                            response: responseData
                         }
                     });
 

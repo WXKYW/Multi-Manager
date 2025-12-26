@@ -166,6 +166,122 @@ router.delete('/accounts/:id', (req, res) => {
     }
 });
 
+// 导出账号
+router.get('/accounts/export', async (req, res) => {
+    try {
+        const accounts = storage.getAccounts();
+        const tokens = storage.getTokens();
+
+        const exportData = {
+            version: '1.0',
+            type: 'antigravity-accounts',
+            exportTime: new Date().toISOString(),
+            accounts: accounts.map(acc => {
+                const token = tokens.find(t => t.account_id === acc.id);
+                return {
+                    name: acc.name,
+                    email: acc.email,
+                    refresh_token: token?.refresh_token || '',
+                    project_id: token?.project_id || ''
+                };
+            }).filter(acc => acc.refresh_token) // 只导出有 refresh_token 的
+        };
+        res.json(exportData);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// 导入账号
+router.post('/accounts/import', async (req, res) => {
+    try {
+        const { accounts } = req.body;
+        if (!Array.isArray(accounts)) {
+            return res.status(400).json({ error: 'Invalid format: accounts must be an array' });
+        }
+
+        let imported = 0;
+        let skipped = 0;
+        const errors = [];
+
+        for (const acc of accounts) {
+            if (!acc.refresh_token) {
+                skipped++;
+                continue;
+            }
+            try {
+                // 需要先获取 access_token
+                const params = new URLSearchParams({
+                    client_id: GOOGLE_CLIENT_ID,
+                    client_secret: GOOGLE_CLIENT_SECRET,
+                    refresh_token: acc.refresh_token,
+                    grant_type: 'refresh_token'
+                });
+
+                const tokenRes = await axios.post('https://oauth2.googleapis.com/token', params.toString(), {
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+                });
+
+                const accessToken = tokenRes.data.access_token;
+
+                // 获取 email
+                let email = acc.email || '';
+                let projectId = acc.project_id || '';
+
+                if (!email) {
+                    try {
+                        const userRes = await axios.get('https://www.googleapis.com/oauth2/v2/userinfo', {
+                            headers: { Authorization: `Bearer ${accessToken}` }
+                        });
+                        email = userRes.data.email || '';
+                    } catch (e) { }
+                }
+
+                if (!projectId) {
+                    try {
+                        const projRes = await axios.get('https://cloudresourcemanager.googleapis.com/v1/projects', {
+                            headers: { Authorization: `Bearer ${accessToken}` }
+                        });
+                        const projects = projRes.data.projects || [];
+                        if (projects.length > 0) projectId = projects[0].projectId;
+                    } catch (e) { }
+                }
+
+                if (!projectId) {
+                    projectId = `antigravity-import-${Math.random().toString(36).substring(2, 8)}`;
+                }
+
+                const newAcc = storage.addAccount({
+                    name: acc.name || email || `Imported ${imported + 1}`,
+                    email: email,
+                    enable: true
+                });
+
+                storage.saveToken({
+                    accountId: newAcc.id,
+                    accessToken,
+                    refreshToken: acc.refresh_token,
+                    expiresIn: tokenRes.data.expires_in || 3599,
+                    timestamp: Date.now(),
+                    projectId,
+                    email,
+                    userEmail: email
+                });
+
+                storage.updateAccount(newAcc.id, { status: 'online' });
+                imported++;
+            } catch (e) {
+                errors.push({ name: acc.name, error: e.message });
+                skipped++;
+            }
+        }
+
+        res.json({ success: true, imported, skipped, errors: errors.length > 0 ? errors : undefined });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // 注入模型启用状态
 function injectModelStatus(quotas) {
     if (!quotas) return quotas;
@@ -1045,8 +1161,8 @@ router.post('/v1/chat/completions', requireApiAuth, async (req, res) => {
                     durationMs: Date.now() - startTime,
                     clientIp: req.ip,
                     userAgent: req.headers['user-agent'],
-                    detail: { 
-                        error: error.message, 
+                    detail: {
+                        error: error.message,
                         model: req.body.model,
                         messages: originalMessages
                     }

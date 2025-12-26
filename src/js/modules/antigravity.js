@@ -992,5 +992,82 @@ export const antigravityMethods = {
         row.base = newState;
         row.fakeStream = newState;
         row.antiTrunc = newState;
+    },
+
+    // 导出账号
+    async exportAntigravityAccounts() {
+        try {
+            const response = await fetch('/api/antigravity/accounts/export', {
+                headers: store.getAuthHeaders()
+            });
+            const data = await response.json();
+
+            if (data.error) {
+                toast.error('导出失败: ' + data.error);
+                return;
+            }
+
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `antigravity-accounts-${new Date().toISOString().slice(0, 10)}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            toast.success(`已导出 ${data.accounts?.length || 0} 个账号`);
+        } catch (error) {
+            toast.error('导出失败: ' + error.message);
+        }
+    },
+
+    // 导入账号
+    async importAntigravityAccountsFromFile() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+
+        input.onchange = async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            try {
+                const text = await file.text();
+                const data = JSON.parse(text);
+
+                if (!data.accounts || !Array.isArray(data.accounts)) {
+                    toast.error('无效的文件格式');
+                    return;
+                }
+
+                store.antigravityLoading = true;
+                toast.info(`正在导入 ${data.accounts.length} 个账号，请稍候...`);
+
+                const response = await fetch('/api/antigravity/accounts/import', {
+                    method: 'POST',
+                    headers: {
+                        ...store.getAuthHeaders(),
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ accounts: data.accounts })
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    toast.success(`导入成功: ${result.imported} 个账号${result.skipped > 0 ? `，跳过 ${result.skipped} 个` : ''}`);
+                    this.loadAntigravityAccounts();
+                } else {
+                    toast.error('导入失败: ' + (result.error || '未知错误'));
+                }
+            } catch (error) {
+                toast.error('导入失败: ' + error.message);
+            } finally {
+                store.antigravityLoading = false;
+            }
+        };
+
+        input.click();
     }
 };
