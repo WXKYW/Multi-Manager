@@ -91,6 +91,13 @@
 .auth-logo.login-logo {
     background: linear-gradient(135deg, #6366f1, #4f46e5);
     box-shadow: 0 8px 20px rgba(99, 102, 241, 0.4);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    cursor: pointer;
+}
+
+.auth-logo.login-logo:hover {
+    transform: rotate(14deg);
+    box-shadow: 0 12px 28px rgba(99, 102, 241, 0.5);
 }
 
 .auth-header h1 {

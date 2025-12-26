@@ -54,7 +54,7 @@
       <div v-if="!isDemoMode" class="auth-input-group">
         <i class="fas fa-lock input-icon"></i>
         <input v-model="loginPassword" type="password" class="auth-input" placeholder="请输入管理员密码"
-          autocomplete="current-password" @keyup.enter="verifyPassword" />
+          autocomplete="current-password" autofocus @keyup.enter="verifyPassword" />
       </div>
       <div v-if="loginError" class="auth-error-msg">
         <i class="fas fa-exclamation-triangle"></i> {{ loginError }}
