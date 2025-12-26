@@ -163,6 +163,10 @@ export const settingsMethods = {
 
   // 保存所有设置到后端
   async saveUserSettingsToServer() {
+    // 如果用户未登录，静默跳过保存（避免在登录页面显示错误提示）
+    if (!store.isAuthenticated) {
+      return false;
+    }
     this.antigravitySaving = true; // 复用该变量控制全局 Loading
     try {
       const settings = {
