@@ -16,6 +16,180 @@ const router = express.Router();
 const AG_OAUTH_STATE = crypto.randomUUID();
 const OAUTH_REDIRECT_URI = 'http://localhost:8045/oauth-callback';
 
+// ==================== 服务器端定时检测服务 ====================
+const autoCheckService = {
+    timerId: null,
+
+    /**
+     * 启动定时检测
+     */
+    start() {
+        this.stop();
+
+        const settings = storage.getSettings();
+        const enabled = settings.autoCheckEnabled === '1' || settings.autoCheckEnabled === true;
+        const intervalMs = parseInt(settings.autoCheckInterval) || 3600000;
+
+        if (!enabled) {
+            console.log('[AntiG AutoCheck] 定时检测未启用');
+            return;
+        }
+
+        console.log(`[AntiG AutoCheck] 定时检测已启动，间隔: ${Math.round(intervalMs / 60000)} 分钟`);
+
+        this.timerId = setInterval(() => {
+            this.runCheck();
+        }, intervalMs);
+
+        this.nextRunTime = Date.now() + intervalMs;
+    },
+
+    /**
+     * 停止定时检测
+     */
+    stop() {
+        if (this.timerId) {
+            clearInterval(this.timerId);
+            this.timerId = null;
+            console.log('[AntiG AutoCheck] 定时检测已停止');
+        }
+    },
+
+    /**
+     * 重启定时检测
+     */
+    restart() {
+        console.log('[AntiG AutoCheck] 重新加载设置...');
+        this.start();
+    },
+
+    /**
+     * 执行一次模型检测
+     */
+    async runCheck() {
+        console.log('[AntiG AutoCheck] 开始执行定时模型检测...');
+
+        try {
+            const accounts = storage.getAccounts();
+            if (accounts.length === 0) {
+                console.log('[AntiG AutoCheck] 没有账号，跳过检测');
+                return;
+            }
+
+            // 获取要检测的模型列表
+            const modelConfigs = storage.getModelConfigs();
+            let modelsToCheck = Object.keys(modelConfigs).filter(modelId => modelConfigs[modelId] === true);
+
+            // 应用禁用模型过滤
+            const settings = storage.getSettings();
+            if (settings.disabledCheckModels) {
+                try {
+                    const disabledModels = JSON.parse(settings.disabledCheckModels);
+                    if (disabledModels.length > 0) {
+                        modelsToCheck = modelsToCheck.filter(m => !disabledModels.includes(m));
+                    }
+                } catch (e) { }
+            }
+
+            if (modelsToCheck.length === 0) {
+                const historyModels = storage.getModelCheckHistory().models || [];
+                modelsToCheck = historyModels.length > 0 ? historyModels : [
+                    'gemini-3-pro-preview', 'gemini-3-flash-preview',
+                    'gemini-2.5-pro', 'gemini-2.5-flash'
+                ];
+            }
+
+            const batchTime = Math.floor(Date.now() / 1000);
+
+            for (const modelId of modelsToCheck) {
+                storage.recordModelCheck(modelId, 'error', 'Waiting...', batchTime, '');
+            }
+
+            const globalModelStatus = {};
+            modelsToCheck.forEach(m => globalModelStatus[m] = { ok: false, errors: [], passedIndices: [] });
+
+            console.log(`[AntiG AutoCheck] 检测 ${modelsToCheck.length} 个模型，${accounts.length} 个账号 (并行)`);
+
+            const checkAccount = async (account, accountIndex) => {
+                for (const modelId of modelsToCheck) {
+                    const isThinkingModel = modelId.includes('-thinking') || modelId.includes('opus') || modelId.includes('claude');
+                    const testMaxTokens = isThinkingModel ? 2048 : 5;
+
+                    const testRequest = {
+                        model: modelId,
+                        messages: [{ role: 'user', content: 'Hi' }],
+                        max_tokens: testMaxTokens,
+                        stream: false
+                    };
+
+                    try {
+                        const timeoutPromise = new Promise((_, reject) =>
+                            setTimeout(() => reject(new Error('Timeout')), 15000)
+                        );
+
+                        const response = await Promise.race([
+                            client.chatCompletions(account.id, testRequest),
+                            timeoutPromise
+                        ]);
+
+                        const hasContent = response?.choices?.[0]?.message?.content !== undefined;
+                        const hasToolCalls = Array.isArray(response?.choices?.[0]?.message?.tool_calls);
+
+                        if (response && (hasContent || hasToolCalls)) {
+                            globalModelStatus[modelId].ok = true;
+                            globalModelStatus[modelId].passedIndices.push(accountIndex);
+                        } else {
+                            const errorMsg = response?.error?.message || 'Unexpected response';
+                            globalModelStatus[modelId].errors.push(`${account.name}: ${errorMsg}`);
+                        }
+                    } catch (e) {
+                        const errorMsg = e.response?.data?.error?.message || e.message;
+                        globalModelStatus[modelId].errors.push(`${account.name}: ${errorMsg}`);
+                    }
+
+                    // 实时更新数据库
+                    const passedAccounts = globalModelStatus[modelId].passedIndices.sort((a, b) => a - b).join(',');
+                    const status = globalModelStatus[modelId].ok ? 'ok' : 'error';
+                    const errorLog = globalModelStatus[modelId].errors.join('\n');
+                    storage.recordModelCheck(modelId, status, errorLog, batchTime, passedAccounts);
+                }
+            };
+
+            // 并行执行所有账号检测
+            await Promise.allSettled(
+                accounts.map((account, i) => checkAccount(account, i + 1))
+            );
+
+            // 检测完成后统一更新数据库
+            for (const modelId of modelsToCheck) {
+                const passedAccounts = globalModelStatus[modelId].passedIndices.sort((a, b) => a - b).join(',');
+                const status = globalModelStatus[modelId].ok ? 'ok' : 'error';
+                const errorLog = globalModelStatus[modelId].errors.join('\n');
+                storage.recordModelCheck(modelId, status, errorLog, batchTime, passedAccounts);
+            }
+
+            console.log(`[AntiG AutoCheck] 定时检测完成`);
+        } catch (error) {
+            console.error('[AntiG AutoCheck] 定时检测失败:', error.message);
+        }
+    },
+
+    getStatus() {
+        const settings = storage.getSettings();
+        return {
+            running: this.timerId !== null,
+            enabled: settings.autoCheckEnabled === '1',
+            intervalMs: parseInt(settings.autoCheckInterval) || 3600000,
+            nextRunTime: this.nextRunTime || null
+        };
+    }
+};
+
+// 模块加载时自动启动定时检测
+setTimeout(() => {
+    autoCheckService.start();
+}, 2000);
+
 /**
  * API Key 认证中间件
  * 允许:
@@ -140,6 +314,12 @@ router.post('/settings', (req, res) => {
         for (const [key, value] of Object.entries(updates)) {
             storage.updateSetting(key, value);
         }
+
+        // 如果定时检测相关设置变更，重启定时器
+        if ('autoCheckEnabled' in updates || 'autoCheckInterval' in updates) {
+            autoCheckService.restart();
+        }
+
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -378,23 +558,25 @@ router.post('/accounts/check', async (req, res) => {
 
         console.log(`[AntiG] Checking ${modelsToCheck.length} models across ${accountsToCheck.length} accounts at ${batchTime}`);
 
-        // 遍历所有账号
-        for (let i = 0; i < accountsToCheck.length; i++) {
-            const account = accountsToCheck[i];
-            const accountIndex = i + 1; // 1-based index
-            console.log(`[AntiG] Checking account #${accountIndex}: ${account.name || account.id}`);
+        // 并行检测所有账号
+        console.log(`[AntiG] 并行检测 ${accountsToCheck.length} 个账号...`);
+
+        const checkAccount = async (account, accountIndex) => {
+            console.log(`[AntiG] 开始检测账号 #${accountIndex}: ${account.name || account.id}`);
 
             for (const modelId of modelsToCheck) {
+                // Claude thinking 模型要求 max_tokens > thinking.budget_tokens (1024)
+                const isThinkingModel = modelId.includes('-thinking') || modelId.includes('opus') || modelId.includes('claude');
+                const testMaxTokens = isThinkingModel ? 2048 : 5;
+
                 const testRequest = {
                     model: modelId,
                     messages: [{ role: 'user', content: 'Hi' }],
-                    max_tokens: 5,
+                    max_tokens: testMaxTokens,
                     stream: false
                 };
 
                 try {
-                    console.log(`[AntiG]   -> Testing ${modelId}...`);
-
                     // 添加超时 (15秒)
                     const timeoutPromise = new Promise((_, reject) =>
                         setTimeout(() => reject(new Error('Timeout')), 15000)
@@ -411,20 +593,20 @@ router.post('/accounts/check', async (req, res) => {
                     if (response && (hasContent || hasToolCalls)) {
                         globalModelStatus[modelId].ok = true;
                         globalModelStatus[modelId].passedIndices.push(accountIndex);
-                        console.log(`[Antigravity]      ✓ ${modelId} passed for ${account.name}`);
+                        console.log(`\x1b[32m[Antigravity]      ✓ ${modelId} passed for ${account.name}\x1b[0m`);
                     } else {
                         const errorMsg = response && response.error ? response.error.message : 'Unexpected response structure';
                         globalModelStatus[modelId].errors.push(`${account.name}: ${errorMsg}`);
-                        console.log(`[Antigravity]      ✗ ${modelId} failed for ${account.name}: ${errorMsg}`);
+                        console.log(`\x1b[31m[Antigravity]      ✗ ${modelId} failed for ${account.name}: ${errorMsg}\x1b[0m`);
                     }
                 } catch (e) {
                     const errorMsg = e.response?.data?.error?.message || e.message || 'Unknown error';
                     globalModelStatus[modelId].errors.push(`${account.name}: ${errorMsg}`);
-                    console.log(`[Antigravity]      ✗ ${modelId} failed for ${account.name}: ${errorMsg}`);
+                    console.log(`\x1b[31m[Antigravity]      ✗ ${modelId} failed for ${account.name}: ${errorMsg}\x1b[0m`);
                 }
 
-                // 实时更新数据库，让前端轮询能看到进度
-                const passedAccounts = globalModelStatus[modelId].passedIndices.join(',');
+                // 实时更新数据库，让前端能看到进度
+                const passedAccounts = globalModelStatus[modelId].passedIndices.sort((a, b) => a - b).join(',');
                 const status = globalModelStatus[modelId].ok ? 'ok' : 'error';
                 const errorLog = globalModelStatus[modelId].errors.join('\n');
                 storage.recordModelCheck(modelId, status, errorLog, batchTime, passedAccounts);
@@ -434,10 +616,25 @@ router.post('/accounts/check', async (req, res) => {
             storage.updateAccount(account.id, {
                 last_check: batchTime,
                 check_result: JSON.stringify({
-                    status: globalModelStatus[modelsToCheck[0]]?.ok ? 'online' : 'error',
+                    status: 'checked',
                     timestamp: Date.now()
                 })
             });
+
+            return { accountId: account.id, accountIndex };
+        };
+
+        // 并行执行所有账号检测
+        await Promise.allSettled(
+            accountsToCheck.map((account, i) => checkAccount(account, i + 1))
+        );
+
+        // 检测完成后统一更新数据库
+        for (const modelId of modelsToCheck) {
+            const passedAccounts = globalModelStatus[modelId].passedIndices.sort((a, b) => a - b).join(',');
+            const status = globalModelStatus[modelId].ok ? 'ok' : 'error';
+            const errorLog = globalModelStatus[modelId].errors.join('\n');
+            storage.recordModelCheck(modelId, status, errorLog, batchTime, passedAccounts);
         }
 
         console.log(`[AntiG] Check complete for ${accountsToCheck.length} accounts`);

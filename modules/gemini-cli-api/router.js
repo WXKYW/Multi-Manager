@@ -8,6 +8,180 @@ const { requireAuth } = require('../../src/middleware/auth');
 
 const streamProcessor = new StreamProcessor(client);
 
+// ==================== 服务器端定时检测服务 ====================
+const autoCheckService = {
+    timerId: null,
+
+    /**
+     * 启动定时检测
+     */
+    start() {
+        this.stop(); // 先停止已有定时器
+
+        const settings = storage.getSettings();
+        const enabled = settings.autoCheckEnabled === '1' || settings.autoCheckEnabled === true;
+        const intervalMs = parseInt(settings.autoCheckInterval) || 3600000; // 默认 1 小时
+
+        if (!enabled) {
+            console.log('[GCLI AutoCheck] 定时检测未启用');
+            return;
+        }
+
+        console.log(`[GCLI AutoCheck] 定时检测已启动，间隔: ${Math.round(intervalMs / 60000)} 分钟`);
+
+        this.timerId = setInterval(() => {
+            this.runCheck();
+        }, intervalMs);
+
+        // 记录下次执行时间
+        this.nextRunTime = Date.now() + intervalMs;
+    },
+
+    /**
+     * 停止定时检测
+     */
+    stop() {
+        if (this.timerId) {
+            clearInterval(this.timerId);
+            this.timerId = null;
+            console.log('[GCLI AutoCheck] 定时检测已停止');
+        }
+    },
+
+    /**
+     * 重启定时检测（设置变更时调用）
+     */
+    restart() {
+        console.log('[GCLI AutoCheck] 重新加载设置...');
+        this.start();
+    },
+
+    /**
+     * 执行一次模型检测
+     */
+    async runCheck() {
+        console.log('[GCLI AutoCheck] 开始执行定时模型检测...');
+
+        try {
+            const accounts = storage.getAccounts();
+            if (accounts.length === 0) {
+                console.log('[GCLI AutoCheck] 没有账号，跳过检测');
+                return;
+            }
+
+            // 获取要检测的模型列表（复用现有逻辑）
+            const set = new Set();
+            const redirects = storage.getModelRedirects();
+            if (Array.isArray(redirects)) {
+                redirects.forEach(r => set.add(r.source_model));
+            }
+
+            const matrixConfig = getMatrixConfig();
+            Object.keys(matrixConfig || {}).forEach(m => set.add(m));
+
+            const history = storage.getModelCheckHistory();
+            (history.models || []).forEach(m => set.add(m));
+
+            let modelsToCheck = Array.from(set);
+
+            // 应用禁用模型过滤
+            const settings = storage.getSettings();
+            if (settings.disabledCheckModels) {
+                try {
+                    const disabledModels = JSON.parse(settings.disabledCheckModels);
+                    if (disabledModels.length > 0) {
+                        modelsToCheck = modelsToCheck.filter(m => !disabledModels.includes(m));
+                    }
+                } catch (e) { }
+            }
+
+            if (modelsToCheck.length === 0) {
+                modelsToCheck = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'];
+            }
+
+            const batchTime = Math.floor(Date.now() / 1000);
+
+            // 初始化历史记录
+            for (const modelId of modelsToCheck) {
+                storage.recordModelCheck(modelId, 'error', 'Waiting...', batchTime, '');
+            }
+
+            const globalModelStatus = {};
+            modelsToCheck.forEach(m => globalModelStatus[m] = { ok: false, errors: [], passedIndices: [] });
+
+            console.log(`[GCLI AutoCheck] 检测 ${modelsToCheck.length} 个模型，${accounts.length} 个账号`);
+
+            for (let i = 0; i < accounts.length; i++) {
+                const account = accounts[i];
+                const accountIndex = i + 1;
+
+                for (const modelId of modelsToCheck) {
+                    const testRequest = {
+                        model: modelId,
+                        messages: [{ role: 'user', content: 'Hi' }],
+                        max_tokens: 5,
+                        stream: false
+                    };
+
+                    try {
+                        const timeoutPromise = new Promise((_, reject) =>
+                            setTimeout(() => reject(new Error('Timeout')), 15000)
+                        );
+
+                        const response = await Promise.race([
+                            client.generateContent(testRequest, account.id),
+                            timeoutPromise
+                        ]);
+
+                        const responseData = response && response.data ? response.data : response;
+                        const candidates = responseData?.response?.candidates || responseData?.candidates;
+                        const hasContent = candidates && candidates.length > 0;
+
+                        if (hasContent) {
+                            globalModelStatus[modelId].ok = true;
+                            globalModelStatus[modelId].passedIndices.push(accountIndex);
+                        } else {
+                            const errorMsg = responseData?.error?.message || 'Unexpected response';
+                            globalModelStatus[modelId].errors.push(`${account.name}: ${errorMsg}`);
+                        }
+                    } catch (e) {
+                        const errorMsg = e.response?.data?.error?.message || e.message;
+                        globalModelStatus[modelId].errors.push(`${account.name}: ${errorMsg}`);
+                    }
+
+                    // 实时更新数据库
+                    const passedAccounts = globalModelStatus[modelId].passedIndices.join(',');
+                    const status = globalModelStatus[modelId].ok ? 'ok' : 'error';
+                    const errorLog = globalModelStatus[modelId].errors.join('\n');
+                    storage.recordModelCheck(modelId, status, errorLog, batchTime, passedAccounts);
+                }
+            }
+
+            console.log(`[GCLI AutoCheck] 定时检测完成`);
+        } catch (error) {
+            console.error('[GCLI AutoCheck] 定时检测失败:', error.message);
+        }
+    },
+
+    /**
+     * 获取状态
+     */
+    getStatus() {
+        const settings = storage.getSettings();
+        return {
+            running: this.timerId !== null,
+            enabled: settings.autoCheckEnabled === '1',
+            intervalMs: parseInt(settings.autoCheckInterval) || 3600000,
+            nextRunTime: this.nextRunTime || null
+        };
+    }
+};
+
+// 模块加载时自动启动定时检测
+setTimeout(() => {
+    autoCheckService.start();
+}, 2000); // 延迟 2 秒，等待数据库初始化完成
+
 /**
  * API Key 认证中间件 (供外部客户端使用)
  */
@@ -98,6 +272,8 @@ router.post('/config/matrix', requireAuth, (req, res) => {
 router.get('/settings', requireAuth, (req, res) => {
     try {
         const settings = storage.getSettings();
+        // 附加定时检测运行状态
+        settings._autoCheckStatus = autoCheckService.getStatus();
         res.json(settings);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -111,6 +287,12 @@ router.post('/settings', requireAuth, (req, res) => {
         for (const [key, value] of Object.entries(updates)) {
             storage.updateSetting(key, value);
         }
+
+        // 如果定时检测相关设置变更，重启定时器
+        if ('autoCheckEnabled' in updates || 'autoCheckInterval' in updates) {
+            autoCheckService.restart();
+        }
+
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -504,18 +686,18 @@ router.post('/accounts/check', async (req, res) => {
                     if (hasContent) {
                         globalModelStatus[modelId].ok = true;
                         globalModelStatus[modelId].passedIndices.push(accountIndex);
-                        console.log(`[GCLI]      ✓ ${modelId} passed`);
+                        console.log(`\x1b[32m[GCLI]      ✓ ${modelId} passed\x1b[0m`);
                     } else {
                         // 打印实际响应结构用于调试
-                        console.log(`[GCLI]      ✗ ${modelId} responseData:`, JSON.stringify(responseData).substring(0, 300));
+                        console.log(`\x1b[31m[GCLI]      ✗ ${modelId} responseData:\x1b[0m`, JSON.stringify(responseData).substring(0, 300));
                         const errorMsg = responseData && responseData.error ? responseData.error.message : 'Unexpected response structure';
                         globalModelStatus[modelId].errors.push(`${account.name}: ${errorMsg}`);
-                        console.log(`[GCLI]      ✗ ${modelId} failed: ${errorMsg}`);
+                        console.log(`\x1b[31m[GCLI]      ✗ ${modelId} failed: ${errorMsg}\x1b[0m`);
                     }
                 } catch (e) {
                     const errorMsg = e.response?.data?.error?.message || e.message || 'Unknown error';
                     globalModelStatus[modelId].errors.push(`${account.name}: ${errorMsg}`);
-                    console.log(`[GCLI]      ✗ ${modelId} failed: ${errorMsg}`);
+                    console.log(`\x1b[31m[GCLI]      ✗ ${modelId} failed: ${errorMsg}\x1b[0m`);
                 }
 
                 // 实时更新数据库，让前端轮询能看到进度

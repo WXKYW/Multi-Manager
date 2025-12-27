@@ -311,36 +311,31 @@ func (c *Collector) CollectState() *State {
 	// Docker 信息采集
 	state.Docker = c.collectDockerInfo()
 	
-	// GPU 使用率、显存与功耗采集 (节流: 每5秒实际采集一次，但如果缓存为0则立即重采)
-	shouldCollectGPU := time.Since(c.lastGPUTime) > 5*time.Second || 
-		(c.lastGPUUsage < 0.1 && c.lastGPUMemUsed == 0 && time.Since(c.lastGPUTime) > 1*time.Second)
-	
-	if shouldCollectGPU {
-		gpuUsage, gpuMemUsed, gpuPower := c.collectGPUState()
-		// 只有采集到有效数据才更新缓存
-		if gpuUsage > 0 || gpuMemUsed > 0 || gpuPower > 0 {
-			c.lastGPUUsage = gpuUsage
-			c.lastGPUMemUsed = gpuMemUsed
-			c.lastGPUPower = gpuPower
-			c.lastGPUTime = time.Now()
-		}
+	// GPU 使用率、显存与功耗采集 (每次都采集，与 CPU 保持一致的 1.5 秒频率)
+	gpuUsage, gpuMemUsed, gpuPower := c.collectGPUState()
+	// 只有采集到有效数据才更新缓存
+	if gpuUsage > 0 || gpuMemUsed > 0 || gpuPower > 0 {
+		c.lastGPUUsage = gpuUsage
+		c.lastGPUMemUsed = gpuMemUsed
+		c.lastGPUPower = gpuPower
+		c.lastGPUTime = time.Now()
+	}
 
-		// 补救措施：如果显存总量为 0，尝试重新获取静态信息
-		if c.cachedHostInfo != nil && c.cachedHostInfo.GPUMemTotal == 0 {
-			go func() {
-				c.mu.Lock()
-				defer c.mu.Unlock()
-				// 再次检查，防止并发重复
-				if c.cachedHostInfo.GPUMemTotal == 0 {
-					models, total := c.collectGPUMetadata()
-					if total > 0 {
-						c.cachedHostInfo.GPU = models
-						c.cachedHostInfo.GPUMemTotal = total
-						fmt.Printf("[Collector] GPU metadata refreshed: %d MiB\n", total/1024/1024)
-					}
+	// 补救措施：如果显存总量为 0，尝试重新获取静态信息
+	if c.cachedHostInfo != nil && c.cachedHostInfo.GPUMemTotal == 0 {
+		go func() {
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			// 再次检查，防止并发重复
+			if c.cachedHostInfo.GPUMemTotal == 0 {
+				models, total := c.collectGPUMetadata()
+				if total > 0 {
+					c.cachedHostInfo.GPU = models
+					c.cachedHostInfo.GPUMemTotal = total
+					fmt.Printf("[Collector] GPU metadata refreshed: %d MiB\n", total/1024/1024)
 				}
-			}()
-		}
+			}
+		}()
 	}
 	state.GPU = c.lastGPUUsage
 	state.GPUMemUsed = c.lastGPUMemUsed

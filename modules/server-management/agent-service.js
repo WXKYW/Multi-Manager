@@ -177,21 +177,61 @@ class AgentService {
 
     /**
      * 采集当前所有在线主机的指标并存入历史记录
+     * 增加数据新鲜度检查和去重逻辑，避免保存陈旧或重复的数据
      */
     collectHistoryMetrics() {
         try {
             let collected = 0;
+            let skippedStale = 0;
+            let skippedDuplicate = 0;
             const servers = serverStorage.getAll();
+            const now = Date.now();
+
+            // 获取采集间隔用于判断数据新鲜度 (默认 60 秒)
+            const config = ServerMonitorConfig.get();
+            const intervalMs = (config?.metrics_collect_interval || 60) * 1000;
+            // 数据超过 2 倍采集间隔认为陈旧
+            const staleThreshold = intervalMs * 2;
 
             for (const server of servers) {
                 const cached = this.stateCache.get(server.id);
                 if (!cached) continue;
+
+                // 检查数据新鲜度
+                const dataAge = now - cached.timestamp;
+                if (dataAge > staleThreshold) {
+                    skippedStale++;
+                    if (this.debug) {
+                        this.log(`跳过陈旧数据: ${server.id} (${Math.round(dataAge / 1000)}秒前)`);
+                    }
+                    continue;
+                }
 
                 const hostInfo = this.hostInfoCache.get(server.id) || {};
                 const state = cached.state;
 
                 // 使用协议转换函数获取前端格式指标
                 const frontendMetrics = stateToFrontendFormat(state, hostInfo);
+
+                // 生成数据指纹用于去重 (使用关键指标)
+                const dataFingerprint = `${server.id}:${frontendMetrics.cpu_usage}:${frontendMetrics.mem_percent}:${frontendMetrics.gpu_usage}:${frontendMetrics.gpu_power}:${frontendMetrics.load}`;
+                
+                // 初始化去重缓存
+                if (!this.lastHistoryFingerprints) {
+                    this.lastHistoryFingerprints = new Map();
+                }
+                
+                // 检查是否与上次保存的数据完全相同
+                if (this.lastHistoryFingerprints.get(server.id) === dataFingerprint) {
+                    skippedDuplicate++;
+                    if (this.debug) {
+                        this.log(`跳过重复数据: ${server.id}`);
+                    }
+                    continue;
+                }
+                
+                // 更新指纹缓存
+                this.lastHistoryFingerprints.set(server.id, dataFingerprint);
 
                 // 解析内存数值 (格式: "123/456MB")
                 let memUsed = 0;
@@ -225,8 +265,16 @@ class AgentService {
                 collected++;
             }
 
-            if (collected > 0 && this.debug) {
-                this.log(`历史指标采集完成: ${collected} 台主机`);
+            // 输出统计信息
+            if (collected > 0 || skippedStale > 0 || skippedDuplicate > 0) {
+                const stats = [];
+                if (collected > 0) stats.push(`采集 ${collected} 台`);
+                if (skippedStale > 0) stats.push(`跳过陈旧 ${skippedStale} 台`);
+                if (skippedDuplicate > 0) stats.push(`跳过重复 ${skippedDuplicate} 台`);
+                
+                if (this.debug || skippedStale > 0 || skippedDuplicate > 0) {
+                    this.log(`历史指标采集: ${stats.join(', ')}`);
+                }
             }
         } catch (error) {
             console.error('[AgentService] 历史指标采集失败:', error.message);
