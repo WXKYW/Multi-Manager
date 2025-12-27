@@ -376,6 +376,7 @@ export const store = reactive({
     agRefreshingAll: false,
     agLogDetailShowRaw: false, // 是否显示原始 JSON
     antigravityLogDetail: null, // 移入 store
+    currentTime: Date.now(), // 全局当前时间，用于驱动倒计时
     antigravityQuotaViewMode: 'list',
     antigravityModelRedirects: [],
     antigravityMatrix: null,
@@ -383,7 +384,12 @@ export const store = reactive({
     newRedirectTarget: '',
     agEditingRedirectSource: null,
     antigravityCheckLoading: false, // 模型检测中
+    antigravityChecking: false, // 正在执行检测
     antigravityCheckHistory: { models: [], times: [], matrix: {} }, // 检测历史矩阵
+    antigravityAutoCheck: false, // 定时检测开关
+    antigravityAutoCheckInterval: 3600000, // 默认 1 小时
+    antigravityAutoCheckTimerId: null, // 定时器 ID
+    antigravityDisabledCheckModels: [], // 禁用检测的模型列表
 
     // Gemini CLI
     geminiCliAccounts: [],
@@ -418,7 +424,13 @@ export const store = reactive({
     geminiCliLogFilterModel: '',
     gcliLogDetailShowRaw: false, // 是否显示原始 JSON (Gemini CLI)
     geminiCliCheckLoading: false, // 模型检测中
+    geminiCliChecking: false, // 正在执行检测
     geminiCliCheckHistory: { models: [], times: [], matrix: {} }, // 检测历史矩阵
+    geminiCliAutoCheck: false, // 定时检测开关
+    geminiCliAutoCheckInterval: 3600000, // 默认 1 小时
+    geminiCliAutoCheckTimerId: null, // 定时器 ID
+    geminiCliDisabledCheckModels: [], // 禁用检测的模型列表
+
 
     // 统一日志查看器 (Log Viewer)
     logViewer: {

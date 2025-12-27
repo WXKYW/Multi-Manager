@@ -3,6 +3,20 @@ const dbService = require('../../src/db/database');
 // 初始化数据库
 dbService.initialize();
 
+// 确保设置表存在
+try {
+    const db = dbService.getDatabase();
+    db.prepare(`
+        CREATE TABLE IF NOT EXISTS gemini_cli_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `).run();
+} catch (e) {
+    console.error('❌ 初始化 Gemini CLI 设置表失败:', e.message);
+}
+
 /**
  * 获取账号列表
  */
@@ -339,6 +353,107 @@ function removeModelRedirect(sourceModel) {
     }
 }
 
+// 确保模型检测历史表存在
+try {
+    const db = dbService.getDatabase();
+    db.prepare(`
+        CREATE TABLE IF NOT EXISTS gemini_cli_model_checks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            model_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            error_message TEXT,
+            check_time INTEGER NOT NULL,
+            passed_accounts TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `).run();
+    db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_gcli_model_checks_unique ON gemini_cli_model_checks(model_id, check_time)`).run();
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_gcli_model_checks_time ON gemini_cli_model_checks(check_time)`).run();
+} catch (e) {
+    console.error('❌ 初始化 Gemini CLI 模型检测表失败:', e.message);
+}
+
+/**
+ * 记录模型检测结果
+ */
+function recordModelCheck(modelId, status, errorMessage = null, checkTime = null, passedAccounts = null) {
+    try {
+        const db = dbService.getDatabase();
+        const time = checkTime || Math.floor(Date.now() / 1000);
+        db.prepare(`
+            INSERT INTO gemini_cli_model_checks (model_id, status, error_message, check_time, passed_accounts)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(model_id, check_time) DO UPDATE SET
+                status = excluded.status,
+                error_message = excluded.error_message,
+                passed_accounts = excluded.passed_accounts
+        `).run(modelId, status, errorMessage, time, passedAccounts);
+        return true;
+    } catch (e) {
+        console.error('❌ [GCLI] 记录模型检测失败:', e.message);
+        return false;
+    }
+}
+
+/**
+ * 获取模型检测历史
+ */
+function getModelCheckHistory() {
+    try {
+        const db = dbService.getDatabase();
+
+        const times = db.prepare(`
+            SELECT DISTINCT check_time FROM gemini_cli_model_checks 
+            ORDER BY check_time DESC LIMIT 10
+        `).all().map(r => r.check_time);
+
+        const models = db.prepare(`
+            SELECT DISTINCT model_id FROM gemini_cli_model_checks 
+            ORDER BY model_id
+        `).all().map(r => r.model_id);
+
+        if (times.length === 0) {
+            return { models: [], times: [], matrix: {} };
+        }
+
+        const checks = db.prepare(`
+            SELECT model_id, status, check_time, passed_accounts, error_message FROM gemini_cli_model_checks 
+            WHERE check_time IN (${times.map(() => '?').join(',')})
+        `).all(...times);
+
+        const matrix = {};
+        models.forEach(model => { matrix[model] = {}; });
+        checks.forEach(check => {
+            if (matrix[check.model_id]) {
+                matrix[check.model_id][check.check_time] = {
+                    status: check.status,
+                    passedAccounts: check.passed_accounts || '',
+                    error_log: check.error_message || ''
+                };
+            }
+        });
+
+        return { models, times, matrix };
+    } catch (e) {
+        console.error('❌ [GCLI] 获取检测历史失败:', e.message);
+        return { models: [], times: [], matrix: {} };
+    }
+}
+
+/**
+ * 清空模型检测历史
+ */
+function clearModelCheckHistory() {
+    try {
+        const db = dbService.getDatabase();
+        db.prepare('DELETE FROM gemini_cli_model_checks').run();
+        return true;
+    } catch (e) {
+        console.error('❌ [GCLI] 清空检测历史失败:', e.message);
+        return false;
+    }
+}
+
 module.exports = {
     getAccounts,
     addAccount,
@@ -357,7 +472,10 @@ module.exports = {
     setModelStatus,
     getModelRedirects,
     addModelRedirect,
-    removeModelRedirect
+    removeModelRedirect,
+    recordModelCheck,
+    getModelCheckHistory,
+    clearModelCheckHistory
 };
 
 // 内存中的禁用模型缓存

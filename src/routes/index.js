@@ -423,7 +423,7 @@ function registerRoutes(app) {
     'openlist-api': '/api/openlist',
     'server-management': '/api/server',
     'antigravity-api': '/api/antigravity',
-    'gemini-cli-api': '/api/gemini-cli-api'
+    'gemini-cli-api': '/api/gemini-cli'
   };
 
   if (fs.existsSync(modulesDir)) {

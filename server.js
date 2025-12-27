@@ -65,9 +65,13 @@ agentService.initSocketIO(server);
 server.on('upgrade', (request, socket, head) => {
   const pathname = request.url.split('?')[0];
 
-  // Socket.IO 自动处理其命名空间的升级请求，这里直接跳过
-  if (pathname.startsWith('/socket.io')) {
-    // Socket.IO 已经通过 initSocketIO 注册，无需额外处理
+  // Socket.IO 或 Vite HMR 自动处理其命名空间的升级请求，这里直接跳过
+  // 增加对 /metrics 和 /agent 的放行，因为它们可能是 Socket.IO 的入口路径
+  if (pathname.startsWith('/socket.io') ||
+    pathname.includes('socket.io') ||
+    pathname === '/' ||
+    pathname === '/metrics' ||
+    pathname === '/agent') {
     return;
   }
 
@@ -89,8 +93,11 @@ server.on('upgrade', (request, socket, head) => {
       sshWss.emit('connection', ws, request);
     });
   } else {
-    logger.warn(`[WS Upgrade] 拦截未知路径: ${pathname}`);
-    socket.destroy();
+    // 仅针对明确属于 /ws/ 但未识别的路径进行拦截，其他路径交给系统默认处理（或超时断开）
+    if (pathname.startsWith('/ws/')) {
+      logger.warn(`[WS Upgrade] 拦截未知路径: ${pathname}`);
+      socket.destroy();
+    }
   }
 });
 

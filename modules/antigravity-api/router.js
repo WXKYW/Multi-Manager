@@ -122,6 +122,29 @@ router.get('/accounts', (req, res) => {
     }
 });
 
+// 获取设置
+router.get('/settings', (req, res) => {
+    try {
+        const settings = storage.getSettings();
+        res.json(settings);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// 保存设置
+router.post('/settings', (req, res) => {
+    try {
+        const updates = req.body;
+        for (const [key, value] of Object.entries(updates)) {
+            storage.updateSetting(key, value);
+        }
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // 刷新所有凭证
 router.post('/accounts/refresh-all', async (req, res) => {
     try {
@@ -277,6 +300,177 @@ router.post('/accounts/import', async (req, res) => {
         }
 
         res.json({ success: true, imported, skipped, errors: errors.length > 0 ? errors : undefined });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * 模型健康检测 - 对所有账号执行测试
+ */
+router.post('/accounts/check', async (req, res) => {
+    console.log('[AntiG] Starting model check (dialog test)...');
+    try {
+        const accounts = storage.getAccounts();
+        // 检测所有账号，不仅仅是启用的
+        const accountsToCheck = accounts;
+
+        if (accountsToCheck.length === 0) {
+            return res.json({
+                success: true,
+                message: 'No accounts to check',
+                totalAccounts: 0
+            });
+        }
+
+        // 获取要检测的模型列表 - 使用 getModelConfigs 获取已启用的模型，与额度状态页面一致
+        const modelConfigs = storage.getModelConfigs();
+        let modelsToCheck = Object.keys(modelConfigs).filter(modelId => modelConfigs[modelId] === true);
+
+        // 获取禁用的模型列表
+        const settings = storage.getSettings();
+        let disabledModels = [];
+        if (settings.disabledCheckModels) {
+            try {
+                disabledModels = JSON.parse(settings.disabledCheckModels);
+            } catch (e) {
+                disabledModels = [];
+            }
+        }
+
+        // 过滤掉当前禁用的模型
+        if (disabledModels.length > 0) {
+            modelsToCheck = modelsToCheck.filter(m => !disabledModels.includes(m));
+        }
+
+        // 如果没有已启用的模型，从历史记录补充
+        if (modelsToCheck.length === 0) {
+            const historyModels = storage.getModelCheckHistory().models || [];
+            modelsToCheck = historyModels;
+        }
+
+        // 如果仍然没有模型，使用兜底方案
+        if (modelsToCheck.length === 0) {
+            modelsToCheck = [
+                'gemini-3-pro-preview',
+                'gemini-3-flash-preview',
+                'gemini-2.5-pro',
+                'gemini-2.5-flash',
+                'gemini-1.5-pro',
+                'gemini-1.5-flash'
+            ];
+        }
+
+        console.log(`[AntiG] 将检测 ${modelsToCheck.length} 个模型: ${modelsToCheck.slice(0, 5).join(', ')}...`);
+
+        // 统一批次时间戳
+        const batchTime = Math.floor(Date.now() / 1000);
+
+        // 初始化历史记录 (占位)，让表格能立即显示新列
+        for (const modelId of modelsToCheck) {
+            storage.recordModelCheck(modelId, 'error', 'Waiting...', batchTime, '');
+        }
+
+        // 记录全局模型健康状态
+        const globalModelStatus = {};
+        modelsToCheck.forEach(m => globalModelStatus[m] = { ok: false, errors: [], passedIndices: [] });
+
+        console.log(`[AntiG] Checking ${modelsToCheck.length} models across ${accountsToCheck.length} accounts at ${batchTime}`);
+
+        // 遍历所有账号
+        for (let i = 0; i < accountsToCheck.length; i++) {
+            const account = accountsToCheck[i];
+            const accountIndex = i + 1; // 1-based index
+            console.log(`[AntiG] Checking account #${accountIndex}: ${account.name || account.id}`);
+
+            for (const modelId of modelsToCheck) {
+                const testRequest = {
+                    model: modelId,
+                    messages: [{ role: 'user', content: 'Hi' }],
+                    max_tokens: 5,
+                    stream: false
+                };
+
+                try {
+                    console.log(`[AntiG]   -> Testing ${modelId}...`);
+
+                    // 添加超时 (15秒)
+                    const timeoutPromise = new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error('Timeout')), 15000)
+                    );
+
+                    const response = await Promise.race([
+                        client.chatCompletions(account.id, testRequest),
+                        timeoutPromise
+                    ]);
+
+                    const hasContent = response?.choices?.[0]?.message?.content !== undefined;
+                    const hasToolCalls = Array.isArray(response?.choices?.[0]?.message?.tool_calls);
+
+                    if (response && (hasContent || hasToolCalls)) {
+                        globalModelStatus[modelId].ok = true;
+                        globalModelStatus[modelId].passedIndices.push(accountIndex);
+                        console.log(`[Antigravity]      ✓ ${modelId} passed for ${account.name}`);
+                    } else {
+                        const errorMsg = response && response.error ? response.error.message : 'Unexpected response structure';
+                        globalModelStatus[modelId].errors.push(`${account.name}: ${errorMsg}`);
+                        console.log(`[Antigravity]      ✗ ${modelId} failed for ${account.name}: ${errorMsg}`);
+                    }
+                } catch (e) {
+                    const errorMsg = e.response?.data?.error?.message || e.message || 'Unknown error';
+                    globalModelStatus[modelId].errors.push(`${account.name}: ${errorMsg}`);
+                    console.log(`[Antigravity]      ✗ ${modelId} failed for ${account.name}: ${errorMsg}`);
+                }
+
+                // 实时更新数据库，让前端轮询能看到进度
+                const passedAccounts = globalModelStatus[modelId].passedIndices.join(',');
+                const status = globalModelStatus[modelId].ok ? 'ok' : 'error';
+                const errorLog = globalModelStatus[modelId].errors.join('\n');
+                storage.recordModelCheck(modelId, status, errorLog, batchTime, passedAccounts);
+            }
+
+            // 更新检测完成后的单个账号状态
+            storage.updateAccount(account.id, {
+                last_check: batchTime,
+                check_result: JSON.stringify({
+                    status: globalModelStatus[modelsToCheck[0]]?.ok ? 'online' : 'error',
+                    timestamp: Date.now()
+                })
+            });
+        }
+
+        console.log(`[AntiG] Check complete for ${accountsToCheck.length} accounts`);
+        res.json({
+            success: true,
+            message: `Checked ${accountsToCheck.length} accounts`,
+            totalAccounts: accountsToCheck.length,
+            batchTime
+        });
+    } catch (e) {
+        console.error('[AntiG] Model check error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * 获取模型检测历史
+ */
+router.get('/models/check-history', (req, res) => {
+    try {
+        const history = storage.getModelCheckHistory();
+        res.json(history);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * 清空模型检测历史
+ */
+router.post('/models/check-history/clear', (req, res) => {
+    try {
+        storage.clearModelCheckHistory();
+        res.json({ success: true });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }

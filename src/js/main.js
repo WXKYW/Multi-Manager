@@ -917,12 +917,14 @@ const app = createApp({
                 this.loadOpenListAccounts();
                 break;
               case 'antigravity':
+                this.loadAntigravityAutoCheckSettings(); // 加载并启动定时检测
                 if (this.antigravityCurrentTab === 'quotas') {
                   if (this.loadAntigravityQuotas) this.loadAntigravityQuotas();
                 }
                 break;
               case 'gemini-cli':
                 this.initGeminiCli();
+                this.loadGeminiCliAutoCheckSettings(); // 确保加载设置
                 break;
               case 'totp':
                 this.loadTotpAccounts();
@@ -980,12 +982,14 @@ const app = createApp({
               this.loadServerList();
               break;
             case 'antigravity':
+              this.loadAntigravityAutoCheckSettings();
               if (this.antigravityCurrentTab === 'quotas') {
                 if (this.loadAntigravityQuotas) this.loadAntigravityQuotas();
               }
               break;
             case 'gemini-cli':
               this.initGeminiCli();
+              this.loadGeminiCliAutoCheckSettings();
               break;
             case 'totp':
               this.loadTotpAccounts();
@@ -1287,6 +1291,11 @@ async function initApp() {
 
     // 2. 挂载 Vue 应用
     app.mount('#app');
+
+    // 3. 启动全局时间更新定时器 (每秒触发一次，用于倒计时)
+    setInterval(() => {
+      store.currentTime = Date.now();
+    }, 1000);
 
     const elapsed = Date.now() - startTime;
     console.log(`[App] Initialized and mounted in ${elapsed}ms`);

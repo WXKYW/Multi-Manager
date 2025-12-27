@@ -91,6 +91,31 @@ router.post('/config/matrix', requireAuth, (req, res) => {
     }
 });
 
+
+
+// 获取设置
+router.get('/settings', requireAuth, (req, res) => {
+    try {
+        const settings = storage.getSettings();
+        res.json(settings);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// 保存设置
+router.post('/settings', requireAuth, (req, res) => {
+    try {
+        const updates = req.body;
+        for (const [key, value] of Object.entries(updates)) {
+            storage.updateSetting(key, value);
+        }
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // 辅助函数：根据矩阵配置和禁用列表生成可用模型列表
 function getAvailableModels(prefix) {
     const matrix = getMatrixConfig();
@@ -368,6 +393,192 @@ router.delete('/models/redirects/:sourceModel', async (req, res) => {
         res.status(500).json({ error: e.message });
     }
 });
+
+/**
+ * 模型健康检测 - 对所有账号执行测试
+ */
+router.post('/accounts/check', async (req, res) => {
+    console.log('[GCLI] Starting model check...');
+    try {
+        const accounts = storage.getAccounts();
+
+        if (accounts.length === 0) {
+            return res.json({
+                success: true,
+                message: 'No accounts to check',
+                totalAccounts: 0
+            });
+        }
+
+        // 获取要检测的模型列表
+        const set = new Set();
+
+        // 1. 从重定向中获取
+        const redirects = storage.getModelRedirects();
+        if (Array.isArray(redirects)) {
+            redirects.forEach(r => set.add(r.source_model));
+        } else {
+            Object.keys(redirects || {}).forEach(m => set.add(m));
+        }
+
+        // 2. 从矩阵配置中获取
+        const matrix = storage.getMatrix();
+        Object.keys(matrix || {}).forEach(m => set.add(m));
+
+        // 3. 从历史记录补充
+        const history = storage.getModelCheckHistory();
+        (history.models || []).forEach(m => set.add(m));
+
+        let modelsToCheck = Array.from(set);
+
+        // 4. 应用禁用模型过滤
+        const settings = storage.getSettings();
+        if (settings.disabledCheckModels) {
+            try {
+                const disabledModels = JSON.parse(settings.disabledCheckModels);
+                if (disabledModels.length > 0) {
+                    modelsToCheck = modelsToCheck.filter(m => !disabledModels.includes(m));
+                }
+            } catch (e) {
+                console.error('[GCLI] Failed to parse disabledCheckModels:', e.message);
+            }
+        }
+
+        // 5. 兜底方案
+        if (modelsToCheck.length === 0) {
+            modelsToCheck = [
+                'gemini-2.5-pro',
+                'gemini-2.5-flash',
+                'gemini-1.5-pro',
+                'gemini-1.5-flash'
+            ];
+        }
+
+        const batchTime = Math.floor(Date.now() / 1000);
+
+        // 初始化历史记录 (占位)
+        for (const modelId of modelsToCheck) {
+            storage.recordModelCheck(modelId, 'error', 'Waiting...', batchTime, '');
+        }
+
+        const globalModelStatus = {};
+        modelsToCheck.forEach(m => globalModelStatus[m] = { ok: false, errors: [], passedIndices: [] });
+
+        console.log(`[GCLI] Checking ${modelsToCheck.length} models across ${accounts.length} accounts at ${batchTime}`);
+
+        for (let i = 0; i < accounts.length; i++) {
+            const account = accounts[i];
+            const accountIndex = i + 1;
+            console.log(`[GCLI] Checking account #${accountIndex}: ${account.name || account.id}`);
+
+            for (const modelId of modelsToCheck) {
+                const testRequest = {
+                    model: modelId,
+                    messages: [{ role: 'user', content: 'Hi' }],
+                    max_tokens: 5,
+                    stream: false
+                };
+
+                try {
+                    console.log(`[GCLI]   -> Testing ${modelId}...`);
+
+                    // 添加超时 (15秒)
+                    const timeoutPromise = new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error('Timeout')), 15000)
+                    );
+
+                    const response = await Promise.race([
+                        client.generateContent(testRequest, account.id),
+                        timeoutPromise
+                    ]);
+
+                    // axios 返回的是包装后的对象，实际数据在 data 属性中
+                    const responseData = response && response.data ? response.data : response;
+
+                    // 只要有任何形式的内容返回就初步认为成功
+                    // Google API 结构: { response: { candidates: [...] } }
+                    const candidates = responseData?.response?.candidates || responseData?.candidates;
+                    const hasContent = candidates && candidates.length > 0;
+
+                    if (hasContent) {
+                        globalModelStatus[modelId].ok = true;
+                        globalModelStatus[modelId].passedIndices.push(accountIndex);
+                        console.log(`[GCLI]      ✓ ${modelId} passed`);
+                    } else {
+                        // 打印实际响应结构用于调试
+                        console.log(`[GCLI]      ✗ ${modelId} responseData:`, JSON.stringify(responseData).substring(0, 300));
+                        const errorMsg = responseData && responseData.error ? responseData.error.message : 'Unexpected response structure';
+                        globalModelStatus[modelId].errors.push(`${account.name}: ${errorMsg}`);
+                        console.log(`[GCLI]      ✗ ${modelId} failed: ${errorMsg}`);
+                    }
+                } catch (e) {
+                    const errorMsg = e.response?.data?.error?.message || e.message || 'Unknown error';
+                    globalModelStatus[modelId].errors.push(`${account.name}: ${errorMsg}`);
+                    console.log(`[GCLI]      ✗ ${modelId} failed: ${errorMsg}`);
+                }
+
+                // 实时更新数据库，让前端轮询能看到进度
+                const passedAccounts = globalModelStatus[modelId].passedIndices.join(',');
+                const status = globalModelStatus[modelId].ok ? 'ok' : 'error';
+                const errorLog = globalModelStatus[modelId].errors.join('\n');
+                storage.recordModelCheck(modelId, status, errorLog, batchTime, passedAccounts);
+            }
+
+            storage.updateAccount(account.id, {
+                last_check: batchTime,
+                check_result: JSON.stringify({ timestamp: Date.now() })
+            });
+        }
+
+        console.log(`[GCLI] Check complete`);
+        res.json({
+            success: true,
+            message: `Checked ${accounts.length} accounts`,
+            totalAccounts: accounts.length,
+            batchTime
+        });
+    } catch (e) {
+        console.error('[GCLI] Model check error:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * 获取模型检测历史
+ */
+router.get('/models/check-history', (req, res) => {
+    try {
+        const history = storage.getModelCheckHistory();
+        res.json(history);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * 获取模型检测历史
+ */
+router.get('/models/check-history', (req, res) => {
+    try {
+        const history = storage.getModelCheckHistory();
+        res.json(history);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/**
+ * 清空模型检测历史
+ */
+router.post('/models/check-history/clear', (req, res) => {
+    try {
+        storage.clearModelCheckHistory();
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 
 router.get('/accounts', async (req, res) => {
     try {
