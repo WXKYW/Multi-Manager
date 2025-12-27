@@ -54,6 +54,9 @@ export const geminiCliMethods = {
         // 后台加载检测历史
         this.loadGeminiCliCheckHistory();
 
+        // 加载定时检测设置并启动定时器（如果用户开启了定时检测）
+        this.loadGeminiCliAutoCheckSettings();
+
         // 启动账号列表自动刷新 (用于更新冷却倒计时)
         if (this.gcliAccountTimer) clearInterval(this.gcliAccountTimer);
         this.gcliAccountTimer = setInterval(() => {
@@ -1015,8 +1018,15 @@ export const geminiCliMethods = {
                 }
             }
 
+            console.log('[Gemini CLI] 定时检测设置:', {
+                enabled: store.geminiCliAutoCheck,
+                interval: store.geminiCliAutoCheckInterval,
+                intervalMinutes: Math.round(store.geminiCliAutoCheckInterval / 60000)
+            });
+
             if (store.geminiCliAutoCheck) {
                 this.startGeminiCliAutoCheck();
+                console.log('[Gemini CLI] 定时检测已启动，间隔:', Math.round(store.geminiCliAutoCheckInterval / 60000), '分钟');
             }
         } catch (error) {
             console.error('加载 Gemini CLI 定时检测设置失败:', error);

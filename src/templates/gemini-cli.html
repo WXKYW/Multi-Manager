@@ -350,7 +350,7 @@
             </label>
             <span style="opacity: 0.8;">定时</span>
             <select v-model="geminiCliAutoCheckInterval" @change="restartGeminiCliAutoCheck"
-              style="font-size: 11px; padding: 2px 4px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-secondary);">
+              class="auto-check-select">
               <option value="1800000">30分钟</option>
               <option value="3600000">1小时</option>
               <option value="7200000">2小时</option>

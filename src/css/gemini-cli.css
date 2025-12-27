@@ -257,3 +257,40 @@
   color: var(--text-tertiary);
   font-size: 14px;
 }
+
+/* 定时检测下拉框样式 */
+.auto-check-select {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%234285f4'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+  background-size: 16px;
+  padding-right: 24px;
+}
+
+.auto-check-select:hover {
+  border-color: var(--gemini-primary);
+  background-color: var(--bg-secondary);
+}
+
+.auto-check-select:focus {
+  outline: none;
+  border-color: var(--gemini-primary);
+  box-shadow: 0 0 0 2px rgba(66, 133, 244, 0.2);
+}
+
+/* 下拉选项样式（浏览器支持有限） */
+.auto-check-select option {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  padding: 8px 12px;
+}

@@ -399,6 +399,10 @@ export const antigravityMethods = {
             this.loadAntigravitySettings();
         } else if (tabName === 'logs') {
             this.loadAntigravityLogs();
+        } else if (tabName === 'accounts') {
+            // 加载账号列表和检测历史
+            this.loadAntigravityAccounts();
+            this.loadAntigravityCheckHistory();
         } else {
             // 切出额度页，停止轮询
             this.stopAntigravityQuotaPolling();

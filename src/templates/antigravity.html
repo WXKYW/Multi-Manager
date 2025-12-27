@@ -223,12 +223,12 @@
             </label>
             <span style="opacity: 0.8;">定时</span>
             <select v-model="antigravityAutoCheckInterval" @change="restartAntigravityAutoCheck"
-              style="font-size: 11px; padding: 2px 4px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-secondary);">
-              <option value="1800000">30分</option>
-              <option value="3600000">1时</option>
-              <option value="7200000">2时</option>
-              <option value="14400000">4时</option>
-              <option value="21600000">6时</option>
+              class="auto-check-select">
+              <option value="1800000">30分钟</option>
+              <option value="3600000">1小时</option>
+              <option value="7200000">2小时</option>
+              <option value="14400000">4小时</option>
+              <option value="21600000">6小时</option>
             </select>
           </div>
           <button class="btn btn-primary btn-sm" @click="runAntigravityModelCheck" :disabled="antigravityChecking">
