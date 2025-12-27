@@ -1241,62 +1241,27 @@ const app = createApp({
     detectSinglePageMode() {
       const path = window.location.pathname.toLowerCase().replace(/^\//, '');
 
-      // 模块路径映射 (支持所有模块和别名)
-      const moduleMap = {
-        // TOTP 验证器
-        '2fa': 'totp',
-        'totp': 'totp',
-        // 主机管理
-        'hosts': 'server',
-        'server': 'server',
-        // DNS 管理
-        'dns': 'dns',
-        // Compute (Workers/Pages)
-        'compute': 'dns',  // compute 是 dns 的子标签
-        'workers': 'dns',
-        'pages': 'dns',
-        // R2 存储
-        'r2': 'dns',  // R2 也属于 dns 模块
-        // PaaS
-        'paas': 'paas',
-        'zeabur': 'paas',
-        'koyeb': 'paas',
-        'fly': 'paas',
-        // OpenAI
-        'openai': 'openai',
-        'api': 'openai',
-        // Antigravity
-        'antigravity': 'antigravity',
-        'antig': 'antigravity',
-        // Gemini CLI
-        'gemini-cli': 'gemini-cli',
-        'gcli': 'gemini-cli',
-        'gemini': 'gemini-cli',
-        // Self-Hosted
-        'self-h': 'self-h',
-        'selfh': 'self-h',
-        'openlist': 'self-h'
-      };
+      // 直接使用 mainActiveTab 值作为路径
+      const validTabs = ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'self-h', 'server', 'totp'];
 
-      if (path && moduleMap[path]) {
-        const targetModule = moduleMap[path];
+      if (path && validTabs.includes(path)) {
         store.singlePageMode = true;
-        store.mainActiveTab = targetModule;
+        store.mainActiveTab = path;
         document.body.classList.add('single-page-mode');
-        console.log(`[SinglePageMode] 已激活: ${path} -> ${targetModule}`);
+        console.log(`[SinglePageMode] 已激活: /${path}`);
 
         // 更新页面标题
         const titles = {
-          'totp': '2FA 验证器',
-          'server': '主机管理',
-          'dns': 'DNS 管理',
-          'paas': 'PaaS 监控',
           'openai': 'OpenAI API',
           'antigravity': 'Antigravity',
           'gemini-cli': 'Gemini CLI',
-          'self-h': 'Self-Hosted'
+          'paas': 'PaaS 监控',
+          'dns': 'DNS 管理',
+          'self-h': 'Self-Hosted',
+          'server': '主机管理',
+          'totp': '2FA 验证器'
         };
-        document.title = `API Monitor - ${titles[targetModule] || path.toUpperCase()}`;
+        document.title = `API Monitor - ${titles[path] || path}`;
       }
     }
   }
