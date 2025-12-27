@@ -8,12 +8,29 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
-
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/eventlog"
 	"golang.org/x/sys/windows/svc/mgr"
 )
+
+var (
+	kernel32         = syscall.NewLazyDLL("kernel32.dll")
+	user32           = syscall.NewLazyDLL("user32.dll")
+	getConsoleWindow = kernel32.NewProc("GetConsoleWindow")
+	showWindow       = user32.NewProc("ShowWindow")
+)
+
+const SW_HIDE = 0
+
+// HideConsoleWindow 隐藏控制台窗口 (用于非服务模式的后台运行)
+func HideConsoleWindow() {
+	hwnd, _, _ := getConsoleWindow.Call()
+	if hwnd != 0 {
+		showWindow.Call(hwnd, SW_HIDE)
+	}
+}
 
 const serviceName = "APIMonitorAgent"
 const serviceDisplayName = "API Monitor Agent"

@@ -914,10 +914,10 @@ BINARY_BASE_URL="${binaryBaseUrl}"
 ARCH=${$}(uname -m)
 case ${$}ARCH in
     x86_64)
-        BINARY_NAME="am-agent-linux"
+        BINARY_NAME="agent-linux-amd64"
         ;;
     aarch64|arm64)
-        BINARY_NAME="am-agent-linux-arm64"
+        BINARY_NAME="agent-linux-arm64"
         ;;
     *)
         echo -e "${$}{RED}错误: 不支持的架构 ${$}ARCH${$}{NC}"
@@ -1063,110 +1063,149 @@ fi
 
         return `
 # API Monitor Agent Windows 自动安装/升级脚本 (Go 版)
-# 支持从旧版 Node.js Agent 无缝升级
+# 支持 Windows 服务模式，开机自启，无窗口后台运行
 $ErrorActionPreference = "Stop"
 
 $SERVER_URL = "${serverUrl}"
 $SERVER_ID = "${serverId}"
 $AGENT_KEY = "${agentKey}"
-$INSTALL_DIR = "$env:LOCALAPPDATA\\api-monitor-agent"
-$BINARY_URL = "${binaryBaseUrl}/am-agent-win.exe"
-$taskName = "APIMonitorAgent"
+$INSTALL_DIR = "$env:ProgramFiles\\APIMonitorAgent"
+$BINARY_URL = "${binaryBaseUrl}/agent-windows-amd64.exe"
+$SERVICE_NAME = "APIMonitorAgent"
 
 Write-Host ">>> API Monitor Agent 安装/升级脚本 (Go 版)" -ForegroundColor Cyan
+Write-Host "    使用 Windows 服务模式，开机自启，无窗口后台运行" -ForegroundColor Gray
+
+# 0. 检查管理员权限
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    Write-Host "❌ 请以管理员身份运行 PowerShell!" -ForegroundColor Red
+    Write-Host "   右键点击 PowerShell -> 以管理员身份运行" -ForegroundColor Yellow
+    exit 1
+}
 
 # 1. 检测是否为升级安装
 $upgradeMode = $false
-$oldExe = Join-Path $INSTALL_DIR "api-monitor-agent.exe"
-$newExe = Join-Path $INSTALL_DIR "agent.exe"
+$agentExe = Join-Path $INSTALL_DIR "agent.exe"
 
-if ((Test-Path $oldExe) -or (Test-Path $newExe)) {
+if (Test-Path $agentExe) {
     $upgradeMode = $true
     Write-Host ">>> 检测到已安装 Agent，将执行升级..." -ForegroundColor Cyan
 }
 
-# 2. 停止现有任务
-$existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-if ($existingTask) {
-    Write-Host "⏹  停止现有任务..." -ForegroundColor Yellow
-    Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+# 2. 停止现有服务
+$existingService = Get-Service -Name $SERVICE_NAME -ErrorAction SilentlyContinue
+if ($existingService) {
+    Write-Host "⏹  停止现有服务..." -ForegroundColor Yellow
+    Stop-Service -Name $SERVICE_NAME -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
 }
 
-# 3. 清理旧版文件
-if ($upgradeMode) {
-    Write-Host "🧹 清理旧版 Agent 文件..." -ForegroundColor Yellow
-    # 删除旧的 Node.js Agent 二进制
-    if (Test-Path $oldExe) { Remove-Item $oldExe -Force }
-    # 删除可能存在的 Node.js 文件
-    $oldFiles = @("index.js", "config.js", "collector.js", "package.json", "package-lock.json")
-    foreach ($f in $oldFiles) {
-        $fp = Join-Path $INSTALL_DIR $f
-        if (Test-Path $fp) { Remove-Item $fp -Force }
-    }
-    # 删除 node_modules
-    $nodeModules = Join-Path $INSTALL_DIR "node_modules"
-    if (Test-Path $nodeModules) { Remove-Item $nodeModules -Recurse -Force }
+# 2.1 清理旧版计划任务 (如果存在)
+$oldTask = Get-ScheduledTask -TaskName "APIMonitorAgent" -ErrorAction SilentlyContinue
+if ($oldTask) {
+    Write-Host "🧹 清理旧版计划任务..." -ForegroundColor Yellow
+    Stop-ScheduledTask -TaskName "APIMonitorAgent" -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName "APIMonitorAgent" -Confirm:$false -ErrorAction SilentlyContinue
 }
 
-# 4. 创建目录
+# 3. 创建安装目录
 if (-not (Test-Path $INSTALL_DIR)) {
-    Write-Host "📁 创建目录: $INSTALL_DIR"
+    Write-Host "📁 创建目录: $INSTALL_DIR" -ForegroundColor Gray
     New-Item -ItemType Directory -Force -Path $INSTALL_DIR | Out-Null
 }
 Set-Location $INSTALL_DIR
 
-# 5. 下载新版二进制文件
+# 4. 下载新版二进制文件
 Write-Host "📥 下载 Agent 二进制文件..." -ForegroundColor Yellow
 $tempExe = Join-Path $INSTALL_DIR "agent.exe.new"
 try {
+    # 使用 TLS 1.2
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     Invoke-WebRequest -Uri $BINARY_URL -OutFile $tempExe -UseBasicParsing
+    
     # 原子替换
-    if (Test-Path $newExe) { Remove-Item $newExe -Force }
+    if (Test-Path $agentExe) { Remove-Item $agentExe -Force }
     Rename-Item $tempExe "agent.exe"
+    Write-Host "   ✓ 下载完成" -ForegroundColor Green
 } catch {
     Write-Host "❌ 下载失败: $_" -ForegroundColor Red
-    if (Test-Path $tempExe) { Remove-Item $tempExe -Force }
+    Write-Host "   尝试备用地址..." -ForegroundColor Yellow
+    # 尝试备用地址 (旧格式)
+    $BINARY_URL_ALT = "${binaryBaseUrl}/am-agent-win.exe"
+    try {
+        Invoke-WebRequest -Uri $BINARY_URL_ALT -OutFile $tempExe -UseBasicParsing
+        if (Test-Path $agentExe) { Remove-Item $agentExe -Force }
+        Rename-Item $tempExe "agent.exe"
+        Write-Host "   ✓ 使用备用地址下载完成" -ForegroundColor Green
+    } catch {
+        Write-Host "❌ 备用地址也下载失败: $_" -ForegroundColor Red
+        if (Test-Path $tempExe) { Remove-Item $tempExe -Force }
+        exit 1
+    }
+}
+
+# 5. 生成/更新配置文件
+$configPath = Join-Path $INSTALL_DIR "config.json"
+Write-Host "📝 生成配置文件..." -ForegroundColor Yellow
+$config = @{
+    serverUrl = $SERVER_URL
+    serverId = $SERVER_ID
+    agentKey = $AGENT_KEY
+    reportInterval = 1500
+    reconnectDelay = 4000
+} | ConvertTo-Json
+$config | Out-File -FilePath $configPath -Encoding UTF8 -Force
+Write-Host "   ✓ 配置已保存" -ForegroundColor Green
+
+# 6. 卸载旧服务 (如果存在)
+if ($existingService) {
+    Write-Host "🔧 卸载旧服务..." -ForegroundColor Yellow
+    & "$agentExe" uninstall 2>$null
+    Start-Sleep -Seconds 1
+}
+
+# 7. 安装 Windows 服务
+Write-Host "⚙️ 安装 Windows 服务..." -ForegroundColor Yellow
+$installResult = & "$agentExe" install 2>&1
+if ($LASTEXITCODE -ne 0 -and $installResult -notmatch "服务已存在") {
+    Write-Host "❌ 服务安装失败: $installResult" -ForegroundColor Red
     exit 1
 }
+Write-Host "   ✓ 服务已安装" -ForegroundColor Green
 
-# 6. 生成/更新配置文件
-$configPath = Join-Path $INSTALL_DIR "config.json"
-if ($upgradeMode -and (Test-Path $configPath)) {
-    Write-Host "📝 保留现有配置文件" -ForegroundColor Cyan
+# 8. 启动服务
+Write-Host "🚀 启动服务..." -ForegroundColor Yellow
+& "$agentExe" start 2>&1 | Out-Null
+Start-Sleep -Seconds 2
+
+# 9. 检查服务状态
+$service = Get-Service -Name $SERVICE_NAME -ErrorAction SilentlyContinue
+if ($service -and $service.Status -eq "Running") {
+    Write-Host ""
+    Write-Host "================================================" -ForegroundColor Green
+    if ($upgradeMode) {
+        Write-Host "  ✅ API Monitor Agent 升级成功!" -ForegroundColor Green
+    } else {
+        Write-Host "  ✅ API Monitor Agent 安装成功!" -ForegroundColor Green
+    }
+    Write-Host "================================================" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  安装目录: $INSTALL_DIR" -ForegroundColor White
+    Write-Host "  运行模式: Windows 服务 (开机自启)" -ForegroundColor White
+    Write-Host "  服务名称: $SERVICE_NAME" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  管理命令:" -ForegroundColor Cyan
+    Write-Host "    查看状态: sc query $SERVICE_NAME" -ForegroundColor Gray
+    Write-Host "    停止服务: sc stop $SERVICE_NAME" -ForegroundColor Gray
+    Write-Host "    启动服务: sc start $SERVICE_NAME" -ForegroundColor Gray
+    Write-Host "    卸载服务: & '$agentExe' uninstall" -ForegroundColor Gray
+    Write-Host ""
 } else {
-    Write-Host "📝 生成配置文件..." -ForegroundColor Yellow
-    $config = @{
-        serverUrl = $SERVER_URL
-        serverId = $SERVER_ID
-        agentKey = $AGENT_KEY
-        reportInterval = 1500
-        reconnectDelay = 4000
-    } | ConvertTo-Json
-    $config | Out-File -FilePath $configPath -Encoding ASCII -Force
+    Write-Host "❌ 服务启动失败" -ForegroundColor Red
+    Write-Host "   请检查 Windows 事件查看器中的 Application 日志" -ForegroundColor Yellow
+    exit 1
 }
-
-# 7. 设置并启动服务 (开机自启)
-Write-Host "⚙️ 配置开机自启..." -ForegroundColor Yellow
-$executablePath = Join-Path $INSTALL_DIR "agent.exe"
-
-# 停止并删除已存在的同名任务
-Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false
-
-$action = New-ScheduledTaskAction -Execute $executablePath -WorkingDirectory $INSTALL_DIR
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-Register-ScheduledTask -Action $action -Trigger $trigger -Settings $settings -TaskName $taskName -Description "API Monitor Agent Auto-start Task" | Out-Null
-
-# 立即开始运行
-Start-ScheduledTask -TaskName $taskName
-
-Write-Host "================================================" -ForegroundColor Green
-Write-Host "  ✅ API Monitor Agent 安装完成!" -ForegroundColor Green
-Write-Host "  安装目录: $INSTALL_DIR" -ForegroundColor White
-Write-Host "  自启配置: 已添加 Windows 计划任务 ($taskName)" -ForegroundColor White
-Write-Host "  启动状态: 已在后台启动" -ForegroundColor White
-Write-Host "================================================" -ForegroundColor Green
         `.trim();
     }
 

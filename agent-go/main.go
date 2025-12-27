@@ -21,7 +21,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const VERSION = "2.0.1"
+const VERSION = "0.1.2"
 
 // Agent 事件类型 (与服务端 protocol.js 保持一致)
 const (
@@ -688,7 +688,13 @@ func main() {
 	agentKey := flag.String("k", "", "Agent 密钥")
 	interval := flag.Int("i", 1500, "上报间隔 (毫秒)")
 	debug := flag.Bool("d", false, "调试模式")
+	background := flag.Bool("b", false, "后台模式 (隐藏控制台窗口)")
 	flag.Parse()
+
+	// 后台模式：隐藏控制台窗口
+	if *background {
+		HideConsoleWindow()
+	}
 
 	// 加载配置
 	config := &Config{
@@ -788,12 +794,14 @@ func printUsage() {
 	fmt.Println("  -k <key>    Agent 密钥")
 	fmt.Println("  -i <ms>     上报间隔 (毫秒, 默认 1500)")
 	fmt.Println("  -d          调试模式")
+	fmt.Println("  -b          后台模式 (隐藏控制台窗口, Windows)")
 	fmt.Println()
 	fmt.Println("配置文件:")
 	fmt.Println("  将 config.json 放在程序同目录下")
 	fmt.Println()
 	fmt.Println("示例:")
-	fmt.Println("  api-monitor-agent install           # 安装服务")
-	fmt.Println("  api-monitor-agent start             # 启动服务")  
+	fmt.Println("  api-monitor-agent install           # 安装为 Windows 服务 (推荐)")
+	fmt.Println("  api-monitor-agent start             # 启动服务")
+	fmt.Println("  api-monitor-agent -b                # 后台模式运行 (隐藏窗口)")
 	fmt.Println("  api-monitor-agent -s https://xxx -id abc -k key123")
 }
