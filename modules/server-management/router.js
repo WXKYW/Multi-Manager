@@ -46,14 +46,29 @@ router.get('/accounts', (req, res) => {
                 return {
                     ...server,
                     info: {
-                        load: cachedMetrics.load,
-                        cores: cachedMetrics.cores,
-                        mem_usage: cachedMetrics.mem,
-                        cpu_usage: cachedMetrics.cpu_usage,
+                        cpu: {
+                            Load: cachedMetrics.load,
+                            Cores: cachedMetrics.cores,
+                            Usage: cachedMetrics.cpu_usage
+                        },
+                        memory: {
+                            Usage: cachedMetrics.mem_percent !== undefined ? Math.round(cachedMetrics.mem_percent) + '%' : '-',
+                            Used: cachedMetrics.mem ? cachedMetrics.mem.split('/')[0] : '-',
+                            Total: cachedMetrics.mem ? cachedMetrics.mem.split('/')[1] : '-'
+                        },
                         disk: diskArray,
                         docker: cachedMetrics.docker,
                         network: cachedMetrics.network,
-                        lastUpdate: new Date(cachedMetrics.timestamp).toLocaleTimeString()
+                        gpu: {
+                            Model: cachedMetrics.gpu_model,
+                            Usage: cachedMetrics.gpu_usage,
+                            Memory: cachedMetrics.gpu_mem,
+                            Power: cachedMetrics.gpu_power
+                        },
+                        platform: cachedMetrics.platform,
+                        platformVersion: cachedMetrics.platformVersion,
+                        agentVersion: cachedMetrics.agent_version,
+                        lastUpdate: cachedMetrics.lastUpdate || new Date(cachedMetrics.timestamp).toLocaleTimeString()
                     }
                 };
             }
@@ -262,6 +277,8 @@ router.get('/monitor/logs', (req, res) => {
     }
 });
 
+
+
 /**
  * 批量 TCP ping 测量延迟
  */
@@ -317,10 +334,69 @@ router.post('/info', async (req, res) => {
 
 /**
  * Docker 容器操作
+ * POST /docker/action
+ * { serverId, containerId, action: 'start'|'stop'|'restart'|'pause'|'unpause'|'update'|'pull', image?: string }
  */
-// Docker 容器操作目前仅支持 Agent 模式推送，不支持主动控制（因 SSH 已移除）
+const { TaskTypes: DockerTaskTypes } = require('./protocol');
+
 router.post('/docker/action', async (req, res) => {
-    res.status(501).json({ success: false, error: '目前仅支持 Agent 监控，暂不支持主动控制容器' });
+    try {
+        const { serverId, containerId, action, image } = req.body;
+
+        if (!serverId) {
+            return res.status(400).json({ success: false, error: '缺少服务器 ID' });
+        }
+        if (!containerId) {
+            return res.status(400).json({ success: false, error: '缺少容器 ID' });
+        }
+        if (!action) {
+            return res.status(400).json({ success: false, error: '缺少操作类型' });
+        }
+
+        const validActions = ['start', 'stop', 'restart', 'pause', 'unpause', 'update', 'pull'];
+        if (!validActions.includes(action)) {
+            return res.status(400).json({ success: false, error: `不支持的操作: ${action}` });
+        }
+
+        // 检查主机是否在线
+        if (!agentService.isOnline(serverId)) {
+            return res.status(400).json({ success: false, error: '主机不在线' });
+        }
+
+        // 构建任务数据
+        const taskData = JSON.stringify({
+            action,
+            container_id: containerId,
+            image: image || ''
+        });
+
+        // 发送任务并等待结果 (Docker 操作可能较慢，给 2 分钟超时)
+        const result = await agentService.sendTaskAndWait(serverId, {
+            type: DockerTaskTypes.DOCKER_ACTION,
+            data: taskData,
+            timeout: 120
+        }, 120000);
+
+        if (result.successful) {
+            res.json({
+                success: true,
+                message: result.data || `${action} 操作成功`,
+                data: {
+                    serverId,
+                    containerId,
+                    action,
+                    result: result.data
+                }
+            });
+        } else {
+            res.status(400).json({
+                success: false,
+                error: result.data || `${action} 操作失败`
+            });
+        }
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
 });
 
 // ==================== SSH 终端接口 ====================
@@ -513,7 +589,8 @@ router.post('/metrics/collect', async (req, res) => {
                     disk_usage: parseFloat(metrics.disk_usage?.match(/\((\d+\.?\d*)%\)/)?.[1]) || 0,
                     docker_installed: metrics.docker?.installed ? 1 : 0,
                     docker_running: metrics.docker?.running || 0,
-                    docker_stopped: metrics.docker?.stopped || 0
+                    docker_stopped: metrics.docker?.stopped || 0,
+                    platform: metrics.platform || ''
                 });
                 collected.push(server.id);
             }

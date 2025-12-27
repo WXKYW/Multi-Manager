@@ -621,8 +621,9 @@ class ServerMetricsHistory {
                 mem_used, mem_total, mem_usage,
                 disk_used, disk_total, disk_usage,
                 docker_installed, docker_running, docker_stopped,
-                recorded_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                gpu_usage, gpu_mem_used, gpu_mem_total, gpu_power,
+                platform, recorded_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         const now = new Date().toISOString();
@@ -640,6 +641,11 @@ class ServerMetricsHistory {
             data.docker_installed ? 1 : 0,
             data.docker_running || 0,
             data.docker_stopped || 0,
+            data.gpu_usage || 0,
+            data.gpu_mem_used || 0,
+            data.gpu_mem_total || 0,
+            data.gpu_power || 0,
+            data.platform || '',
             now
         );
 
@@ -660,8 +666,9 @@ class ServerMetricsHistory {
                 mem_used, mem_total, mem_usage,
                 disk_used, disk_total, disk_usage,
                 docker_installed, docker_running, docker_stopped,
-                recorded_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                gpu_usage, gpu_mem_used, gpu_mem_total, gpu_power,
+                platform, recorded_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         const now = new Date().toISOString();
@@ -682,6 +689,11 @@ class ServerMetricsHistory {
                     data.docker_installed ? 1 : 0,
                     data.docker_running || 0,
                     data.docker_stopped || 0,
+                    data.gpu_usage || 0,
+                    data.gpu_mem_used || 0,
+                    data.gpu_mem_total || 0,
+                    data.gpu_power || 0,
+                    data.platform || '',
                     now
                 );
             }
@@ -823,6 +835,45 @@ class ServerMetricsHistory {
         }
     }
 }
+
+/**
+ * 自动迁移：检查并添加缺失的列
+ */
+function runMigrations() {
+    const db = getDb();
+
+    // 检查 server_metrics_history 表的 GPU 列是否存在
+    try {
+        const tableInfo = db.prepare("PRAGMA table_info(server_metrics_history)").all();
+        const columns = tableInfo.map(col => col.name);
+
+        if (!columns.includes('gpu_usage')) {
+            db.exec("ALTER TABLE server_metrics_history ADD COLUMN gpu_usage REAL DEFAULT 0");
+            console.log('[Models] 迁移: 添加 gpu_usage 列');
+        }
+        if (!columns.includes('gpu_mem_used')) {
+            db.exec("ALTER TABLE server_metrics_history ADD COLUMN gpu_mem_used INTEGER DEFAULT 0");
+            console.log('[Models] 迁移: 添加 gpu_mem_used 列');
+        }
+        if (!columns.includes('gpu_mem_total')) {
+            db.exec("ALTER TABLE server_metrics_history ADD COLUMN gpu_mem_total INTEGER DEFAULT 0");
+            console.log('[Models] 迁移: 添加 gpu_mem_total 列');
+        }
+        if (!columns.includes('gpu_power')) {
+            db.exec("ALTER TABLE server_metrics_history ADD COLUMN gpu_power REAL DEFAULT 0");
+            console.log('[Models] 迁移: 添加 gpu_power 列');
+        }
+        if (!columns.includes('platform')) {
+            db.exec("ALTER TABLE server_metrics_history ADD COLUMN platform TEXT");
+            console.log('[Models] 迁移: 添加 platform 列');
+        }
+    } catch (error) {
+        console.error('[Models] 迁移失败:', error.message);
+    }
+}
+
+// 启动时执行迁移
+runMigrations();
 
 module.exports = {
     ServerAccount,

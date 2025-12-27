@@ -259,12 +259,23 @@ export const metricsMethods = {
             // 增量更新 CPU (仅在值变化时更新)
             const newCpuLoad = metrics.load || '-';
             const newCpuUsage = metrics.cpu_usage || '0%';
-            const newCpuCores = metrics.cores || '-';
+            // 静态参数保持：只有当新核心数是有效的正整数（>=1）时才更新，避免被异常值覆盖
+            const newCpuCores = parseInt(metrics.cores);
+            const validNewCores = !isNaN(newCpuCores) && newCpuCores >= 1;
 
             if (!info.cpu) info.cpu = {};
             if (info.cpu.Load !== newCpuLoad) info.cpu.Load = newCpuLoad;
             if (info.cpu.Usage !== newCpuUsage) info.cpu.Usage = newCpuUsage;
-            if (info.cpu.Cores !== newCpuCores) info.cpu.Cores = newCpuCores;
+            // 核心数：仅在有效值时更新，且优先保留较大的历史值（防止单次采样异常）
+            if (validNewCores) {
+                const existingCores = parseInt(info.cpu.Cores) || 0;
+                // 如果新值 >= 现有值，或现有值无效，则更新
+                if (newCpuCores >= existingCores || existingCores <= 0) {
+                    info.cpu.Cores = newCpuCores;
+                }
+            } else if (!info.cpu.Cores) {
+                info.cpu.Cores = '-';
+            }
 
             // 增量更新内存
             if (metrics.mem_usage || metrics.mem) {
@@ -312,8 +323,12 @@ export const metricsMethods = {
                 if (info.docker.runningCount !== running) info.docker.runningCount = running;
                 if (info.docker.stoppedCount !== stopped) info.docker.stoppedCount = stopped;
 
-                // 始终更新容器列表，因为即使数量不变，单个容器的状态也可能已改变
-                info.docker.containers = Array.isArray(metrics.docker.containers) ? metrics.docker.containers : [];
+                // 只有当容器数量变化时才更新列表，避免频繁触发 Vue 重渲染
+                const newContainers = Array.isArray(metrics.docker.containers) ? metrics.docker.containers : [];
+                const currentLen = info.docker.containers?.length || 0;
+                if (newContainers.length !== currentLen) {
+                    info.docker.containers = newContainers;
+                }
             }
 
             // 增量更新网络
@@ -326,9 +341,44 @@ export const metricsMethods = {
                 });
             }
 
-            // 更新时间戳 (简化格式)
-            const newTimestamp = new Date(data.timestamp || Date.now()).toLocaleTimeString();
-            if (info.lastUpdate !== newTimestamp) info.lastUpdate = newTimestamp;
+            // 增量更新 GPU 信息（分离静态参数和动态指标）
+            if (!info.gpu || typeof info.gpu === 'number') info.gpu = {};
+
+            // GPU 型号（静态参数）：仅在有效非空值时更新，保持历史有效值
+            if (metrics.gpu_model && metrics.gpu_model.trim() !== '') {
+                if (info.gpu.Model !== metrics.gpu_model) info.gpu.Model = metrics.gpu_model;
+            }
+
+            // GPU 动态指标：始终更新（如果有新值的话）
+            if (metrics.gpu_usage !== undefined) {
+                if (info.gpu.Usage !== metrics.gpu_usage) info.gpu.Usage = metrics.gpu_usage;
+            }
+            if (metrics.gpu_mem !== undefined && metrics.gpu_mem !== '0 B/1 B') {
+                if (info.gpu.Memory !== metrics.gpu_mem) info.gpu.Memory = metrics.gpu_mem;
+            }
+            if (metrics.gpu_power !== undefined) {
+                if (info.gpu.Power !== metrics.gpu_power) info.gpu.Power = metrics.gpu_power;
+            }
+            if (metrics.gpu_mem_percent !== undefined) {
+                if (info.gpu.Percent !== metrics.gpu_mem_percent) info.gpu.Percent = metrics.gpu_mem_percent;
+            }
+            if (metrics.platform && info.platform !== metrics.platform) {
+                info.platform = metrics.platform;
+                // 计算并缓存简化的平台名称
+                info.platformShort = this.formatPlatformShort(metrics.platform, metrics.platformVersion);
+            }
+            if (metrics.platformVersion && info.platformVersion !== metrics.platformVersion) {
+                info.platformVersion = metrics.platformVersion;
+                // 平台版本变化时也更新简化名称
+                if (info.platform) {
+                    info.platformShort = this.formatPlatformShort(info.platform, metrics.platformVersion);
+                }
+            }
+
+            // 更新时间戳 (节流: 只有当旧时间戳不存在时才更新，避免频繁触发 Vue 重渲染)
+            if (!info.lastUpdate) {
+                info.lastUpdate = new Date(data.timestamp || Date.now()).toLocaleTimeString();
+            }
 
             // 仅在状态变化时更新
             if (server.status !== 'online') server.status = 'online';
@@ -337,6 +387,46 @@ export const metricsMethods = {
         } catch (err) {
             console.warn('[Metrics] 数据转换失败:', err, data);
         }
+    },
+
+    /**
+     * 格式化平台名称为简短版本
+     */
+    formatPlatformShort(platform, version) {
+        if (!platform) return '';
+        const p = platform.toLowerCase();
+
+        let ver = '';
+        if (version) {
+            const verMatch = version.match(/(\d+)/);
+            if (verMatch) ver = verMatch[1];
+        }
+
+        if (p.includes('windows')) {
+            if (version) {
+                if (version.includes('26') || version.includes('22') || version.includes('21')) return 'Win11';
+                if (version.includes('19') || version.includes('18')) return 'Win10';
+            }
+            if (p.includes('11')) return 'Win11';
+            if (p.includes('10')) return 'Win10';
+            if (p.includes('server')) return 'WinSrv';
+            return 'Windows';
+        }
+
+        if (p.includes('debian')) return 'Debian' + ver;
+        if (p.includes('ubuntu')) return 'Ubuntu' + ver;
+        if (p.includes('centos')) return 'CentOS' + ver;
+        if (p.includes('fedora')) return 'Fedora' + ver;
+        if (p.includes('redhat') || p.includes('rhel')) return 'RHEL' + ver;
+        if (p.includes('rocky')) return 'Rocky' + ver;
+        if (p.includes('alma')) return 'Alma' + ver;
+        if (p.includes('arch')) return 'Arch';
+        if (p.includes('alpine')) return 'Alpine' + ver;
+        if (p.includes('darwin') || p.includes('macos')) return 'macOS' + ver;
+        if (p.includes('freebsd')) return 'FreeBSD' + ver;
+        if (p.includes('linux')) return 'Linux';
+
+        return platform.substring(0, 10);
     },
 
     /**
@@ -450,6 +540,11 @@ export const metricsMethods = {
                         ...item.metrics.network
                     };
                 }
+
+                // 7. 更新 GPU 和平台信息
+                info.gpu = item.metrics.gpu;
+                info.platform = item.metrics.platform;
+                info.platformVersion = item.metrics.platformVersion;
 
                 // 赋值回响应式对象
                 // 如果是新对象，直接赋值；如果是旧对象，赋值新引用以触发更干净的 Patch
@@ -570,7 +665,9 @@ export const metricsMethods = {
         // 如果主机列表有展开的卡片，同步刷新它们的图表
         if (this.expandedServers && this.expandedServers.length > 0) {
             this.expandedServers.forEach(serverId => {
-                this.loadCardMetrics(serverId);
+                const server = this.serverList.find(s => s.id === serverId);
+                // 延迟刷新，确保 DOM 已处于稳定状态
+                setTimeout(() => this.loadCardMetrics(server || serverId), 300);
             });
         }
     },
@@ -700,8 +797,10 @@ export const metricsMethods = {
         Object.entries(this.groupedMetricsHistory).forEach(([serverId, records]) => {
             // 渲染历史页面的大图表
             this.renderSingleChart(serverId, records, `metrics-chart-${serverId}`);
-            // 同时尝试渲染卡片图表 (如果 DOM 存在)
+            // 卡片正面图表
             this.renderSingleChart(serverId, records, `metrics-chart-card-${serverId}`);
+            // 卡片背面 GPU 图表 (仅当已翻转或即将渲染时)
+            this.renderGpuChart(serverId, records, `gpu-chart-${serverId}`);
         });
     },
 
@@ -711,7 +810,7 @@ export const metricsMethods = {
      * @param {Array} records 历史记录数据
      * @param {string} canvasId Canvas 元素 ID
      */
-    async renderSingleChart(serverId, records, canvasId) {
+    async renderSingleChart(serverId, records, canvasId, retryCount = 0) {
         // 确保 Chart.js 已加载，否则触发回退加载
         if (!window.Chart) {
             const loaded = await this.loadChartJsFallback();
@@ -720,12 +819,31 @@ export const metricsMethods = {
         if (!records || records.length === 0) return;
 
         const canvas = document.getElementById(canvasId);
-        if (!canvas) return;
+        if (!canvas) {
+            // Canvas 不存在，可能动画还没完成，稍后重试
+            if (retryCount < 3) {
+                setTimeout(() => this.renderSingleChart(serverId, records, canvasId, retryCount + 1), 200);
+            }
+            return;
+        }
+
+        // 检查 canvas 尺寸是否为 0（可能在展开动画中）
+        const rect = canvas.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) {
+            if (retryCount < 5) {
+                // 尺寸为 0，稍后重试
+                setTimeout(() => this.renderSingleChart(serverId, records, canvasId, retryCount + 1), 200);
+                return;
+            }
+            // 重试次数耗尽但仍然没有尺寸，可能是隐藏的标签页，跳过渲染
+            console.warn(`[Charts] Canvas ${canvasId} has zero size after ${retryCount} retries, skipping render`);
+            return;
+        }
 
         // 由于记录通常是记录时间倒序排列的，绘图前先克隆并正序排列
         let sortedRecords = [...records].sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
 
-        // 性能优化：数据点过多时进行降采样 (最多保留 100 个点)
+        // 性能优化：数据点过多时进行降采样 (最多保留 50 个点)
         const MAX_POINTS = 50;
         if (sortedRecords.length > MAX_POINTS) {
             const step = Math.ceil(sortedRecords.length / MAX_POINTS);
@@ -739,6 +857,10 @@ export const metricsMethods = {
         });
         const cpuData = sortedRecords.map(r => r.cpu_usage || 0);
         const memData = sortedRecords.map(r => r.mem_usage || 0);
+        const gpuData = sortedRecords.map(r => r.gpu_usage || 0);
+
+        // 检查是否包含有效的 GPU 数据
+        const hasGpuData = sortedRecords.some(r => r.gpu_usage !== null && r.gpu_usage !== undefined);
 
         // 销毁已存在的实例
         const existingChart = Chart.getChart(canvas);
@@ -746,101 +868,133 @@ export const metricsMethods = {
             existingChart.destroy();
         }
 
-        // 创建新图表
-        new Chart(canvas, {
-            type: 'line',
-            data: {
-                labels: labels,
-                datasets: [
-                    {
-                        label: 'CPU (%)',
-                        data: cpuData,
-                        borderColor: '#10b981',
-                        backgroundColor: 'transparent',
-                        borderWidth: 2.5,
-                        fill: false,
-                        tension: 0.3,
-                        pointRadius: 0,
-                        pointHoverRadius: 5
-                    },
-                    {
-                        label: '内存 (%)',
-                        data: memData,
-                        borderColor: '#3b82f6',
-                        backgroundColor: 'transparent',
-                        borderWidth: 2.5,
-                        fill: false,
-                        tension: 0.3,
-                        pointRadius: 0,
-                        pointHoverRadius: 5
-                    }
-                ]
+        const datasets = [
+            {
+                label: 'CPU (%)',
+                data: cpuData,
+                borderColor: '#10b981',
+                backgroundColor: 'transparent',
+                borderWidth: 2,
+                fill: false,
+                tension: 0.3,
+                pointRadius: 0,
+                pointHoverRadius: 4,
+                spanGaps: true
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        mode: 'index',
-                        intersect: false,
-                        padding: 10,
-                        backgroundColor: 'rgba(13, 17, 23, 0.9)',
-                        titleColor: '#8b949e',
-                        bodyColor: '#e6edf3',
-                        borderColor: 'rgba(255, 255, 255, 0.1)',
-                        borderWidth: 1
-                    }
+            {
+                label: '内存 (%)',
+                data: memData,
+                borderColor: '#3b82f6',
+                backgroundColor: 'transparent',
+                borderWidth: 2,
+                fill: false,
+                tension: 0.3,
+                pointRadius: 0,
+                pointHoverRadius: 4,
+                spanGaps: true
+            }
+        ];
+
+        if (hasGpuData) {
+            datasets.push({
+                label: 'GPU (%)',
+                data: gpuData,
+                borderColor: '#76b900',
+                backgroundColor: 'transparent',
+                borderWidth: 2,
+                fill: false,
+                tension: 0.3,
+                pointRadius: 0,
+                pointHoverRadius: 4,
+                spanGaps: true
+            });
+        }
+
+        // 延迟创建新图表，确保旧实例已完全清理且尺寸稳定
+        this.$nextTick(() => {
+            new Chart(canvas, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: datasets
                 },
-                scales: {
-                    x: {
-                        display: true,
-                        grid: {
-                            display: true,
-                            color: 'rgba(255, 255, 255, 0.06)',
-                            drawBorder: false
-                        },
-                        ticks: {
-                            maxRotation: 0,
-                            autoSkip: true,
-                            maxTicksLimit: 6,
-                            font: { size: 10 },
-                            color: '#6e7681'
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            padding: 10,
+                            backgroundColor: 'rgba(13, 17, 23, 0.9)',
+                            titleColor: '#8b949e',
+                            bodyColor: '#e6edf3',
+                            borderColor: 'rgba(255, 255, 255, 0.1)',
+                            borderWidth: 1
                         }
                     },
-                    y: {
-                        display: true,
-                        min: 0,
-                        max: 100,
-                        grid: {
+                    scales: {
+                        x: {
                             display: true,
-                            color: 'rgba(255, 255, 255, 0.06)',
-                            drawBorder: false
+                            grid: {
+                                display: true,
+                                color: 'rgba(255, 255, 255, 0.06)',
+                                drawBorder: false
+                            },
+                            ticks: {
+                                maxRotation: 0,
+                                autoSkip: true,
+                                maxTicksLimit: 6,
+                                font: { size: 10 },
+                                color: '#6e7681'
+                            }
                         },
-                        ticks: {
-                            font: { size: 10 },
-                            color: '#6e7681',
-                            stepSize: 25
+                        y: {
+                            display: true,
+                            min: 0,
+                            max: 100,
+                            grid: {
+                                display: true,
+                                color: 'rgba(255, 255, 255, 0.06)',
+                                drawBorder: false
+                            },
+                            ticks: {
+                                font: { size: 10 },
+                                color: '#6e7681',
+                                stepSize: 25
+                            }
                         }
+                    },
+                    interaction: {
+                        mode: 'nearest',
+                        axis: 'x',
+                        intersect: false
                     }
-                },
-                interaction: {
-                    mode: 'nearest',
-                    axis: 'x',
-                    intersect: false
                 }
-            }
+            });
         });
     },
 
     /**
      * 为特定主机加载指标历史数据（用于卡片展示）
      */
-    async loadCardMetrics(serverId) {
-        if (!serverId) return;
+    async loadCardMetrics(serverOrId) {
+        if (!serverOrId) return [];
+
+        // 兼容处理：支持传入主机对象或主机 ID
+        let server = typeof serverOrId === 'object' ? serverOrId : null;
+        let serverId = typeof serverOrId === 'string' ? serverOrId : (server ? server.id : null);
+
+        // 如果只传了 ID，尝试在 serverList 中找到对象，以便能缓存数据
+        if (!server && serverId && this.serverList) {
+            server = this.serverList.find(s => s.id === serverId);
+        }
+
+        if (!serverId) return [];
 
         try {
-            // 计算时间范围 (使用与 loadMetricsHistory 相同的逻辑)
+            // 计算时间范围
             let startTime = null;
             const now = Date.now();
 
@@ -855,7 +1009,7 @@ export const metricsMethods = {
             const params = new URLSearchParams({
                 serverId: serverId,
                 page: 1,
-                pageSize: 10000 // 获取该段时间内所有记录以保证图表精细度
+                pageSize: 300
             });
 
             if (startTime) {
@@ -867,18 +1021,25 @@ export const metricsMethods = {
             });
             const data = await response.json();
 
-            if (data.success && data.data.length > 0) {
-                // 如果当前已经在 history 列表里了，则合并，否则直接放入
-                // 为了简单起见，我们直接看 groupedMetricsHistory 能否拿到
-                // 我们把获取到的数据放入一个临时的缓存或直接渲染
+            if (data.success && data.data) {
                 const records = data.data;
 
+                // 缓存数据到主机对象中
+                if (server) {
+                    server.metricsCache = records;
+                }
+
+                // 更新正面图表
                 this.$nextTick(() => {
                     this.renderSingleChart(serverId, records, `metrics-chart-card-${serverId}`);
                 });
+
+                return records;
             }
+            return [];
         } catch (error) {
             console.error('加载卡片指标失败:', error);
+            return [];
         }
     },
 
@@ -988,5 +1149,132 @@ export const metricsMethods = {
             this.showGlobalToast('配置更新失败', 'error');
             console.error('更新配置失败:', error);
         }
+    },
+
+    /**
+     * 渲染 GPU 趋势图
+     * @param {string} serverId 主机 ID
+     * @param {Array} records 历史指标
+     * @param {string} canvasId 画布 ID
+     */
+    async renderGpuChart(serverId, records, canvasId) {
+        if (!window.Chart || !records || records.length === 0) return;
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+
+        // 正序排列
+        let sortedRecords = [...records].sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
+
+        // 降采样
+        const MAX_POINTS = 50;
+        if (sortedRecords.length > MAX_POINTS) {
+            const step = Math.ceil(sortedRecords.length / MAX_POINTS);
+            sortedRecords = sortedRecords.filter((_, index) => index % step === 0);
+        }
+
+        const labels = sortedRecords.map(r => {
+            const d = new Date(r.recorded_at);
+            return d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0');
+        });
+
+        // 映射数据 (处理单位: gpu_mem_used 现在在数据库也是 Byte)
+        const gpuUsageData = sortedRecords.map(r => r.gpu_usage || 0);
+        const gpuMemData = sortedRecords.map(r => {
+            if (!r.gpu_mem_total) return 0;
+            return Math.min(100, (r.gpu_mem_used / r.gpu_mem_total) * 100);
+        });
+        const gpuPowerData = sortedRecords.map(r => r.gpu_power || 0);
+
+        const existingChart = Chart.getChart(canvas);
+        if (existingChart) existingChart.destroy();
+
+        new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: 'GPU (%)',
+                        data: gpuUsageData,
+                        borderColor: '#76b900',
+                        backgroundColor: 'rgba(118, 185, 0, 0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        borderWidth: 2,
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: 'VRAM (%)',
+                        data: gpuMemData,
+                        borderColor: '#8bc34a',
+                        borderDash: [3, 3],
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        borderWidth: 1.5,
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: 'Power (W)',
+                        data: gpuPowerData,
+                        borderColor: '#ff9800',
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        borderWidth: 1.2,
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top',
+                        labels: { boxWidth: 8, padding: 8, font: { size: 9 }, color: '#888' }
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        backgroundColor: 'rgba(13, 17, 23, 0.9)',
+                        callbacks: {
+                            label: (ctx) => {
+                                const val = ctx.parsed.y.toFixed(1);
+                                const label = ctx.dataset.label;
+                                if (label.includes('%')) return `${label}: ${val}%`;
+                                return `${label}: ${val}W`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        display: true,
+                        grid: { display: false },
+                        ticks: { font: { size: 9 }, color: '#666', maxTicksLimit: 6 }
+                    },
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        min: 0,
+                        max: 100,
+                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                        ticks: { font: { size: 9 }, color: '#666', callback: v => v + '%' }
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        min: 0,
+                        grid: { drawOnChartArea: false },
+                        ticks: { font: { size: 9 }, color: '#ff9800', callback: v => v + 'W' }
+                    }
+                }
+            }
+        });
     }
 };

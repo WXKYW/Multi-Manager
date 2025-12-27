@@ -150,6 +150,11 @@ export const settingsMethods = {
 
   // 激活第一个可见的模块
   activateFirstVisibleModule() {
+    // 如果处于单页模式（通过 URL 直接访问特定模块），不要覆盖当前标签
+    if (store.singlePageMode) {
+      return;
+    }
+
     // 如果当前选中的模块不可见，或者我们想默认选中第一个
     // 这里简单的策略是：总是尝试切换到排序后的第一个可见模块
     // 这样用户登录时就会看到他们配置的第一个模块
@@ -299,10 +304,12 @@ export const settingsMethods = {
       this.moduleVisibility[this.moduleOrder[0]] = true;
     }
 
-    // 切换到第一个可见的模块
-    const firstVisibleModule = this.moduleOrder.find(m => this.moduleVisibility[m]);
-    if (firstVisibleModule) {
-      this.mainActiveTab = firstVisibleModule;
+    // 切换到第一个可见的模块（仅在非单页模式下）
+    if (!store.singlePageMode) {
+      const firstVisibleModule = this.moduleOrder.find(m => this.moduleVisibility[m]);
+      if (firstVisibleModule) {
+        this.mainActiveTab = firstVisibleModule;
+      }
     }
 
     // 保存更新后的设置

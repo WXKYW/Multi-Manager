@@ -1,0 +1,11 @@
+{
+    "ignore": [
+        "data/**/*",
+        "agent_debug.log",
+        "agent-go/**/*",
+        "public/agent/**/*",
+        "**/*.test.js",
+        "**/*.log"
+    ],
+    "ext": "js,json,html,css"
+}

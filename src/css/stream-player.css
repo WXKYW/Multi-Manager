@@ -1,9 +1,209 @@
 /**
  * 流媒体播放器样式
  * 
- * 沉浸式全屏视频播放器 UI
+ * 使用 Plyr 播放器
  * 支持亮色/暗色主题
  */
+
+/* ==================== Plyr 播放器自定义样式 ==================== */
+
+.plyr-player-wrapper {
+    position: relative;
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    background: #000;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+}
+
+.plyr-player-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.8), transparent);
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 10;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.plyr-player-wrapper:hover .plyr-player-toolbar {
+    opacity: 1;
+}
+
+.plyr-toolbar-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.plyr-toolbar-title i {
+    opacity: 0.8;
+}
+
+.plyr-toolbar-title span {
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.plyr-toolbar-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.plyr-toolbar-actions .btn {
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    color: #fff;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+}
+
+.plyr-toolbar-actions .btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.plyr-video {
+    width: 100%;
+    display: block;
+}
+
+/* ==================== Plyr 主题定制 ==================== */
+.plyr {
+    /* 主色调 */
+    --plyr-color-main: #06b6d4;
+
+    /* 进度条与缓存条变量 - 确保使用标准变量并设置合理的对比度 */
+    --plyr-range-fill-background: #06b6d4;
+    --plyr-range-track-background: rgba(255, 255, 255, 0.2);
+    --plyr-video-progress-buffered-background: rgba(255, 255, 255, 0.35);
+}
+
+/* 控制栏背景 - 使用简单渐变确保文字可见 */
+.plyr__controls {
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.7), transparent) !important;
+}
+
+/* 交互优化：手型光标 */
+.plyr__control,
+.plyr__progress,
+.plyr__progress__container,
+.plyr__volume,
+.plyr input[type="range"] {
+    cursor: pointer !important;
+}
+
+/* 移除所有自定义的 inherit 规则，让 Plyr 恢复原生的 hover 颜色切换逻辑 */
+.plyr__control:focus,
+.plyr__control:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+/* 大播放按钮 */
+.plyr__control--overlaid {
+    background: rgba(6, 182, 212, 0.8) !important;
+}
+
+.plyr__control--overlaid:hover {
+    background: rgba(6, 182, 212, 1) !important;
+}
+
+/* 缓存进度条显示优化 */
+.plyr__progress__buffer {
+    border-radius: 100px !important;
+}
+
+
+/* Tooltip */
+.plyr__tooltip {
+    background: rgba(15, 23, 42, 0.95) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 8px !important;
+    font-weight: 500 !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* 全屏时隐藏自定义工具栏 */
+.plyr--fullscreen-active .plyr-player-toolbar {
+    display: none;
+}
+
+/* 全屏时控制栏圆角移除 */
+.plyr--fullscreen-active .plyr__controls {
+    border-radius: 0 !important;
+}
+
+/* openlist 视频容器适配 */
+.openlist-video-tab-view .plyr-player-wrapper {
+    max-width: 100%;
+    max-height: calc(100vh - 200px);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.openlist-video-tab-view .plyr {
+    border-radius: 16px;
+    overflow: hidden;
+}
+
+/* 加载状态 */
+.plyr--loading .plyr__control--overlaid {
+    animation: plyr-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes plyr-pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    50% {
+        opacity: 0.7;
+        transform: scale(0.95);
+    }
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+    .plyr-player-wrapper {
+        border-radius: 0;
+    }
+
+    .plyr-player-toolbar {
+        padding: 8px 12px;
+    }
+
+    .plyr-toolbar-title span {
+        max-width: 150px;
+        font-size: 12px;
+    }
+
+    .plyr__controls {
+        padding: 30px 8px 8px !important;
+    }
+
+    .plyr__control--overlaid {
+        padding: 18px !important;
+    }
+}
+
 
 /* ==================== 播放器模态框 ==================== */
 
@@ -32,6 +232,8 @@
         opacity: 1;
     }
 }
+
+
 
 .stream-player-container {
     position: relative;
@@ -83,9 +285,16 @@
     }
 }
 
+
+
+
+
+
+
 /* ==================== 视频区域 ==================== */
 
 .stream-player-video-wrapper {
+    border-radius: 18px;
     flex: 1;
     display: flex;
     align-items: center;
@@ -123,14 +332,7 @@
     transition: opacity 0.35s ease, visibility 0.35s;
 }
 
-/* 仅在支持 hover 的设备上使用 hover 触发位 */
-@media (hover: hover) {
-    .stream-player-container:hover .stream-player-header {
-        opacity: 1;
-        pointer-events: auto;
-    }
-}
-
+/* 控制栏只通过 controls-visible 类控制显示，避免 hover 覆盖手动隐藏 */
 .stream-player-container.controls-visible .stream-player-header {
     opacity: 1;
     pointer-events: auto;
@@ -211,6 +413,8 @@
     }
 }
 
+
+
 .stream-player-close {
     width: 44px;
     height: 44px;
@@ -249,13 +453,7 @@
     transition: opacity 0.35s ease, visibility 0.35s;
 }
 
-@media (hover: hover) {
-    .stream-player-container:hover .stream-player-controls {
-        opacity: 1;
-        pointer-events: auto;
-    }
-}
-
+/* 控制栏只通过 controls-visible 类控制显示 */
 .stream-player-container.controls-visible .stream-player-controls {
     opacity: 1;
     pointer-events: auto;
@@ -305,13 +503,25 @@
     border-radius: 50%;
     transform: translate(-50%, -50%);
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-    opacity: 0;
-    transition: opacity 0.2s ease;
+    opacity: 0.8;
+    transition: opacity 0.2s ease, transform 0.15s ease;
     pointer-events: none;
 }
 
-.stream-player-progress:hover .stream-player-progress-thumb {
+.stream-player-progress:hover .stream-player-progress-thumb,
+.stream-player-container.dragging .stream-player-progress-thumb {
     opacity: 1;
+}
+
+/* 拖动时滑块放大效果 */
+.stream-player-container.dragging .stream-player-progress-thumb {
+    transform: translate(-50%, -50%) scale(1.3);
+    box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.2), 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* 拖动时禁用进度条过渡，确保跟手流畅 */
+.stream-player-container.dragging .stream-player-progress-played {
+    transition: none !important;
 }
 
 /* 控制按钮行 */
@@ -532,6 +742,8 @@
         transform: rotate(360deg);
     }
 }
+
+
 
 /* 进度条拖动时禁用过渡，解决卡顿感 */
 .stream-player-container.dragging .stream-player-progress-played,
@@ -857,6 +1069,8 @@
     }
 }
 
+
+
 /* ==================== 全屏模式 ==================== */
 
 .stream-player-container:fullscreen {
@@ -910,6 +1124,8 @@
         transform: translate(-50%, 0);
     }
 }
+
+
 
 /* 控制栏显隐过渡优化 */
 .stream-player-container .stream-player-header,
@@ -998,9 +1214,10 @@
 .openlist-video-tab-view {
     padding: 0;
     min-height: unset;
-    /* 核心修改：高度跟随父容器，或者设为 100% 配合 flex */
     width: 100%;
-    height: 100%;
+    /* 使用 vh 单位确保有明确的高度约束 */
+    height: auto;
+    max-height: calc(100vh - 180px);
     display: flex;
     justify-content: center;
     align-items: center;
@@ -1008,20 +1225,26 @@
 
 .openlist-video-tab-view .stream-player-container.inside-tab {
     margin: 0;
-    /* 核心修改：宽度自适应，高度自适应，最大不超过容器 */
-    width: 100%;
-    height: 100%;
+    /* 使用 auto 让容器适应视频比例 */
+    width: auto;
+    height: auto;
     max-width: 100%;
-    max-height: 100%;
-    /* 移除之前可能存在的强制比例 */
+    max-height: calc(100vh - 180px);
 }
 
 /* 强制视频元素在 Tab 视图中也保持 contain */
-.openlist-video-tab-view .stream-player-video-wrapper,
+.openlist-video-tab-view .stream-player-video-wrapper {
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: calc(100vh - 250px);
+}
+
 .openlist-video-tab-view .stream-player-video {
-    width: 100%;
-    height: 100%;
-    max-height: 80vh;
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: calc(100vh - 250px);
     object-fit: contain;
 }
 
@@ -1048,4 +1271,46 @@
         align-items: center;
         justify-content: center;
     }
+}
+
+/* 全屏模式下的强制样式重置 - 解决 inside-tab 类导致的尺寸限制 */
+.stream-player-container:fullscreen,
+.stream-player-container:-webkit-full-screen,
+.stream-player-container:-moz-full-screen {
+    width: 100vw !important;
+    height: 100vh !important;
+    max-width: none !important;
+    max-height: none !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #000 !important;
+}
+
+.stream-player-container:fullscreen .stream-player-video-wrapper,
+.stream-player-container:-webkit-full-screen .stream-player-video-wrapper,
+.stream-player-container:-moz-full-screen .stream-player-video-wrapper {
+    border-radius: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+.stream-player-container:fullscreen .stream-player-video,
+.stream-player-container:-webkit-full-screen .stream-player-video,
+.stream-player-container:-moz-full-screen .stream-player-video {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    object-fit: contain !important;
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    margin: auto !important;
 }

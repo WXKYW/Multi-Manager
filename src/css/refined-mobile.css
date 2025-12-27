@@ -1,6 +1,28 @@
 /* Refined Mobile Adaptation - API Monitor */
 
-/* --- 基础布局 --- */
+/* ============================================================
+   单页模式 (Single Page Mode) - 全面隐藏导航元素
+   ============================================================ */
+body.single-page-mode .header,
+body.single-page-mode .main-nav-container,
+body.single-page-mode .main-tabs,
+body.single-page-mode .main-tabs-sidebar,
+body.single-page-mode .btn-settings-toggle,
+body.single-page-mode .btn-settings-pc-bottom {
+    display: none !important;
+    visibility: hidden !important;
+}
+
+/* 单页模式下容器无需底部边距（底部导航已隐藏） */
+body.single-page-mode .container {
+    padding-bottom: 12px !important;
+}
+
+/* 单页模式下移除 sec-tabs 的顶部边距 */
+body.single-page-mode .sec-tabs,
+body.single-page-mode [class*="-sec-tabs"] {
+    margin-top: 8px !important;
+}
 @media (max-width: 768px) {
     .main-tab.active::after {
         width: 100%;

@@ -935,7 +935,6 @@
               <li v-if="agentInstallOS === 'linux'"><strong>一键安装</strong>：点击下方按钮自动通过 SSH 安装</li>
               <li><strong>手动安装</strong>：复制上方命令到服务器执行</li>
               <li>Agent 会自识别系统并安装为服务</li>
-              <li><strong>无需 Node.js</strong>：使用预编译二进制文件安装</li>
             </ol>
           </div>
 
@@ -1941,7 +1940,7 @@
 <!-- 视频播放器模态框 -->
 <div v-if="streamPlayer.visible" class="stream-player-overlay" @keydown.esc="closeVideoPlayer" tabindex="-1">
   <div class="stream-player-container"
-    :class="{ 'controls-visible': streamPlayer.showControls || streamPlayer.loading }">
+    :class="{ 'controls-visible': streamPlayer.showControls || streamPlayer.loading, 'dragging': streamPlayer.isDragging }">
 
     <!-- 顶部信息栏 -->
     <div class="stream-player-header">
@@ -1977,7 +1976,8 @@
     <!-- 控制栏 -->
     <div class="stream-player-controls">
       <!-- 进度条 -->
-      <div class="stream-player-progress" @click="handleProgressClick">
+      <div class="stream-player-progress" @mousedown="handleProgressMouseDown"
+        @touchstart.prevent="handleProgressMouseDown">
         <div class="stream-player-progress-buffered" :style="{ width: getBufferedPercent() + '%' }"></div>
         <div class="stream-player-progress-played" :style="{ width: getPlayedPercent() + '%' }"></div>
         <div class="stream-player-progress-thumb" :style="{ left: getPlayedPercent() + '%' }"></div>

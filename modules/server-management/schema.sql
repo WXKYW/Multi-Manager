@@ -108,6 +108,11 @@ CREATE TABLE IF NOT EXISTS server_metrics_history (
     docker_installed INTEGER DEFAULT 0,          -- Docker 是否安装
     docker_running INTEGER DEFAULT 0,            -- Docker 运行容器数
     docker_stopped INTEGER DEFAULT 0,            -- Docker 停止容器数
+    gpu_usage REAL DEFAULT 0,                    -- GPU 使用率 (%)
+    gpu_mem_used INTEGER DEFAULT 0,              -- GPU 显存已用 (MB)
+    gpu_mem_total INTEGER DEFAULT 0,             -- GPU 显存总量 (MB)
+    gpu_power REAL DEFAULT 0,                    -- GPU 功耗 (W)
+    platform TEXT,                               -- 平台信息
     recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (server_id) REFERENCES server_accounts(id) ON DELETE CASCADE
 );
@@ -119,3 +124,10 @@ CREATE INDEX IF NOT EXISTS idx_metrics_history_time ON server_metrics_history(re
 -- 迁移：monitor_mode 已简化为纯 Agent 模式，移除了 SSH 和双模式选项
 -- 旧数据库可能仍包含 'ssh' 或 'both' 值，应用层会统一按 Agent 模式处理
 -- ALTER TABLE server_accounts ADD COLUMN monitor_mode TEXT DEFAULT 'agent';
+
+-- 迁移：添加 GPU 监控字段 (v2.0.2)
+-- ALTER TABLE server_metrics_history ADD COLUMN gpu_usage REAL DEFAULT 0;
+-- ALTER TABLE server_metrics_history ADD COLUMN gpu_mem_used INTEGER DEFAULT 0;
+-- ALTER TABLE server_metrics_history ADD COLUMN gpu_mem_total INTEGER DEFAULT 0;
+-- ALTER TABLE server_metrics_history ADD COLUMN gpu_power REAL DEFAULT 0;
+-- ALTER TABLE server_metrics_history ADD COLUMN platform TEXT;

@@ -351,7 +351,11 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: 12px;
-    /* margin-bottom: 10px; */
+    align-items: stretch;
+}
+
+.server-details-grid>* {
+    height: 100%;
 }
 
 .server-detail-section {
@@ -2812,26 +2816,22 @@
     }
 }
 
-/* ==================== 鍘嗗彶鎸囨爣椤甸潰鏍峰紡 ==================== */
-
-/* 鏃堕棿鑼冨洿閫夋嫨鎸夐挳缁?*/
 .time-range-pills {
     display: flex;
-    gap: 6px;
-    padding: 4px;
+    gap: 2px;
+    padding: 0px;
     background: var(--bg-secondary);
     border-radius: 10px;
     border: 1px solid var(--border-color);
 }
 
-/* 鏃堕棿鑼冨洿閫夋嫨鑽墖鎸夐挳 */
 .pill-btn {
     padding: 6px 12px;
     border: none;
     background: transparent;
     color: var(--text-secondary);
-    border-radius: 6px;
-    font-size: 11px;
+    border-radius: 8.5px;
+    font-size: 12px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.15s ease;
@@ -3534,13 +3534,14 @@
         gap: 20px !important;
         width: 100% !important;
         align-items: center !important;
+        justify-content: center !important;
         background: rgba(var(--primary-rgb), 0.03) !important;
         padding: 4px 10px !important;
         border-radius: 8px !important;
     }
 
     .server-card-header .network-speed-mini>div {
-        flex: 1 !important;
+        flex: 0 0 auto !important;
     }
 
     .server-management-actions span {
@@ -3578,4 +3579,41 @@
         flex: 1 1 auto;
         justify-content: center;
     }
+}
+
+/* ==================== 翻转卡片 ==================== */
+.flip-card {
+    background-color: transparent;
+}
+
+.flip-card-inner {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    transform-style: preserve-3d;
+}
+
+.flip-card.flipped .flip-card-inner {
+    transform: rotateX(180deg);
+}
+
+.flip-card-front,
+.flip-card-back {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+}
+
+.flip-card-back {
+    transform: rotateX(180deg);
+}
+
+.flip-card h4:hover i.fa-sync-alt,
+.flip-card h4:hover i.fa-undo {
+    opacity: 1 !important;
+    transform: rotate(180deg);
+    transition: all 0.3s ease;
 }

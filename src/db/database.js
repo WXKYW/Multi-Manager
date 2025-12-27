@@ -266,6 +266,21 @@ class DatabaseService {
             } catch (err) {
                 logger.error('Server Accounts monitor_mode 迁移失败:', err.message);
             }
+
+            // Server Metrics History 迁移: 添加 platform 字段
+            try {
+                const metricsColumns = this.db.pragma('table_info(server_metrics_history)');
+                if (metricsColumns.length > 0) {
+                    const hasPlatform = metricsColumns.some(col => col.name === 'platform');
+                    if (!hasPlatform) {
+                        logger.info('正在为 server_metrics_history 表添加 platform 字段...');
+                        this.db.exec("ALTER TABLE server_metrics_history ADD COLUMN platform TEXT");
+                        logger.success('server_metrics_history.platform 字段添加成功');
+                    }
+                }
+            } catch (err) {
+                logger.error('Server Metrics History platform 迁移失败:', err.message);
+            }
         } catch (error) {
             logger.error('数据库迁移失败', error.message);
             // 不抛出错误，避免影响应用启动

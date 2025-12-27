@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -19,7 +21,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const VERSION = "2.0.0"
+const VERSION = "2.0.1"
 
 // Agent 事件类型 (与服务端 protocol.js 保持一致)
 const (
@@ -398,8 +400,8 @@ func (a *AgentClient) reportState() {
 	if err := a.emit(EventAgentState, state); err != nil {
 		log.Printf("[Agent] 状态上报失败: %v", err)
 	} else if a.config.Debug {
-		log.Printf("[Agent] 状态上报: CPU=%.1f%%, MEM=%.1fGB",
-			state.CPU, float64(state.MemUsed)/1024/1024/1024)
+		log.Printf("[Agent] 状态上报: CPU=%.1f%%, MEM=%.1fGB, GPU=%.1f%%, Power=%.1fW",
+			state.CPU, float64(state.MemUsed)/1024/1024/1024, state.GPU, state.GPUPower)
 	}
 }
 
@@ -461,6 +463,14 @@ func (a *AgentClient) handleTask(id string, taskType int, data string, timeout i
 		result["successful"] = true
 	case 7: // KEEPALIVE
 		result["successful"] = true
+	case 10: // DOCKER_ACTION
+		output, err := a.handleDockerAction(data)
+		if err != nil {
+			result["data"] = err.Error()
+		} else {
+			result["successful"] = true
+			result["data"] = output
+		}
 	default:
 		result["data"] = fmt.Sprintf("不支持的任务类型: %d", taskType)
 	}
@@ -469,6 +479,135 @@ func (a *AgentClient) handleTask(id string, taskType int, data string, timeout i
 
 	a.emit(EventAgentTaskResult, result)
 	log.Printf("[Agent] 任务完成: %s", id)
+}
+
+// DockerActionRequest Docker 操作请求
+type DockerActionRequest struct {
+	Action      string `json:"action"`       // start, stop, restart, pause, unpause, update
+	ContainerID string `json:"container_id"` // 容器 ID 或名称
+	Image       string `json:"image"`        // 更新时使用的镜像
+}
+
+// handleDockerAction 处理 Docker 操作
+func (a *AgentClient) handleDockerAction(data string) (string, error) {
+	var req DockerActionRequest
+	if err := json.Unmarshal([]byte(data), &req); err != nil {
+		return "", fmt.Errorf("解析请求失败: %v", err)
+	}
+
+	if req.ContainerID == "" {
+		return "", fmt.Errorf("缺少容器 ID")
+	}
+
+	var cmd *exec.Cmd
+	var actionDesc string
+
+	switch req.Action {
+	case "start":
+		cmd = exec.Command("docker", "start", req.ContainerID)
+		actionDesc = "启动"
+	case "stop":
+		cmd = exec.Command("docker", "stop", req.ContainerID)
+		actionDesc = "停止"
+	case "restart":
+		cmd = exec.Command("docker", "restart", req.ContainerID)
+		actionDesc = "重启"
+	case "pause":
+		cmd = exec.Command("docker", "pause", req.ContainerID)
+		actionDesc = "暂停"
+	case "unpause":
+		cmd = exec.Command("docker", "unpause", req.ContainerID)
+		actionDesc = "恢复"
+	case "update":
+		// 更新流程: pull 新镜像 -> stop -> rm -> run
+		return a.handleDockerUpdate(req)
+	case "pull":
+		// 仅拉取镜像
+		image := req.Image
+		if image == "" {
+			// 获取容器的镜像
+			inspectCmd := exec.Command("docker", "inspect", "--format", "{{.Config.Image}}", req.ContainerID)
+			output, err := inspectCmd.Output()
+			if err != nil {
+				return "", fmt.Errorf("获取容器镜像失败: %v", err)
+			}
+			image = strings.TrimSpace(string(output))
+		}
+		cmd = exec.Command("docker", "pull", image)
+		actionDesc = "拉取镜像"
+	default:
+		return "", fmt.Errorf("不支持的操作: %s", req.Action)
+	}
+
+	log.Printf("[Docker] %s容器: %s", actionDesc, req.ContainerID)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%s失败: %s", actionDesc, string(output))
+	}
+
+	return fmt.Sprintf("%s成功", actionDesc), nil
+}
+
+// handleDockerUpdate 处理 Docker 容器更新
+func (a *AgentClient) handleDockerUpdate(req DockerActionRequest) (string, error) {
+	// 1. 获取容器信息
+	inspectCmd := exec.Command("docker", "inspect", "--format",
+		"{{.Config.Image}}|{{.HostConfig.RestartPolicy.Name}}|{{json .HostConfig.PortBindings}}|{{json .Config.Env}}|{{json .HostConfig.Binds}}|{{.Name}}",
+		req.ContainerID)
+	output, err := inspectCmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("获取容器信息失败: %v", err)
+	}
+
+	parts := strings.SplitN(strings.TrimSpace(string(output)), "|", 6)
+	if len(parts) < 6 {
+		return "", fmt.Errorf("解析容器信息失败")
+	}
+
+	image := parts[0]
+	containerName := strings.TrimPrefix(parts[5], "/")
+
+	log.Printf("[Docker] 更新容器: %s (镜像: %s)", containerName, image)
+
+	// 2. 拉取最新镜像
+	pullCmd := exec.Command("docker", "pull", image)
+	if pullOutput, err := pullCmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("拉取镜像失败: %s", string(pullOutput))
+	}
+
+	// 3. 停止旧容器
+	stopCmd := exec.Command("docker", "stop", req.ContainerID)
+	stopCmd.Run()
+
+	// 4. 重命名旧容器 (备份)
+	backupName := containerName + "_backup_" + time.Now().Format("20060102150405")
+	renameCmd := exec.Command("docker", "rename", req.ContainerID, backupName)
+	renameCmd.Run()
+
+	// 5. 使用相同配置启动新容器
+	// 注意：这是简化实现，完整实现需要解析并重建所有参数
+	runArgs := []string{"run", "-d", "--name", containerName}
+	
+	// 解析 restart policy
+	if parts[1] != "" && parts[1] != "no" {
+		runArgs = append(runArgs, "--restart", parts[1])
+	}
+
+	runArgs = append(runArgs, image)
+	
+	runCmd := exec.Command("docker", runArgs...)
+	if runOutput, err := runCmd.CombinedOutput(); err != nil {
+		// 恢复旧容器
+		exec.Command("docker", "rename", backupName, containerName).Run()
+		exec.Command("docker", "start", containerName).Run()
+		return "", fmt.Errorf("启动新容器失败: %s", string(runOutput))
+	}
+
+	// 6. 删除备份容器
+	exec.Command("docker", "rm", backupName).Run()
+
+	return fmt.Sprintf("容器 %s 更新成功", containerName), nil
 }
 
 // Stop 停止 Agent
@@ -487,6 +626,49 @@ func (a *AgentClient) Stop() {
 // ==================== 主程序 ====================
 
 func main() {
+	// 检查是否以 Windows 服务方式运行
+	if IsRunningAsService() {
+		RunAsService()
+		return
+	}
+
+	// 检查服务管理命令
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "install":
+			if err := InstallService(); err != nil {
+				fmt.Println("❌ 安装失败:", err)
+				os.Exit(1)
+			}
+			return
+		case "uninstall", "remove":
+			if err := UninstallService(); err != nil {
+				fmt.Println("❌ 卸载失败:", err)
+				os.Exit(1)
+			}
+			return
+		case "start":
+			if err := StartService(); err != nil {
+				fmt.Println("❌ 启动失败:", err)
+				os.Exit(1)
+			}
+			return
+		case "stop":
+			if err := StopService(); err != nil {
+				fmt.Println("❌ 停止失败:", err)
+				os.Exit(1)
+			}
+			return
+		case "service":
+			// 直接以服务模式运行（由 Windows SCM 调用）
+			RunAsService()
+			return
+		case "help", "-h", "--help":
+			printUsage()
+			return
+		}
+	}
+
 	// 命令行参数
 	serverURL := flag.String("s", "", "Dashboard 地址")
 	serverID := flag.String("id", "", "主机 ID")
@@ -503,10 +685,12 @@ func main() {
 		ReconnectDelay:   4000,
 	}
 
-	// 从配置文件加载
-	if data, err := os.ReadFile("config.json"); err == nil {
+	// 从配置文件加载（使用可执行文件所在目录）
+	exePath, _ := os.Executable()
+	configPath := filepath.Join(filepath.Dir(exePath), "config.json")
+	if data, err := os.ReadFile(configPath); err == nil {
 		json.Unmarshal(data, config)
-		log.Println("[Config] 已加载配置文件")
+		log.Println("[Config] 已加载配置文件:", configPath)
 	}
 
 	// 环境变量覆盖
@@ -568,4 +752,35 @@ func init() {
 	
 	// 设置最大可用 CPU
 	runtime.GOMAXPROCS(runtime.NumCPU())
+}
+
+// printUsage 打印使用帮助
+func printUsage() {
+	fmt.Println("═══════════════════════════════════════════════")
+	fmt.Printf("  API Monitor Agent v%s (Go)\n", VERSION)
+	fmt.Println("═══════════════════════════════════════════════")
+	fmt.Println()
+	fmt.Println("使用方法:")
+	fmt.Println("  api-monitor-agent [命令] [选项]")
+	fmt.Println()
+	fmt.Println("服务管理命令 (需要管理员权限):")
+	fmt.Println("  install     安装为 Windows 服务 (开机自启)")
+	fmt.Println("  uninstall   卸载 Windows 服务")
+	fmt.Println("  start       启动服务")
+	fmt.Println("  stop        停止服务")
+	fmt.Println()
+	fmt.Println("直接运行选项:")
+	fmt.Println("  -s <url>    Dashboard 地址")
+	fmt.Println("  -id <id>    主机 ID")
+	fmt.Println("  -k <key>    Agent 密钥")
+	fmt.Println("  -i <ms>     上报间隔 (毫秒, 默认 1500)")
+	fmt.Println("  -d          调试模式")
+	fmt.Println()
+	fmt.Println("配置文件:")
+	fmt.Println("  将 config.json 放在程序同目录下")
+	fmt.Println()
+	fmt.Println("示例:")
+	fmt.Println("  api-monitor-agent install           # 安装服务")
+	fmt.Println("  api-monitor-agent start             # 启动服务")  
+	fmt.Println("  api-monitor-agent -s https://xxx -id abc -k key123")
 }

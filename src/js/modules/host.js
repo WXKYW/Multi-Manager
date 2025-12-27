@@ -46,6 +46,7 @@ export const hostMethods = {
                 this.serverForm.privateKey = defaultCred.private_key || '';
                 this.serverForm.passphrase = defaultCred.passphrase || '';
             }
+            this.selectedCredentialId = defaultCred.id; // 同步 UI 选中项
             console.log('[Server] 已应用默认凭据:', defaultCred.name);
         }
 
@@ -604,16 +605,18 @@ export const hostMethods = {
             const data = await response.json();
 
             if (data.success) {
-                // 导出时去除敏感字段
+                // 导出所有必要字段以支持恢复 (包含敏感字段)
                 const exportData = data.data.map(server => ({
                     name: server.name,
                     host: server.host,
                     port: server.port,
                     username: server.username,
                     auth_type: server.auth_type,
+                    password: server.password,
+                    private_key: server.private_key,
+                    passphrase: server.passphrase,
                     tags: server.tags,
                     description: server.description
-                    // 不导出密码和私钥
                 }));
 
                 const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
@@ -643,14 +646,21 @@ export const hostMethods = {
             // 收起：从数组中移除
             this.expandedServers.splice(index, 1);
         } else {
-            // 展开：添加到数组
-            this.expandedServers.push(serverId);
-
+            // 展开前检查主机是否在线
             const server = this.serverList.find(s => s.id === serverId);
             if (!server) return;
 
-            // 延迟加载历史指标图表，避免展开瞬间卡顿
-            setTimeout(() => this.loadCardMetrics(serverId), 300);
+            // 如果主机不在线或没有数据，不允许展开
+            if (server.status !== 'online' || !server.info) {
+                this.showGlobalToast('主机未连接，无法查看详情', 'warning');
+                return;
+            }
+
+            // 展开：添加到数组
+            this.expandedServers.push(serverId);
+
+            // 延迟加载历史指标图表，稍微增加延迟以确保动画完成且 DOM 尺寸稳定
+            setTimeout(() => this.loadCardMetrics(server), 600);
 
             // 不再强制刷新数据 - 实时数据由 Socket.IO 推送
         }
@@ -705,6 +715,7 @@ export const hostMethods = {
     },
 
     async loadServerList() {
+        if (this.serverLoading) return;
         this.serverLoading = true;
         try {
             const response = await fetch('/api/server/accounts');
@@ -720,6 +731,10 @@ export const hostMethods = {
                         ...server,
                         // 优先使用 API 返回的 info（首屏瞬显关键），如果本地已有且更新则保持本地
                         info: (existing && existing.info && !server.info) ? existing.info : server.info,
+                        // 保留指标数据缓存，防止刷新列表导致图表重绘失败
+                        metricsCache: (existing && existing.metricsCache) ? existing.metricsCache : null,
+                        gpuChartVisible: (existing && existing.gpuChartVisible) ? existing.gpuChartVisible : false,
+                        gpuLoading: (existing && existing.gpuLoading) ? existing.gpuLoading : false,
                         error: (existing && existing.error) ? existing.error : null,
                         loading: (existing && existing.loading) ? existing.loading : false
                     };
@@ -741,6 +756,25 @@ export const hostMethods = {
             this.serverList = [];
         } finally {
             this.serverLoading = false;
+
+            // 为已展开的主机重新加载/渲染指标图表 (解决刷新列表或切换标签后图表消失的问题)
+            if (this.expandedServers && this.expandedServers.length > 0) {
+                this.expandedServers.forEach(serverId => {
+                    const server = this.serverList.find(s => s.id === serverId);
+                    if (server) {
+                        // 预留更充足的时间给 DOM 初始化和动画
+                        setTimeout(() => {
+                            this.loadCardMetrics(server).then(records => {
+                                // 如果 GPU 图表当时处于可见（翻转）状态，也要手动触发重绘背面图表
+                                if (server.gpuChartVisible && records && records.length > 0) {
+                                    setTimeout(() => this.renderGpuChart(server.id, records, `gpu-chart-${server.id}`), 100);
+                                }
+                            });
+                        }, 800);
+                    }
+                });
+            }
+
             // 1. 首先尝试连接实时指标推送流 (秒级监控)
             if (this.isAuthenticated && this.mainActiveTab === 'server') {
                 this.connectMetricsStream();
@@ -882,14 +916,14 @@ export const hostMethods = {
             });
             const data = await response.json();
             if (data.success) {
-                this.showGlobalToast('Docker 操作已执行', 'success');
+                this.showGlobalToast(data.message || 'Docker 操作已执行', 'success');
                 // 延迟刷新以等待同步
                 setTimeout(() => this.loadServerInfo(serverId), 1000);
             } else {
-                this.showGlobalToast('操作失败: ' + data.message, 'error');
+                this.showGlobalToast('操作失败: ' + (data.error || data.message || '未知错误'), 'error');
             }
         } catch (error) {
-            this.showGlobalToast('Docker 操作异常', 'error');
+            this.showGlobalToast('Docker 操作异常: ' + error.message, 'error');
         } finally {
             if (server) server.loading = false;
         }
@@ -1015,8 +1049,11 @@ export const hostMethods = {
         const cred = this.serverCredentials.find(c => c.id == id);
         if (cred) {
             this.serverForm.username = cred.username;
-            this.serverForm.password = cred.password;
-            this.serverForm.authType = 'password';
+            this.serverForm.authType = cred.auth_type === 'key' ? 'privateKey' : 'password';
+            this.serverForm.password = cred.password || '';
+            this.serverForm.privateKey = cred.private_key || '';
+            this.serverForm.passphrase = cred.passphrase || '';
+            this.selectedCredentialId = id; // 同步选中项
         }
     },
 
@@ -1089,6 +1126,308 @@ export const hostMethods = {
         if (percent > 90) return 'danger';
         if (percent > 75) return 'warning';
         return '';
+    },
+
+    async toggleGpuChart(server) {
+        server.gpuChartVisible = !server.gpuChartVisible;
+
+        // 如果翻转到背面，渲染或重绘 GPU 图表
+        if (server.gpuChartVisible) {
+            // 获取数据 (优先使用本地缓存)
+            let records = server.metricsCache || (this.groupedMetricsHistory ? this.groupedMetricsHistory[server.id] : null);
+
+            // 如果数据未加载，立即触发加载
+            if (!records || records.length === 0) {
+                server.gpuLoading = true;
+                records = await this.loadCardMetrics(server);
+                server.gpuLoading = false;
+            }
+
+            // 启动渲染逻辑
+            if (records && records.length > 0) {
+                // 增加延迟到 400ms，确保旋转动画过半，DOM 尺寸计算稳定，防止白屏
+                setTimeout(() => {
+                    this.renderGpuChart(server.id, records, `gpu-chart-${server.id}`);
+                }, 400);
+            }
+        }
+    },
+
+    /**
+     * 渲染 GPU 趋势图
+     */
+    async renderGpuChart(serverId, records = null, canvasId = null, retryCount = 0) {
+        // 确保 Chart.js 已加载
+        if (!window.Chart) {
+            console.warn('[GPU Chart] Chart.js 未加载');
+            return;
+        }
+
+        const cid = canvasId || `gpu-chart-${serverId}`;
+        const canvas = document.getElementById(cid);
+        if (!canvas) {
+            // Canvas 不存在，可能动画还没完成，稍后重试
+            if (retryCount < 3) {
+                setTimeout(() => this.renderGpuChart(serverId, records, canvasId, retryCount + 1), 200);
+            }
+            return;
+        }
+
+        // 检查 canvas 尺寸是否为 0（可能在翻转动画中）
+        const rect = canvas.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) {
+            if (retryCount < 5) {
+                // 尺寸为 0，稍后重试
+                setTimeout(() => this.renderGpuChart(serverId, records, canvasId, retryCount + 1), 200);
+                return;
+            }
+            console.warn(`[GPU Chart] Canvas ${cid} has zero size after ${retryCount} retries, skipping render`);
+            return;
+        }
+
+        // 获取历史数据
+        try {
+            const response = await fetch(`/api/server/monitor/history?serverId=${serverId}&page=1&pageSize=50`, {
+                headers: this.getAuthHeaders ? this.getAuthHeaders() : {}
+            });
+            const data = await response.json();
+
+            if (!data.success || !data.data || data.data.length === 0) {
+                return;
+            }
+
+            // 按时间正序排列
+            const records = [...data.data].sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
+
+            // 准备数据
+            const labels = records.map(r => {
+                const d = new Date(r.recorded_at);
+                return d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0');
+            });
+            const gpuUsageData = records.map(r => r.gpu_usage || 0);
+            const gpuMemData = records.map(r => Math.round((r.gpu_mem_used / (r.gpu_mem_total || 1)) * 100) || 0);
+            const gpuPowerData = records.map(r => r.gpu_power || 0);
+
+            // 销毁已存在的实例
+            const existingChart = Chart.getChart(canvas);
+            if (existingChart) {
+                existingChart.destroy();
+            }
+
+            // 创建图表
+            new Chart(canvas, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: 'GPU %',
+                            data: gpuUsageData,
+                            borderColor: '#76b900',
+                            backgroundColor: 'rgba(118, 185, 0, 0.1)',
+                            fill: true,
+                            tension: 0.4,
+                            pointRadius: 0,
+                            borderWidth: 2,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'VRAM %',
+                            data: gpuMemData,
+                            borderColor: '#8bc34a',
+                            borderDash: [3, 3],
+                            fill: false,
+                            tension: 0.4,
+                            pointRadius: 0,
+                            borderWidth: 1.5,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'Power (W)',
+                            data: gpuPowerData,
+                            borderColor: '#ff9800',
+                            fill: false,
+                            tension: 0.4,
+                            pointRadius: 0,
+                            borderWidth: 1,
+                            yAxisID: 'y1',
+                            hidden: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                boxWidth: 8,
+                                padding: 8,
+                                font: { size: 10 },
+                                color: '#888'
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            backgroundColor: 'rgba(0,0,0,0.8)',
+                            titleFont: { size: 11 },
+                            bodyFont: { size: 10 },
+                            callbacks: {
+                                label: (ctx) => {
+                                    const val = ctx.parsed.y;
+                                    const label = ctx.dataset.label;
+                                    if (label.includes('%') || label.includes('GPU')) {
+                                        return `${label}: ${val}%`;
+                                    }
+                                    return `${label}: ${val}W`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            grid: { display: false },
+                            ticks: { font: { size: 9 }, color: '#666', maxTicksLimit: 6 }
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            min: 0,
+                            max: 100,
+                            grid: { color: 'rgba(128,128,128,0.1)' },
+                            ticks: { font: { size: 9 }, color: '#666', callback: v => v + '%' }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            min: 0,
+                            suggestedMax: 200,
+                            grid: { drawOnChartArea: false },
+                            ticks: { font: { size: 9 }, color: '#ff9800', callback: v => v + 'W' }
+                        }
+                    },
+                    interaction: {
+                        mode: 'nearest',
+                        axis: 'x',
+                        intersect: false
+                    }
+                }
+            });
+        } catch (error) {
+            console.error('[GPU Chart] 加载失败:', error);
+        }
+    },
+
+    // 获取操作系统图标 (Font Awesome)
+    getOSIcon(platform) {
+        if (!platform) return 'fas fa-server';
+        const p = platform.toLowerCase();
+
+        // Windows
+        if (p.includes('windows') || p.includes('win')) return 'fab fa-windows';
+
+        // Linux 发行版
+        if (p.includes('debian')) return 'fab fa-debian';
+        if (p.includes('ubuntu')) return 'fab fa-ubuntu';
+        if (p.includes('centos')) return 'fab fa-centos';
+        if (p.includes('fedora')) return 'fab fa-fedora';
+        if (p.includes('redhat') || p.includes('rhel')) return 'fab fa-redhat';
+        if (p.includes('suse') || p.includes('opensuse')) return 'fab fa-suse';
+        if (p.includes('arch')) return 'fab fa-linux'; // Arch 无特定图标
+        if (p.includes('alpine')) return 'fab fa-linux';
+        if (p.includes('linux')) return 'fab fa-linux';
+
+        // macOS
+        if (p.includes('darwin') || p.includes('macos') || p.includes('mac os')) return 'fab fa-apple';
+
+        // BSD
+        if (p.includes('freebsd') || p.includes('openbsd') || p.includes('netbsd')) return 'fab fa-freebsd';
+
+        return 'fas fa-server';
+    },
+
+    // 获取操作系统颜色
+    getOSColor(platform) {
+        if (!platform) return 'var(--text-tertiary)';
+        const p = platform.toLowerCase();
+
+        if (p.includes('windows')) return '#00adef'; // Windows 蓝
+        if (p.includes('debian')) return '#a80030'; // Debian 红
+        if (p.includes('ubuntu')) return '#e95420'; // Ubuntu 橙
+        if (p.includes('centos')) return '#932279'; // CentOS 紫
+        if (p.includes('fedora')) return '#294172'; // Fedora 蓝
+        if (p.includes('redhat') || p.includes('rhel')) return '#ee0000'; // RedHat 红
+        if (p.includes('suse') || p.includes('opensuse')) return '#73ba25'; // SUSE 绿
+        if (p.includes('arch')) return '#1793d1'; // Arch 蓝
+        if (p.includes('alpine')) return '#0d597f'; // Alpine 蓝
+        if (p.includes('darwin') || p.includes('macos')) return '#999999'; // Apple 灰
+        if (p.includes('freebsd')) return '#ab2b28'; // FreeBSD 红
+        if (p.includes('linux')) return '#fcc624'; // Linux 黄
+
+        return 'var(--text-tertiary)';
+    },
+
+    // 格式化平台名称为简短版本 (如 Windows11, Debian12)
+    formatPlatformShort(platform, version) {
+        if (!platform) return '';
+        const p = platform.toLowerCase();
+
+        // 提取主版本号
+        let ver = '';
+        if (version) {
+            // 尝试提取主版本号 (如 "10.0.26200" -> "11", "12.0" -> "12")
+            const verMatch = version.match(/(\d+)/);
+            if (verMatch) ver = verMatch[1];
+        }
+
+        // Windows 特殊处理
+        if (p.includes('windows')) {
+            // 根据内核版本判断 Windows 版本
+            if (version) {
+                if (version.includes('26') || version.includes('22') || version.includes('21')) {
+                    return 'Win11';
+                } else if (version.includes('19') || version.includes('18')) {
+                    return 'Win10';
+                }
+            }
+            if (p.includes('11')) return 'Win11';
+            if (p.includes('10')) return 'Win10';
+            if (p.includes('server')) return 'WinSrv';
+            return 'Windows';
+        }
+
+        // Linux 发行版
+        if (p.includes('debian')) return 'Debian' + ver;
+        if (p.includes('ubuntu')) return 'Ubuntu' + ver;
+        if (p.includes('centos')) return 'CentOS' + ver;
+        if (p.includes('fedora')) return 'Fedora' + ver;
+        if (p.includes('redhat') || p.includes('rhel')) return 'RHEL' + ver;
+        if (p.includes('rocky')) return 'Rocky' + ver;
+        if (p.includes('alma')) return 'Alma' + ver;
+        if (p.includes('arch')) return 'Arch';
+        if (p.includes('alpine')) return 'Alpine' + ver;
+        if (p.includes('opensuse')) return 'openSUSE';
+        if (p.includes('suse')) return 'SUSE' + ver;
+
+        // macOS
+        if (p.includes('darwin') || p.includes('macos') || p.includes('mac os')) {
+            return 'macOS' + ver;
+        }
+
+        // BSD
+        if (p.includes('freebsd')) return 'FreeBSD' + ver;
+        if (p.includes('openbsd')) return 'OpenBSD';
+
+        // 通用 Linux
+        if (p.includes('linux')) return 'Linux';
+
+        return platform.substring(0, 10);
     },
 
     formatUptime(uptimeStr) {

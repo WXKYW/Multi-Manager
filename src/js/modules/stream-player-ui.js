@@ -50,6 +50,7 @@ if (!store.streamPlayer) {
             bufferedTime: 0,
             isDragging: false,
             dragTime: 0,
+            webFullscreen: false,
 
             // 播放速度选项
             playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]
@@ -196,6 +197,27 @@ export const streamPlayerMethods = {
 
             container.onmouseup = stopLongPress;
             container.onmouseleave = stopLongPress;
+
+            // 滚轮控制：普通滚轮调音量，Shift+滚轮调进度
+            container.onwheel = (e) => {
+                e.preventDefault();
+                const delta = e.deltaY > 0 ? -1 : 1; // 向上滚动为正
+
+                if (e.shiftKey) {
+                    // Shift + 滚轮：精细调整进度 (±5秒)
+                    this.skipVideo(delta * 5);
+                    this._showAnimation('seek', `${delta > 0 ? '+' : ''}${delta * 5}s`);
+                } else {
+                    // 普通滚轮：精细调整音量 (±5%)
+                    const video = streamPlayer.state?.videoElement || document.getElementById('stream-player-video');
+                    if (video) {
+                        const newVolume = Math.max(0, Math.min(1, video.volume + delta * 0.05));
+                        video.volume = newVolume;
+                        video.muted = false;
+                        this._showAnimation('volume', `${Math.round(newVolume * 100)}%`);
+                    }
+                }
+            };
         }
 
         // 核心事件
@@ -321,14 +343,62 @@ export const streamPlayerMethods = {
     },
 
     /**
-     * 调整进度
+     * 进度条拖动开始
+     * 支持鼠标和触摸，拖动时只更新视觉，松手后才 seek
      */
-    handleProgressClick(e) {
-        const rect = e.currentTarget.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const percent = Math.max(0, Math.min(1, x / rect.width));
-        if (store.streamPlayer.duration) {
-            streamPlayer.seek(percent * store.streamPlayer.duration);
+    handleProgressMouseDown(e) {
+        const video = streamPlayer.state?.videoElement || document.getElementById('stream-player-video');
+        if (!video || !store.streamPlayer.duration) return;
+
+        const isTouch = e.type.startsWith('touch');
+        const target = e.currentTarget;
+        const container = target.closest('.stream-player-container');
+
+        store.streamPlayer.isDragging = true;
+        if (container) container.classList.add('dragging');
+
+        const update = (ex) => {
+            const rect = target.getBoundingClientRect();
+            const clientX = (isTouch && ex.touches)
+                ? ex.touches[0].clientX
+                : (ex.clientX || (ex.changedTouches && ex.changedTouches[0].clientX));
+            const pos = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+            store.streamPlayer.dragTime = pos * store.streamPlayer.duration;
+        };
+
+        update(e);
+
+        const finishDrag = () => {
+            // 先更新 currentTime 为目标位置，防止视觉回跳
+            store.streamPlayer.currentTime = store.streamPlayer.dragTime;
+            // 然后执行 seek
+            streamPlayer.seek(store.streamPlayer.dragTime);
+            // 最后清除拖动状态
+            store.streamPlayer.isDragging = false;
+            if (container) container.classList.remove('dragging');
+        };
+
+        if (isTouch) {
+            const onTouchMove = (te) => {
+                if (te.cancelable) te.preventDefault();
+                update(te);
+            };
+            const onTouchEnd = () => {
+                finishDrag();
+                document.removeEventListener('touchmove', onTouchMove);
+                document.removeEventListener('touchend', onTouchEnd);
+            };
+            document.addEventListener('touchmove', onTouchMove, { passive: false });
+            document.addEventListener('touchend', onTouchEnd);
+        } else {
+            const onMouseMove = (me) => update(me);
+            const onMouseUp = () => {
+                finishDrag();
+                document.removeEventListener('mousemove', onMouseMove);
+                document.removeEventListener('mouseup', onMouseUp);
+            };
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
         }
     },
 
@@ -346,6 +416,22 @@ export const streamPlayerMethods = {
      */
     async toggleVideoPiP() {
         await streamPlayer.togglePictureInPicture();
+    },
+
+    /**
+     * 切换网页全屏（铺满 app-main 区域）
+     */
+    toggleWebFullscreen() {
+        store.streamPlayer.webFullscreen = !store.streamPlayer.webFullscreen;
+        const container = document.querySelector('.stream-player-container.inside-tab');
+        const appMain = document.querySelector('.app-main');
+        
+        if (container) {
+            container.classList.toggle('web-fullscreen', store.streamPlayer.webFullscreen);
+        }
+        if (appMain) {
+            appMain.classList.toggle('video-web-fullscreen', store.streamPlayer.webFullscreen);
+        }
     },
 
     /**
@@ -398,10 +484,12 @@ export const streamPlayerMethods = {
 
     /**
      * 获取进度百分比
+     * 拖动时使用 dragTime，否则使用 currentTime
      */
     getPlayedPercent() {
         if (!store.streamPlayer.duration) return 0;
-        return (store.streamPlayer.currentTime / store.streamPlayer.duration) * 100;
+        const time = store.streamPlayer.isDragging ? store.streamPlayer.dragTime : store.streamPlayer.currentTime;
+        return (time / store.streamPlayer.duration) * 100;
     },
 
     /**

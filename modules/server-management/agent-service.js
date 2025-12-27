@@ -132,8 +132,8 @@ class AgentService {
                 origin: '*',
                 methods: ['GET', 'POST']
             },
-            pingTimeout: 10000,
-            pingInterval: 5000
+            pingTimeout: 30000,
+            pingInterval: 10000
         });
 
         // Agent 命名空间 - 处理 Agent 连接
@@ -161,7 +161,7 @@ class AgentService {
 
         // 获取采集间隔 (优先从配置读取，默认 300 秒)
         const config = ServerMonitorConfig.get();
-        const intervalSec = config?.metrics_collect_interval || 300;
+        const intervalSec = config?.metrics_collect_interval || 60;
         const intervalMs = intervalSec * 1000;
 
         this.log(`历史指标自动采集已启动 (间隔: ${intervalSec}秒)`);
@@ -215,7 +215,12 @@ class AgentService {
                     disk_usage: frontendMetrics.disk_percent || 0,
                     docker_installed: frontendMetrics.docker?.installed ? 1 : 0,
                     docker_running: frontendMetrics.docker?.running || 0,
-                    docker_stopped: frontendMetrics.docker?.stopped || 0
+                    docker_stopped: frontendMetrics.docker?.stopped || 0,
+                    gpu_usage: parseFloat(frontendMetrics.gpu_usage) || 0,
+                    gpu_mem_used: frontendMetrics.gpu_mem_used || 0,
+                    gpu_mem_total: hostInfo.gpu_mem_total || 0,
+                    gpu_power: parseFloat(frontendMetrics.gpu_power) || 0,
+                    platform: frontendMetrics.platform || ''
                 });
                 collected++;
             }
@@ -238,10 +243,11 @@ class AgentService {
 
         this.log(`Agent 连接中: ${socket.id}`);
 
-        // 设置认证超时 (10 秒内必须完成认证)
         const authTimeout = setTimeout(() => {
             if (!authenticated) {
-                console.warn(`[AgentService] Agent 认证超时: ${socket.id}`);
+                const msg = `Agent 认证超时: ${socket.id}`;
+                console.warn(`[AgentService] ${msg}`);
+                this.log(msg);
                 socket.emit(Events.DASHBOARD_AUTH_FAIL, { reason: 'Authentication timeout' });
                 socket.disconnect();
             }
@@ -283,11 +289,19 @@ class AgentService {
                 return;
             }
 
-            // 检查是否有旧连接，断开它
+            // 检查是否有旧连接，静默断开它 (不触发离线状态)
             const oldSocket = this.connections.get(serverId);
-            if (oldSocket && oldSocket.id !== socket.id) {
-                this.log(`断开旧连接: ${serverId}`);
-                oldSocket.disconnect();
+            let isReconnect = false;
+            if (oldSocket) {
+                if (oldSocket.id !== socket.id) {
+                    this.log(`替换旧连接: ${serverId}`);
+                    oldSocket._isReplaced = true; // 标记为被替换，避免触发离线状态
+                    oldSocket.disconnect();
+                    isReconnect = true;
+                } else {
+                    // 同一个 socket 重复认证，忽略日志
+                    return;
+                }
             }
 
             // 注册新连接
@@ -308,7 +322,14 @@ class AgentService {
             // 广播上线状态给前端
             this.broadcastServerStatus(serverId, 'online');
 
-            console.log(`[AgentService] Agent 上线: ${serverId}`);
+            // 仅在非重连时打印上线日志
+            if (!isReconnect) {
+                const msg = `Agent 上线: ${serverId}`;
+                console.log(`[AgentService] ${msg}`);
+                this.log(msg);
+            } else {
+                this.log(`Agent 重连: ${serverId}`);
+            }
         });
 
         // 2. 接收主机硬件信息
@@ -320,7 +341,7 @@ class AgentService {
                 received_at: Date.now()
             });
 
-            this.log(`收到主机信息: ${serverId} (${hostInfo.platform} ${hostInfo.platform_version})`);
+            this.log(`收到主机信息: ${serverId} (${hostInfo.platform} ${hostInfo.platform_version}), Cores: ${hostInfo.cores}, CPU List: ${JSON.stringify(hostInfo.cpu)}`);
         });
 
         // 3. 接收实时状态
@@ -347,7 +368,16 @@ class AgentService {
             this.resetHeartbeat(serverId);
 
             // 转换为前端格式并广播
-            const hostInfo = this.hostInfoCache.get(serverId) || {};
+            let hostInfo = this.hostInfoCache.get(serverId) || {};
+
+            // 如果 hostInfo 缺少关键静态信息（如核心数或 GPU 型号），主动请求 Agent 重新上报
+            if (!hostInfo.cores && !hostInfo._requestedAt) {
+                // 标记已请求，避免重复请求
+                this.hostInfoCache.set(serverId, { ...hostInfo, _requestedAt: Date.now() });
+                this.requestHostInfo(serverId);
+                this.log(`主机信息缺失，已请求 Agent 重新上报: ${serverId}`);
+            }
+
             const frontendData = stateToFrontendFormat(state, hostInfo);
 
             this.broadcastMetrics(serverId, frontendData);
@@ -371,7 +401,15 @@ class AgentService {
         // 5. 断开连接
         socket.on('disconnect', (reason) => {
             if (serverId) {
-                console.log(`[AgentService] Agent 离线: ${serverId}`);
+                const msg = `Agent 离线: ${serverId} (${reason})`;
+                this.log(msg);
+                // 如果是被新连接替换，不更新离线状态
+                if (socket._isReplaced) {
+                    this.log(`旧连接已被替换: ${serverId}`);
+                    return;
+                }
+
+                console.log(`[AgentService] ${msg}`);
                 this.connections.delete(serverId);
                 this.stopHeartbeat(serverId);
                 this.updateServerStatus(serverId, 'offline');
@@ -868,10 +906,10 @@ BINARY_BASE_URL="${binaryBaseUrl}"
 ARCH=${$}(uname -m)
 case ${$}ARCH in
     x86_64)
-        BINARY_NAME="agent-linux-amd64"
+        BINARY_NAME="am-agent-linux"
         ;;
     aarch64|arm64)
-        BINARY_NAME="agent-linux-arm64"
+        BINARY_NAME="am-agent-linux-arm64"
         ;;
     *)
         echo -e "${$}{RED}错误: 不支持的架构 ${$}ARCH${$}{NC}"
@@ -1024,7 +1062,7 @@ $SERVER_URL = "${serverUrl}"
 $SERVER_ID = "${serverId}"
 $AGENT_KEY = "${agentKey}"
 $INSTALL_DIR = "$env:LOCALAPPDATA\\api-monitor-agent"
-$BINARY_URL = "${binaryBaseUrl}/agent-windows-amd64.exe"
+$BINARY_URL = "${binaryBaseUrl}/am-agent-win.exe"
 $taskName = "APIMonitorAgent"
 
 Write-Host ">>> API Monitor Agent 安装/升级脚本 (Go 版)" -ForegroundColor Cyan
@@ -1042,7 +1080,7 @@ if ((Test-Path $oldExe) -or (Test-Path $newExe)) {
 # 2. 停止现有任务
 $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 if ($existingTask) {
-    Write-Host "⏹ 停止现有任务..." -ForegroundColor Yellow
+    Write-Host "⏹  停止现有任务..." -ForegroundColor Yellow
     Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
 }
@@ -1074,7 +1112,7 @@ Set-Location $INSTALL_DIR
 Write-Host "📥 下载 Agent 二进制文件..." -ForegroundColor Yellow
 $tempExe = Join-Path $INSTALL_DIR "agent.exe.new"
 try {
-    Invoke-WebRequest -Uri $BINARY_URL -OutFile $tempExe
+    Invoke-WebRequest -Uri $BINARY_URL -OutFile $tempExe -UseBasicParsing
     # 原子替换
     if (Test-Path $newExe) { Remove-Item $newExe -Force }
     Rename-Item $tempExe "agent.exe"

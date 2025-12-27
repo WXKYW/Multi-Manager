@@ -35,7 +35,9 @@ const TaskTypes = {
     FILE_UPLOAD: 4,       // 文件上传
     UPGRADE: 5,           // Agent 升级
     REPORT_HOST_INFO: 6,  // 请求上报主机信息
-    KEEPALIVE: 7          // 心跳保活
+    KEEPALIVE: 7,         // 心跳保活
+    DOCKER_ACTION: 10,    // Docker 容器操作
+    DOCKER_CHECK_UPDATE: 11 // Docker 检查更新
 };
 
 // ==================== 数据结构 ====================
@@ -209,6 +211,11 @@ function stateToFrontendFormat(state, hostInfo = {}) {
     const udpConn = safeNumber(state.udp_conn_count);
     const uptime = safeNumber(state.uptime);
 
+    // GPU 显存
+    const gpuMemUsed = safeNumber(state.gpu_mem_used);
+    const gpuMemTotal = safeNumber(hostInfo.gpu_mem_total) || 1;
+    const gpuMemPercent = gpuMemTotal > 0 ? Math.min(100, (gpuMemUsed / gpuMemTotal) * 100) : 0;
+
     // 计算百分比
     const memPercent = memTotal > 0 ? Math.min(100, (memUsed / memTotal) * 100) : 0;
     const diskPercent = diskTotal > 0 ? Math.min(100, (diskUsed / diskTotal) * 100) : 0;
@@ -220,7 +227,7 @@ function stateToFrontendFormat(state, hostInfo = {}) {
     return {
         cpu_usage: cpu.toFixed(1) + '%',
         load: `${load1.toFixed(2)} ${load5.toFixed(2)} ${load15.toFixed(2)}`,
-        cores: hostInfo.cpu?.length || 1,
+        cores: safeNumber(hostInfo.cores || hostInfo.Cores) || (hostInfo.cpu?.length || 1),
         // 保持前端兼容的格式: "使用量/总量MB"
         mem: `${memUsedMB}/${memTotalMB}MB`,
         mem_usage: `${memUsedMB}/${memTotalMB}MB`,
@@ -239,6 +246,16 @@ function stateToFrontendFormat(state, hostInfo = {}) {
             connections: tcpConn + udpConn
         },
         docker: state.docker || { installed: false, running: 0, stopped: 0, containers: [] },
+        gpu: safeNumber(state.gpu),
+        gpu_usage: safeNumber(state.gpu).toFixed(1) + '%',
+        gpu_mem: `${formatBytes(gpuMemUsed)}/${formatBytes(gpuMemTotal)}`,
+        gpu_mem_used: gpuMemUsed, // 改回 Byte，保持与 Total 一致
+        gpu_mem_percent: gpuMemPercent,
+        gpu_power: safeNumber(state.gpu_power).toFixed(0) + 'W',
+        gpu_model: Array.isArray(hostInfo.gpu) && hostInfo.gpu.length > 0 ? hostInfo.gpu[0] : '',
+        platform: hostInfo.platform || '',
+        platformVersion: hostInfo.platform_version || hostInfo.platformVersion || '',
+        agent_version: hostInfo.agent_version || '',
         uptime: formatUptime(uptime),
         timestamp: Date.now()
     };

@@ -763,6 +763,18 @@ const app = createApp({
           // 已有 Socket.IO 实时数据时不刷新（避免跳变）
           if (this.serverList.length === 0) {
             this.loadServerList();
+          } else {
+            // 为已展开的卡片重新加载图表（切换标签页后 canvas 需要重新渲染）
+            this.$nextTick(() => {
+              if (this.expandedServers && this.expandedServers.length > 0) {
+                this.expandedServers.forEach(serverId => {
+                  const server = this.serverList.find(s => s.id === serverId);
+                  if (server) {
+                    setTimeout(() => this.loadCardMetrics(server), 300);
+                  }
+                });
+              }
+            });
           }
         } else if (newVal === 'terminal') {
           // 切换到 SSH 终端视图时，恢复 DOM 挂载并调整大小
@@ -891,11 +903,10 @@ const app = createApp({
                 }
                 break;
               case 'server':
-                // 仅在列表为空时加载（已有数据时依赖 Socket.IO 实时流）
-                if (this.serverList.length === 0) {
-                  this.loadFromServerListCache();
-                  this.loadServerList();
-                }
+                // 始终加载列表以确保状态同步和触发卡片监控加载
+                this.loadFromServerListCache();
+                this.loadServerList();
+
                 // 如果当前选中的是管理子标签，确保加载配置和相关数据
                 if (this.serverCurrentTab === 'management') {
                   this.loadMonitorConfig();
@@ -965,10 +976,8 @@ const app = createApp({
               this.loadOpenListAccounts();
               break;
             case 'server':
-              // 仅在列表为空时加载
-              if (this.serverList.length === 0) {
-                this.loadServerList();
-              }
+              // 统一入口：加载主机列表并触发已展开卡片的指标渲染
+              this.loadServerList();
               break;
             case 'antigravity':
               if (this.antigravityCurrentTab === 'quotas') {

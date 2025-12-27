@@ -43,7 +43,8 @@
                 <div :class="['server-status-indicator', server.status || 'unknown']"></div>
                 <div class="ssh-quick-item-info">
                   <div class="ssh-quick-item-name">{{ server.name }}</div>
-                  <div class="ssh-quick-item-host">{{ server.host }}</div>
+                  <div v-if="server.host && server.host !== '0.0.0.0'" class="ssh-quick-item-host">{{ server.host }}
+                  </div>
                 </div>
                 <i class="fas fa-arrow-right"></i>
               </div>
@@ -139,6 +140,12 @@
 
           <div style="display: flex; flex-direction: column; min-width: 0;">
             <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <!-- OS Icon based on platform -->
+              <i v-if="server.info && server.info.platform" :class="getOSIcon(server.info.platform)"
+                :style="{ color: getOSColor(server.info.platform), fontSize: '14px', width: '16px', textAlign: 'center' }"
+                :title="server.info.platform + ' ' + (server.info.platformVersion || '')"></i>
+              <i v-else class="fas fa-server"
+                style="color: var(--text-tertiary); font-size: 14px; width: 16px; text-align: center;" title="未知系统"></i>
               <span
                 style="font-size: 15px; font-weight: 700; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{
                 server.name }}</span>
@@ -250,6 +257,24 @@
                 }"></div>
             </div>
           </div>
+
+          <!-- GPU Micro-meter (only show when GPU Model exists) -->
+          <div v-if="server.info && server.info.gpu && server.info.gpu.Model" class="meter-item"
+            style="flex: 1; min-width: 60px; max-width: 80px;">
+            <div
+              style="display: flex; justify-content: space-between; font-size: 10px; font-weight: 800; color: var(--text-tertiary); margin-bottom: 4px; text-transform: uppercase;">
+              <span>GPU</span>
+              <span style="color: #76b900;">{{ server.info.gpu.Usage || '0%' }}</span>
+            </div>
+            <div style="height: 4px; background: var(--bg-tertiary); border-radius: 2px; overflow: hidden;">
+              <div :style="{ 
+                  width: server.info.gpu.Usage || '0%', height: '100%', 
+                  transition: 'width 0.5s ease, background 0.3s ease',
+                  background: 'linear-gradient(90deg, #76b900, #8bc34a)',
+                  boxShadow: '0 0 4px rgba(118, 185, 0, 0.3)'
+                }"></div>
+            </div>
+          </div>
         </div>
 
 
@@ -343,7 +368,12 @@
             <div class="server-details-grid">
               <!-- 系统信息 -->
               <div class="server-detail-section">
-                <h4><i class="fas fa-microchip"></i> 硬件载荷</h4>
+                <h4>
+                  <i class="fas fa-microchip"></i> 硬件载荷
+                  <span v-if="server.info.platformShort"
+                    style="font-size: 11px; font-weight: 400; opacity: 0.7; margin-left: 8px;">{{
+                    server.info.platformShort }}</span>
+                </h4>
                 <div v-if="server.info.cpu && server.info.cpu.Load" class="server-detail-item"
                   style="border:none; padding-bottom: 4px;">
                   <span class="server-detail-label">系统负载 (1/5/15min)</span>
@@ -379,10 +409,13 @@
                     <span style="font-size: 10px; color: #3b82f6; display: flex; align-items: center; gap: 4px;">
                       <span style="width: 6px; height: 6px; border-radius: 50%; background: #3b82f6;"></span> Mem
                     </span>
+                    <span v-if="server.info.gpu !== undefined && server.info.gpu !== null"
+                      style="font-size: 10px; color: #76b900; display: flex; align-items: center; gap: 4px;">
+                      <span style="width: 6px; height: 6px; border-radius: 50%; background: #76b900;"></span> GPU
+                    </span>
                   </div>
                 </div>
-                <div
-                  style="height: 145px; position: relative; background: var(--bg-tertiary); border-radius: 12px; padding: 8px; border: 1px solid var(--border-color);">
+                <div style="height: 145px; position: relative; border-radius: 12px">
                   <canvas :id="'metrics-chart-card-' + server.id"></canvas>
                   <!-- 无数据状态提示 -->
                   <div v-if="!server.info || server.loading"
@@ -393,23 +426,92 @@
                 </div>
               </div>
 
-              <!-- 存储资源 -->
-              <div class="server-detail-section">
-                <h4><i class="fas fa-database"></i> 存储资源</h4>
-                <!-- 只显示主分区或第一个分区 -->
-                <div v-if="server.info.disk && server.info.disk.length > 0">
-                  <div class="server-detail-item">
-                    <span class="server-detail-label">主存储 ({{ server.info.disk[0].device }})</span>
-                    <span class="server-detail-value">{{ server.info.disk[0].used }} / {{
-                      server.info.disk[0].total }}</span>
+              <!-- 计算与存储 (翻转卡片) -->
+              <!-- 计算与存储 (翻转卡片) -->
+              <div class="flip-card" :class="{ 'flipped': server.gpuChartVisible }" @click="toggleGpuChart(server)"
+                style="height: 100%; min-height: 190px; perspective: 1000px; cursor: pointer; margin-bottom: 0;"
+                title="点击翻转查看 GPU 趋势">
+                <div class="flip-card-inner"
+                  style="position: relative; width: 100%; height: 100%; transition: transform 0.6s; transform-style: preserve-3d;">
+                  <!-- 正面: 信息 -->
+                  <div class="flip-card-front server-detail-section"
+                    style="position: absolute; inset: 0; backface-visibility: hidden; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden;">
+                    <h4>
+                      <i class="fas fa-microchip"></i> 计算与存储
+                      <i class="fas fa-sync-alt" style="font-size: 10px; margin-left: 6px; opacity: 0.5;"></i>
+                    </h4>
+
+                    <!-- GPU 信息 -->
+                    <!-- GPU 信息：同时检查实时数据和历史缓存 -->
+                    <div
+                      v-if="(server.info.gpu && (server.info.gpu.Model || server.info.gpu.Usage)) || (server.metricsCache && server.metricsCache.some(r => r.gpu_usage !== null && r.gpu_usage !== undefined && r.gpu_usage > 0))">
+                      <div class="server-detail-item">
+                        <span class="server-detail-label">
+                          <i class="fas fa-gamepad" style="margin-right: 4px; color: #76b900;"></i>
+                          {{ server.info.gpu && server.info.gpu.Model ? server.info.gpu.Model : 'GPU' }}
+                        </span>
+                        <span class="server-detail-value">{{ server.info.gpu && server.info.gpu.Usage ?
+                          server.info.gpu.Usage : '0%' }}</span>
+                      </div>
+                      <div class="progress-bar">
+                        <div class="progress-bar-fill" style="background: linear-gradient(90deg, #76b900, #8bc34a);"
+                          :style="{ width: (server.info.gpu && server.info.gpu.Usage) || '0%' }"></div>
+                      </div>
+                      <div v-if="server.info.gpu && server.info.gpu.Memory" class="server-detail-item"
+                        style="border:none; padding: 4px 0 0 0;">
+                        <span class="server-detail-label" style="font-size: 11px; opacity: 0.7;">显存 / 功耗</span>
+                        <span class="server-detail-value" style="font-size: 11px; opacity: 0.7;">{{
+                          server.info.gpu.Memory }} / {{ server.info.gpu.Power || '0W' }}</span>
+                      </div>
+                    </div>
+                    <div v-else class="server-detail-item" style="border: none; opacity: 0.5;">
+                      <span class="server-detail-label"><i class="fas fa-gamepad" style="margin-right: 4px;"></i>
+                        GPU</span>
+                      <span class="server-detail-value">未检测到</span>
+                    </div>
+
+                    <!-- 弹性占位 -->
+                    <div style="flex: 1;"></div>
+
+                    <!-- 磁盘存储 (底部) -->
+                    <div v-if="server.info.disk && server.info.disk.length > 0"
+                      style="margin-top: auto; padding-top: 12px;">
+                      <div class="server-detail-item" style="border: none; padding-bottom: 4px;">
+                        <span class="server-detail-label">
+                          <i class="fas fa-hdd" style="margin-right: 4px;"></i>
+                          主存储 ({{ server.info.disk[0].usage }})
+                        </span>
+                        <span class="server-detail-value" style="font-size: 11px; opacity: 0.8;">{{
+                          server.info.disk[0].used }} / {{ server.info.disk[0].total }}</span>
+                      </div>
+                      <div class="progress-bar">
+                        <div class="progress-bar-fill" :class="getDiskClass(server.info.disk[0].usage)"
+                          :style="{ width: server.info.disk[0].usage }"></div>
+                      </div>
+                    </div>
                   </div>
-                  <div class="progress-bar">
-                    <div class="progress-bar-fill" :class="getDiskClass(server.info.disk[0].usage)"
-                      :style="{ width: server.info.disk[0].usage }"></div>
-                  </div>
-                  <div class="server-detail-item" style="border:none; padding: 4px 0 0 0;">
-                    <span class="server-detail-value" style="font-size: 11px; opacity: 0.7;">使用率: {{
-                      server.info.disk[0].usage }}</span>
+
+                  <!-- 背面: GPU 图表 -->
+                  <div class="flip-card-back server-detail-section"
+                    style="position: absolute; inset: 0; backface-visibility: hidden; transform: rotateX(180deg); display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden;">
+                    <h4 title="点击返回">
+                      <i class="fas fa-chart-area" style="color: #76b900;"></i> GPU 趋势
+                      <i class="fas fa-undo" style="font-size: 10px; margin-left: 6px; opacity: 0.5;"></i>
+                    </h4>
+                    <div style="height: 165px; position: relative; margin-top: 4px;">
+                      <canvas :id="'gpu-chart-' + server.id"></canvas>
+                      <div v-if="server.gpuLoading"
+                        style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-tertiary); gap: 8px; background: var(--bg-tertiary); border-radius: 8px;">
+                        <div class="ag-spinner-elegant ag-spinner-elegant-sm"></div>
+                        <span style="font-size: 10px; opacity: 0.6;">LOADING GPU METRICS</span>
+                      </div>
+                      <!-- 无数据状态提示：同时检查实时GPU型号和历史缓存中的GPU数据 -->
+                      <div
+                        v-if="!server.gpuLoading && (!server.info.gpu || !server.info.gpu.Model) && (!server.metricsCache || !server.metricsCache.some(r => r.gpu_usage !== null && r.gpu_usage !== undefined))"
+                        style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); background: rgba(0,0,0,0.05); border-radius: 8px;">
+                        <span>无 GPU 采集数据</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -451,8 +553,9 @@
                 </div>
               </div>
 
-              <!-- 容器虚拟化 - 可折叠面板 -->
-              <div class="server-detail-section docker-section" style="grid-column: 1 / -1;">
+              <!-- 容器虚拟化 - 可折叠面板 (仅在检测到 Docker 时显示) -->
+              <div v-if="server.info && server.info.docker && server.info.docker.installed"
+                class="server-detail-section docker-section" style="grid-column: 1 / -1;">
                 <div class="docker-section-header" @click.stop="toggleDockerPanel(server.id)" style="cursor: pointer;">
                   <h4>
                     <i class="fab fa-docker"></i> 容器虚拟化
@@ -582,7 +685,7 @@
           </div>
 
           <button class="metrics-toolbar-btn" @click="loadMetricsHistory()" :disabled="metricsHistoryLoading"
-            title="刷新数据" style="margin-left: 8px;">
+            title="刷新数据">
             <i class="fas fa-sync-alt" :class="{ 'fa-spin': metricsHistoryLoading }"></i>
           </button>
         </div>
@@ -601,6 +704,10 @@
               </span>
               <span style="font-size: 12px; display: flex; align-items: center; gap: 4px; color: #3b82f6;">
                 <span style="width: 8px; height: 8px; border-radius: 2px; background: #3b82f6;"></span> Mem
+              </span>
+              <span v-if="records.some(r => r.gpu_usage !== null)"
+                style="font-size: 12px; display: flex; align-items: center; gap: 4px; color: #76b900;">
+                <span style="width: 8px; height: 8px; border-radius: 2px; background: #76b900;"></span> GPU
               </span>
             </div>
           </div>
@@ -702,9 +809,13 @@
         <div v-for="(records, serverId) in groupedMetricsHistory" :key="serverId" class="metrics-server-card">
           <div class="metrics-server-header" @click="toggleMetricsServerExpand(serverId)">
             <div class="metrics-server-info">
-              <i class="fas fa-server"></i>
+              <!-- OS Icon -->
+              <i v-if="records[0]?.platform" :class="getOSIcon(records[0].platform)"
+                :style="{ color: getOSColor(records[0].platform), fontSize: '14px', width: '16px', textAlign: 'center' }"></i>
+              <i v-else class="fas fa-server"></i>
               <span class="metrics-server-name">{{ records[0]?.server_name || '未知主机' }}</span>
-              <code class="metrics-server-host">{{ formatHost(records[0]?.server_host) }}</code>
+              <code v-if="records[0]?.server_host && records[0].server_host !== '0.0.0.0'"
+                class="metrics-server-host">{{ formatHost(records[0]?.server_host) }}</code>
             </div>
             <div class="metrics-server-stats">
               <span class="metrics-record-count">{{ records.length }} 条记录</span>
@@ -743,6 +854,19 @@
                   <span class="metrics-data-label">Docker</span>
                   <span class="metrics-data-value">
                     {{ record.docker_running || 0 }}/{{ record.docker_stopped || 0 }}
+                  </span>
+                </div>
+                <!-- GPU 历史数据 -->
+                <div class="metrics-data-item" v-if="record.gpu_usage !== null && record.gpu_usage !== undefined">
+                  <span class="metrics-data-label">GPU</span>
+                  <span class="metrics-data-value" style="color: #76b900;">
+                    {{ record.gpu_usage?.toFixed(1) }}% / {{ record.gpu_power }}W
+                  </span>
+                </div>
+                <div class="metrics-data-item" v-if="record.gpu_mem_total > 0">
+                  <span class="metrics-data-label">显存</span>
+                  <span class="metrics-data-value" style="color: #8bc34a;">
+                    {{ ((record.gpu_mem_used / record.gpu_mem_total) * 100).toFixed(1) }}%
                   </span>
                 </div>
                 <div class="metrics-data-item">
@@ -852,16 +976,21 @@
               </td>
               <td>
                 <div style="display: flex; align-items: center; gap: 8px;">
-                  <i class="fas fa-server" style="font-size: 12px; color: var(--server-primary); opacity: 0.7;"></i>
+                  <!-- OS Icon -->
+                  <i v-if="server.info && server.info.platform" :class="getOSIcon(server.info.platform)"
+                    :style="{ color: getOSColor(server.info.platform), fontSize: '14px', width: '16px', textAlign: 'center' }"></i>
+                  <i v-else class="fas fa-server"
+                    style="font-size: 12px; color: var(--server-primary); opacity: 0.7;"></i>
                   <strong>{{ server.name }}</strong>
                 </div>
               </td>
-              <td>
+              <td v-if="server.host && server.host !== '0.0.0.0'">
                 <code
                   style="background: var(--bg-secondary); border: 1px solid var(--border-color); padding: 2px 8px; border-radius: 6px; font-size: 11px; font-family: var(--font-mono); color: var(--text-secondary);">
                   {{ formatHost(server.host) }}:{{ server.port }}
                 </code>
               </td>
+              <td v-else class="text-secondary" style="font-size: 11px; opacity: 0.5;">未检测到 IP</td>
               <td class="text-center">
                 <span
                   style="padding: 4px 12px; font-size: 11px; border-radius: 6px; background: rgba(0, 212, 170, 0.1); color: var(--server-primary); font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">

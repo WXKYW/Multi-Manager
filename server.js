@@ -127,6 +127,15 @@ app.use(fileUpload({
   createParentPath: true
 }));
 
+// Agent 二进制文件静态服务
+// 开发模式: public/agent, 生产模式: dist/agent
+const agentDir = fs.existsSync(path.join(__dirname, 'dist', 'agent'))
+  ? path.join(__dirname, 'dist', 'agent')
+  : path.join(__dirname, 'public', 'agent');
+if (fs.existsSync(agentDir)) {
+  app.use('/agent', express.static(agentDir));
+}
+
 // 注册所有路由
 // Fly.io module integrated - v4
 registerRoutes(app);

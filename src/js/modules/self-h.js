@@ -999,28 +999,19 @@ export const selfHMethods = {
         this.selectTempTab(id);
     },
 
-    // 在标签页中初始化播放器
+    // 在标签页中初始化播放器 (使用 Plyr)
     async initVideoPlayerInTab(tab) {
-        const videoId = 'video-player-' + tab.id;
+        const videoId = 'plyr-video-' + tab.id;
         const videoElement = document.getElementById(videoId);
         if (!videoElement) {
-            console.error('[SelfH] Video element not found:', videoId);
+            console.error('[SelfH] Plyr video element not found:', videoId);
             return;
         }
 
-        // 查重：如果是同一个视频且已经在播放/加载，不重置状态也不重新 play
-        // 即使 store.streamPlayer.url 变了（因为它是单例），我们也通过 videoElement.src 来判断
-        const currentSrc = videoElement.getAttribute('src') || videoElement.src;
-        if (currentSrc && (currentSrc === tab.videoUrl || currentSrc.includes(tab.videoUrl))) {
-            console.log('[SelfH] Video element already has the correct src. Resyncing state.');
-            if (store.streamPlayer) {
-                store.streamPlayer.url = tab.videoUrl;
-                store.streamPlayer.filename = tab.filename;
-                store.streamPlayer.duration = videoElement.duration || 0;
-                store.streamPlayer.currentTime = videoElement.currentTime || 0;
-                store.streamPlayer.playing = !videoElement.paused;
-                store.streamPlayer.loading = videoElement.readyState < 3;
-            }
+        // 如果已经有播放器实例且是同一个视频，不重新初始化
+        const currentPlayer = streamPlayer.getPlayer();
+        if (currentPlayer && streamPlayer.state.currentUrl === tab.videoUrl) {
+            console.log('[SelfH] Plyr already playing this video.');
             return;
         }
 
@@ -1034,9 +1025,6 @@ export const selfHMethods = {
         }
 
         try {
-            // 先绑定基础事件，确保 metadata 等信息能被捕捉
-            this.bindInternalVideoEvents(videoElement);
-
             const res = await streamPlayer.play({
                 url: tab.videoUrl,
                 filename: tab.filename,
@@ -1044,14 +1032,12 @@ export const selfHMethods = {
             });
 
             if (res.success) {
-                // 绑定快捷键到整个播放器容器
-                const container = videoElement.closest('.stream-player-container');
-                if (container) {
-                    streamPlayer.bindKeyboardShortcuts(container);
-                }
+                console.log('[SelfH] Plyr initialized successfully');
+            } else {
+                console.error('[SelfH] Plyr init failed:', res.message);
             }
         } catch (e) {
-            console.error('[SelfH] Failed to init player:', e);
+            console.error('[SelfH] Failed to init Plyr:', e);
         }
     },
 
