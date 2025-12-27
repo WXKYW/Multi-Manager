@@ -23,7 +23,8 @@ const OAUTH_REDIRECT_URI = 'http://localhost:8045/oauth-callback';
  * 2. Visualization Header "Authorization: Bearer <API_KEY>"
  */
 function requireApiAuth(req, res, next) {
-    // 1. 检查 Session
+    // 1. 检查 Session / 聚合器分发
+    if (req.lb) return next(); // 如果经过负载均衡器验证，直接放行
     const session = getSession(req);
     if (session) return next();
 

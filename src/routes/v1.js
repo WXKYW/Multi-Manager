@@ -73,13 +73,20 @@ function requireApiAuth(req, res, next) {
         if (sessionById) return next();
 
         // 尝试作为 API Key (动态从存储中获取最新值)
-        let configuredApiKey = null;
+        let agApiKey = null;
         try {
             const agStorage = require(path.join(modulesDir, 'antigravity-api', 'storage.js'));
-            configuredApiKey = agStorage.getSetting('API_KEY');
+            agApiKey = agStorage.getSetting('API_KEY');
         } catch (e) { }
 
-        if (configuredApiKey && token === configuredApiKey) {
+        let gcliApiKey = null;
+        try {
+            const gcliStorage = require(path.join(modulesDir, 'gemini-cli-api', 'storage.js'));
+            const gcliSettings = gcliStorage.getSettings();
+            gcliApiKey = gcliSettings.API_KEY || '123456';
+        } catch (e) { }
+
+        if ((agApiKey && token === agApiKey) || (gcliApiKey && token === gcliApiKey)) {
             return next();
         }
     }
@@ -87,13 +94,20 @@ function requireApiAuth(req, res, next) {
     // 3. 检查 Query Param (compat)
     const queryKey = req.query.key;
     if (queryKey) {
-        let configuredApiKey = null;
+        let agApiKey = null;
         try {
             const agStorage = require(path.join(modulesDir, 'antigravity-api', 'storage.js'));
-            configuredApiKey = agStorage.getSetting('API_KEY');
+            agApiKey = agStorage.getSetting('API_KEY');
         } catch (e) { }
 
-        if (configuredApiKey && queryKey === configuredApiKey) {
+        let gcliApiKey = null;
+        try {
+            const gcliStorage = require(path.join(modulesDir, 'gemini-cli-api', 'storage.js'));
+            const gcliSettings = gcliStorage.getSettings();
+            gcliApiKey = gcliSettings.API_KEY || '123456';
+        } catch (e) { }
+
+        if ((agApiKey && queryKey === agApiKey) || (gcliApiKey && queryKey === gcliApiKey)) {
             return next();
         }
     }

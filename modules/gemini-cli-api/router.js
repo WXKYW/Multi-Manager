@@ -13,6 +13,7 @@ const streamProcessor = new StreamProcessor(client);
  */
 const requireApiKey = async (req, res, next) => {
     const authHeader = req.headers.authorization;
+    if (req.lb) return next(); // 如果经过负载均衡器验证，直接放行
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         return res.status(401).json({ error: { message: 'Unauthorized', type: 'invalid_request_error', code: '401' } });
     }
@@ -422,7 +423,7 @@ router.post('/accounts/check', async (req, res) => {
         }
 
         // 2. 从矩阵配置中获取
-        const matrix = storage.getMatrix();
+        const matrix = getMatrixConfig();
         Object.keys(matrix || {}).forEach(m => set.add(m));
 
         // 3. 从历史记录补充
