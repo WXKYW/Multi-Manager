@@ -41,12 +41,12 @@ RUN go mod download
 # 复制源码并构建
 COPY agent-go/ .
 # 构建 Linux amd64 和 arm64
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o am-agent-linux && \
-    upx --best am-agent-linux || true
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o am-agent-linux-arm64 && \
-    upx --best am-agent-linux-arm64 || true
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o agent-linux-amd64 && \
+    upx --best agent-linux-amd64 || true
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o agent-linux-arm64 && \
+    upx --best agent-linux-arm64 || true
 # 构建 Windows amd64
-RUN CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o am-agent-win.exe
+RUN CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o agent-windows-amd64.exe
 
 # 阶段 3: 运行时镜像 (Runner)
 FROM node:20-alpine AS runner
@@ -79,9 +79,9 @@ RUN npm install --only=production --legacy-peer-deps && npm cache clean --force
 COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
 # 将 Go Agent 二进制文件放入 dist/agent 目录以便静态服务
 RUN mkdir -p /app/dist/agent
-COPY --from=agent-builder --chown=nodejs:nodejs /app/agent-go/am-agent-linux /app/dist/agent/
-COPY --from=agent-builder --chown=nodejs:nodejs /app/agent-go/am-agent-linux-arm64 /app/dist/agent/
-COPY --from=agent-builder --chown=nodejs:nodejs /app/agent-go/am-agent-win.exe /app/dist/agent/
+COPY --from=agent-builder --chown=nodejs:nodejs /app/agent-go/agent-linux-amd64 /app/dist/agent/
+COPY --from=agent-builder --chown=nodejs:nodejs /app/agent-go/agent-linux-arm64 /app/dist/agent/
+COPY --from=agent-builder --chown=nodejs:nodejs /app/agent-go/agent-windows-amd64.exe /app/dist/agent/
 
 # 4. 复制后端源码
 COPY --chown=nodejs:nodejs . .
