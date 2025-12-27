@@ -68,7 +68,8 @@ router.get('/accounts', (req, res) => {
                         platform: cachedMetrics.platform,
                         platformVersion: cachedMetrics.platformVersion,
                         agentVersion: cachedMetrics.agent_version,
-                        lastUpdate: cachedMetrics.lastUpdate || new Date(cachedMetrics.timestamp).toLocaleTimeString()
+                        uptime: cachedMetrics.uptime,
+                        lastUpdate: cachedMetrics.lastUpdate || (cachedMetrics.timestamp ? new Date(cachedMetrics.timestamp).toLocaleTimeString() : '-')
                     }
                 };
             }

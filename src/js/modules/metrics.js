@@ -375,6 +375,11 @@ export const metricsMethods = {
                 }
             }
 
+            // 增量更新 Uptime
+            if (metrics.uptime) {
+                if (info.uptime !== metrics.uptime) info.uptime = metrics.uptime;
+            }
+
             // 更新时间戳 (节流: 只有当旧时间戳不存在时才更新，避免频繁触发 Vue 重渲染)
             if (!info.lastUpdate) {
                 info.lastUpdate = new Date(data.timestamp || Date.now()).toLocaleTimeString();
@@ -545,6 +550,7 @@ export const metricsMethods = {
                 info.gpu = item.metrics.gpu;
                 info.platform = item.metrics.platform;
                 info.platformVersion = item.metrics.platformVersion;
+                info.uptime = item.metrics.uptime;
 
                 // 赋值回响应式对象
                 // 如果是新对象，直接赋值；如果是旧对象，赋值新引用以触发更干净的 Patch
@@ -772,8 +778,6 @@ export const metricsMethods = {
     },
 
     async renderMetricsCharts(retryCount = 0) {
-        // 手机端不渲染图表，以最大化内容显示并节省性能
-        if (window.innerWidth <= 768) return;
 
         // CDN 模式下 Chart.js 可能还未加载，使用回退机制动态加载
         if (!window.Chart) {
@@ -862,10 +866,22 @@ export const metricsMethods = {
         // 检查是否包含有效的 GPU 数据
         const hasGpuData = sortedRecords.some(r => r.gpu_usage !== null && r.gpu_usage !== undefined);
 
-        // 销毁已存在的实例
+        // 如果图表已存在，则尝试增量更新数据
         const existingChart = Chart.getChart(canvas);
         if (existingChart) {
-            existingChart.destroy();
+            existingChart.data.labels = labels;
+            existingChart.data.datasets[0].data = cpuData;
+            existingChart.data.datasets[1].data = memData;
+            if (hasGpuData && existingChart.data.datasets[2]) {
+                existingChart.data.datasets[2].data = gpuData;
+            } else if (hasGpuData && !existingChart.data.datasets[2]) {
+                // 如果之前没 GPU 现在有了，则还是需要重新创建或者 push 进去
+                existingChart.destroy();
+            } else {
+                // 正常更新
+                existingChart.update('none'); // 使用 'none' 模式禁用更新动画，防止抖动
+                return;
+            }
         }
 
         const datasets = [
@@ -910,7 +926,7 @@ export const metricsMethods = {
             });
         }
 
-        // 延迟创建新图表，确保旧实例已完全清理且尺寸稳定
+        // 创建新图表
         this.$nextTick(() => {
             new Chart(canvas, {
                 type: 'line',
@@ -921,6 +937,7 @@ export const metricsMethods = {
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    animation: { duration: 0 }, // 禁用初始化动画，防止翻转时抽搐
                     plugins: {
                         legend: { display: false },
                         tooltip: {
@@ -1186,7 +1203,14 @@ export const metricsMethods = {
         const gpuPowerData = sortedRecords.map(r => r.gpu_power || 0);
 
         const existingChart = Chart.getChart(canvas);
-        if (existingChart) existingChart.destroy();
+        if (existingChart) {
+            existingChart.data.labels = labels;
+            existingChart.data.datasets[0].data = gpuUsageData;
+            existingChart.data.datasets[1].data = gpuMemData;
+            existingChart.data.datasets[2].data = gpuPowerData;
+            existingChart.update('none'); // 静默更新，不触发重排
+            return;
+        }
 
         new Chart(canvas, {
             type: 'line',

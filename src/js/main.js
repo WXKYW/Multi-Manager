@@ -1241,14 +1241,23 @@ const app = createApp({
     detectSinglePageMode() {
       const path = window.location.pathname.toLowerCase().replace(/^\//, '');
 
+      // 路径别名映射
+      const pathAliases = {
+        'hosts': 'server',
+        '2fa': 'totp'
+      };
+
+      // 将路径转为实际的 tab 名称
+      const tabName = pathAliases[path] || path;
+
       // 直接使用 mainActiveTab 值作为路径
       const validTabs = ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'self-h', 'server', 'totp'];
 
-      if (path && validTabs.includes(path)) {
+      if (tabName && validTabs.includes(tabName)) {
         store.singlePageMode = true;
-        store.mainActiveTab = path;
+        store.mainActiveTab = tabName;
         document.body.classList.add('single-page-mode');
-        console.log(`[SinglePageMode] 已激活: /${path}`);
+        console.log(`[SinglePageMode] 已激活: /${path} -> ${tabName}`);
 
         // 更新页面标题
         const titles = {
@@ -1261,7 +1270,7 @@ const app = createApp({
           'server': '主机管理',
           'totp': '2FA 验证器'
         };
-        document.title = `API Monitor - ${titles[path] || path}`;
+        document.title = `API Monitor - ${titles[tabName] || tabName}`;
       }
     }
   }

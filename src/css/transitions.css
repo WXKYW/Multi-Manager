@@ -282,6 +282,11 @@
   padding: 0px 0px 10px 0px;
   grid-template-rows: 1fr;
   opacity: 1;
+  overflow: visible;
+}
+
+.server-card.expanded>.server-card-body>div {
+  overflow: visible;
 }
 
 /* 内部包装器，确保 Grid 转换生效 */

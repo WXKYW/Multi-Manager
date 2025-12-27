@@ -1145,10 +1145,10 @@ export const hostMethods = {
 
             // 启动渲染逻辑
             if (records && records.length > 0) {
-                // 增加延迟到 400ms，确保旋转动画过半，DOM 尺寸计算稳定，防止白屏
+                // 增加延迟到 650ms，确保旋转动画（0.6s）完全结束，DOM 尺寸计算稳定，防止卡顿
                 setTimeout(() => {
                     this.renderGpuChart(server.id, records, `gpu-chart-${server.id}`);
-                }, 400);
+                }, 650);
             }
         }
     },
@@ -1208,10 +1208,15 @@ export const hostMethods = {
             const gpuMemData = records.map(r => Math.round((r.gpu_mem_used / (r.gpu_mem_total || 1)) * 100) || 0);
             const gpuPowerData = records.map(r => r.gpu_power || 0);
 
-            // 销毁已存在的实例
+            // 尝试增量更新图表数据
             const existingChart = Chart.getChart(canvas);
             if (existingChart) {
-                existingChart.destroy();
+                existingChart.data.labels = labels;
+                existingChart.data.datasets[0].data = gpuUsageData;
+                existingChart.data.datasets[1].data = gpuMemData;
+                existingChart.data.datasets[2].data = gpuPowerData;
+                existingChart.update('none'); // 无感更新
+                return;
             }
 
             // 创建图表
@@ -1437,10 +1442,10 @@ export const hostMethods = {
         let str = uptimeStr.replace(/^up\s+/i, '');
 
         // 提取各个时间部分
-        const weekMatch = str.match(/(\d+)\s*weeks?/i);
-        const dayMatch = str.match(/(\d+)\s*days?/i);
-        const hourMatch = str.match(/(\d+)\s*hours?/i);
-        const minMatch = str.match(/(\d+)\s*minutes?/i);
+        const weekMatch = str.match(/(\d+)\s*(weeks?|w)/i);
+        const dayMatch = str.match(/(\d+)\s*(days?|d)/i);
+        const hourMatch = str.match(/(\d+)\s*(hours?|h)/i);
+        const minMatch = str.match(/(\d+)\s*(minutes?|m)/i);
 
         let days = dayMatch ? parseInt(dayMatch[1], 10) : 0;
         const weeks = weekMatch ? parseInt(weekMatch[1], 10) : 0;
