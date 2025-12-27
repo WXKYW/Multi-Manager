@@ -1154,8 +1154,9 @@ $config = @{
     agentKey = $AGENT_KEY
     reportInterval = 1500
     reconnectDelay = 4000
-} | ConvertTo-Json
-$config | Out-File -FilePath $configPath -Encoding UTF8 -Force
+} | ConvertTo-Json -Compress
+# 使用 ASCII 编码避免 UTF-8 BOM (Go json.Unmarshal 不支持 BOM)
+[System.IO.File]::WriteAllText($configPath, $config)
 Write-Host "   ✓ 配置已保存" -ForegroundColor Green
 
 # 6. 卸载旧服务 (如果存在)
