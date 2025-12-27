@@ -687,11 +687,11 @@
             <div style="display: flex; flex-direction: column; gap: 8px;">
               <label style="font-size: 11px; color: var(--text-tertiary); font-weight: 600;">或者手动下载二进制文件:</label>
               <div style="display: flex; gap: 8px;">
-                <a :href="quickDeployResult.apiUrl + '/agent/api-monitor-agent-linux'" target="_blank"
+                <a :href="quickDeployResult.apiUrl + '/agent/agent-linux-amd64'" target="_blank"
                   style="flex: 1; padding: 6px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; font-size: 11px; text-decoration: none; color: var(--text-primary); display: flex; align-items: center; justify-content: center; gap: 6px;">
                   <i class="fab fa-linux"></i> Linux
                 </a>
-                <a :href="quickDeployResult.apiUrl + '/agent/api-monitor-agent-win.exe'" target="_blank"
+                <a :href="quickDeployResult.apiUrl + '/agent/agent-windows-amd64.exe'" target="_blank"
                   style="flex: 1; padding: 6px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; font-size: 11px; text-decoration: none; color: var(--text-primary); display: flex; align-items: center; justify-content: center; gap: 6px;">
                   <i class="fab fa-windows"></i> Windows
                 </a>
@@ -944,11 +944,11 @@
               <i class="fas fa-file-download" style="color: var(--server-primary); margin-right: 8px;"></i>直接下载二进制 Agent
             </p>
             <div style="display: flex; gap: 10px;">
-              <a :href="agentModalData.apiUrl + '/agent/api-monitor-agent-linux'" target="_blank"
+              <a :href="agentModalData.apiUrl + '/agent/agent-linux-amd64'" target="_blank"
                 class="btn btn-secondary btn-sm" style="flex: 1; text-decoration: none; justify-content: center;">
                 <i class="fab fa-linux"></i> Linux (x64)
               </a>
-              <a :href="agentModalData.apiUrl + '/agent/api-monitor-agent-win.exe'" target="_blank"
+              <a :href="agentModalData.apiUrl + '/agent/agent-windows-amd64.exe'" target="_blank"
                 class="btn btn-secondary btn-sm" style="flex: 1; text-decoration: none; justify-content: center;">
                 <i class="fab fa-windows"></i> Windows (x64)
               </a>
