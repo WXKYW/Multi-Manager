@@ -11,6 +11,8 @@ export const antigravityMethods = {
         store.antigravityCurrentTab = 'quotas';
         this.loadAntigravityAccounts();
         this.loadAntigravityStats();
+        this.loadAntigravityCheckHistory(); // 加载检测历史
+        this.loadAntigravityAutoCheckSettings(); // 加载定时检测设置
     },
 
     async loadAntigravityAccounts() {
@@ -31,6 +33,9 @@ export const antigravityMethods = {
                     this.loadAntigravityQuotas();
                 }
 
+                // 为每个账号加载简要额度信息
+                this.loadAllAccountQuotas();
+
                 if (store.mainActiveTab === 'antigravity' && store.antigravityCurrentTab === 'accounts') {
                     toast.success('账号列表已刷新');
                 }
@@ -40,6 +45,54 @@ export const antigravityMethods = {
             toast.error('加载账号失败');
         } finally {
             store.antigravityLoading = false;
+        }
+    },
+
+    /**
+     * 为所有账号加载简要额度信息
+     */
+    async loadAllAccountQuotas() {
+        const KEY_MODELS = [
+            'gemini-3-pro-high',
+            'gemini-3-flash',
+            'gemini-3-pro-image',
+            'claude-sonnet-4-5'
+        ];
+
+        for (const account of store.antigravityAccounts) {
+            if (account.status !== 'online') continue;
+
+            try {
+                const response = await fetch(`/api/antigravity/accounts/${account.id}/quotas`, {
+                    headers: store.getAuthHeaders()
+                });
+                if (response.ok) {
+                    const quotaData = await response.json();
+                    // 后端返回的是分组数据：{ groupId: { models: [{ id, remaining }] } }
+                    // 需要遍历所有分组找到目标模型
+                    const quotas = {};
+
+                    // 遍历所有分组
+                    for (const groupId of Object.keys(quotaData)) {
+                        const group = quotaData[groupId];
+                        if (!group.models) continue;
+
+                        // 遍历分组内的模型
+                        for (const model of group.models) {
+                            if (KEY_MODELS.includes(model.id)) {
+                                quotas[model.id] = {
+                                    percent: model.remaining || 0
+                                };
+                            }
+                        }
+                    }
+
+                    // Vue 响应式更新
+                    account.quotas = quotas;
+                }
+            } catch (error) {
+                console.error(`加载账号 ${account.name} 额度失败:`, error);
+            }
         }
     },
 
@@ -455,7 +508,7 @@ export const antigravityMethods = {
     },
 
     // 将重置时间转换为倒计时格式 (自动适配时区)
-    formatResetCountdown(isoTime) {
+    formatResetCountdown(isoTime, nowVal) {
         if (!isoTime) return '无';
         try {
             const resetDate = new Date(isoTime);
@@ -1069,5 +1122,346 @@ export const antigravityMethods = {
         };
 
         input.click();
+    },
+
+    // ========== 模型检测历史功能 ==========
+
+    /**
+     * 执行模型健康检测
+     */
+    async runAntigravityModelCheck() {
+        store.antigravityChecking = true;
+        toast.info('正在检测模型健康状态...');
+
+        // 立即刷新一次，显示 "Waiting..." 状态
+        this.loadAntigravityCheckHistory();
+
+        // 开启轮询，实现实时刷新表格
+        const pollInterval = setInterval(() => {
+            console.log('[Antigravity] Polling check history...', store.antigravityChecking);
+            if (store.antigravityChecking) {
+                this.loadAntigravityCheckHistory();
+            } else {
+                console.log('[Antigravity] Polling stopped');
+                clearInterval(pollInterval);
+            }
+        }, 2000);
+
+        try {
+            const response = await fetch('/api/antigravity/accounts/check', {
+                method: 'POST',
+                headers: store.getAuthHeaders()
+            });
+            const data = await response.json();
+            if (response.ok && data.success) {
+                toast.success(`检测完成: ${data.totalAccounts} 账号, ${data.totalModels} 模型`);
+            } else {
+                toast.error(data.error || '检测失败');
+            }
+        } catch (error) {
+            toast.error('检测请求失败: ' + error.message);
+        } finally {
+            store.antigravityChecking = false;
+            clearInterval(pollInterval);
+            this.loadAntigravityCheckHistory(); // 确保最后刷新一次
+        }
+    },
+
+    /**
+     * 切换定时检测开关
+     */
+    toggleAntigravityAutoCheck() {
+        if (store.antigravityAutoCheck) {
+            // 开启定时检测
+            this.startAntigravityAutoCheck();
+            toast.success(`已开启定时检测 (每 ${Math.round(store.antigravityAutoCheckInterval / 60000)} 分钟)`);
+        } else {
+            // 关闭定时检测
+            this.stopAntigravityAutoCheck();
+            toast.info('已关闭定时检测');
+        }
+        // 保存设置到后端
+        this.saveAntigravityAutoCheckSettings();
+    },
+
+    /**
+     * 重启定时检测 (间隔变化时)
+     */
+    restartAntigravityAutoCheck() {
+        if (store.antigravityAutoCheck) {
+            this.stopAntigravityAutoCheck();
+            this.startAntigravityAutoCheck();
+            toast.success(`定时检测间隔已更新为 ${Math.round(store.antigravityAutoCheckInterval / 60000)} 分钟`);
+        }
+        // 保存设置到后端
+        this.saveAntigravityAutoCheckSettings();
+    },
+
+    /**
+     * 启动定时检测
+     */
+    startAntigravityAutoCheck() {
+        this.stopAntigravityAutoCheck(); // 确保没有重复定时器
+        store.antigravityAutoCheckTimerId = setInterval(() => {
+            if (!store.antigravityChecking) {
+                console.log('[Antigravity] 定时检测触发');
+                this.runAntigravityModelCheck();
+            }
+        }, Number(store.antigravityAutoCheckInterval));
+    },
+
+    /**
+     * 停止定时检测
+     */
+    stopAntigravityAutoCheck() {
+        if (store.antigravityAutoCheckTimerId) {
+            clearInterval(store.antigravityAutoCheckTimerId);
+            store.antigravityAutoCheckTimerId = null;
+        }
+    },
+
+    /**
+     * 加载定时检测设置
+     */
+    async loadAntigravityAutoCheckSettings() {
+        try {
+            const response = await fetch('/api/antigravity/settings', {
+                headers: store.getAuthHeaders()
+            });
+            const settings = await response.json();
+
+            // 从设置中恢复定时检测状态
+            if (settings.autoCheckEnabled !== undefined) {
+                store.antigravityAutoCheck = settings.autoCheckEnabled === '1' || settings.autoCheckEnabled === true;
+            }
+            if (settings.autoCheckInterval !== undefined) {
+                store.antigravityAutoCheckInterval = parseInt(settings.autoCheckInterval) || 3600000;
+            }
+            // 加载禁用模型列表
+            if (settings.disabledCheckModels) {
+                try {
+                    store.antigravityDisabledCheckModels = JSON.parse(settings.disabledCheckModels) || [];
+                } catch (e) {
+                    store.antigravityDisabledCheckModels = [];
+                }
+            }
+
+            // 如果设置为开启，启动定时器
+            if (store.antigravityAutoCheck) {
+                this.startAntigravityAutoCheck();
+            }
+        } catch (error) {
+            console.error('加载定时检测设置失败:', error);
+        }
+    },
+
+    /**
+     * 保存定时检测设置
+     */
+    async saveAntigravityAutoCheckSettings() {
+        try {
+            await fetch('/api/antigravity/settings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...store.getAuthHeaders()
+                },
+                body: JSON.stringify({
+                    autoCheckEnabled: store.antigravityAutoCheck ? '1' : '0',
+                    autoCheckInterval: String(store.antigravityAutoCheckInterval),
+                    disabledCheckModels: JSON.stringify(store.antigravityDisabledCheckModels)
+                })
+            });
+        } catch (error) {
+            console.error('保存定时检测设置失败:', error);
+        }
+    },
+
+    /**
+     * 切换模型检测开关
+     */
+    toggleAntigravityCheckModel(modelId) {
+        const idx = store.antigravityDisabledCheckModels.indexOf(modelId);
+        if (idx >= 0) {
+            // 已禁用，启用它
+            store.antigravityDisabledCheckModels.splice(idx, 1);
+        } else {
+            // 未禁用，禁用它
+            store.antigravityDisabledCheckModels.push(modelId);
+        }
+        // 保存到设置
+        this.saveAntigravityAutoCheckSettings();
+    },
+
+    /**
+     * 加载模型检测历史
+     */
+    async loadAntigravityCheckHistory() {
+        try {
+            const response = await fetch('/api/antigravity/models/check-history', {
+                headers: store.getAuthHeaders()
+            });
+            const data = await response.json();
+            store.antigravityCheckHistory = data;
+        } catch (error) {
+            console.error('加载模型检测历史失败:', error);
+        }
+    },
+
+    /**
+     * 清空模型检测历史
+     */
+    async clearAntigravityCheckHistory() {
+        const confirmed = await store.showConfirm({
+            title: '确认清空',
+            message: '确定要清空所有模型检测历史吗？',
+            icon: 'fa-trash',
+            confirmText: '清空',
+            confirmClass: 'btn-danger'
+        });
+
+        if (!confirmed) return;
+
+        try {
+            const response = await fetch('/api/antigravity/models/check-history/clear', {
+                method: 'POST',
+                headers: store.getAuthHeaders()
+            });
+            if (response.ok) {
+                toast.success('检测历史已清空');
+                store.antigravityCheckHistory = { models: [], times: [], matrix: {} };
+            } else {
+                toast.error('清空失败');
+            }
+        } catch (error) {
+            toast.error('请求失败: ' + error.message);
+        }
+    },
+
+    /**
+     * 格式化检测时间显示
+     */
+    formatCheckTime(timestamp) {
+        if (!timestamp) return '-';
+        const date = new Date(timestamp * 1000);
+        return date.toLocaleString('zh-CN', {
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    },
+
+    /**
+     * 获取检测徽章的 CSS 类
+     * @param {Object} checkData - 检测数据 {status, passedAccounts, error_log}
+     * @param {number} accountIndex - 账号序号 (1-based)
+     * @returns {string} CSS 类名
+     */
+    getCheckBadgeClass(checkData, accountIndex) {
+        if (!checkData) return 'check-badge-unknown';
+
+        // 检测中状态
+        if (checkData.error_log === 'Waiting...' || checkData.error_log === 'Checking...') {
+            return 'check-badge-unknown';
+        }
+
+        // 检查是否通过
+        const passedList = (checkData.passedAccounts || '').split(',').filter(s => s);
+        if (passedList.includes(String(accountIndex))) {
+            return 'check-badge-success';
+        }
+
+        // 检查错误日志中是否有内容（说明检测完成）
+        const errorLog = checkData.error_log || '';
+        const checkComplete = errorLog.length > 0 && errorLog !== 'Waiting...' && errorLog !== 'Checking...';
+
+        // 只有检测明确完成且当前账号不在通过列表中，才显示失败
+        // 检测完成的标志：status 为 ok 或 error，且有错误日志
+        if (checkComplete && (checkData.status === 'ok' || checkData.status === 'error')) {
+            return 'check-badge-error';
+        }
+
+        // 其他情况视为未检测（可能正在检测该账号）
+        return 'check-badge-unknown';
+    },
+
+    /**
+     * 获取检测徽章的标题提示
+     */
+    getCheckBadgeTitle(checkData, accountIndex) {
+        if (!checkData) return '未检测';
+
+        if (checkData.error_log === 'Waiting...' || checkData.error_log === 'Checking...') {
+            return `账号 #${accountIndex} 检测中`;
+        }
+
+        const passedList = (checkData.passedAccounts || '').split(',').filter(s => s);
+        if (passedList.includes(String(accountIndex))) {
+            return `账号 #${accountIndex} 通过`;
+        }
+
+        if (passedList.length > 0 || checkData.status === 'error') {
+            return `账号 #${accountIndex} 失败`;
+        }
+
+        return `账号 #${accountIndex} 未检测`;
+    },
+
+    /**
+     * 获取账号配额显示数据
+     */
+    getAccountQuotaDisplay(quotas) {
+        const DISPLAY_MAP = {
+            'gemini-3-pro-high': 'G3 Pro',
+            'gemini-3-flash': 'G3 Flash',
+            'gemini-3-pro-image': 'G3 Image',
+            'claude-sonnet-4-5': 'Claude 4.5'
+        };
+
+        const result = [];
+        for (const [modelId, label] of Object.entries(DISPLAY_MAP)) {
+            if (quotas[modelId]) {
+                result.push({
+                    key: modelId,
+                    label: label,
+                    percent: quotas[modelId].percent || 0
+                });
+            } else {
+                result.push({
+                    key: modelId,
+                    label: label,
+                    percent: 0
+                });
+            }
+        }
+        return result;
+    },
+
+    /**
+     * 获取配额进度条的背景色
+     */
+    getQuotaBarColor(percent) {
+        if (percent >= 50) return 'rgba(16, 185, 129, 0.15)';
+        if (percent >= 20) return 'rgba(245, 158, 11, 0.15)';
+        return 'rgba(239, 68, 68, 0.15)';
+    },
+
+    /**
+     * 获取配额填充进度条的颜色
+     */
+    getQuotaFillColor(percent) {
+        if (percent >= 50) return '#10b981';
+        if (percent >= 20) return '#f59e0b';
+        return '#ef4444';
+    },
+
+    /**
+     * 获取配额百分比文字颜色
+     */
+    getQuotaTextColor(percent) {
+        if (percent >= 50) return '#10b981';
+        if (percent >= 20) return '#f59e0b';
+        return '#ef4444';
     }
 };

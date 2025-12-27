@@ -799,3 +799,55 @@ input:checked+.slider:before {
         grid-column: span 2;
     }
 }
+
+/* 模型检测历史标记样式 */
+.check-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    margin: 1px;
+    transition: all 0.2s ease;
+}
+
+.check-badge-success {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.check-badge-error {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.check-badge-unknown {
+    background: rgba(107, 114, 128, 0.1);
+    color: #6b7280;
+    border: 1px solid rgba(107, 114, 128, 0.2);
+}
+
+.check-badge:hover {
+    transform: scale(1.1);
+}
+
+/* 暗色模式适配 */
+@media (prefers-color-scheme: dark) {
+    .check-badge-success {
+        background: rgba(16, 185, 129, 0.2);
+    }
+
+    .check-badge-error {
+        background: rgba(239, 68, 68, 0.2);
+    }
+
+    .check-badge-unknown {
+        background: rgba(107, 114, 128, 0.2);
+    }
+}

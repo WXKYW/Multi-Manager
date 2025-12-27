@@ -272,6 +272,7 @@
         <table class="data-table">
           <thead>
             <tr>
+              <th style="width: 40px;">#</th>
               <th>备注名称</th>
               <th>项目 ID</th>
               <th>邮箱</th>
@@ -281,7 +282,8 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="account in geminiCliAccounts" :key="account.id">
+            <tr v-for="(account, index) in geminiCliAccounts" :key="account.id">
+              <td data-label="#" style="font-weight: 600; opacity: 0.6;">{{ index + 1 }}</td>
               <td data-label="备注名称"><strong>{{ account.name || '未命名' }}</strong></td>
               <td data-label="项目 ID"><code class="code-sm">{{ account.project_id || '-' }}</code></td>
               <td data-label="邮箱"><span style="font-size: 11px; opacity: 0.7;">{{ account.email || '-' }}</span></td>
@@ -330,6 +332,92 @@
           <i class="fas fa-terminal" style="font-size: 48px; margin-bottom: 16px;"></i>
           <div>暂无账号，点击上方按钮新增授权</div>
         </div>
+      </div>
+    </div>
+
+    <!-- 模型健康检测历史 -->
+    <div class="panel" style="margin-top: 16px;">
+      <div class="panel-header" style="padding-bottom: 6px;">
+        <div class="panel-title">
+          <i class="fas fa-heartbeat" style="margin-right: 8px; color: var(--gemini-primary);"></i>模型健康检测
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <!-- 定时检测开关 -->
+          <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; margin-right: 8px;">
+            <label class="switch" style="transform: scale(0.8);">
+              <input type="checkbox" v-model="geminiCliAutoCheck" @change="toggleGeminiCliAutoCheck">
+              <span class="slider round"></span>
+            </label>
+            <span style="opacity: 0.8;">定时</span>
+            <select v-model="geminiCliAutoCheckInterval" @change="restartGeminiCliAutoCheck"
+              style="font-size: 11px; padding: 2px 4px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-secondary);">
+              <option value="1800000">30分钟</option>
+              <option value="3600000">1小时</option>
+              <option value="7200000">2小时</option>
+              <option value="14400000">4小时</option>
+              <option value="21600000">6小时</option>
+            </select>
+          </div>
+          <button class="btn btn-primary btn-sm" @click="runGeminiCliModelCheck" :disabled="geminiCliChecking">
+            <i class="fas" :class="geminiCliChecking ? 'fa-spinner fa-spin' : 'fa-play'"></i>
+            {{ geminiCliChecking ? '检测中...' : '执行检测' }}
+          </button>
+          <button class="btn btn-secondary btn-sm" @click="loadGeminiCliCheckHistory">
+            <i class="fas fa-sync-alt"></i>
+          </button>
+          <button class="btn btn-secondary btn-sm" @click="clearGeminiCliCheckHistory"
+            style="color: var(--danger-color);" title="清空历史">
+            <i class="fas fa-trash"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- 检测历史矩阵 -->
+      <div v-if="geminiCliCheckHistory && geminiCliCheckHistory.models.length > 0" class="table-container">
+        <table class="data-table" style="font-size: 12px;">
+          <thead>
+            <tr>
+              <th style="width: 180px;">模型</th>
+              <th v-for="time in geminiCliCheckHistory.times.slice().reverse()" :key="time" class="text-center"
+                style="min-width: 80px; font-size: 11px;">
+                {{ formatGeminiCliCheckTime(time) }}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="model in geminiCliCheckHistory.models" :key="model">
+              <td style="font-family: monospace; font-size: 11px;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <label class="switch" style="transform: scale(0.6); margin: 0;">
+                    <input type="checkbox" :checked="!geminiCliDisabledCheckModels.includes(model)"
+                      @change="toggleGeminiCliCheckModel(model)">
+                    <span class="slider round"></span>
+                  </label>
+                  <span :style="{ opacity: geminiCliDisabledCheckModels.includes(model) ? 0.4 : 1 }">{{ model }}</span>
+                </div>
+              </td>
+              <td v-for="time in geminiCliCheckHistory.times.slice().reverse()" :key="time" class="text-center">
+                <template v-if="geminiCliCheckHistory.matrix[model] && geminiCliCheckHistory.matrix[model][time]">
+                  <span v-for="n in geminiCliAccounts.length" :key="n" class="check-badge"
+                    :class="getGeminiCliCheckBadgeClass(geminiCliCheckHistory.matrix[model][time], n)"
+                    :title="getGeminiCliCheckBadgeTitle(geminiCliCheckHistory.matrix[model][time], n)">
+                    {{ n }}
+                  </span>
+                </template>
+                <span v-else class="check-badge check-badge-unknown" title="未检测">-</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <!-- 检测中占位符 -->
+      <div v-else-if="geminiCliChecking" style="text-align: center; padding: 40px;">
+        <div class="spinner" style="margin: 0 auto 16px;"></div>
+        <div style="font-size: 13px; opacity: 0.7;">正在检测模型健康状态...</div>
+      </div>
+      <div v-else style="text-align: center; padding: 30px; opacity: 0.5; font-size: 13px;">
+        <i class="fas fa-info-circle" style="margin-right: 6px;"></i>
+        暂无检测记录。点击「执行检测」开始首次检测。
       </div>
     </div>
   </div>

@@ -17,6 +17,10 @@ export const geminiCliMethods = {
         } else if (store.geminiCliCurrentTab === 'accounts') {
             this.loadGeminiCliAccounts();
         }
+
+        // 加载检测历史和定时设置
+        this.loadGeminiCliCheckHistory();
+        this.loadGeminiCliAutoCheckSettings();
     },
 
     // 切换 Gemini CLI 子标签页
@@ -86,7 +90,7 @@ export const geminiCliMethods = {
     // 获取模型分组图标
     getGeminiCliModelGroupIcon(modelId) {
         if (modelId.includes('image') || modelId.includes('vision')) return '🖼️';
-        if (modelId.includes('pro')) return '⚡';
+        if (modelId.includes('pro')) return '🤖';
         if (modelId.includes('flash')) return '🚀';
         if (modelId.includes('ultra')) return '💎';
         return '🤖';
@@ -130,7 +134,7 @@ export const geminiCliMethods = {
         if (!coolDowns || coolDowns.length === 0) return '';
         return coolDowns.map(c => {
             const time = new Date(c.resetTime).toLocaleTimeString();
-            return `${c.model} → ${time}`;
+            return `${c.model} 至 ${time}`;
         }).join(', ');
     },
 
@@ -162,7 +166,7 @@ export const geminiCliMethods = {
     async loadGeminiCliMatrix() {
         store.geminiCliModelLoading = true;
         try {
-            const response = await fetch('/api/gemini-cli-api/config/matrix', {
+            const response = await fetch('/api/gemini-cli/config/matrix', {
                 headers: store.getAuthHeaders()
             });
             const data = await response.json();
@@ -183,7 +187,7 @@ export const geminiCliMethods = {
     // 保存模型矩阵配置
     async saveGeminiCliMatrix() {
         try {
-            const response = await fetch('/api/gemini-cli-api/config/matrix', {
+            const response = await fetch('/api/gemini-cli/config/matrix', {
                 method: 'POST',
                 headers: {
                     ...store.getAuthHeaders(),
@@ -275,7 +279,7 @@ export const geminiCliMethods = {
 
     async loadGeminiCliStats() {
         try {
-            const response = await fetch('/api/gemini-cli-api/stats', {
+            const response = await fetch('/api/gemini-cli/stats', {
                 headers: store.getAuthHeaders()
             });
             const data = await response.json();
@@ -288,7 +292,7 @@ export const geminiCliMethods = {
     async loadGeminiCliLogs() {
         store.geminiCliLoading = true;
         try {
-            const response = await fetch('/api/gemini-cli-api/logs', {
+            const response = await fetch('/api/gemini-cli/logs', {
                 headers: store.getAuthHeaders()
             });
             const data = await response.json();
@@ -307,7 +311,7 @@ export const geminiCliMethods = {
 
     async viewGeminiCliLogDetail(log) {
         try {
-            const response = await fetch(`/api/gemini-cli-api/logs/${log.id}`, {
+            const response = await fetch(`/api/gemini-cli/logs/${log.id}`, {
                 headers: store.getAuthHeaders()
             });
             const data = await response.json();
@@ -325,10 +329,10 @@ export const geminiCliMethods = {
                 data.clientIp = data.clientIp || data.client_ip;
                 data.userAgent = data.userAgent || data.user_agent;
 
-                // 2. Detail 对象标准化
+                // 2. Detail 对象标准
                 if (data.detail) {
                     // Case A: 已经是 OpenAI 格式 (直接透传的请求)
-                    // 需要将 detail.request.messages 提升到 detail.messages 以匹配模板
+                    // 需要将 detail.request.messages 提升为 detail.messages 以匹配模板
                     if (data.detail.request && data.detail.request.messages && !data.detail.messages) {
                         data.detail.messages = data.detail.request.messages;
                     }
@@ -342,7 +346,7 @@ export const geminiCliMethods = {
                     }
 
                     // 处理 Response: candidates -> choices
-                    // 如果是流式请求 (type: stream)，可能没有完整的 response 对象，或者 response 是空的
+                    // 如果是流式请求 (type: stream)，可能没有完整的 response 对象，或者 response 是空
                     if (data.detail.response && data.detail.response.candidates && !data.detail.response.choices) {
                         data.detail.response.choices = data.detail.response.candidates.map(c => ({
                             message: {
@@ -376,7 +380,7 @@ export const geminiCliMethods = {
         if (!confirmed) return;
 
         try {
-            const response = await fetch('/api/gemini-cli-api/logs', {
+            const response = await fetch('/api/gemini-cli/logs', {
                 method: 'DELETE',
                 headers: store.getAuthHeaders()
             });
@@ -392,7 +396,7 @@ export const geminiCliMethods = {
     async loadGeminiCliSettings() {
         store.geminiCliLoading = true;
         try {
-            const response = await fetch('/api/gemini-cli-api/settings', {
+            const response = await fetch('/api/gemini-cli/settings', {
                 headers: store.getAuthHeaders()
             });
             const data = await response.json();
@@ -411,7 +415,7 @@ export const geminiCliMethods = {
     async saveGeminiCliSettings() {
         store.geminiCliSaving = true;
         try {
-            const response = await fetch('/api/gemini-cli-api/settings', {
+            const response = await fetch('/api/gemini-cli/settings', {
                 method: 'POST',
                 headers: {
                     ...store.getAuthHeaders(),
@@ -433,22 +437,10 @@ export const geminiCliMethods = {
         }
     },
 
-    async loadGeminiCliStats() {
-        try {
-            const response = await fetch('/api/gemini-cli-api/stats', {
-                headers: store.getAuthHeaders()
-            });
-            const data = await response.json();
-            store.geminiCliStats = data;
-        } catch (error) {
-            console.error('加载 Gemini CLI 统计失败:', error);
-        }
-    },
-
     async loadGeminiCliAccounts() {
         store.geminiCliLoading = true;
         try {
-            const response = await fetch('/api/gemini-cli-api/accounts', {
+            const response = await fetch('/api/gemini-cli/accounts', {
                 headers: store.getAuthHeaders()
             });
             const data = await response.json();
@@ -473,7 +465,7 @@ export const geminiCliMethods = {
         store.geminiCliLoading = true;
         toast.info('正在刷新所有账号及邮箱信息...');
         try {
-            const response = await fetch('/api/gemini-cli-api/accounts/refresh', {
+            const response = await fetch('/api/gemini-cli/accounts/refresh', {
                 method: 'POST',
                 headers: store.getAuthHeaders()
             });
@@ -523,8 +515,8 @@ export const geminiCliMethods = {
         try {
             const isEditing = store.geminiCliEditingAccount !== null;
             const url = isEditing
-                ? `/api/gemini-cli-api/accounts/${store.geminiCliEditingAccount.id}`
-                : '/api/gemini-cli-api/accounts';
+                ? `/api/gemini-cli/accounts/${store.geminiCliEditingAccount.id}`
+                : '/api/gemini-cli/accounts';
 
             const response = await fetch(url, {
                 method: isEditing ? 'PUT' : 'POST',
@@ -560,7 +552,7 @@ export const geminiCliMethods = {
 
         store.geminiCliLoading = true;
         try {
-            const response = await fetch('/api/gemini-cli-api/accounts/fetch-email', {
+            const response = await fetch('/api/gemini-cli/accounts/fetch-email', {
                 method: 'POST',
                 headers: {
                     ...store.getAuthHeaders(),
@@ -600,7 +592,7 @@ export const geminiCliMethods = {
         if (!confirmed) return;
 
         try {
-            const response = await fetch(`/api/gemini-cli-api/accounts/${account.id}`, {
+            const response = await fetch(`/api/gemini-cli/accounts/${account.id}`, {
                 method: 'DELETE',
                 headers: store.getAuthHeaders()
             });
@@ -650,7 +642,7 @@ export const geminiCliMethods = {
 
         store.geminiCliLoading = true;
         try {
-            const response = await fetch('/api/gemini-cli-api/oauth/exchange', {
+            const response = await fetch('/api/gemini-cli/oauth/exchange', {
                 method: 'POST',
                 headers: store.getAuthHeaders(),
                 body: JSON.stringify({
@@ -708,7 +700,7 @@ export const geminiCliMethods = {
     // 切换账号启用状态
     async toggleGeminiCliAccount(account) {
         try {
-            const response = await fetch(`/api/gemini-cli-api/accounts/${account.id}/toggle`, {
+            const response = await fetch(`/api/gemini-cli/accounts/${account.id}/toggle`, {
                 method: 'POST',
                 headers: store.getAuthHeaders()
             });
@@ -727,7 +719,7 @@ export const geminiCliMethods = {
     // Model Redirect Management
     async loadGeminiCliModelRedirects() {
         try {
-            const response = await fetch('/api/gemini-cli-api/models/redirects', {
+            const response = await fetch('/api/gemini-cli/models/redirects', {
                 headers: store.getAuthHeaders()
             });
             store.geminiCliModelRedirects = await response.json();
@@ -744,13 +736,13 @@ export const geminiCliMethods = {
         try {
             // 如果是编辑模式，且修改了源模型名称（主键变了），则需要先删除旧的
             if (store.gcliEditingRedirectSource && store.gcliEditingRedirectSource !== sourceModel) {
-                await fetch(`/api/gemini-cli-api/models/redirects/${encodeURIComponent(store.gcliEditingRedirectSource)}`, {
+                await fetch(`/api/gemini-cli/models/redirects/${encodeURIComponent(store.gcliEditingRedirectSource)}`, {
                     method: 'DELETE',
                     headers: store.getAuthHeaders()
                 });
             }
 
-            const response = await fetch('/api/gemini-cli-api/models/redirects', {
+            const response = await fetch('/api/gemini-cli/models/redirects', {
                 method: 'POST',
                 headers: {
                     ...store.getAuthHeaders(),
@@ -795,7 +787,7 @@ export const geminiCliMethods = {
         if (!confirmed) return;
 
         try {
-            const response = await fetch(`/api/gemini-cli-api/models/redirects/${encodeURIComponent(sourceModel)}`, {
+            const response = await fetch(`/api/gemini-cli/models/redirects/${encodeURIComponent(sourceModel)}`, {
                 method: 'DELETE',
                 headers: store.getAuthHeaders()
             });
@@ -814,7 +806,7 @@ export const geminiCliMethods = {
     // 导出账号
     async exportGeminiCliAccounts() {
         try {
-            const response = await fetch('/api/gemini-cli-api/accounts/export', {
+            const response = await fetch('/api/gemini-cli/accounts/export', {
                 headers: store.getAuthHeaders()
             });
             const data = await response.json();
@@ -860,7 +852,7 @@ export const geminiCliMethods = {
                 }
 
                 store.geminiCliLoading = true;
-                const response = await fetch('/api/gemini-cli-api/accounts/import', {
+                const response = await fetch('/api/gemini-cli/accounts/import', {
                     method: 'POST',
                     headers: {
                         ...store.getAuthHeaders(),
@@ -886,18 +878,18 @@ export const geminiCliMethods = {
         input.click();
     },
 
-    // 执行模型健康检测
+    // 执行模型健康检测 (旧版，保留或删除)
     async checkGeminiCliAccounts() {
         store.geminiCliCheckLoading = true;
         toast.info('正在检测模型健康状态...');
         try {
-            const response = await fetch('/api/gemini-cli-api/accounts/check', {
+            const response = await fetch('/api/gemini-cli/accounts/check', {
                 method: 'POST',
                 headers: store.getAuthHeaders()
             });
             const data = await response.json();
             if (response.ok) {
-                toast.success(`检测完成: ${data.checked} 正常, ${data.failed} 异常`);
+                toast.success('检测完成');
                 await this.loadGeminiCliCheckHistory();
             } else {
                 toast.error(data.error || '检测失败');
@@ -909,20 +901,181 @@ export const geminiCliMethods = {
         }
     },
 
-    // 加载检测历史
+    // ========== 模型检测历史功能 ==========
+
+    /**
+     * 执行模型健康检测
+     */
+    async runGeminiCliModelCheck() {
+        store.geminiCliChecking = true;
+        toast.info('正在检测模型健康状态..');
+
+        // 开启轮询，实现实时刷新表格
+        const pollInterval = setInterval(() => {
+            if (store.geminiCliChecking) {
+                this.loadGeminiCliCheckHistory();
+            } else {
+                clearInterval(pollInterval);
+            }
+        }, 2000);
+
+        try {
+            const response = await fetch('/api/gemini-cli/accounts/check', {
+                method: 'POST',
+                headers: store.getAuthHeaders()
+            });
+            const data = await response.json();
+            if (response.ok && data.success) {
+                toast.success('检测完成');
+            } else {
+                toast.error(data.error || '检测失败');
+            }
+        } catch (error) {
+            toast.error('检测请求失败: ' + error.message);
+        } finally {
+            store.geminiCliChecking = false;
+            clearInterval(pollInterval);
+            this.loadGeminiCliCheckHistory(); // 确保最后刷新一次
+        }
+    },
+
+    /**
+     * 切换定时检测开关
+     */
+    toggleGeminiCliAutoCheck() {
+        if (store.geminiCliAutoCheck) {
+            this.startGeminiCliAutoCheck();
+            toast.success(`已开启定时检测 (每 ${Math.round(store.geminiCliAutoCheckInterval / 60000)} 分钟)`);
+        } else {
+            this.stopGeminiCliAutoCheck();
+            toast.info('已关闭定时检测');
+        }
+        // 保存设置到后端
+        this.saveGeminiCliAutoCheckSettings();
+    },
+
+    /**
+     * 重启定时检测 (间隔变化时)
+     */
+    restartGeminiCliAutoCheck() {
+        if (store.geminiCliAutoCheck) {
+            this.stopGeminiCliAutoCheck();
+            this.startGeminiCliAutoCheck();
+            toast.success(`定时检测间隔已更新为 ${Math.round(store.geminiCliAutoCheckInterval / 60000)} 分钟`);
+        }
+        // 保存设置到后端
+        this.saveGeminiCliAutoCheckSettings();
+    },
+
+    /**
+     * 启动定时检测
+     */
+    startGeminiCliAutoCheck() {
+        this.stopGeminiCliAutoCheck();
+        store.geminiCliAutoCheckTimerId = setInterval(() => {
+            if (!store.geminiCliChecking) {
+                console.log('[Gemini CLI] 定时检测触发');
+                this.runGeminiCliModelCheck();
+            }
+        }, Number(store.geminiCliAutoCheckInterval));
+    },
+
+    /**
+     * 停止定时检测
+     */
+    stopGeminiCliAutoCheck() {
+        if (store.geminiCliAutoCheckTimerId) {
+            clearInterval(store.geminiCliAutoCheckTimerId);
+            store.geminiCliAutoCheckTimerId = null;
+        }
+    },
+
+    /**
+     * 加载定时检测设置
+     */
+    async loadGeminiCliAutoCheckSettings() {
+        try {
+            const response = await fetch('/api/gemini-cli/settings', {
+                headers: store.getAuthHeaders()
+            });
+            const settings = await response.json();
+
+            if (settings.autoCheckEnabled !== undefined) {
+                store.geminiCliAutoCheck = settings.autoCheckEnabled === '1' || settings.autoCheckEnabled === true;
+            }
+            if (settings.autoCheckInterval !== undefined) {
+                store.geminiCliAutoCheckInterval = parseInt(settings.autoCheckInterval) || 3600000;
+            }
+            // 加载禁用模型列表
+            if (settings.disabledCheckModels) {
+                try {
+                    store.geminiCliDisabledCheckModels = JSON.parse(settings.disabledCheckModels) || [];
+                } catch (e) {
+                    store.geminiCliDisabledCheckModels = [];
+                }
+            }
+
+            if (store.geminiCliAutoCheck) {
+                this.startGeminiCliAutoCheck();
+            }
+        } catch (error) {
+            console.error('加载 Gemini CLI 定时检测设置失败:', error);
+        }
+    },
+
+    /**
+     * 保存定时检测设置
+     */
+    async saveGeminiCliAutoCheckSettings() {
+        try {
+            await fetch('/api/gemini-cli/settings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...store.getAuthHeaders()
+                },
+                body: JSON.stringify({
+                    autoCheckEnabled: store.geminiCliAutoCheck ? '1' : '0',
+                    autoCheckInterval: String(store.geminiCliAutoCheckInterval),
+                    disabledCheckModels: JSON.stringify(store.geminiCliDisabledCheckModels)
+                })
+            });
+        } catch (error) {
+            console.error('保存 Gemini CLI 定时检测设置失败:', error);
+        }
+    },
+
+    /**
+     * 切换模型检测开关
+     */
+    toggleGeminiCliCheckModel(modelId) {
+        const idx = store.geminiCliDisabledCheckModels.indexOf(modelId);
+        if (idx >= 0) {
+            store.geminiCliDisabledCheckModels.splice(idx, 1);
+        } else {
+            store.geminiCliDisabledCheckModels.push(modelId);
+        }
+        this.saveGeminiCliAutoCheckSettings();
+    },
+
+    /**
+     * 加载模型检测历史
+     */
     async loadGeminiCliCheckHistory() {
         try {
-            const response = await fetch('/api/gemini-cli-api/models/check-history', {
+            const response = await fetch('/api/gemini-cli/models/check-history', {
                 headers: store.getAuthHeaders()
             });
             const data = await response.json();
             store.geminiCliCheckHistory = data;
         } catch (error) {
-            console.error('加载检测历史失败:', error);
+            console.error('加载 Gemini CLI 模型检测历史失败', error);
         }
     },
 
-    // 清空检测历史
+    /**
+     * 清空模型检测历史
+     */
     async clearGeminiCliCheckHistory() {
         const confirmed = await store.showConfirm({
             title: '确认清空',
@@ -935,76 +1088,83 @@ export const geminiCliMethods = {
         if (!confirmed) return;
 
         try {
-            const response = await fetch('/api/gemini-cli-api/models/check-history', {
-                method: 'DELETE',
+            const response = await fetch('/api/gemini-cli/models/check-history/clear', {
+                method: 'POST',
                 headers: store.getAuthHeaders()
             });
             if (response.ok) {
                 toast.success('检测历史已清空');
                 store.geminiCliCheckHistory = { models: [], times: [], matrix: {} };
+            } else {
+                toast.error('清空失败');
             }
         } catch (error) {
-            toast.error('清空失败');
+            toast.error('请求失败: ' + error.message);
         }
     },
 
-    // 格式化检测时间（显示为 日-时-分-秒）
-    formatCheckTime(timestamp) {
+    /**
+     * 格式化检测时间显示
+     */
+    formatGeminiCliCheckTime(timestamp) {
         if (!timestamp) return '-';
         const date = new Date(timestamp * 1000);
-        const d = String(date.getDate()).padStart(2, '0');
-        const h = String(date.getHours()).padStart(2, '0');
-        const m = String(date.getMinutes()).padStart(2, '0');
-        const s = String(date.getSeconds()).padStart(2, '0');
-        return `${d}-${h}-${m}-${s}`;
+        return date.toLocaleString('zh-CN', {
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
     },
 
-    // 格式化相对时间
-    formatRelativeTime(timestamp) {
-        if (!timestamp) return '-';
-        const now = Math.floor(Date.now() / 1000);
-        const diff = now - timestamp;
+    /**
+     * 获取检测徽章的 CSS 类
+     */
+    getGeminiCliCheckBadgeClass(checkData, accountIndex) {
+        if (!checkData) return 'check-badge-unknown';
 
-        if (diff < 60) return '刚刚';
-        if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`;
-        if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`;
-        return `${Math.floor(diff / 86400)}天前`;
-    },
-
-    // 获取检测结果 CSS 类
-    getCheckResultClass(checkResult) {
-        if (!checkResult) return 'ag-status-unknown';
-        try {
-            const result = typeof checkResult === 'string' ? JSON.parse(checkResult) : checkResult;
-            return result.status === 'online' ? 'ag-status-online' : 'ag-status-error';
-        } catch (e) {
-            return 'ag-status-unknown';
+        // 检测中状态
+        if (checkData.error_log === 'Waiting...' || checkData.error_log === 'Checking...') {
+            return 'check-badge-unknown';
         }
+
+        // 检查是否通过
+        const passedList = (checkData.passedAccounts || '').split(',').filter(s => s);
+        if (passedList.includes(String(accountIndex))) {
+            return 'check-badge-success';
+        }
+
+        // 检查错误日志中是否有内容（说明检测完成）
+        const errorLog = checkData.error_log || '';
+        const checkComplete = errorLog.length > 0 && errorLog !== 'Waiting...' && errorLog !== 'Checking...';
+
+        // 只有检测明确完成且当前账号不在通过列表中，才显示失败
+        if (checkComplete && (checkData.status === 'ok' || checkData.status === 'error')) {
+            return 'check-badge-error';
+        }
+
+        return 'check-badge-unknown';
     },
 
-    // 获取检测结果图标
-    getCheckResultIcon(checkResult) {
-        if (!checkResult) return 'fa-question-circle';
-        try {
-            const result = typeof checkResult === 'string' ? JSON.parse(checkResult) : checkResult;
-            return result.status === 'online' ? 'fa-check-circle' : 'fa-times-circle';
-        } catch (e) {
-            return 'fa-question-circle';
-        }
-    },
+    /**
+     * 获取检测徽章的标题提示
+     */
+    getGeminiCliCheckBadgeTitle(checkData, accountIndex) {
+        if (!checkData) return '未检测';
 
-    // 格式化检测结果详情
-    formatCheckResult(checkResult) {
-        if (!checkResult) return '暂无检测记录';
-        try {
-            const result = typeof checkResult === 'string' ? JSON.parse(checkResult) : checkResult;
-            if (result.status === 'online') {
-                return `状态正常 (${result.passed || 0}/${result.modelsTested || 0} 模型通过)`;
-            } else {
-                return `状态异常: ${result.error || '未知错误'}`;
-            }
-        } catch (e) {
-            return '解析错误';
+        if (checkData.error_log === 'Waiting...' || checkData.error_log === 'Checking...') {
+            return `账号 #${accountIndex} 检测中`;
         }
+
+        const passedList = (checkData.passedAccounts || '').split(',').filter(s => s);
+        if (passedList.includes(String(accountIndex))) {
+            return `账号 #${accountIndex} 通过`;
+        }
+
+        if (passedList.length > 0 || checkData.status === 'error') {
+            return `账号 #${accountIndex} 失败`;
+        }
+
+        return `账号 #${accountIndex} 未检测`;
     }
 };

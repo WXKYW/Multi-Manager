@@ -1018,7 +1018,7 @@ export const settingsMethods = {
         this.geminiCliSettingsForm.PROXY = proxy;
       }
 
-      await fetch('/api/gemini-cli-api/settings', {
+      await fetch('/api/gemini-cli/settings', {
         method: 'POST',
         headers: {
           ...this.getAuthHeaders(),

@@ -354,3 +354,60 @@
     white-space: nowrap;
   }
 }
+
+/* 模型配额通用显示样式 (用于账号列表等) */
+.quota-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px 12px;
+}
+
+.quota-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.quota-label {
+  min-width: 60px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.quota-bar-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.quota-bar {
+  flex: 1;
+  height: 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.05);
+  /* 更淡的背景 */
+  overflow: hidden;
+  min-width: 40px;
+}
+
+.quota-fill {
+  height: 100%;
+  border-radius: 6px;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.quota-value,
+.quota-percent {
+  min-width: 35px;
+  text-align: right;
+  font-weight: 600;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+/* 适配深色模式 */
+[data-theme='dark'] .quota-bar {
+  background: rgba(255, 255, 255, 0.1);
+}
