@@ -150,7 +150,7 @@ router.get('/song/url', async (req, res) => {
 
             try {
                 const match = require('@unblockneteasemusic/server');
-                const sources = ['bodian', 'kugou', 'kuwo', 'migu'];  // bodian 优先
+                const sources = ['bodian'];  // 只用波点
                 const unblocked = await match(Number(id), sources);
 
                 if (unblocked && unblocked.url) {
@@ -222,8 +222,8 @@ router.get('/song/url/unblock', async (req, res) => {
         // 使用 npm 包 @unblockneteasemusic/server
         const match = require('@unblockneteasemusic/server');
 
-        // 默认音源列表：波点优先，其次酷狗、酷我、咪咕
-        const sources = source ? source.split(',') : ['bodian', 'kugou', 'kuwo', 'migu'];
+        // 默认音源：只用波点
+        const sources = source ? source.split(',') : ['bodian'];
 
         console.log(`[Music] Unblock: trying to match song ${id} with sources:`, sources);
 
