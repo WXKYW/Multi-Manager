@@ -454,7 +454,16 @@ function registerRoutes(app) {
     });
   }
 
-  // 5. 核心认证路由兼容旧版 (放在最后作为兜底，防止拦截模块路由)
+  // 5. 音乐模块路由 (代理 NCM API)
+  try {
+    const musicRouter = require('./music');
+    app.use('/api/music', requireAuth, musicRouter);
+    logger.success('音乐模块已挂载 -> /api/music');
+  } catch (e) {
+    logger.warn('音乐模块加载失败 (可选模块):', e.message);
+  }
+
+  // 6. 核心认证路由兼容旧版 (放在最后作为兜底，防止拦截模块路由)
   app.use('/api', authRouter);
 }
 
