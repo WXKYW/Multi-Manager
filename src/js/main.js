@@ -320,6 +320,7 @@ const app = createApp({
       serverBatchError: '',
       serverBatchSuccess: '',
       serverAddingBatch: false,
+      isDraggingFile: false, // 文件拖拽状态
 
       // 主机筛选与自动更新
       probeStatus: '', // '', 'loading', 'success', 'error'

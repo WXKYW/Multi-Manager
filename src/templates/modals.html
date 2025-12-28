@@ -763,10 +763,40 @@
       <button class="modal-close" @click="closeImportServerModal"><i class="fas fa-times"></i></button>
     </div>
     <div class="modal-body">
-      <div class="server-form-section">
+      <div class="server-form-section" style="border: none; background: transparent; padding: 0;">
         <div class="form-group">
-          <label><i class="fas fa-file"></i> 选择 JSON 文件</label>
-          <input type="file" ref="importFileInput" accept=".json" class="form-input" @change="handleImportFileChange" />
+          <label style="margin-bottom: 12px; font-weight: 600; color: var(--text-primary);">
+            <i class="fas fa-file-import"></i> 导入数据源
+          </label>
+
+          <!-- 已选择文件时的状态 -->
+          <div v-if="importPreview" class="selected-file-preview">
+            <div class="file-drop-zone-icon"
+              style="font-size: 20px; margin: 0; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; background: rgba(var(--current-rgb, 59, 130, 246), 0.1); border-radius: 8px;">
+              <i class="fas fa-file-code"></i>
+            </div>
+            <div class="file-info">
+              <div class="file-name">已加载 {{ importPreview.length }} 台主机配置</div>
+              <div class="file-meta">准备就绪，点击下方确认导入</div>
+            </div>
+            <button class="remove-file-btn" @click="clearImportFile" title="移除文件">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+
+          <!-- 未选择文件时的 Drop Zone -->
+          <div v-else class="file-drop-zone" :class="{ dragging: isDraggingFile }"
+            @dragover.prevent="isDraggingFile = true" @dragleave.prevent="isDraggingFile = false"
+            @drop.prevent="handleImportDrop">
+            <input type="file" ref="importFileInput" accept=".json" @change="handleImportFileChange" />
+            <div class="file-drop-zone-content">
+              <div class="file-drop-zone-icon">
+                <i class="fas fa-cloud-upload-alt"></i>
+              </div>
+              <div class="file-drop-zone-text">点击或将 JSON 文件拖拽到此处</div>
+              <div class="file-drop-zone-subtext">支持标准主机列表导出的 JSON 格式</div>
+            </div>
+          </div>
         </div>
       </div>
       <div v-if="importPreview" class="server-form-section" style="margin-top: 8px;">
