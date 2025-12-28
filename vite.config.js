@@ -43,6 +43,7 @@ module.exports = defineConfig(({ mode }) => {
                 'vue': useCdn
                     ? path.resolve(__dirname, 'src/js/vue-shim.js')
                     : 'vue/dist/vue.esm-bundler.js'
+                // AMLL 现在从 npm 包 @applemusic-like-lyrics/core 导入
             }
         },
         plugins: [
@@ -77,6 +78,11 @@ module.exports = defineConfig(({ mode }) => {
         server: {
             port: 5173,
             host: true,
+            fs: {
+                allow: [
+                    path.resolve(__dirname) // 允许访问项目根目录
+                ]
+            },
             proxy: {
                 '/api': {
                     target: 'http://127.0.0.1:3000',
