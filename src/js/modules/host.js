@@ -422,6 +422,29 @@ export const hostMethods = {
     handleImportFileChange(event) {
         const file = event.target.files[0];
         if (!file) return;
+        this.processImportFile(file);
+    },
+
+    handleImportDrop(event) {
+        this.isDraggingFile = false;
+        const file = event.dataTransfer.files[0];
+        if (!file) return;
+        this.processImportFile(file);
+    },
+
+    clearImportFile() {
+        this.importPreview = null;
+        this.importModalError = '';
+        if (this.$refs.importFileInput) {
+            this.$refs.importFileInput.value = '';
+        }
+    },
+
+    processImportFile(file) {
+        if (!file.name.toLowerCase().endsWith('.json')) {
+            this.importModalError = '仅支持 .json 格式的文件';
+            return;
+        }
 
         const reader = new FileReader();
         reader.onload = (e) => {

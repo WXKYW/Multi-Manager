@@ -2511,6 +2511,137 @@
     transform: none;
 }
 
+/* ==================== 现代化文件上传 (Drop Zone) ==================== */
+.file-drop-zone {
+    position: relative;
+    width: 100%;
+    min-height: 120px;
+    padding: 20px;
+    background: var(--bg-tertiary);
+    border: 2px dashed var(--border-color);
+    border-radius: 12px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    overflow: hidden;
+}
+
+.file-drop-zone:hover,
+.file-drop-zone.dragging {
+    border-color: var(--server-primary);
+    background: rgba(var(--current-rgb, 59, 130, 246), 0.05);
+    transform: translateY(-2px);
+}
+
+.file-drop-zone input[type="file"] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    width: 100%;
+    height: 100%;
+}
+
+.file-drop-zone-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 8px;
+    pointer-events: none;
+}
+
+.file-drop-zone-icon {
+    font-size: 28px;
+    color: var(--server-primary);
+    margin-bottom: 4px;
+    transition: transform 0.3s ease;
+}
+
+.file-drop-zone:hover .file-drop-zone-icon {
+    transform: scale(1.1);
+}
+
+.file-drop-zone-text {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.file-drop-zone-subtext {
+    font-size: 11px;
+    color: var(--text-tertiary);
+}
+
+/* 选中文件后的预览状态 */
+.selected-file-preview {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--server-primary);
+    border-radius: 10px;
+    animation: slideInUp 0.3s ease;
+}
+
+.file-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.file-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.file-meta {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-family: var(--font-mono);
+}
+
+.remove-file-btn {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.remove-file-btn:hover {
+    background: #ef4444;
+    color: white;
+}
+
+@keyframes slideInUp {
+    from {
+        transform: translateY(10px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
 /* ==================== SSH 蹇€熻繛鎺ヤ笅鎷夎彍鍗曞姩鐢?==================== */
 /* 涓嬫媺鑿滃崟灞曞紑鍔ㄧ敾 */
 .dropdown-fade-enter-active {

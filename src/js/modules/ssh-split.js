@@ -67,22 +67,59 @@ export const sshSplitMethods = {
      * @param {string} sessionId - 要移除的会话 ID
      */
     removeFromSplitView(sessionId) {
+        // 1. 同步清理分屏快照（如果存在），防止快照引用已销毁的会话
+        if (this.sshGroupState && this.sshGroupState.ids.includes(sessionId)) {
+            const newIds = this.sshGroupState.ids.filter(id => id !== sessionId);
+            if (newIds.length <= 1) {
+                // 如果快照只剩一个成员，则不再构成“组”，销毁快照
+                this.sshGroupState = null;
+                this.sshSyncEnabled = false;
+            } else {
+                this.sshGroupState.ids = newIds;
+            }
+        }
+
         const index = this.visibleSessionIds.indexOf(sessionId);
         if (index === -1) return;
 
+        // 2. 预先寻找下一个激活候选者 (如果当前要移除的是激活项)
+        let nextActiveId = null;
+        if (this.activeSSHSessionId === sessionId) {
+            // 优先选择同组中的下一个或上一个
+            if (this.visibleSessionIds.length > 1) {
+                nextActiveId = this.visibleSessionIds[index === 0 ? 1 : index - 1];
+            } else if (this.sshSessions && this.sshSessions.length > 0) {
+                // 如果是最后一个分屏，选择 session 列表中的最后一个（非当前）
+                const others = this.sshSessions.filter(s => s.id !== sessionId);
+                if (others.length > 0) nextActiveId = others[others.length - 1].id;
+            }
+        }
+
+        const prevLayout = this.sshViewLayout;
         this.visibleSessionIds.splice(index, 1);
 
-        // 如果只剩一个或没有，恢复单屏
-        if (this.visibleSessionIds.length <= 1) {
-            this._resetToSingle();
+        // 3. 核心修复：只有在当前确实处于分屏【布局】且分屏数不足时，才由于物理原因重置状态。
+        // 如果当前是单屏模式（由外部切换进入），即便 visibleSessionIds 为空，也不应重置 (因为快照已由步骤1守护)
+        if (prevLayout !== 'single') {
+            if (this.visibleSessionIds.length <= 1) {
+                this._resetToSingle();
+            } else {
+                this._updateLayoutMode();
+                this._scheduleSync();
+            }
         } else {
-            this._updateLayoutMode();
+            // 单屏模式下移除，仅标记需要重新同步 DOM
             this._scheduleSync();
         }
 
-        // 如果关闭的是当前激活的，切换到其他
-        if (this.activeSSHSessionId === sessionId && this.visibleSessionIds.length > 0) {
-            this.activeSSHSessionId = this.visibleSessionIds[0];
+        // 4. 处理 ID 切换逻辑 (仅在分屏布局下关闭窗格时主动切换)
+        // 如果是单屏模式下关闭会话，交给外部的 closeSSHSession 处理，它会调用 switchToSSHTab 触发完整的视图恢复
+        if (prevLayout !== 'single') {
+            if (nextActiveId) {
+                this.activeSSHSessionId = nextActiveId;
+            } else if (this.activeSSHSessionId === sessionId && this.visibleSessionIds.length > 0) {
+                this.activeSSHSessionId = this.visibleSessionIds[0];
+            }
         }
     },
 
@@ -95,6 +132,8 @@ export const sshSplitMethods = {
 
         this.sshViewLayout = 'single';
         this.visibleSessionIds = [];
+        this.sshGroupState = null;
+        this.sshSyncEnabled = false;
 
         this._scheduleSync();
     },
@@ -178,8 +217,10 @@ export const sshSplitMethods = {
                 layout: this.sshViewLayout,
                 side: this.sshSplitSide
             };
-        } else if (this.visibleSessionIds.length <= 1) {
-            // 如果物理上只剩一个窗格，且并非是“暂时切出”状态，则销毁快照
+        } else if (this.sshViewLayout !== 'single' && this.visibleSessionIds.length <= 1) {
+            // 核心修复：只有在物理布局是分屏，且窗格数量降至 1 以下时，才视为分屏主动解散
+            this.sshGroupState = null;
+            this.sshSyncEnabled = false;
         }
     },
 
