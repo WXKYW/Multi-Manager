@@ -18,7 +18,8 @@ function initAudioPlayer() {
     if (audioPlayer) return audioPlayer;
 
     audioPlayer = new Audio();
-    audioPlayer.crossOrigin = 'anonymous';
+    // 注意：不设置 crossOrigin，因为第三方音源（如酷我、酷狗）不支持 CORS
+    // 这意味着 Web Audio API 可视化功能将不可用
     audioPlayer.preload = 'auto';
 
     // 绑定事件
@@ -30,17 +31,8 @@ function initAudioPlayer() {
     audioPlayer.addEventListener('waiting', () => store.musicBuffering = true);
     audioPlayer.addEventListener('playing', () => store.musicBuffering = false);
 
-    // 尝试创建音频可视化
-    try {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        analyser = audioContext.createAnalyser();
-        const source = audioContext.createMediaElementSource(audioPlayer);
-        source.connect(analyser);
-        analyser.connect(audioContext.destination);
-        analyser.fftSize = 256;
-    } catch (e) {
-        console.warn('[Music] Audio visualization not supported:', e);
-    }
+    // Web Audio API 可视化在无 CORS 时不可用
+    // 如果需要可视化，需要通过后端代理音频流
 
     return audioPlayer;
 }
@@ -109,18 +101,27 @@ function handleCanPlay() {
  */
 async function retryWithUnblock(songId) {
     try {
+        console.log('[Music] Trying to unblock song:', songId);
         const response = await fetch(`/api/music/song/url/unblock?id=${songId}`);
         const data = await response.json();
 
-        if (data.url) {
-            audioPlayer.src = data.url;
-            audioPlayer.play();
-            toast.success(`已切换音源: ${data.source || '未知'}`);
+        // 后端返回格式: { code: 200, data: { url, source, ... } }
+        const urlData = data.data || data;
+
+        if (urlData?.url) {
+            audioPlayer.src = urlData.url;
+            await audioPlayer.play();
+            store.musicPlaying = true;
+            store.musicBuffering = false;
+            toast.success(`已切换音源: ${urlData.source || '解锁'}`);
         } else {
             toast.error('暂无可用音源');
+            store.musicBuffering = false;
         }
     } catch (error) {
+        console.error('[Music] Unblock retry failed:', error);
         toast.error('获取音源失败');
+        store.musicBuffering = false;
     }
 }
 
@@ -224,14 +225,18 @@ export const musicMethods = {
 
         try {
             // 获取播放地址
+            console.log('[Music] Fetching URL for song:', song.id);
             const response = await fetch(`/api/music/song/url?id=${song.id}&level=exhigh`);
             const data = await response.json();
 
             const songData = data.data?.[0];
+            console.log('[Music] URL response:', songData?.url ? 'Got URL' : 'No URL', 'source:', songData?.source || 'official');
+
             if (songData?.url) {
                 audioPlayer.src = songData.url;
                 await audioPlayer.play();
                 store.musicPlaying = true;
+                store.musicBuffering = false;
 
                 // 获取歌词
                 this.musicLoadLyrics(song.id);
@@ -242,6 +247,7 @@ export const musicMethods = {
                 }
             } else {
                 // 尝试解锁
+                console.log('[Music] No URL from official API, trying unblock...');
                 await retryWithUnblock(song.id);
             }
         } catch (error) {
