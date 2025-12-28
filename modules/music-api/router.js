@@ -122,11 +122,73 @@ async function handleRequest(moduleName, req, res) {
 
         const result = await api[moduleName](query);
 
-        // 如果返回新的 Cookie，保存到服务器
+        // 如果返回新的 Cookie，合并到现有 Cookie（而非覆盖）
         if (result.cookie && Array.isArray(result.cookie)) {
-            const cookieStr = result.cookie.join('; ');
-            if (cookieStr) {
-                saveCookie(cookieStr);
+            // HTTP Cookie 属性列表（需要过滤掉）
+            const httpAttrs = ['max-age', 'expires', 'path', 'domain', 'secure', 'httponly', 'samesite'];
+
+            // 提取新 Cookie 的 key=value 部分，过滤 HTTP 属性
+            const newCookieParts = [];
+            result.cookie.forEach(c => {
+                const match = String(c).match(/^([^;]+)/);
+                if (match) {
+                    const part = match[1].trim();
+                    const [key] = part.split('=');
+                    // 只保留非 HTTP 属性的 Cookie
+                    if (key && !httpAttrs.includes(key.toLowerCase())) {
+                        newCookieParts.push(part);
+                    }
+                }
+            });
+
+            if (newCookieParts.length === 0) {
+                // 没有有效的新 Cookie，跳过
+            } else {
+                // 解析现有 Cookie
+                const existingCookies = {};
+                if (storedCookie) {
+                    storedCookie.split(';').forEach(part => {
+                        const trimmed = part.trim();
+                        if (!trimmed) return;
+                        const [key, ...valueParts] = trimmed.split('=');
+                        if (key && !httpAttrs.includes(key.toLowerCase())) {
+                            existingCookies[key.trim()] = valueParts.join('=');
+                        }
+                    });
+                }
+
+                // 检查现有 Cookie 是否包含登录态
+                const hasExistingLogin = !!existingCookies['MUSIC_U'] || !!existingCookies['MUSIC_R_U'];
+
+                // 合并新 Cookie
+                newCookieParts.forEach(part => {
+                    const [key, ...valueParts] = part.split('=');
+                    if (!key) return;
+
+                    const keyTrimmed = key.trim();
+
+                    // 如果已有登录态，只接受登录相关的 Cookie 更新，拒绝匿名 Cookie 覆盖
+                    if (hasExistingLogin) {
+                        // 登录相关的 Cookie 可以更新
+                        const loginCookies = ['MUSIC_U', 'MUSIC_R_U', 'MUSIC_A', 'MUSIC_A_T', '__csrf'];
+                        if (loginCookies.includes(keyTrimmed)) {
+                            existingCookies[keyTrimmed] = valueParts.join('=');
+                        }
+                        // NMTID 等匿名 Cookie 不更新
+                    } else {
+                        // 没有登录态时，接受所有 Cookie
+                        existingCookies[keyTrimmed] = valueParts.join('=');
+                    }
+                });
+
+                // 重新组合 Cookie 字符串
+                const mergedCookie = Object.entries(existingCookies)
+                    .map(([k, v]) => `${k}=${v}`)
+                    .join('; ');
+
+                if (mergedCookie && mergedCookie !== storedCookie) {
+                    saveCookie(mergedCookie);
+                }
             }
         }
 
@@ -347,28 +409,67 @@ router.get('/login/qr/check', async (req, res) => {
 
         const result = await api.login_qr_check(query);
 
+        // 调试：打印完整结果结构
+        logger.debug('[QR Check] result.body.code:', result.body?.code);
+        logger.debug('[QR Check] result.cookie:', result.cookie);
+        logger.debug('[QR Check] result.body.cookie:', result.body?.cookie);
+
         // 登录成功 (code 803) 时保存 Cookie
         if (result.body?.code === 803) {
             logger.info('[Music] 扫码登录成功，正在提取并持久化 Cookie...');
 
             let cookieStr = '';
 
-            // 1. 优先从 api 直接返回的 cookie 字段提取 (通常是字符串数组)
-            if (result.cookie) {
-                const rawCookies = Array.isArray(result.cookie) ? result.cookie : [result.cookie];
-                cookieStr = rawCookies.join('; ');
+            // 从 result.cookie 数组提取 (更可靠)
+            if (result.cookie && Array.isArray(result.cookie)) {
+                const rawCookies = result.cookie;
+                // 提取每个 Set-Cookie 字符串中的 key=value 部分
+                const cookieParts = rawCookies.map(c => {
+                    // Set-Cookie 格式: "KEY=VALUE; Path=/; Max-Age=..."
+                    // 只取第一个分号前的 KEY=VALUE 部分
+                    const match = String(c).match(/^([^;]+)/);
+                    return match ? match[1].trim() : '';
+                }).filter(Boolean);
+                cookieStr = cookieParts.join('; ');
+                logger.info('[QR Check] Extracted from result.cookie array, length:', cookieStr.length);
             }
 
-            // 2. 如果第一步没拿到，检查 body 里的 cookie (兼容模式)
-            if (!cookieStr && result.body?.cookie) {
-                cookieStr = result.body.cookie;
+            // 备选：从 body.cookie 获取并解析 (需要清理格式)
+            if (!cookieStr && result.body?.cookie && typeof result.body.cookie === 'string') {
+                // body.cookie 可能是 "KEY1=VAL1; Max-Age=...; KEY2=VAL2; ..."
+                // 需要按分号拆分，只保留 key=value 格式的部分
+                const parts = result.body.cookie.split(';');
+                const cleanParts = parts
+                    .map(p => p.trim())
+                    .filter(p => {
+                        // 只保留 key=value 格式，排除 Max-Age, Expires, Path 等属性
+                        if (!p.includes('=')) return false;
+                        const key = p.split('=')[0].toLowerCase();
+                        return !['max-age', 'expires', 'path', 'domain', 'secure', 'httponly', 'samesite'].includes(key);
+                    });
+                cookieStr = cleanParts.join('; ');
+                logger.info('[QR Check] Extracted from result.body.cookie, length:', cookieStr.length);
             }
 
+            // 调试：打印 Cookie 内容
+            logger.debug('[QR Check] Cookie preview:', cookieStr.substring(0, 150));
+
+            // 验证是否包含 MUSIC_U (登录态关键字段)
             if (cookieStr) {
-                saveCookie(cookieStr);
-                logger.success('[Music] 登录态已持久化到服务器数据库');
+                const hasMusicU = cookieStr.includes('MUSIC_U=');
+                if (hasMusicU) {
+                    saveCookie(cookieStr);
+                    logger.success('[Music] 登录态已持久化到服务器数据库 (包含 MUSIC_U)');
+                } else {
+                    logger.warn('[Music] Cookie 不包含 MUSIC_U，可能不是有效的登录 Cookie');
+                    logger.warn('[Music] Cookie 内容:', cookieStr);
+                    // 仍然保存，但打印警告
+                    saveCookie(cookieStr);
+                }
             } else {
                 logger.error('[Music] 登录成功但未提取到有效 Cookie');
+                logger.error('[Music] result.cookie:', JSON.stringify(result.cookie));
+                logger.error('[Music] result.body.cookie:', result.body?.cookie);
             }
         }
 
@@ -408,7 +509,12 @@ router.get('/auth/status', async (req, res) => {
 
     try {
         const result = await api.login_status({ cookie: storedCookie });
-        const profile = result.body?.data?.profile;
+
+        // 调试：打印完整返回结构
+        logger.info('login_status raw result:', JSON.stringify(result.body, null, 2));
+
+        // 网易云 API 可能在不同位置返回 profile
+        const profile = result.body?.data?.profile || result.body?.profile;
 
         if (profile) {
             res.json({

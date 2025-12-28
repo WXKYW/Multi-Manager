@@ -933,10 +933,14 @@ const app = createApp({
                 this.loadTotpAccounts();
                 this.startTotpTimer();
                 break;
-              case 'music':
-                this.initMusicModule();
-                break;
             }
+          });
+        }
+
+        // Music 模块独立初始化 (有自己的登录系统，不依赖应用认证)
+        if (newVal === 'music') {
+          this.$nextTick(() => {
+            this.initMusicModule();
           });
         }
 

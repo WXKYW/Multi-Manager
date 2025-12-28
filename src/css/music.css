@@ -1050,6 +1050,19 @@
     background: var(--text-secondary-local);
 }
 
+/* 加载更多指示器 */
+.music-load-more {
+    text-align: center;
+    padding: 20px;
+    color: var(--text-secondary-local);
+    font-size: 13px;
+    opacity: 0.7;
+}
+
+.music-load-more i {
+    margin-right: 8px;
+}
+
 .music-song-item {
     display: flex;
     align-items: center;
@@ -2024,4 +2037,13 @@
         height: 64px !important;
         border-radius: 16px !important;
     }
+}
+
+/* 禁止所有图片拖动 */
+.music-module img {
+    -webkit-user-drag: none;
+    user-drag: none;
+    -webkit-user-select: none;
+    user-select: none;
+    pointer-events: auto;
 }

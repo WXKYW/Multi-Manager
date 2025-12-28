@@ -654,10 +654,18 @@ export const antigravityMethods = {
                 'CREDENTIAL_MAX_USAGE_PER_HOUR': '',
                 'TIMEOUT': '',
                 'REQUEST_LOG_RETENTION_DAYS': '',
-                // 'API_KEY': '',
+                'API_KEY': '',
                 'PROXY': ''
             };
-            if (Array.isArray(data)) {
+            // 后端返回的是 { key: value } 对象，直接合并
+            if (data && typeof data === 'object' && !Array.isArray(data)) {
+                Object.keys(data).forEach(key => {
+                    if (key in form || key === 'API_KEY' || key === 'PROXY') {
+                        form[key] = data[key];
+                    }
+                });
+            } else if (Array.isArray(data)) {
+                // 兼容旧格式（数组）
                 data.forEach(s => {
                     form[s.key] = s.value;
                 });
