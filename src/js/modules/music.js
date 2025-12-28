@@ -115,8 +115,6 @@ function initAudioPlayer() {
     if (audioPlayer) return audioPlayer;
 
     audioPlayer = new Audio();
-    // 注意：不设置 crossOrigin，因为第三方音源（如酷我、酷狗）不支持 CORS
-    // 这意味着 Web Audio API 可视化功能将不可用
     audioPlayer.preload = 'auto';
 
     // 绑定事件
@@ -127,9 +125,6 @@ function initAudioPlayer() {
     audioPlayer.addEventListener('canplay', handleCanPlay);
     audioPlayer.addEventListener('waiting', () => store.musicBuffering = true);
     audioPlayer.addEventListener('playing', () => store.musicBuffering = false);
-
-    // Web Audio API 可视化在无 CORS 时不可用
-    // 如果需要可视化，需要通过后端代理音频流
 
     return audioPlayer;
 }
@@ -148,6 +143,43 @@ function handleTimeUpdate() {
     // 如果全屏且 AMLL 存在，也在这里更新一次确保对齐
     if (store.musicShowFullPlayer && amllPlayer) {
         amllPlayer.setCurrentTime(audioPlayer.currentTime * 1000);
+    }
+
+    // 每 5 秒保存一次播放状态到 localStorage
+    savePlayStateThrottled();
+}
+
+// 节流保存播放状态
+let lastSaveTime = 0;
+function savePlayStateThrottled() {
+    const now = Date.now();
+    if (now - lastSaveTime < 5000) return; // 5 秒内不重复保存
+    lastSaveTime = now;
+    savePlayState();
+}
+
+/**
+ * 保存播放状态到 localStorage
+ */
+function savePlayState() {
+    if (!store.musicCurrentSong || !audioPlayer) return;
+
+    const state = {
+        song: store.musicCurrentSong,
+        currentTime: audioPlayer.currentTime,
+        duration: audioPlayer.duration,
+        playlist: store.musicPlaylist,
+        currentIndex: store.musicCurrentIndex,
+        volume: store.musicVolume,
+        repeatMode: store.musicRepeatMode,
+        shuffleEnabled: store.musicShuffleEnabled,
+        savedAt: Date.now()
+    };
+
+    try {
+        localStorage.setItem('music_play_state', JSON.stringify(state));
+    } catch (e) {
+        console.warn('[Music] Failed to save play state:', e);
     }
 }
 
@@ -339,6 +371,61 @@ function parseLyrics(lrcText) {
  * 音乐模块方法
  */
 export const musicMethods = {
+    // 懒加载：每次加载的歌曲数量
+    playlistLoadChunkSize: 50,
+    playlistVisibleCount: 50,
+
+    /**
+     * 计算属性：可见的歌单曲目
+     */
+    get visiblePlaylistTracks() {
+        const detail = store.musicCurrentPlaylistDetail;
+        if (!detail || !detail.tracks) return [];
+        return detail.tracks.slice(0, store.musicPlaylistVisibleCount || 50);
+    },
+
+    /**
+     * 计算属性：是否还有更多曲目
+     */
+    get hasMorePlaylistTracks() {
+        const detail = store.musicCurrentPlaylistDetail;
+        if (!detail || !detail.tracks) return false;
+        return (store.musicPlaylistVisibleCount || 50) < detail.tracks.length;
+    },
+
+    /**
+     * 滚动加载更多
+     */
+    handlePlaylistScroll(event) {
+        const el = event.target;
+        // 距离底部不足 200px 时加载更多
+        if (el.scrollHeight - el.scrollTop - el.clientHeight < 200) {
+            this.loadMorePlaylistTracks();
+        }
+    },
+
+    /**
+     * 加载更多歌曲
+     */
+    loadMorePlaylistTracks() {
+        const detail = store.musicCurrentPlaylistDetail;
+        if (!detail || !detail.tracks) return;
+
+        const current = store.musicPlaylistVisibleCount || 50;
+        const total = detail.tracks.length;
+
+        if (current < total) {
+            store.musicPlaylistVisibleCount = Math.min(current + 50, total);
+        }
+    },
+
+    /**
+     * 重置懒加载状态（在打开新歌单时调用）
+     */
+    resetPlaylistLazyLoad() {
+        store.musicPlaylistVisibleCount = 50;
+    },
+
     /**
      * 搜索歌曲
      */
@@ -587,7 +674,13 @@ export const musicMethods = {
     /**
      * 暂停/继续播放
      */
-    musicTogglePlay() {
+    async musicTogglePlay() {
+        // 如果有恢复的歌曲状态但音频未加载，则从保存的进度开始播放
+        if (store.musicCurrentSong && (!audioPlayer || !audioPlayer.src)) {
+            await this.resumeFromSavedState();
+            return;
+        }
+
         if (!audioPlayer) return;
 
         if (store.musicPlaying) {
@@ -600,6 +693,48 @@ export const musicMethods = {
             store.musicPlaying = true;
             if (amllPlayer) amllPlayer.resume();
             if (amllBgRender) amllBgRender.resume();
+        }
+    },
+
+    /**
+     * 从保存的状态恢复播放（从上次的进度继续）
+     */
+    async resumeFromSavedState() {
+        const song = store.musicCurrentSong;
+        if (!song) return;
+
+        initAudioPlayer();
+        store.musicBuffering = true;
+
+        try {
+            console.log('[Music] Resuming from saved state:', song.name);
+            const response = await fetch(`/api/music/song/url?id=${song.id}&level=exhigh`);
+            const data = await response.json();
+
+            const songData = data.data?.[0];
+            if (songData?.url) {
+                audioPlayer.src = songData.url;
+
+                // 等待音频加载后跳转到保存的位置
+                audioPlayer.onloadedmetadata = () => {
+                    const savedTime = store.musicCurrentTime || 0;
+                    if (savedTime > 0 && savedTime < audioPlayer.duration) {
+                        audioPlayer.currentTime = savedTime;
+                        console.log('[Music] Seeking to saved position:', savedTime, 's');
+                    }
+                };
+
+                await audioPlayer.play();
+                store.musicPlaying = true;
+                store.musicBuffering = false;
+                if (amllPlayer) amllPlayer.resume();
+            } else {
+                await retryWithUnblock(song.id);
+            }
+        } catch (error) {
+            console.error('[Music] Resume error:', error);
+            toast.error('恢复播放失败');
+            store.musicBuffering = false;
         }
     },
 
@@ -785,12 +920,8 @@ export const musicMethods = {
                 }));
 
                 store.musicDailyRecommend = songs;
-
-                // 直接播放每日推荐
-                store.musicPlaylist = songs;
-                store.musicCurrentIndex = 0;
-                this.musicPlay(songs[0]);
-                toast.success('每日推荐已加载');
+                // 只加载到列表，不自动播放
+                console.log('[Music] Daily recommend loaded:', songs.length, 'songs');
             } else {
                 toast.warning('需要登录才能获取每日推荐');
             }
@@ -889,6 +1020,8 @@ export const musicMethods = {
                         duration: song.dt || 0
                     }))
                 };
+                // 重置懒加载状态
+                store.musicPlaylistVisibleCount = 50;
                 // 自动打开详情页
                 store.musicShowDetail = true;
             }
@@ -1213,6 +1346,9 @@ export const musicMethods = {
             }
         }
 
+        // 恢复上次的播放状态（歌曲、进度、播放列表），但不自动播放
+        this.restorePlayState();
+
         // 自动加载发现页/首页数据 (热门推荐)
         this.musicLoadHotPlaylists();
 
@@ -1224,6 +1360,54 @@ export const musicMethods = {
                 this.musicLoadDailyRecommend();
             }
         });
+    },
+
+    /**
+     * 恢复上次的播放状态
+     */
+    restorePlayState() {
+        try {
+            const saved = localStorage.getItem('music_play_state');
+            if (!saved) return;
+
+            const state = JSON.parse(saved);
+
+            // 检查保存时间，超过 24 小时则不恢复
+            if (Date.now() - state.savedAt > 24 * 60 * 60 * 1000) {
+                localStorage.removeItem('music_play_state');
+                return;
+            }
+
+            // 恢复播放列表
+            if (state.playlist && state.playlist.length > 0) {
+                store.musicPlaylist = state.playlist;
+                store.musicCurrentIndex = state.currentIndex || 0;
+            }
+
+            // 恢复当前歌曲信息（但不播放）
+            if (state.song) {
+                store.musicCurrentSong = state.song;
+                store.musicCurrentTime = state.currentTime || 0;
+                store.musicDuration = state.duration || 0;
+                store.musicProgress = state.duration ? (state.currentTime / state.duration) * 100 : 0;
+
+                // 加载歌词
+                this.musicLoadLyrics(state.song.id);
+
+                // 初始化音频但不播放
+                initAudioPlayer();
+
+                console.log('[Music] Restored play state:', state.song.name, 'at', Math.floor(state.currentTime), 's');
+            }
+
+            // 恢复设置
+            if (state.volume !== undefined) store.musicVolume = state.volume;
+            if (state.repeatMode) store.musicRepeatMode = state.repeatMode;
+            if (state.shuffleEnabled !== undefined) store.musicShuffleEnabled = state.shuffleEnabled;
+
+        } catch (e) {
+            console.warn('[Music] Failed to restore play state:', e);
+        }
     },
 };
 

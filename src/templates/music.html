@@ -277,8 +277,8 @@
                         </div>
                     </div>
 
-                    <div class="music-song-list">
-                        <div class="music-song-item" v-for="(song, index) in musicCurrentPlaylistDetail.tracks"
+                    <div class="music-song-list" ref="musicSongList" @scroll="handlePlaylistScroll">
+                        <div class="music-song-item" v-for="(song, index) in visiblePlaylistTracks"
                             :key="song.id" @click="musicPlay(song)" tabindex="0" @keyup.enter="musicPlay(song)"
                             :class="{ playing: musicCurrentSong && song.id === musicCurrentSong.id }">
                             <div class="music-song-index">{{ index + 1 }}</div>
@@ -287,6 +287,10 @@
                                 <div class="music-song-artist">{{ song.artists }} - {{ song.album }}</div>
                             </div>
                             <div class="song-duration">{{ formatMusicTime(song.duration) }}</div>
+                        </div>
+                        <!-- 加载更多指示器 -->
+                        <div v-if="hasMorePlaylistTracks" class="music-load-more">
+                            <i class="fas fa-spinner fa-spin"></i> 滚动加载更多...
                         </div>
                     </div>
                 </div>

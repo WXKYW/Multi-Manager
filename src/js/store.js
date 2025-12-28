@@ -484,6 +484,7 @@ export const store = reactive({
     musicCollectedPlaylists: [], // 用户收藏的歌单
     musicLikedPlaylist: null, // 喜欢的音乐歌单
     musicShowDetail: false, // 显示歌单详情页
+    musicPlaylistVisibleCount: 50, // 歌单懒加载：当前可见的歌曲数量
     musicShowUserDropdown: false, // 显示用户下拉菜单
 
     // 统一日志查看器 (Log Viewer)
