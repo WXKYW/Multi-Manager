@@ -933,6 +933,9 @@ const app = createApp({
                 this.loadTotpAccounts();
                 this.startTotpTimer();
                 break;
+              case 'music':
+                this.initMusicModule();
+                break;
             }
           });
         }

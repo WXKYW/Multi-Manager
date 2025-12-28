@@ -439,7 +439,7 @@ export const store = reactive({
     geminiCliDisabledCheckModels: [], // 禁用检测的模型列表
 
     // ===== 音乐播放器模块 =====
-    musicCurrentTab: 'discover', // 'discover', 'search', 'playlist', 'settings'
+    musicCurrentTab: 'home', // 'home', 'discover', 'search', 'library', 'settings'
     musicSearchKeyword: '',
     musicSearchLoading: false,
     musicSearchResults: [],
@@ -470,6 +470,21 @@ export const store = reactive({
     musicUnblockUrl: '', // 解锁服务地址，空则使用内置
     musicQuality: 'exhigh', // 'standard', 'higher', 'exhigh', 'lossless'
     musicAutoPlay: true,
+
+    // 登录相关
+    musicUser: null, // { userId, nickname, avatarUrl, vipType }
+    musicLoginLoading: false,
+    musicShowLoginModal: false, // 显示网易云登录弹窗
+    musicLoginStatusText: '请使用网易云音乐 App 扫码登录', // 登录状态文字
+    musicQrKey: '',
+    musicQrImg: '',
+    musicQrExpired: false,
+    musicQrChecking: false,
+    musicMyPlaylists: [], // 用户创建的歌单
+    musicCollectedPlaylists: [], // 用户收藏的歌单
+    musicLikedPlaylist: null, // 喜欢的音乐歌单
+    musicShowDetail: false, // 显示歌单详情页
+    musicShowUserDropdown: false, // 显示用户下拉菜单
 
     // 统一日志查看器 (Log Viewer)
     logViewer: {

@@ -456,9 +456,9 @@ function registerRoutes(app) {
 
   // 5. 音乐模块路由 (代理 NCM API) - 无需认证，允许公开访问
   try {
-    const musicRouter = require('./music');
-    app.use('/api/music', musicRouter);  // 移除 requireAuth，允许公开使用
-    logger.success('音乐模块已挂载 -> /api/music (public)');
+    const musicRouter = require('../../modules/music-api/router');
+    app.use('/api/music', musicRouter);
+    logger.success('模块已挂载 -> music-api [/api/music] (public)');
   } catch (e) {
     logger.warn('音乐模块加载失败 (可选模块):', e.message);
   }
