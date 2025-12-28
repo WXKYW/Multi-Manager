@@ -61,6 +61,12 @@ export const MODULE_CONFIG = {
         shortName: '2FA',
         icon: 'fa-shield-alt',
         description: 'TOTP 验证器'
+    },
+    'music': {
+        name: 'Music',
+        shortName: 'Music',
+        icon: 'fa-music',
+        description: '网易云音乐播放器'
     }
 };
 
@@ -109,7 +115,8 @@ export const store = reactive({
         dns: true,
         'self-h': true,
         server: true,
-        totp: true
+        totp: true,
+        music: true
     },
     channelEnabled: {
         antigravity: true,
@@ -119,7 +126,7 @@ export const store = reactive({
         antigravity: '',
         'gemini-cli': ''
     },
-    moduleOrder: ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'self-h', 'server', 'totp'],
+    moduleOrder: ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'self-h', 'server', 'totp', 'music'],
 
     // 界面设置
     opacity: 100,
@@ -431,6 +438,38 @@ export const store = reactive({
     geminiCliAutoCheckTimerId: null, // 定时器 ID
     geminiCliDisabledCheckModels: [], // 禁用检测的模型列表
 
+    // ===== 音乐播放器模块 =====
+    musicCurrentTab: 'discover', // 'discover', 'search', 'playlist', 'settings'
+    musicSearchKeyword: '',
+    musicSearchLoading: false,
+    musicSearchResults: [],
+    musicPlaying: false,
+    musicBuffering: false,
+    musicCurrentSong: null,
+    musicPlaylist: [],
+    musicCurrentIndex: -1,
+    musicVolume: 80,
+    musicMuted: false,
+    musicRepeatMode: 'none', // 'none', 'all', 'one'
+    musicShuffleEnabled: false,
+    musicCurrentTime: 0,
+    musicDuration: 0,
+    musicProgress: 0,
+    musicLyrics: [],
+    musicLyricsTranslation: [],
+    musicCurrentLyricIndex: 0,
+    musicShowFullPlayer: false,
+    musicShowPlaylistDrawer: false,
+    musicDailyRecommend: [],
+    musicRecommendLoading: false,
+    musicHotPlaylists: [],
+    musicPlaylistsLoading: false,
+    musicCurrentPlaylistDetail: null,
+    musicPlaylistDetailLoading: false,
+    musicApiUrl: '', // NCM API 地址，空则使用内置
+    musicUnblockUrl: '', // 解锁服务地址，空则使用内置
+    musicQuality: 'exhigh', // 'standard', 'higher', 'exhigh', 'lossless'
+    musicAutoPlay: true,
 
     // 统一日志查看器 (Log Viewer)
     logViewer: {

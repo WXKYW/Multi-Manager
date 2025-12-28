@@ -1,0 +1,365 @@
+<!-- Music Player Module Template -->
+<div class="music-module">
+    <!-- 标签页导航 -->
+    <div class="music-tabs">
+        <button class="music-tab" :class="{ active: musicCurrentTab === 'discover' }"
+            @click="musicCurrentTab = 'discover'">
+            <i class="fas fa-compass"></i> 发现
+        </button>
+        <button class="music-tab" :class="{ active: musicCurrentTab === 'search' }" @click="musicCurrentTab = 'search'">
+            <i class="fas fa-search"></i> 搜索
+        </button>
+        <button class="music-tab" :class="{ active: musicCurrentTab === 'playlist' }"
+            @click="musicCurrentTab = 'playlist'">
+            <i class="fas fa-list"></i> 播放列表
+        </button>
+        <button class="music-tab" :class="{ active: musicCurrentTab === 'settings' }"
+            @click="musicCurrentTab = 'settings'">
+            <i class="fas fa-cog"></i> 设置
+        </button>
+    </div>
+
+    <!-- 内容区域 -->
+    <div class="music-content">
+        <!-- 发现页 -->
+        <div v-show="musicCurrentTab === 'discover'">
+            <!-- 热门歌单 -->
+            <div class="music-section">
+                <div class="music-section-header">
+                    <h3>热门歌单</h3>
+                    <button class="btn btn-text" @click="musicLoadHotPlaylists">
+                        <i class="fas fa-sync-alt" :class="{ 'fa-spin': musicPlaylistsLoading }"></i>
+                    </button>
+                </div>
+
+                <div v-if="musicPlaylistsLoading" class="music-loading">
+                    <div class="music-loading-spinner"></div>
+                    <p style="margin-top: 12px;">加载中...</p>
+                </div>
+
+                <div v-else-if="musicHotPlaylists.length" class="music-playlist-grid">
+                    <div v-for="pl in musicHotPlaylists" :key="pl.id" class="music-playlist-card"
+                        @click="musicLoadPlaylistDetail(pl.id)">
+                        <img :src="pl.cover + '?param=200y200'" :alt="pl.name" class="music-playlist-cover"
+                            loading="lazy" @error="$event.target.src='/logo.svg'">
+                        <div class="music-playlist-info">
+                            <div class="music-playlist-name">{{ pl.name }}</div>
+                            <div class="music-playlist-meta">
+                                <i class="fas fa-play"></i> {{ (pl.playCount / 10000).toFixed(1) }}万
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div v-else class="music-empty">
+                    <i class="fas fa-music"></i>
+                    <p class="music-empty-text">暂无歌单，点击刷新</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 搜索页 -->
+        <div v-show="musicCurrentTab === 'search'">
+            <!-- 搜索框 -->
+            <div class="music-search-container">
+                <div class="music-search-box">
+                    <i class="fas fa-search"></i>
+                    <input type="text" v-model="musicSearchKeyword" placeholder="搜索歌曲、歌手、专辑..."
+                        @keyup.enter="musicSearch">
+                    <button v-if="musicSearchKeyword" class="music-control-btn"
+                        style="width:28px;height:28px;font-size:12px;"
+                        @click="musicSearchKeyword = ''; musicSearchResults = []">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 搜索中 -->
+            <div v-if="musicSearchLoading" class="music-loading">
+                <div class="music-loading-spinner"></div>
+                <p style="margin-top: 12px;">搜索中...</p>
+            </div>
+
+            <!-- 搜索结果 -->
+            <div v-else-if="musicSearchResults.length" class="music-song-list">
+                <div v-for="(song, index) in musicSearchResults" :key="song.id" class="music-song-item"
+                    :class="{ playing: musicCurrentSong?.id === song.id }" @click="musicPlay(song)">
+                    <div class="music-song-cover" v-if="song.cover">
+                        <img :src="song.cover + '?param=100y100'" :alt="song.name"
+                            style="width:100%;height:100%;object-fit:cover;border-radius:inherit;" loading="lazy"
+                            @error="$event.target.parentElement.classList.add('no-cover')">
+                    </div>
+                    <div class="music-song-cover no-cover" v-else>
+                        <i class="fas fa-music"></i>
+                    </div>
+                    <div class="music-song-info">
+                        <div class="music-song-name">{{ song.name }}</div>
+                        <div class="music-song-artist">{{ song.artists }} - {{ song.album }}</div>
+                    </div>
+                    <div class="music-song-duration">{{ formatMusicTime(song.duration) }}</div>
+                    <div class="music-song-actions">
+                        <button class="music-song-action-btn" @click.stop="musicAddToPlaylist(song)" title="添加到播放列表">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 空状态 -->
+            <div v-else class="music-empty">
+                <i class="fas fa-search"></i>
+                <p class="music-empty-text">输入关键词搜索音乐</p>
+            </div>
+        </div>
+
+        <!-- 播放列表页 -->
+        <div v-show="musicCurrentTab === 'playlist'">
+            <div v-if="musicPlaylist.length" class="music-song-list">
+                <div class="music-section-header" style="padding: 12px 16px;">
+                    <span>共 {{ musicPlaylist.length }} 首</span>
+                    <button class="btn btn-text btn-sm" @click="musicClearPlaylist">
+                        <i class="fas fa-trash"></i> 清空
+                    </button>
+                </div>
+
+                <div v-for="(song, index) in musicPlaylist" :key="song.id + '-' + index" class="music-song-item"
+                    :class="{ playing: musicCurrentIndex === index }" @click="musicPlay(song)">
+                    <div class="music-song-cover" v-if="song.cover">
+                        <img :src="song.cover + '?param=100y100'" :alt="song.name"
+                            style="width:100%;height:100%;object-fit:cover;border-radius:inherit;" loading="lazy">
+                    </div>
+                    <div class="music-song-cover no-cover" v-else>
+                        <i class="fas fa-music"></i>
+                    </div>
+                    <div class="music-song-info">
+                        <div class="music-song-name">{{ song.name }}</div>
+                        <div class="music-song-artist">{{ song.artists }}</div>
+                    </div>
+                    <div class="music-song-actions" style="opacity: 1;">
+                        <button class="music-song-action-btn" @click.stop="musicRemoveFromPlaylist(index)" title="移除">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div v-else class="music-empty">
+                <i class="fas fa-list"></i>
+                <p class="music-empty-text">播放列表为空</p>
+                <p style="font-size: 13px; margin-top: 8px; opacity: 0.7;">去搜索或发现页添加歌曲吧</p>
+            </div>
+        </div>
+
+        <!-- 设置页 -->
+        <div v-show="musicCurrentTab === 'settings'">
+            <div class="settings-section">
+                <h4 class="settings-section-title">API 配置</h4>
+
+                <div class="form-group">
+                    <label>NCM API 地址</label>
+                    <input type="text" v-model="musicApiUrl" class="form-control" placeholder="http://localhost:3000">
+                    <small class="form-text">网易云音乐 API 服务地址</small>
+                </div>
+
+                <div class="form-group">
+                    <label>解锁服务地址</label>
+                    <input type="text" v-model="musicUnblockUrl" class="form-control"
+                        placeholder="http://localhost:8080">
+                    <small class="form-text">UnblockNeteaseMusic 服务地址（可选）</small>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h4 class="settings-section-title">播放设置</h4>
+
+                <div class="form-group">
+                    <label>音质偏好</label>
+                    <select v-model="musicQuality" class="form-control">
+                        <option value="standard">标准 (128kbps)</option>
+                        <option value="higher">较高 (192kbps)</option>
+                        <option value="exhigh">极高 (320kbps)</option>
+                        <option value="lossless">无损 (FLAC)</option>
+                    </select>
+                </div>
+
+                <div class="form-check">
+                    <input type="checkbox" id="music-auto-play" v-model="musicAutoPlay">
+                    <label for="music-auto-play">自动播放下一首</label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 迷你播放器 (有歌曲时显示) -->
+    <div v-if="musicCurrentSong" class="music-mini-player" @click="musicShowFullPlayer = true">
+        <!-- 进度条 -->
+        <div class="music-mini-progress" @click.stop="musicSeekByClick($event)">
+            <div class="music-mini-progress-bar" :style="{ width: musicProgress + '%' }"></div>
+        </div>
+
+        <div class="music-mini-player-content">
+            <!-- 封面 -->
+            <img v-if="musicCurrentSong.cover" :src="musicCurrentSong.cover + '?param=120y120'"
+                :alt="musicCurrentSong.name" class="music-mini-cover" :class="{ spinning: musicPlaying }">
+            <div v-else class="music-mini-cover" style="display:flex;align-items:center;justify-content:center;">
+                <i class="fas fa-music" style="font-size: 24px; opacity: 0.5;"></i>
+            </div>
+
+            <!-- 歌曲信息 -->
+            <div class="music-mini-info">
+                <div class="music-mini-name">{{ musicCurrentSong.name }}</div>
+                <div class="music-mini-artist">{{ musicCurrentSong.artists }}</div>
+            </div>
+
+            <!-- 控制按钮 -->
+            <div class="music-mini-controls" @click.stop>
+                <button class="music-control-btn" @click="playPrevious" title="上一首">
+                    <i class="fas fa-step-backward"></i>
+                </button>
+                <button class="music-control-btn primary" @click="musicTogglePlay">
+                    <i class="fas" :class="musicPlaying ? 'fa-pause' : 'fa-play'"></i>
+                </button>
+                <button class="music-control-btn" @click="playNext" title="下一首">
+                    <i class="fas fa-step-forward"></i>
+                </button>
+                <button class="music-control-btn" @click.stop="musicShowPlaylistDrawer = !musicShowPlaylistDrawer"
+                    title="播放列表">
+                    <i class="fas fa-list"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 全屏播放器 -->
+    <transition name="slide-up">
+        <div v-if="musicShowFullPlayer && musicCurrentSong" class="music-fullscreen-player">
+            <div class="music-fullscreen-header">
+                <button class="music-fullscreen-close" @click="musicShowFullPlayer = false">
+                    <i class="fas fa-chevron-down"></i>
+                </button>
+                <span style="font-size: 14px; opacity: 0.7;">正在播放</span>
+                <button class="music-fullscreen-close" @click="musicShowPlaylistDrawer = true">
+                    <i class="fas fa-list"></i>
+                </button>
+            </div>
+
+            <!-- 封面 -->
+            <div class="music-fullscreen-cover-container">
+                <img v-if="musicCurrentSong.cover" :src="musicCurrentSong.cover + '?param=500y500'"
+                    :alt="musicCurrentSong.name" class="music-fullscreen-cover" :class="{ spinning: musicPlaying }">
+                <div v-else class="music-fullscreen-cover"
+                    style="display:flex;align-items:center;justify-content:center;background:var(--music-surface-variant);">
+                    <i class="fas fa-music" style="font-size: 80px; opacity: 0.3;"></i>
+                </div>
+            </div>
+
+            <!-- 歌曲信息 -->
+            <div class="music-fullscreen-info">
+                <div class="music-fullscreen-name">{{ musicCurrentSong.name }}</div>
+                <div class="music-fullscreen-artist">{{ musicCurrentSong.artists }}</div>
+            </div>
+
+            <!-- 歌词 -->
+            <div v-if="musicLyrics.length" class="music-lyrics-container" ref="lyricsContainer">
+                <div v-for="(lyric, index) in musicLyrics" :key="index" class="music-lyric-line"
+                    :class="{ active: musicCurrentLyricIndex === index }">
+                    {{ lyric.text }}
+                </div>
+            </div>
+
+            <!-- 进度条 -->
+            <div class="music-fullscreen-progress">
+                <div class="music-progress-bar" @click="musicSeekByClick($event)">
+                    <div class="music-progress-fill" :style="{ width: musicProgress + '%' }"></div>
+                </div>
+                <div class="music-progress-time">
+                    <span>{{ formatMusicSeconds(musicCurrentTime) }}</span>
+                    <span>{{ formatMusicSeconds(musicDuration) }}</span>
+                </div>
+            </div>
+
+            <!-- 控制按钮 -->
+            <div class="music-fullscreen-controls">
+                <button class="music-control-btn" @click="musicToggleShuffle"
+                    :style="{ color: musicShuffleEnabled ? 'var(--music-primary)' : '' }">
+                    <i class="fas fa-random"></i>
+                </button>
+                <button class="music-control-btn" @click="playPrevious">
+                    <i class="fas fa-step-backward"></i>
+                </button>
+                <button class="music-control-btn primary" @click="musicTogglePlay">
+                    <i class="fas" :class="musicPlaying ? 'fa-pause' : 'fa-play'"></i>
+                </button>
+                <button class="music-control-btn" @click="playNext">
+                    <i class="fas fa-step-forward"></i>
+                </button>
+                <button class="music-control-btn" @click="musicToggleRepeat"
+                    :style="{ color: musicRepeatMode !== 'none' ? 'var(--music-primary)' : '' }">
+                    <i class="fas" :class="musicRepeatMode === 'one' ? 'fa-redo-alt' : 'fa-redo'"></i>
+                </button>
+            </div>
+        </div>
+    </transition>
+
+    <!-- 播放列表抽屉 -->
+    <div class="music-playlist-drawer" :class="{ open: musicShowPlaylistDrawer }">
+        <div class="music-playlist-drawer-header">
+            <span class="music-playlist-drawer-title">播放列表 ({{ musicPlaylist.length }})</span>
+            <button class="music-control-btn" @click="musicShowPlaylistDrawer = false">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="music-playlist-drawer-content">
+            <div v-if="musicPlaylist.length" class="music-song-list" style="padding: 8px;">
+                <div v-for="(song, index) in musicPlaylist" :key="song.id" class="music-song-item"
+                    :class="{ playing: musicCurrentIndex === index }"
+                    @click="musicPlay(song); musicShowPlaylistDrawer = false">
+                    <div class="music-song-info">
+                        <div class="music-song-name">{{ song.name }}</div>
+                        <div class="music-song-artist">{{ song.artists }}</div>
+                    </div>
+                    <button class="music-song-action-btn" @click.stop="musicRemoveFromPlaylist(index)"
+                        style="opacity:1;">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            <div v-else class="music-empty">
+                <p>播放列表为空</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 背景遮罩 -->
+    <div v-if="musicShowPlaylistDrawer" class="modal-backdrop" style="z-index: 2050;"
+        @click="musicShowPlaylistDrawer = false"></div>
+</div>
+
+<style>
+    .slide-up-enter-active,
+    .slide-up-leave-active {
+        transition: transform 0.3s ease;
+    }
+
+    .slide-up-enter-from,
+    .slide-up-leave-to {
+        transform: translateY(100%);
+    }
+
+    .music-section {
+        margin-bottom: 24px;
+    }
+
+    .music-section-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+    }
+
+    .music-section-header h3 {
+        font-size: 18px;
+        font-weight: 600;
+        margin: 0;
+    }
+</style>
