@@ -1,56 +1,34 @@
 /**
  * Music API Router - 音乐模块后端路由
- * 代理 api-enhanced 和 UnblockNeteaseMusic 请求
+ * 使用 @neteasecloudmusicapienhanced/api (npm 包)
  */
 
 const express = require('express');
 const router = express.Router();
-const path = require('path');
-const fs = require('fs');
 
-// NCM API 模块缓存
-let ncmModules = null;
-let ncmModulesLoaded = false;
+// NCM API 库 (使用 npm 包)
+let ncmApi = null;
 
 /**
- * 动态加载 NCM API 模块
+ * 加载 NCM API 库
  */
-async function loadNcmModules() {
-    if (ncmModulesLoaded) return ncmModules;
-
-    const modulePath = path.join(__dirname, '../../test/api-enhanced/module');
-
-    if (!fs.existsSync(modulePath)) {
-        console.warn('[Music] NCM API modules not found at:', modulePath);
-        return null;
-    }
+function loadNcmApi() {
+    if (ncmApi) return ncmApi;
 
     try {
-        ncmModules = {};
-        const files = fs.readdirSync(modulePath);
-
-        for (const file of files) {
-            if (file.endsWith('.js')) {
-                const name = file.replace('.js', '');
-                try {
-                    ncmModules[name] = require(path.join(modulePath, file));
-                } catch (e) {
-                    // 忽略加载失败的模块
-                }
-            }
-        }
-
-        ncmModulesLoaded = true;
-        console.log('[Music] Loaded', Object.keys(ncmModules).length, 'NCM modules');
-        return ncmModules;
+        // 使用 npm 包 @neteasecloudmusicapienhanced/api
+        ncmApi = require('@neteasecloudmusicapienhanced/api');
+        console.log('[Music] NCM API loaded from npm package');
+        return ncmApi;
     } catch (error) {
-        console.error('[Music] Failed to load NCM modules:', error);
+        console.error('[Music] Failed to load NCM API:', error.message);
+        console.warn('[Music] Please install: npm install @neteasecloudmusicapienhanced/api');
         return null;
     }
 }
 
 // 初始化加载
-loadNcmModules();
+loadNcmApi();
 
 /**
  * 解析 Cookie 字符串
@@ -73,12 +51,12 @@ function parseCookies(cookieHeader) {
  * 通用请求处理器
  */
 async function handleRequest(moduleName, req, res) {
-    const modules = await loadNcmModules();
+    const api = loadNcmApi();
 
-    if (!modules || !modules[moduleName]) {
+    if (!api || typeof api[moduleName] !== 'function') {
         return res.status(404).json({
             code: 404,
-            message: `Module ${moduleName} not found`
+            message: `API method ${moduleName} not found`
         });
     }
 
@@ -89,7 +67,8 @@ async function handleRequest(moduleName, req, res) {
             cookie: parseCookies(req.headers.cookie)
         };
 
-        const result = await modules[moduleName](query);
+        // 直接调用 api-enhanced 封装好的方法
+        const result = await api[moduleName](query);
 
         // 转发 Set-Cookie
         if (result.cookie && Array.isArray(result.cookie)) {
@@ -357,13 +336,13 @@ router.get('/login/qr/check', (req, res) => handleRequest('login_qr_check', req,
  * 检查音乐模块状态
  * GET /api/music/health
  */
-router.get('/health', async (req, res) => {
-    const modules = await loadNcmModules();
+router.get('/health', (req, res) => {
+    const api = loadNcmApi();
 
     res.json({
         status: 'ok',
-        modulesLoaded: !!modules,
-        moduleCount: modules ? Object.keys(modules).length : 0,
+        modulesLoaded: !!api,
+        moduleCount: api ? Object.keys(api).filter(k => typeof api[k] === 'function').length : 0,
         timestamp: new Date().toISOString()
     });
 });

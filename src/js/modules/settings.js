@@ -38,7 +38,7 @@ export const settingsMethods = {
           }
 
           // 应用模块设置 (过滤掉已废弃的模块)
-          const validModules = ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'self-h', 'server', 'totp'];
+          const validModules = ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'self-h', 'server', 'totp', 'music'];
           if (settings.moduleVisibility) {
             // 过滤掉不再支持的模块
             const filtered = {};
@@ -115,7 +115,7 @@ export const settingsMethods = {
     const savedVisibility = localStorage.getItem('module_visibility');
     const savedOrder = localStorage.getItem('module_order');
 
-    const availableModules = ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'self-h', 'server', 'totp'];
+    const availableModules = ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'self-h', 'server', 'totp', 'music'];
 
     if (savedVisibility) {
       const saved = JSON.parse(savedVisibility);
@@ -282,7 +282,7 @@ export const settingsMethods = {
     await this.loadUserSettings();
 
     // 定义所有可用模块
-    const availableModules = ['paas', 'dns', 'openai', 'server', 'antigravity', 'gemini-cli', 'self-h', 'totp'];
+    const availableModules = ['paas', 'dns', 'openai', 'server', 'antigravity', 'gemini-cli', 'self-h', 'totp', 'music'];
 
     // 确保所有模块都有配置
     availableModules.forEach(module => {
