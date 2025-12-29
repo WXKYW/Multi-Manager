@@ -250,7 +250,7 @@ export const store = reactive({
     zeaburRefreshInterval: 30000,
     zeaburRefreshIntervalSec: 30, // 秒（用于表单绑定）
     refreshCountdown: 30,
-    refreshProgress: 100,
+    refreshProgress: 30,
     dataRefreshPaused: false,
     projectCosts: {},
 
@@ -263,7 +263,7 @@ export const store = reactive({
     koyebRefreshInterval: 30000,
     koyebRefreshIntervalSec: 30, // 秒（用于表单绑定）
     koyebRefreshCountdown: 30,
-    koyebRefreshProgress: 100,
+    koyebRefreshProgress: 30,
     koyebDataRefreshPaused: false,
     koyebExpandedAccounts: {},
     showAddKoyebAccountModal: false,
@@ -283,8 +283,8 @@ export const store = reactive({
     flyLastUpdate: '',
     flyRefreshInterval: 30000,
     flyRefreshIntervalSec: 30, // 秒（用于表单绑定）
-    flyRefreshCountdown: 30,
-    flyRefreshProgress: 100,
+    flyRefreshCountdown: 300,
+    flyRefreshProgress: 300,
     flyDataRefreshPaused: false,
     flyExpandedAccounts: {},
     showAddFlyAccountModal: false,
@@ -439,10 +439,18 @@ export const store = reactive({
     geminiCliDisabledCheckModels: [], // 禁用检测的模型列表
 
     // ===== 音乐播放器模块 =====
+    musicReady: false,
     musicCurrentTab: 'home', // 'home', 'discover', 'search', 'library', 'settings'
     musicSearchKeyword: '',
     musicSearchLoading: false,
-    musicSearchResults: [],
+    musicSearchResults: [], // 歌曲搜索结果
+    musicSearchPlaylists: [], // 歌单搜索结果
+    musicSearchArtists: [], // 歌手搜索结果
+    musicSearchType: 'songs', // 'songs', 'playlists', 'artists'
+    musicSearchOffset: 0, // 分页偏移
+    musicSearchHasMore: true, // 是否有更多结果
+    musicSearchLoadingMore: false, // 加载更多中
+    musicShowSearchTab: false, // 是否显示搜索标签
     musicPlaying: false,
     musicBuffering: false,
     musicCurrentSong: null,

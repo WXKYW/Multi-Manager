@@ -6,10 +6,16 @@
     display: flex;
     flex-direction: column;
     height: 100%;
+    /* Fill parent height */
+    min-height: 0;
+    /* Critical: allow flex item to shrink */
+    max-height: 100%;
+    /* Prevent growing beyond parent */
     background: transparent;
     color: var(--text-primary);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     overflow: hidden;
+    /* Prevent module from scrolling, let children scroll */
     position: relative;
 
     /* 核心变量: Rose Red Theme */
@@ -27,9 +33,52 @@
     --z-sticky: 100;
     --z-drawer: 500;
     --z-bar: 600;
-    --z-dropdown: 700;
-    --z-modal: 900;
-    --z-top: 999;
+    --z-dropdown: 2000;
+    --z-modal: 2100;
+    --z-top: 2200;
+}
+
+/* 模块背景：全屏播放器激活时变黑，突出卡片感 */
+.music-module.player-active {
+    transition: background 0.6s ease;
+}
+
+/* 背景包装层 - 用于全屏播放时的缩放动画 */
+.music-bg-wrapper {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    height: 100%;
+    transition: transform 0.6s cubic-bezier(0.25, 1, 0.5, 1),
+        border-radius 0.6s ease,
+        opacity 0.6s ease;
+    transform-origin: center top;
+    will-change: transform, border-radius;
+    background: var(--bg-primary);
+}
+
+/* 当全屏播放器激活时，背景缩小 */
+.music-module.player-active .music-bg-wrapper {
+    transform: scale(0.94) translateY(10px);
+    border-radius: 24px;
+    pointer-events: none;
+    /* 防止点击背景 */
+    user-select: none;
+}
+
+/* 确保模板容器正确填充高度 */
+#template-music {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    height: calc(100vh - 120px);
+    /* Account for header and padding */
+}
+
+body.single-page-mode #template-music {
+    height: 100vh;
 }
 
 /* --- Section Tabs (Grid 3-Column: Left | Center | Right) --- */
@@ -42,8 +91,25 @@
     flex-shrink: 0;
     position: sticky;
     top: 0;
-    z-index: 100;
+    z-index: 2500;
+    /* Higher than player bar (600) to allow dropdown to show */
     background: var(--bg-primary);
+    overflow: visible !important;
+    /* Critical: allow dropdown to overflow outside header */
+}
+
+/* 搜索标签关闭按钮 */
+.tab-close-hint {
+    margin-left: 6px;
+    font-size: 14px;
+    opacity: 0.5;
+    transition: opacity 0.2s, color 0.2s;
+    cursor: pointer;
+}
+
+.tab-close-hint:hover {
+    opacity: 1;
+    color: var(--primary-color);
 }
 
 .music-sec-tabs .sec-tabs-left-controls {
@@ -76,29 +142,58 @@
     align-items: center;
     flex-direction: row-reverse;
     /* 图标在右边 */
-    background: var(--bg-tertiary);
-    padding: 6px 12px;
-    border-radius: 8px;
-    width: clamp(120px, 18vw, 200px);
+    background: var(--bg-glass);
+    padding: 8px 14px;
+    border-radius: 20px;
+    width: clamp(140px, 18vw, 220px);
     min-width: 0;
-    border: 1px solid var(--border-light);
+    border: 1px solid transparent;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(10px);
+}
+
+.music-sec-tabs .search-pill:hover {
+    background: var(--bg-glass-hover);
+}
+
+.music-sec-tabs .search-pill:focus-within {
+    background: var(--bg-secondary);
+    border-color: var(--border-light);
+    width: clamp(180px, 22vw, 280px);
 }
 
 .music-sec-tabs .search-pill i {
     color: var(--text-secondary-local);
-    font-size: 14px;
+    font-size: 13px;
     margin-left: 8px;
-    /* 改为 margin-left */
-    opacity: 0.6;
+    opacity: 0.5;
+    transition: opacity 0.2s, color 0.2s;
+}
+
+.music-sec-tabs .search-pill:focus-within i {
+    opacity: 1;
+    color: var(--primary-color);
 }
 
 .music-sec-tabs .search-pill input {
     border: none;
     background: transparent;
     outline: none;
-    font-size: 14px;
+    font-size: 13px;
     width: 100%;
     color: var(--text-primary-local);
+}
+
+.music-sec-tabs .search-pill input:focus,
+.music-sec-tabs .search-pill input:focus-visible {
+    outline: none;
+    border: none;
+    box-shadow: none;
+}
+
+.music-sec-tabs .search-pill input::placeholder {
+    color: var(--text-secondary-local);
+    opacity: 0.6;
 }
 
 .music-sec-tabs .user-pill {
@@ -140,7 +235,8 @@
 /* --- User Dropdown --- */
 .user-pill-wrapper {
     position: relative;
-    z-index: var(--z-dropdown);
+    z-index: 9999;
+    /* Ensure dropdown appears above all content */
 }
 
 .music-user-dropdown {
@@ -152,7 +248,8 @@
     border: 1px solid var(--border-light);
     border-radius: 12px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-    z-index: var(--z-dropdown);
+    z-index: 9999;
+    /* Must be above everything including player bar */
     overflow: hidden;
     animation: dropdownSlide 0.2s ease;
 }
@@ -253,6 +350,7 @@
     padding-bottom: 120px;
     /* 确保滚动到底部时内容在播放器上方 */
     position: relative;
+    min-height: 0;
 }
 
 /* Page Titles */
@@ -275,6 +373,29 @@
     font-weight: 600;
     margin: 24px 0 12px 0;
     color: var(--text-secondary-local);
+}
+
+/* Daily Recommend Section */
+.daily-recommend-section {
+    margin-top: 16px;
+    margin-bottom: 32px;
+}
+
+.section-header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.section-header .section-title {
+    margin: 0;
+}
+
+.section-sub {
+    font-size: 13px;
+    color: var(--text-secondary-local);
+    opacity: 0.7;
 }
 
 /* Library Header */
@@ -305,7 +426,7 @@
 
 .quick-grid-home {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 16px;
 }
 
@@ -612,7 +733,8 @@
     grid-template-columns: minmax(100px, 300px) 1fr minmax(80px, 300px);
     align-items: center;
     padding: 0 20px;
-    z-index: var(--z-bar);
+    z-index: 3100;
+    /* 高于歌词页(3000)，确保进度条不被遮挡 */
     transition: border-radius 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
@@ -662,8 +784,7 @@
     cursor: pointer;
     border-radius: 50px;
     transition: transform 0.2s ease, height 0.2s ease;
-    z-index: 100;
-    /* 确保在歌词页之上 */
+    z-index: 3100;
     transform-origin: center center;
 }
 
@@ -804,7 +925,8 @@
     flex-direction: column;
     justify-content: center;
     overflow: hidden;
-    min-width: 0;
+    min-width: 120px;
+    max-width: 280px;
 }
 
 .bar-title {
@@ -812,13 +934,38 @@
     font-size: 14px;
     white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
     color: var(--text-primary-local);
     cursor: pointer;
+    position: relative;
+    display: block;
+    mask-image: linear-gradient(to right, transparent, black 8px, black calc(100% - 8px), transparent);
+    -webkit-mask-image: linear-gradient(to right, transparent, black 8px, black calc(100% - 8px), transparent);
+}
+
+.bar-title span {
+    display: inline-block;
+    padding-left: 8px;
+    padding-right: 18px;
+    animation: none;
+}
+
+/* 当标题溢出时添加滚动动画 */
+.bar-title.scrolling span {
+    animation: marquee-scroll 8s linear infinite;
+}
+
+@keyframes marquee-scroll {
+    0% {
+        transform: translateX(0);
+    }
+
+    100% {
+        transform: translateX(-50%);
+    }
 }
 
 .bar-title:hover {
-    text-decoration: underline;
+    text-decoration: none;
 }
 
 .bar-artist {
@@ -913,17 +1060,19 @@
 
 /* Playlist Detail Page - 固定容器边界 */
 .music-playlist-detail-page {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 80px;
-    /* 留出底部播放栏的空间 */
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    /* Critical: allow flex item to shrink */
+    height: 0;
+    /* Force height calculation in flex context */
+    width: 100%;
     background: var(--bg-primary);
     z-index: 10;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    /* Prevent page from scrolling */
 }
 
 @keyframes slideUp {
@@ -970,8 +1119,11 @@
     gap: 40px;
     flex: 1;
     min-height: 0;
+    height: 0;
+    /* Force flex-based height calculation */
     /* 重要：允许 flex 子项收缩 */
     overflow: hidden;
+    /* Critical: clip children so they can scroll internally */
 }
 
 /* 左侧信息区：固定宽度 */
@@ -1020,13 +1172,19 @@
 
 /* 歌曲列表：独立滚动区域 */
 .music-song-list {
-    flex: 1;
+    flex: 1 1 0;
+    /* Use 0 basis to force shrinking */
     min-height: 0;
+    height: 0;
+    /* Force flex-based height calculation */
     /* 重要：flex 子项可收缩 */
-    overflow-y: auto;
+    overflow-y: auto !important;
+    /* Force scrollbar */
     overflow-x: hidden;
-    padding-bottom: 40px;
-    /* 列表末尾留白 */
+    padding-top: 10px;
+    /* 顶部留白防止第一行被遮 */
+    padding-bottom: 830px;
+    /* 底部留白给播放条 */
     margin-right: -10px;
     /* 滚动条不占用内容空间 */
     padding-right: 10px;
@@ -1093,6 +1251,16 @@
     flex-shrink: 0;
 }
 
+.music-song-item .music-song-cover {
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
+    object-fit: cover;
+    flex-shrink: 0;
+    margin-right: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
 .music-song-item .music-song-info {
     flex: 1;
     min-width: 0;
@@ -1120,7 +1288,7 @@
 /* Playlist Drawer */
 .music-playlist-drawer {
     position: fixed;
-    bottom: 116px;
+    bottom: 94px;
     right: max(24px, calc((100% - 1200px) / 2));
     width: 360px;
     max-height: 50vh;
@@ -1131,7 +1299,7 @@
     box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
     display: flex;
     flex-direction: column;
-    z-index: calc(var(--z-bar) + 20);
+    z-index: 3400;
     /* 确保在歌词页之上 */
     overflow: hidden;
     animation: slideUp 0.3s ease;
@@ -1149,6 +1317,8 @@
 
 .playlist-content {
     flex: 1;
+    min-height: 0;
+    /* Critical: allow flex item to shrink below content height */
     overflow-y: auto;
 }
 
@@ -1363,6 +1533,7 @@
     .music-playlist-drawer {
         width: 300px;
         right: 16px;
+        bottom: 88px;
     }
 }
 
@@ -1433,9 +1604,8 @@
 
     .music-playlist-drawer {
         width: calc(100% - 24px);
-        left: 12px;
         right: 12px;
-        bottom: 90px;
+        bottom: 76px;
     }
 }
 
@@ -1551,6 +1721,19 @@
     opacity: 0;
 }
 
+/* 全屏播放器动画 (配合背景缩放) */
+.full-player-fade-enter-active,
+.full-player-fade-leave-active {
+    transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.full-player-fade-enter-from,
+.full-player-fade-leave-to {
+    opacity: 0;
+    transform: translate(-50%, 100px) scale(0.9);
+}
+
+
 /* 缩放淡入 */
 .scale-fade-enter-active,
 .scale-fade-leave-active {
@@ -1574,14 +1757,17 @@
 /* --- Full Screen Player (歌词面板与底部bar无缝连接) --- */
 .music-full-player {
     position: fixed;
-    /* 与底部播放条上边缘无缝连接 */
+    /* 顶部保留间距，与底部bar边距一致 */
     top: 10px;
     bottom: 94px;
+    /* 调高避免遮挡进度条 */
     left: 50%;
     transform: translateX(-50%);
+    /* 与底部控制条宽度一致 */
     width: calc(100% - 48px);
     max-width: 1276px;
-    z-index: calc(var(--z-bar) - 1);
+    z-index: 3000;
+    /* 高于导航栏，确保完全覆盖 */
     display: flex;
     flex-direction: column;
     color: var(--text-primary);
@@ -1589,8 +1775,12 @@
     /* 与底部bar一致的背景 */
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
+    border-bottom: none;
+    /* 移除底部边框，与bar无缝连接 */
     border-radius: 23px 23px 0 0;
+    /* 顶部圆角，底部直角与bar连接 */
     box-shadow: var(--card-shadow);
+    /* 只保留顶部阴影 */
 }
 
 .full-player-bg-container {
@@ -1790,8 +1980,6 @@
     position: absolute;
     left: 0;
     top: 0;
-    padding-left: 10px;
-    padding-right: 80px;
     font-family: "SF Pro Display", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
     font-weight: 700;
     text-align: left;
@@ -1799,10 +1987,22 @@
     -webkit-font-smoothing: antialiased;
 }
 
-/* 歌词行缩放原点 */
+/* 歌词行样式优化 */
 .amll-lyric-player [class*="_lyricLine_"] {
     transform-origin: left center;
     will-change: transform, opacity, color;
+    /* 增加内边距以优化 hover 效果 */
+    padding: 10px 24px;
+    margin: 4px 20px 4px 0;
+    /* 右侧留白防止截断 */
+    border-radius: 12px;
+    line-height: 1.4;
+    transition: background-color 0.2s ease, transform 0.3s ease;
+}
+
+/* 鼠标悬停高亮 */
+.amll-lyric-player [class*="_lyricLine_"]:hover {
+    background-color: rgba(255, 255, 255, 0.08);
 }
 
 /* 翻译歌词 */
@@ -1813,9 +2013,9 @@
     margin-top: 8px;
 }
 
-/* 间奏点 - 隐藏 */
+/* 间奏点样式 */
 .amll-lyric-player [class*="_interludeDots_"] {
-    display: none !important;
+    margin-bottom: 32px;
 }
 
 /* 备用简单渲染逻辑适配 */
@@ -1941,10 +2141,10 @@
     box-shadow: 0 10px 40px rgba(var(--primary-rgb), 0.4);
 }
 
-/* Transitions - 歌词面板弹簧效果展开 */
+/* Transitions - 歌词面板平滑展开 */
 .full-player-fade-enter-active {
     transition:
-        top 0.5s cubic-bezier(0.34, 1.56, 0.64, 1),
+        top 0.5s cubic-bezier(0.25, 1, 0.5, 1),
         opacity 0.3s ease;
 }
 

@@ -84,7 +84,8 @@
                     module === 'self-h' ? 'self-h-tab' : '',
                     module === 'antigravity' ? 'antigravity-tab' : '',
                     module === 'gemini-cli' ? 'gemini-cli-tab' : '',
-                    module === 'totp' ? 'totp-tab' : ''
+                    module === 'totp' ? 'totp-tab' : '',
+                    module === 'music' ? 'music-tab' : ''
                   ]" @click="handleTabSwitch(module)">
                   <i class="fas" :class="getModuleIcon(module)"></i>
                   <span> {{ getModuleName(module) }}</span>

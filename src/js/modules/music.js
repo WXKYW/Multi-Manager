@@ -427,18 +427,42 @@ export const musicMethods = {
     },
 
     /**
-     * 搜索歌曲
+     * 搜索音乐 (歌曲/歌单/歌手)
+     * @param {boolean} loadMore - 是否加载更多
      */
-    async musicSearch() {
+    async musicSearch(loadMore = false) {
         if (!store.musicSearchKeyword.trim()) return;
 
-        store.musicSearchLoading = true;
+        // 如果不是加载更多，重置状态
+        if (!loadMore) {
+            store.musicSearchResults = [];
+            store.musicSearchPlaylists = [];
+            store.musicSearchArtists = [];
+            store.musicSearchOffset = 0;
+            store.musicSearchHasMore = true;
+            store.musicSearchLoading = true;
+            store.musicShowSearchTab = true;
+        } else {
+            store.musicSearchLoadingMore = true;
+        }
+
+        // 搜索类型映射: 1=歌曲, 10=专辑, 100=歌手, 1000=歌单
+        const typeMap = {
+            songs: 1,
+            playlists: 1000,
+            artists: 100
+        };
+        const searchType = typeMap[store.musicSearchType] || 1;
+        const limit = 30;
+
         try {
-            const response = await fetch(`/api/music/search?keywords=${encodeURIComponent(store.musicSearchKeyword)}&limit=30`);
+            const response = await fetch(
+                `/api/music/search?keywords=${encodeURIComponent(store.musicSearchKeyword)}&type=${searchType}&limit=${limit}&offset=${store.musicSearchOffset}`
+            );
             const data = await response.json();
 
-            if (data.result?.songs) {
-                store.musicSearchResults = data.result.songs.map(song => ({
+            if (store.musicSearchType === 'songs' && data.result?.songs) {
+                const songs = data.result.songs.map(song => ({
                     id: song.id,
                     name: song.name,
                     artists: song.ar?.map(a => a.name).join(' / ') || '未知艺术家',
@@ -446,64 +470,76 @@ export const musicMethods = {
                     cover: song.al?.picUrl || '',
                     duration: song.dt || 0
                 }));
+                store.musicSearchResults = loadMore ? [...store.musicSearchResults, ...songs] : songs;
+                store.musicSearchHasMore = songs.length >= limit;
+            } else if (store.musicSearchType === 'playlists' && data.result?.playlists) {
+                const playlists = data.result.playlists.map(pl => ({
+                    id: pl.id,
+                    name: pl.name,
+                    cover: pl.coverImgUrl || '',
+                    creator: pl.creator?.nickname || '未知',
+                    trackCount: pl.trackCount || 0,
+                    playCount: pl.playCount || 0
+                }));
+                store.musicSearchPlaylists = loadMore ? [...store.musicSearchPlaylists, ...playlists] : playlists;
+                store.musicSearchHasMore = playlists.length >= limit;
+            } else if (store.musicSearchType === 'artists' && data.result?.artists) {
+                const artists = data.result.artists.map(ar => ({
+                    id: ar.id,
+                    name: ar.name,
+                    cover: ar.picUrl || ar.img1v1Url || '',
+                    alias: ar.alias?.join(' / ') || '',
+                    albumCount: ar.albumSize || 0
+                }));
+                store.musicSearchArtists = loadMore ? [...store.musicSearchArtists, ...artists] : artists;
+                store.musicSearchHasMore = artists.length >= limit;
             } else {
-                store.musicSearchResults = [];
+                if (!loadMore) {
+                    store.musicSearchResults = [];
+                    store.musicSearchPlaylists = [];
+                    store.musicSearchArtists = [];
+                }
+                store.musicSearchHasMore = false;
             }
+
+            store.musicSearchOffset += limit;
         } catch (error) {
             console.error('[Music] Search error:', error);
             toast.error('搜索失败');
         } finally {
             store.musicSearchLoading = false;
+            store.musicSearchLoadingMore = false;
         }
     },
 
     /**
-     * 切换播放/暂停
+     * 关闭搜索标签
      */
-    musicTogglePlay() {
-        if (!audioPlayer) return;
-        if (store.musicPlaying) {
-            audioPlayer.pause();
-            store.musicPlaying = false;
-            if (amllPlayer) amllPlayer.pause();
-            if (amllBgRender) amllBgRender.pause();
-        } else {
-            audioPlayer.play();
-            store.musicPlaying = true;
-            if (amllPlayer) amllPlayer.resume();
-            if (amllBgRender) amllBgRender.resume();
+    musicCloseSearchTab() {
+        store.musicShowSearchTab = false;
+        store.musicSearchKeyword = '';
+        store.musicSearchResults = [];
+        store.musicSearchPlaylists = [];
+        store.musicSearchArtists = [];
+        store.musicSearchOffset = 0;
+        // 返回首页
+        if (store.musicCurrentTab === 'search') {
+            store.musicCurrentTab = 'home';
         }
     },
 
     /**
-     * 上一首
+     * 切换搜索类型
      */
-    playPrevious() {
-        if (store.musicPlaylist.length === 0) return;
-        let newIndex = store.musicCurrentIndex - 1;
-        if (newIndex < 0) newIndex = store.musicPlaylist.length - 1;
-        this.musicPlay(store.musicPlaylist[newIndex]);
-    },
-
-    /**
-     * 下一首
-     */
-    playNext() {
-        if (store.musicPlaylist.length === 0) return;
-
-        let newIndex;
-        if (store.musicShuffleEnabled) {
-            newIndex = Math.floor(Math.random() * store.musicPlaylist.length);
-        } else {
-            newIndex = store.musicCurrentIndex + 1;
-            if (newIndex >= store.musicPlaylist.length) newIndex = 0;
+    musicSwitchSearchType(type) {
+        if (store.musicSearchType !== type) {
+            store.musicSearchType = type;
+            this.musicSearch(false);
         }
-
-        this.musicPlay(store.musicPlaylist[newIndex]);
     },
 
     /**
-     * 切换全屏播放器显示/隐藏
+     * 切换全屏播放器展开/收起
      */
     musicToggleFullPlayer() {
         if (store.musicShowFullPlayer) {
@@ -521,26 +557,31 @@ export const musicMethods = {
 
         // 延迟初始化 AMLL，确保容器已渲染
         setTimeout(async () => {
-            // 初始化歌词播放器 (使用 DomSlimLyricPlayer)
+            // 初始化歌词播放器
             if (!amllPlayer) {
                 try {
                     const amllCore = await import('@applemusic-like-lyrics/core');
                     console.log('[Music] AMLL Core loaded:', Object.keys(amllCore));
 
-                    const { DomSlimLyricPlayer } = amllCore;
-                    if (!DomSlimLyricPlayer) {
-                        throw new Error('DomSlimLyricPlayer not found');
+                    // 使用文档标准类名 LyricPlayer
+                    const { LyricPlayer } = amllCore;
+                    if (!LyricPlayer) {
+                        // Fallback check if DomSlimLyricPlayer exists (backward compat)
+                        if (amllCore.DomSlimLyricPlayer) {
+                            console.warn('[Music] LyricPlayer not found, falling back to DomSlimLyricPlayer');
+                        } else {
+                            throw new Error('LyricPlayer class not found in @applemusic-like-lyrics/core');
+                        }
                     }
 
-                    amllPlayer = new DomSlimLyricPlayer();
+                    const PlayerClass = LyricPlayer || amllCore.DomSlimLyricPlayer;
+                    amllPlayer = new PlayerClass();
                     const el = amllPlayer.getElement();
 
                     // 先设置样式
                     el.style.width = '100%';
                     el.style.height = '100%';
                     el.classList.add('amll-lyric-player');
-                    el.style.fontWeight = '700';
-                    el.style.fontFamily = '"SF Pro Display", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif';
 
                     // 先添加到 DOM
                     const container = document.querySelector('.full-lyrics-container');
@@ -549,15 +590,15 @@ export const musicMethods = {
                         container.appendChild(el);
                     }
 
-                    // 添加到 DOM 后再配置 AMLL 参数 (SPlayer 风格)
+                    // 添加到 DOM 后再配置 AMLL 参数
                     await new Promise(r => setTimeout(r, 50));
 
                     amllPlayer.setEnableScale(true);      // 缩放效果
                     amllPlayer.setEnableBlur(true);       // 非当前行模糊
                     amllPlayer.setEnableSpring(true);     // 弹簧动画
-                    amllPlayer.setAlignPosition(0.15);    // SPlayer 默认：当前行在屏幕 15% 位置
-                    amllPlayer.setAlignAnchor('top');     // 以行顶部对齐
-                    amllPlayer.setWordFadeWidth(0.8);     // 逐字淡入宽度
+                    amllPlayer.setAlignPosition(0.5);     // 居中位置
+                    amllPlayer.setAlignAnchor('center');  // 居中对齐
+                    amllPlayer.setWordFadeWidth(0.9);     // 逐字淡入宽度
 
                     // 监听点击歌词事件
                     el.addEventListener('click', (e) => {
@@ -575,12 +616,14 @@ export const musicMethods = {
                         }
                     });
 
-                    startAmllUpdateLoop();
                     console.log('[Music] AMLL initialized successfully');
                 } catch (err) {
                     console.error('[Music] AMLL init failed:', err);
                 }
             }
+
+            // 无论是否刚初始化，都要启动更新循环
+            startAmllUpdateLoop();
 
             // 每次打开都确保 AMLL 元素在容器中
             if (amllPlayer) {
@@ -599,20 +642,13 @@ export const musicMethods = {
                 if (store.musicPlaying) amllPlayer.resume();
                 else amllPlayer.pause();
 
-                // 等待歌词渲染完成后再应用配置
+                // 再次强制应用配置以防重置
                 setTimeout(() => {
-                    try {
-                        amllPlayer.setEnableScale(true);
-                        amllPlayer.setEnableBlur(true);
-                        amllPlayer.setEnableSpring(true);
-                        amllPlayer.setAlignPosition(0.15);
-                        amllPlayer.setAlignAnchor('top');
-                        amllPlayer.setWordFadeWidth(0.8);
-                        console.log('[Music] AMLL config applied');
-                    } catch (e) {
-                        console.warn('[Music] AMLL config error:', e);
+                    if (amllPlayer) {
+                        amllPlayer.setAlignPosition(0.5);
+                        amllPlayer.setAlignAnchor('center');
                     }
-                }, 100);
+                }, 200);
             }
         }, 100);
     },
@@ -902,6 +938,7 @@ export const musicMethods = {
      * 获取每日推荐
      */
     async musicLoadDailyRecommend() {
+        if (store.musicDailyRecommend.length > 0) return; // 已有数据不再重复加载
         store.musicRecommendLoading = true;
         try {
             const response = await fetch('/api/music/recommend/songs', {
@@ -968,9 +1005,49 @@ export const musicMethods = {
     },
 
     /**
+     * 为首页加载每日推荐（不跳转详情页）
+     */
+    async musicLoadDailyRecommendForHome() {
+        if (!store.musicUser) {
+            toast.warning('需要登录才能获取每日推荐');
+            return;
+        }
+
+        store.musicRecommendLoading = true;
+        try {
+            const response = await fetch('/api/music/recommend/songs', {
+                credentials: 'include'
+            });
+            const data = await response.json();
+
+            if (data.data?.dailySongs && data.data.dailySongs.length > 0) {
+                const songs = data.data.dailySongs.map(song => ({
+                    id: song.id,
+                    name: song.name,
+                    artists: song.ar?.map(a => a.name).join(' / ') || '未知艺术家',
+                    album: song.al?.name || '未知专辑',
+                    cover: song.al?.picUrl || '',
+                    duration: song.dt || 0
+                }));
+
+                store.musicDailyRecommend = songs;
+                console.log('[Music] Daily recommend for home loaded:', songs.length, 'songs');
+            } else {
+                toast.warning('获取每日推荐失败，请稍后重试');
+            }
+        } catch (error) {
+            console.error('[Music] Daily recommend for home error:', error);
+            toast.error('加载每日推荐失败');
+        } finally {
+            store.musicRecommendLoading = false;
+        }
+    },
+
+    /**
      * 获取热门歌单
      */
     async musicLoadHotPlaylists() {
+        if (store.musicHotPlaylists.length > 0) return; // 已有数据不再重复加载
         store.musicPlaylistsLoading = true;
         try {
             const response = await fetch('/api/music/top/playlist?limit=20');
@@ -993,10 +1070,61 @@ export const musicMethods = {
     },
 
     /**
+     * 获取歌手热门歌曲
+     */
+    async musicLoadArtistSongs(artistId, artistName) {
+        store.musicPlaylistDetailLoading = true;
+        store.musicCurrentPlaylistDetail = null;
+        store.musicShowDetail = true;
+
+        try {
+            const response = await fetch(`/api/music/artist/songs?id=${artistId}`);
+            const data = await response.json();
+
+            if (data.songs && data.songs.length > 0) {
+                const songs = data.songs.map(song => ({
+                    id: song.id,
+                    name: song.name,
+                    artists: song.ar?.map(a => a.name).join(' / ') || '未知艺术家',
+                    album: song.al?.name || '未知专辑',
+                    cover: song.al?.picUrl || '',
+                    duration: song.dt || 0
+                }));
+
+                store.musicCurrentPlaylistDetail = {
+                    id: `artist-${artistId}`,
+                    name: artistName,
+                    cover: songs[0]?.cover || 'https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg',
+                    description: `${artistName} 的热门歌曲`,
+                    creator: '歌手',
+                    trackCount: songs.length,
+                    playCount: 0,
+                    tracks: songs
+                };
+                store.musicPlaylistVisibleCount = 50;
+            } else {
+                store.musicShowDetail = false;
+                toast.warning('未找到该歌手的歌曲');
+            }
+        } catch (error) {
+            console.error('[Music] Artist songs error:', error);
+            store.musicShowDetail = false;
+            toast.error('加载歌手歌曲失败');
+        } finally {
+            store.musicPlaylistDetailLoading = false;
+        }
+    },
+
+    /**
      * 获取歌单详情
      */
     async musicLoadPlaylistDetail(id) {
+        // 立即显示详情页和骨架屏，提供即时反馈
+        store.musicShowDetail = true;
         store.musicPlaylistDetailLoading = true;
+        // 清空当前详情，显示骨架屏
+        store.musicCurrentPlaylistDetail = null;
+        
         try {
             const response = await fetch(`/api/music/playlist/detail?id=${id}`);
             const data = await response.json();
@@ -1022,11 +1150,11 @@ export const musicMethods = {
                 };
                 // 重置懒加载状态
                 store.musicPlaylistVisibleCount = 50;
-                // 自动打开详情页
-                store.musicShowDetail = true;
             }
         } catch (error) {
             console.error('[Music] Playlist detail error:', error);
+            // 加载失败时关闭详情页
+            store.musicShowDetail = false;
         } finally {
             store.musicPlaylistDetailLoading = false;
         }
@@ -1040,6 +1168,17 @@ export const musicMethods = {
         store.musicPlaylist = [...tracks];
         store.musicCurrentIndex = 0;
         this.musicPlay(tracks[0]);
+    },
+
+    /**
+     * 播放每日推荐（从指定位置开始）
+     */
+    musicPlayDailyFromIndex(index) {
+        if (!store.musicDailyRecommend?.length) return;
+        // 将整个每日推荐列表加入播放队列
+        store.musicPlaylist = [...store.musicDailyRecommend];
+        store.musicCurrentIndex = index;
+        this.musicPlay(store.musicDailyRecommend[index]);
     },
 
     /**
@@ -1126,6 +1265,8 @@ export const musicMethods = {
 
                 // 登录成功后加载用户歌单
                 this.musicLoadUserPlaylists();
+                // 同时加载每日推荐显示在首页
+                this.musicLoadDailyRecommendForHome();
                 return true;
             } else {
                 store.musicUser = null;
@@ -1327,6 +1468,9 @@ export const musicMethods = {
      * 初始化音乐模块
      */
     initMusicModule() {
+        if (store.musicReady) return;
+        store.musicReady = true;
+
         console.log('[Music] Module initialized');
         // 恢复上次的音量设置
         if (audioPlayer) {
