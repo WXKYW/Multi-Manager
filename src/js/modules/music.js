@@ -55,10 +55,11 @@ function transformToAMLL(lyrics, translations = []) {
     return lyrics.map((line, index) => {
         const nextTime = lyrics[index + 1]?.time || (line.time + 5000);
 
-        // 让 endTime 紧贴下一行 startTime，避免 AMLL 识别出间奏（间奏需要 >= 4s 间隔）
+        // 让 endTime 紧贴下一行 startTime，避免 AMLL 识别出间奏（除非确实有很长的间奏）
         const gap = nextTime - line.time;
-        const duration = Math.min(gap - 100, 8000); // 始终留 100ms 间隔
-        const endTime = line.time + Math.max(duration, 1000);
+        // 只有间隔超过 4.5秒 才真正结束当前行，否则紧贴下一行开始，利于平滑滚动
+        const duration = Math.min(gap - 100, 8000);
+        const endTime = gap > 4500 ? (line.time + 4000) : (nextTime - 10);
 
         let trans = '';
         if (translations && translations.length) {
@@ -303,9 +304,11 @@ function startAmllUpdateLoop() {
         const delta = now - lastTime;
         lastTime = now;
 
-        if (amllPlayer && audioPlayer) {
-            // AMLL 需要 setCurrentTime 并在 update 中根据 delta 计算补间
-            amllPlayer.setCurrentTime(audioPlayer.currentTime * 1000);
+        if (amllPlayer && audioPlayer && !audioPlayer.paused) {
+            // 核心改进：不再每一帧都设置 currentTime。
+            // 因为 audioPlayer.currentTime 只有每约 250ms 才更新一次。
+            // 每一帧都设置会导致 AMLL 的内部时钟在 250ms 内原地踏步，从而产生卡顿。
+            // 我们只需让 AMLL 基于 delta 自己推进（update），校准交给 handleTimeUpdate。
             amllPlayer.update(delta);
         }
 
@@ -599,6 +602,7 @@ export const musicMethods = {
                     amllPlayer.setAlignPosition(0.5);     // 居中位置
                     amllPlayer.setAlignAnchor('center');  // 居中对齐
                     amllPlayer.setWordFadeWidth(0.9);     // 逐字淡入宽度
+                    // 移除不存在的 setEnableWordAnimation，AMLL 会自动根据 words 数组渲染逐字动画
 
                     // 监听点击歌词事件
                     el.addEventListener('click', (e) => {
@@ -637,7 +641,9 @@ export const musicMethods = {
 
             // 设置歌词
             if (amllPlayer && store.musicLyrics) {
-                amllPlayer.setLyricLines(transformToAMLL(store.musicLyrics, store.musicLyricsTranslation), audioPlayer.currentTime * 1000);
+                amllPlayer.setLyricLines(transformToAMLL(store.musicLyrics, store.musicLyricsTranslation));
+                // 立即校准时间，即使在暂停状态下也能显示当前位置
+                amllPlayer.setCurrentTime(audioPlayer.currentTime * 1000);
 
                 if (store.musicPlaying) amllPlayer.resume();
                 else amllPlayer.pause();

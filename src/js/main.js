@@ -31,6 +31,7 @@ import '../css/refined-ui.css'; // 精选组件样式
 import '../css/stream-player.css'; // 流媒体播放器样式
 import '../css/totp.css'; // 2FA 验证器样式
 import '../css/music.css'; // 音乐播放器样式
+import '../css/nav-grouped.css'; // 分组导航样式
 import '../css/refined-mobile.css'; // 移动端适配 (必须最后加载)
 
 // 导入模板加载器
@@ -75,7 +76,7 @@ import { musicMethods } from './modules/music.js';
 import { formatDateTime, formatFileSize, maskAddress, formatRegion } from './modules/utils.js';
 
 // 导入全局状态
-import { store } from './store.js';
+import { store, MODULE_GROUPS } from './store.js';
 import { computed } from 'vue';
 
 
@@ -101,7 +102,8 @@ const app = createApp({
       currentOpenListTempTab,
       openListTempPathParts,
       sortedOpenListFiles,
-      isSelfHVideoActive
+      isSelfHVideoActive,
+      moduleGroups: MODULE_GROUPS  // 模块分组配置
     };
   },
   data() {
@@ -1284,6 +1286,75 @@ const app = createApp({
         };
         document.title = `API Monitor - ${titles[tabName] || tabName}`;
       }
+    },
+
+    // ==================== 分组导航方法 ====================
+
+    /**
+     * 获取分组中可见的模块列表
+     */
+    getVisibleModulesInGroup(modules) {
+      return modules.filter(m => this.moduleVisibility[m]);
+    },
+
+    /**
+     * 判断分组是否包含当前激活的模块
+     */
+    isGroupActive(modules) {
+      return modules.includes(this.mainActiveTab);
+    },
+
+    /**
+     * 切换分组展开状态
+     */
+    toggleNavGroup(groupId) {
+      if (this.navGroupExpanded === groupId) {
+        this.navGroupExpanded = null;
+      } else {
+        this.navGroupExpanded = groupId;
+      }
+    },
+
+    /**
+     * 处理分组按钮悬停 (PC端悬浮展开)
+     */
+    handleGroupHover(groupId) {
+      if (this.isMobile) return;
+      // 清除可能存在的关闭定时器
+      if (this._groupLeaveTimer) {
+        clearTimeout(this._groupLeaveTimer);
+        this._groupLeaveTimer = null;
+      }
+      this.navGroupExpanded = groupId;
+    },
+
+    /**
+     * 处理鼠标离开分组区域 (延迟关闭，避免抖动)
+     */
+    handleGroupLeave() {
+      if (this.isMobile) return;
+      this._groupLeaveTimer = setTimeout(() => {
+        this.navGroupExpanded = null;
+      }, 150);
+    },
+
+    /**
+     * 取消分组关闭（鼠标移入下拉菜单时）
+     */
+    cancelGroupLeave() {
+      if (this._groupLeaveTimer) {
+        clearTimeout(this._groupLeaveTimer);
+        this._groupLeaveTimer = null;
+      }
+    },
+
+    /**
+     * 处理分组内模块点击
+     */
+    handleGroupModuleClick(module) {
+      this.handleTabSwitch(module);
+      // 点击后关闭下拉菜单
+      this.navGroupExpanded = null;
     }
   }
 });
