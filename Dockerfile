@@ -73,7 +73,7 @@ COPY package.json package-lock.json ./
 RUN npm config set registry https://registry.npmmirror.com
 
 # 2. 仅安装生产依赖 (减小体积)
-RUN npm install --only=production --legacy-peer-deps && npm cache clean --force
+RUN npm install --omit=dev --legacy-peer-deps && npm cache clean --force
 
 # 3. 从各阶段复制构建好的资源
 COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
