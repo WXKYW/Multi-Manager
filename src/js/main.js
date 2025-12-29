@@ -30,6 +30,7 @@ import '../css/template.css'; // 模块模板通用样式
 import '../css/refined-ui.css'; // 精选组件样式
 import '../css/stream-player.css'; // 流媒体播放器样式
 import '../css/totp.css'; // 2FA 验证器样式
+import '../css/music.css'; // 音乐播放器样式
 import '../css/refined-mobile.css'; // 移动端适配 (必须最后加载)
 
 // 导入模板加载器
@@ -70,6 +71,7 @@ import { commonMethods } from './modules/common.js';
 import { toast } from './modules/toast.js';
 import { streamPlayerMethods } from './modules/stream-player-ui.js';
 import { totpMethods, totpComputed, totpData } from './modules/totp.js';
+import { musicMethods } from './modules/music.js';
 import { formatDateTime, formatFileSize, maskAddress, formatRegion } from './modules/utils.js';
 
 // 导入全局状态
@@ -935,6 +937,13 @@ const app = createApp({
           });
         }
 
+        // Music 模块独立初始化 (有自己的登录系统，不依赖应用认证)
+        if (newVal === 'music') {
+          this.$nextTick(() => {
+            this.initMusicModule();
+          });
+        }
+
         // 4. 轮询管理
         if (newVal !== 'antigravity' || this.antigravityCurrentTab !== 'quotas') {
           if (this.stopAntigravityQuotaPolling) {
@@ -1228,6 +1237,7 @@ const app = createApp({
     ...commonMethods,
     ...streamPlayerMethods,
     ...totpMethods,
+    ...musicMethods,
 
     // ==================== 工具函数 ====================
     formatDateTime,
@@ -1252,7 +1262,7 @@ const app = createApp({
       const tabName = pathAliases[path] || path;
 
       // 直接使用 mainActiveTab 值作为路径
-      const validTabs = ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'self-h', 'server', 'totp'];
+      const validTabs = ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'self-h', 'server', 'totp', 'music'];
 
       if (tabName && validTabs.includes(tabName)) {
         store.singlePageMode = true;
@@ -1269,7 +1279,8 @@ const app = createApp({
           'dns': 'DNS 管理',
           'self-h': 'Self-Hosted',
           'server': '主机管理',
-          'totp': '2FA 验证器'
+          'totp': '2FA 验证器',
+          'music': '音乐播放器'
         };
         document.title = `API Monitor - ${titles[tabName] || tabName}`;
       }

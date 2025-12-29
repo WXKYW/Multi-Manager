@@ -281,6 +281,28 @@ class DatabaseService {
             } catch (err) {
                 logger.error('Server Metrics History platform 迁移失败:', err.message);
             }
+
+            // Music Settings 迁移: 创建 music_settings 表存储 Cookie
+            try {
+                const musicTables = this.db.prepare(`
+                    SELECT name FROM sqlite_master WHERE type='table' AND name='music_settings'
+                `).all();
+
+                if (musicTables.length === 0) {
+                    logger.info('正在创建 music_settings 表...');
+                    this.db.exec(`
+                        CREATE TABLE IF NOT EXISTS music_settings (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            key TEXT UNIQUE NOT NULL,
+                            value TEXT,
+                            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                        )
+                    `);
+                    logger.success('music_settings 表创建成功');
+                }
+            } catch (err) {
+                logger.error('Music Settings 表创建失败:', err.message);
+            }
         } catch (error) {
             logger.error('数据库迁移失败', error.message);
             // 不抛出错误，避免影响应用启动

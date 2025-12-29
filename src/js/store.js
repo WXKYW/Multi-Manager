@@ -61,6 +61,12 @@ export const MODULE_CONFIG = {
         shortName: '2FA',
         icon: 'fa-shield-alt',
         description: 'TOTP 验证器'
+    },
+    'music': {
+        name: 'Music',
+        shortName: 'Music',
+        icon: 'fa-music',
+        description: '网易云音乐播放器'
     }
 };
 
@@ -109,7 +115,8 @@ export const store = reactive({
         dns: true,
         'self-h': true,
         server: true,
-        totp: true
+        totp: true,
+        music: true
     },
     channelEnabled: {
         antigravity: true,
@@ -119,7 +126,7 @@ export const store = reactive({
         antigravity: '',
         'gemini-cli': ''
     },
-    moduleOrder: ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'self-h', 'server', 'totp'],
+    moduleOrder: ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'self-h', 'server', 'totp', 'music'],
 
     // 界面设置
     opacity: 100,
@@ -243,7 +250,7 @@ export const store = reactive({
     zeaburRefreshInterval: 30000,
     zeaburRefreshIntervalSec: 30, // 秒（用于表单绑定）
     refreshCountdown: 30,
-    refreshProgress: 100,
+    refreshProgress: 30,
     dataRefreshPaused: false,
     projectCosts: {},
 
@@ -256,7 +263,7 @@ export const store = reactive({
     koyebRefreshInterval: 30000,
     koyebRefreshIntervalSec: 30, // 秒（用于表单绑定）
     koyebRefreshCountdown: 30,
-    koyebRefreshProgress: 100,
+    koyebRefreshProgress: 30,
     koyebDataRefreshPaused: false,
     koyebExpandedAccounts: {},
     showAddKoyebAccountModal: false,
@@ -276,8 +283,8 @@ export const store = reactive({
     flyLastUpdate: '',
     flyRefreshInterval: 30000,
     flyRefreshIntervalSec: 30, // 秒（用于表单绑定）
-    flyRefreshCountdown: 30,
-    flyRefreshProgress: 100,
+    flyRefreshCountdown: 300,
+    flyRefreshProgress: 300,
     flyDataRefreshPaused: false,
     flyExpandedAccounts: {},
     showAddFlyAccountModal: false,
@@ -431,6 +438,62 @@ export const store = reactive({
     geminiCliAutoCheckTimerId: null, // 定时器 ID
     geminiCliDisabledCheckModels: [], // 禁用检测的模型列表
 
+    // ===== 音乐播放器模块 =====
+    musicReady: false,
+    musicCurrentTab: 'home', // 'home', 'discover', 'search', 'library', 'settings'
+    musicSearchKeyword: '',
+    musicSearchLoading: false,
+    musicSearchResults: [], // 歌曲搜索结果
+    musicSearchPlaylists: [], // 歌单搜索结果
+    musicSearchArtists: [], // 歌手搜索结果
+    musicSearchType: 'songs', // 'songs', 'playlists', 'artists'
+    musicSearchOffset: 0, // 分页偏移
+    musicSearchHasMore: true, // 是否有更多结果
+    musicSearchLoadingMore: false, // 加载更多中
+    musicShowSearchTab: false, // 是否显示搜索标签
+    musicPlaying: false,
+    musicBuffering: false,
+    musicCurrentSong: null,
+    musicPlaylist: [],
+    musicCurrentIndex: -1,
+    musicVolume: 80,
+    musicMuted: false,
+    musicRepeatMode: 'none', // 'none', 'all', 'one'
+    musicShuffleEnabled: false,
+    musicCurrentTime: 0,
+    musicDuration: 0,
+    musicProgress: 0,
+    musicLyrics: [],
+    musicLyricsTranslation: [],
+    musicCurrentLyricIndex: 0,
+    musicShowFullPlayer: false,
+    musicShowPlaylistDrawer: false,
+    musicDailyRecommend: [],
+    musicRecommendLoading: false,
+    musicHotPlaylists: [],
+    musicPlaylistsLoading: false,
+    musicCurrentPlaylistDetail: null,
+    musicPlaylistDetailLoading: false,
+    musicApiUrl: '', // NCM API 地址，空则使用内置
+    musicUnblockUrl: '', // 解锁服务地址，空则使用内置
+    musicQuality: 'exhigh', // 'standard', 'higher', 'exhigh', 'lossless'
+    musicAutoPlay: true,
+
+    // 登录相关
+    musicUser: null, // { userId, nickname, avatarUrl, vipType }
+    musicLoginLoading: false,
+    musicShowLoginModal: false, // 显示网易云登录弹窗
+    musicLoginStatusText: '请使用网易云音乐 App 扫码登录', // 登录状态文字
+    musicQrKey: '',
+    musicQrImg: '',
+    musicQrExpired: false,
+    musicQrChecking: false,
+    musicMyPlaylists: [], // 用户创建的歌单
+    musicCollectedPlaylists: [], // 用户收藏的歌单
+    musicLikedPlaylist: null, // 喜欢的音乐歌单
+    musicShowDetail: false, // 显示歌单详情页
+    musicPlaylistVisibleCount: 50, // 歌单懒加载：当前可见的歌曲数量
+    musicShowUserDropdown: false, // 显示用户下拉菜单
 
     // 统一日志查看器 (Log Viewer)
     logViewer: {

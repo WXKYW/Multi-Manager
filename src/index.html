@@ -84,7 +84,8 @@
                     module === 'self-h' ? 'self-h-tab' : '',
                     module === 'antigravity' ? 'antigravity-tab' : '',
                     module === 'gemini-cli' ? 'gemini-cli-tab' : '',
-                    module === 'totp' ? 'totp-tab' : ''
+                    module === 'totp' ? 'totp-tab' : '',
+                    module === 'music' ? 'music-tab' : ''
                   ]" @click="handleTabSwitch(module)">
                   <i class="fas" :class="getModuleIcon(module)"></i>
                   <span> {{ getModuleName(module) }}</span>
@@ -109,6 +110,7 @@
           <div id="template-server" v-show="mainActiveTab === 'server'"></div>
           <div id="template-self-h" v-show="mainActiveTab === 'self-h'"></div>
           <div id="template-totp" v-show="mainActiveTab === 'totp'"></div>
+          <div id="template-music" v-show="mainActiveTab === 'music'"></div>
         </div>
 
         <!-- 未登录占位符 -->

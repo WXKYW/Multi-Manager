@@ -130,12 +130,22 @@ pre,
     -webkit-overflow-scrolling: touch;
   }
 
-  /* 单页模式下移除分割线 */
+  /* 单页模式下移除分割线和标题栏 */
   body.single-page-mode .sec-tabs,
   body.single-page-mode [class*="-sec-tabs"] {
     border-bottom: none;
     margin-top: 0;
     margin-bottom: 0;
+  }
+
+  body.single-page-mode .header {
+    display: none !important;
+  }
+
+  body.single-page-mode .container {
+    padding: 0;
+    height: 100vh;
+    /* max-width: 100%; */
   }
 
   .sec-tabs::-webkit-scrollbar {
@@ -203,6 +213,10 @@ pre,
     border-color: var(--totp-primary) !important;
   }
 
+  .theme-music .tab-btn:hover:not(.active) {
+    border-color: #f43f5e !important;
+  }
+
   .tab-btn.active {
     border-color: rgba(0, 0, 0, 0.1) !important;
     /* 激活时保持细微边框感 */
@@ -224,7 +238,8 @@ pre,
   .theme-self-h,
   .theme-server,
   .theme-paas,
-  .theme-totp {
+  .theme-totp,
+  .theme-music {
     --current-primary: var(--primary-color);
     --current-dark: var(--primary-dark);
   }
@@ -275,6 +290,12 @@ pre,
     --current-primary: var(--totp-primary);
     --current-dark: var(--totp-dark);
     --current-rgb: 139, 92, 246;
+  }
+
+  .theme-music {
+    --current-primary: #f43f5e;
+    --current-dark: #e11d48;
+    --current-rgb: 244, 63, 94;
   }
 
   /* 应用动态颜色到通用组件 */
@@ -343,6 +364,11 @@ pre,
   .theme-totp .tab-btn.active {
     background: linear-gradient(135deg, var(--totp-primary), var(--totp-dark)) !important;
     box-shadow: 0 2px 8px rgba(139, 92, 246, 0.3);
+  }
+
+  .theme-music .tab-btn.active {
+    background: linear-gradient(135deg, #f43f5e, #e11d48) !important;
+    box-shadow: 0 2px 8px rgba(244, 63, 94, 0.3);
   }
 
   /* ========================================
@@ -530,7 +556,7 @@ body.modal-open {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  height: 100%;
+  /* height: 100%; */
   /* 改为 100% 填充容器 */
   overflow-y: auto;
   position: relative;
@@ -732,7 +758,7 @@ body.modal-open {
 
 /* 移除侧边栏后的全屏适配 */
 .app-wrapper.no-sidebar {
-  display: block;
+  display: flex;
   width: 100%;
 }
 
@@ -828,48 +854,46 @@ body.modal-open {
    统一按钮系统 (Unified Button System)
    ======================================== */
 .btn {
-  height: 36px;
-  padding: 0 16px;
-  border-radius: 8px;
-  font-weight: 600;
-  font-size: 13px;
-  letter-spacing: 0.3px;
-  cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
+  height: 38px;
+  padding: 0 18px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.2px;
+  cursor: pointer;
   white-space: nowrap;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   border: 1px solid transparent;
   user-select: none;
-  /* box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); */
+  position: relative;
+  overflow: hidden;
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
 }
 
-/* 所有的 Hover 统一逻辑：仅亮度微调 */
-.btn:hover:not(:disabled) {
-  box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.12);
-  filter: brightness(1.05);
-}
-
-/* 所有的 Active 统一逻辑：按压沉降与微调 */
-.btn:active:not(:disabled) {
-  transform: scale(0.97);
-  filter: brightness(0.95);
-  border-color: rgba(0, 0, 0, 0.15);
-  transition: all 0.05s ease;
-}
-
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  box-shadow: none;
-}
-
-/* 语义化配色方案 - 仅区分颜色 */
+/* --- 功能变体 (Functional Variants) --- */
 .btn-primary {
   background: var(--primary-color);
   color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  /* 仅颜色亮度变化 */
+}
+
+.btn-secondary {
+  background: var(--bg-tertiary);
+  border-color: var(--border-color);
+  color: var(--text-secondary);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--border-color);
+  color: var(--text-primary);
 }
 
 .btn-success {
@@ -887,71 +911,162 @@ body.modal-open {
   color: white;
 }
 
-.btn-secondary {
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-color);
-  box-shadow: none;
+.btn-info {
+  background: var(--info-color);
+  color: white;
 }
 
-.btn-secondary:hover {
-  background: var(--border-color);
+/* 幽灵按钮/外框按钮 */
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-secondary);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: rgba(var(--primary-rgb), 0.1);
+  color: var(--primary-color);
+}
+
+.btn-outline {
+  background: transparent;
+  border-color: var(--border-color);
   color: var(--text-primary);
 }
 
-/* 针对小尺寸按钮的特定优化 */
+.btn-outline:hover:not(:disabled) {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+  background: rgba(var(--primary-rgb), 0.05);
+}
+
+/* --- 尺寸规范 (Sizes) --- */
+.btn-lg {
+  height: 48px;
+  padding: 0 28px;
+  font-size: 16px;
+  border-radius: 14px;
+}
+
+.btn-md {
+  /* 默认尺寸，无需在此定义 */
+}
+
 .btn-sm {
-  height: 30px;
-  padding: 0 10px;
-  font-size: 12px;
-  border-radius: 6px;
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+  border-radius: 8px;
+  gap: 6px;
 }
 
 .btn-xs {
-  height: 24px;
+  height: 26px;
   padding: 0 8px;
-  font-size: 11px;
-  border-radius: 4px;
+  font-size: 12px;
+  border-radius: 6px;
+  gap: 4px;
 }
 
-/* 按钮内图标大小统一 */
+/* --- 形状规范 (Shapes) --- */
+.btn-pill {
+  border-radius: 999px;
+}
+
+.btn-circle {
+  width: 38px;
+  padding: 0;
+  border-radius: 50%;
+  justify-content: center;
+}
+
+.btn-circle.btn-lg {
+  width: 48px;
+}
+
+.btn-circle.btn-sm {
+  width: 32px;
+}
+
+.btn-circle.btn-xs {
+  width: 26px;
+}
+
+.btn-square {
+  width: 38px;
+  padding: 0;
+  border-radius: 10px;
+}
+
+.btn-square.btn-lg {
+  width: 48px;
+}
+
+.btn-square.btn-sm {
+  width: 32px;
+}
+
+.btn-square.btn-xs {
+  width: 26px;
+}
+
+/* --- 交互状态 (States) --- */
+.btn:hover:not(:disabled) {
+  filter: brightness(1.1);
+  border-color: rgba(var(--primary-rgb), 0.2);
+}
+
+.btn:active:not(:disabled) {
+  filter: brightness(0.9);
+  transition: all 0.1s ease;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: grayscale(0.5);
+}
+
+/* 加载状态 (Loading) */
+.btn-loading {
+  color: transparent !important;
+  pointer-events: none;
+}
+
+.btn-loading::after {
+  content: "";
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: currentColor;
+  animation: btn-spin 0.6s linear infinite;
+}
+
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 图标大小修正 */
 .btn i {
-  font-size: 14px;
+  font-size: inherit;
 }
 
 .btn-sm i {
   font-size: 12px;
 }
 
-/* 移除旧的重复按钮定义 */
-/* 以下区域在原文件中将被替换 */
-
-/* 按钮禁用状态下的微光动效保留但改为通用类 */
-.btn-loading {
-  position: relative;
-  overflow: hidden;
+.btn-xs i {
+  font-size: 11px;
 }
 
-.btn-loading::after {
-  content: "";
-  position: absolute;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
-  background: linear-gradient(to right,
-      transparent,
-      rgba(255, 255, 255, 0.2),
-      transparent);
-  transform: rotate(30deg);
-  animation: loading-shimmer 1.5s infinite;
-}
-
+/* 遗留/兼容类名修正 */
 .btn.icon-only {
-  width: 36px;
+  width: 40px;
   padding: 0;
-  min-width: 36px;
-  justify-content: center;
 }
 
 .btn-icon-refined {
@@ -964,9 +1079,7 @@ body.modal-open {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  border-radius: 25px;
-  padding: 0;
-  line-height: 1;
+  border-radius: 50%;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 

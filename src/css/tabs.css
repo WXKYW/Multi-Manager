@@ -108,6 +108,15 @@
   background-color: var(--totp-primary) !important;
 }
 
+.main-tab.music-tab:hover,
+.main-tab.music-tab.active {
+  color: #f43f5e !important;
+}
+
+.main-tab.music-tab::after {
+  background-color: #f43f5e !important;
+}
+
 @media (max-width: 768px) {
   .main-tab {
     padding: 12px 16px;
@@ -209,6 +218,10 @@
 
 .main-tabs-sidebar .sidebar-tab.totp-tab.active {
   color: var(--totp-primary) !important;
+}
+
+.main-tabs-sidebar .sidebar-tab.music-tab.active {
+  color: #f43f5e !important;
 }
 
 
