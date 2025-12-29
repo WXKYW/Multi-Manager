@@ -50,6 +50,8 @@
     flex: 1;
     min-height: 0;
     height: 100%;
+    padding-bottom: 120px;
+    /* 为固定的音乐栏留出空间 */
     transition: transform 0.6s cubic-bezier(0.25, 1, 0.5, 1),
         border-radius 0.6s ease,
         opacity 0.6s ease;
@@ -73,7 +75,7 @@
     flex-direction: column;
     flex: 1;
     min-height: 0;
-    height: calc(100vh - 120px);
+    /* height: calc(100vh - 85px); */
     /* Account for header and padding */
 }
 
@@ -718,30 +720,90 @@ body.single-page-mode #template-music {
 
 /* --- Bottom Bar --- */
 .music-bottom-bar {
-    position: fixed;
-    bottom: 10px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: calc(100% - 48px);
-    max-width: 1276px;
-    height: 84px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: 23px;
-    box-shadow: var(--card-shadow);
-    display: grid;
-    grid-template-columns: minmax(100px, 300px) 1fr minmax(80px, 300px);
-    align-items: center;
-    padding: 0 20px;
-    z-index: 3100;
-    /* 高于歌词页(3000)，确保进度条不被遮挡 */
-    transition: border-radius 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    position: fixed !important;
+    /* 强制脱离任何 transform 容器，相对于窗口定位 */
+    bottom: 10px !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+
+    /* 增加宽度 */
+    width: 95% !important;
+    max-width: 1400px !important;
+    height: 76px !important;
+
+    /* 自适应磨砂玻璃质感 - 极致一致性 */
+    background: rgba(var(--bg-secondary-rgb), 0.72) !important;
+    backdrop-filter: blur(40px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(40px) saturate(180%) !important;
+
+    border: 1px solid var(--border-color) !important;
+    border-radius: 20px !important;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15) !important;
+    user-select: none !important;
+    /* 禁止内容被选择 */
+    -webkit-user-drag: none !important;
+    /* 禁止拖拽 */
+
+    display: grid !important;
+    grid-template-columns: minmax(100px, 300px) 1fr minmax(80px, 300px) !important;
+    align-items: center !important;
+    padding: 0 20px !important;
+    z-index: 11000 !important;
+    /* 开启背景和边框的硬件优化 */
+    will-change: background, border-color, box-shadow, transform;
+    transition: all 0.6s cubic-bezier(0.32, 0.72, 0, 1) !important;
+}
+
+/* 展开状态：使用可过渡属性值，彻底消除收起瞬间的边缘闪烁 */
+.music-bottom-bar.expanded {
+    background: rgba(var(--bg-secondary-rgb), 0) !important;
+    backdrop-filter: blur(0px) saturate(100%) !important;
+    -webkit-backdrop-filter: blur(0px) saturate(100%) !important;
+    border-color: transparent !important;
+    box-shadow: 0 0 0 rgba(0, 0, 0, 0) !important;
+    /* 核心：用透明阴影代替 none */
+}
+
+/* 适配深色模式：强制保持 0.72 透明度，确保与歌词页完全一致 */
+@media (prefers-color-scheme: dark) {
+    .music-bottom-bar {
+        background: rgba(var(--bg-secondary-rgb), 0.72) !important;
+        backdrop-filter: blur(40px) saturate(180%) !important;
+        -webkit-backdrop-filter: blur(40px) saturate(180%) !important;
+        border-color: rgba(255, 255, 255, 0.1) !important;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4) !important;
+    }
+}
+
+/* 移除干扰：彻底删除底栏顶部的白色装饰线和任何伪元素装饰 */
+.music-bottom-bar::before,
+.music-bottom-bar::after,
+.music-bottom-bar.expanded::before,
+.music-bottom-bar.expanded::after {
+    display: none !important;
+    content: none !important;
+}
+
+/* 核心修复：防止任何父级容器的 transform 属性“囚禁” fixed 元素 */
+.app-main,
+.container,
+#template-music,
+.music-module {
+    perspective: none !important;
+    /* 注意：如果这里的父级必须保留 transform 动画，
+       则 fixed 定位只能相对于该容器显示。
+       但为了悬浮效果，我们强制修正背景包装层的 z-index */
+}
+
+/* 确保背景内容滚动时不会遮挡底栏 */
+.music-bg-wrapper {
+    position: relative;
+    z-index: 1;
 }
 
 /* 歌词面板展开时的底部bar样式 */
 .music-bottom-bar.expanded {
-    border-radius: 0 0 23px 23px;
-    /* 只保留底部圆角 */
+    border-radius: 0 0 20px 20px !important;
 }
 
 /* 点击背景层 - 点击展开播放器 */
@@ -753,19 +815,7 @@ body.single-page-mode #template-music {
     border-radius: inherit;
 }
 
-.music-bottom-bar::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 42px;
-    right: 42px;
-    height: 1px;
-    background: linear-gradient(90deg,
-            rgba(255, 255, 255, 0) 0%,
-            rgba(255, 255, 255, 0.15) 50%,
-            rgba(255, 255, 255, 0) 100%);
-    pointer-events: none;
-}
+/* 线条装饰已移至 display: none */
 
 .music-bottom-bar:hover {
     /* background: rgba(var(--bg-secondary-rgb, 20, 20, 20), 0.85); */
@@ -777,11 +827,13 @@ body.single-page-mode #template-music {
 
 .bar-progress {
     position: absolute;
-    top: -2px;
+    top: -1px;
     left: 20px;
     right: 20px;
     height: 3px;
     cursor: pointer;
+    background: rgba(128, 128, 128, 0.15);
+    /* 进度条底色 */
     border-radius: 50px;
     transition: transform 0.2s ease, height 0.2s ease;
     z-index: 3100;
@@ -830,6 +882,26 @@ body.single-page-mode #template-music {
 .bar-progress:hover .bar-fill::after {
     opacity: 1;
 }
+
+
+
+
+
+
+/* 已在上方统一处理 */
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 .bar-left {
     display: flex;
@@ -918,6 +990,8 @@ body.single-page-mode #template-music {
     width: 100%;
     height: 100%;
     object-fit: cover;
+    -webkit-user-drag: none !important;
+    pointer-events: none;
 }
 
 .bar-info {
@@ -1165,7 +1239,7 @@ body.single-page-mode #template-music {
     line-height: 1.5;
     margin-bottom: 20px;
     display: -webkit-box;
-    -webkit-line-clamp: 3;
+    line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
@@ -1418,7 +1492,9 @@ body.single-page-mode #template-music {
 }
 
 .music-login-content {
-    background: var(--bg-secondary);
+    background: var(--bg-secondary) !important;
+    border: 1px solid var(--border-color) !important;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5) !important;
     padding: 40px;
     border-radius: 20px;
     text-align: center;
@@ -1505,19 +1581,16 @@ body.single-page-mode #template-music {
         padding-right: 12px;
     }
 
-    .music-main-content {
-        /* padding: 16px 20px 120px 20px; */
-    }
-
     .music-sec-tabs .search-pill {
         width: clamp(100px, 25vw, 160px);
     }
 
     .music-bottom-bar {
-        height: 72px;
-        padding: 0 20px;
-        bottom: 16px;
-        width: calc(100% - 32px);
+        /* 精确计算：悬浮在底部导航栏 (56px) 之上 */
+        bottom: calc(56px + env(safe-area-inset-bottom, 0) + 12px) !important;
+        width: calc(100% - 24px) !important;
+        height: 68px !important;
+        margin: 0 !important;
     }
 
     .bar-cover {
@@ -1531,9 +1604,13 @@ body.single-page-mode #template-music {
     }
 
     .music-playlist-drawer {
-        width: 300px;
+        width: 320px;
         right: 16px;
-        bottom: 88px;
+        bottom: calc(56px + env(safe-area-inset-bottom, 0) + 90px);
+        background: rgba(var(--bg-secondary-rgb), 0.9);
+        backdrop-filter: blur(20px);
+        border: 1px solid var(--border-color);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
     }
 }
 
@@ -1547,21 +1624,14 @@ body.single-page-mode #template-music {
         gap: 8px;
     }
 
-    .music-main-content {
-        /* padding: 12px 16px 100px 16px; */
-    }
-
     .page-title {
         font-size: 22px;
     }
 
     .music-bottom-bar {
-        grid-template-columns: 60px 1fr auto;
-        height: 64px;
-        padding: 0 12px;
-        bottom: 12px;
-        width: calc(100% - 24px);
-        border-radius: 16px;
+        bottom: calc(56px + env(safe-area-inset-bottom, 0) + 12px) !important;
+        width: calc(100% - 16px) !important;
+        height: 64px !important;
     }
 
     .bar-left .bar-info {
@@ -1754,33 +1824,81 @@ body.single-page-mode #template-music {
     margin-left: 12px;
 }
 
-/* --- Full Screen Player (歌词面板与底部bar无缝连接) --- */
+/* --- Full Screen Player (从底栏上边缘向上生长的容器) --- */
 .music-full-player {
-    position: fixed;
-    /* 顶部保留间距，与底部bar边距一致 */
-    top: 10px;
-    bottom: 94px;
-    /* 调高避免遮挡进度条 */
-    left: 50%;
-    transform: translateX(-50%);
-    /* 与底部控制条宽度一致 */
-    width: calc(100% - 48px);
-    max-width: 1276px;
-    z-index: 3000;
-    /* 高于导航栏，确保完全覆盖 */
+    position: fixed !important;
+    /* 真·一体化：底边缘与底栏完全重合 */
+    bottom: 10px !important;
+    top: 10px !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+
+    width: 95% !important;
+    max-width: 1400px !important;
+    z-index: 10000 !important;
+
     display: flex;
     flex-direction: column;
     color: var(--text-primary);
     overflow: hidden;
-    /* 与底部bar一致的背景 */
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-bottom: none;
-    /* 移除底部边框，与bar无缝连接 */
-    border-radius: 23px 23px 0 0;
-    /* 顶部圆角，底部直角与bar连接 */
-    box-shadow: var(--card-shadow);
-    /* 只保留顶部阴影 */
+
+    /* 整体圆角，与底栏闭合状态一致 */
+    border-radius: 20px !important;
+    border: 1px solid var(--border-color) !important;
+
+    /* 全屏页承载唯一的磨砂背景图层 */
+    background: rgba(var(--bg-secondary-rgb), 0.72) !important;
+    backdrop-filter: blur(40px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(40px) saturate(180%) !important;
+
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3) !important;
+    /* Zeabur 风格向上生长动画 */
+    transition: all 0.6s cubic-bezier(0.32, 0.72, 0, 1) !important;
+    transform-origin: bottom center !important;
+
+    will-change: transform, opacity;
+}
+
+/* 保护内容：在生长过程中为底部预留底栏按钮的空间 */
+.full-player-body {
+    flex: 1;
+    display: flex;
+    padding: 20px 60px 86px 60px !important;
+    /* 86px = 底栏高度76 + 10px 边距 */
+    gap: 60px;
+    overflow: hidden;
+}
+
+@media (prefers-color-scheme: light) {
+
+    .music-full-player,
+    .music-bottom-bar {
+        background: rgba(255, 255, 255, 0.88) !important;
+        backdrop-filter: blur(40px) saturate(180%) !important;
+    }
+
+    .amll-lyric-player {
+        --amll-lp-color: #333 !important;
+    }
+}
+
+/* 彻底禁止任何覆盖全屏页背景的伪元素定义，防止色差 */
+.music-full-player::before,
+.music-full-player::after {
+    display: none !important;
+    content: none !important;
+}
+
+/* 移除后续重复的 radial-gradient 定义 */
+
+@keyframes rotate-bg {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 .full-player-bg-container {
@@ -1800,9 +1918,9 @@ body.single-page-mode #template-music {
     left: 0;
     width: 100%;
     height: 100%;
-    /* 主题自适应遮罩 */
-    background: rgba(var(--bg-secondary-rgb), 0.6);
-    backdrop-filter: blur(60px) saturate(180%);
+    /* 主题自适应遮罩 - 增加一层极其微妙的暗化以提升文字可读性 */
+    background: rgba(0, 0, 0, 0.03) !important;
+    backdrop-filter: none !important;
     z-index: -1;
     border-radius: inherit;
 }
@@ -1901,6 +2019,10 @@ body.single-page-mode #template-music {
     width: 100%;
     height: 100%;
     object-fit: cover;
+    display: block;
+    -webkit-user-drag: none !important;
+    pointer-events: none;
+    /* 彻底禁止交互 */
 }
 
 .full-player-info {
@@ -1970,13 +2092,22 @@ body.single-page-mode #template-music {
     isolation: isolate;
 }
 
-/* AMLL 歌词播放器 - SPlayer 风格 */
 .amll-lyric-player {
     --amll-lp-color: var(--text-primary);
     --amll-lp-font-size: 32px;
 
     width: 100%;
     height: 100%;
+    /* 硬件加速：提升滚动流畅度 */
+    will-change: transform;
+    transform: translate3d(0, 0, 0);
+    z-index: 15;
+    /* 确保在渐变遮罩之上 */
+    backface-visibility: hidden;
+    perspective: 1000px;
+
+    contain: layout style;
+    /* 移除 paints，防止意外裁剪 */
     position: absolute;
     left: 0;
     top: 0;
@@ -1985,24 +2116,69 @@ body.single-page-mode #template-music {
     text-align: left;
     box-sizing: border-box;
     -webkit-font-smoothing: antialiased;
+    /* 基础文字阴影，增强跨背景识别度 */
+    text-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
 }
 
 /* 歌词行样式优化 */
 .amll-lyric-player [class*="_lyricLine_"] {
     transform-origin: left center;
-    will-change: transform, opacity, color;
+    will-change: transform, opacity;
+    /* 移除这里的 transform: translate3d，因为它会覆盖 AMLL 内部的滚动/缩放位置 */
     /* 增加内边距以优化 hover 效果 */
     padding: 10px 24px;
     margin: 4px 20px 4px 0;
     /* 右侧留白防止截断 */
     border-radius: 12px;
     line-height: 1.4;
-    transition: background-color 0.2s ease, transform 0.3s ease;
+    /* 核心修复：移除 transform 过渡，交给 AMLL JS 引擎实时驱动。如果开启了 CSS transform transition，会与 JS 动画冲突导致滞后感 */
+    transition: background-color 0.2s ease, opacity 0.3s ease;
+
+    /* 极致丝滑：平滑文字均衡 */
+    -webkit-font-smoothing: antialiased;
+}
+
+/* 匹配 AMLL 各种可能的高亮类名 - 同步 SPlayer 算法 */
+.amll-lyric-player [class*="_lyricLine_"][class*="active"],
+.amll-lyric-player [class*="_lyricLine_"][class*="current"] {
+    /* 使用加法混合模式，使高亮行在背景上显得更亮、更透 */
+    mix-blend-mode: plus-lighter;
+    color: rgba(255, 255, 255, 0.98) !important;
+    /* 软发光效果 */
+    text-shadow: 0 0 20px rgba(255, 255, 255, 0.4), 0 2px 10px rgba(0, 0, 0, 0.2);
+    /* 强制重绘优化 */
+    will-change: transform, opacity, color;
+    opacity: 1 !important;
+}
+
+/* 兼容性降级 */
+@supports not (mix-blend-mode: plus-lighter) {
+
+    .amll-lyric-player [class*="_lyricLine_"][class*="active"],
+    .amll-lyric-player [class*="_lyricLine_"][class*="current"] {
+        color: #ffffff !important;
+        text-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+    }
 }
 
 /* 鼠标悬停高亮 */
 .amll-lyric-player [class*="_lyricLine_"]:hover {
     background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* 适配浅色模式的高亮逻辑 */
+@media (prefers-color-scheme: light) {
+
+    .amll-lyric-player [class*="_lyricLine_"][class*="active"],
+    .amll-lyric-player [class*="_lyricLine_"][class*="current"] {
+        mix-blend-mode: normal !important;
+        color: #000 !important;
+        text-shadow: 0 0 10px rgba(0, 0, 0, 0.1) !important;
+    }
+
+    .amll-lyric-player [class*="_lyricLine_"]:hover {
+        background-color: rgba(0, 0, 0, 0.05) !important;
+    }
 }
 
 /* 翻译歌词 */
@@ -2148,23 +2324,29 @@ body.single-page-mode #template-music {
         opacity 0.3s ease;
 }
 
+.full-player-fade-enter-active,
 .full-player-fade-leave-active {
-    transition:
-        top 0.35s cubic-bezier(0.4, 0, 0.2, 1),
-        opacity 0.2s ease;
+    /* 核心生长动画时间：0.6s，贝塞尔曲线复刻 Zeabur 平滑感 */
+    transition: transform 0.6s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.4s ease !important;
 }
 
 .full-player-fade-enter-from,
 .full-player-fade-leave-to {
-    /* 收起时 top 移到与底部bar无缝连接的位置 */
-    top: calc(100% - 94px) !important;
+    /* Zeabur 风格起点：从底栏高度（约 0.08 比例）开始生长 */
+    transform: translateX(-50%) scaleY(0.08) !important;
     opacity: 0;
+    transform-origin: bottom center !important;
 }
 
+.full-player-fade-enter-to,
+.full-player-fade-leave-from {
+    transform: translateX(-50%) scaleY(1) !important;
+    opacity: 1;
+}
+
+/* 解决内容扭曲：在容器生长过程中，先隐藏内容，等容器长高后再显现 */
 .full-player-fade-enter-from .full-player-header,
-.full-player-fade-enter-from .full-player-body,
-.full-player-fade-leave-to .full-player-header,
-.full-player-fade-leave-to .full-player-body {
+.full-player-fade-enter-from .full-player-body {
     opacity: 0;
     transform: translateY(20px);
 }
@@ -2214,9 +2396,8 @@ body.single-page-mode #template-music {
 
 @media screen and (max-width: 768px) {
     .music-full-player {
-        width: calc(100% - 24px);
-        bottom: 8px;
-        border-radius: 18px;
+        width: 100% !important;
+        border-radius: 0 !important;
     }
 
     .full-player-header {
@@ -2241,8 +2422,6 @@ body.single-page-mode #template-music {
 
 /* 禁止所有图片拖动 */
 .music-module img {
-    -webkit-user-drag: none;
-    user-drag: none;
     -webkit-user-select: none;
     user-select: none;
     pointer-events: auto;

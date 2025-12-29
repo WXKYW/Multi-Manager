@@ -249,7 +249,7 @@ router.get('/song/url', async (req, res) => {
 
             try {
                 const match = require('@unblockneteasemusic/server');
-                const sources = ['bodian'];
+                const sources = ['pyncmd', 'bodian'];
                 const unblocked = await match(Number(id), sources);
 
                 if (unblocked && unblocked.url) {
@@ -312,7 +312,7 @@ router.get('/song/url/unblock', async (req, res) => {
 
     try {
         const match = require('@unblockneteasemusic/server');
-        const sources = source ? source.split(',') : ['bodian'];
+        const sources = source ? source.split(',') : ['pyncmd', 'bodian'];
 
         logger.info(`Unblock: trying to match song ${id} with sources:`, sources);
 

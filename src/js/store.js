@@ -71,6 +71,31 @@ export const MODULE_CONFIG = {
 };
 
 /**
+ * 模块分组配置 - 将模块按功能分类
+ * @type {Array<{id: string, name: string, icon: string, modules: string[]}>}
+ */
+export const MODULE_GROUPS = [
+    {
+        id: 'api-gateway',
+        name: 'API 网关',
+        icon: 'fa-bolt',
+        modules: ['openai', 'antigravity', 'gemini-cli']
+    },
+    {
+        id: 'infrastructure',
+        name: '基础设施',
+        icon: 'fa-cubes',
+        modules: ['paas', 'dns', 'server']
+    },
+    {
+        id: 'toolbox',
+        name: '工具箱',
+        icon: 'fa-toolbox',
+        modules: ['self-h', 'totp', 'music']
+    }
+];
+
+/**
  * 获取模块名称
  * @param {string} moduleId - 模块 ID
  * @param {boolean} short - 是否返回简短名称
@@ -116,7 +141,7 @@ export const store = reactive({
         'self-h': true,
         server: true,
         totp: true,
-        music: true
+        music: false
     },
     channelEnabled: {
         antigravity: true,
@@ -137,6 +162,7 @@ export const store = reactive({
     showSettingsModal: false, // 设置面板显示状态
     singlePageMode: false, // 单页模式（通过 URL 路径访问特定模块时隐藏导航）
     mobileSettingsNavExpanded: false, // 移动端设置导航展开状态
+    navGroupExpanded: null, // 当前展开的分组 ID (null 表示都收起)
 
     // TOTP 模块设置
     totpSettings: {
