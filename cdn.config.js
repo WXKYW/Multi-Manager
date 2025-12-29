@@ -69,6 +69,12 @@ const cdnDependencies = {
         global: null,
         css: true
     },
+    'jsqr': {
+        version: '1.4.0',
+        file: '/dist/jsQR.js',
+        global: 'jsQR',
+        css: false
+    },
     'html5-qrcode': {
         version: '2.3.8',
         file: '/html5-qrcode.min.js',

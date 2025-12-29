@@ -7,7 +7,7 @@ import { store } from '../store.js';
 import { toast } from './toast.js';
 
 // 导入 AMLL 样式
-import '@applemusic-like-lyrics/core/style.css';
+import '@applemusic-like-lyrics/core/dist/amll-core.css';
 
 // 音频播放器实例
 let audioPlayer = null;
@@ -1124,7 +1124,7 @@ export const musicMethods = {
         store.musicPlaylistDetailLoading = true;
         // 清空当前详情，显示骨架屏
         store.musicCurrentPlaylistDetail = null;
-        
+
         try {
             const response = await fetch(`/api/music/playlist/detail?id=${id}`);
             const data = await response.json();

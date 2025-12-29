@@ -15,6 +15,10 @@ module.exports = defineConfig(({ mode }) => {
     // 获取 CDN URLs
     const cdnUrls = useCdn ? getAllCdnUrls(cdnProvider) : { js: [], css: [] };
 
+    // 需要 external 的包 (仅针对有 global 定义的 JS 包，排除 vue，因为它有特殊的 shim 处理)
+    const externalDeps = useCdn ? getExternals().filter(pkg => pkg !== 'vue') : [];
+    const globals = useCdn ? getGlobals() : {};
+
     // 生成 CDN 脚本标签 (普通 script，不是 module)
     const cdnScriptTags = cdnUrls.js.map(item =>
         `<script src="${item.url}"></script>`
@@ -71,8 +75,11 @@ module.exports = defineConfig(({ mode }) => {
             rollupOptions: {
                 input: {
                     main: path.resolve(__dirname, 'src/index.html')
+                },
+                external: externalDeps,
+                output: {
+                    globals: globals
                 }
-                // CDN 模式下不再需要 external/globals，因为 shim 会处理
             }
         },
         server: {
