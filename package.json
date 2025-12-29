@@ -44,6 +44,13 @@
     "ssh2": "^1.17.0",
     "uuid": "^13.0.0",
     "vue": "^3.5.26",
+    "@pixi/app": "^7.4.2",
+    "@pixi/core": "^7.4.2",
+    "@pixi/display": "^7.4.2",
+    "@pixi/filter-blur": "^7.4.2",
+    "@pixi/filter-color-matrix": "^7.4.2",
+    "@pixi/sprite": "^7.4.2",
+    "@pixi/ticker": "^7.4.2",
     "ws": "^8.18.3"
   },
   "devDependencies": {
