@@ -95,9 +95,9 @@ function getCdnUrl(provider, pkg, type = 'js') {
         const cssFile = typeof dep.css === 'string' ? dep.css : dep.file;
 
         // 特殊处理: npmmirror 不允许加载 simple-icons-font 的静态文件 (FORBIDDEN)
-        // 在这种情况下，强制切换到 jsdelivr 镜像源
+        // 在这种情况下，强制切换到 unpkg 镜像源
         if (pkg === 'simple-icons-font' && provider === 'npmmirror') {
-            const fallbackCdn = cdnProviders.jsdelivr;
+            const fallbackCdn = cdnProviders.unpkg;
             return fallbackCdn.format(pkg, dep.version, cssFile);
         }
 

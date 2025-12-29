@@ -31,14 +31,22 @@ export const settingsMethods = {
           // 应用 Zeabur 刷新间隔
           if (settings.zeaburRefreshInterval) {
             this.zeaburRefreshInterval = settings.zeaburRefreshInterval;
-            // 如果 PaaS 模块已激活且当前平台正是 Zeabur，重启自动刷新
+            this.zeaburRefreshIntervalSec = settings.zeaburRefreshInterval / 1000;
             if (this.mainActiveTab === 'paas' && this.paasCurrentPlatform === 'zeabur' && !this.dataRefreshPaused) {
               this.startAutoRefresh();
             }
           }
+          if (settings.koyebRefreshInterval) {
+            this.koyebRefreshInterval = settings.koyebRefreshInterval;
+            this.koyebRefreshIntervalSec = settings.koyebRefreshInterval / 1000;
+          }
+          if (settings.flyRefreshInterval) {
+            this.flyRefreshInterval = settings.flyRefreshInterval;
+            this.flyRefreshIntervalSec = settings.flyRefreshInterval / 1000;
+          }
 
           // 应用模块设置 (过滤掉已废弃的模块)
-          const validModules = ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'self-h', 'server', 'totp'];
+          const validModules = ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'self-h', 'server', 'totp', 'music'];
           if (settings.moduleVisibility) {
             // 过滤掉不再支持的模块
             const filtered = {};
@@ -115,7 +123,7 @@ export const settingsMethods = {
     const savedVisibility = localStorage.getItem('module_visibility');
     const savedOrder = localStorage.getItem('module_order');
 
-    const availableModules = ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'self-h', 'server', 'totp'];
+    const availableModules = ['openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'self-h', 'server', 'totp', 'music'];
 
     if (savedVisibility) {
       const saved = JSON.parse(savedVisibility);
@@ -177,6 +185,8 @@ export const settingsMethods = {
       const settings = {
         customCss: this.customCss,
         zeaburRefreshInterval: this.zeaburRefreshInterval,
+        koyebRefreshInterval: this.koyebRefreshInterval,
+        flyRefreshInterval: this.flyRefreshInterval,
         moduleVisibility: this.moduleVisibility,
         channelEnabled: this.channelEnabled,
         channelModelPrefix: this.channelModelPrefix,
@@ -282,7 +292,7 @@ export const settingsMethods = {
     await this.loadUserSettings();
 
     // 定义所有可用模块
-    const availableModules = ['paas', 'dns', 'openai', 'server', 'antigravity', 'gemini-cli', 'self-h', 'totp'];
+    const availableModules = ['paas', 'dns', 'openai', 'server', 'antigravity', 'gemini-cli', 'self-h', 'totp', 'music'];
 
     // 确保所有模块都有配置
     availableModules.forEach(module => {

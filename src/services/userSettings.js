@@ -62,6 +62,8 @@ function loadUserSettings() {
     return {
       customCss: settings.custom_css || '',
       zeaburRefreshInterval: settings.zeabur_refresh_interval || 30000,
+      koyebRefreshInterval: settings.koyeb_refresh_interval || 30000,
+      flyRefreshInterval: settings.fly_refresh_interval || 30000,
       moduleVisibility: visibility,
       channelEnabled: channelEnabled,
       channelModelPrefix: channelModelPrefix,
@@ -89,6 +91,8 @@ function saveUserSettings(settings) {
     const dbSettings = {
       custom_css: settings.customCss !== undefined ? settings.customCss : settings.custom_css,
       zeabur_refresh_interval: settings.zeaburRefreshInterval !== undefined ? settings.zeaburRefreshInterval : settings.zeabur_refresh_interval,
+      koyeb_refresh_interval: settings.koyebRefreshInterval !== undefined ? settings.koyebRefreshInterval : settings.koyeb_refresh_interval,
+      fly_refresh_interval: settings.flyRefreshInterval !== undefined ? settings.flyRefreshInterval : settings.fly_refresh_interval,
       module_visibility: settings.moduleVisibility !== undefined ? settings.moduleVisibility : settings.module_visibility,
       channel_enabled: settings.channelEnabled !== undefined ? settings.channelEnabled : settings.channel_enabled,
       channel_model_prefix: settings.channelModelPrefix !== undefined ? settings.channelModelPrefix : settings.channel_model_prefix,

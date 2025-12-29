@@ -153,6 +153,14 @@
   --module-color: rgba(0, 212, 170, 0.06);
 }
 
+/* Music 模块 - 玫红色主题 */
+.music-tab-content.slide-in-left,
+.music-tab-content.slide-in-right,
+.music-tab-content.slide-out-left,
+.music-tab-content.slide-out-right {
+  --module-color: rgba(244, 63, 94, 0.06);
+}
+
 .active-ssh-terminal.sub-tab-content {
   animation-duration: 0.4s;
   animation-name: fadeIn;
@@ -181,6 +189,15 @@
 .self-h-tab-content.slide-out-right,
 .self-h-tab-content.fade-in {
   --module-color: rgba(6, 182, 212, 0.06);
+}
+
+/* Music 模块 - 玫红色主题 */
+.music-tab-content.slide-in-left,
+.music-tab-content.slide-in-right,
+.music-tab-content.slide-out-left,
+.music-tab-content.slide-out-right,
+.music-tab-content.fade-in {
+  --module-color: rgba(244, 63, 94, 0.06);
 }
 
 /* 切换动画使用模块主题色 */

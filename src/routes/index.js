@@ -454,7 +454,16 @@ function registerRoutes(app) {
     });
   }
 
-  // 5. 核心认证路由兼容旧版 (放在最后作为兜底，防止拦截模块路由)
+  // 5. 音乐模块路由 (代理 NCM API) - 无需认证，允许公开访问
+  try {
+    const musicRouter = require('../../modules/music-api/router');
+    app.use('/api/music', musicRouter);
+    logger.success('模块已挂载 -> music-api [/api/music] (public)');
+  } catch (e) {
+    logger.warn('音乐模块加载失败 (可选模块):', e.message);
+  }
+
+  // 6. 核心认证路由兼容旧版 (放在最后作为兜底，防止拦截模块路由)
   app.use('/api', authRouter);
 }
 

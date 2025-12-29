@@ -21,6 +21,7 @@ const TemplateLoader = {
         'modals.html': '#template-modals',
         'r2.html': '#template-r2',
         'totp.html': '#template-totp',
+        'music.html': '#template-music',
     },
 
     /**
