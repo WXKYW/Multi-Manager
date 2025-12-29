@@ -48,6 +48,7 @@
     "@pixi/core": "^7.4.2",
     "@pixi/display": "^7.4.2",
     "@pixi/filter-blur": "^7.4.2",
+    "@pixi/filter-bulge-pinch": "^7.4.2",
     "@pixi/filter-color-matrix": "^7.4.2",
     "@pixi/sprite": "^7.4.2",
     "@pixi/ticker": "^7.4.2",
