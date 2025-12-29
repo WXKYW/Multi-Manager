@@ -382,6 +382,22 @@ class UserSettings extends BaseModel {
             }
         }
 
+        if (!this.hasColumn('koyeb_refresh_interval')) {
+            try {
+                this.getDb().prepare(`ALTER TABLE ${this.tableName} ADD COLUMN koyeb_refresh_interval INTEGER DEFAULT 30000`).run();
+            } catch (e) {
+                console.warn('Auto-migration for koyeb_refresh_interval failed:', e.message);
+            }
+        }
+
+        if (!this.hasColumn('fly_refresh_interval')) {
+            try {
+                this.getDb().prepare(`ALTER TABLE ${this.tableName} ADD COLUMN fly_refresh_interval INTEGER DEFAULT 30000`).run();
+            } catch (e) {
+                console.warn('Auto-migration for fly_refresh_interval failed:', e.message);
+            }
+        }
+
         const data = { ...updates };
 
         // 处理 JSON 字段

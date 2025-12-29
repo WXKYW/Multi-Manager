@@ -353,7 +353,55 @@ router.get('/lyric', (req, res) => handleRequest('lyric_new', req, res));
 
 // ==================== 歌单 API ====================
 
-router.get('/playlist/detail', (req, res) => handleRequest('playlist_detail', req, res));
+router.get('/playlist/detail', async (req, res) => {
+    const api = loadNcmApi();
+    if (!api || typeof api.playlist_detail !== 'function') {
+        return res.status(500).json({ code: 500, message: 'API not available' });
+    }
+
+    try {
+        // 添加 s 参数获取歌曲数量（默认获取全部，最多 20000）
+        const query = {
+            id: req.query.id,
+            s: req.query.s || 20000, // 获取歌曲详情的数量
+            cookie: getEffectiveCookie(req.headers.cookie)
+        };
+
+        const result = await api.playlist_detail(query);
+
+        // 调试日志
+        logger.info('[Playlist] trackCount:', result.body?.playlist?.trackCount);
+        logger.info('[Playlist] tracks length:', result.body?.playlist?.tracks?.length);
+        logger.info('[Playlist] trackIds length:', result.body?.playlist?.trackIds?.length);
+
+        // 如果歌单有歌曲但 tracks 为空，可能需要额外获取歌曲详情
+        if (result.body?.playlist && result.body.playlist.trackIds?.length > 0 &&
+            (!result.body.playlist.tracks || result.body.playlist.tracks.length === 0)) {
+
+            logger.info('[Playlist] tracks empty, fetching song details for', result.body.playlist.trackIds.length, 'songs');
+
+            // 获取前 500 首歌的详情
+            const trackIds = result.body.playlist.trackIds.slice(0, 500).map(t => t.id);
+
+            if (trackIds.length > 0 && api.song_detail) {
+                const songResult = await api.song_detail({
+                    ids: trackIds.join(','),
+                    cookie: getEffectiveCookie(req.headers.cookie)
+                });
+
+                if (songResult.body?.songs) {
+                    result.body.playlist.tracks = songResult.body.songs;
+                    logger.info('[Playlist] Loaded', result.body.playlist.tracks.length, 'songs');
+                }
+            }
+        }
+
+        res.status(result.status || 200).json(result.body);
+    } catch (error) {
+        logger.error('playlist/detail error:', error.message);
+        res.status(500).json({ code: 500, message: error.message });
+    }
+});
 router.get('/top/playlist', (req, res) => handleRequest('top_playlist', req, res));
 router.get('/top/playlist/highquality', (req, res) => handleRequest('top_playlist_highquality', req, res));
 router.get('/playlist/catlist', (req, res) => handleRequest('playlist_catlist', req, res));

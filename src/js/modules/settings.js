@@ -31,10 +31,18 @@ export const settingsMethods = {
           // 应用 Zeabur 刷新间隔
           if (settings.zeaburRefreshInterval) {
             this.zeaburRefreshInterval = settings.zeaburRefreshInterval;
-            // 如果 PaaS 模块已激活且当前平台正是 Zeabur，重启自动刷新
+            this.zeaburRefreshIntervalSec = settings.zeaburRefreshInterval / 1000;
             if (this.mainActiveTab === 'paas' && this.paasCurrentPlatform === 'zeabur' && !this.dataRefreshPaused) {
               this.startAutoRefresh();
             }
+          }
+          if (settings.koyebRefreshInterval) {
+            this.koyebRefreshInterval = settings.koyebRefreshInterval;
+            this.koyebRefreshIntervalSec = settings.koyebRefreshInterval / 1000;
+          }
+          if (settings.flyRefreshInterval) {
+            this.flyRefreshInterval = settings.flyRefreshInterval;
+            this.flyRefreshIntervalSec = settings.flyRefreshInterval / 1000;
           }
 
           // 应用模块设置 (过滤掉已废弃的模块)
@@ -177,6 +185,8 @@ export const settingsMethods = {
       const settings = {
         customCss: this.customCss,
         zeaburRefreshInterval: this.zeaburRefreshInterval,
+        koyebRefreshInterval: this.koyebRefreshInterval,
+        flyRefreshInterval: this.flyRefreshInterval,
         moduleVisibility: this.moduleVisibility,
         channelEnabled: this.channelEnabled,
         channelModelPrefix: this.channelModelPrefix,
