@@ -3,6 +3,9 @@
  * 负责实时指标流、轮询、历史记录、图表渲染等
  */
 
+import { io } from 'socket.io-client';
+import Chart from 'chart.js/auto';
+
 /**
  * 监控指标方法集合
  */
@@ -103,46 +106,16 @@ export const metricsMethods = {
     // ==================== Socket.IO 实时流 ====================
 
     /**
-     * 动态加载 Socket.IO 客户端
+     * 加载 Socket.IO 客户端 (已从本地 npm 模块导入)
      */
     async loadSocketIO() {
-        if (window.io) return true;
-
-        const CDN_SOURCES = [
-            'https://registry.npmmirror.com/socket.io-client/4.7.2/files/dist/socket.io.min.js',
-            'https://cdn.jsdelivr.net/npm/socket.io-client@4.7.2/dist/socket.io.min.js',
-            'https://unpkg.com/socket.io-client@4.7.2/dist/socket.io.min.js'
-        ];
-
-        for (let i = 0; i < CDN_SOURCES.length; i++) {
-            const src = CDN_SOURCES[i];
-            console.log(`[Metrics] 加载 Socket.IO 客户端 (${i + 1}/${CDN_SOURCES.length})...`);
-
-            try {
-                await new Promise((resolve, reject) => {
-                    const script = document.createElement('script');
-                    script.src = src;
-                    script.async = true;
-                    script.onload = () => {
-                        if (window.io) {
-                            console.log(`[Metrics] ✅ Socket.IO 客户端加载成功`);
-                            resolve();
-                        } else {
-                            reject(new Error('io not available'));
-                        }
-                    };
-                    script.onerror = () => reject(new Error('Failed to load'));
-                    setTimeout(() => reject(new Error('Timeout')), 5000);
-                    document.head.appendChild(script);
-                });
-                return true;
-            } catch (err) {
-                console.warn(`[Metrics] ❌ CDN 源不可用: ${src.split('/')[2]}`);
-            }
+        // Socket.IO 已通过 import 从本地 node_modules 加载
+        // 将其暴露到 window 以兼容旧的连接逻辑
+        if (!window.io) {
+            window.io = io;
         }
-
-        console.error('[Metrics] 所有 Socket.IO CDN 源均不可用');
-        return false;
+        console.log('[Metrics] ✅ Socket.IO 客户端已从本地模块加载');
+        return true;
     },
 
     async connectMetricsStream() {
@@ -731,50 +704,16 @@ export const metricsMethods = {
     // ==================== 图表渲染 ====================
 
     /**
-     * 动态加载 Chart.js 的 CDN 回退机制
-     * 依次尝试多个 CDN 源，直到成功加载
+     * 加载 Chart.js (已从本地 npm 模块导入)
      */
     async loadChartJsFallback() {
-        // 如果已加载则跳过
-        if (window.Chart) return true;
-
-        const CDN_SOURCES = [
-            'https://registry.npmmirror.com/chart.js/4.4.7/files/dist/chart.umd.js', // npmmirror
-            'https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.js',         // jsDelivr
-            'https://unpkg.com/chart.js@4.4.7/dist/chart.umd.js',                    // unpkg
-            'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.7/chart.umd.js'     // cdnjs
-        ];
-
-        for (let i = 0; i < CDN_SOURCES.length; i++) {
-            const src = CDN_SOURCES[i];
-            console.log(`[Charts] 尝试加载 Chart.js (${i + 1}/${CDN_SOURCES.length}): ${src.split('/')[2]}`);
-
-            try {
-                await new Promise((resolve, reject) => {
-                    const script = document.createElement('script');
-                    script.src = src;
-                    script.async = true;
-                    script.onload = () => {
-                        if (window.Chart) {
-                            console.log(`[Charts] ✅ Chart.js 加载成功 (来源: ${src.split('/')[2]})`);
-                            resolve();
-                        } else {
-                            reject(new Error('Script loaded but Chart not available'));
-                        }
-                    };
-                    script.onerror = () => reject(new Error(`Failed to load: ${src}`));
-                    // 超时保护 (5秒)
-                    setTimeout(() => reject(new Error('Timeout')), 5000);
-                    document.head.appendChild(script);
-                });
-                return true; // 成功加载
-            } catch (err) {
-                console.warn(`[Charts] ❌ CDN 源不可用: ${src.split('/')[2]} - ${err.message}`);
-            }
+        // Chart.js 已通过 import 从本地 node_modules 加载
+        // 将其暴露到 window 以兼容旧的图表渲染逻辑
+        if (!window.Chart) {
+            window.Chart = Chart;
         }
-
-        console.error('[Charts] 所有 CDN 源均不可用，图表功能已禁用');
-        return false;
+        console.log('[Charts] ✅ Chart.js 已从本地模块加载');
+        return true;
     },
 
     async renderMetricsCharts(retryCount = 0) {
