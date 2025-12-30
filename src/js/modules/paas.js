@@ -104,5 +104,49 @@ export const paasMethods = {
             };
         }
         return { accounts: 0, projects: 0, services: 0, running: 0, cost: 0 };
+    },
+
+    /**
+     * 保存 PaaS 模块刷新间隔配置
+     */
+    async saveZeaburSettings() {
+        try {
+            // 同步秒到毫秒
+            store.zeaburRefreshInterval = store.zeaburRefreshIntervalSec * 1000;
+            store.koyebRefreshInterval = store.koyebRefreshIntervalSec * 1000;
+            store.flyRefreshInterval = store.flyRefreshIntervalSec * 1000;
+
+            // 保存到服务器
+            const settings = {
+                zeaburRefreshInterval: store.zeaburRefreshInterval,
+                koyebRefreshInterval: store.koyebRefreshInterval,
+                flyRefreshInterval: store.flyRefreshInterval
+            };
+
+            const response = await fetch('/api/settings', {
+                method: 'POST',
+                headers: store.getAuthHeaders(),
+                body: JSON.stringify(settings)
+            });
+
+            if (response.ok) {
+                toast.success('模块配置已保存');
+                // 如果正在刷新 Zeabur，则应用新间隔
+                if (this.mainActiveTab === 'paas' && !store.dataRefreshPaused) {
+                    if (this.paasCurrentPlatform === 'zeabur') {
+                        this.startAutoRefresh?.();
+                    } else if (this.paasCurrentPlatform === 'koyeb') {
+                        this.startKoyebAutoRefresh?.();
+                    } else if (this.paasCurrentPlatform === 'fly') {
+                        this.startFlyAutoRefresh?.();
+                    }
+                }
+            } else {
+                toast.error('保存失败');
+            }
+        } catch (error) {
+            console.error('保存 PaaS 设置失败:', error);
+            toast.error('保存失败: ' + error.message);
+        }
     }
 };
