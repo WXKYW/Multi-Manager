@@ -41,9 +41,10 @@
       <!-- 主内容区 -->
       <main class="app-main">
         <div v-if="isAuthenticated" class="container" :class="'layout-' + navLayout">
-          <!-- 顶部导航栏 (Logo + 导航 + 设置在同一行) -->
-          <div class="top-nav-bar" v-if="!singlePageMode && (!isSelfHVideoActive || !isMobile)">
-            <!-- Logo 区域 -->
+          <!-- 顶部导航栏 (移动端：CSS会自动转为底部导航；PC端：仅顶部布局显示) -->
+          <div class="top-nav-bar"
+            v-if="!singlePageMode && (!isSelfHVideoActive || !isMobile) && (isMobile || (navLayout !== 'bottom' && navLayout !== 'bottom-normal'))">
+            <!-- Logo 区域 (CSS 会在移动端隐藏) -->
             <div class="nav-brand">
               <img src="./logo.svg" class="nav-logo" alt="Logo">
               <span class="nav-title">API Monitor</span>
@@ -100,6 +101,51 @@
                   <span class="group-name">设置</span>
                 </button>
               </div>
+            </div>
+          </div>
+
+          <!-- 底部导航容器 (仅底部布局时显示) -->
+          <div
+            v-if="!singlePageMode && (!isSelfHVideoActive || !isMobile) && (navLayout === 'bottom' || navLayout === 'bottom-normal')"
+            class="main-nav-container nav-bottom-fixed" :class="[
+              {'nav-capsule': navLayout === 'bottom'},
+              'theme-' + (mainActiveTab === 'self-h' ? 'self-h' : mainActiveTab === 'gemini-cli' ? 'gemini-cli' : mainActiveTab === 'dns' ? 'cf-dns' : mainActiveTab)
+            ]">
+            <div class="main-tabs main-tabs-grouped" v-if="visibleModulesCount > 1">
+              <button v-if="moduleVisibility.dashboard" class="nav-group-btn single-module-btn"
+                :class="{ 'active': mainActiveTab === 'dashboard' }" @click="handleGroupModuleClick('dashboard')">
+                <i class="fas fa-tachometer-alt"></i>
+                <span class="group-name">仪表盘</span>
+              </button>
+              <template v-for="group in moduleGroups" :key="group.id">
+                <div v-if="group.id !== 'overview' && getVisibleModulesInGroup(group.modules).length > 0"
+                  class="nav-group"
+                  :class="{ 'expanded': navGroupExpanded === group.id, 'has-active': isGroupActive(group.modules) }">
+                  <button class="nav-group-btn" :class="{ 'active': isGroupActive(group.modules) }"
+                    @click="toggleNavGroup(group.id)" @mouseenter="handleGroupHover(group.id)"
+                    @mouseleave="handleGroupLeave">
+                    <i class="fas" :class="group.icon"></i>
+                    <span class="group-name">{{ group.name }}</span>
+                    <i class="fas fa-chevron-down group-arrow"></i>
+                  </button>
+                  <transition name="dropdown-fade">
+                    <div v-show="navGroupExpanded === group.id" class="nav-group-dropdown"
+                      @mouseenter="cancelGroupLeave" @mouseleave="handleGroupLeave">
+                      <button v-for="module in getVisibleModulesInGroup(group.modules)" :key="module"
+                        class="dropdown-item" :class="[{ 'active': mainActiveTab === module }, module + '-tab']"
+                        @click="handleGroupModuleClick(module)">
+                        <i class="fas" :class="getModuleIcon(module)"></i>
+                        <span>{{ getModuleName(module) }}</span>
+                      </button>
+                    </div>
+                  </transition>
+                </div>
+              </template>
+              <button class="nav-settings-btn" :class="{ active: showSettingsModal }"
+                @click="showSettingsModal = !showSettingsModal" title="系统设置">
+                <i class="fas fa-cog"></i>
+                <span class="group-name">设置</span>
+              </button>
             </div>
           </div>
 
@@ -203,10 +249,12 @@
           :style="{ opacity: !musicCurrentSong ? 0.3 : 1 }">
           <i class="fas fa-step-forward" aria-hidden="true"></i>
         </button>
-        <button class="ctrl-btn" @click="musicToggleRepeat" aria-label="循环模式" :disabled="!musicCurrentSong"
+        <button class="ctrl-btn repeat-btn" @click="musicToggleRepeat" aria-label="循环模式" :disabled="!musicCurrentSong"
           :aria-pressed="musicRepeatMode !== 'none'"
+          :class="{ 'mode-one': musicRepeatMode === 'one', 'mode-all': musicRepeatMode === 'all' }"
           :style="{ color: musicRepeatMode !== 'none' ? 'var(--primary-color)' : '', opacity: !musicCurrentSong ? 0.3 : 1 }">
-          <i :class="musicRepeatMode === 'one' ? 'fas fa-redo-alt' : 'fas fa-redo'" aria-hidden="true"></i>
+          <i class="fas fa-redo" aria-hidden="true"></i>
+          <span v-if="musicRepeatMode === 'one'" class="repeat-badge">1</span>
         </button>
       </div>
 
@@ -220,22 +268,31 @@
           :style="{ color: musicShowPlaylistDrawer ? 'var(--primary-color)' : '' }">
           <i class="fas fa-list-ul" aria-hidden="true"></i>
         </button>
-        <button class="icon-btn-sm" @click="musicMuted = !musicMuted" :aria-label="musicMuted ? '取消静音' : '静音'"
-          :aria-pressed="musicMuted" :disabled="!musicCurrentSong" :style="{ opacity: !musicCurrentSong ? 0.3 : 1 }">
-          <i :class="musicMuted ? 'fas fa-volume-mute' : 'fas fa-volume-up'" aria-hidden="true"></i>
-        </button>
+        <div class="music-volume-control" :class="{ disabled: !musicCurrentSong }">
+          <button class="icon-btn-sm" @click="musicToggleMute" :aria-label="musicMuted ? '取消静音' : '静音'"
+            :aria-pressed="musicMuted" :disabled="!musicCurrentSong" :style="{ opacity: !musicCurrentSong ? 0.3 : 1 }">
+            <i :class="musicMuted ? 'fas fa-volume-mute' : (musicVolume < 50 ? 'fas fa-volume-down' : 'fas fa-volume-up')"
+              aria-hidden="true"></i>
+          </button>
+          <div class="volume-slider-wrapper">
+            <input type="range" class="volume-slider" min="0" max="100" :value="musicVolume"
+              @input="musicSetVolume($event.target.value)" :disabled="!musicCurrentSong" aria-label="音量调节">
+            <div class="volume-slider-fill" :style="{ width: (musicMuted ? 0 : musicVolume) + '%' }"></div>
+          </div>
+        </div>
       </div>
     </div>
 
     <!-- 播放队列抽屉 (全局) -->
-    <transition name="drawer-slide">
+    <transition name="drawer-slide" @after-enter="scrollToCurrentSong">
       <div class="music-playlist-drawer" v-if="musicShowPlaylistDrawer" role="dialog" aria-label="播放队列">
         <div class="playlist-header">
           <span>播放队列</span>
           <span class="playlist-count">{{ musicPlaylist.length }} 首</span>
         </div>
-        <div class="playlist-content">
+        <div ref="playlistDrawerContent" class="playlist-content">
           <div class="playlist-item" v-for="(song, index) in musicPlaylist" :key="song.id"
+            :ref="musicCurrentSong && song.id === musicCurrentSong.id ? 'currentPlayingSong' : undefined"
             :class="{ active: musicCurrentSong && song.id === musicCurrentSong.id }" @click="musicPlay(song)"
             tabindex="0" @keyup.enter="musicPlay(song)">
             <div v-if="musicCurrentSong && song.id === musicCurrentSong.id && musicPlaying"
@@ -279,11 +336,12 @@
     <!-- Full Screen Player (SPlayer Style - 全局) -->
     <transition name="full-player-fade">
       <div v-if="musicShowFullPlayer && musicCurrentSong" class="music-full-player" :class="{ 'playing': musicPlaying }"
-        style="z-index: 11000;">
+        style="z-index: 11000;" @click="musicShowFullPlayer = false">
+        <!-- Top Header (简化版) -->
         <!-- Top Header (简化版) -->
         <div class="full-player-header">
           <div class="header-spacer"></div>
-          <div class="header-right">
+          <div class="header-right" @click.stop>
             <button class="header-btn" title="歌词模式">
               <i class="fas fa-quote-left"></i>
             </button>
@@ -296,11 +354,11 @@
         <div class="full-player-body">
           <!-- Left: Album Art & Info -->
           <div class="full-player-left">
-            <div class="full-player-cover-container">
+            <div class="full-player-cover-container" @click.stop>
               <img :src="musicCurrentSong.cover + '?param=1000y1000'" class="full-player-cover"
                 :alt="musicCurrentSong.name">
             </div>
-            <div class="full-player-info">
+            <div class="full-player-info" @click.stop>
               <h1 class="full-player-title">{{ musicCurrentSong.name }}</h1>
               <div class="full-player-meta-row">
                 <i class="fas fa-user-circle"></i>
@@ -315,7 +373,7 @@
 
           <!-- Right: Lyrics -->
           <div class="full-player-right">
-            <div ref="lyricsContainer" class="full-lyrics-container">
+            <div ref="lyricsContainer" class="full-lyrics-container" @click.stop>
               <!-- AMLL will be injected here, fallback to simple lyrics if not available -->
               <div v-if="musicLyrics.length === 0" class="lyric-empty">
                 <i class="fas fa-music"></i>

@@ -196,6 +196,15 @@ async function play(options) {
         return { success: true, player: playerState.plyr };
     }
 
+    // 如果当前正在播放，先暂停
+    if (playerState.plyr && playerState.isPlaying) {
+        try {
+            playerState.plyr.pause();
+        } catch (e) {
+            console.warn('[StreamPlayer] Error pausing before switch:', e);
+        }
+    }
+
     // 销毁之前的播放器
     destroyPlayer();
 

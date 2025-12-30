@@ -422,6 +422,7 @@ router.get('/toplist/detail', (req, res) => handleRequest('toplist_detail', req,
 
 router.get('/artist/detail', (req, res) => handleRequest('artist_detail', req, res));
 router.get('/artist/top/song', (req, res) => handleRequest('artist_top_song', req, res));
+router.get('/artist/songs', (req, res) => handleRequest('artist_songs', req, res));
 router.get('/artist/album', (req, res) => handleRequest('artist_album', req, res));
 
 // ==================== 专辑 API ====================

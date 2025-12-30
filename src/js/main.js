@@ -671,6 +671,11 @@ const app = createApp({
         if (this.mainActiveTab === 'server') {
           this.loadServerList();
         }
+
+        // 如果当前在 Self-H 页（单页模式），立即加载
+        if (this.mainActiveTab === 'self-h') {
+          this.loadOpenListAccounts();
+        }
       }
     });
 
@@ -737,7 +742,7 @@ const app = createApp({
     settingsCurrentTab(newVal) {
       if (newVal === 'logs') {
         // 进入日志标签页：加载日志数据和设置，并自动连接日志流
-        this.fetchSystemLogs();
+        this.initLogWs();
         this.fetchLogSettings();
         // 自动连接 WebSocket 日志流
         this.connectLogStream();
@@ -970,8 +975,14 @@ const app = createApp({
     isAuthenticated(newVal) {
       if (newVal) {
         // 登录成功，从后端加载用户设置并启动指标流
-        this.loadUserSettings();
+        this.loadModuleSettings();
         this.connectMetricsStream();
+
+        // ⚡ 关键：立即加载后台定时任务设置（无论当前在哪个标签页）
+        // 这些定时检测需要在后台持续运行，不能等用户切换到对应模块才启动
+        this.loadAntigravityAutoCheckSettings();
+        this.loadGeminiCliAutoCheckSettings();
+        console.log('[System] 后台定时检测设置已加载');
 
         // 加载当前激活标签页的数据
         this.$nextTick(() => {

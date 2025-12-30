@@ -3,6 +3,13 @@
  * 全站统一风格
  */
 
+/* ==================== 面板头部按钮修复 ==================== */
+/* 防止按钮在 flex 容器中被压缩导致文字截断 */
+.totp-tab-content .panel-header .btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
 /* ==================== 搜索框 ==================== */
 .totp-search-box {
     position: relative;
@@ -833,6 +840,7 @@
 
     .totp-tab-content .panel-header .btn {
         flex-shrink: 0;
+        white-space: nowrap;
     }
 }
 

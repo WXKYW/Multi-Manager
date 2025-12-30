@@ -458,26 +458,21 @@
                   </div>
                   <div class="form-group" style="margin-top: 16px;">
                     <label class="form-label" style="font-size: 13px; font-weight: 600;">导航栏显示位置</label>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
                       <button class="btn btn-sm" :class="navLayout === 'top' ? 'btn-primary' : 'btn-secondary'"
                         @click="navLayout = 'top'; saveUserSettingsToServer()" style="height: 40px; font-size: 12px;">
-                        <i class="fas fa-grip-lines" style="margin-right: 4px;"></i> 顶部普通
-                      </button>
-                      <button class="btn btn-sm" :class="navLayout === 'top-capsule' ? 'btn-primary' : 'btn-secondary'"
-                        @click="navLayout = 'top-capsule'; saveUserSettingsToServer()"
-                        style="height: 40px; font-size: 12px;">
-                        <i class="fas fa-capsules" style="margin-right: 4px;"></i> 顶部胶囊
+                        <i class="fas fa-grip-lines" style="margin-right: 4px;"></i> 顶部
                       </button>
                       <button class="btn btn-sm"
                         :class="navLayout === 'bottom-normal' ? 'btn-primary' : 'btn-secondary'"
                         @click="navLayout = 'bottom-normal'; saveUserSettingsToServer()"
                         style="height: 40px; font-size: 12px;">
-                        <i class="fas fa-grip-lines" style="margin-right: 4px;"></i> 底部普通
+                        <i class="fas fa-grip-lines" style="margin-right: 4px;"></i> 底部
                       </button>
                       <button class="btn btn-sm" :class="navLayout === 'bottom' ? 'btn-primary' : 'btn-secondary'"
                         @click="navLayout = 'bottom'; saveUserSettingsToServer()"
                         style="height: 40px; font-size: 12px;">
-                        <i class="fas fa-capsules" style="margin-right: 4px;"></i> 底部胶囊
+                        <i class="fas fa-capsules" style="margin-right: 4px;"></i> 胶囊
                       </button>
                     </div>
                   </div>
@@ -590,17 +585,7 @@
           </div>
 
         </div> <!-- End settings-main -->
-
-        <!-- 全局操作区域 -->
-        <div class="settings-footer-actions"
-          style="padding: 15px 25px; border-top: 1px solid var(--border-color); background: var(--bg-secondary); display: flex; justify-content: flex-end; gap: 12px;">
-          <button class="btn btn-secondary btn-sm" @click="showSettingsModal = false">取消</button>
-          <button class="btn btn-primary btn-sm" @click="saveUserSettingsToServer" :disabled="antigravitySaving">
-            <i class="fas" :class="antigravitySaving ? 'fa-spinner fa-spin' : 'fa-check-circle'"></i>
-            应用并保存设置
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
+      </div> <!-- End settings-container -->
+    </div> <!-- End settings-sidebar -->
+  </div> <!-- End settings-modal-wrapper -->
 </transition>

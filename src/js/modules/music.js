@@ -131,6 +131,7 @@ function initAudioPlayer() {
     audioPlayer.addEventListener('play', () => {
         store.musicPlaying = true;
         if (typeof amllPlayer !== 'undefined' && amllPlayer) amllPlayer.resume();
+        startAmllUpdateLoop(); // 确保同步循环开启
     });
     audioPlayer.addEventListener('pause', () => {
         store.musicPlaying = false;
@@ -200,16 +201,29 @@ function savePlayState() {
 function handleTrackEnd() {
     console.log('[Music] Track ended, repeat mode:', store.musicRepeatMode);
 
+    if (!audioPlayer) {
+        console.warn('[Music] audioPlayer not available');
+        return;
+    }
+
     if (store.musicRepeatMode === 'one') {
-        // 单曲循环
+        // 单曲循环 - 重置时间并重新播放
+        console.log('[Music] Single repeat: restarting song');
         audioPlayer.currentTime = 0;
-        audioPlayer.play();
+        audioPlayer.play().then(() => {
+            console.log('[Music] Single repeat: playback restarted');
+            store.musicPlaying = true;
+        }).catch(err => {
+            console.error('[Music] Single repeat play failed:', err);
+        });
     } else if (store.musicRepeatMode === 'all' || store.musicPlaylist.length > 1) {
         // 列表循环或有下一首
         playNext();
     } else {
         // 停止播放
         store.musicPlaying = false;
+        store.musicCurrentLyricText = '';
+        store.musicCurrentLyricTranslation = '';
     }
 }
 
@@ -217,9 +231,21 @@ function handleTrackEnd() {
  * 播放错误处理
  */
 function handlePlayError(e) {
+    // 忽略加载被中断引起的错误 (src 被重置或切换)
+    if (audioPlayer && (audioPlayer.src === '' || audioPlayer.src === window.location.href)) return;
+
+    // 如果是因为找不到源触发的 abort，忽略之
+    if (e && e.name === 'AbortError') return;
+
     console.error('[Music] Play error:', e);
     store.musicBuffering = false;
-    toast.error('播放失败，尝试切换音源...');
+
+    // 只有确实有错误时才弹出
+    const mediaError = audioPlayer?.error;
+    if (mediaError) {
+        console.warn('[Music] Media Error Code:', mediaError.code);
+        toast.error('音源加载失败，尝试切换...');
+    }
 
     // 尝试使用解锁服务重新获取
     if (store.musicCurrentSong) {
@@ -264,6 +290,7 @@ async function retryWithUnblock(songId) {
             store.musicBuffering = false;
         }
     } catch (error) {
+        if (error.name === 'AbortError') return;
         console.error('[Music] Unblock retry failed:', error);
         toast.error('获取音源失败');
         store.musicBuffering = false;
@@ -274,26 +301,65 @@ async function retryWithUnblock(songId) {
  * 更新当前歌词行
  */
 function updateCurrentLyricLine() {
-    if (!store.musicLyrics.length) return;
+    if (!store.musicLyrics.length || !audioPlayer) return;
 
-    const currentTime = store.musicCurrentTime * 1000; // 转换为毫秒
+    const currentTime = audioPlayer.currentTime * 1000;
 
-    // 更新 AMLL 播放器状态 (由 startAmllUpdateLoop 统一管理)
-    // if (amllPlayer) {
-    //     amllPlayer.setCurrentTime(currentTime);
-    // }
-
-    for (let i = store.musicLyrics.length - 1; i >= 0; i--) {
+    // 1. 查找当前行索引 (默认指向第一项，确保前奏时显示第一句)
+    let activeIndex = 0;
+    for (let i = 0; i < store.musicLyrics.length; i++) {
         if (store.musicLyrics[i].time <= currentTime) {
-            if (store.musicCurrentLyricIndex !== i) {
-                store.musicCurrentLyricIndex = i;
-
-                // 全屏模式下自动滚动 (如果 AMLL 没初始化则使用旧逻辑)
-                if (store.musicShowFullPlayer && !amllPlayer) {
-                    scrollToCurrentLyric();
-                }
-            }
+            activeIndex = i;
+        } else {
             break;
+        }
+    }
+
+    if (store.musicLyrics.length > 0) {
+        // 计算百分比
+        const currentLine = store.musicLyrics[activeIndex];
+        const nextLine = store.musicLyrics[activeIndex + 1];
+        const nextTime = nextLine ? nextLine.time : (currentLine.time + 5000);
+        const duration = nextTime - currentLine.time;
+        const elapsed = currentTime - currentLine.time;
+
+        if (duration > 0 && duration < 8000) {
+            store.musicCurrentLyricPercent = Math.min(100, Math.max(0, (elapsed / duration) * 100));
+        } else {
+            store.musicCurrentLyricPercent = 100;
+        }
+
+        if (store.musicCurrentLyricIndex !== activeIndex) {
+            store.musicCurrentLyricIndex = activeIndex;
+            store.musicCurrentLyricText = currentLine.text || '';
+
+            // 获取下一句歌词
+            const nextIdx = activeIndex + 1;
+            if (nextIdx < store.musicLyrics.length) {
+                const nextL = store.musicLyrics[nextIdx];
+                store.musicNextLyricText = nextL.text || '';
+
+                if (store.musicLyricsTranslation.length > 0) {
+                    const nTrans = store.musicLyricsTranslation.find(t => Math.abs(t.time - nextL.time) < 1000);
+                    store.musicNextLyricTranslation = nTrans ? nTrans.text : '';
+                } else {
+                    store.musicNextLyricTranslation = '';
+                }
+            } else {
+                store.musicNextLyricText = '';
+                store.musicNextLyricTranslation = '';
+            }
+
+            if (store.musicLyricsTranslation.length > 0) {
+                const trans = store.musicLyricsTranslation.find(t => Math.abs(t.time - currentLine.time) < 1000);
+                store.musicCurrentLyricTranslation = trans ? trans.text : '';
+            } else {
+                store.musicCurrentLyricTranslation = '';
+            }
+
+            if (store.musicShowFullPlayer && !amllPlayer) {
+                scrollToCurrentLyric();
+            }
         }
     }
 }
@@ -306,7 +372,7 @@ function startAmllUpdateLoop() {
 
     let lastTime = performance.now();
     function step(now) {
-        if (!store.musicShowFullPlayer) {
+        if (!store.musicPlaying && !store.musicShowFullPlayer) {
             amllUpdateFrame = null;
             return;
         }
@@ -314,11 +380,9 @@ function startAmllUpdateLoop() {
         const delta = now - lastTime;
         lastTime = now;
 
-        if (amllPlayer && audioPlayer && !audioPlayer.paused) {
-            // 核心改进：不再每一帧都设置 currentTime。
-            // 因为 audioPlayer.currentTime 只有每约 250ms 才更新一次。
-            // 每一帧都设置会导致 AMLL 的内部时钟在 250ms 内原地踏步，从而产生卡顿。
-            // 我们只需让 AMLL 基于 delta 自己推进（update），校准交给 handleTimeUpdate。
+        updateCurrentLyricLine();
+
+        if (store.musicShowFullPlayer && amllPlayer && audioPlayer && !audioPlayer.paused) {
             amllPlayer.update(delta);
         }
 
@@ -437,6 +501,22 @@ export const musicMethods = {
      */
     resetPlaylistLazyLoad() {
         store.musicPlaylistVisibleCount = 50;
+    },
+
+    /**
+     * 滚动到当前播放的歌曲
+     */
+    scrollToCurrentSong() {
+        this.$nextTick(() => {
+            const currentSongRef = this.$refs.currentPlayingSong;
+            if (currentSongRef) {
+                // Vue 3 中 v-for 的 ref 是数组
+                const el = Array.isArray(currentSongRef) ? currentSongRef[0] : currentSongRef;
+                if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }
+        });
     },
 
     /**
@@ -568,69 +648,62 @@ export const musicMethods = {
     async musicOpenFullPlayer() {
         store.musicShowFullPlayer = true;
 
+        // 检查是否需要补载歌词
+        if (store.musicCurrentSong && (!store.musicLyrics || store.musicLyrics.length === 0)) {
+            this.musicLoadLyrics(store.musicCurrentSong.id);
+        }
+
+        // 递归查找容器的助手函数
+        const findContainer = () => {
+            return document.querySelector('.full-lyrics-container');
+        };
+
         // 延迟初始化 AMLL，确保容器已渲染
         setTimeout(async () => {
             // 初始化歌词播放器
             if (!amllPlayer) {
                 try {
                     const amllCore = await import('@applemusic-like-lyrics/core');
-                    console.log('[Music] AMLL Core loaded:', Object.keys(amllCore));
-
-                    // 使用文档标准类名 LyricPlayer
                     const { LyricPlayer } = amllCore;
-                    if (!LyricPlayer) {
-                        // Fallback check if DomSlimLyricPlayer exists (backward compat)
-                        if (amllCore.DomSlimLyricPlayer) {
-                            console.warn('[Music] LyricPlayer not found, falling back to DomSlimLyricPlayer');
-                        } else {
-                            throw new Error('LyricPlayer class not found in @applemusic-like-lyrics/core');
-                        }
-                    }
-
                     const PlayerClass = LyricPlayer || amllCore.DomSlimLyricPlayer;
+                    if (!PlayerClass) throw new Error('AMLL Player class not found');
+
                     amllPlayer = new PlayerClass();
                     const el = amllPlayer.getElement();
-
-                    // 先设置样式
                     el.style.width = '100%';
                     el.style.height = '100%';
                     el.classList.add('amll-lyric-player');
 
-                    // 先添加到 DOM
-                    const container = document.querySelector('.full-lyrics-container');
+                    const container = findContainer();
                     if (container) {
                         container.innerHTML = '';
                         container.appendChild(el);
                     }
 
-                    // 添加到 DOM 后再配置 AMLL 参数
                     await new Promise(r => setTimeout(r, 50));
+                    amllPlayer.setEnableScale(true);
+                    amllPlayer.setEnableBlur(true);
+                    amllPlayer.setEnableSpring(true);
+                    amllPlayer.setAlignPosition(0.5);
+                    amllPlayer.setAlignAnchor('center');
+                    amllPlayer.setWordFadeWidth(0.9);
 
-                    amllPlayer.setEnableScale(true);      // 缩放效果
-                    amllPlayer.setEnableBlur(true);       // 非当前行模糊
-                    amllPlayer.setEnableSpring(true);     // 弹簧动画
-                    amllPlayer.setAlignPosition(0.5);     // 居中位置
-                    amllPlayer.setAlignAnchor('center');  // 居中对齐
-                    amllPlayer.setWordFadeWidth(0.9);     // 逐字淡入宽度
-                    // 移除不存在的 setEnableWordAnimation，AMLL 会自动根据 words 数组渲染逐字动画
-
-                    // 监听点击歌词事件
                     el.addEventListener('click', (e) => {
                         let target = e.target;
+                        let lineFound = false;
                         while (target && target !== el) {
                             const lineObj = amllPlayer.lyricLineElementMap?.get(target);
                             if (lineObj) {
+                                lineFound = true;
                                 const time = lineObj.getLine()?.startTime;
-                                if (time !== undefined) {
-                                    this.musicSeekToLyric(time);
-                                }
+                                if (time !== undefined) this.musicSeekToLyric(time);
                                 break;
                             }
                             target = target.parentElement;
                         }
+                        // 仅当点击到歌词行时阻止冒泡，空白处允许冒泡以关闭播放器
+                        if (lineFound) e.stopPropagation();
                     });
-
-                    console.log('[Music] AMLL initialized successfully');
                 } catch (err) {
                     console.error('[Music] AMLL init failed:', err);
                 }
@@ -640,33 +713,33 @@ export const musicMethods = {
             startAmllUpdateLoop();
 
             // 每次打开都确保 AMLL 元素在容器中
-            if (amllPlayer) {
-                const container = document.querySelector('.full-lyrics-container');
+            const container = findContainer();
+            if (amllPlayer && container) {
                 const el = amllPlayer.getElement();
-                if (container && el && !container.contains(el)) {
+                if (!container.contains(el)) {
                     container.innerHTML = '';
                     container.appendChild(el);
                 }
             }
 
             // 设置歌词
-            if (amllPlayer && store.musicLyrics) {
-                amllPlayer.setLyricLines(transformToAMLL(store.musicLyrics, store.musicLyricsTranslation));
-                // 立即校准时间，即使在暂停状态下也能显示当前位置
-                amllPlayer.setCurrentTime(audioPlayer.currentTime * 1000);
+            if (amllPlayer) {
+                if (store.musicLyrics && store.musicLyrics.length > 0) {
+                    amllPlayer.setLyricLines(transformToAMLL(store.musicLyrics, store.musicLyricsTranslation));
+                }
+                amllPlayer.setCurrentTime(audioPlayer ? audioPlayer.currentTime * 1000 : 0);
 
                 if (store.musicPlaying) amllPlayer.resume();
                 else amllPlayer.pause();
 
-                // 再次强制应用配置以防重置
                 setTimeout(() => {
                     if (amllPlayer) {
                         amllPlayer.setAlignPosition(0.5);
                         amllPlayer.setAlignAnchor('center');
                     }
-                }, 200);
+                }, 300);
             }
-        }, 100);
+        }, 300);
     },
 
 
@@ -789,7 +862,7 @@ export const musicMethods = {
                     toast.warning('歌单为空');
                 }
             } else {
-                toast.warning('未找到“我喜欢的音乐”歌单');
+                toast.warning('未找到"我喜欢的音乐"歌单');
             }
         } catch (error) {
             console.error('Play favorites failed:', error);
@@ -798,17 +871,44 @@ export const musicMethods = {
     },
 
     /**
-     * 自动加载“我喜欢的音乐” (随机) 但不播放
+     * 自动加载"我喜欢的音乐" (随机) 但不播放
+     * 优化：先从缓存恢复上次歌曲，实现瞬间显示
      */
     async musicAutoLoadFavorites() {
         // 如果已经有歌在列表里或者正在播放，就不再自动随机加载了
         if (store.musicCurrentSong) return;
 
+        // 1. 优先从缓存恢复（瞬间显示）
+        const cached = this._loadMusicCache();
+        if (cached && cached.song) {
+            store.musicCurrentSong = cached.song;
+            store.musicPlaylist = cached.playlist || [cached.song];
+            // 设置当前索引，确保下一首/上一首按钮正常工作
+            store.musicCurrentIndex = store.musicPlaylist.findIndex(s => s.id === cached.song.id);
+            if (store.musicCurrentIndex === -1) store.musicCurrentIndex = 0;
+            store.musicPlaying = false;
+            console.log('[Music] Restored from cache, index:', store.musicCurrentIndex);
+
+            // 恢复后延迟加载歌词，确保 UI 能够显示
+            setTimeout(() => {
+                this.musicLoadLyrics(cached.song.id);
+            }, 500);
+
+            // 不再后台刷新，保持稳定
+            return;
+        }
+
+        // 2. 无缓存时加载
+        store.musicWidgetLoading = true;
+
         if (!store.musicUser) {
             await this.musicCheckLoginStatus();
         }
 
-        if (!store.musicUser) return;
+        if (!store.musicUser) {
+            store.musicWidgetLoading = false;
+            return;
+        }
 
         try {
             if (store.musicMyPlaylists.length === 0) {
@@ -827,6 +927,9 @@ export const musicMethods = {
                     store.musicCurrentSong = tracks[0];
                     store.musicPlaying = false;
 
+                    // 保存到缓存供下次快速恢复
+                    this._saveMusicCache(tracks[0], tracks.slice(0, 20));
+
                     // 关键修正：重置详情页显示状态，确保点击音乐模块时显示首页
                     store.musicShowDetail = false;
 
@@ -835,21 +938,73 @@ export const musicMethods = {
             }
         } catch (error) {
             console.warn('[Music] Auto load favorites failed:', error);
+        } finally {
+            store.musicWidgetLoading = false;
         }
+    },
+
+    /**
+     * 保存音乐缓存
+     */
+    _saveMusicCache(song, playlist) {
+        try {
+            localStorage.setItem('music_widget_cache', JSON.stringify({
+                song,
+                playlist,
+                timestamp: Date.now()
+            }));
+        } catch (e) {
+            console.warn('[Music] Cache save failed:', e);
+        }
+    },
+
+    /**
+     * 加载音乐缓存
+     */
+    _loadMusicCache() {
+        try {
+            const cached = localStorage.getItem('music_widget_cache');
+            if (cached) {
+                const data = JSON.parse(cached);
+                // 缓存 24 小时有效
+                if (Date.now() - data.timestamp < 24 * 60 * 60 * 1000) {
+                    return data;
+                }
+            }
+        } catch (e) {
+            console.warn('[Music] Cache load failed:', e);
+        }
+        return null;
     },
     async musicPlay(song) {
         if (!song) return;
 
         initAudioPlayer();
+        if (audioPlayer) {
+            audioPlayer.pause();
+            audioPlayer.src = ''; // 彻底切断旧音源，重置时间
+        }
+
         store.musicBuffering = true;
         store.musicCurrentSong = song;
-        store.musicCurrentLyricIndex = 0; // 重置歌词索引
+        store.musicCurrentLyricIndex = -1; // 使用 -1 强制触发下一次索引改变的动画
+        store.musicCurrentLyricText = '';
+        store.musicCurrentLyricTranslation = '';
+        store.musicCurrentLyricPercent = 0;
+        store.musicLyrics = [];
+        store.musicLyricsTranslation = [];
 
         // 添加到播放列表（如果不存在）
         if (!store.musicPlaylist.find(s => s.id === song.id)) {
             store.musicPlaylist.push(song);
         }
         store.musicCurrentIndex = store.musicPlaylist.findIndex(s => s.id === song.id);
+
+        // 立即开启更新循环，确保切换瞬间就开始同步
+        startAmllUpdateLoop();
+
+        // 并行加载歌词，提高响应速度
+        this.musicLoadLyrics(song.id);
 
         try {
             // 获取播放地址
@@ -867,9 +1022,6 @@ export const musicMethods = {
                 store.musicBuffering = false;
                 if (amllPlayer) amllPlayer.resume();
 
-                // 获取歌词
-                this.musicLoadLyrics(song.id);
-
                 // 更新封面（如果没有）
                 if (!song.cover) {
                     this.musicLoadSongDetail(song.id);
@@ -880,6 +1032,7 @@ export const musicMethods = {
                 await retryWithUnblock(song.id);
             }
         } catch (error) {
+            if (error.name === 'AbortError') return;
             console.error('[Music] Play error:', error);
             toast.error('播放失败');
             store.musicBuffering = false;
@@ -904,6 +1057,10 @@ export const musicMethods = {
             if (typeof amllPlayer !== 'undefined' && amllPlayer) amllPlayer.pause();
             if (typeof amllBgRender !== 'undefined' && amllBgRender) amllBgRender.pause();
         } else {
+            // 如果开始播放时没有歌词，尝试加载一次
+            if (store.musicCurrentSong && (!store.musicLyrics || store.musicLyrics.length === 0)) {
+                this.musicLoadLyrics(store.musicCurrentSong.id);
+            }
             audioPlayer.play();
             store.musicPlaying = true;
             if (typeof amllPlayer !== 'undefined' && amllPlayer) amllPlayer.resume();
@@ -1045,6 +1202,16 @@ export const musicMethods = {
     },
 
     /**
+     * 切换静音
+     */
+    musicToggleMute() {
+        store.musicMuted = !store.musicMuted;
+        if (audioPlayer) {
+            audioPlayer.muted = store.musicMuted;
+        }
+    },
+
+    /**
      * 切换循环模式
      */
     musicToggleRepeat() {
@@ -1080,7 +1247,10 @@ export const musicMethods = {
 
             store.musicLyrics = parseLyrics(lrcText);
             store.musicLyricsTranslation = parseLyrics(tlyricText);
-            store.musicCurrentLyricIndex = 0;
+            store.musicCurrentLyricIndex = -1; // 保持 -1，由更新循环或下方手动调用同步第一句
+
+            // 加载完立即同步一次文字，确保瞬时显示
+            updateCurrentLyricLine();
 
             // 同步到底层 AMLL 播放器
             if (amllPlayer) {
@@ -1238,16 +1408,95 @@ export const musicMethods = {
                     id: pl.id,
                     name: pl.name,
                     cover: pl.coverImgUrl || '',
+                    coverImgUrl: pl.coverImgUrl || '', // 兼容旧字段
                     playCount: pl.playCount || 0,
                     creator: pl.creator?.nickname || '未知'
                 }));
             }
         } catch (error) {
-            console.error('[Music] Hot playlists error:', error);
+            console.error('[Music] Load hot playlists error:', error);
         } finally {
             store.musicPlaylistsLoading = false;
         }
     },
+
+    /**
+     * 加载并播放歌单
+     */
+    async musicLoadPlaylist(id, autoPlay = true) {
+        await this.musicLoadPlaylistDetail(id);
+
+        if (store.musicCurrentPlaylistDetail && store.musicCurrentPlaylistDetail.tracks && store.musicCurrentPlaylistDetail.tracks.length > 0) {
+            // 替换播放列表
+            store.musicPlaylist = [...store.musicCurrentPlaylistDetail.tracks];
+
+            if (autoPlay) {
+                store.musicCurrentIndex = 0;
+                this.musicPlay(store.musicPlaylist[0]);
+            }
+        } else {
+            toast.warning('歌单为空或加载失败');
+        }
+    },
+
+    /**
+     * 换一批（随机播放推荐/热门歌单中的歌曲）
+     */
+    async musicSwapBatch() {
+        // 1. 尝试初始化登录状态（如果尚未获取）
+        if (!store.musicUser) {
+            await this.musicCheckLoginStatus();
+        }
+
+        // 2. 优先使用“我喜欢的音乐”进行随机播放
+        if (store.musicUser) {
+            // 确保歌单列表已加载
+            if (!store.musicMyPlaylists || store.musicMyPlaylists.length === 0) {
+                await this.musicLoadUserPlaylists();
+            }
+
+            if (store.musicMyPlaylists && store.musicMyPlaylists.length > 0) {
+                // 通常列表第一个就是“我喜欢的音乐” (specialType === 5)
+                const likedPlaylist = store.musicMyPlaylists.find(p => p.isSpecial) || store.musicMyPlaylists[0];
+
+                if (likedPlaylist) {
+                    toast.info('正在随机播放我喜欢的音乐...');
+                    // 确保已加载详情 (注意：这里直接调用 fetch 避免 autoPlay 干扰)
+                    await this.musicLoadPlaylistDetail(likedPlaylist.id);
+
+                    // 设置并打乱播放
+                    if (store.musicCurrentPlaylistDetail?.tracks) {
+                        const tracks = [...store.musicCurrentPlaylistDetail.tracks];
+                        // Fisher-Yates Shuffle
+                        for (let i = tracks.length - 1; i > 0; i--) {
+                            const j = Math.floor(Math.random() * (i + 1));
+                            [tracks[i], tracks[j]] = [tracks[j], tracks[i]];
+                        }
+                        store.musicPlaylist = tracks;
+                        store.musicCurrentIndex = 0;
+                        this.musicPlay(tracks[0]);
+                        toast.success('已切换至我喜欢的音乐 (随机)');
+                        return;
+                    }
+                }
+            }
+        }
+
+        // 3. 未登录或无红心歌单时，降级为随机推荐歌单
+        if (!store.musicHotPlaylists || store.musicHotPlaylists.length === 0) {
+            toast.info('正在获取推荐列表...');
+            await this.musicLoadHotPlaylists();
+        }
+
+        if (store.musicHotPlaylists && store.musicHotPlaylists.length > 0) {
+            const randomPlaylist = store.musicHotPlaylists[Math.floor(Math.random() * store.musicHotPlaylists.length)];
+            toast.success(`切换至推荐歌单：${randomPlaylist.name}`);
+            this.musicLoadPlaylist(randomPlaylist.id, true);
+        } else {
+            toast.warning('暂无推荐内容');
+        }
+    },
+
 
     /**
      * 获取歌手热门歌曲

@@ -43,55 +43,55 @@
   }
 }
 
-/* 滑动动画 - 从右侧进入 */
+/* 滑动动画 - 从下方进入 (替代从右侧进入) */
 @keyframes slideInRight {
   from {
     opacity: 0;
-    transform: translateX(30px);
+    transform: translateY(20px);
   }
 
   to {
     opacity: 1;
-    transform: translateX(0);
+    transform: translateY(0);
   }
 }
 
-/* 滑动动画 - 从左侧进入 */
+/* 滑动动画 - 从上方进入 (替代从左侧进入) */
 @keyframes slideInLeft {
   from {
     opacity: 0;
-    transform: translateX(-30px);
+    transform: translateY(-20px);
   }
 
   to {
     opacity: 1;
-    transform: translateX(0);
+    transform: translateY(0);
   }
 }
 
-/* 滑动动画 - 向左退出 */
+/* 滑动动画 - 向上退出 (替代向左退出) */
 @keyframes slideOutLeft {
   from {
     opacity: 1;
-    transform: translateX(0);
+    transform: translateY(0);
   }
 
   to {
     opacity: 0;
-    transform: translateX(-30px);
+    transform: translateY(-20px);
   }
 }
 
-/* 滑动动画 - 向右退出 */
+/* 滑动动画 - 向下退出 (替代向右退出) */
 @keyframes slideOutRight {
   from {
     opacity: 1;
-    transform: translateX(0);
+    transform: translateY(0);
   }
 
   to {
     opacity: 0;
-    transform: translateX(30px);
+    transform: translateY(20px);
   }
 }
 

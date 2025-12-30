@@ -120,18 +120,28 @@
         <!-- Left Column: Main Content -->
         <div class="content-column">
             <!-- Music Widget -->
-            <div class="music-widget-wrapper" v-if="musicCurrentSong" @click="mainActiveTab = 'music'">
+            <div class="music-widget-wrapper" v-if="musicCurrentSong">
+                <!-- 顶部右上角状态区 -->
+                <div class="music-status-container">
+                    <button class="music-swap-btn" @click.stop="musicSwapBatch">
+                        <i class="fas fa-random"></i> 换一批
+                    </button>
+                    <!-- 正在播放 Badge (新样式) -->
+                    <div class="music-playing-badge">
+                        <i class="fas fa-music"></i> 正在播放
+                    </div>
+                </div>
                 <div class="music-bg-blur" :style="{ backgroundImage: 'url(' + musicCurrentSong.cover + ')' }"></div>
 
                 <div class="music-content-layer">
-                    <img :src="musicCurrentSong.cover + '?param=300y300'" class="music-cover-large">
+                    <img :src="musicCurrentSong.cover + '?param=300y300'" class="music-cover-large"
+                        @click.stop="musicOpenFullPlayer()">
 
                     <div class="music-info-col">
-                        <div class="music-title">{{ musicCurrentSong.name }}</div>
+                        <div class="music-title" @click.stop="mainActiveTab = 'music'">{{ musicCurrentSong.name }}</div>
                         <div class="music-artist">{{ musicCurrentSong.artists }}</div>
 
                         <div class="music-controls">
-                            <!-- Corrected function names -->
                             <button class="btn-control-circle" @click.stop="playPrevious">
                                 <i class="fas fa-step-backward"></i>
                             </button>
@@ -144,8 +154,39 @@
                         </div>
                     </div>
 
-                    <div class="music-status-badge">
-                        <i class="fas fa-music"></i> 正在播放
+                    <!-- Mini Lyrics Display with Roll Animation -->
+                    <div class="music-mini-lyric" v-if="musicCurrentSong && musicLyrics && musicLyrics.length > 0">
+                        <transition-group name="lyric-roll" tag="div" class="lyric-content">
+                            <template v-for="i in [musicCurrentLyricIndex, musicCurrentLyricIndex + 1]"
+                                :key="musicLyrics[i] ? musicLyrics[i].time : i">
+                                <div v-if="musicLyrics[i]"
+                                    :class="['lyric-row', i === musicCurrentLyricIndex ? 'current' : 'next']">
+                                    <div class="lyric-line-main"
+                                        :style="i === musicCurrentLyricIndex ? { '--progress': musicCurrentLyricPercent + '%' } : {}">
+                                        {{ musicLyrics[i].text || '🎵' }}
+                                    </div>
+                                    <div class="lyric-line-sub"
+                                        v-if="i === musicCurrentLyricIndex && musicCurrentLyricTranslation">
+                                        {{ musicCurrentLyricTranslation }}
+                                    </div>
+                                </div>
+                            </template>
+                        </transition-group>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- Music Loading State (Skeleton) -->
+            <div class="music-widget-wrapper music-skeleton-wrapper" v-else-if="musicWidgetLoading">
+                <div class="music-bg-blur" style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);"></div>
+                <div class="music-content-layer" style="justify-content: center;">
+                    <div class="music-skeleton-content">
+                        <div class="skeleton music-skeleton-cover"></div>
+                        <div class="music-skeleton-info">
+                            <div class="skeleton music-skeleton-title"></div>
+                            <div class="skeleton music-skeleton-artist"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -261,21 +302,21 @@
                 </div>
             </div>
 
-            <!-- Quick Actions -->
-            <div class="quick-actions-grid">
-                <div class="action-card" @click="mainActiveTab = 'totp'" style="grid-column: span 2;">
-                    <i class="fas fa-shield-alt card-icon-large"></i>
-                    <div class="totp-content-wrapper">
-                        <div class="totp-left">
-                            <div class="action-icon"><i class="fas fa-shield-alt"></i></div>
-                            <div class="action-text">
-                                <h5>2FA 安全令牌</h5>
-                                <p>双重验证保护</p>
+            <!-- 2FA Card - Same style as PaaS List -->
+            <div class="detail-card totp-dashboard-card" @click="mainActiveTab = 'totp'" style="cursor: pointer;">
+                <div class="paas-list">
+                    <div class="paas-item">
+                        <div class="paas-info">
+                            <div class="paas-logo-box" style="color: #8b5cf6;"><i class="fas fa-shield-alt"></i></div>
+                            <div class="paas-item-text">
+                                <h4>2FA 安全令牌</h4>
+                                <p>One-Time Password</p>
                             </div>
                         </div>
-                        <div class="totp-right">
-                            <span class="totp-count">{{ totpAccounts ? totpAccounts.length : 0 }}</span>
-                            <span class="totp-label">个令牌</span>
+                        <div class="paas-status-badge">
+                            <div class="status-dot-mini"
+                                :class="totpAccounts && totpAccounts.length > 0 ? 'active' : ''"></div>
+                            {{ totpAccounts ? totpAccounts.length : 0 }}
                         </div>
                     </div>
                 </div>

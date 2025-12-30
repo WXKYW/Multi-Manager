@@ -1,43 +1,125 @@
 /**
  * Dashboard Module - 系统状态概览
+ * 优化版：支持缓存预加载、并行请求、后台静默刷新
  */
 import { store } from '../store.js';
+
+// 缓存 key
+const CACHE_KEY = 'dashboard_stats_cache';
+const CACHE_EXPIRY = 5 * 60 * 1000; // 5 分钟缓存有效期
+
+/**
+ * 从 localStorage 加载缓存
+ */
+function loadFromCache() {
+    try {
+        const cached = localStorage.getItem(CACHE_KEY);
+        if (cached) {
+            const { data, timestamp } = JSON.parse(cached);
+            // 缓存有效期内直接使用
+            if (Date.now() - timestamp < CACHE_EXPIRY) {
+                return data;
+            }
+        }
+    } catch (e) {
+        console.warn('[Dashboard] Cache load failed:', e);
+    }
+    return null;
+}
+
+/**
+ * 保存到 localStorage 缓存
+ */
+function saveToCache(data) {
+    try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify({
+            data,
+            timestamp: Date.now()
+        }));
+    } catch (e) {
+        console.warn('[Dashboard] Cache save failed:', e);
+    }
+}
 
 export const dashboardMethods = {
     /**
      * 初始化仪表盘数据
+     * 优化：先从缓存加载实现瞬时显示，再后台刷新
      */
     async initDashboard() {
         console.log('[Dashboard] Initializing...');
-        this.refreshDashboardData();
+
+        // 1. 优先从缓存加载（实现瞬时展示）
+        const cached = loadFromCache();
+        if (cached) {
+            console.log('[Dashboard] Loaded from cache');
+            Object.assign(store.dashboardStats, cached);
+            store.dashboardLastUpdate = '缓存';
+
+            // 后台静默刷新（不显示 loading 状态）
+            this.refreshDashboardDataSilent();
+        } else {
+            // 无缓存时正常加载
+            await this.refreshDashboardData();
+        }
+
+        // 音乐收藏异步加载（不阻塞仪表盘）
         if (this.musicAutoLoadFavorites) {
-            this.musicAutoLoadFavorites();
+            setTimeout(() => this.musicAutoLoadFavorites(), 100);
         }
     },
 
     /**
-     * 刷新仪表盘所有数据
+     * 刷新仪表盘所有数据（显示 loading 状态）
      */
     async refreshDashboardData() {
         if (store.dashboardLoading) return;
         store.dashboardLoading = true;
 
         try {
-            // 使用 Promise.allSettled 确保部分失败不影响整体
-            await Promise.allSettled([
-                this.fetchServerSummary(),
-                this.fetchApiSummary(),
-                this.fetchPaaSSummary(),
-                this.fetchDnsSummary(),
-                // 确保加载 TOTP 数据以显示计数
-                this.loadTotpAccounts ? this.loadTotpAccounts() : Promise.resolve()
-            ]);
+            await this._fetchAllData();
         } catch (error) {
             console.error('[Dashboard] Refresh error:', error);
         } finally {
             store.dashboardLoading = false;
             store.dashboardLastUpdate = new Date().toLocaleTimeString();
         }
+    },
+
+    /**
+     * 静默刷新（不显示 loading 状态，用于后台更新）
+     */
+    async refreshDashboardDataSilent() {
+        try {
+            await this._fetchAllData();
+            store.dashboardLastUpdate = new Date().toLocaleTimeString();
+        } catch (error) {
+            console.error('[Dashboard] Silent refresh error:', error);
+        }
+    },
+
+    /**
+     * 内部方法：并行获取所有数据
+     */
+    async _fetchAllData() {
+        // 使用 Promise.allSettled 确保部分失败不影响整体
+        // 所有请求完全并行，不串行等待
+        await Promise.allSettled([
+            this.fetchServerSummary(),
+            this.fetchApiSummary(),
+            this.fetchPaaSSummary(),
+            this.fetchDnsSummary(),
+            this.loadTotpAccounts ? this.loadTotpAccounts() : Promise.resolve()
+        ]);
+
+        // 保存到缓存
+        saveToCache({
+            servers: store.dashboardStats.servers,
+            antigravity: store.dashboardStats.antigravity,
+            geminiCli: store.dashboardStats.geminiCli,
+            paas: store.dashboardStats.paas,
+            dns: store.dashboardStats.dns
+        });
     },
 
     /**
@@ -63,18 +145,21 @@ export const dashboardMethods = {
 
     /**
      * 获取 API 网关摘要 (Antigravity & Gemini CLI)
+     * 优化：两个请求并行执行
      */
     async fetchApiSummary() {
         try {
-            // Antigravity Stats
-            const agRes = await fetch('/api/antigravity/stats', { headers: store.getAuthHeaders() });
+            // 并行请求两个 API
+            const [agRes, gRes] = await Promise.all([
+                fetch('/api/antigravity/stats', { headers: store.getAuthHeaders() }),
+                fetch('/api/gemini-cli/stats', { headers: store.getAuthHeaders() })
+            ]);
+
             if (agRes.ok) {
                 const agData = await agRes.json();
                 store.dashboardStats.antigravity = agData.data || agData;
             }
 
-            // Gemini CLI Stats
-            const gRes = await fetch('/api/gemini-cli/stats', { headers: store.getAuthHeaders() });
             if (gRes.ok) {
                 const gData = await gRes.json();
                 store.dashboardStats.geminiCli = gData.data || gData;
@@ -86,11 +171,18 @@ export const dashboardMethods = {
 
     /**
      * 获取 PaaS 摘要 (Zeabur, Koyeb, Fly.io)
+     * 优化：三个平台的请求完全并行
      */
     async fetchPaaSSummary() {
         try {
+            // 并行请求所有 PaaS 平台
+            const [zRes, kRes, fRes] = await Promise.all([
+                fetch('/api/zeabur/projects', { headers: store.getAuthHeaders() }),
+                fetch('/api/koyeb/data', { headers: store.getAuthHeaders() }),
+                fetch('/api/fly/proxy/apps', { headers: store.getAuthHeaders() })
+            ]);
+
             // Zeabur
-            const zRes = await fetch('/api/zeabur/projects', { headers: store.getAuthHeaders() });
             if (zRes.ok) {
                 const zData = await zRes.json();
                 let appCount = 0;
@@ -111,7 +203,6 @@ export const dashboardMethods = {
             }
 
             // Koyeb
-            const kRes = await fetch('/api/koyeb/data', { headers: store.getAuthHeaders() });
             if (kRes.ok) {
                 const kData = await kRes.json();
                 let appCount = 0;
@@ -123,7 +214,6 @@ export const dashboardMethods = {
                                 if (p.services) {
                                     p.services.forEach(s => {
                                         appCount++;
-                                        // 状态可能是 HEALTHY, RUNNING, STARTING 等
                                         if (s.status === 'HEALTHY' || s.status === 'RUNNING') {
                                             runningCount++;
                                         }
@@ -137,7 +227,6 @@ export const dashboardMethods = {
             }
 
             // Fly.io
-            const fRes = await fetch('/api/fly/proxy/apps', { headers: store.getAuthHeaders() });
             if (fRes.ok) {
                 const fData = await fRes.json();
                 let appCount = 0;
@@ -169,15 +258,11 @@ export const dashboardMethods = {
             const res = await fetch('/api/cf-dns/zones', { headers: store.getAuthHeaders() });
             if (res.ok) {
                 const data = await res.json();
-                console.log('[Dashboard] DNS zones fetched:', data);
                 if (data.success && Array.isArray(data.data)) {
                     store.dashboardStats.dns.zones = data.data.length;
                 } else if (typeof data.zones === 'number') {
-                    // 兼容直接返回数量的情况
                     store.dashboardStats.dns.zones = data.zones;
                 }
-            } else {
-                console.error('[Dashboard] Fetch DNS summary failed with status:', res.status);
             }
         } catch (e) {
             console.error('[Dashboard] Fetch DNS summary failed:', e);

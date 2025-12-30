@@ -310,18 +310,25 @@ router.get('/settings', (req, res) => {
 // 保存设置
 router.post('/settings', (req, res) => {
     try {
-        const updates = req.body;
-        for (const [key, value] of Object.entries(updates)) {
-            storage.updateSetting(key, value);
+        const body = req.body;
+        if (!body) return res.status(400).json({ error: 'Body required' });
+
+        // 兼容格式 1: { key: "PROXY", value: "..." }
+        if (body.key !== undefined && body.value !== undefined) {
+            storage.updateSetting(body.key, body.value);
+        } else {
+            // 兼容格式 2: { "PROXY": "...", "API_KEY": "..." }
+            for (const [key, value] of Object.entries(body)) {
+                if (value !== undefined) {
+                    storage.updateSetting(key, value);
+                }
+            }
         }
 
-        // 如果定时检测相关设置变更，重启定时器
-        if ('autoCheckEnabled' in updates || 'autoCheckInterval' in updates) {
-            autoCheckService.restart();
-        }
-
+        // 如果有特定的模块刷新需求可以在此添加，Antigravity 暂无 autoCheckService
         res.json({ success: true });
     } catch (error) {
+        console.error('Save settings error:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -751,18 +758,6 @@ router.get('/settings', (req, res) => {
         ];
 
         res.json(allSettings);
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
-});
-
-// 更新设置
-router.post('/settings', (req, res) => {
-    const { key, value } = req.body;
-    if (!key) return res.status(400).json({ error: 'Key is required' });
-    try {
-        storage.updateSetting(key, value);
-        res.json({ success: true });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }

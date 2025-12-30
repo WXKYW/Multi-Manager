@@ -5,15 +5,14 @@
     <!-- 二级导航栏 -->
     <div class="sec-tabs server-sec-tabs">
         <div class="server-tabs-scroll-wrapper">
-            <button class="tab-btn" :class="{ active: openListSubTab === 'files' }" @click="openListSubTab = 'files'">
+            <button class="tab-btn" :class="{ active: openListSubTab === 'files' }" @click="switchOpenListTab('files')">
                 <i class="fas fa-folder-open"></i> 文件列表
             </button>
             <button class="tab-btn" :class="{ active: openListSubTab === 'settings' }"
-                @click="openListSubTab = 'settings'">
+                @click="switchOpenListTab('settings')">
                 <i class="fas fa-cog"></i> 设置
             </button>
-            <button class="tab-btn" :class="{ active: openListSubTab === 'cron' }"
-                @click="openListSubTab = 'cron'; loadCronTasks(); loadCronLogs()">
+            <button class="tab-btn" :class="{ active: openListSubTab === 'cron' }" @click="switchOpenListTab('cron')">
                 <i class="fas fa-clock"></i> 定时任务
             </button>
             <!-- 临时标签页列表 -->
@@ -34,7 +33,7 @@
             <div v-if="!currentOpenListAccount" class="empty-state" style="margin-top: 40px;">
                 <div class="empty-icon"><i class="fas fa-plug"></i></div>
                 <p>尚未连接 OpenList 实例</p>
-                <button class="btn btn-primary" @click="openListSubTab = 'settings'">
+                <button class="btn btn-primary" @click="switchOpenListTab('settings')">
                     <i class="fas fa-plus"></i> 前往配置
                 </button>
             </div>
@@ -67,7 +66,21 @@
                     </div>
 
                     <!-- 右侧搜索 -->
+                    <!-- 右侧工具栏 -->
                     <div class="toolbar-right">
+                        <!-- 视图切换 -->
+                        <div class="view-toggle-group">
+                            <button class="btn btn-icon-refined sm" :class="{ active: openListLayoutMode === 'list' }"
+                                @click="toggleOpenListLayout('list')" title="列表视图">
+                                <i class="fas fa-list"></i>
+                            </button>
+                            <button class="btn btn-icon-refined sm" :class="{ active: openListLayoutMode === 'grid' }"
+                                @click="toggleOpenListLayout('grid')" title="网格视图">
+                                <i class="fas fa-th-large"></i>
+                            </button>
+                        </div>
+                        <div class="divider-vertical"></div>
+
                         <button class="btn btn-icon-refined" @click="mkdirOpenList" title="新建文件夹"><i
                                 class="fas fa-folder-plus"></i></button>
                         <button class="btn btn-icon-refined" @click="loadOpenListFiles(openListPath, true)"
@@ -78,7 +91,9 @@
 
                 <!-- 文件列表区域 (Scrolling Area) -->
                 <div class="openlist-list-container">
-                    <table class="data-table sticky-header" style="width: 100%;">
+                    <!-- 列表视图 -->
+                    <table class="data-table sticky-header" style="width: 100%;"
+                        v-if="!openListLayoutMode || openListLayoutMode === 'list'">
                         <thead>
                             <tr>
                                 <th class="col-name" @click="toggleOpenListSort('name')">名称 <i
@@ -130,6 +145,39 @@
                             </tr>
                         </tbody>
                     </table>
+
+                    <!-- 网格视图 (瀑布流/Grid) -->
+                    <div class="openlist-grid-view" v-else-if="openListLayoutMode === 'grid'">
+                        <div v-if="sortedOpenListFiles.length > 0" class="file-grid-container">
+                            <div v-for="file in sortedOpenListFiles" :key="file.name" class="file-grid-item"
+                                @click="handleOpenFile(file)"
+                                @contextmenu="showFileContextMenu($event, file, openListPath)"
+                                @touchstart="handleFileTouchStart($event, file, openListPath)"
+                                @touchend="handleFileTouchEnd($event)" @touchmove="handleFileTouchMove()"
+                                @auxclick.middle.stop="handleMiddleClickItem(file)">
+
+                                <div class="grid-item-preview">
+                                    <img v-if="getFileThumbnail(file)" :src="getFileThumbnail(file)"
+                                        class="grid-thumb-img" referrerpolicy="no-referrer" loading="lazy" />
+                                    <div v-else class="grid-icon-placeholder">
+                                        <i :class="getFileIconClass(file)"></i>
+                                    </div>
+                                </div>
+                                <div class="grid-item-info">
+                                    <div class="grid-item-name" :title="file.name">{{ file.name }}</div>
+                                    <div class="grid-item-meta">
+                                        {{ file.is_dir ? formatDateTime(file.modified) : (getOpenListFileSize(file) ||
+                                        '-') }}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- 空状态 (Grid) -->
+                        <div v-else-if="!openListFilesLoading" class="openlist-empty-state">
+                            <i class="fas fa-folder-open"></i>
+                            <p>当前目录为空</p>
+                        </div>
+                    </div>
 
                     <!-- 加载骨架 -->
                     <div v-if="openListFilesLoading" class="list-loading-shimmer">
@@ -635,6 +683,44 @@
         <div class="context-menu-item danger" @click="handleFileContextAction('delete')">
             <i class="fas fa-trash-alt"></i>
             <span>删除</span>
+        </div>
+</Teleport>
+
+<!-- 图片预览弹窗 -->
+<Teleport to="body">
+    <div v-if="imagePreview.visible" class="image-preview-overlay" @click.self="closeImagePreview">
+        <div class="image-preview-container">
+            <!-- 关闭按钮 -->
+            <button class="image-preview-close" @click="closeImagePreview" title="关闭 (ESC)">
+                <i class="fas fa-times"></i>
+            </button>
+
+            <!-- 图片标题栏 -->
+            <div class="image-preview-header">
+                <span class="image-preview-filename" :title="imagePreview.filename">{{ imagePreview.filename }}</span>
+                <div class="image-preview-actions">
+                    <a :href="imagePreview.url" target="_blank" class="btn btn-icon-refined sm" title="在新标签页打开">
+                        <i class="fas fa-external-link-alt"></i>
+                    </a>
+                    <a :href="imagePreview.url" :download="imagePreview.filename" class="btn btn-icon-refined sm"
+                        title="下载">
+                        <i class="fas fa-download"></i>
+                    </a>
+                </div>
+            </div>
+
+            <!-- 图片内容 -->
+            <div class="image-preview-body">
+                <!-- 加载中遮罩 -->
+                <div v-show="imagePreview.loading" class="image-preview-loading">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <span>加载中...</span>
+                </div>
+                <!-- 图片 -->
+                <img v-show="!imagePreview.loading" :src="imagePreview.url" :alt="imagePreview.filename"
+                    class="image-preview-img" @load="onImagePreviewLoad" @error="onImagePreviewLoad"
+                    referrerpolicy="no-referrer" crossorigin="anonymous" draggable="false" />
+            </div>
         </div>
     </div>
 </Teleport>

@@ -5,6 +5,9 @@ import { store } from '../store.js';
 import { toast } from './toast.js';
 import { streamPlayer } from './stream-player.js';
 
+// 模块级变量：图片预览 ESC 键处理器
+let _imagePreviewEscHandler = null;
+
 export const selfHMethods = {
     // 加载所有 OpenList 账号
     async loadOpenListAccounts() {
@@ -43,6 +46,12 @@ export const selfHMethods = {
             const data = await res.json();
             if (data.success && data.value) {
                 store.openListPreviewSize = parseInt(data.value);
+            }
+
+            // 恢复视图模式
+            const savedMode = localStorage.getItem('openListLayoutMode');
+            if (savedMode && ['list', 'grid'].includes(savedMode)) {
+                store.openListLayoutMode = savedMode;
             }
         } catch (e) {
             console.warn('Failed to load settings:', e);
@@ -496,6 +505,9 @@ export const selfHMethods = {
             // 检查是否为视频文件
             if (streamPlayer.isVideoFile(file.name)) {
                 this.playVideoFile(file, file.parent || store.openListPath);
+            } else if (this.isImageFile(file.name)) {
+                // 图片文件：打开预览弹窗
+                this.openImagePreview(file, file.parent || store.openListPath);
             } else {
                 this.showOpenFileDetail(file, file.parent || store.openListPath);
             }
@@ -594,8 +606,13 @@ export const selfHMethods = {
         if (index === -1) return;
 
         const tab = store.openListTempTabs[index];
-        if (tab.isVideo) {
-            streamPlayer.destroyPlayer();
+        if (tab.isVideo && tab.plyrInstance) {
+            try {
+                tab.plyrInstance.destroy();
+            } catch (e) {
+                console.warn('[SelfH] Error destroying Plyr:', e);
+            }
+            tab.plyrInstance = null;
         }
 
         store.openListTempTabs.splice(index, 1);
@@ -940,6 +957,107 @@ export const selfHMethods = {
         return null;
     },
 
+    // 判断是否为图片文件
+    isImageFile(filename) {
+        if (!filename) return false;
+        return /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)$/i.test(filename);
+    },
+
+    // 打开图片预览弹窗
+    async openImagePreview(file, baseDir = store.openListPath) {
+        const fullPath = this.getFilePath(file, baseDir);
+        const fileName = typeof file.name === 'string' ? file.name : String(file.name || '');
+
+        try {
+            toast.info('正在获取图片...');
+
+            const response = await fetch(`/api/openlist/${this.currentOpenListAccount.id}/fs/get`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: fullPath })
+            });
+
+            if (!response.ok) {
+                toast.error(`获取图片链接失败 (${response.status})`);
+                return;
+            }
+
+            const data = await response.json();
+            console.log('[ImagePreview] API Response:', data);
+
+            if (data.code === 200 && data.data.raw_url) {
+                const imageUrl = data.data.raw_url;
+                console.log('[ImagePreview] Image URL:', imageUrl);
+
+                // 先显示弹窗和 loading 状态
+                store.imagePreview = {
+                    visible: true,
+                    url: imageUrl,
+                    filename: fileName,
+                    loading: true
+                };
+
+                // 绑定 ESC 键关闭
+                this._bindImagePreviewEscKey();
+
+                // 使用 Image 对象预加载图片
+                const img = new Image();
+                img.onload = () => {
+                    console.log('[ImagePreview] Image loaded successfully');
+                    if (store.imagePreview) {
+                        store.imagePreview.loading = false;
+                    }
+                };
+                img.onerror = (e) => {
+                    console.error('[ImagePreview] Image load failed:', e);
+                    if (store.imagePreview) {
+                        store.imagePreview.loading = false;
+                    }
+                    toast.error('图片加载失败，可能是跨域限制');
+                };
+                img.src = imageUrl;
+            } else {
+                toast.error('获取图片链接失败: ' + (data.message || '未知错误'));
+            }
+        } catch (e) {
+            toast.error('获取图片失败: ' + e.message);
+        }
+    },
+
+    // ESC 键关闭图片预览
+    _bindImagePreviewEscKey() {
+        // 移除旧的监听器（如果有）
+        if (_imagePreviewEscHandler) {
+            document.removeEventListener('keydown', _imagePreviewEscHandler);
+        }
+        // 创建新的监听器
+        _imagePreviewEscHandler = (e) => {
+            if (e.key === 'Escape' && store.imagePreview?.visible) {
+                this.closeImagePreview();
+            }
+        };
+        document.addEventListener('keydown', _imagePreviewEscHandler);
+    },
+
+    // 关闭图片预览弹窗
+    closeImagePreview() {
+        if (store.imagePreview) {
+            store.imagePreview.visible = false;
+        }
+        // 移除 ESC 键监听
+        if (_imagePreviewEscHandler) {
+            document.removeEventListener('keydown', _imagePreviewEscHandler);
+            _imagePreviewEscHandler = null;
+        }
+    },
+
+    // 图片加载完成
+    onImagePreviewLoad() {
+        if (store.imagePreview) {
+            store.imagePreview.loading = false;
+        }
+    },
+
     // 播放视频文件 (在临时标签页中用播放器打开)
     async playVideoFile(file, baseDir = store.openListPath) {
         const fullPath = this.getFilePath(file, baseDir);
@@ -1008,10 +1126,29 @@ export const selfHMethods = {
             return;
         }
 
-        // 如果已经有播放器实例且是同一个视频，不重新初始化
-        const currentPlayer = streamPlayer.getPlayer();
-        if (currentPlayer && streamPlayer.state.currentUrl === tab.videoUrl) {
-            console.log('[SelfH] Plyr already playing this video.');
+        // 先暂停所有其他视频标签页的播放器
+        store.openListTempTabs.forEach(t => {
+            if (t.isVideo && t.id !== tab.id && t.plyrInstance) {
+                try {
+                    t.plyrInstance.pause();
+                    console.log('[SelfH] Paused video in tab:', t.filename);
+                } catch (e) {
+                    console.warn('[SelfH] Error pausing video:', e);
+                }
+            }
+        });
+
+        // 如果这个标签页已经有播放器实例，直接使用，不重新初始化
+        if (tab.plyrInstance) {
+            console.log('[SelfH] Resuming existing Plyr instance for:', tab.filename);
+            // 同步状态到 store
+            if (store.streamPlayer) {
+                const plyr = tab.plyrInstance;
+                store.streamPlayer.duration = plyr.duration || 0;
+                store.streamPlayer.currentTime = plyr.currentTime || 0;
+                store.streamPlayer.playing = !plyr.paused;
+                store.streamPlayer.loading = false;
+            }
             return;
         }
 
@@ -1025,17 +1162,68 @@ export const selfHMethods = {
         }
 
         try {
-            const res = await streamPlayer.play({
-                url: tab.videoUrl,
-                filename: tab.filename,
-                videoElement: videoElement
+            // 直接创建 Plyr 实例，不使用 streamPlayer 单例
+            const Plyr = (await import('plyr')).default;
+
+            videoElement.src = tab.videoUrl;
+
+            const plyr = new Plyr(videoElement, {
+                controls: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'settings', 'pip', 'fullscreen'],
+                settings: ['quality', 'speed'],
+                speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] },
+                keyboard: { focused: true, global: false },
+                tooltips: { controls: true, seek: true },
+                fullscreen: { enabled: true, fallback: true },
+                hideControls: true,
+                clickToPlay: true,
+                i18n: {
+                    restart: '重新播放', play: '播放', pause: '暂停',
+                    fastForward: '快进 {seektime}s', rewind: '后退 {seektime}s',
+                    seek: '跳转', currentTime: '当前时间', duration: '总时长',
+                    volume: '音量', mute: '静音', unmute: '取消静音',
+                    enterFullscreen: '全屏', exitFullscreen: '退出全屏',
+                    settings: '设置', speed: '速度', normal: '正常', pip: '画中画'
+                }
             });
 
-            if (res.success) {
-                console.log('[SelfH] Plyr initialized successfully');
-            } else {
-                console.error('[SelfH] Plyr init failed:', res.message);
-            }
+            // 存储到标签页对象
+            tab.plyrInstance = plyr;
+
+            // 绑定事件到 store
+            plyr.on('play', () => {
+                if (store.streamPlayer) store.streamPlayer.playing = true;
+            });
+            plyr.on('pause', () => {
+                if (store.streamPlayer) store.streamPlayer.playing = false;
+            });
+            plyr.on('timeupdate', () => {
+                if (store.streamPlayer) {
+                    store.streamPlayer.currentTime = plyr.currentTime;
+                    store.streamPlayer.duration = plyr.duration;
+                }
+            });
+            plyr.on('loadedmetadata', () => {
+                if (store.streamPlayer) {
+                    store.streamPlayer.duration = plyr.duration;
+                    store.streamPlayer.loading = false;
+                }
+            });
+            plyr.on('waiting', () => {
+                if (store.streamPlayer) store.streamPlayer.loading = true;
+            });
+            plyr.on('canplay', () => {
+                if (store.streamPlayer) store.streamPlayer.loading = false;
+            });
+            plyr.on('volumechange', () => {
+                if (store.streamPlayer) {
+                    store.streamPlayer.volume = plyr.volume;
+                    store.streamPlayer.muted = plyr.muted;
+                }
+            });
+
+            // 自动播放
+            await plyr.play();
+            console.log('[SelfH] Plyr initialized successfully for:', tab.filename);
         } catch (e) {
             console.error('[SelfH] Failed to init Plyr:', e);
         }
@@ -1043,7 +1231,14 @@ export const selfHMethods = {
 
     // 销毁视频播放器
     destroyVideoPlayerInTab(tab) {
-        streamPlayer.destroyPlayer();
+        if (tab && tab.plyrInstance) {
+            try {
+                tab.plyrInstance.destroy();
+            } catch (e) {
+                console.warn('[SelfH] Error destroying Plyr:', e);
+            }
+            tab.plyrInstance = null;
+        }
     },
 
     // 内部事件绑定（用于控制条交互等）
@@ -1169,8 +1364,20 @@ export const selfHMethods = {
         }, 1000);
     },
 
+    // 获取当前视频标签页的 Plyr 实例
+    getCurrentPlyr() {
+        const tab = this.currentOpenListTempTab;
+        return (tab && tab.isVideo && tab.plyrInstance) ? tab.plyrInstance : null;
+    },
+
+    // 获取当前视频标签页的视频元素
+    getCurrentVideoElement() {
+        const plyr = this.getCurrentPlyr();
+        return plyr ? plyr.media : null;
+    },
+
     handleProgressMouseDown(e) {
-        const video = streamPlayer.state.videoElement;
+        const video = this.getCurrentVideoElement();
         if (!video || !store.streamPlayer.duration) return;
 
         const isTouch = e.type.startsWith('touch');
@@ -1195,7 +1402,8 @@ export const selfHMethods = {
                 update(te);
             };
             const onTouchEnd = () => {
-                streamPlayer.seek(store.streamPlayer.dragTime);
+                const plyr = this.getCurrentPlyr();
+                if (plyr) plyr.currentTime = store.streamPlayer.dragTime;
                 store.streamPlayer.isDragging = false;
                 if (container) container.classList.remove('dragging');
                 document.removeEventListener('touchmove', onTouchMove);
@@ -1206,7 +1414,8 @@ export const selfHMethods = {
         } else {
             const onMouseMove = (me) => update(me);
             const onMouseUp = () => {
-                streamPlayer.seek(store.streamPlayer.dragTime);
+                const plyr = this.getCurrentPlyr();
+                if (plyr) plyr.currentTime = store.streamPlayer.dragTime;
                 store.streamPlayer.isDragging = false;
                 if (container) container.classList.remove('dragging');
                 document.removeEventListener('mousemove', onMouseMove);
@@ -1221,7 +1430,8 @@ export const selfHMethods = {
         const update = (ex) => {
             const rect = e.currentTarget.getBoundingClientRect();
             const vol = Math.max(0, Math.min(1, (ex.clientX - rect.left) / rect.width));
-            streamPlayer.setVolume(vol);
+            const plyr = this.getCurrentPlyr();
+            if (plyr) plyr.volume = vol;
         };
         update(e);
         const onMouseMove = (me) => update(me);
@@ -1235,16 +1445,19 @@ export const selfHMethods = {
 
     // 视频控制代理方法
     toggleVideoPlay() {
-        streamPlayer.togglePlay();
+        const plyr = this.getCurrentPlyr();
+        if (plyr) plyr.togglePlay();
     },
 
     skipVideo(seconds) {
-        streamPlayer.skip(seconds);
+        const plyr = this.getCurrentPlyr();
+        if (plyr) plyr.forward(seconds);
     },
 
     toggleMute() {
-        if (streamPlayer.state.videoElement) {
-            streamPlayer.state.videoElement.muted = !streamPlayer.state.videoElement.muted;
+        const video = this.getCurrentVideoElement();
+        if (video) {
+            video.muted = !video.muted;
         }
     },
 
@@ -1262,19 +1475,17 @@ export const selfHMethods = {
         const ua = navigator.userAgent.toLowerCase();
         const isMobile = /iphone|ipad|ipod|android/.test(ua);
 
+        // 如果内部正在播放，先暂停
+        const plyr = this.getCurrentPlyr();
+        if (plyr && !plyr.paused) {
+            plyr.pause();
+        }
+
         if (isMobile) {
-            // 如果内部正在播放，先暂停
-            if (store.streamPlayer.playing) {
-                streamPlayer.togglePlay();
-            }
             // 尝试唤起移动端播放器 (UC)
             this.openInUCBrowser(tab.videoUrl);
             toast.info('尝试唤起移动端播放器...');
         } else {
-            // 如果内部正在播放，先暂停
-            if (store.streamPlayer.playing) {
-                streamPlayer.togglePlay();
-            }
             // PC 端尝试调用 PotPlayer
             const potUrl = `potplayer://${tab.videoUrl}`;
             const a = document.createElement('a');
@@ -1346,18 +1557,18 @@ export const selfHMethods = {
     },
 
     setVideoPlaybackRate(rate) {
-        streamPlayer.setPlaybackRate(rate);
+        const plyr = this.getCurrentPlyr();
+        if (plyr) plyr.speed = rate;
     },
 
     toggleVideoPiP() {
-        streamPlayer.togglePictureInPicture();
+        const plyr = this.getCurrentPlyr();
+        if (plyr) plyr.pip = !plyr.pip;
     },
 
     toggleVideoFullscreen() {
-        const container = document.querySelector('.stream-player-container.inside-tab');
-        if (container) {
-            streamPlayer.toggleFullscreen(container);
-        }
+        const plyr = this.getCurrentPlyr();
+        if (plyr) plyr.fullscreen.toggle();
     },
 
     // 下载文件
@@ -1442,6 +1653,33 @@ export const selfHMethods = {
         } catch (e) {
             console.error('[OpenList] Detail load error:', e);
             toast.error('获取详情出错');
+        }
+    },
+
+    // 切换子标签页 (files, settings, cron, temp)
+    switchOpenListTab(tabName) {
+        // 如果即将离开临时标签页（即离开视频播放），暂停视频但不销毁
+        if (store.openListSubTab === 'temp' && tabName !== 'temp') {
+            const plyr = this.getCurrentPlyr();
+            if (plyr && !plyr.paused) {
+                plyr.pause();
+            }
+        }
+        store.openListSubTab = tabName;
+
+        // 如果切换到定时任务，自动加载
+        if (tabName === 'cron') {
+            this.loadCronTasks();
+            this.loadCronLogs();
+        }
+    },
+
+    // 切换视图模式 (列表/网格)
+    toggleOpenListLayout(mode) {
+        if (['list', 'grid'].includes(mode)) {
+            store.openListLayoutMode = mode;
+            // 可选：持久化保存
+            localStorage.setItem('openListLayoutMode', mode);
         }
     },
 

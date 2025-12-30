@@ -235,6 +235,15 @@ export const store = reactive({
         longPressTimer: null,
         longPressTriggered: false
     },
+    openListLayoutMode: 'list', // 'list' | 'grid'
+
+    // 图片预览弹窗状态
+    imagePreview: {
+        visible: false,
+        url: '',
+        filename: '',
+        loading: false
+    },
 
     // 全局数据刷新控制
     serverList: [],
@@ -492,6 +501,7 @@ export const store = reactive({
     musicShowSearchTab: false, // 是否显示搜索标签
     musicPlaying: false,
     musicBuffering: false,
+    musicWidgetLoading: false, // 仪表盘音乐卡片加载状态
     musicCurrentSong: null,
     musicPlaylist: [],
     musicCurrentIndex: -1,
@@ -505,6 +515,11 @@ export const store = reactive({
     musicLyrics: [],
     musicLyricsTranslation: [],
     musicCurrentLyricIndex: 0,
+    musicCurrentLyricText: '', // 当前主歌词文字
+    musicCurrentLyricTranslation: '', // 当前翻译歌词文字
+    musicNextLyricText: '', // 下一句主歌词
+    musicNextLyricTranslation: '', // 下一句翻译
+    musicCurrentLyricPercent: 0, // 当前行播放进度 (0-100)
     musicShowFullPlayer: false,
     musicShowPlaylistDrawer: false,
     musicDailyRecommend: [],

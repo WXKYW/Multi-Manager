@@ -694,7 +694,9 @@ export const antigravityMethods = {
             let saved = 0;
             for (const key of keys) {
                 const value = this.agSettingsForm[key];
-                if (value !== undefined && value !== '') {
+                // 允许保存空字符串，以支持清空设置（如 PROXY）
+                // 只跳过 undefined 值
+                if (value !== undefined) {
                     await fetch('/api/antigravity/settings', {
                         method: 'POST',
                         headers: {

@@ -494,7 +494,7 @@ body.single-page-mode [class*="-sec-tabs"] {
         /* 导航栏在最底部 */
         border-bottom: none !important;
         border-top: 1px solid var(--border-color) !important;
-        padding: 6px 4px !important;
+        padding: 4px 4px !important;
         background: var(--bg-secondary) !important;
     }
 
@@ -502,7 +502,7 @@ body.single-page-mode [class*="-sec-tabs"] {
         flex-direction: column !important;
         gap: 4px !important;
         flex: 1 !important;
-        padding: 8px 4px !important;
+        padding: 6px 4px !important;
         min-width: 60px !important;
         justify-content: center !important;
     }

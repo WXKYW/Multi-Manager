@@ -28,6 +28,8 @@ router.get('/accounts', (req, res) => {
         // 附带后端缓存的最新指标（通过 agentService 获取）
         const serversWithMetrics = servers.map(server => {
             const cachedMetrics = agentService.getMetrics(server.id);
+            const isOnline = agentService.isOnline(server.id);
+
             if (cachedMetrics) {
                 // 解析 disk 字符串为结构化对象 (格式: "38G/40G (95%)")
                 let diskArray = [];
@@ -45,6 +47,7 @@ router.get('/accounts', (req, res) => {
 
                 return {
                     ...server,
+                    status: isOnline ? 'online' : (server.status || 'offline'), // 动态设置在线状态
                     info: {
                         cpu: {
                             Load: cachedMetrics.load,
@@ -73,7 +76,11 @@ router.get('/accounts', (req, res) => {
                     }
                 };
             }
-            return server;
+            // 没有缓存指标时，根据 Agent 连接状态判断
+            return {
+                ...server,
+                status: isOnline ? 'online' : (server.status || 'offline')
+            };
         });
 
         res.json({

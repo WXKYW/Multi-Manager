@@ -320,6 +320,7 @@
 
     /* 移动端隐藏顶部导航栏的 Logo 区域 */
     .top-nav-bar {
+        display: unset !important;
         padding: 0;
         margin-bottom: 0;
     }
