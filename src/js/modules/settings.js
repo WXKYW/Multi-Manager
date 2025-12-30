@@ -28,13 +28,21 @@ export const settingsMethods = {
             this.applyCustomCss();
           }
 
-          // 应用 Zeabur 刷新间隔
+          // 应用 PaaS 刷新间隔
           if (settings.zeaburRefreshInterval) {
             this.zeaburRefreshInterval = settings.zeaburRefreshInterval;
             this.zeaburRefreshIntervalSec = settings.zeaburRefreshInterval / 1000;
             if (this.mainActiveTab === 'paas' && this.paasCurrentPlatform === 'zeabur' && !this.dataRefreshPaused) {
               this.startAutoRefresh();
             }
+          }
+          if (settings.koyebRefreshInterval) {
+            this.koyebRefreshInterval = settings.koyebRefreshInterval;
+            this.koyebRefreshIntervalSec = settings.koyebRefreshInterval / 1000;
+          }
+          if (settings.flyRefreshInterval) {
+            this.flyRefreshInterval = settings.flyRefreshInterval;
+            this.flyRefreshIntervalSec = settings.flyRefreshInterval / 1000;
           }
 
           // 应用模块设置
@@ -47,7 +55,12 @@ export const settingsMethods = {
             this.moduleVisibility = filtered;
           }
           if (settings.moduleOrder) {
-            this.moduleOrder = settings.moduleOrder.filter(m => validModules.includes(m));
+            // 保留已保存的有效模块顺序
+            const savedOrder = settings.moduleOrder.filter(m => validModules.includes(m));
+            // 找出所有缺失的模块（新增或之前未保存的）
+            const missingModules = validModules.filter(m => !savedOrder.includes(m));
+            // 合并：已保存顺序 + 缺失模块追加到末尾
+            this.moduleOrder = [...savedOrder, ...missingModules];
           }
 
           if (settings.channelEnabled) this.channelEnabled = settings.channelEnabled;
@@ -369,9 +382,12 @@ export const settingsMethods = {
     }
   },
 
-  // 激活第一个可见项
+  // 激活第一个可见项（仅当当前 tab 不可见时）
   activateFirstVisibleModule() {
     if (store.singlePageMode) return;
+    // 如果当前 tab (默认为 dashboard) 是可见的，则不切换
+    if (this.moduleVisibility[this.mainActiveTab]) return;
+    // 否则找到第一个可见的模块
     const first = this.moduleOrder.find(m => this.moduleVisibility[m]);
     if (first) this.mainActiveTab = first;
   },

@@ -1213,15 +1213,45 @@ export const antigravityMethods = {
 
     /**
      * 启动定时检测
+     * 基于上次执行时间计算剩余等待时间，而不是每次重启都从头开始
      */
     startAntigravityAutoCheck() {
         this.stopAntigravityAutoCheck(); // 确保没有重复定时器
-        store.antigravityAutoCheckTimerId = setInterval(() => {
+
+        const interval = Number(store.antigravityAutoCheckInterval);
+        const lastRun = store.antigravityAutoCheckLastRun || 0;
+        const now = Date.now();
+        const elapsed = now - lastRun;
+
+        // 计算剩余等待时间
+        let delay = interval - elapsed;
+        if (delay < 0 || lastRun === 0) {
+            // 如果已经超过间隔或从未运行过，立即执行
+            delay = 0;
+        }
+
+        console.log(`[Antigravity] 定时检测启动: 间隔=${interval / 60000}分钟, 上次=${lastRun ? new Date(lastRun).toLocaleTimeString() : '从未'}, 剩余等待=${Math.round(delay / 60000)}分钟`);
+
+        // 首先等待剩余时间
+        store.antigravityAutoCheckTimerId = setTimeout(() => {
+            // 执行首次检测
             if (!store.antigravityChecking) {
-                console.log('[Antigravity] 定时检测触发');
+                console.log('[Antigravity] 定时检测触发 (首次/延迟)');
                 this.runAntigravityModelCheck();
+                store.antigravityAutoCheckLastRun = Date.now();
+                this.saveAntigravityAutoCheckSettings();
             }
-        }, Number(store.antigravityAutoCheckInterval));
+
+            // 然后开始正常的间隔循环
+            store.antigravityAutoCheckTimerId = setInterval(() => {
+                if (!store.antigravityChecking) {
+                    console.log('[Antigravity] 定时检测触发');
+                    this.runAntigravityModelCheck();
+                    store.antigravityAutoCheckLastRun = Date.now();
+                    this.saveAntigravityAutoCheckSettings();
+                }
+            }, interval);
+        }, delay);
     },
 
     /**
@@ -1259,6 +1289,10 @@ export const antigravityMethods = {
                     store.antigravityDisabledCheckModels = [];
                 }
             }
+            // 加载上次执行时间
+            if (settings.autoCheckLastRun !== undefined) {
+                store.antigravityAutoCheckLastRun = parseInt(settings.autoCheckLastRun) || 0;
+            }
 
             // 如果设置为开启，启动定时器
             if (store.antigravityAutoCheck) {
@@ -1283,6 +1317,7 @@ export const antigravityMethods = {
                 body: JSON.stringify({
                     autoCheckEnabled: store.antigravityAutoCheck ? '1' : '0',
                     autoCheckInterval: String(store.antigravityAutoCheckInterval),
+                    autoCheckLastRun: String(store.antigravityAutoCheckLastRun || 0),
                     disabledCheckModels: JSON.stringify(store.antigravityDisabledCheckModels)
                 })
             });
