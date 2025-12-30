@@ -919,6 +919,10 @@ body.single-page-mode #template-music {
 }
 
 /* 收起按钮样式 */
+.bar-collapse-btn {
+    cursor: pointer;
+}
+
 .bar-collapse-btn .collapse-btn-wrapper {
     display: flex;
     align-items: center;

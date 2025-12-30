@@ -130,7 +130,11 @@ module.exports = defineConfig(({ mode }) => {
         // 定义全局变量注入
         define: {
             '__USE_CDN__': JSON.stringify(useCdn),
-            '__CDN_PROVIDER__': JSON.stringify(cdnProvider)
+            '__CDN_PROVIDER__': JSON.stringify(cdnProvider),
+            // Vue 3 feature flags (用于 tree-shaking)
+            '__VUE_OPTIONS_API__': JSON.stringify(true),
+            '__VUE_PROD_DEVTOOLS__': JSON.stringify(false),
+            '__VUE_PROD_HYDRATION_MISMATCH_DETAILS__': JSON.stringify(false)
         }
     };
 });

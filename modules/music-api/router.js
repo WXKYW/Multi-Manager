@@ -101,6 +101,17 @@ loadNcmApi();
 loadStoredCookie();
 
 /**
+ * 确保 URL 使用 HTTPS (避免混合内容问题)
+ * @param {string} url - 原始 URL
+ * @returns {string} HTTPS URL
+ */
+function ensureHttps(url) {
+    if (!url || typeof url !== 'string') return url;
+    // 将 http:// 替换为 https://
+    return url.replace(/^http:\/\//i, 'https://');
+}
+
+/**
  * 通用请求处理器
  */
 async function handleRequest(moduleName, req, res) {
@@ -256,7 +267,7 @@ router.get('/song/url', async (req, res) => {
                     logger.success(`Song ${id} unblocked from ${unblocked.source}`);
 
                     if (song) {
-                        song.url = unblocked.url;
+                        song.url = ensureHttps(unblocked.url);
                         song.br = unblocked.br || 320000;
                         song.size = unblocked.size || song.size;
                         song.freeTrialInfo = null;
@@ -264,7 +275,7 @@ router.get('/song/url', async (req, res) => {
                     } else if (result.body?.data) {
                         result.body.data[0] = {
                             id: Number(id),
-                            url: unblocked.url,
+                            url: ensureHttps(unblocked.url),
                             br: unblocked.br || 320000,
                             size: unblocked.size || 0,
                             md5: unblocked.md5 || null,
@@ -281,6 +292,11 @@ router.get('/song/url', async (req, res) => {
 
         if (result.cookie && Array.isArray(result.cookie)) {
             res.set('Set-Cookie', result.cookie);
+        }
+
+        // 在返回之前确保 URL 使用 HTTPS
+        if (result.body?.data?.[0]?.url) {
+            result.body.data[0].url = ensureHttps(result.body.data[0].url);
         }
 
         res.status(result.status || 200).json(result.body);
@@ -324,7 +340,7 @@ router.get('/song/url/unblock', async (req, res) => {
                 code: 200,
                 data: {
                     id: Number(id),
-                    url: result.url,
+                    url: ensureHttps(result.url),
                     br: result.br || 320000,
                     size: result.size || 0,
                     md5: result.md5 || null,

@@ -240,11 +240,10 @@ function handlePlayError(e) {
     console.error('[Music] Play error:', e);
     store.musicBuffering = false;
 
-    // 只有确实有错误时才弹出
+    // 只有确实有错误时输出日志
     const mediaError = audioPlayer?.error;
     if (mediaError) {
         console.warn('[Music] Media Error Code:', mediaError.code);
-        toast.error('音源加载失败，尝试切换...');
     }
 
     // 尝试使用解锁服务重新获取
@@ -272,7 +271,6 @@ function handleCanPlay() {
  */
 async function retryWithUnblock(songId) {
     try {
-        console.log('[Music] Trying to unblock song:', songId);
         const response = await fetch(`/api/music/song/url/unblock?id=${songId}`);
         const data = await response.json();
 
@@ -284,15 +282,12 @@ async function retryWithUnblock(songId) {
             await audioPlayer.play();
             store.musicPlaying = true;
             store.musicBuffering = false;
-            toast.success(`已切换音源: ${urlData.source || '解锁'}`);
         } else {
-            toast.error('暂无可用音源');
             store.musicBuffering = false;
         }
     } catch (error) {
         if (error.name === 'AbortError') return;
         console.error('[Music] Unblock retry failed:', error);
-        toast.error('获取音源失败');
         store.musicBuffering = false;
     }
 }
@@ -448,23 +443,19 @@ function parseLyrics(lrcText) {
  * 音乐模块方法
  */
 export const musicMethods = {
-    // 懒加载：每次加载的歌曲数量
-    playlistLoadChunkSize: 50,
-    playlistVisibleCount: 50,
-
     /**
-     * 计算属性：可见的歌单曲目
+     * 获取可见的歌单曲目
      */
-    get visiblePlaylistTracks() {
+    getVisiblePlaylistTracks() {
         const detail = store.musicCurrentPlaylistDetail;
         if (!detail || !detail.tracks) return [];
         return detail.tracks.slice(0, store.musicPlaylistVisibleCount || 50);
     },
 
     /**
-     * 计算属性：是否还有更多曲目
+     * 检查是否还有更多曲目
      */
-    get hasMorePlaylistTracks() {
+    getHasMorePlaylistTracks() {
         const detail = store.musicCurrentPlaylistDetail;
         if (!detail || !detail.tracks) return false;
         return (store.musicPlaylistVisibleCount || 50) < detail.tracks.length;
@@ -1034,7 +1025,6 @@ export const musicMethods = {
         } catch (error) {
             if (error.name === 'AbortError') return;
             console.error('[Music] Play error:', error);
-            toast.error('播放失败');
             store.musicBuffering = false;
         }
     },
@@ -1105,7 +1095,6 @@ export const musicMethods = {
             }
         } catch (error) {
             console.error('[Music] Resume error:', error);
-            toast.error('恢复播放失败');
             store.musicBuffering = false;
         }
     },
