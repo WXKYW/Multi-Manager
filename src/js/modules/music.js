@@ -19,6 +19,21 @@ let amllPlayer = null; // AMLL 歌词播放器实例
 let amllUpdateFrame = null;
 
 /**
+ * 确保 URL 为 HTTPS，避免 Mixed Content 错误
+ */
+function ensureHttps(url) {
+    if (!url || typeof url !== 'string') return url;
+    if (url.startsWith('http://')) {
+        return url.replace('http://', 'https://');
+    }
+    // 如果是 // 开头的协议相对路径，也补齐 https:
+    if (url.startsWith('//')) {
+        return 'https:' + url;
+    }
+    return url;
+}
+
+/**
  * 转换 NCM 歌词为 AMLL 格式
  */
 function transformToAMLL(lyrics, translations = []) {
@@ -551,7 +566,7 @@ export const musicMethods = {
                     name: song.name,
                     artists: song.ar?.map(a => a.name).join(' / ') || '未知艺术家',
                     album: song.al?.name || '未知专辑',
-                    cover: song.al?.picUrl || '',
+                    cover: ensureHttps(song.al?.picUrl || ''),
                     duration: song.dt || 0
                 }));
                 store.musicSearchResults = loadMore ? [...store.musicSearchResults, ...songs] : songs;
@@ -560,7 +575,7 @@ export const musicMethods = {
                 const playlists = data.result.playlists.map(pl => ({
                     id: pl.id,
                     name: pl.name,
-                    cover: pl.coverImgUrl || '',
+                    cover: ensureHttps(pl.coverImgUrl || ''),
                     creator: pl.creator?.nickname || '未知',
                     trackCount: pl.trackCount || 0,
                     playCount: pl.playCount || 0
@@ -571,7 +586,7 @@ export const musicMethods = {
                 const artists = data.result.artists.map(ar => ({
                     id: ar.id,
                     name: ar.name,
-                    cover: ar.picUrl || ar.img1v1Url || '',
+                    cover: ensureHttps(ar.picUrl || ar.img1v1Url || ''),
                     alias: ar.alias?.join(' / ') || '',
                     albumCount: ar.albumSize || 0
                 }));
@@ -872,17 +887,24 @@ export const musicMethods = {
         // 1. 优先从缓存恢复（瞬间显示）
         const cached = this._loadMusicCache();
         if (cached && cached.song) {
-            store.musicCurrentSong = cached.song;
-            store.musicPlaylist = cached.playlist || [cached.song];
+            const song = { ...cached.song };
+            if (song.cover) song.cover = ensureHttps(song.cover);
+
+            store.musicCurrentSong = song;
+            store.musicPlaylist = (cached.playlist || [song]).map(s => ({
+                ...s,
+                cover: ensureHttps(s.cover)
+            }));
+
             // 设置当前索引，确保下一首/上一首按钮正常工作
-            store.musicCurrentIndex = store.musicPlaylist.findIndex(s => s.id === cached.song.id);
+            store.musicCurrentIndex = store.musicPlaylist.findIndex(s => s.id === song.id);
             if (store.musicCurrentIndex === -1) store.musicCurrentIndex = 0;
             store.musicPlaying = false;
             console.log('[Music] Restored from cache, index:', store.musicCurrentIndex);
 
             // 恢复后延迟加载歌词，确保 UI 能够显示
             setTimeout(() => {
-                this.musicLoadLyrics(cached.song.id);
+                this.musicLoadLyrics(song.id);
             }, 500);
 
             // 不再后台刷新，保持稳定
@@ -1263,7 +1285,7 @@ export const musicMethods = {
             if (data.songs?.[0]) {
                 const detail = data.songs[0];
                 if (store.musicCurrentSong?.id === songId) {
-                    store.musicCurrentSong.cover = detail.al?.picUrl || '';
+                    store.musicCurrentSong.cover = ensureHttps(detail.al?.picUrl || '');
                     store.musicCurrentSong.album = detail.al?.name || '';
                 }
             }
@@ -1290,7 +1312,7 @@ export const musicMethods = {
                     name: song.name,
                     artists: song.ar?.map(a => a.name).join(' / ') || '未知艺术家',
                     album: song.al?.name || '未知专辑',
-                    cover: song.al?.picUrl || '',
+                    cover: ensureHttps(song.al?.picUrl || ''),
                     duration: song.dt || 0
                 }));
 
@@ -1325,7 +1347,7 @@ export const musicMethods = {
                     name: song.name,
                     artists: song.artists?.map(a => a.name).join(' / ') || '未知艺术家',
                     album: song.album?.name || '未知专辑',
-                    cover: song.album?.picUrl || '',
+                    cover: ensureHttps(song.album?.picUrl || ''),
                     duration: song.duration || 0
                 }));
 
@@ -1365,7 +1387,7 @@ export const musicMethods = {
                     name: song.name,
                     artists: song.ar?.map(a => a.name).join(' / ') || '未知艺术家',
                     album: song.al?.name || '未知专辑',
-                    cover: song.al?.picUrl || '',
+                    cover: ensureHttps(song.al?.picUrl || ''),
                     duration: song.dt || 0
                 }));
 
@@ -1396,8 +1418,8 @@ export const musicMethods = {
                 store.musicHotPlaylists = data.playlists.map(pl => ({
                     id: pl.id,
                     name: pl.name,
-                    cover: pl.coverImgUrl || '',
-                    coverImgUrl: pl.coverImgUrl || '', // 兼容旧字段
+                    cover: ensureHttps(pl.coverImgUrl || ''),
+                    coverImgUrl: ensureHttps(pl.coverImgUrl || ''), // 兼容旧字段
                     playCount: pl.playCount || 0,
                     creator: pl.creator?.nickname || '未知'
                 }));
@@ -1505,7 +1527,7 @@ export const musicMethods = {
                     name: song.name,
                     artists: song.ar?.map(a => a.name).join(' / ') || '未知艺术家',
                     album: song.al?.name || '未知专辑',
-                    cover: song.al?.picUrl || '',
+                    cover: ensureHttps(song.al?.picUrl || ''),
                     duration: song.dt || 0
                 }));
 
@@ -1553,7 +1575,7 @@ export const musicMethods = {
                 store.musicCurrentPlaylistDetail = {
                     id: pl.id,
                     name: pl.name,
-                    cover: pl.coverImgUrl || '',
+                    cover: ensureHttps(pl.coverImgUrl) || '',
                     description: pl.description || '',
                     creator: pl.creator?.nickname || '未知',
                     trackCount: pl.trackCount || 0,
@@ -1563,7 +1585,7 @@ export const musicMethods = {
                         name: song.name,
                         artists: song.ar?.map(a => a.name).join(' / ') || '未知艺术家',
                         album: song.al?.name || '未知专辑',
-                        cover: song.al?.picUrl || '',
+                        cover: ensureHttps(song.al?.picUrl || ''),
                         duration: song.dt || 0
                     }))
                 };
@@ -1678,6 +1700,7 @@ export const musicMethods = {
             const data = await response.json();
 
             if (data.loggedIn && data.user) {
+                if (data.user.avatarUrl) data.user.avatarUrl = ensureHttps(data.user.avatarUrl);
                 store.musicUser = data.user;
                 localStorage.setItem('music_user_info', JSON.stringify(data.user));
                 console.log('[Music] Logged in as:', data.user.nickname);
@@ -1717,7 +1740,7 @@ export const musicMethods = {
                     const item = {
                         id: pl.id,
                         name: pl.name,
-                        cover: pl.coverImgUrl || '',
+                        cover: ensureHttps(pl.coverImgUrl || ''),
                         trackCount: pl.trackCount || 0,
                         playCount: pl.playCount || 0,
                         creator: pl.creator?.nickname || '',
@@ -1819,6 +1842,9 @@ export const musicMethods = {
                             const statusData = await statusRes.json();
 
                             if (statusData.loggedIn && statusData.user) {
+                                if (statusData.user.avatarUrl) {
+                                    statusData.user.avatarUrl = ensureHttps(statusData.user.avatarUrl);
+                                }
                                 store.musicUser = statusData.user;
                                 localStorage.setItem('music_user_info', JSON.stringify(statusData.user));
                                 console.log('[Music] Logged in as:', statusData.user.nickname);
@@ -1903,7 +1929,9 @@ export const musicMethods = {
         const cachedUser = localStorage.getItem('music_user_info');
         if (cachedUser) {
             try {
-                store.musicUser = JSON.parse(cachedUser);
+                const user = JSON.parse(cachedUser);
+                if (user.avatarUrl) user.avatarUrl = ensureHttps(user.avatarUrl);
+                store.musicUser = user;
             } catch (e) {
                 console.warn('[Music] Failed to parse cached user info');
             }
@@ -1949,24 +1977,30 @@ export const musicMethods = {
 
             // 恢复播放列表
             if (state.playlist && state.playlist.length > 0) {
-                store.musicPlaylist = state.playlist;
+                store.musicPlaylist = state.playlist.map(s => ({
+                    ...s,
+                    cover: ensureHttps(s.cover)
+                }));
                 store.musicCurrentIndex = state.currentIndex || 0;
             }
 
             // 恢复当前歌曲信息（但不播放）
             if (state.song) {
-                store.musicCurrentSong = state.song;
+                const song = { ...state.song };
+                if (song.cover) song.cover = ensureHttps(song.cover);
+
+                store.musicCurrentSong = song;
                 store.musicCurrentTime = state.currentTime || 0;
                 store.musicDuration = state.duration || 0;
                 store.musicProgress = state.duration ? (state.currentTime / state.duration) * 100 : 0;
 
                 // 加载歌词
-                this.musicLoadLyrics(state.song.id);
+                this.musicLoadLyrics(song.id);
 
                 // 初始化音频但不播放
                 initAudioPlayer();
 
-                console.log('[Music] Restored play state:', state.song.name, 'at', Math.floor(state.currentTime), 's');
+                console.log('[Music] Restored play state:', song.name, 'at', Math.floor(state.currentTime), 's');
             }
 
             // 恢复设置
