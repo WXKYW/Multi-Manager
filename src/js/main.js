@@ -3,6 +3,9 @@
  * 整合所有功能模块，初始化 Vue 应用
  */
 
+// 日志控制（必须最先导入，覆盖 console 方法）
+import './modules/logger.js';
+
 // 导入样式
 import '../css/styles.css';
 import '../css/dashboard.css';
