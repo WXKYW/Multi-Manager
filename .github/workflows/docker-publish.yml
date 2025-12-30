@@ -35,6 +35,7 @@ permissions:
 env:
   IMAGE_NAME: api-monitor
   REGISTRY: ghcr.io
+  DOCKERHUB_REPO: ${{ github.repository_owner }}/api-monitor
 
 jobs:
   build-and-push:
@@ -65,12 +66,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # 登录 Docker Hub (请确保已在 GitHub Secrets 中配置 DOCKERHUB_USERNAME 和 DOCKERHUB_TOKEN)
+      - name: Login to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       # 提取元数据（标签、标签等）
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          images: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+            ${{ env.DOCKERHUB_REPO }}
           tags: |
             # 默认 latest 标签（推送到 main 分支或版本标签时都生成）
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
@@ -115,7 +126,11 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**拉取命令：**" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "# 从 GHCR 拉取" >> $GITHUB_STEP_SUMMARY
           echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# 从 Docker Hub 拉取" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.DOCKERHUB_REPO }}:latest" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**使用 Docker Compose 运行：**" >> $GITHUB_STEP_SUMMARY
