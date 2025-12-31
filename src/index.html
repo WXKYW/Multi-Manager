@@ -30,7 +30,7 @@
       }
     </style>
 
-    <!-- 应用加载屏 (优化 FCP) -->
+    <!-- 应用加载屏 (优化 FCP，支持深浅主题) -->
     <div
       id="app-loading"
       style="
@@ -39,7 +39,6 @@
         left: 0;
         width: 100%;
         height: 100%;
-        background: #0d1117;
         z-index: 99999;
         display: flex;
         flex-direction: column;
@@ -59,19 +58,14 @@
         "
       />
       <div
-        style="
-          width: 160px;
-          height: 3px;
-          background: rgba(88, 166, 255, 0.1);
-          border-radius: 4px;
-          overflow: hidden;
-        "
+        id="loading-progress-track"
+        style="width: 160px; height: 3px; border-radius: 4px; overflow: hidden"
       >
         <div
+          id="loading-progress-bar"
           style="
             width: 30%;
             height: 100%;
-            background: #58a6ff;
             border-radius: 4px;
             animation: progress-indeterminate 1.5s infinite ease-in-out;
           "
@@ -109,6 +103,39 @@
           }
         }
       </style>
+      <script>
+        // 立即执行的主题检测脚本
+        (function () {
+          var isDark =
+            window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var loader = document.getElementById('app-loading');
+          var track = document.getElementById('loading-progress-track');
+          var bar = document.getElementById('loading-progress-bar');
+
+          function applyTheme(dark) {
+            if (loader) {
+              loader.style.background = dark ? '#0d1117' : '#f6f8fa';
+            }
+            if (track) {
+              track.style.background = dark ? 'rgba(88, 166, 255, 0.1)' : 'rgba(31, 111, 235, 0.1)';
+            }
+            if (bar) {
+              bar.style.background = dark ? '#58a6ff' : '#1f6feb';
+            }
+          }
+
+          applyTheme(isDark);
+
+          // 监听系统主题变化
+          if (window.matchMedia) {
+            window
+              .matchMedia('(prefers-color-scheme: dark)')
+              .addEventListener('change', function (e) {
+                applyTheme(e.matches);
+              });
+          }
+        })();
+      </script>
     </div>
 
     <div id="app" v-cloak>
