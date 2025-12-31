@@ -532,22 +532,38 @@ func (c *Collector) collectGPUInfoWindows() ([]string, uint64) {
 }
 
 // collectGPUState 采集 GPU 使用率、显存占用和功耗 (带超时保护)
+// 支持: NVIDIA (nvidia-smi), AMD (rocm-smi/sysfs), Intel (sysfs/performance counter)
 func (c *Collector) collectGPUState() (float64, uint64, float64) {
+	// 1. 首先尝试 NVIDIA GPU (nvidia-smi)
 	nvidiaSmi := c.getNvidiaSmiPath()
-	if nvidiaSmi == "" {
-		return 0, 0, 0
+	if nvidiaSmi != "" {
+		usage, mem, power := c.collectNvidiaGPUState(nvidiaSmi)
+		if usage > 0 || mem > 0 {
+			return usage, mem, power
+		}
 	}
 
-	// 使用 context 添加超时保护 (2秒)
+	// 2. 如果没有 NVIDIA，尝试其他方案
+	if runtime.GOOS == "windows" {
+		// Windows: 使用 Performance Counter 采集所有 GPU
+		return c.collectGPUStateWindows()
+	} else if runtime.GOOS == "linux" {
+		// Linux: 尝试 AMD (rocm-smi / sysfs) 或 Intel (sysfs)
+		return c.collectGPUStateLinux()
+	}
+
+	return 0, 0, 0
+}
+
+// collectNvidiaGPUState 使用 nvidia-smi 采集 NVIDIA GPU 状态
+func (c *Collector) collectNvidiaGPUState(nvidiaSmi string) (float64, uint64, float64) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	// 获取使用率、显存已用量和功耗
 	cmd := exec.CommandContext(ctx, nvidiaSmi, "--query-gpu=utilization.gpu,memory.used,power.draw", "--format=csv,noheader,nounits")
 	hideWindow(cmd)
 	output, err := cmd.Output()
 	if err != nil {
-		fmt.Printf("[Collector] GPU state collection failed: %v\n", err)
 		return 0, 0, 0
 	}
 
@@ -577,14 +593,213 @@ func (c *Collector) collectGPUState() (float64, uint64, float64) {
 	if count == 0 {
 		return 0, 0, 0
 	}
-	
-	avgUsage := totalUsage / float64(count)
-	if avgUsage > 0 || totalUsedMem > 0 {
-		// 仅在有意义时打印日志
-		// fmt.Printf("[Collector] GPU: %.1f%%, Mem: %d MiB, Power: %.1f W\n", avgUsage, totalUsedMem/1024/1024, totalPower)
+
+	return totalUsage / float64(count), totalUsedMem, totalPower
+}
+
+// collectGPUStateWindows Windows 下采集 AMD/Intel GPU 使用率
+// 使用 PowerShell 查询 GPU Engine 性能计数器
+func (c *Collector) collectGPUStateWindows() (float64, uint64, float64) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// 方案1: 使用 GPU Engine 性能计数器 (Windows 10 1709+)
+	// 查询所有 GPU 3D 引擎的使用率
+	psCmd := `
+$counters = Get-Counter '\GPU Engine(*engtype_3D)\Utilization Percentage' -ErrorAction SilentlyContinue
+if ($counters) {
+    $samples = $counters.CounterSamples | Where-Object { $_.CookedValue -gt 0 }
+    if ($samples) {
+        $avg = ($samples | Measure-Object -Property CookedValue -Average).Average
+        [math]::Round($avg, 1)
+    } else { 0 }
+} else { 0 }
+`
+	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command", psCmd)
+	hideWindow(cmd)
+	output, err := cmd.Output()
+	if err != nil {
+		// 方案2: 尝试旧版 Performance Counter
+		return c.collectGPUStateWindowsLegacy()
 	}
-	
-	return avgUsage, totalUsedMem, totalPower
+
+	usage, _ := strconv.ParseFloat(strings.TrimSpace(string(output)), 64)
+	if usage > 0 {
+		// fmt.Printf("[Collector] GPU (Win PerfCounter): %.1f%%\n", usage)
+	}
+	return usage, 0, 0
+}
+
+// collectGPUStateWindowsLegacy 旧版 Windows GPU 采集 (Windows 10 早期版本)
+func (c *Collector) collectGPUStateWindowsLegacy() (float64, uint64, float64) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// 尝试使用 WMI 查询 GPU 负载 (部分驱动支持)
+	psCmd := `
+$gpu = Get-CimInstance -Namespace root/cimv2 -ClassName Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine -ErrorAction SilentlyContinue | 
+    Where-Object { $_.Name -like '*engtype_3D*' } | 
+    Measure-Object -Property UtilizationPercentage -Average
+if ($gpu.Average) { [math]::Round($gpu.Average, 1) } else { 0 }
+`
+	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command", psCmd)
+	hideWindow(cmd)
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, 0, 0
+	}
+
+	usage, _ := strconv.ParseFloat(strings.TrimSpace(string(output)), 64)
+	return usage, 0, 0
+}
+
+// collectGPUStateLinux Linux 下采集 AMD/Intel GPU 使用率
+func (c *Collector) collectGPUStateLinux() (float64, uint64, float64) {
+	// 1. 尝试 AMD rocm-smi
+	if usage, mem, power := c.collectAMDGPULinux(); usage > 0 || mem > 0 {
+		return usage, mem, power
+	}
+
+	// 2. 尝试 AMD/Intel sysfs
+	if usage := c.collectGPUFromSysfs(); usage > 0 {
+		return usage, 0, 0
+	}
+
+	// 3. 尝试 Intel intel_gpu_top (需要 intel-gpu-tools)
+	if usage := c.collectIntelGPULinux(); usage > 0 {
+		return usage, 0, 0
+	}
+
+	return 0, 0, 0
+}
+
+// collectAMDGPULinux 使用 rocm-smi 采集 AMD GPU
+func (c *Collector) collectAMDGPULinux() (float64, uint64, float64) {
+	if _, err := exec.LookPath("rocm-smi"); err != nil {
+		return 0, 0, 0
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// rocm-smi --showuse --showmemuse --showpower --csv
+	cmd := exec.CommandContext(ctx, "rocm-smi", "--showuse", "--csv")
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, 0, 0
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	if len(lines) < 2 {
+		return 0, 0, 0
+	}
+
+	// 解析 CSV (跳过表头)
+	var totalUsage float64
+	var count int
+	for _, line := range lines[1:] {
+		parts := strings.Split(line, ",")
+		if len(parts) >= 2 {
+			// GPU Use (%) 通常在第二列
+			usage, _ := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+			totalUsage += usage
+			count++
+		}
+	}
+
+	if count > 0 {
+		return totalUsage / float64(count), 0, 0
+	}
+	return 0, 0, 0
+}
+
+// collectGPUFromSysfs 从 Linux sysfs 读取 GPU 使用率
+// 支持 AMD (gpu_busy_percent) 和部分 Intel 驱动
+func (c *Collector) collectGPUFromSysfs() float64 {
+	// AMD GPU: /sys/class/drm/card*/device/gpu_busy_percent
+	files, err := os.ReadDir("/sys/class/drm")
+	if err != nil {
+		return 0
+	}
+
+	var totalUsage float64
+	var count int
+
+	for _, f := range files {
+		if !strings.HasPrefix(f.Name(), "card") || strings.Contains(f.Name(), "-") {
+			continue
+		}
+
+		// AMD GPU busy percent
+		busyPath := fmt.Sprintf("/sys/class/drm/%s/device/gpu_busy_percent", f.Name())
+		if data, err := os.ReadFile(busyPath); err == nil {
+			usage, _ := strconv.ParseFloat(strings.TrimSpace(string(data)), 64)
+			if usage > 0 {
+				totalUsage += usage
+				count++
+				continue
+			}
+		}
+
+		// Intel GPU: GT 引擎使用率
+		gtPath := fmt.Sprintf("/sys/class/drm/%s/gt_cur_freq_mhz", f.Name())
+		gtMaxPath := fmt.Sprintf("/sys/class/drm/%s/gt_max_freq_mhz", f.Name())
+		if cur, err1 := os.ReadFile(gtPath); err1 == nil {
+			if max, err2 := os.ReadFile(gtMaxPath); err2 == nil {
+				curFreq, _ := strconv.ParseFloat(strings.TrimSpace(string(cur)), 64)
+				maxFreq, _ := strconv.ParseFloat(strings.TrimSpace(string(max)), 64)
+				if maxFreq > 0 {
+					// 使用频率比例估算使用率
+					usage := (curFreq / maxFreq) * 100
+					if usage > 0 {
+						totalUsage += usage
+						count++
+					}
+				}
+			}
+		}
+	}
+
+	if count > 0 {
+		return totalUsage / float64(count)
+	}
+	return 0
+}
+
+// collectIntelGPULinux 使用 intel_gpu_top 采集 Intel GPU (需要 intel-gpu-tools)
+func (c *Collector) collectIntelGPULinux() float64 {
+	if _, err := exec.LookPath("intel_gpu_top"); err != nil {
+		return 0
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// intel_gpu_top -s 1000 -J (JSON 输出，采样 1 秒)
+	cmd := exec.CommandContext(ctx, "intel_gpu_top", "-s", "500", "-o", "-")
+	output, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+
+	// 简单解析: 查找 "Render" 引擎的使用率
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "Render") && strings.Contains(line, "%") {
+			// 尝试提取百分比
+			parts := strings.Fields(line)
+			for _, p := range parts {
+				if strings.HasSuffix(p, "%") {
+					usage, _ := strconv.ParseFloat(strings.TrimSuffix(p, "%"), 64)
+					if usage > 0 {
+						return usage
+					}
+				}
+			}
+		}
+	}
+
+	return 0
 }
 
 func (c *Collector) getNvidiaSmiPath() string {
