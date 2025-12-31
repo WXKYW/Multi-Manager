@@ -1,13 +1,28 @@
-# 🚀 API Monitor Dashboard
+<p align="center">
+  <img src="./src/logo.svg" width="120" height="120" alt="API Monitor Logo">
+</p>
 
-[![License](https://img.shields.io/github/license/iwvw/api-monitor)](LICENSE)
-[![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org/)
-[![Storage](https://img.shields.io/badge/Storage-SQLite3-orange.svg)](https://www.sqlite.org/)
+<h1 align="center">API Monitor</h1>
+
+<p align="center">
+  <a href="https://github.com/iwvw/api-monitor/blob/main/LICENSE"><img src="https://img.shields.io/github/license/iwvw/api-monitor" alt="License"></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-20+-green.svg" alt="Node.js"></a>
+  <a href="https://www.sqlite.org/"><img src="https://img.shields.io/badge/Storage-SQLite3-orange.svg" alt="Storage"></a>
+  <a href="https://hub.docker.com/r/iwvw/api-monitor"><img src="https://img.shields.io/docker/pulls/iwvw/api-monitor.svg" alt="Docker Pulls"></a>
+  <a href="https://github.com/iwvw/api-monitor/actions"><img src="https://img.shields.io/github/actions/workflow/status/iwvw/api-monitor/docker-publish.yml" alt="Build Status"></a>
+  <img src="https://img.shields.io/badge/Platform-AMD64%20%7C%20ARM64-blue.svg" alt="Platforms">
+</p>
+
+--- 
 
 **一个全能型的 API 管理与服务器监控面板**。
-它不仅能帮您集中管理 Zeabur、Koyeb、Cloudflare、OpenAI 等多种云服务，还提供了强大的主机管理、实时 SSH 终端及 Docker 容器监控功能。
+它不仅能帮您集中管理主机、实时 SSH 终端、Docker 容器监控，还提供了强大的云服务集成功能，包括 Cloudflare、OpenAI、Zeabur、Koyeb、等多种云服务。
+同样支持Antigravity / Gemini 的模型转 API 调用，同时有完善的额度使用统计、日志记录、模型列表获取、全链路耗时统计等功能。
 
-[🔴 在线演示 (Demo)](https://api-monitor.zeabur.app/)
+[🔵 Docker Hub](https://hub.docker.com/r/iwvw/api-monitor) | [🔴 在线演示 (Demo)](https://api-monitor.zeabur.app/)
+
+> [!TIP]
+> **多架构支持**：本项目 Docker 镜像已原生支持 `linux/amd64` 和 `linux/arm64`。
 
 > [!WARNING]
 > 请勿在演示环境中输入真实的敏感数据（如 API Key、服务器密码等）。演示数据将**定期自动清空**。
@@ -19,22 +34,21 @@
 ### 🖥️ 基础设施管理
 - **主机监控**：实时可视化 CPU、内存、磁盘及系统负载数据。
 - **SSH Web 终端**：全功能交互式终端，支持多会话切换与断线重连。
-- **Docker 管理**：一键控制容器启停、重启，查看实时运行状态。
+- **Docker 管理**：一键控制容器启停、重启，查看实时运行状态。「待重构」
 - **健康拨测**：定时检测主机连通性及响应时间，生成历史趋势图。
-- **隐私保护**：支持主机 IP 自动脱敏/隐藏，适合公开演示或共享屏幕。
 
 ### ☁️ 云服务集成
+- **Cloudflare DNS**：多账号域名管理、DNS 记录快速增删改、代理模式切换。
+- **AI 模型 API**：
+  - **OpenAI / Antigravity / Gemini**：多端点可用性检测、实时配额查询、模型列表获取、全链路耗时统计。
 - **Zeabur**：多账号余额监控、项目费用追踪、服务生命周期管理。
 - **Koyeb**：
   - 支持多账号管理与组织切换。
   - 服务/应用生命周期控制（暂停/重启/重新部署）。
   - 实时日志流查看、实例状态监控及资源用量统计。
-- **Cloudflare DNS**：多账号域名管理、DNS 记录快速增删改、代理模式切换。
-- **AI 模型 API**：
-  - **OpenAI / Antigravity / Gemini**：多端点可用性检测。
-  - 实时配额查询、模型列表获取、全链路耗时统计。
 
 ### 🛠️ 架构与安全
+- **现代前端栈**：基于 **Vue 3 + Pinia** 的响应式状态管理，使用 **Vite 7** 构建，极致的加载速度。
 - **全链路追踪**：引入 **Trace ID**，从 HTTP 请求到数据库审计日志实现全生命周期追踪。
 - **结构化日志**：基于 Node.js `AsyncLocalStorage` 的高性能异步 JSON 日志系统。
 - **自动脱敏**：智能识别并打码日志及数据库中的 Token、密码、Key 等敏感信息。
@@ -48,12 +62,17 @@
 
 **方式一：Docker Compose (最简)**
 
-```bash
-# 1. 下载配置文件
-curl -O https://raw.githubusercontent.com/iwvw/api-monitor/main/docker-compose.yml
-
-# 2. 启动服务
-docker compose pull && docker compose up -d
+```yaml
+version: '3.8'
+services:
+  api-monitor:
+    image: iwvw/api-monitor:latest
+    container_name: api-monitor
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
 ```
 
 **方式二：Docker CLI**
@@ -63,7 +82,7 @@ docker run -d --name api-monitor \
   -p 3000:3000 \
   -v $(pwd)/data:/app/data \
   --restart unless-stopped \
-  ghcr.io/iwvw/api-monitor:latest
+  iwvw/api-monitor:latest
 ```
 
 ### 2. 本地开发
@@ -96,10 +115,14 @@ npm run build && npm start
 | `PORT` | `3000` | 服务运行端口 |
 | `NODE_ENV` | `production` | 运行环境 (`development` / `production`) |
 | `ADMIN_PASSWORD` | - | **初始管理员密码**（首次启动时生效，也可在界面设置） |
-| `JWT_SECRET` | (随机) | **强烈建议设置**。用于加密会话 Token，固定此值可防止重启后用户掉线。 |
+| `JWT_SECRET` | (随机) | **强烈建议设置**。用于加密会话 Token |
+| `DATA_DIR` | `/app/data` | 数据持久化目录 (数据库与日志存放路径) |
+| `DB_NAME` | `data.db` | 数据库文件名 |
 | `LOG_LEVEL` | `INFO` | 日志级别 (`DEBUG`, `INFO`, `WARN`, `ERROR`) |
 | `LOG_RETENTION_DAYS` | `7` | 本地日志文件保留天数 |
-| `TRUST_PROXY` | `false` | 若部署在反代后 (如 Nginx/Cloudflare)，建议设为 `true` 以获取真实 IP |
+| `TRUST_PROXY` | `false` | 若部署在反代后 (如 Nginx/CF)，建议设为 `true` |
+| `VITE_USE_CDN` | `true` | 是否启用 CDN 加载静态资源 (构建时生效) |
+| `VITE_CDN_PROVIDER`| `npmmirror` | CDN 节点选择 (`npmmirror`, `jsdelivr`, `unpkg`, `bootcdn`) |
 
 ---
 
@@ -108,30 +131,26 @@ npm run build && npm start
 ```text
 api-monitor/
 ├── src/                    # 前端源码 & 后端核心
-│   ├── index.html          # 前端入口文件
-│   ├── css/                # 模块化样式表
-│   ├── js/                 # 前端核心逻辑 (Vue 3/Vanilla)
-│   ├── templates/          # HTML 模板片段
-│   ├── db/                 # 数据库模型 (SQLite) & ORM
-│   ├── middleware/         # 中间件 (Auth, Logger, CORS)
-│   ├── routes/             # API 路由定义
-│   ├── services/           # 业务服务层
-│   └── utils/              # 通用工具函数
-├── modules/                # 业务功能模块 (插件化架构)
-│   ├── _template/          # 模块开发模板
-│   ├── server-management/  # 主机/Docker/SSH 管理
-│   ├── antigravity-api/    # Antigravity 客户端集成
-│   ├── cloudflare-dns/     # Cloudflare DNS 管理
-│   ├── gemini-cli-api/     # Gemini CLI 适配器
-│   ├── koyeb-api/          # Koyeb 平台集成
-│   ├── openai-api/         # OpenAI 接口监控
-│   └── zeabur-api/         # Zeabur 平台集成
-├── data/                   # 持久化数据 (git忽略)
-├── dist/                   # 前端构建产物
-├── server.js               # 后端启动入口
-├── vite.config.js          # Vite 构建配置
-├── Dockerfile              # Docker 构建文件
-└── docker-compose.yml      # 容器编排配置
+│   ├── js/
+│   │   ├── stores/         # Pinia 状态管理中心 (Auth, App, Server 等)
+│   │   ├── modules/        # 前端中间件与注入逻辑
+│   │   └── main.js         # 应用入口与热重载配置
+│   ├── db/                 # 数据库模型 (SQLite) & 自动迁移
+│   ├── middleware/         # 增强版中间件 (TraceID, RateLimit, Security)
+│   ├── routes/             # 统一路由注册中心
+│   ├── services/           # 核心业务服务 (Session, Log, Metrics)
+│   └── utils/              # 加密存储与通用工具
+├── modules/                # 业务扩展功能库
+│   ├── server-management/  # 主机/SSH/Docker 管理核心
+│   ├── antigravity-api/    # Antigravity 客户端
+│   ├── cloudflare-dns/     # Cloudflare DNS 控制台
+│   └── ...                 # 其他多云集成模块
+├── data/                   # 数据库与日志持久化 (挂载点)
+├── dist/                   # 基于 Vite 7 的生产产物
+├── server.js               # 高度精简的 Express 启动入口
+├── vite.config.mjs         # Vite 7 极速构建配置
+├── cdn.config.mjs          # 弹性 CDN 别名映射配置
+└── Dockerfile              # 多阶段多架构构建脚本
 ```
 
 ---

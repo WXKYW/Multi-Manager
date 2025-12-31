@@ -38,15 +38,45 @@ export const cdnProviders = {
 // 需要通过 CDN 加载的依赖及其版本
 export const cdnDependencies = {
   vue: {
-    version: '3.5.13',
+    version: '3.5.26',
     file: '/dist/vue.global.prod.js',
     global: 'Vue',
     css: false,
   },
+  'vue-demi': {
+    version: '0.14.10',
+    file: '/lib/index.iife.js',
+    global: 'VueDemi',
+    css: false,
+  },
+  pinia: {
+    version: '2.3.0',
+    file: '/dist/pinia.iife.prod.js',
+    global: 'Pinia',
+    css: false,
+  },
+  axios: {
+    version: '1.7.9',
+    file: '/dist/axios.min.js',
+    global: 'axios',
+    css: false,
+  },
   'chart.js': {
-    version: '4.4.7',
+    version: '4.5.1',
     file: '/dist/chart.umd.js',
     global: 'Chart',
+    css: false,
+  },
+  marked: {
+    version: '15.0.4',
+    file: '/lib/marked.umd.js',
+    global: 'marked',
+    css: false,
+  },
+  dompurify: {
+    version: '3.2.3',
+    file: '/dist/purify.min.js',
+    global: 'DOMPurify',
     css: false,
   },
   '@fortawesome/fontawesome-free': {
