@@ -18,6 +18,9 @@ let analyser = null;
 let amllPlayer = null; // AMLL 歌词播放器实例
 let amllUpdateFrame = null;
 
+// Media Session 相关变量
+let mediaSessionInitialized = false;
+
 /**
  * 确保 URL 为 HTTPS，避免 Mixed Content 错误
  */
@@ -126,7 +129,167 @@ function transformToAMLL(lyrics, translations = []) {
     });
 }
 
+/**
+ * 更新 Media Session 元数据 (用于 SMTC 和系统媒体控制)
+ * 支持 Windows 系统媒体控制中心显示歌曲信息
+ */
+function updateMediaSession(song) {
+    if (!('mediaSession' in navigator)) {
+        console.warn('[Music] Media Session API not supported');
+        return;
+    }
 
+    if (!song) return;
+
+    // 准备封面图片 URL
+    const artworkUrl = ensureHttps(song.cover || 'https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg');
+
+    // 更新媒体元数据
+    navigator.mediaSession.metadata = new MediaMetadata({
+        title: song.name || '未知歌曲',
+        artist: song.artists || '未知艺术家',
+        album: song.album || '未知专辑',
+        artwork: [
+            { src: artworkUrl + '?param=96y96', sizes: '96x96', type: 'image/jpeg' },
+            { src: artworkUrl + '?param=128y128', sizes: '128x128', type: 'image/jpeg' },
+            { src: artworkUrl + '?param=192y192', sizes: '192x192', type: 'image/jpeg' },
+            { src: artworkUrl + '?param=256y256', sizes: '256x256', type: 'image/jpeg' },
+            { src: artworkUrl + '?param=384y384', sizes: '384x384', type: 'image/jpeg' },
+            { src: artworkUrl + '?param=512y512', sizes: '512x512', type: 'image/jpeg' }
+        ]
+    });
+
+    // 更新页面标题以显示在 SMTC 中
+    // Windows SMTC 会从 document.title 获取应用名称
+    const songTitle = song.name || '未知歌曲';
+    const artistName = song.artists || '未知艺术家';
+    document.title = `${songTitle} - ${artistName} | API Monitor`;
+
+    console.log('[Music] Media Session updated:', song.name);
+}
+
+/**
+ * 恢复页面默认标题
+ */
+function resetDocumentTitle() {
+    document.title = 'API Monitor';
+}
+
+/**
+ * 更新 Media Session 播放位置信息
+ */
+function updateMediaSessionPosition() {
+    if (!('mediaSession' in navigator) || !('setPositionState' in navigator.mediaSession)) return;
+    if (!audioPlayer || !audioPlayer.duration || isNaN(audioPlayer.duration)) return;
+
+    try {
+        navigator.mediaSession.setPositionState({
+            duration: audioPlayer.duration,
+            playbackRate: audioPlayer.playbackRate,
+            position: audioPlayer.currentTime
+        });
+    } catch (e) {
+        // 忽略位置状态更新错误（可能在切换歌曲时发生）
+    }
+}
+
+// Media Session 位置更新节流变量
+let lastMediaSessionPositionUpdate = 0;
+
+/**
+ * 节流版本的 Media Session 位置更新 (每秒最多更新一次)
+ */
+function updateMediaSessionPositionThrottled() {
+    const now = Date.now();
+    if (now - lastMediaSessionPositionUpdate < 1000) return;
+    lastMediaSessionPositionUpdate = now;
+    updateMediaSessionPosition();
+}
+
+/**
+ * 设置 Media Session 事件处理器 (媒体快捷键响应)
+ * 支持系统媒体键：播放/暂停、上一曲、下一曲、快进、快退、跳转
+ */
+function setupMediaSessionHandlers() {
+    if (!('mediaSession' in navigator)) return;
+    if (mediaSessionInitialized) return;
+
+    mediaSessionInitialized = true;
+
+    // 播放
+    navigator.mediaSession.setActionHandler('play', () => {
+        console.log('[Music] Media Session: play');
+        if (audioPlayer && audioPlayer.src) {
+            audioPlayer.play();
+        }
+    });
+
+    // 暂停
+    navigator.mediaSession.setActionHandler('pause', () => {
+        console.log('[Music] Media Session: pause');
+        if (audioPlayer) {
+            audioPlayer.pause();
+        }
+    });
+
+    // 上一曲
+    navigator.mediaSession.setActionHandler('previoustrack', () => {
+        console.log('[Music] Media Session: previoustrack');
+        if (window.vueApp && window.vueApp.playPrevious) {
+            window.vueApp.playPrevious();
+        }
+    });
+
+    // 下一曲
+    navigator.mediaSession.setActionHandler('nexttrack', () => {
+        console.log('[Music] Media Session: nexttrack');
+        if (window.vueApp && window.vueApp.playNext) {
+            window.vueApp.playNext();
+        } else {
+            playNext();
+        }
+    });
+
+    // 快退 10 秒
+    navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+        console.log('[Music] Media Session: seekbackward');
+        if (audioPlayer) {
+            const skipTime = details.seekOffset || 10;
+            audioPlayer.currentTime = Math.max(0, audioPlayer.currentTime - skipTime);
+            updateMediaSessionPosition();
+        }
+    });
+
+    // 快进 10 秒
+    navigator.mediaSession.setActionHandler('seekforward', (details) => {
+        console.log('[Music] Media Session: seekforward');
+        if (audioPlayer) {
+            const skipTime = details.seekOffset || 10;
+            audioPlayer.currentTime = Math.min(audioPlayer.duration || 0, audioPlayer.currentTime + skipTime);
+            updateMediaSessionPosition();
+        }
+    });
+
+    // 跳转到指定位置
+    navigator.mediaSession.setActionHandler('seekto', (details) => {
+        console.log('[Music] Media Session: seekto', details.seekTime);
+        if (audioPlayer && details.seekTime !== undefined) {
+            audioPlayer.currentTime = details.seekTime;
+            updateMediaSessionPosition();
+        }
+    });
+
+    // 停止
+    navigator.mediaSession.setActionHandler('stop', () => {
+        console.log('[Music] Media Session: stop');
+        if (audioPlayer) {
+            audioPlayer.pause();
+            audioPlayer.currentTime = 0;
+        }
+    });
+
+    console.log('[Music] Media Session handlers registered');
+}
 
 /**
  * 初始化音频播放器
@@ -151,11 +314,22 @@ function initAudioPlayer() {
         store.musicPlaying = true;
         if (typeof amllPlayer !== 'undefined' && amllPlayer) amllPlayer.resume();
         startAmllUpdateLoop(); // 确保同步循环开启
+        // 更新 Media Session 播放状态
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'playing';
+        }
     });
     audioPlayer.addEventListener('pause', () => {
         store.musicPlaying = false;
         if (typeof amllPlayer !== 'undefined' && amllPlayer) amllPlayer.pause();
+        // 更新 Media Session 播放状态
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'paused';
+        }
     });
+
+    // 初始化 Media Session 处理器
+    setupMediaSessionHandlers();
 
     return audioPlayer;
 }
@@ -182,6 +356,9 @@ function handleTimeUpdate() {
 
     // 每 5 秒保存一次播放状态到 localStorage
     savePlayStateThrottled();
+
+    // 更新 Media Session 位置信息 (节流，每秒更新一次)
+    updateMediaSessionPositionThrottled();
 }
 
 // 节流保存播放状态
@@ -701,7 +878,7 @@ export const musicMethods = {
                     amllPlayer.setEnableScale(true);
                     amllPlayer.setEnableBlur(true);
                     amllPlayer.setEnableSpring(true);
-                    amllPlayer.setAlignPosition(0.5);
+                    amllPlayer.setAlignPosition(0.35);
                     amllPlayer.setAlignAnchor('center');
                     amllPlayer.setWordFadeWidth(0.9);
 
@@ -752,7 +929,7 @@ export const musicMethods = {
 
                 setTimeout(() => {
                     if (amllPlayer) {
-                        amllPlayer.setAlignPosition(0.5);
+                        amllPlayer.setAlignPosition(0.35);
                         amllPlayer.setAlignAnchor('center');
                     }
                 }, 300);
@@ -1027,6 +1204,9 @@ export const musicMethods = {
 
         // 立即开启更新循环，确保切换瞬间就开始同步
         startAmllUpdateLoop();
+
+        // 更新 Media Session (SMTC) 元数据
+        updateMediaSession(song);
 
         // 并行加载歌词，提高响应速度
         this.musicLoadLyrics(song.id);
@@ -2065,6 +2245,9 @@ export const musicMethods = {
 
                 // 初始化音频但不播放
                 initAudioPlayer();
+
+                // 更新 Media Session 元数据（显示上次播放的歌曲）
+                updateMediaSession(song);
 
                 console.log('[Music] Restored play state:', song.name, 'at', Math.floor(state.currentTime), 's');
             }
