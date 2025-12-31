@@ -1067,13 +1067,50 @@ export const musicMethods = {
 
     /**
      * 自动加载"我喜欢的音乐" (随机) 但不播放
-     * 优化：先从缓存恢复上次歌曲，实现瞬间显示
+     * 优化：先从播放状态/缓存恢复上次歌曲，实现瞬间显示
      */
     async musicAutoLoadFavorites() {
         // 如果已经有歌在列表里或者正在播放，就不再自动随机加载了
         if (store.musicCurrentSong) return;
 
-        // 1. 优先从缓存恢复（瞬间显示）
+        // 1. 优先从完整播放状态恢复（包含播放进度、音量等）
+        const playState = localStorage.getItem('music_play_state');
+        if (playState) {
+            try {
+                const state = JSON.parse(playState);
+                // 检查保存时间，24 小时有效
+                if (state.song && Date.now() - state.savedAt < 24 * 60 * 60 * 1000) {
+                    const song = { ...state.song };
+                    if (song.cover) song.cover = ensureHttps(song.cover);
+
+                    store.musicCurrentSong = song;
+                    store.musicPlaylist = (state.playlist || [song]).map(s => ({
+                        ...s,
+                        cover: ensureHttps(s.cover)
+                    }));
+                    store.musicCurrentIndex = state.currentIndex || 0;
+                    store.musicCurrentTime = state.currentTime || 0;
+                    store.musicDuration = state.duration || 0;
+                    store.musicProgress = state.duration ? (state.currentTime / state.duration) * 100 : 0;
+                    store.musicPlaying = false; // 不自动播放
+
+                    // 恢复设置
+                    if (state.volume !== undefined) store.musicVolume = state.volume;
+                    if (state.repeatMode) store.musicRepeatMode = state.repeatMode;
+                    if (state.shuffleEnabled !== undefined) store.musicShuffleEnabled = state.shuffleEnabled;
+
+                    console.log('[Music] Restored from play state:', song.name);
+
+                    // 延迟加载歌词
+                    setTimeout(() => this.musicLoadLyrics(song.id), 500);
+                    return;
+                }
+            } catch (e) {
+                console.warn('[Music] Failed to restore play state:', e);
+            }
+        }
+
+        // 2. 次选：从简单缓存恢复（瞬间显示）
         const cached = this._loadMusicCache();
         if (cached && cached.song) {
             const song = { ...cached.song };
@@ -1091,16 +1128,12 @@ export const musicMethods = {
             store.musicPlaying = false;
             console.log('[Music] Restored from cache, index:', store.musicCurrentIndex);
 
-            // 恢复后延迟加载歌词，确保 UI 能够显示
-            setTimeout(() => {
-                this.musicLoadLyrics(song.id);
-            }, 500);
-
-            // 不再后台刷新，保持稳定
+            // 恢复后延迟加载歌词
+            setTimeout(() => this.musicLoadLyrics(song.id), 500);
             return;
         }
 
-        // 2. 无缓存时加载
+        // 3. 无缓存时加载"我喜欢的音乐"
         store.musicWidgetLoading = true;
 
         if (!store.musicUser) {
@@ -2206,12 +2239,6 @@ export const musicMethods = {
         try {
             const saved = localStorage.getItem('music_play_state');
             if (!saved) return;
-
-            // 如果当前在仪表盘页面，跳过恢复（优先使用“随机加载喜爱音乐”功能）
-            if (store.mainActiveTab === 'dashboard') {
-                console.log('[Music] Skip restore play state on dashboard to allow random favorites');
-                return;
-            }
 
             const state = JSON.parse(saved);
 

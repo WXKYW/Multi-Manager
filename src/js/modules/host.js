@@ -1151,6 +1151,28 @@ export const hostMethods = {
         return '';
     },
 
+    /**
+     * 检查服务器是否有 GPU 数据
+     * 用于控制翻转卡片功能的可用性
+     */
+    hasGpuData(server) {
+        if (!server || !server.info) return false;
+
+        // 检查实时 GPU 数据
+        if (server.info.gpu && (server.info.gpu.Model || server.info.gpu.Usage)) {
+            return true;
+        }
+
+        // 检查历史缓存中是否有 GPU 数据
+        if (server.metricsCache && server.metricsCache.some(r =>
+            r.gpu_usage !== null && r.gpu_usage !== undefined && r.gpu_usage > 0
+        )) {
+            return true;
+        }
+
+        return false;
+    },
+
     async toggleGpuChart(server) {
         server.gpuChartVisible = !server.gpuChartVisible;
 
