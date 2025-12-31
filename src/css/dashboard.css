@@ -147,7 +147,13 @@
   padding: var(--card-padding);
   border: 1px solid var(--border-color);
   box-shadow: var(--card-shadow);
-  transition: all 0.3s ease;
+  /* 只对视觉属性过渡，避免布局属性动画导致的闪烁 */
+  transition:
+    transform 0.3s ease,
+    box-shadow 0.3s ease,
+    border-color 0.3s ease,
+    background-color 0.3s ease,
+    opacity 0.3s ease;
   position: relative;
   overflow: hidden;
   box-sizing: border-box;
@@ -498,28 +504,23 @@
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
 }
 
-/* 播放状态时，控制按钮和状态容器渐隐，避免与歌词重叠 */
+/* 默认隐藏控制按钮和状态容器，只有悬停时显示 */
 .music-widget-wrapper .music-controls,
 .music-widget-wrapper .music-status-container {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-5px);
   transition:
     opacity 0.5s ease,
     transform 0.3s ease;
 }
 
-/* 当播放按钮显示暂停图标时（fa-pause），表示正在播放，触发渐隐 */
-.music-widget-wrapper:has(.btn-control-circle.play .fa-pause) .music-controls,
-.music-widget-wrapper:has(.btn-control-circle.play .fa-pause) .music-status-container {
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(-5px);
-}
-
 /* 鼠标悬停在卡片上时，恢复显示控制按钮和状态 */
 .music-widget-wrapper:hover .music-controls,
 .music-widget-wrapper:hover .music-status-container {
-  opacity: 1 !important;
-  pointer-events: auto !important;
-  transform: translateY(0) !important;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 
 .music-status-badge {
@@ -564,6 +565,20 @@
     transparent 100%
   );
   mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%);
+  /* 淡入动画，避免歌词突然出现 */
+  animation: lyricFadeIn 0.5s ease-out forwards;
+}
+
+@keyframes lyricFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .lyric-content {

@@ -817,14 +817,32 @@ const app = createApp({
       }
     },
 
-    // 监听认证检查状态，移除启动屏 (FCP 优化)
+    // 监听认证检查状态，移除启动屏 (FCP 优化，防闪屏)
     isCheckingAuth(newVal) {
       if (newVal === false) {
-        const loader = document.getElementById('app-loading');
-        if (loader) {
-          loader.style.opacity = '0';
-          setTimeout(() => loader.remove(), 300);
-        }
+        // 等待 Vue 完成 DOM 更新后再移除加载屏幕
+        this.$nextTick(() => {
+          // 再等待一帧确保浏览器完成渲染
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              // 通过 store 状态控制类，避免 Vue 的 :class 绑定覆盖
+              store.appRevealed = true;
+
+              // 延迟启用过渡动画，确保初始数据加载完成后才启用
+              // 在此期间，CSS 规则 .app-wrapper:not(.app-ready) * { transition: none } 生效
+              setTimeout(() => {
+                store.appReady = true;
+                console.log('[System] App ready, transitions enabled');
+              }, 1000);
+
+              const loader = document.getElementById('app-loading');
+              if (loader) {
+                loader.style.opacity = '0';
+                setTimeout(() => loader.remove(), 350);
+              }
+            });
+          });
+        });
       }
     },
 
@@ -1078,11 +1096,13 @@ const app = createApp({
         this.loadGeminiCliAutoCheckSettings();
         console.log('[System] 后台定时检测设置已加载');
 
-        // 懒加载非核心样式 (使用 requestIdleCallback 在空闲时加载，避免阻塞)
+        // 懒加载非核心样式 (异步加载，不阻塞首屏)
+        // 由于 CSS 规则 .app-wrapper:not(.app-ready) * { transition: none } 生效中
+        // CSS 注入不会导致过渡动画闪烁
         if ('requestIdleCallback' in window) {
           window.requestIdleCallback(() => loadLazyCSS());
         } else {
-          setTimeout(() => loadLazyCSS(), 1000);
+          setTimeout(() => loadLazyCSS(), 100);
         }
 
         // 加载当前激活标签页的数据

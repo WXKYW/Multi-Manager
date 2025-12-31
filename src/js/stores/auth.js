@@ -28,7 +28,8 @@ export const useAuthStore = defineStore('auth', {
 
   actions: {
     // 验证密码（登录）
-    async verifyPassword() {
+    // @param {boolean} silent - 静默模式，不显示成功 toast（用于自动验证）
+    async verifyPassword(silent = false) {
       this.loginError = '';
       try {
         const response = await fetch('/api/login', {
@@ -56,7 +57,10 @@ export const useAuthStore = defineStore('auth', {
           localStorage.setItem('admin_password', this.loginPassword);
           localStorage.setItem('password_time', Date.now().toString());
 
-          toast.success('登录成功，欢迎回来！');
+          // 仅在非静默模式下显示成功提示
+          if (!silent) {
+            toast.success('登录成功，欢迎回来！');
+          }
           return true;
         } else {
           this.loginError = result.error || '密码错误，请重试';
@@ -106,7 +110,7 @@ export const useAuthStore = defineStore('auth', {
           const now = Date.now();
           if (now - parseInt(savedTime) < 4 * 24 * 60 * 60 * 1000) {
             this.loginPassword = savedPassword;
-            await this.verifyPassword();
+            await this.verifyPassword(true); // 静默模式，不显示 toast
             if (!this.isAuthenticated) {
               this.showLoginModal = true;
             }

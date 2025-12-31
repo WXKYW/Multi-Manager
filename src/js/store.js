@@ -183,6 +183,8 @@ export const store = reactive({
   navLayout: 'bottom', // 'sidebar' (左侧), 'top' (顶部) or 'bottom' (底栏)
   agentDownloadUrl: '', // 自定义 Agent 下载地址，空则使用主控端
   showSettingsModal: false, // 设置面板显示状态
+  appRevealed: false, // 首屏淡入动画完成
+  appReady: false, // 首屏加载完成，可以启用过渡动画
   singlePageMode: false, // 单页模式（通过 URL 路径访问特定模块时隐藏导航）
   mobileSettingsNavExpanded: false, // 移动端设置导航展开状态
   navGroupExpanded: null, // 当前展开的分组 ID (null 表示都收起)

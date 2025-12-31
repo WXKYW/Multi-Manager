@@ -67,9 +67,18 @@ export const dashboardMethods = {
       this.refreshDashboardData();
     }
 
-    // 音乐收藏异步加载（不阻塞仪表盘）
+    // 2. 音乐收藏异步加载（立即设置加载状态，避免空状态闪烁）
     if (this.musicAutoLoadFavorites) {
-      setTimeout(() => this.musicAutoLoadFavorites(), 100);
+      // 如果没有当前歌曲且没有缓存，立即进入加载状态
+      if (!store.musicCurrentSong) {
+        const musicCache =
+          localStorage.getItem('music_play_state') || localStorage.getItem('music_widget_cache');
+        if (!musicCache) {
+          store.musicWidgetLoading = true;
+        }
+      }
+      // 立即执行，不延迟（延迟会导致先显示空状态）
+      this.musicAutoLoadFavorites();
     }
   },
 

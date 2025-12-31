@@ -95,6 +95,8 @@ function loadUserSettings() {
  */
 function saveUserSettings(settings) {
   try {
+    console.log('[UserSettings] 收到保存请求:', JSON.stringify(settings, null, 2));
+
     // 转换字段名，并确保即便字段不存在也能保留默认结构
     // 注意：必须检查 undefined，因为空字符串 "" 是有效值，不能用 || 运算符覆盖
     const dbSettings = {
@@ -144,8 +146,12 @@ function saveUserSettings(settings) {
           : settings.agent_download_url,
     };
 
+    console.log('[UserSettings] 转换后数据:', JSON.stringify(dbSettings, null, 2));
+
     // 直接交给 Model 层处理，Model 层会自动处理 JSON 序列化和数据库列更新
-    UserSettings.updateSettings(dbSettings);
+    const result = UserSettings.updateSettings(dbSettings);
+    console.log('[UserSettings] 保存结果:', result);
+
     return { success: true };
   } catch (error) {
     console.error('保存用户设置失败:', error);

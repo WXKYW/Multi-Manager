@@ -119,12 +119,12 @@
       <!-- 主界面布局 -->
       <div
         v-if="isAuthenticated"
-        class="app-wrapper no-sidebar"
-        :class="[{ 'settings-active-context': showSettingsModal }, 'nav-layout-' + navLayout]"
+        class="app-wrapper no-sidebar nav-layout-top"
+        :class="[{ 'settings-active-context': showSettingsModal, 'app-reveal': appRevealed, 'app-ready': appReady }, 'nav-layout-' + navLayout]"
       >
         <!-- 主内容区 -->
         <main class="app-main">
-          <div v-if="isAuthenticated" class="container" :class="'layout-' + navLayout">
+          <div v-if="isAuthenticated" class="container layout-top" :class="'layout-' + navLayout">
             <!-- 顶部导航栏 (移动端：CSS会自动转为底部导航；PC端：仅顶部布局显示) -->
             <div
               class="top-nav-bar"

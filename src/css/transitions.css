@@ -557,12 +557,17 @@
   transform: scale(0.995);
 }
 
-/* 卡片悬停效果优化 */
+/* 卡片悬停效果优化 - 只对视觉属性过渡，避免布局属性动画导致的闪烁 */
 .account-card,
 .stat-card,
 .zone-card,
 .project-card {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition:
+    transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* 减少动画以提升性能（可选） */

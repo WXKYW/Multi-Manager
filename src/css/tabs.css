@@ -1,6 +1,6 @@
 /* Tabs & Navigation Styles */
 
-.main-tabs {
+.main-tabs:not(.main-tabs-grouped) {
   display: flex;
   gap: 0;
   justify-content: center;

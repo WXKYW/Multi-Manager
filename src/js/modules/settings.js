@@ -10,7 +10,7 @@ export const settingsMethods = {
   async loadModuleSettings() {
     try {
       const response = await fetch('/api/settings', {
-        headers: store.getAuthHeaders(),
+        headers: this.getAuthHeaders(),
       });
 
       // 顺便加载数据库统计信息
@@ -78,18 +78,19 @@ export const settingsMethods = {
             this.moduleOrder = [...savedOrder, ...missingModules];
           }
 
-          if (settings.channelEnabled) this.channelEnabled = settings.channelEnabled;
-          if (settings.channelModelPrefix) this.channelModelPrefix = settings.channelModelPrefix;
+          if (settings.channelEnabled) Object.assign(this.channelEnabled, settings.channelEnabled);
+          if (settings.channelModelPrefix)
+            Object.assign(this.channelModelPrefix, settings.channelModelPrefix);
           if (settings.load_balancing_strategy)
             this.agSettingsForm.load_balancing_strategy = settings.load_balancing_strategy;
           if (settings.serverIpDisplayMode) this.serverIpDisplayMode = settings.serverIpDisplayMode;
           if (settings.vibrationEnabled !== undefined)
             this.vibrationEnabled = settings.vibrationEnabled;
 
-          if (settings.totpSettings) Object.assign(store.totpSettings, settings.totpSettings);
-          if (settings.navLayout) store.navLayout = settings.navLayout;
+          if (settings.totpSettings) Object.assign(this.totpSettings, settings.totpSettings);
+          if (settings.navLayout) this.navLayout = settings.navLayout;
           if (settings.agentDownloadUrl !== undefined)
-            store.agentDownloadUrl = settings.agentDownloadUrl;
+            this.agentDownloadUrl = settings.agentDownloadUrl;
 
           this.activateFirstVisibleModule();
           return true;
@@ -238,7 +239,7 @@ export const settingsMethods = {
 
   // 保存所有设置到后端
   async saveUserSettingsToServer() {
-    if (!store.isAuthenticated) return false;
+    if (!this.isAuthenticated) return false;
     this.antigravitySaving = true;
     try {
       const settings = {
@@ -250,18 +251,19 @@ export const settingsMethods = {
         load_balancing_strategy: this.agSettingsForm.load_balancing_strategy,
         serverIpDisplayMode: this.serverIpDisplayMode,
         vibrationEnabled: this.vibrationEnabled,
-        navLayout: store.navLayout,
-        totpSettings: store.totpSettings,
-        agentDownloadUrl: store.agentDownloadUrl,
+        navLayout: this.navLayout,
+        totpSettings: this.totpSettings,
+        agentDownloadUrl: this.agentDownloadUrl,
       };
 
       const response = await fetch('/api/settings', {
         method: 'POST',
-        headers: store.getAuthHeaders(),
+        headers: this.getAuthHeaders(),
         body: JSON.stringify(settings),
       });
       return response.ok;
     } catch (error) {
+      console.error('[Settings] 保存设置失败:', error);
       return false;
     } finally {
       this.antigravitySaving = false;

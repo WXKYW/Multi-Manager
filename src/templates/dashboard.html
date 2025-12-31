@@ -6,7 +6,7 @@
       <p class="subtitle">System Overview & Status Monitor</p>
     </div>
     <div class="header-right">
-      <div class="last-update" v-if="dashboardLastUpdate">
+      <div class="last-update" v-show="dashboardLastUpdate">
         <i class="fas fa-history"></i><span>{{ dashboardLastUpdate }}</span>
       </div>
       <button class="btn-refresh-all" @click="refreshDashboardData" :disabled="dashboardLoading">
@@ -262,7 +262,7 @@
               <div
                 class="api-progress-bar"
                 style="background: var(--ag-primary)"
-                :style="{ width: (dashboardStats.antigravity.total_calls ? (dashboardStats.antigravity.success_calls/dashboardStats.antigravity.total_calls*100) : 100) + '%' }"
+                :style="{ width: (dashboardStats.antigravity.total_calls ? (dashboardStats.antigravity.success_calls/dashboardStats.antigravity.total_calls*100) : 0) + '%' }"
               ></div>
             </div>
           </div>
@@ -278,7 +278,7 @@
               <div
                 class="api-progress-bar"
                 style="background: var(--gemini-primary)"
-                :style="{ width: (dashboardStats.geminiCli.total_calls ? (dashboardStats.geminiCli.success_calls/dashboardStats.geminiCli.total_calls*100) : 100) + '%' }"
+                :style="{ width: (dashboardStats.geminiCli.total_calls ? (dashboardStats.geminiCli.success_calls/dashboardStats.geminiCli.total_calls*100) : 0) + '%' }"
               ></div>
             </div>
           </div>
