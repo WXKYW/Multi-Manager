@@ -20,6 +20,8 @@ import '../css/refined-mobile.css'; // 移动端适配
 
 // 懒加载样式 (Lazy Load CSS) - 非首屏模块
 async function loadLazyCSS() {
+  if (window.lazyCSSLoaded) return;
+  window.lazyCSSLoaded = true;
   console.log('[System] Loading lazy CSS resources...');
   const styles = [
     import('../css/projects.css'),
@@ -1074,6 +1076,13 @@ const app = createApp({
         this.loadGeminiCliAutoCheckSettings();
         console.log('[System] 后台定时检测设置已加载');
 
+        // 懒加载非核心样式 (使用 requestIdleCallback 在空闲时加载，避免阻塞)
+        if ('requestIdleCallback' in window) {
+          window.requestIdleCallback(() => loadLazyCSS());
+        } else {
+          setTimeout(() => loadLazyCSS(), 1000);
+        }
+
         // 加载当前激活标签页的数据
         this.$nextTick(() => {
           switch (this.mainActiveTab) {
@@ -1519,11 +1528,11 @@ async function initApp() {
     const elapsed = Date.now() - startTime;
     console.log(`[App] Initialized and mounted in ${elapsed}ms`);
 
-    // 4. 延迟加载非核心资源 (样式)
-    requestAnimationFrame(() => {
-      // 懒加载其余样式
-      loadLazyCSS();
-    });
+    // 4. 延迟加载非核心资源 (样式) - 移至认证成功后加载
+    // requestAnimationFrame(() => {
+    //   // 懒加载其余样式
+    //   loadLazyCSS();
+    // });
   } catch (error) {
     console.error('[App] Critical failure during initialization:', error);
     // 即使模板加载失败，也尝试挂载 Vue 以显示基础界面或错误状态
