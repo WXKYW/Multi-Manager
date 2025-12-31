@@ -4,7 +4,7 @@
 # 多阶段构建：Builder -> Runner
 
 # 阶段 1: 构建前端 (Builder)
-FROM node:20-alpine AS builder
+FROM --platform=$BUILDPLATFORM node:20-alpine AS builder
 # 安装构建工具
 RUN apk add --no-cache python3 make g++
 WORKDIR /app
@@ -30,7 +30,7 @@ ENV PATH=/app/node_modules/.bin:$PATH \
 RUN npm run build
 
 # 阶段 2: 构建 Go Agent 二进制 (Agent Builder)
-FROM golang:1.21-alpine AS agent-builder
+FROM --platform=$BUILDPLATFORM golang:1.23-alpine AS agent-builder
 WORKDIR /app/agent-go
 # 安装构建工具
 RUN apk add --no-cache upx
@@ -48,7 +48,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o agent-lin
 RUN CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o agent-windows-amd64.exe
 
 # 阶段 3: 运行时镜像 (Runner)
-FROM node:20-alpine AS runner
+FROM --platform=$TARGETPLATFORM node:20-alpine AS runner
 
 LABEL org.opencontainers.image.title="API Monitor"
 LABEL org.opencontainers.image.description="API聚合监控面板"

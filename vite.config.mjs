@@ -94,21 +94,27 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
+        // 关键：确保支持在 HTML 中直接写模板 (Runtime Compilation)
+        'vue': 'vue/dist/vue.esm-bundler.js',
       },
     },
     define: {
       __USE_CDN__: JSON.stringify(useCdn),
       __CDN_PROVIDER__: JSON.stringify(cdnProvider),
+      // Vue 特性标志，消除控制台警告
+      __VUE_OPTIONS_API__: JSON.stringify(true),
+      __VUE_PROD_DEVTOOLS__: JSON.stringify(false),
+      __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: JSON.stringify(false),
     },
     server: {
       port: 5173,
       proxy: {
         '/api': {
-          target: 'http://localhost:11451',
+          target: 'http://127.0.0.1:3000',
           changeOrigin: true,
         },
         '/socket.io': {
-          target: 'http://localhost:11451',
+          target: 'http://127.0.0.1:3000',
           ws: true,
         },
       },

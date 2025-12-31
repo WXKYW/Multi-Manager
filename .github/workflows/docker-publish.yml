@@ -11,22 +11,22 @@ name: Build and Publish Docker Image
 on:
   push:
     branches: [main]
-    tags: ['v*']
+    tags: ["v*"]
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - '.gitignore'
-      - 'LICENSE'
+      - "**.md"
+      - "docs/**"
+      - ".gitignore"
+      - "LICENSE"
   workflow_dispatch:
     inputs:
       tag:
-        description: '镜像标签（可选）'
+        description: "镜像标签（可选）"
         required: false
-        default: 'latest'
+        default: "latest"
       platforms:
-        description: '构建平台（可选）'
+        description: "构建平台（可选）"
         required: false
-        default: 'linux/amd64'
+        default: "linux/amd64,linux/arm64"
 
 permissions:
   contents: read
@@ -106,7 +106,7 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          platforms: ${{ github.event.inputs.platforms != '' && github.event.inputs.platforms || 'linux/amd64' }}
+          platforms: ${{ github.event.inputs.platforms != '' && github.event.inputs.platforms || 'linux/amd64,linux/arm64' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -143,13 +143,13 @@ jobs:
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest
-          format: 'sarif'
-          output: 'trivy-results.sarif'
+          format: "sarif"
+          output: "trivy-results.sarif"
         continue-on-error: true
 
       # 上传扫描结果（可选）
       - name: Upload Trivy scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: 'trivy-results.sarif'
+          sarif_file: "trivy-results.sarif"
         continue-on-error: true

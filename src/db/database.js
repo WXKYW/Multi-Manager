@@ -9,7 +9,11 @@ class DatabaseService {
   constructor() {
     this.db = null;
     this.initialized = false;
-    this.dbPath = path.join(__dirname, '../../data/data.db');
+    const dataDir = process.env.DATA_DIR || path.join(__dirname, '../../data');
+    const dbName = process.env.DB_NAME || 'data.db';
+    this.dbPath = path.isAbsolute(dataDir)
+      ? path.join(dataDir, dbName)
+      : path.resolve(process.cwd(), dataDir, dbName);
     this.schemaPath = path.join(__dirname, 'schema.sql');
   }
 

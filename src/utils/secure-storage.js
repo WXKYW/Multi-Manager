@@ -149,6 +149,20 @@ function createSecureWrapper(category) {
             if (!Array.isArray(arr)) return arr;
             return arr.map((item) => decryptFields(item, fields));
         },
+
+        /**
+         * 单个值的安全解密（兼容旧数据）
+         */
+        secureDecrypt(value) {
+            return secureDecrypt(value);
+        },
+
+        /**
+         * 单个值的安全加密
+         */
+        secureEncrypt(value) {
+            return secureEncrypt(value);
+        }
     };
 }
 

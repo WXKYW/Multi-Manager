@@ -113,16 +113,32 @@ const app = createApp({
       authStore,
       appStore,
       serverStore,
-      ...toRefs(authStore),
-      ...toRefs(appStore),
-      ...toRefs(serverStore),
+      // 手动挑选常用状态（兼容 index.html 现有引用，避免全量解构导致的 $ 属性冲突）
+      isAuthenticated: computed(() => authStore.isAuthenticated),
+      isCheckingAuth: computed(() => authStore.isCheckingAuth),
+      showLoginModal: computed({
+        get: () => authStore.showLoginModal,
+        set: (v) => authStore.showLoginModal = v
+      }),
+      showSetPasswordModal: computed({
+        get: () => authStore.showSetPasswordModal,
+        set: (v) => authStore.showSetPasswordModal = v
+      }),
+      mainActiveTab: computed({
+        get: () => appStore.mainActiveTab,
+        set: (v) => appStore.mainActiveTab = v
+      }),
+      opacity: computed({
+        get: () => appStore.opacity,
+        set: (v) => appStore.opacity = v
+      }),
 
       openListPathParts,
       currentOpenListTempTab,
       openListTempPathParts,
       sortedOpenListFiles,
       isSelfHVideoActive,
-      moduleGroups: appStore.moduleGroups, // 模块分组配置
+      moduleGroups: appStore.moduleGroups,
     };
   },
   data() {
@@ -680,8 +696,8 @@ const app = createApp({
     });
 
     // 3. 异步认证与关键数据加载
-    authStore.checkAuth().then(() => {
-      if (authStore.isAuthenticated) {
+    this.authStore.checkAuth().then(() => {
+      if (this.authStore.isAuthenticated) {
         // 关键业务数据
         this.loadManagedAccounts();
         this.loadProjectCosts();

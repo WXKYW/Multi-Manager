@@ -37,8 +37,12 @@ function createLimiter(options = {}) {
             return req.path === '/health' || req.path === '/api/health';
         },
         keyGenerator: (req) => {
-            // 使用 IP + User-Agent 作为限制键
-            return `${req.ip}-${req.headers['user-agent'] || 'unknown'}`;
+            // 使用标准 IP 逻辑，并附加 User-Agent 以增加区分度
+            return req.ip + (req.headers['user-agent'] || '');
+        },
+        validate: {
+            xForwardedForHeader: false,
+            keyGeneratorIpFallback: false
         },
     };
 
@@ -46,12 +50,12 @@ function createLimiter(options = {}) {
 }
 
 /**
- * 通用 API 限制器 - 宽松
- * 100 请求 / 15 分钟
+ * 通用 API 限制器 - 为了开发环境友好，显著放宽上限
+ * 1000 请求 / 15 分钟
  */
 const generalLimiter = createLimiter({
     windowMs: 15 * 60 * 1000,
-    max: 100,
+    max: process.env.NODE_ENV === 'development' ? 5000 : 1000,
 });
 
 /**
