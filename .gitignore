@@ -1,54 +1,87 @@
+# ====================
 # 依赖
+# ====================
 node_modules/
 
+# ====================
 # 环境变量（包含敏感信息）
+# ====================
 .env
+.env.local
+.env.*.local
 
-# 主机存储的账号数据（包含 API Token）
+# ====================
+# 敏感数据文件
+# ====================
 accounts.json
-
-# 敏感文件
 password.json
 sessions.json
 antigravity-accounts-*.json
 
-# 用户数据
+# ====================
+# 用户数据 & 数据库
+# ====================
 data/
 *.db
+*.db-journal
+*.db-shm
+*.db-wal
 
+# ====================
 # 日志
+# ====================
 *.log
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
+# ====================
 # 操作系统
+# ====================
 .DS_Store
 Thumbs.db
+Desktop.ini
 
-# IDE
+# ====================
+# IDE / 编辑器
+# ====================
 .vscode/
 .idea/
 .kiro/
 *.swp
 *.swo
+*~
 
+# ====================
 # 临时文件
+# ====================
 *.tmp
 .cache/
 config/
-.example
-./backup
-todo.md
-test-*-*.js
+tmp/
+test/tmp/
+
+# ====================
 # 构建输出
+# ====================
 dist/
 build/
 out/
-docs/
-tmp/
-test/tmp/
 coverage/
+stats.html
+docs/
+
+# ====================
+# 备份 & 杂项
+# ====================
 backup/
+*.bak
+.example
+todo.md
+test-*-*.js
+
+# ====================
+# AI Agent 工作目录
+# ====================
 .agent/
-.agent/workflows/
-.agent/workflows/optimization-plan.md
-optimization-plan.md
