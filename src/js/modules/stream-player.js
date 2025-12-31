@@ -6,8 +6,9 @@
  * @module stream-player
  */
 
-import Plyr from 'plyr';
-import 'plyr/dist/plyr.css';
+// Plyr imports removed for lazy loading
+// import Plyr from 'plyr';
+// import 'plyr/dist/plyr.css';
 import { store } from '../store.js';
 
 // ==================== 配置常量 ====================
@@ -204,6 +205,17 @@ async function play(options) {
 
   if (!url || !videoElement) {
     return { success: false, message: '缺少必要参数' };
+  }
+
+  // 动态加载 Plyr 和 CSS
+  let Plyr;
+  try {
+    // plyr.css has been moved to main.js loadLazyCSS to ensure correct injection
+    const module = await import('plyr');
+    Plyr = module.default;
+  } catch (e) {
+    console.error('[StreamPlayer] Failed to load Plyr:', e);
+    return { success: false, message: '播放器组件加载失败' };
   }
 
   // 如果已经在播放同一个视频，直接返回

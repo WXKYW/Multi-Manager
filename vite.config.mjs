@@ -131,6 +131,11 @@ export default defineConfig(({ mode }) => {
           target: 'http://127.0.0.1:3000',
           ws: true,
         },
+        '/ws': {
+          target: 'http://127.0.0.1:3000',
+          ws: true,
+          changeOrigin: true,
+        },
       },
     },
   };

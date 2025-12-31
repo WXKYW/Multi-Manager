@@ -3,9 +3,7 @@
  * 负责 SSH 会话管理、终端初始化、分屏布局、主题切换等
  */
 
-import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
-import { WebLinksAddon } from '@xterm/addon-web-links';
+// xterm imports moved to initSessionTerminal for lazy loading
 import { toast } from './toast.js';
 import { sshSplitMethods } from './ssh-split.js';
 
@@ -52,8 +50,8 @@ export const sshMethods = {
     this.activeSSHSessionId = sessionId;
     this.serverCurrentTab = 'terminal';
 
-    this.$nextTick(() => {
-      this.initSessionTerminal(sessionId);
+    this.$nextTick(async () => {
+      await this.initSessionTerminal(sessionId);
       // 核心修复：调度智能同步，处理 DOM 挂载和多级尺寸适配补偿
       this.scheduleSync();
     });
@@ -268,8 +266,24 @@ export const sshMethods = {
   /**
    * 手动计算并调整终端尺寸 (替代不稳定的 FitAddon)
    */
+  /**
+   * 手动调整终端大小 (兼容 FitAddon)
+   */
   manualTerminalResize(session) {
     if (!session || !session.terminal) return;
+
+    // 如果有 FitAddon，优先使用
+    if (session.fit) {
+      try {
+        session.fit.fit();
+        // 同步后端
+        this.syncTerminalSize(session);
+        return;
+      } catch (e) {
+        console.warn('FitAddon failed, falling back to manual resize', e);
+      }
+    }
+
     const terminal = session.terminal;
     const container = document.getElementById('ssh-terminal-' + session.id);
     if (!container || container.offsetWidth === 0) return;
@@ -303,20 +317,25 @@ export const sshMethods = {
       terminal.resize(Math.max(20, cols), Math.max(5, rows));
 
       // 4. 同步到后端
-      if (session.ws && session.ws.readyState === WebSocket.OPEN) {
-        if (session._resizeDebounce) clearTimeout(session._resizeDebounce);
-        session._resizeDebounce = setTimeout(() => {
-          if (session.ws && session.ws.readyState === WebSocket.OPEN) {
-            session.ws.send(
-              JSON.stringify({
-                type: 'resize',
-                cols: terminal.cols,
-                rows: terminal.rows,
-              })
-            );
-          }
-        }, 400);
-      }
+      this.syncTerminalSize(session);
+    }
+  },
+
+  syncTerminalSize(session) {
+    if (!session || !session.terminal) return;
+    if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+      if (session._resizeDebounce) clearTimeout(session._resizeDebounce);
+      session._resizeDebounce = setTimeout(() => {
+        if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+          session.ws.send(
+            JSON.stringify({
+              type: 'resize',
+              cols: session.terminal.cols,
+              rows: session.terminal.rows,
+            })
+          );
+        }
+      }, 400);
     }
   },
 
@@ -619,9 +638,27 @@ export const sshMethods = {
   /**
    * 初始化会话终端 (WebSocket 版本)
    */
-  initSessionTerminal(sessionId) {
+  async initSessionTerminal(sessionId) {
     const session = this.sshSessions.find(s => s.id === sessionId);
     if (!session) return;
+
+    // 动态加载 xterm 库 (Code Splitting) & 确保 CSS 已加载
+    // 只有在用户真正打开终端时才下载这些重型库
+    let Terminal, FitAddon, WebLinksAddon;
+    try {
+      // 显式导入 CSS 以防 main.js 中的 lazy load 还没完成 (Vite 会自动去重)
+      await import('@xterm/xterm/css/xterm.css');
+
+      [{ Terminal }, { FitAddon }, { WebLinksAddon }] = await Promise.all([
+        import('@xterm/xterm'),
+        import('@xterm/addon-fit'),
+        import('@xterm/addon-web-links'),
+      ]);
+    } catch (e) {
+      console.error('Failed to load xterm:', e);
+      toast.error('终端组件加载失败，请检查网络连接');
+      return;
+    }
 
     // 核心修复：如果全局仓库中不存在该节点的挂载点，则手动创建一个
     let terminalContainer = document.getElementById('ssh-terminal-' + sessionId);
@@ -655,6 +692,8 @@ export const sshMethods = {
     });
 
     // 加载基本插件
+    const fitAddon = new FitAddon();
+    terminal.loadAddon(fitAddon);
     terminal.loadAddon(new WebLinksAddon());
 
     // 打开终端到容器
@@ -662,7 +701,7 @@ export const sshMethods = {
 
     // 保存到会话
     session.terminal = terminal;
-    // 移除 session.fit，改用手动模式
+    session.fit = fitAddon;
 
     // 立即执行一次手动适配
     this.$nextTick(() => {

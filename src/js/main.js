@@ -17,6 +17,7 @@ import '../css/transitions.css';
 import '../css/refined-ui.css';
 import '../css/nav-grouped.css';
 import '../css/refined-mobile.css'; // 移动端适配
+// xterm.css moved to lazy load
 
 // 懒加载样式 (Lazy Load CSS) - 非首屏模块
 async function loadLazyCSS() {
@@ -32,6 +33,10 @@ async function loadLazyCSS() {
     import('../css/logs.css'),
     import('../css/server.css'),
     import('../css/ssh-ide.css'),
+    import('../css/ssh-ide.css'),
+    // xterm.css moved to critical imports
+    import('@xterm/xterm/css/xterm.css'),
+    import('@applemusic-like-lyrics/core/style.css'),
     import('../css/antigravity.css'),
     import('../css/gemini-cli.css'),
     import('../css/openai.css'),
@@ -43,6 +48,7 @@ async function loadLazyCSS() {
     import('../css/chat.css'),
     import('../css/template.css'),
     import('../css/stream-player.css'),
+    import('plyr/dist/plyr.css'),
     import('../css/totp.css'),
     import('../css/music.css'),
   ];
@@ -61,11 +67,7 @@ import { useAppStore } from './stores/app.js';
 import { useServerStore } from './stores/server.js';
 import '@fortawesome/fontawesome-free/css/all.min.css';
 
-// xterm.js imports
-import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
-import { WebLinksAddon } from '@xterm/addon-web-links';
-import '@xterm/xterm/css/xterm.css';
+// xterm.js imports removed - lazy loaded in ssh.js
 
 // 导入功能模块
 import { dashboardMethods } from './modules/dashboard.js';
