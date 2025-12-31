@@ -60,21 +60,22 @@
       />
       <div
         style="
-          font-family:
-            -apple-system,
-            BlinkMacSystemFont,
-            Segoe UI,
-            Roboto,
-            Helvetica,
-            Arial,
-            sans-serif;
-          color: #58a6ff;
-          font-size: 14px;
-          letter-spacing: 1px;
-          font-weight: 500;
+          width: 160px;
+          height: 3px;
+          background: rgba(88, 166, 255, 0.1);
+          border-radius: 4px;
+          overflow: hidden;
         "
       >
-        API MONITOR
+        <div
+          style="
+            width: 30%;
+            height: 100%;
+            background: #58a6ff;
+            border-radius: 4px;
+            animation: progress-indeterminate 1.5s infinite ease-in-out;
+          "
+        ></div>
       </div>
       <style>
         @keyframes pulse {
@@ -91,6 +92,20 @@
           100% {
             opacity: 0.6;
             transform: scale(0.95);
+          }
+        }
+
+        @keyframes progress-indeterminate {
+          0% {
+            transform: translateX(-150%);
+          }
+
+          50% {
+            transform: translateX(180%);
+          }
+
+          100% {
+            transform: translateX(400%);
           }
         }
       </style>
