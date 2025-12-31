@@ -813,6 +813,17 @@ const app = createApp({
       }
     },
 
+    // 监听认证检查状态，移除启动屏 (FCP 优化)
+    isCheckingAuth(newVal) {
+      if (newVal === false) {
+        const loader = document.getElementById('app-loading');
+        if (loader) {
+          loader.style.opacity = '0';
+          setTimeout(() => loader.remove(), 300);
+        }
+      }
+    },
+
     'monitorConfig.interval'(newVal) {
       console.log('主机刷新间隔变更为:', newVal, '秒，重启轮询');
       this.startServerPolling();
@@ -1497,13 +1508,6 @@ async function initApp() {
     // 2. 挂载 Vue 应用
     app.use(pinia);
     app.mount('#app');
-
-    // 移除加载屏 (FCP 优化)
-    const loader = document.getElementById('app-loading');
-    if (loader) {
-      loader.style.opacity = '0';
-      setTimeout(() => loader.remove(), 300);
-    }
 
     // 3. 启动全局时间更新定时器 (每秒触发一次，用于倒计时)
     const appStore = useAppStore();

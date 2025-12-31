@@ -1,10 +1,4 @@
-<!-- 认证检查加载状态 -->
-<div v-if="isCheckingAuth" class="auth-loading">
-  <div class="auth-loading-content">
-    <div class="modern-loader"></div>
-    <div class="loading-text">Gravity</div>
-  </div>
-</div>
+<!-- 认证检查加载状态 (已移除，使用全局加载屏) -->
 
 <!-- 首次设置密码界面 -->
 <div v-if="!isCheckingAuth && showSetPasswordModal" class="auth-screen">
