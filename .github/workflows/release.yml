@@ -1,0 +1,144 @@
+# ===================================
+# API Monitor 自动发版工作流
+# ===================================
+# 触发条件：
+# - 手动触发并指定版本号
+# - 创建版本标签 (v*)
+#
+# 功能：
+# - 自动生成 Release Notes
+# - 创建 GitHub Release
+# - 更新 CHANGELOG.md
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号 (如 1.0.0，不需要 v 前缀)"
+        required: true
+        type: string
+      prerelease:
+        description: "是否为预发布版本"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      # 确定版本号
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            echo "version=v${VERSION}" >> $GITHUB_OUTPUT
+            echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
+          else
+            # 从标签获取版本
+            TAG="${{ github.ref_name }}"
+            echo "version=${TAG}" >> $GITHUB_OUTPUT
+            echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          fi
+
+      # 创建标签（仅手动触发时）
+      - name: Create tag
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.version.outputs.tag }}" -m "Release ${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      # 生成变更日志
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # 获取上一个标签
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          CURRENT_TAG="${{ steps.version.outputs.tag }}"
+          
+          echo "## 🚀 $CURRENT_TAG 更新内容" > release_notes.md
+          echo "" >> release_notes.md
+          
+          if [ -n "$PREV_TAG" ]; then
+            echo "### 📝 提交记录" >> release_notes.md
+            echo "" >> release_notes.md
+            
+            # 按类型分类提交
+            echo "#### ✨ 新功能 (feat)" >> release_notes.md
+            git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --grep="^feat" >> release_notes.md || true
+            echo "" >> release_notes.md
+            
+            echo "#### 🐛 修复 (fix)" >> release_notes.md
+            git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --grep="^fix" >> release_notes.md || true
+            echo "" >> release_notes.md
+            
+            echo "#### 📚 文档 (docs)" >> release_notes.md
+            git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --grep="^docs" >> release_notes.md || true
+            echo "" >> release_notes.md
+            
+            echo "#### 🔧 其他" >> release_notes.md
+            git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --grep="^build\|^ci\|^chore\|^refactor\|^perf\|^style\|^test" >> release_notes.md || true
+            echo "" >> release_notes.md
+          else
+            echo "首次发布" >> release_notes.md
+          fi
+          
+          echo "" >> release_notes.md
+          echo "---" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "### 📦 Docker 镜像" >> release_notes.md
+          echo '```bash' >> release_notes.md
+          echo "# 从 GitHub Container Registry 拉取" >> release_notes.md
+          echo "docker pull ghcr.io/${{ github.repository_owner }}/api-monitor:$CURRENT_TAG" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "# 从 Docker Hub 拉取" >> release_notes.md
+          echo "docker pull ${{ github.repository_owner }}/api-monitor:$CURRENT_TAG" >> release_notes.md
+          echo '```' >> release_notes.md
+          
+          cat release_notes.md
+
+      # 创建 GitHub Release
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "Release ${{ steps.version.outputs.tag }}"
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+          generate_release_notes: true
+
+      # 输出摘要
+      - name: Summary
+        run: |
+          echo "## 🎉 Release ${{ steps.version.outputs.tag }} 创建成功!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **版本**: ${{ steps.version.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **预发布**: ${{ github.event.inputs.prerelease || 'false' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release 页面**: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
