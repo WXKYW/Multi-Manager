@@ -7,8 +7,17 @@
 const express = require('express');
 const router = express.Router();
 const path = require('path');
+const { Readable } = require('stream');
 const { createLogger } = require('../../src/utils/logger');
 const dbService = require('../../src/db/database');
+
+// UnblockNeteaseMusic 模块（可选依赖，解锁灰色歌曲）
+let unblockmatch = null;
+try {
+  unblockmatch = require('@unblockneteasemusic/server');
+} catch (e) {
+  // 模块未安装，解锁功能将不可用
+}
 
 const logger = createLogger('Music');
 
@@ -308,7 +317,7 @@ router.get('/song/url', async (req, res) => {
       logger.info(`Song ${id} needs unblock, trying...`);
 
       try {
-        const match = require('@unblockneteasemusic/server');
+        const match = unblockmatch;
         const sources = ['pyncmd', 'bodian'];
         const unblocked = await match(Number(id), sources);
 
@@ -376,7 +385,7 @@ router.get('/song/url/unblock', async (req, res) => {
   }
 
   try {
-    const match = require('@unblockneteasemusic/server');
+    const match = unblockmatch;
     const sources = source ? source.split(',') : ['pyncmd', 'bodian'];
 
     logger.info(`Unblock: trying to match song ${id} with sources:`, sources);
@@ -513,7 +522,7 @@ router.get('/audio/proxy', async (req, res) => {
     });
 
     // 将 ReadableStream 转换为 Node.js 可读流并 pipe 到响应
-    const { Readable } = require('stream');
+    // Readable 已在顶部导入
     const nodeStream = Readable.fromWeb(stream);
     nodeStream.pipe(res);
 

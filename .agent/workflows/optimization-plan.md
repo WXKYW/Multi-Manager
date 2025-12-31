@@ -159,20 +159,20 @@ description: API Monitor 项目优化实施计划
   - 添加解密层
 
 ### 3.2 速率限制
-- [ ] **安装依赖**
+- [x] **安装依赖** ✅
   ```bash
   npm install express-rate-limit
   ```
   
-- [ ] **配置限制规则**
-  ```javascript
-  // src/middleware/rateLimit.js
-  const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 100,
-    standardHeaders: true
-  });
-  ```
+- [x] **创建限制器中间件** ✅
+  - `src/middleware/rateLimit.js`
+  - 包含 7 种预设限制器：
+    - `generalLimiter` - 通用 (100/15min)
+    - `authLimiter` - 登录 (5/15min)
+    - `proxyLimiter` - API 代理 (30/min)
+    - `audioProxyLimiter` - 音频代理 (100/min)
+    - `uploadLimiter` - 文件上传 (10/hour)
+    - `sshLimiter` - SSH 连接 (20/10min)
   
 - [ ] **应用到敏感端点**
   - `/api/auth/*` - 登录相关
@@ -190,20 +190,26 @@ description: API Monitor 项目优化实施计划
   - 防止 SQL 注入（虽然用 prepared statements 但仍需验证）
 
 ### 3.4 安全头
-- [ ] **安装 Helmet**
+- [x] **安装 Helmet** ✅
   ```bash
   npm install helmet
   ```
   
-- [ ] **配置安全头**
+- [x] **创建安全中间件** ✅
+  - `src/middleware/security.js`
   - CSP (Content Security Policy)
   - HSTS
   - X-Frame-Options
+  - X-Content-Type-Options
+  - Referrer-Policy
+
+**Phase 3 进度**: 🔄 50%
 
 **Phase 3 产出**:
-- 敏感数据加密存储
-- API 速率限制
-- 增强的输入验证
+- ✅ 速率限制中间件 (7 种限制器)
+- ✅ 安全头配置 (Helmet)
+- 🔄 敏感数据加密 (待完成)
+- 🔄 输入验证 (待完成)
 
 ---
 

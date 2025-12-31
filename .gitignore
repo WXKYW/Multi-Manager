@@ -45,5 +45,6 @@ build/
 out/
 docs/
 tmp/
-test/
+test/tmp/
+coverage/
 backup/
