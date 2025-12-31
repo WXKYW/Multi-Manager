@@ -127,13 +127,23 @@
   grid-template-columns: 2fr 1fr;
   /* 2:1 比例 */
   gap: var(--dashboard-grid-gap);
-  align-items: start;
+  align-items: stretch;
+  /* 两列等高 */
 }
 
 .content-column {
   display: flex;
   flex-direction: column;
   gap: var(--dashboard-grid-gap);
+}
+
+/* 左侧列：卡片拉伸填充 */
+.content-column:first-child .detail-card {
+  flex: 1;
+}
+
+.content-column:last-child .detail-card:last-child {
+  flex: 1;
 }
 
 /* =========================================
