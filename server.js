@@ -28,6 +28,7 @@ const { generalLimiter } = require('./src/middleware/rateLimit');
 const { errorHandler } = require('./src/middleware/errorHandler');
 const loggerMiddleware = require('./src/middleware/logger');
 const cors = require('cors');
+const compression = require('compression');
 
 // 导入服务
 const { loadSessions } = require('./src/services/session');
@@ -121,21 +122,28 @@ try {
 // 应用安全中间件
 app.use(configureHelmet());
 app.use(generalLimiter); // 通用访问限制
+app.use(compression()); // 启用 Gzip 压缩
 
 // 应用基础中间件
 app.use(loggerMiddleware);
 app.use(cors(corsConfig()));
 app.use('/api', apiSecurityHeaders); // 为 API 端点设置额外安全头
 app.use(express.json({ limit: '50mb' }));
-// 静态文件服务
+// 静态文件服务配置
+const staticOptions = {
+  maxAge: '1d', // 静态资源缓存 1 天
+  immutable: true,
+  index: false,
+};
+
 // 1. 优先服务 dist (生产构建内容)
 if (fs.existsSync(path.join(__dirname, 'dist'))) {
-  app.use(express.static('dist'));
+  app.use(express.static('dist', { ...staticOptions, index: 'index.html' }));
 }
 
-// 2. 总是服务 public 和 src (开发模式资源，或作为生产环境下的动态资源补充，如 Agent 二进制)
-app.use(express.static('public'));
-app.use(express.static('src'));
+// 2. 总是服务 public 和 src
+app.use(express.static('public', staticOptions));
+app.use(express.static('src', staticOptions));
 
 // 文件上传中间件
 const fileUpload = require('express-fileupload');

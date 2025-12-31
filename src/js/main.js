@@ -43,6 +43,10 @@ import './template-loader.js';
 
 // Vue and FontAwesome imports
 import { createApp, toRefs } from 'vue';
+import pinia from './stores/index.js';
+import { useAuthStore } from './stores/auth.js';
+import { useAppStore } from './stores/app.js';
+import { useServerStore } from './stores/server.js';
 import '@fortawesome/fontawesome-free/css/all.min.css';
 
 // xterm.js imports
@@ -87,6 +91,10 @@ import { computed } from 'vue';
 // 创建并配置 Vue 应用
 const app = createApp({
   setup() {
+    const authStore = useAuthStore();
+    const appStore = useAppStore();
+    const serverStore = useServerStore();
+
     // 自定义计算属性
     const openListPathParts = computed(() => selfHComputed.openListPathParts(store));
     const currentOpenListTempTab = computed(() => selfHComputed.currentOpenListTempTab(store));
@@ -101,12 +109,20 @@ const app = createApp({
     // 将 store 的所有属性转换为 refs，这样在模板中可以直接使用且保持响应式
     return {
       ...toRefs(store),
+      // Pinia Stores
+      authStore,
+      appStore,
+      serverStore,
+      ...toRefs(authStore),
+      ...toRefs(appStore),
+      ...toRefs(serverStore),
+
       openListPathParts,
       currentOpenListTempTab,
       openListTempPathParts,
       sortedOpenListFiles,
       isSelfHVideoActive,
-      moduleGroups: MODULE_GROUPS, // 模块分组配置
+      moduleGroups: appStore.moduleGroups, // 模块分组配置
     };
   },
   data() {
@@ -664,11 +680,16 @@ const app = createApp({
     });
 
     // 3. 异步认证与关键数据加载
-    this.checkAuth().then(() => {
-      if (this.isAuthenticated) {
+    authStore.checkAuth().then(() => {
+      if (authStore.isAuthenticated) {
         // 关键业务数据
+        this.loadManagedAccounts();
+        this.loadProjectCosts();
         this.loadSnippets();
         this.loadCredentials();
+
+        // 启动自动刷新
+        this.startAutoRefresh();
 
         // 如果当前在仪表盘页，立即加载
         if (this.mainActiveTab === 'dashboard') {
@@ -1419,11 +1440,14 @@ async function initApp() {
     }
 
     // 2. 挂载 Vue 应用
+    app.use(pinia);
     app.mount('#app');
 
     // 3. 启动全局时间更新定时器 (每秒触发一次，用于倒计时)
+    const appStore = useAppStore();
     setInterval(() => {
       store.currentTime = Date.now();
+      appStore.updateCurrentTime();
     }, 1000);
 
     const elapsed = Date.now() - startTime;

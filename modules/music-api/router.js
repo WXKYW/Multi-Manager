@@ -8,6 +8,7 @@ const express = require('express');
 const router = express.Router();
 const path = require('path');
 const { Readable } = require('stream');
+const { pipeline } = require('stream/promises');
 const { createLogger } = require('../../src/utils/logger');
 const dbService = require('../../src/db/database');
 const { secureEncrypt, secureDecrypt } = require('../../src/utils/secure-storage');
@@ -505,28 +506,8 @@ router.get('/audio/proxy', async (req, res) => {
       res.set('Content-Range', contentRange);
     }
 
-    // 流式转发响应体
-    const reader = response.body.getReader();
-
-    const stream = new ReadableStream({
-      async start(controller) {
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            controller.enqueue(value);
-          }
-          controller.close();
-        } catch (err) {
-          controller.error(err);
-        }
-      },
-    });
-
-    // 将 ReadableStream 转换为 Node.js 可读流并 pipe 到响应
-    // Readable 已在顶部导入
-    const nodeStream = Readable.fromWeb(stream);
-    nodeStream.pipe(res);
+    // 流式转发响应体 (使用 pipeline 提高性能和稳定性)
+    await pipeline(Readable.fromWeb(response.body), res);
 
     // 记录代理请求
     logger.info(`[Proxy] Streaming audio from: ${new URL(targetUrl).hostname}`);

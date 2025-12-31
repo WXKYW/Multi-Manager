@@ -1,6 +1,7 @@
 const { defineConfig, loadEnv } = require('vite');
 const path = require('path');
 const { createHtmlPlugin } = require('vite-plugin-html');
+const { visualizer } = require('rollup-plugin-visualizer');
 const { getAllCdnUrls, getExternals, getGlobals } = require('./cdn.config');
 
 module.exports = defineConfig(({ mode }) => {
@@ -60,6 +61,13 @@ module.exports = defineConfig(({ mode }) => {
           },
         },
       }),
+      // 构建分析插件 (输出到 dist/stats.html)
+      visualizer({
+        filename: 'dist/stats.html',
+        open: false,
+        gzipSize: true,
+        brotliSize: true,
+      }),
     ],
     build: {
       outDir: '../dist',
@@ -77,6 +85,21 @@ module.exports = defineConfig(({ mode }) => {
         external: externalDeps,
         output: {
           globals: globals,
+          // 代码分割策略
+          manualChunks: {
+            // 基础框架
+            'vendor-vue': ['vue'],
+            // 图表
+            'vendor-charts': ['chart.js'],
+            // 终端组件
+            'vendor-xterm': ['@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-web-links'],
+            // 播放器与多媒体
+            'vendor-media': ['artplayer', 'flv.js', 'hls.js', 'plyr'],
+            // Pixi 渲染引擎 (AMLL 依赖)
+            'vendor-pixi': ['@pixi/app', '@pixi/core', '@pixi/display', '@pixi/sprite', 'pixi-filters'],
+            // 其他通用库
+            'vendor-utils': ['axios', 'marked', 'dompurify', 'uuid'],
+          },
         },
       },
     },
