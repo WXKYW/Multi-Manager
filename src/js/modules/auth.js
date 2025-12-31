@@ -88,62 +88,41 @@ export const authMethods = {
 
   // 验证密码（登录）
   async verifyPassword() {
-    this.loginError = '';
-    try {
-      const response = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: this.loginPassword }),
-        credentials: 'include', // 确保 cookie 被发送和接收
+    const success = await this.authStore.verifyPassword();
+    if (success) {
+      await this.loadManagedAccounts();
+      this.loadProjectCosts();
+
+      // 根据当前标签页加载对应的数据
+      this.$nextTick(() => {
+        switch (this.mainActiveTab) {
+          case 'zeabur':
+            this.fetchData();
+            break;
+          case 'dns':
+            this.loadDnsAccounts();
+            this.loadDnsTemplates();
+            break;
+          case 'openai':
+            this.loadOpenaiEndpoints();
+            break;
+          case 'server':
+            if (this.serverCurrentTab === 'list') {
+              this.connectMetricsStream();
+            }
+            break;
+        }
       });
 
-      const result = await response.json();
-      if (result.success) {
-        this.isAuthenticated = true;
-        this.showLoginModal = false;
+      // 启动自动刷新
+      this.startAutoRefresh();
 
-        // 保存密码和时间戳
-        localStorage.setItem('admin_password', this.loginPassword);
-        localStorage.setItem('password_time', Date.now().toString());
-
-        await this.loadManagedAccounts();
-        this.loadProjectCosts();
-
-        // 根据当前标签页加载对应的数据
-        this.$nextTick(() => {
-          switch (this.mainActiveTab) {
-            case 'zeabur':
-              this.fetchData();
-              break;
-            case 'dns':
-              this.loadDnsAccounts();
-              this.loadDnsTemplates();
-              break;
-            case 'openai':
-              this.loadOpenaiEndpoints();
-              break;
-            case 'server':
-              if (this.serverCurrentTab === 'list') {
-                this.connectMetricsStream();
-              }
-              break;
-          }
-        });
-
-        // 启动自动刷新
-        this.startAutoRefresh();
-
-        // 加载透明度设置
-        const savedOpacity = localStorage.getItem('card_opacity');
-        if (savedOpacity) {
-          this.opacity = parseInt(savedOpacity);
-          this.updateOpacity();
-        }
-      } else {
-        this.loginError = result.error || '密码错误，请重试';
+      // 加载透明度设置
+      const savedOpacity = localStorage.getItem('card_opacity');
+      if (savedOpacity) {
+        this.opacity = parseInt(savedOpacity);
+        this.updateOpacity();
       }
-    } catch (error) {
-      this.loginError = '验证失败: ' + error.message;
     }
   },
 
@@ -203,68 +182,6 @@ export const authMethods = {
 
   // 检查认证状态 (应用启动时调用)
   async checkAuth() {
-    this.isCheckingAuth = true;
-    try {
-      // 1. 检查是否已设置密码
-      const res = await fetch('/api/check-password');
-      const { hasPassword, isDemoMode } = await res.json();
-      this.isDemoMode = isDemoMode;
-
-      if (isDemoMode) {
-        // 演示模式：如果未登录，则自动尝试登录
-        const savedTime = localStorage.getItem('password_time');
-        const now = Date.now();
-        const isValidSession = savedTime && now - parseInt(savedTime) < 4 * 24 * 60 * 60 * 1000;
-
-        if (!isValidSession) {
-          this.loginPassword = ''; // 演示模式登录不需要真实密码
-          await this.verifyPassword();
-        } else {
-          // 已经有有效会话，直接进入
-          this.isAuthenticated = true;
-          this.showLoginModal = false;
-          await this.loadManagedAccounts();
-          this.loadProjectCosts();
-          this.startAutoRefresh();
-        }
-        return true;
-      }
-
-      if (!hasPassword) {
-        this.showSetPasswordModal = true;
-        this.isAuthenticated = false;
-        return false;
-      }
-
-      // 2. 检查本地凭据
-      const savedPassword = localStorage.getItem('admin_password');
-      const savedTime = localStorage.getItem('password_time');
-
-      if (savedPassword && savedTime) {
-        const now = Date.now();
-        // 4天有效期
-        if (now - parseInt(savedTime) < 4 * 24 * 60 * 60 * 1000) {
-          this.loginPassword = savedPassword;
-          // 复用登录逻辑
-          await this.verifyPassword();
-
-          // 如果登录失败(密码变更等)，verifyPassword 会设置错误并保持 isAuthenticated=false
-          if (!this.isAuthenticated) {
-            this.showLoginModal = true;
-          }
-          return this.isAuthenticated;
-        }
-      }
-
-      // 未登录或凭据过期
-      this.showLoginModal = true;
-      return false;
-    } catch (e) {
-      console.error('Auth check error:', e);
-      this.showLoginModal = true;
-      return false;
-    } finally {
-      this.isCheckingAuth = false;
-    }
+    return await this.authStore.checkAuth();
   },
 };

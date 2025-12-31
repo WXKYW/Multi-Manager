@@ -3,6 +3,7 @@
  */
 
 const dbService = require('../../src/db/database');
+const { getStatement } = require('../../src/db/statements');
 const { v4: uuidv4 } = require('uuid');
 const { encrypt, decrypt } = require('../../src/utils/encryption');
 
@@ -18,7 +19,7 @@ class ServerAccount {
    * @returns {Array} 主机账号列表
    */
   static getAll() {
-    const stmt = getDb().prepare(`
+    const stmt = getStatement(`
             SELECT * FROM server_accounts
             ORDER BY created_at DESC
         `);
@@ -34,7 +35,7 @@ class ServerAccount {
    * @returns {Object|null} 主机账号对象
    */
   static getById(id) {
-    const stmt = getDb().prepare('SELECT * FROM server_accounts WHERE id = ?');
+    const stmt = getStatement('SELECT * FROM server_accounts WHERE id = ?');
     const account = stmt.get(id);
 
     if (!account) return null;
@@ -47,7 +48,7 @@ class ServerAccount {
    * @returns {number} 在线主机数
    */
   static getOnlineCount() {
-    const stmt = getDb().prepare(
+    const stmt = getStatement(
       "SELECT COUNT(*) as count FROM server_accounts WHERE status = 'online'"
     );
     return stmt.get().count;
@@ -58,7 +59,7 @@ class ServerAccount {
    * @returns {number} 离线主机数
    */
   static getOfflineCount() {
-    const stmt = getDb().prepare(
+    const stmt = getStatement(
       "SELECT COUNT(*) as count FROM server_accounts WHERE status != 'online'"
     );
     return stmt.get().count;
@@ -76,7 +77,7 @@ class ServerAccount {
     // 加密敏感信息
     const encryptedData = this.encryptSensitiveData(data);
 
-    const stmt = getDb().prepare(`
+    const stmt = getStatement(`
             INSERT INTO server_accounts (
                 id, name, host, port, username, auth_type,
                 password, private_key, passphrase,
@@ -112,7 +113,7 @@ class ServerAccount {
    */
   static update(id, data) {
     // 首先从数据库获取原始记录(未解密)
-    const stmt = getDb().prepare('SELECT * FROM server_accounts WHERE id = ?');
+    const stmt = getStatement('SELECT * FROM server_accounts WHERE id = ?');
     const existingRaw = stmt.get(id);
     if (!existingRaw) return null;
 
@@ -123,7 +124,7 @@ class ServerAccount {
     // 加密敏感信息(如果提供了新值)
     const encryptedData = this.encryptSensitiveData(data);
 
-    const updateStmt = getDb().prepare(`
+    const updateStmt = getStatement(`
             UPDATE server_accounts
             SET name = ?,
                 host = ?,
@@ -170,7 +171,7 @@ class ServerAccount {
 
     // 如果有 cached_info，一并更新
     if (statusData.cached_info) {
-      const stmt = getDb().prepare(`
+      const stmt = getStatement(`
             UPDATE server_accounts
             SET status = ?,
                 last_check_time = ?,
@@ -195,7 +196,7 @@ class ServerAccount {
     }
 
     // 无 cached_info 时保持原逻辑
-    const stmt = getDb().prepare(`
+    const stmt = getStatement(`
         UPDATE server_accounts
         SET status = ?,
             last_check_time = ?,
@@ -223,7 +224,7 @@ class ServerAccount {
    * @returns {boolean} 是否删除成功
    */
   static delete(id) {
-    const stmt = getDb().prepare('DELETE FROM server_accounts WHERE id = ?');
+    const stmt = getStatement('DELETE FROM server_accounts WHERE id = ?');
     const result = stmt.run(id);
     return result.changes > 0;
   }
@@ -806,7 +807,7 @@ class ServerMetricsHistory {
       // 重置自增 ID (可选，通常建议清空时重置)
       try {
         db.prepare("DELETE FROM sqlite_sequence WHERE name = 'server_metrics_history'").run();
-      } catch (e) {}
+      } catch (e) { }
       return result.changes;
     }
   }

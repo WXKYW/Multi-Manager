@@ -13,7 +13,7 @@ const { AsyncLocalStorage } = require('async_hooks');
 const asyncLocalStorage = new AsyncLocalStorage();
 
 // 日志事件发射器，用于实时推送
-class LogEmitter extends EventEmitter {}
+class LogEmitter extends EventEmitter { }
 const logEmitter = new LogEmitter();
 
 // 日志缓存，用于新连接获取历史日志 (挂载到全局以防多模块加载副本)
@@ -41,6 +41,28 @@ const LOG_FILE = path.join(LOG_DIR, 'app.log');
 
 // 使用流式写入以提升性能
 let logStream = fs.createWriteStream(LOG_FILE, { flags: 'a', encoding: 'utf8' });
+
+// 日志写入队列 (用于异步批量写入)
+let logQueue = [];
+const BATCH_SIZE = 50;
+const BATCH_INTERVAL = 500; // ms
+
+/**
+ * 批量写入日志
+ */
+function flushLogQueue() {
+  if (logQueue.length === 0) return;
+
+  const chunk = logQueue.join('');
+  logQueue = [];
+
+  if (logStream.writable) {
+    logStream.write(chunk);
+  }
+}
+
+// 定时刷新队列
+setInterval(flushLogQueue, BATCH_INTERVAL);
 
 /**
  * 获取日志配置
@@ -103,6 +125,7 @@ function clearLogFile() {
     fs.writeFileSync(LOG_FILE, '', 'utf8'); // 清空文件
     logStream = fs.createWriteStream(LOG_FILE, { flags: 'a', encoding: 'utf8' }); // 重新打开
     global.__LOG_BUFFER__ = []; // 同时清空内存缓存
+    logQueue = []; // 清空待写入队列
     return true;
   } catch (e) {
     console.error('Failed to clear log file:', e);
@@ -125,7 +148,7 @@ function checkSizeAndRotation() {
         clearLogFile();
       }
     }
-  } catch (e) {}
+  } catch (e) { }
 }
 
 // 日志级别
@@ -238,9 +261,13 @@ function log(level, module, message, data) {
     logBuffer.shift();
   }
 
-  // 4. 持久化到文件 (JSON 格式)
+  // 4. 持久化到文件 (批量异步写入)
   const logLine = JSON.stringify(logEntry) + '\n';
-  logStream.write(logLine);
+  logQueue.push(logLine);
+
+  if (logQueue.length >= BATCH_SIZE) {
+    flushLogQueue();
+  }
 
   // 5. 实时推送事件
   logEmitter.emit('log', logEntry);

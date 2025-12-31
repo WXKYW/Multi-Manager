@@ -7,6 +7,7 @@ const { parseCookies } = require('../utils/cookie');
 const { Session } = require('../db/models');
 const dbService = require('../db/database');
 const { createLogger } = require('../utils/logger');
+const { userCache } = require('../utils/cache');
 
 const logger = createLogger('Session');
 
@@ -77,6 +78,13 @@ function getSession(req) {
     return null;
   }
 
+  // 尝试从缓存获取
+  const cacheKey = `session:${sid}`;
+  const cached = userCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   const validation = Session.validateSession(sid);
 
   if (!validation.valid) {
@@ -87,12 +95,17 @@ function getSession(req) {
   logger.debug(`Session 有效 sid=${sid.substring(0, 8)}...`);
 
   const session = validation.session;
-  return {
+  const result = {
     sid: session.session_id,
     password: session.password,
     createdAt: session.created_at,
     lastAccessedAt: session.last_accessed_at,
   };
+
+  // 缓存结果 (1 分钟缓存，防止极高频校验)
+  userCache.set(cacheKey, result, { ttl: 1000 * 60 });
+
+  return result;
 }
 
 /**
@@ -126,6 +139,9 @@ function destroySession(req) {
   const sid = cookies.sid;
 
   if (sid) {
+    const cacheKey = `session:${sid}`;
+    userCache.delete(cacheKey); // 清除缓存
+
     const session = Session.getSession(sid);
     if (session) {
       Session.invalidateSession(sid);

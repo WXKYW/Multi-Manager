@@ -5,6 +5,7 @@
 const path = require('path');
 const { SystemConfig, ZeaburAccount } = require('../db/models');
 const dbService = require('../db/database');
+const { apiCache } = require('../utils/cache');
 
 // 初始化数据库
 dbService.initialize();
@@ -91,8 +92,17 @@ function loadAdminPassword() {
     return process.env.ADMIN_PASSWORD;
   }
 
+  // 尝试从缓存获取
+  const cacheKey = 'config:admin_password';
+  const cached = apiCache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+
   try {
     const password = SystemConfig.getConfigValue('admin_password');
+    // 缓存密码 5 分钟
+    apiCache.set(cacheKey, password, { ttl: 1000 * 60 * 5 });
     return password;
   } catch (e) {
     console.error('❌ 读取密码失败:', e.message);
@@ -118,6 +128,8 @@ function isPasswordSavedToFile() {
 function saveAdminPassword(password) {
   try {
     SystemConfig.setConfig('admin_password', password, '管理员密码');
+    // 清除缓存
+    apiCache.delete('config:admin_password');
     return true;
   } catch (e) {
     console.error('❌ 保存密码失败:', e.message);

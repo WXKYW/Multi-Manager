@@ -1,4 +1,5 @@
 const dbService = require('../database');
+const { getStatement } = require('../statements');
 
 /**
  * 基础模型类，提供通用的 CRUD 操作
@@ -19,8 +20,7 @@ class BaseModel {
    * 检查表是否有指定列
    */
   hasColumn(columnName) {
-    const db = this.getDb();
-    const stmt = db.prepare(`PRAGMA table_info(${this.tableName})`);
+    const stmt = getStatement(`PRAGMA table_info(${this.tableName})`);
     const columns = stmt.all();
     return columns.some(col => col.name === columnName);
   }
@@ -29,8 +29,7 @@ class BaseModel {
    * 查询所有记录
    */
   findAll(orderBy = 'created_at DESC') {
-    const db = this.getDb();
-    const stmt = db.prepare(`SELECT * FROM ${this.tableName} ORDER BY ${orderBy}`);
+    const stmt = getStatement(`SELECT * FROM ${this.tableName} ORDER BY ${orderBy}`);
     return stmt.all();
   }
 
@@ -38,8 +37,7 @@ class BaseModel {
    * 根据 ID 查询单条记录
    */
   findById(id) {
-    const db = this.getDb();
-    const stmt = db.prepare(`SELECT * FROM ${this.tableName} WHERE id = ?`);
+    const stmt = getStatement(`SELECT * FROM ${this.tableName} WHERE id = ?`);
     return stmt.get(id);
   }
 
@@ -48,12 +46,11 @@ class BaseModel {
    * @param {Object} conditions - 查询条件对象
    */
   findWhere(conditions) {
-    const db = this.getDb();
     const keys = Object.keys(conditions);
     const whereClause = keys.map(key => `${key} = ?`).join(' AND ');
     const values = keys.map(key => conditions[key]);
 
-    const stmt = db.prepare(`SELECT * FROM ${this.tableName} WHERE ${whereClause}`);
+    const stmt = getStatement(`SELECT * FROM ${this.tableName} WHERE ${whereClause}`);
     return stmt.all(...values);
   }
 
@@ -61,12 +58,11 @@ class BaseModel {
    * 根据条件查询单条记录
    */
   findOneWhere(conditions) {
-    const db = this.getDb();
     const keys = Object.keys(conditions);
     const whereClause = keys.map(key => `${key} = ?`).join(' AND ');
     const values = keys.map(key => conditions[key]);
 
-    const stmt = db.prepare(`SELECT * FROM ${this.tableName} WHERE ${whereClause}`);
+    const stmt = getStatement(`SELECT * FROM ${this.tableName} WHERE ${whereClause}`);
     return stmt.get(...values);
   }
 
@@ -75,12 +71,11 @@ class BaseModel {
    * @param {Object} data - 要插入的数据
    */
   insert(data) {
-    const db = this.getDb();
     const keys = Object.keys(data);
     const placeholders = keys.map(() => '?').join(', ');
     const values = keys.map(key => data[key]);
 
-    const stmt = db.prepare(`
+    const stmt = getStatement(`
             INSERT INTO ${this.tableName} (${keys.join(', ')})
             VALUES (${placeholders})
         `);
@@ -95,7 +90,6 @@ class BaseModel {
    * @param {Object} data - 要更新的数据
    */
   update(id, data) {
-    const db = this.getDb();
     const keys = Object.keys(data);
     const setClause = keys.map(key => `${key} = ?`).join(', ');
     const values = [...keys.map(key => data[key]), id];
@@ -104,7 +98,7 @@ class BaseModel {
     const hasUpdatedAt = this.hasColumn('updated_at');
     const updateTimestamp = hasUpdatedAt ? ', updated_at = CURRENT_TIMESTAMP' : '';
 
-    const stmt = db.prepare(`
+    const stmt = getStatement(`
             UPDATE ${this.tableName}
             SET ${setClause}${updateTimestamp}
             WHERE id = ?
@@ -146,8 +140,7 @@ class BaseModel {
    * @param {string} id - 记录 ID
    */
   delete(id) {
-    const db = this.getDb();
-    const stmt = db.prepare(`DELETE FROM ${this.tableName} WHERE id = ?`);
+    const stmt = getStatement(`DELETE FROM ${this.tableName} WHERE id = ?`);
     const result = stmt.run(id);
     return result.changes > 0;
   }
@@ -156,12 +149,11 @@ class BaseModel {
    * 根据条件删除
    */
   deleteWhere(conditions) {
-    const db = this.getDb();
     const keys = Object.keys(conditions);
     const whereClause = keys.map(key => `${key} = ?`).join(' AND ');
     const values = keys.map(key => conditions[key]);
 
-    const stmt = db.prepare(`DELETE FROM ${this.tableName} WHERE ${whereClause}`);
+    const stmt = getStatement(`DELETE FROM ${this.tableName} WHERE ${whereClause}`);
     const result = stmt.run(...values);
     return result.changes;
   }
@@ -170,10 +162,8 @@ class BaseModel {
    * 统计记录数
    */
   count(conditions = null) {
-    const db = this.getDb();
-
     if (!conditions) {
-      const stmt = db.prepare(`SELECT COUNT(*) as count FROM ${this.tableName}`);
+      const stmt = getStatement(`SELECT COUNT(*) as count FROM ${this.tableName}`);
       return stmt.get().count;
     }
 
@@ -181,7 +171,7 @@ class BaseModel {
     const whereClause = keys.map(key => `${key} = ?`).join(' AND ');
     const values = keys.map(key => conditions[key]);
 
-    const stmt = db.prepare(`SELECT COUNT(*) as count FROM ${this.tableName} WHERE ${whereClause}`);
+    const stmt = getStatement(`SELECT COUNT(*) as count FROM ${this.tableName} WHERE ${whereClause}`);
     return stmt.get(...values).count;
   }
 
@@ -222,8 +212,7 @@ class BaseModel {
    * 清空表
    */
   truncate() {
-    const db = this.getDb();
-    const stmt = db.prepare(`DELETE FROM ${this.tableName}`);
+    const stmt = getStatement(`DELETE FROM ${this.tableName}`);
     return stmt.run();
   }
 }
