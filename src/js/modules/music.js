@@ -582,7 +582,8 @@ function updateCurrentLyricLine() {
 
       // 当打开了桌面端全屏（且没加载 AMLL）或者打开了移动端歌词模式时，触发原生滚动
       if (store.mfpLyricsMode || (store.musicShowFullPlayer && !amllPlayer)) {
-        requestAnimationFrame(() => scrollToCurrentLyric());
+        // Use setTimeout to ensure Vue DOM updates (class application) are complete
+        setTimeout(() => scrollToCurrentLyric(), 100);
       }
     }
   }
@@ -619,8 +620,57 @@ function startAmllUpdateLoop() {
   amllUpdateFrame = requestAnimationFrame(step);
 }
 
+// Physics-based scrolling state
+// Physics-based scrolling state (Spring Model)
+const lyricScrollState = {
+  currentTop: 0,
+  targetTop: 0,
+  velocity: 0,
+  isAnimating: false,
+};
+
+// Spring configuration (tuned for "Heavy/Damped" feel)
+const SPRING_TENSION = 0.08;   // Force pulling towards target
+const SPRING_FRICTION = 0.82;  // Resistance (lower = more bouncy, higher = more sluggish)
+
+function lyricSmoothScrollLoop() {
+  const container =
+    document.querySelector('.mfp-lyrics-container') ||
+    document.querySelector('.full-lyrics-container');
+
+  if (!container) {
+    lyricScrollState.isAnimating = false;
+    return;
+  }
+
+  // physics step
+  const distance = lyricScrollState.targetTop - lyricScrollState.currentTop;
+  const force = distance * SPRING_TENSION;
+
+  // Apply force and friction to velocity
+  lyricScrollState.velocity += force;
+  lyricScrollState.velocity *= SPRING_FRICTION;
+
+  // Update position
+  lyricScrollState.currentTop += lyricScrollState.velocity;
+
+  // Apply to DOM
+  container.scrollTop = lyricScrollState.currentTop;
+
+  // Stop condition: visual position close enough AND velocity is negligible
+  if (Math.abs(distance) < 0.5 && Math.abs(lyricScrollState.velocity) < 0.1) {
+    lyricScrollState.currentTop = lyricScrollState.targetTop;
+    container.scrollTop = lyricScrollState.targetTop;
+    lyricScrollState.isAnimating = false;
+    lyricScrollState.velocity = 0;
+    return;
+  }
+
+  requestAnimationFrame(lyricSmoothScrollLoop);
+}
+
 /**
- * 滚动歌词到中心位置
+ * 滚动歌词到中心位置 (Spring Physics)
  */
 function scrollToCurrentLyric() {
   const container =
@@ -628,21 +678,33 @@ function scrollToCurrentLyric() {
     document.querySelector('.full-lyrics-container');
   if (!container) return;
 
+  // Ensure native scrolling doesn't fight us
+  if (container.style.scrollBehavior !== 'auto') {
+    container.style.scrollBehavior = 'auto';
+  }
+
   const activeLine = container.querySelector('.lyric-line.active, .mfp-lyric-line.active');
   if (activeLine) {
     const containerHeight = container.offsetHeight;
     const lineOffset = activeLine.offsetTop;
     const lineHeight = activeLine.offsetHeight;
 
-    // 计算目标位置：让当前行处于容器约 35% 处，视觉更舒适
-    const targetScroll = lineOffset - containerHeight * 0.35 + lineHeight / 2;
+    // Calculate target position
+    const targetScroll = Math.max(0, lineOffset - containerHeight * 0.35 + lineHeight / 2);
 
-    // 使用 behavior: 'smooth' 配合合理的 CSS transition 可实现丝滑滚动
-    // 如果原生 behavior 依然不够丝滑，考虑改为手动步进动画，但目前先优化对齐位置
-    container.scrollTo({
-      top: targetScroll,
-      behavior: 'smooth',
-    });
+    lyricScrollState.targetTop = targetScroll;
+
+    // Initialize state if significant drift (e.g. manual scroll)
+    const dist = Math.abs(container.scrollTop - lyricScrollState.currentTop);
+    if (dist > 100) {
+      lyricScrollState.currentTop = container.scrollTop;
+      lyricScrollState.velocity = 0; // Reset momentum on manual intervention
+    }
+
+    if (!lyricScrollState.isAnimating) {
+      lyricScrollState.isAnimating = true;
+      lyricSmoothScrollLoop();
+    }
   }
 }
 
