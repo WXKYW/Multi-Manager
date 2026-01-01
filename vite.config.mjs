@@ -127,6 +127,15 @@ export default defineConfig(({ mode }) => {
           target: 'http://127.0.0.1:3000',
           changeOrigin: true,
         },
+        // PWA Manifest 动态路由
+        '^/pwa/.*/manifest.json$': {
+          target: 'http://127.0.0.1:3000',
+          changeOrigin: true,
+        },
+        '/pwa/manifest.json': {
+          target: 'http://127.0.0.1:3000',
+          changeOrigin: true,
+        },
         '/socket.io': {
           target: 'http://127.0.0.1:3000',
           ws: true,

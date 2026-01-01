@@ -13,6 +13,7 @@ const healthRouter = require('./health');
 const settingsRouter = require('./settings');
 const logService = require('../services/log-service');
 const v1Router = require('./v1');
+const pwaRouter = require('./pwa');
 const { createLogger } = require('../utils/logger');
 
 const logger = createLogger('Router');
@@ -27,7 +28,10 @@ function registerRoutes(app) {
   app.use('/api/logs', logService.router);
   app.use('/v1', v1Router);
 
-  // 2. 独立认证路由 (避免干扰 /api/xxxx)
+  // 2. PWA Manifest 路由 (公开访问)
+  app.use('/pwa', pwaRouter);
+
+  // 3. 独立认证路由 (避免干扰 /api/xxxx)
   app.use('/api/auth', authRouter);
 
   // 3. Agent 公开接口 (不需要认证，必须在 /api/server 模块之前挂载)
