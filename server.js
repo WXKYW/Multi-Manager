@@ -200,6 +200,7 @@ app.get('*', (req, res, next) => {
   if (
     req.path.startsWith('/api') ||
     req.path.startsWith('/v1') ||
+    req.path.startsWith('/pwa') ||
     req.path.startsWith('/ws') ||
     req.path.startsWith('/health') ||
     req.path.startsWith('/socket.io') ||
