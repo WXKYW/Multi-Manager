@@ -599,7 +599,8 @@ html.single-page-mode [class*='-sec-tabs'] {
     scrollbar-width: none !important;
     -ms-overflow-style: none !important;
     padding: 35vh 32px 15vh 32px !important;
-    scroll-behavior: smooth !important;
+    scroll-behavior: auto !important;
+    position: relative !important;
     box-sizing: border-box !important;
     -webkit-overflow-scrolling: touch !important;
     /* iOS/Safari 丝滑滚动关键 */
