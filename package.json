@@ -16,8 +16,7 @@
     "format:check": "prettier --check \"src/**/*.{js,css,html}\" \"modules/**/*.js\"",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "prepare": "node -e \"try { require('husky').default() } catch (e) { if (e.code !== 'MODULE_NOT_FOUND') throw e }\""
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@neteasecloudmusicapienhanced/api": "^4.29.20",
@@ -48,8 +47,6 @@
   "devDependencies": {
     "@applemusic-like-lyrics/core": "^0.2.0",
     "@applemusic-like-lyrics/lyric": "^0.3.0",
-    "@commitlint/cli": "^20.2.0",
-    "@commitlint/config-conventional": "^20.2.0",
     "@eslint/js": "^9.39.2",
     "@fortawesome/fontawesome-free": "^7.1.0",
     "@pixi/app": "^7.4.2",
@@ -74,7 +71,6 @@
     "flv.js": "^1.6.2",
     "gl-matrix": "^4.0.0-beta.2",
     "hls.js": "^1.6.15",
-    "lint-staged": "^16.2.7",
     "marked": "^17.0.1",
     "nodemon": "^3.0.1",
     "pixi-filters": "^5.3.0",
