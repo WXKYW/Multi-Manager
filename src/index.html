@@ -8,22 +8,6 @@
       var match = location.pathname.match(/^\/s\/([^/]+)/i);
       if (match) {
         document.documentElement.classList.add('single-page-mode');
-        // 动态设置 PWA manifest
-        var link = document.createElement('link');
-        link.rel = 'manifest';
-        link.href = '/pwa/' + match[1] + '/manifest.json';
-        document.head.appendChild(link);
-        // 设置 Apple Touch Icon
-        var appleIcon = document.createElement('link');
-        appleIcon.rel = 'apple-touch-icon';
-        appleIcon.href = '/pwa/icons/' + match[1] + '-512.png';
-        document.head.appendChild(appleIcon);
-      } else {
-        // 默认 manifest
-        var link = document.createElement('link');
-        link.rel = 'manifest';
-        link.href = '/pwa/manifest.json';
-        document.head.appendChild(link);
       }
     })();
   </script>
@@ -33,7 +17,7 @@
   <title>API Monitor</title>
   <link rel="icon" type="image/svg+xml" href="/logo.svg" />
   <link rel="shortcut icon" href="/logo.svg" />
-  <link rel="apple-touch-icon" href="/pwa/icons/default-512.png" />
+  <link rel="apple-touch-icon" href="/logo.svg" />
   <meta name="theme-color" content="#0d1117" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -708,22 +692,6 @@
 
   <!-- 模块化 JavaScript -->
   <script type="module" src="/js/main.js"></script>
-
-  <!-- Service Worker 注册 -->
-  <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', function () {
-        navigator.serviceWorker
-          .register('/sw.js', { scope: '/' })
-          .then(function (registration) {
-            console.log('[PWA] Service Worker registered:', registration.scope);
-          })
-          .catch(function (error) {
-            console.warn('[PWA] Service Worker registration failed:', error);
-          });
-      });
-    }
-  </script>
 </body>
 
 </html>

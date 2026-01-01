@@ -142,17 +142,6 @@ if (fs.existsSync(path.join(__dirname, 'dist'))) {
 }
 
 // 2. 总是服务 public 和 src
-// 特殊处理 Service Worker，确保不被长时间缓存
-app.get('/sw.js', (req, res) => {
-  const swPath = path.join(__dirname, 'src', 'sw.js');
-  if (fs.existsSync(swPath)) {
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.setHeader('Content-Type', 'application/javascript');
-    return res.sendFile(swPath);
-  }
-  res.sendStatus(404);
-});
-
 app.use(express.static('public', staticOptions));
 app.use(express.static('src', staticOptions));
 
@@ -211,7 +200,6 @@ app.get('*', (req, res, next) => {
   if (
     req.path.startsWith('/api') ||
     req.path.startsWith('/v1') ||
-    req.path.startsWith('/pwa') ||
     req.path.startsWith('/ws') ||
     req.path.startsWith('/health') ||
     req.path.startsWith('/socket.io') ||
