@@ -121,18 +121,28 @@ export default defineConfig(({ mode }) => {
       __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: JSON.stringify(false),
     },
     server: {
+      host: true, // 监听所有网络接口，允许手机访问
       port: 5173,
+      // SPA 历史回退：所有非静态资源路由都返回 index.html
+      // 显式排除 PWA 路径，防止其拦截本应由后端处理的动态 Manifest 路由
+      historyApiFallback: {
+        rewrites: [
+          { from: /^\/api\/.*$/, to: '/index.html' }, // 仅做兜底，实际应由 proxy 处理
+          { from: /^\/pwa\/.*$/, to: '/pwa/manifest.json' }, // 这里的 to 会被 proxy 拦截
+        ],
+        disableDotRule: true, // 允许路径中带点
+      },
       proxy: {
         '/api': {
           target: 'http://127.0.0.1:3000',
           changeOrigin: true,
         },
-        // PWA Manifest 动态路由
-        '^/pwa/.*/manifest.json$': {
+        // PWA 动态路由及 Service Worker 代理 (必须在 SPA 回退之前生效)
+        '/pwa': {
           target: 'http://127.0.0.1:3000',
           changeOrigin: true,
         },
-        '/pwa/manifest.json': {
+        '/sw.js': {
           target: 'http://127.0.0.1:3000',
           changeOrigin: true,
         },
