@@ -568,13 +568,11 @@
   z-index: 2;
   overflow: hidden;
   /* 调整遮罩比例，确保中间清晰区域更靠下，不遮挡顶部徽章 */
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    transparent 0%,
-    black 15%,
-    black 85%,
-    transparent 100%
-  );
+  -webkit-mask-image: linear-gradient(to bottom,
+      transparent 0%,
+      black 15%,
+      black 85%,
+      transparent 100%);
   mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 85%, transparent 100%);
   /* 淡入动画，避免歌词突然出现 */
   animation: lyricFadeIn 0.5s ease-out forwards;
@@ -632,13 +630,11 @@
 
   /* Karaoke Effect: Base + Fill */
   color: transparent;
-  background: linear-gradient(
-    to right,
-    var(--primary-color) 0%,
-    var(--primary-color) var(--progress, 0%),
-    rgba(180, 180, 180, 0.85) var(--progress, 0%),
-    rgba(180, 180, 180, 0.85) 100%
-  );
+  background: linear-gradient(to right,
+      var(--primary-color) 0%,
+      var(--primary-color) var(--progress, 0%),
+      rgba(180, 180, 180, 0.85) var(--progress, 0%),
+      rgba(180, 180, 180, 0.85) 100%);
   -webkit-background-clip: text;
   background-clip: text;
 
@@ -1160,12 +1156,10 @@
 
 /* Skeleton shimmer animation - using global definition */
 .music-skeleton-wrapper .skeleton {
-  background: linear-gradient(
-    90deg,
-    rgba(255, 255, 255, 0.05) 25%,
-    rgba(255, 255, 255, 0.12) 50%,
-    rgba(255, 255, 255, 0.05) 75%
-  );
+  background: linear-gradient(90deg,
+      rgba(255, 255, 255, 0.05) 25%,
+      rgba(255, 255, 255, 0.12) 50%,
+      rgba(255, 255, 255, 0.05) 75%);
   background-size: 200% 100%;
   animation: music-skeleton-shimmer 1.8s ease-in-out infinite;
 }
@@ -1284,6 +1278,7 @@
    Mobile Adaptation (Full Optimization)
    ========================================= */
 @media (max-width: 768px) {
+
   /* --- Root Variables Override --- */
   :root {
     --dashboard-grid-gap: 8px;
@@ -1542,7 +1537,7 @@
     font-size: 15px;
   }
 
-  .api-stat-group > div:nth-child(2) {
+  .api-stat-group>div:nth-child(2) {
     font-size: 10px !important;
     /* 总调用次数 */
   }
