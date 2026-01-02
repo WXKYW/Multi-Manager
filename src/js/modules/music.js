@@ -530,7 +530,11 @@ function updateCurrentLyricLine() {
 
     const textLen = currentLine.text?.length || 1;
     const gap = nextTime - currentLine.time;
-    const estimatedDuration = Math.min(gap * 0.85, textLen * 280, 5000);
+
+    // 如果是间奏行，使用其自带的 duration
+    const estimatedDuration = currentLine.isInterlude
+      ? currentLine.duration
+      : Math.min(gap * 0.85, textLen * 280, 5000);
 
     const elapsed = currentTime - currentLine.time;
 
@@ -736,7 +740,52 @@ function parseLyrics(lrcText) {
     }
   }
 
-  return lyrics.sort((a, b) => a.time - b.time);
+  // 排序原始歌词
+  const sortedLyrics = lyrics.sort((a, b) => a.time - b.time);
+
+  // 注入间奏指示器
+  const finalLyrics = [];
+  const INTERLUDE_THRESHOLD = 10000; // 10秒以上的空隙才插入指示器
+
+  // 检查首句前的超长前奏 (Intro)
+  if (sortedLyrics.length > 0 && sortedLyrics[0].time > INTERLUDE_THRESHOLD) {
+    const duration = sortedLyrics[0].time - 2000;
+    finalLyrics.push({
+      time: 1000,
+      isInterlude: true,
+      text: '',
+      duration: duration,
+      isCountdown: true, // 标记为倒计时模式
+    });
+  }
+
+  for (let i = 0; i < sortedLyrics.length; i++) {
+    const current = sortedLyrics[i];
+    finalLyrics.push(current);
+
+    if (i < sortedLyrics.length - 1) {
+      const next = sortedLyrics[i + 1];
+      const gap = next.time - current.time;
+
+      // 如果有超过 10 秒的空隙
+      if (
+        gap > INTERLUDE_THRESHOLD &&
+        !current.text.includes('纯音乐') &&
+        !next.text.includes('纯音乐')
+      ) {
+        const duration = gap - 2000;
+        finalLyrics.push({
+          time: current.time + 1000,
+          isInterlude: true,
+          text: '',
+          duration: duration,
+          isCountdown: true, // 标记为倒计时模式
+        });
+      }
+    }
+  }
+
+  return finalLyrics;
 }
 
 /**
