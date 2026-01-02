@@ -71,7 +71,6 @@ build/
 out/
 coverage/
 stats.html
-docs/
 
 # ====================
 # 备份 & 杂项
