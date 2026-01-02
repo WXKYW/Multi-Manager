@@ -629,9 +629,9 @@ const lyricScrollState = {
   isAnimating: false,
 };
 
-// Spring configuration (tuned for "Heavy/Damped" feel)
-const SPRING_TENSION = 0.08;   // Force pulling towards target
-const SPRING_FRICTION = 0.82;  // Resistance (lower = more bouncy, higher = more sluggish)
+// Spring configuration (tuned for smooth, elegant scroll)
+const SPRING_TENSION = 0.02;   // Force pulling towards target (lower = slower)
+const SPRING_FRICTION = 0.85;  // Resistance (lower = less bounce)
 
 function lyricSmoothScrollLoop() {
   const container =
