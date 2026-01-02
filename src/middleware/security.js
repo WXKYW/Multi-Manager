@@ -35,9 +35,10 @@ function configureHelmet(options = {}) {
                         'https://fonts.googleapis.com',
                         'https://cdnjs.cloudflare.com',
                         'https://unpkg.com',
+                        'https://cdn.simpleicons.org',
                     ],
                     fontSrc: ["'self'", 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com', 'https://unpkg.com', 'data:'],
-                    imgSrc: ["'self'", 'data:', 'https:', 'blob:'],
+                    imgSrc: ["'self'", 'data:', 'https:', 'blob:', 'https://cdn.simpleicons.org', 'https://p2.music.126.net'],
                     mediaSrc: ["'self'", 'https:', 'blob:'],
                     connectSrc: [
                         "'self'",
