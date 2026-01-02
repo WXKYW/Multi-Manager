@@ -74,6 +74,12 @@ export const MODULE_CONFIG = {
     icon: 'fa-music',
     description: '网易云音乐播放器',
   },
+  'ai-chat': {
+    name: 'AI Chat',
+    shortName: 'Chat',
+    icon: 'fa-comments',
+    description: 'AI 智能对话助手',
+  },
 };
 
 /**
@@ -91,7 +97,7 @@ export const MODULE_GROUPS = [
     id: 'api-gateway',
     name: 'API 网关',
     icon: 'fa-bolt',
-    modules: ['openai', 'antigravity', 'gemini-cli'],
+    modules: ['openai', 'antigravity', 'gemini-cli', 'ai-chat'],
   },
   {
     id: 'infrastructure',
@@ -154,6 +160,7 @@ export const store = reactive({
     server: true,
     totp: true,
     music: false,
+    'ai-chat': true,
   },
   channelEnabled: {
     antigravity: true,
@@ -174,6 +181,7 @@ export const store = reactive({
     'server',
     'totp',
     'music',
+    'ai-chat',
   ],
 
   // 界面设置

@@ -437,6 +437,7 @@ function registerRoutes(app) {
     'server-management': '/api/server',
     'antigravity-api': '/api/antigravity',
     'gemini-cli-api': '/api/gemini-cli',
+    'ai-chat-api': '/api/ai-chat',
   };
 
   if (fs.existsSync(modulesDir)) {
