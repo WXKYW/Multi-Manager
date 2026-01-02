@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/Platform-AMD64%20%7C%20ARM64-blue.svg" alt="Platforms">
 </p>
 
---- 
+---
 
 **一个全能型的 API 管理与服务器监控面板**。
 它不仅能帮您集中管理主机、实时 SSH 终端、Docker 容器监控，还提供了强大的云服务集成功能，包括 Cloudflare、OpenAI、Zeabur、Koyeb、等多种云服务。
@@ -27,17 +27,19 @@
 > [!WARNING]
 > 请勿在演示环境中输入真实的敏感数据（如 API Key、服务器密码等）。演示数据将**定期自动清空**。
 
---- 
+---
 
 ## ✨ 核心特性
 
 ### 🖥️ 基础设施管理
+
 - **主机监控**：实时可视化 CPU、内存、磁盘及系统负载数据。
 - **SSH Web 终端**：全功能交互式终端，支持多会话切换与断线重连。
 - **Docker 管理**：一键控制容器启停、重启，查看实时运行状态。「待重构」
 - **健康拨测**：定时检测主机连通性及响应时间，生成历史趋势图。
 
 ### ☁️ 云服务集成
+
 - **Cloudflare DNS**：多账号域名管理、DNS 记录快速增删改、代理模式切换。
 - **AI 模型 API**：
   - **OpenAI / Antigravity / Gemini**：多端点可用性检测、实时配额查询、模型列表获取、全链路耗时统计。
@@ -48,6 +50,7 @@
   - 实时日志流查看、实例状态监控及资源用量统计。
 
 ### 🛠️ 架构与安全
+
 - **现代前端栈**：基于 **Vue 3 + Pinia** 的响应式状态管理，使用 **Vite 7** 构建，极致的加载速度。
 - **全链路追踪**：引入 **Trace ID**，从 HTTP 请求到数据库审计日志实现全生命周期追踪。
 - **结构化日志**：基于 Node.js `AsyncLocalStorage` 的高性能异步 JSON 日志系统。
@@ -100,6 +103,7 @@ npm run dev
 ```
 
 如需仅运行生产环境模式：
+
 ```bash
 npm run build && npm start
 ```
@@ -128,30 +132,27 @@ npm run build && npm start
 
 ## 📁 目录结构
 
-```text
-api-monitor/
-├── src/                    # 前端源码 & 后端核心
-│   ├── js/
-│   │   ├── stores/         # Pinia 状态管理中心 (Auth, App, Server 等)
-│   │   ├── modules/        # 前端中间件与注入逻辑
-│   │   └── main.js         # 应用入口与热重载配置
-│   ├── db/                 # 数据库模型 (SQLite) & 自动迁移
-│   ├── middleware/         # 增强版中间件 (TraceID, RateLimit, Security)
-│   ├── routes/             # 统一路由注册中心
-│   ├── services/           # 核心业务服务 (Session, Log, Metrics)
-│   └── utils/              # 加密存储与通用工具
-├── modules/                # 业务扩展功能库
-│   ├── server-management/  # 主机/SSH/Docker 管理核心
-│   ├── antigravity-api/    # Antigravity 客户端
-│   ├── cloudflare-dns/     # Cloudflare DNS 控制台
-│   └── ...                 # 其他多云集成模块
-├── data/                   # 数据库与日志持久化 (挂载点)
-├── dist/                   # 基于 Vite 7 的生产产物
-├── server.js               # 高度精简的 Express 启动入口
-├── vite.config.mjs         # Vite 7 极速构建配置
-├── cdn.config.mjs          # 弹性 CDN 别名映射配置
-└── Dockerfile              # 多阶段多架构构建脚本
 ```
+api-monitor/
+├── server.js              # 应用入口
+├── src/                   # 核心源码
+│   ├── js/modules/        # 前端业务模块
+│   ├── db/                # 数据库层
+│   ├── middleware/        # Express 中间件
+│   ├── routes/            # API 路由
+│   ├── services/          # 业务服务
+│   └── utils/             # 工具函数
+├── modules/               # 可插拔业务模块
+│   ├── server-management/ # 服务器/SSH/Docker
+│   ├── cloudflare-dns/    # Cloudflare DNS
+│   ├── antigravity-api/   # Antigravity Agent
+│   ├── music-api/         # 网易云音乐代理
+│   └── ...                # 更多模块
+├── data/                  # 持久化目录 (挂载点)
+└── dist/                  # 生产构建产物
+```
+
+详细架构说明 → [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
 
 ---
 
