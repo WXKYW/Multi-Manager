@@ -282,9 +282,21 @@
                   <div class="mfp-lyrics-area" v-show="mfpLyricsMode">
                     <div class="mfp-lyrics-container" ref="mfpLyricsContainer">
                       <div v-for="(line, index) in musicLyrics" :key="index" class="mfp-lyric-line"
-                        :class="{ 'active': musicCurrentLyricIndex === index }" @click="musicSeekToLyric(line.time)">
+                        :class="{ 'active': musicCurrentLyricIndex === index, 'is-interlude': line.isInterlude }"
+                        @click="musicSeekToLyric(line.time)">
                         <div class="mfp-line-text">
-                          <template v-if="musicCurrentLyricIndex === index">
+                          <template v-if="line.isInterlude">
+                            <div class="mfp-interlude-dots">
+                              <!-- 倒计式亮起：最后 6s 亮第一个，4s 亮第二个，2s 亮第三个 -->
+                              <span class="mfp-dot"
+                                :class="{ 'active': musicCurrentLyricIndex === index && (line.duration - (musicCurrentLyricPercent / 100 * line.duration)) <= 6000 }"></span>
+                              <span class="mfp-dot"
+                                :class="{ 'active': musicCurrentLyricIndex === index && (line.duration - (musicCurrentLyricPercent / 100 * line.duration)) <= 4000 }"></span>
+                              <span class="mfp-dot"
+                                :class="{ 'active': musicCurrentLyricIndex === index && (line.duration - (musicCurrentLyricPercent / 100 * line.duration)) <= 2000 }"></span>
+                            </div>
+                          </template>
+                          <template v-else-if="musicCurrentLyricIndex === index">
                             <span v-for="(char, cIdx) in musicSplitLyricText(line.text)" :key="cIdx" class="mfp-char"
                               :class="{ 'active': (cIdx / musicSplitLyricText(line.text).length) * 100 <= musicCurrentLyricPercent }">
                               {{ char }}

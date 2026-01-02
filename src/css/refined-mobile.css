@@ -652,6 +652,48 @@ html.single-page-mode [class*='-sec-tabs'] {
     transition: all 0.4s ease !important;
   }
 
+  /* 间奏指示器 */
+  .mfp-interlude-dots {
+    display: flex !important;
+    gap: 12px !important;
+    padding: 15px 0 !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    width: 100% !important;
+  }
+
+  .mfp-dot {
+    width: 10px !important;
+    height: 10px !important;
+    border-radius: 50% !important;
+    background: rgba(255, 255, 255, 0.2) !important;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    box-shadow: 0 0 8px rgba(0, 0, 0, 0.2) !important;
+  }
+
+  .mfp-dot.active {
+    background: #fff !important;
+    transform: scale(1.2) !important;
+    box-shadow: 0 0 15px rgba(255, 255, 255, 0.5) !important;
+  }
+
+  .mfp-lyric-line.is-interlude {
+    opacity: 0 !important;
+    /* 默认隐藏 */
+    filter: none !important;
+    transform: none !important;
+    transition: opacity 0.5s ease !important;
+    pointer-events: none !important;
+    /* 未激活时不触发点击 */
+  }
+
+  .mfp-lyric-line.is-interlude.active {
+    opacity: 1 !important;
+    /* 唱到时才显示 */
+  }
+
+
+
   /* 逐字/词特效容器 */
   .mfp-char {
     display: inline-block !important;
