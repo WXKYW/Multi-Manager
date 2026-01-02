@@ -19,11 +19,11 @@
   overflow: visible;
 }
 
-/* 淡入淡出动画 */
+/* 淡入动画 - 从下方进入 */
 @keyframes fadeIn {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(12px);
   }
 
   to {
@@ -32,6 +32,7 @@
   }
 }
 
+/* 淡出动画 */
 @keyframes fadeOut {
   from {
     opacity: 1;
@@ -40,15 +41,14 @@
 
   to {
     opacity: 0;
-    transform: translateY(-10px);
   }
 }
 
-/* 滑动动画 - 从下方进入 (替代从右侧进入) */
+/* 滑动动画 - 统一从下方进入 */
 @keyframes slideInRight {
   from {
     opacity: 0;
-    transform: translateY(20px);
+    transform: translateY(16px);
   }
 
   to {
@@ -57,11 +57,11 @@
   }
 }
 
-/* 滑动动画 - 从上方进入 (替代从左侧进入) */
+/* 滑动动画 - 统一从下方进入（保持一致） */
 @keyframes slideInLeft {
   from {
     opacity: 0;
-    transform: translateY(-20px);
+    transform: translateY(16px);
   }
 
   to {
@@ -70,29 +70,25 @@
   }
 }
 
-/* 滑动动画 - 向上退出 (替代向左退出) */
+/* 滑动退出 - 淡出 */
 @keyframes slideOutLeft {
   from {
     opacity: 1;
-    transform: translateY(0);
   }
 
   to {
     opacity: 0;
-    transform: translateY(-20px);
   }
 }
 
-/* 滑动动画 - 向下退出 (替代向右退出) */
+/* 滑动退出 - 淡出 */
 @keyframes slideOutRight {
   from {
     opacity: 1;
-    transform: translateY(0);
   }
 
   to {
     opacity: 0;
-    transform: translateY(20px);
   }
 }
 
@@ -219,16 +215,16 @@
   overflow: visible;
 }
 
-/* 快速淡入效果（用于子标签页） */
+/* 快速淡入效果（用于子标签页）- 统一从下方进入 */
 @keyframes quickFadeIn {
   from {
     opacity: 0;
-    transform: scale(0.98);
+    transform: translateY(12px);
   }
 
   to {
     opacity: 1;
-    transform: scale(1);
+    transform: translateY(0);
   }
 }
 
