@@ -34,8 +34,9 @@ function configureHelmet(options = {}) {
                         'https://cdn.jsdelivr.net',
                         'https://fonts.googleapis.com',
                         'https://cdnjs.cloudflare.com',
+                        'https://unpkg.com',
                     ],
-                    fontSrc: ["'self'", 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com', 'data:'],
+                    fontSrc: ["'self'", 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com', 'https://unpkg.com', 'data:'],
                     imgSrc: ["'self'", 'data:', 'https:', 'blob:'],
                     mediaSrc: ["'self'", 'https:', 'blob:'],
                     connectSrc: [
@@ -44,6 +45,7 @@ function configureHelmet(options = {}) {
                         'ws:',
                         'https://api.openai.com',
                         'https://*.googleapis.com',
+                        'https://accounts.google.com',
                     ],
                     objectSrc: ["'none'"],
                     frameAncestors: ["'self'"],
