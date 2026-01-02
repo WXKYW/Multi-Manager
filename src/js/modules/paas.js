@@ -28,9 +28,12 @@ export const paasMethods = {
           this.loadKoyebData();
         }
       } else if (platform === 'fly') {
-        if (this.flyAccounts.length === 0) {
-          this.loadFlyData();
+        // 先加载缓存，让 UI 立即有数据显示
+        if (store.flyAccounts.length === 0) {
+          this.loadFromFlyCache();
         }
+        // 后台加载最新数据
+        this.loadFlyData();
       }
     });
   },

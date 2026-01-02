@@ -254,6 +254,10 @@ export const settingsMethods = {
         navLayout: this.navLayout,
         totpSettings: this.totpSettings,
         agentDownloadUrl: this.agentDownloadUrl,
+        // 刷新间隔设置
+        zeaburRefreshInterval: this.zeaburRefreshInterval,
+        koyebRefreshInterval: this.koyebRefreshInterval,
+        flyRefreshInterval: this.flyRefreshInterval,
       };
 
       const response = await fetch('/api/settings', {
@@ -320,7 +324,7 @@ export const settingsMethods = {
         body: JSON.stringify(this.logSettings),
       });
       this.showGlobalToast('自动清理配置已保存', 'success');
-    } catch (e) {}
+    } catch (e) { }
   },
 
   async enforceLogLimits() {
@@ -346,7 +350,7 @@ export const settingsMethods = {
       });
       const result = await response.json();
       if (result.success) this.dbStats = result.data;
-    } catch (e) {}
+    } catch (e) { }
   },
 
   async fetchLogSettings() {
@@ -356,7 +360,7 @@ export const settingsMethods = {
       });
       const result = await response.json();
       if (result.success) this.logSettings = result.data;
-    } catch (e) {}
+    } catch (e) { }
   },
 
   // 导数逻辑

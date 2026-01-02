@@ -65,15 +65,15 @@ async function koyebRequest(token, path, method = 'GET', body = null) {
  */
 async function fetchAccountData(token) {
   try {
-    // 先获取应用列表来验证 token 有效�?
+    // 先获取应用列表来验证 token 有效
     const appsResponse = await koyebRequest(token, '/apps');
     const apps = appsResponse.apps || [];
 
-    // 获取组织信息（用于余额等�?
+    // 获取组织信息（用于余额等
     let organization = null;
     let profile = null;
 
-    // 尝试获取用户信息（PAT Token 可用�?
+    // 尝试获取用户信息（PAT Token 可用
     try {
       const profileData = await koyebRequest(token, '/account/profile');
       profile = profileData.user;
@@ -90,7 +90,7 @@ async function fetchAccountData(token) {
       console.warn('获取组织信息失败:', e.message);
     }
 
-    // 如果没有 profile，使�?organization 信息回退
+    // 如果没有 profile，使organization 信息回退
     if (!profile && organization) {
       profile = {
         id: organization.id,
@@ -102,18 +102,18 @@ async function fetchAccountData(token) {
       profile = { id: 'unknown', name: 'Koyeb User', email: '' };
     }
 
-    // 获取每个应用的服�?
+    // 获取每个应用的服
     const appsWithServices = await Promise.all(
       apps.map(async app => {
         try {
           const servicesResponse = await koyebRequest(token, `/services?app_id=${app.id}`);
           const services = servicesResponse.services || [];
 
-          // 获取每个服务的部署信�?
+          // 获取每个服务的部署信
           const servicesWithDetails = await Promise.all(
             services.map(async service => {
               try {
-                // 获取最新部�?
+                // 获取最新部
                 const deploymentsResponse = await koyebRequest(
                   token,
                   `/deployments?service_id=${service.id}&limit=1`
@@ -124,7 +124,7 @@ async function fetchAccountData(token) {
                 // 获取服务域名
                 const domains = [];
                 if (service.active_deployment) {
-                  // Koyeb 自动生成的域�?
+                  // Koyeb 自动生成的域
                   if (app.name && service.name) {
                     domains.push({
                       domain: `${app.name}-${service.name}.koyeb.app`,
@@ -132,7 +132,7 @@ async function fetchAccountData(token) {
                     });
                   }
                 }
-                // 自定义域�?
+                // 自定义域
                 if (service.domains) {
                   service.domains.forEach(d => {
                     domains.push({
@@ -179,7 +179,7 @@ async function fetchAccountData(token) {
           if (servicesWithDetails.length > 0) {
             const firstService = services[0];
             try {
-              // 获取第一个服务的实例来确定地�?
+              // 获取第一个服务的实例来确定地
               const instancesResponse = await koyebRequest(
                 token,
                 `/instances?service_id=${firstService.id}&limit=1`
@@ -196,7 +196,7 @@ async function fetchAccountData(token) {
           return {
             _id: app.id,
             name: app.name,
-            region: mapKoyebRegion(appRegion), // 从实例中获取的地�?
+            region: mapKoyebRegion(appRegion), // 从实例中获取的地
             services: servicesWithDetails,
             createdAt: app.created_at,
             updatedAt: app.updated_at,
@@ -241,7 +241,7 @@ async function fetchServiceLogs(token, serviceId, limit = 100) {
     );
     return response.result || [];
   } catch (error) {
-    console.warn(`获取服务日志失败 (尝试旧接�?: ${error.message}`);
+    console.warn(`获取服务日志失败 (尝试旧接: ${error.message}`);
     try {
       // 备选方案：尝试旧的 /logs 接口
       const response = await koyebRequest(
@@ -256,7 +256,7 @@ async function fetchServiceLogs(token, serviceId, limit = 100) {
 }
 
 /**
- * 重命名应�?
+ * 重命名应
  */
 async function renameApp(token, appId, newName) {
   try {
@@ -268,7 +268,7 @@ async function renameApp(token, appId, newName) {
 }
 
 /**
- * 重命名服�?
+ * 重命名服
  */
 async function renameService(token, serviceId, newName) {
   try {
@@ -280,7 +280,7 @@ async function renameService(token, serviceId, newName) {
 }
 
 /**
- * 暂停服务 (Koyeb 通过设置 scale �?0 来暂�?
+ * 暂停服务 (Koyeb 通过设置 scale 0 来暂
  */
 async function pauseService(token, serviceId) {
   try {
@@ -432,7 +432,7 @@ async function fetchOrganizationUsage(token, startTime = null, endTime = null) {
 // ============ 辅助函数 ============
 
 /**
- * �?Koyeb 状态映射为标准状�?
+ * Koyeb 状态映射为标准状
  */
 function mapKoyebStatus(status) {
   const statusMap = {
@@ -495,7 +495,7 @@ function mapKoyebRegion(region) {
 }
 
 /**
- * 从实例类型提�?CPU 配置 (毫核)
+ * 从实例类型提CPU 配置 (毫核)
  */
 function extractCpuFromInstance(instanceType) {
   if (!instanceType) return 0;
@@ -513,7 +513,7 @@ function extractCpuFromInstance(instanceType) {
 }
 
 /**
- * 从实例类型提取内存配�?(MB)
+ * 从实例类型提取内存配(MB)
  */
 function extractMemoryFromInstance(instanceType) {
   if (!instanceType) return 0;

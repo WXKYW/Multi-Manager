@@ -1221,90 +1221,31 @@ export const antigravityMethods = {
 
   /**
    * 切换定时检测开关
+   * 后端完全控制定时器，前端只负责修改设置
    */
   toggleAntigravityAutoCheck() {
+    // 保存设置到后端，后端会自动重启定时器
+    this.saveAntigravityAutoCheckSettings();
     if (store.antigravityAutoCheck) {
-      // 开启定时检测
-      this.startAntigravityAutoCheck();
       toast.success(
         `已开启定时检测 (每 ${Math.round(store.antigravityAutoCheckInterval / 60000)} 分钟)`
       );
     } else {
-      // 关闭定时检测
-      this.stopAntigravityAutoCheck();
       toast.info('已关闭定时检测');
     }
-    // 保存设置到后端
-    this.saveAntigravityAutoCheckSettings();
   },
 
   /**
    * 重启定时检测 (间隔变化时)
+   * 后端完全控制定时器，前端只负责修改设置
    */
   restartAntigravityAutoCheck() {
+    // 保存设置到后端，后端会自动重启定时器
+    this.saveAntigravityAutoCheckSettings();
     if (store.antigravityAutoCheck) {
-      this.stopAntigravityAutoCheck();
-      this.startAntigravityAutoCheck();
       toast.success(
         `定时检测间隔已更新为 ${Math.round(store.antigravityAutoCheckInterval / 60000)} 分钟`
       );
-    }
-    // 保存设置到后端
-    this.saveAntigravityAutoCheckSettings();
-  },
-
-  /**
-   * 启动定时检测
-   * 基于上次执行时间计算剩余等待时间，而不是每次重启都从头开始
-   */
-  startAntigravityAutoCheck() {
-    this.stopAntigravityAutoCheck(); // 确保没有重复定时器
-
-    const interval = Number(store.antigravityAutoCheckInterval);
-    const lastRun = store.antigravityAutoCheckLastRun || 0;
-    const now = Date.now();
-    const elapsed = now - lastRun;
-
-    // 计算剩余等待时间
-    let delay = interval - elapsed;
-    if (delay < 0 || lastRun === 0) {
-      // 如果已经超过间隔或从未运行过，立即执行
-      delay = 0;
-    }
-
-    console.log(
-      `[Antigravity] 定时检测启动: 间隔=${interval / 60000}分钟, 上次=${lastRun ? new Date(lastRun).toLocaleTimeString() : '从未'}, 剩余等待=${Math.round(delay / 60000)}分钟`
-    );
-
-    // 首先等待剩余时间
-    store.antigravityAutoCheckTimerId = setTimeout(() => {
-      // 执行首次检测
-      if (!store.antigravityChecking) {
-        console.log('[Antigravity] 定时检测触发 (首次/延迟)');
-        this.runAntigravityModelCheck();
-        store.antigravityAutoCheckLastRun = Date.now();
-        this.saveAntigravityAutoCheckSettings();
-      }
-
-      // 然后开始正常的间隔循环
-      store.antigravityAutoCheckTimerId = setInterval(() => {
-        if (!store.antigravityChecking) {
-          console.log('[Antigravity] 定时检测触发');
-          this.runAntigravityModelCheck();
-          store.antigravityAutoCheckLastRun = Date.now();
-          this.saveAntigravityAutoCheckSettings();
-        }
-      }, interval);
-    }, delay);
-  },
-
-  /**
-   * 停止定时检测
-   */
-  stopAntigravityAutoCheck() {
-    if (store.antigravityAutoCheckTimerId) {
-      clearInterval(store.antigravityAutoCheckTimerId);
-      store.antigravityAutoCheckTimerId = null;
     }
   },
 
@@ -1334,22 +1275,32 @@ export const antigravityMethods = {
           store.antigravityDisabledCheckModels = [];
         }
       }
-      // 加载上次执行时间
-      if (settings.autoCheckLastRun !== undefined) {
-        store.antigravityAutoCheckLastRun = parseInt(settings.autoCheckLastRun) || 0;
-      }
 
-      // 如果设置为开启，启动定时器
-      if (store.antigravityAutoCheck) {
-        this.startAntigravityAutoCheck();
-      }
+      // 同时获取后端定时器状态
+      this.loadAntigravityAutoCheckStatus();
     } catch (error) {
       console.error('加载定时检测设置失败:', error);
     }
   },
 
   /**
+   * 获取后端定时检测状态
+   */
+  async loadAntigravityAutoCheckStatus() {
+    try {
+      const response = await fetch('/api/antigravity/auto-check/status', {
+        headers: store.getAuthHeaders(),
+      });
+      const status = await response.json();
+      store.antigravityAutoCheckStatus = status;
+    } catch (error) {
+      console.error('获取定时检测状态失败:', error);
+    }
+  },
+
+  /**
    * 保存定时检测设置
+   * 后端会在收到设置后自动重启定时器
    */
   async saveAntigravityAutoCheckSettings() {
     try {
@@ -1362,10 +1313,11 @@ export const antigravityMethods = {
         body: JSON.stringify({
           autoCheckEnabled: store.antigravityAutoCheck ? '1' : '0',
           autoCheckInterval: String(store.antigravityAutoCheckInterval),
-          autoCheckLastRun: String(store.antigravityAutoCheckLastRun || 0),
           disabledCheckModels: JSON.stringify(store.antigravityDisabledCheckModels),
         }),
       });
+      // 保存后刷新状态
+      this.loadAntigravityAutoCheckStatus();
     } catch (error) {
       console.error('保存定时检测设置失败:', error);
     }
