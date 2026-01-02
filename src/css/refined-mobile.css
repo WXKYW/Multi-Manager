@@ -626,21 +626,27 @@ html.single-page-mode [class*='-sec-tabs'] {
   .mfp-lyric-line {
     padding: 10px 0 !important;
     min-height: 35px !important;
-    transition: all 0.4s cubic-bezier(0.33, 1, 0.68, 1) !important;
+    transition: opacity 0.25s ease-out, transform 0.25s ease-out, filter 0.25s ease-out !important;
     cursor: pointer !important;
     transform-origin: left center !important;
     opacity: 0.25 !important;
-    filter: blur(1.5px) !important;
+    filter: blur(1px) !important;
     width: 100% !important;
     text-align: left !important;
+    will-change: transform, opacity !important;
+    /* GPU 加速提示 */
+    contain: layout style !important;
+    /* 限制重绘范围 */
   }
 
   /* 高亮行 */
   .mfp-lyric-line.active {
     opacity: 1 !important;
-    transform: scale(1.02) !important;
+    transform: scale(1.02) translateZ(0) !important;
+    /* translateZ 强制 GPU 层 */
     filter: blur(0) !important;
   }
+
 
   /* 原文 */
   .mfp-line-text {

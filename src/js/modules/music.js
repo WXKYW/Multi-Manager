@@ -634,8 +634,9 @@ const lyricScrollState = {
 };
 
 // Spring configuration (tuned for smooth, elegant scroll)
-const SPRING_TENSION = 0.045;  // 略微提高张力，增加响应速度
-const SPRING_FRICTION = 0.82;  // 略微降低摩擦力，让滑动更顺滑
+const SPRING_TENSION = 0.08;   // 增加张力，提高响应速度
+const SPRING_FRICTION = 0.78;  // 降低摩擦力，让滑动更流畅
+
 
 let lastScrollTime = 0;
 function lyricSmoothScrollLoop(timestamp) {
@@ -785,15 +786,20 @@ function parseLyrics(lrcText) {
         !current.text.includes('纯音乐') &&
         !next.text.includes('纯音乐')
       ) {
-        const duration = gap - 2000;
-        finalLyrics.push({
-          time: current.time + 1000,
-          isInterlude: true,
-          text: '',
-          duration: duration,
-          isCountdown: true, // 标记为倒计时模式
-        });
+        // 间奏指示器在当前歌词展示约 4 秒后出现，确保最后一句完整显示
+        const interludeStart = current.time + 4000;
+        const duration = next.time - interludeStart - 1000; // 在下一句开始前 1 秒结束
+        if (duration > 0) {
+          finalLyrics.push({
+            time: interludeStart,
+            isInterlude: true,
+            text: '',
+            duration: duration,
+            isCountdown: true,
+          });
+        }
       }
+
     }
   }
 

@@ -136,7 +136,23 @@ export const commonMethods = {
     // 仅监听 click，确保点击行为的一致性，避免滑动时触发震动
     window.addEventListener('click', handleInteraction, { capture: true });
 
+    // 点击空白处关闭底栏展开菜单
+    document.addEventListener('click', (e) => {
+      // 如果没有展开的菜单，直接返回
+      if (!store.navGroupExpanded) return;
+
+      // 检查点击是否在菜单区域内
+      const isInsideDropdown = e.target.closest('.nav-group-dropdown');
+      const isInsideGroupBtn = e.target.closest('.nav-group-btn');
+
+      // 如果点击的不是菜单按钮也不是下拉菜单内部，则关闭
+      if (!isInsideDropdown && !isInsideGroupBtn) {
+        store.navGroupExpanded = null;
+      }
+    });
+
     console.log('[System] Mobile interaction feedback (click) initialized');
+
 
     /*
         let touchStartX = null;
