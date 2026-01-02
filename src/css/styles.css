@@ -1,8 +1,6 @@
 /* API Monitor - Main Styles */
 
-/* 字体图标库（字体文件保留 CDN 加载以避免包体积过大） */
-@import url('https://unpkg.com/simple-icons-font@14.15.0/font/simple-icons.min.css');
-@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css');
+/* 字体图标库已移至 index.html <head> 中通过 <link> 标签加载，避免 @import 阻塞渲染 */
 
 ::-webkit-scrollbar {
   display: none !important;

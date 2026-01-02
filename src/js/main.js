@@ -65,7 +65,8 @@ import pinia from './stores/index.js';
 import { useAuthStore } from './stores/auth.js';
 import { useAppStore } from './stores/app.js';
 import { useServerStore } from './stores/server.js';
-import '@fortawesome/fontawesome-free/css/all.min.css';
+// FontAwesome 已移至 index.html <head> 中通过 CDN 加载，避免 JS 模块延迟导致的 FOUC
+// import '@fortawesome/fontawesome-free/css/all.min.css';
 
 // xterm.js imports removed - lazy loaded in ssh.js
 

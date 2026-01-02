@@ -23,6 +23,14 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="mobile-web-app-capable" content="yes" />
 
+  <!-- 关键字体图标预加载 (移出 CSS @import 避免渲染阻塞) -->
+  <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" as="style"
+    crossorigin>
+  <link rel="preload" href="https://unpkg.com/simple-icons-font@14.15.0/font/simple-icons.min.css" as="style"
+    crossorigin>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin>
+  <link rel="stylesheet" href="https://unpkg.com/simple-icons-font@14.15.0/font/simple-icons.min.css" crossorigin>
+
   <!-- CDN 样式 (由 Vite 注入) -->
   <%- cdnStyleTags %>
 
@@ -33,6 +41,49 @@
       <link rel="stylesheet" href="css/refined-mobile.css" />
 
       <style>
+        /* ========== 关键内联样式 (Critical CSS) ========== */
+        /* 这些样式在任何外部 CSS 加载之前就生效，防止 FOUC */
+
+        /* 基础颜色变量 (深色模式优先) */
+        :root {
+          --bg-primary: #111827;
+          --bg-secondary: #1f2937;
+          --text-primary: #f9fafb;
+          --border-color: #374151;
+        }
+
+        @media (prefers-color-scheme: light) {
+          :root {
+            --bg-primary: #f4f6f8;
+            --bg-secondary: #f9fafb;
+            --text-primary: #4e4e4e;
+            --border-color: #dedede;
+          }
+        }
+
+        /* 基础重置 */
+        *,
+        *::before,
+        *::after {
+          box-sizing: border-box;
+          margin: 0;
+          padding: 0;
+        }
+
+        html,
+        body {
+          height: 100%;
+          width: 100%;
+        }
+
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+          background-color: var(--bg-primary);
+          color: var(--text-primary);
+          -webkit-font-smoothing: antialiased;
+        }
+
+        /* Vue 未编译模板隐藏 */
         [v-cloak] {
           display: none !important;
         }
