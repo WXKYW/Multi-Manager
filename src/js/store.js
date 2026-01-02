@@ -451,10 +451,9 @@ export const store = reactive({
   antigravityCheckLoading: false, // 模型检测中
   antigravityChecking: false, // 正在执行检测
   antigravityCheckHistory: { models: [], times: [], matrix: {} }, // 检测历史矩阵
-  antigravityAutoCheck: false, // 定时检测开关
+  antigravityAutoCheck: false, // 定时检测开关 (UI 状态)
   antigravityAutoCheckInterval: 3600000, // 默认 1 小时
-  antigravityAutoCheckTimerId: null, // 定时器 ID
-  antigravityAutoCheckLastRun: 0, // 上次定时检测执行时间戳 (用于重启后恢复计时)
+  antigravityAutoCheckStatus: null, // 后端定时器状态 { running, enabled, intervalMs, nextRunTime }
   antigravityDisabledCheckModels: [], // 禁用检测的模型列表
 
   // Gemini CLI
@@ -493,10 +492,9 @@ export const store = reactive({
   geminiCliCheckLoading: false, // 模型检测中
   geminiCliChecking: false, // 正在执行检测
   geminiCliCheckHistory: { models: [], times: [], matrix: {} }, // 检测历史矩阵
-  geminiCliAutoCheck: false, // 定时检测开关
+  geminiCliAutoCheck: false, // 定时检测开关 (UI 状态)
   geminiCliAutoCheckInterval: 3600000, // 默认 1 小时
-  geminiCliAutoCheckTimerId: null, // 定时器 ID
-  geminiCliAutoCheckLastRun: 0, // 上次定时检测执行时间戳 (用于重启后恢复计时)
+  geminiCliAutoCheckStatus: null, // 后端定时器状态 { running, enabled, intervalMs, nextRunTime }
   geminiCliDisabledCheckModels: [], // 禁用检测的模型列表
 
   // ===== 音乐播放器模块 =====

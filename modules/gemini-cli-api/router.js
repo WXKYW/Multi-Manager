@@ -92,7 +92,7 @@ const autoCheckService = {
           if (disabledModels.length > 0) {
             modelsToCheck = modelsToCheck.filter(m => !disabledModels.includes(m));
           }
-        } catch (e) {}
+        } catch (e) { }
       }
 
       if (modelsToCheck.length === 0) {
@@ -169,6 +169,11 @@ const autoCheckService = {
       console.log('[GCLI AutoCheck] 定时检测完成');
     } catch (error) {
       console.error('[GCLI AutoCheck] 定时检测失败:', error.message);
+    } finally {
+      // 更新下次执行时间
+      const settings = storage.getSettings();
+      const intervalMs = parseInt(settings.autoCheckInterval) || 3600000;
+      this.nextRunTime = Date.now() + intervalMs;
     }
   },
 

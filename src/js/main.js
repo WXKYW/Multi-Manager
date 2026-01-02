@@ -1209,13 +1209,18 @@ const app = createApp({
         this.stopAutoRefresh();
       } else if (newVal === 'fly') {
         this.paasCurrentPlatform = 'fly';
+        // 优先加载缓存
         if (this.flyAccounts.length === 0) {
           this.loadFromFlyCache();
         }
         if (this.flyManagedAccounts.length === 0) {
           this.loadFlyManagedAccounts();
         }
-
+        // 启动 Fly.io 自动刷新
+        if (!this.flyDataRefreshPaused) {
+          this.startFlyAutoRefresh();
+          this.loadFlyData(); // 立即触发一次
+        }
         // 停止其他自动刷新
         this.stopAutoRefresh();
         this.stopKoyebAutoRefresh();

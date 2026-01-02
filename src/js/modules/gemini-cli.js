@@ -968,88 +968,31 @@ export const geminiCliMethods = {
 
   /**
    * 切换定时检测开关
+   * 后端完全控制定时器，前端只负责修改设置
    */
   toggleGeminiCliAutoCheck() {
+    // 保存设置到后端，后端会自动重启定时器
+    this.saveGeminiCliAutoCheckSettings();
     if (store.geminiCliAutoCheck) {
-      this.startGeminiCliAutoCheck();
       toast.success(
         `已开启定时检测 (每 ${Math.round(store.geminiCliAutoCheckInterval / 60000)} 分钟)`
       );
     } else {
-      this.stopGeminiCliAutoCheck();
       toast.info('已关闭定时检测');
     }
-    // 保存设置到后端
-    this.saveGeminiCliAutoCheckSettings();
   },
 
   /**
    * 重启定时检测 (间隔变化时)
+   * 后端完全控制定时器，前端只负责修改设置
    */
   restartGeminiCliAutoCheck() {
+    // 保存设置到后端，后端会自动重启定时器
+    this.saveGeminiCliAutoCheckSettings();
     if (store.geminiCliAutoCheck) {
-      this.stopGeminiCliAutoCheck();
-      this.startGeminiCliAutoCheck();
       toast.success(
         `定时检测间隔已更新为 ${Math.round(store.geminiCliAutoCheckInterval / 60000)} 分钟`
       );
-    }
-    // 保存设置到后端
-    this.saveGeminiCliAutoCheckSettings();
-  },
-
-  /**
-   * 启动定时检测
-   * 基于上次执行时间计算剩余等待时间，而不是每次重启都从头开始
-   */
-  startGeminiCliAutoCheck() {
-    this.stopGeminiCliAutoCheck();
-
-    const interval = Number(store.geminiCliAutoCheckInterval);
-    const lastRun = store.geminiCliAutoCheckLastRun || 0;
-    const now = Date.now();
-    const elapsed = now - lastRun;
-
-    // 计算剩余等待时间
-    let delay = interval - elapsed;
-    if (delay < 0 || lastRun === 0) {
-      // 如果已经超过间隔或从未运行过，立即执行
-      delay = 0;
-    }
-
-    console.log(
-      `[Gemini CLI] 定时检测启动: 间隔=${interval / 60000}分钟, 上次=${lastRun ? new Date(lastRun).toLocaleTimeString() : '从未'}, 剩余等待=${Math.round(delay / 60000)}分钟`
-    );
-
-    // 首先等待剩余时间
-    store.geminiCliAutoCheckTimerId = setTimeout(() => {
-      // 执行首次检测
-      if (!store.geminiCliChecking) {
-        console.log('[Gemini CLI] 定时检测触发 (首次/延迟)');
-        this.runGeminiCliModelCheck();
-        store.geminiCliAutoCheckLastRun = Date.now();
-        this.saveGeminiCliAutoCheckSettings();
-      }
-
-      // 然后开始正常的间隔循环
-      store.geminiCliAutoCheckTimerId = setInterval(() => {
-        if (!store.geminiCliChecking) {
-          console.log('[Gemini CLI] 定时检测触发');
-          this.runGeminiCliModelCheck();
-          store.geminiCliAutoCheckLastRun = Date.now();
-          this.saveGeminiCliAutoCheckSettings();
-        }
-      }, interval);
-    }, delay);
-  },
-
-  /**
-   * 停止定时检测
-   */
-  stopGeminiCliAutoCheck() {
-    if (store.geminiCliAutoCheckTimerId) {
-      clearInterval(store.geminiCliAutoCheckTimerId);
-      store.geminiCliAutoCheckTimerId = null;
     }
   },
 
@@ -1078,25 +1021,18 @@ export const geminiCliMethods = {
           store.geminiCliDisabledCheckModels = [];
         }
       }
-      // 加载上次执行时间
-      if (settings.autoCheckLastRun !== undefined) {
-        store.geminiCliAutoCheckLastRun = parseInt(settings.autoCheckLastRun) || 0;
+
+      // 后端定时器状态已包含在 _autoCheckStatus 中
+      if (settings._autoCheckStatus) {
+        store.geminiCliAutoCheckStatus = settings._autoCheckStatus;
       }
 
       console.log('[Gemini CLI] 定时检测设置:', {
         enabled: store.geminiCliAutoCheck,
         interval: store.geminiCliAutoCheckInterval,
         intervalMinutes: Math.round(store.geminiCliAutoCheckInterval / 60000),
+        backendRunning: settings._autoCheckStatus?.running,
       });
-
-      if (store.geminiCliAutoCheck) {
-        this.startGeminiCliAutoCheck();
-        console.log(
-          '[Gemini CLI] 定时检测已启动，间隔:',
-          Math.round(store.geminiCliAutoCheckInterval / 60000),
-          '分钟'
-        );
-      }
     } catch (error) {
       console.error('加载 Gemini CLI 定时检测设置失败:', error);
     }
@@ -1104,6 +1040,7 @@ export const geminiCliMethods = {
 
   /**
    * 保存定时检测设置
+   * 后端会在收到设置后自动重启定时器
    */
   async saveGeminiCliAutoCheckSettings() {
     try {
@@ -1116,10 +1053,11 @@ export const geminiCliMethods = {
         body: JSON.stringify({
           autoCheckEnabled: store.geminiCliAutoCheck ? '1' : '0',
           autoCheckInterval: String(store.geminiCliAutoCheckInterval),
-          autoCheckLastRun: String(store.geminiCliAutoCheckLastRun || 0),
           disabledCheckModels: JSON.stringify(store.geminiCliDisabledCheckModels),
         }),
       });
+      // 保存后刷新设置以获取最新的后端状态
+      this.loadGeminiCliAutoCheckSettings();
     } catch (error) {
       console.error('保存 Gemini CLI 定时检测设置失败:', error);
     }

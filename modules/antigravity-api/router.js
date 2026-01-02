@@ -76,13 +76,37 @@ const autoCheckService = {
         return;
       }
 
-      // 获取要检测的模型列表
-      const modelConfigs = storage.getModelConfigs();
-      let modelsToCheck = Object.keys(modelConfigs).filter(
-        modelId => modelConfigs[modelId] === true
-      );
+      // 获取要检测的模型列表 - 从第一个启用账号的额度 API 获取完整模型列表
+      let modelsToCheck = [];
+      const enabledAccounts = accounts.filter(a => a.enable);
 
-      // 应用禁用模型过滤
+      if (enabledAccounts.length > 0) {
+        try {
+          const quotas = await client.listQuotas(enabledAccounts[0].id);
+          // 从额度数据中提取所有模型 ID
+          const allModels = new Set();
+          Object.values(quotas).forEach(group => {
+            if (group.models && Array.isArray(group.models)) {
+              group.models.forEach(m => allModels.add(m.id));
+            }
+          });
+          modelsToCheck = Array.from(allModels);
+        } catch (e) {
+          console.log('[AntiG AutoCheck] 获取额度失败，使用配置:', e.message);
+        }
+      }
+
+      // 获取模型启用配置（用户显式禁用的模型）
+      const modelConfigs = storage.getModelConfigs();
+
+      // 过滤掉用户显式禁用的模型（enabled = false）
+      modelsToCheck = modelsToCheck.filter(modelId => {
+        // 如果模型在配置中且被禁用，排除它
+        if (modelConfigs[modelId] === false) return false;
+        return true;
+      });
+
+      // 应用检测禁用模型过滤（用户在检测设置中禁用的模型）
       const settings = storage.getSettings();
       if (settings.disabledCheckModels) {
         try {
@@ -90,20 +114,22 @@ const autoCheckService = {
           if (disabledModels.length > 0) {
             modelsToCheck = modelsToCheck.filter(m => !disabledModels.includes(m));
           }
-        } catch (e) {}
+        } catch (e) { }
       }
 
+      // 如果仍然没有模型，使用兜底方案
       if (modelsToCheck.length === 0) {
         const historyModels = storage.getModelCheckHistory().models || [];
         modelsToCheck =
           historyModels.length > 0
             ? historyModels
             : [
-                'gemini-3-pro-preview',
-                'gemini-3-flash-preview',
-                'gemini-2.5-pro',
-                'gemini-2.5-flash',
-              ];
+              'gemini-3-pro-high',
+              'gemini-3-pro-low',
+              'gemini-3-flash',
+              'gemini-2.5-pro',
+              'gemini-2.5-flash',
+            ];
       }
 
       const batchTime = Math.floor(Date.now() / 1000);
@@ -185,6 +211,11 @@ const autoCheckService = {
       console.log('[AntiG AutoCheck] 定时检测完成');
     } catch (error) {
       console.error('[AntiG AutoCheck] 定时检测失败:', error.message);
+    } finally {
+      // 更新下次执行时间
+      const settings = storage.getSettings();
+      const intervalMs = parseInt(settings.autoCheckInterval) || 3600000;
+      this.nextRunTime = Date.now() + intervalMs;
     }
   },
 
@@ -338,19 +369,31 @@ router.post('/settings', (req, res) => {
     const body = req.body;
     if (!body) return res.status(400).json({ error: 'Body required' });
 
+    let autoCheckChanged = false;
+
     // 兼容格式 1: { key: "PROXY", value: "..." }
     if (body.key !== undefined && body.value !== undefined) {
       storage.updateSetting(body.key, body.value);
+      if (body.key === 'autoCheckEnabled' || body.key === 'autoCheckInterval') {
+        autoCheckChanged = true;
+      }
     } else {
       // 兼容格式 2: { "PROXY": "...", "API_KEY": "..." }
       for (const [key, value] of Object.entries(body)) {
         if (value !== undefined) {
           storage.updateSetting(key, value);
+          if (key === 'autoCheckEnabled' || key === 'autoCheckInterval') {
+            autoCheckChanged = true;
+          }
         }
       }
     }
 
-    // 如果有特定的模块刷新需求可以在此添加，Antigravity 暂无 autoCheckService
+    // 如果定时检测设置变更，重启定时检测服务
+    if (autoCheckChanged) {
+      autoCheckService.restart();
+    }
+
     res.json({ success: true });
   } catch (error) {
     console.error('Save settings error:', error);
@@ -476,7 +519,7 @@ router.post('/accounts/import', async (req, res) => {
               headers: { Authorization: `Bearer ${accessToken}` },
             });
             email = userRes.data.email || '';
-          } catch (e) {}
+          } catch (e) { }
         }
 
         if (!projectId) {
@@ -489,7 +532,7 @@ router.post('/accounts/import', async (req, res) => {
             );
             const projects = projRes.data.projects || [];
             if (projects.length > 0) projectId = projects[0].projectId;
-          } catch (e) {}
+          } catch (e) { }
         }
 
         if (!projectId) {
@@ -545,24 +588,51 @@ router.post('/accounts/check', async (req, res) => {
       });
     }
 
-    // 获取要检测的模型列表 - 使用 getModelConfigs 获取已启用的模型，与额度状态页面一致
-    const modelConfigs = storage.getModelConfigs();
-    let modelsToCheck = Object.keys(modelConfigs).filter(modelId => modelConfigs[modelId] === true);
+    // 获取要检测的模型列表 - 从第一个启用账号的额度 API 获取完整模型列表
+    let modelsToCheck = [];
+    const enabledAccounts = accounts.filter(a => a.enable);
 
-    // 获取禁用的模型列表
-    const settings = storage.getSettings();
-    let disabledModels = [];
-    if (settings.disabledCheckModels) {
+    if (enabledAccounts.length > 0) {
       try {
-        disabledModels = JSON.parse(settings.disabledCheckModels);
+        const quotas = await client.listQuotas(enabledAccounts[0].id);
+        // 从额度数据中提取所有模型 ID
+        const allModels = new Set();
+        Object.values(quotas).forEach(group => {
+          if (group.models && Array.isArray(group.models)) {
+            group.models.forEach(m => allModels.add(m.id));
+          }
+        });
+        modelsToCheck = Array.from(allModels);
+        console.log(`[AntiG] 从额度 API 获取到 ${modelsToCheck.length} 个模型`);
       } catch (e) {
-        disabledModels = [];
+        console.log('[AntiG] 获取额度失败，使用配置:', e.message);
       }
     }
 
-    // 过滤掉当前禁用的模型
-    if (disabledModels.length > 0) {
-      modelsToCheck = modelsToCheck.filter(m => !disabledModels.includes(m));
+    // 获取模型启用配置（用户显式禁用的模型）
+    const modelConfigs = storage.getModelConfigs();
+
+    // 过滤掉用户显式禁用的模型（enabled = false）
+    modelsToCheck = modelsToCheck.filter(modelId => {
+      // 如果模型在配置中且被禁用，排除它
+      if (modelConfigs[modelId] === false) return false;
+      return true;
+    });
+
+    // 获取检测禁用的模型列表
+    const settings = storage.getSettings();
+    let disabledCheckModels = [];
+    if (settings.disabledCheckModels) {
+      try {
+        disabledCheckModels = JSON.parse(settings.disabledCheckModels);
+      } catch (e) {
+        disabledCheckModels = [];
+      }
+    }
+
+    // 过滤掉在检测设置中禁用的模型
+    if (disabledCheckModels.length > 0) {
+      modelsToCheck = modelsToCheck.filter(m => !disabledCheckModels.includes(m));
     }
 
     // 如果没有已启用的模型，从历史记录补充
@@ -574,12 +644,11 @@ router.post('/accounts/check', async (req, res) => {
     // 如果仍然没有模型，使用兜底方案
     if (modelsToCheck.length === 0) {
       modelsToCheck = [
-        'gemini-3-pro-preview',
-        'gemini-3-flash-preview',
+        'gemini-3-pro-high',
+        'gemini-3-pro-low',
+        'gemini-3-flash',
         'gemini-2.5-pro',
         'gemini-2.5-flash',
-        'gemini-1.5-pro',
-        'gemini-1.5-flash',
       ];
     }
 
@@ -726,6 +795,17 @@ router.post('/models/check-history/clear', (req, res) => {
   try {
     storage.clearModelCheckHistory();
     res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * 获取定时检测状态
+ */
+router.get('/auto-check/status', (req, res) => {
+  try {
+    res.json(autoCheckService.getStatus());
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
