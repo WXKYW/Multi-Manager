@@ -373,7 +373,8 @@ export const totpMethods = {
   },
 
   getPlatformAccountCount(issuer) {
-    return this.totpAccounts.filter(a => (a.issuer || '') === (issuer || '')).length;
+    const key = (issuer || '').toLowerCase();
+    return this.totpAccounts.filter(a => (a.issuer || '').toLowerCase() === key).length;
   },
 
   // ==================== 导入 ====================
@@ -611,7 +612,7 @@ export const totpMethods = {
 
         // 尝试优先级：1. 后置 -> 2. 前置 -> 3. 枚举设备
         const startCamera = async constraints => {
-          await this.html5QrCode.start(constraints, config, successCallback, () => {});
+          await this.html5QrCode.start(constraints, config, successCallback, () => { });
         };
 
         try {
@@ -1095,18 +1096,23 @@ export const totpComputed = {
 
     // 根据设置决定是否按平台分组
     if (this.totpSettings.groupByPlatform) {
-      // 统计每个平台的账号数量
+      // 使用小写 issuer 作为 key 统计每个平台的账号数量（忽略大小写）
       const issuerCount = {};
       accounts.forEach(acc => {
-        const issuer = acc.issuer || '';
-        issuerCount[issuer] = (issuerCount[issuer] || 0) + 1;
+        const issuerKey = (acc.issuer || '').toLowerCase();
+        issuerCount[issuerKey] = (issuerCount[issuerKey] || 0) + 1;
       });
 
-      // 按平台账号数量降序排序，数量相同则按平台名称排序
+      // 按平台账号数量降序排序，数量相同则按平台名称排序（忽略大小写）
       accounts.sort((a, b) => {
-        const countDiff = (issuerCount[b.issuer || ''] || 0) - (issuerCount[a.issuer || ''] || 0);
+        const aKey = (a.issuer || '').toLowerCase();
+        const bKey = (b.issuer || '').toLowerCase();
+        const countDiff = (issuerCount[bKey] || 0) - (issuerCount[aKey] || 0);
         if (countDiff !== 0) return countDiff;
-        return (a.issuer || '').localeCompare(b.issuer || '');
+        // 相同平台的账号聚在一起
+        if (aKey !== bKey) return aKey.localeCompare(bKey);
+        // 同平台内按账号名排序
+        return (a.account || '').localeCompare(b.account || '');
       });
     }
 

@@ -2,25 +2,13 @@
 <div class="tab-content totp-tab-content theme-totp" :class="getTabAnimationClass('totp')">
   <!-- 子标签页 -->
   <div class="sec-tabs totp-sec-tabs">
-    <button
-      class="tab-btn"
-      :class="{ active: totpCurrentTab === 'accounts' }"
-      @click="totpCurrentTab = 'accounts'"
-    >
+    <button class="tab-btn" :class="{ active: totpCurrentTab === 'accounts' }" @click="totpCurrentTab = 'accounts'">
       <i class="fas fa-key"></i> 验证码
     </button>
-    <button
-      class="tab-btn"
-      :class="{ active: totpCurrentTab === 'groups' }"
-      @click="totpCurrentTab = 'groups'"
-    >
+    <button class="tab-btn" :class="{ active: totpCurrentTab === 'groups' }" @click="totpCurrentTab = 'groups'">
       <i class="fas fa-folder"></i> 分组
     </button>
-    <button
-      class="tab-btn"
-      :class="{ active: totpCurrentTab === 'settings' }"
-      @click="totpCurrentTab = 'settings'"
-    >
+    <button class="tab-btn" :class="{ active: totpCurrentTab === 'settings' }" @click="totpCurrentTab = 'settings'">
       <i class="fas fa-cog"></i> 设置
     </button>
   </div>
@@ -31,17 +19,11 @@
       <div class="panel-header">
         <div class="panel-title">
           <i class="fas fa-shield-alt" style="margin-right: 8px"></i>2FA 账号
-          <span style="font-weight: 400; opacity: 0.6; margin-left: 8px"
-            >({{ filteredTotpAccounts.length }})</span
-          >
+          <span style="font-weight: 400; opacity: 0.6; margin-left: 8px">({{ filteredTotpAccounts.length }})</span>
         </div>
         <div style="display: flex; gap: 8px; align-items: center">
           <!-- 分组筛选 -->
-          <select
-            v-model="totpFilterGroup"
-            class="form-input"
-            style="min-width: 120px; padding: 6px 10px"
-          >
+          <select v-model="totpFilterGroup" class="form-input" style="min-width: 120px; padding: 6px 10px">
             <option value="">全部分组</option>
             <option v-for="g in totpGroups" :key="g.id" :value="g.id">{{ g.name }}</option>
           </select>
@@ -66,12 +48,7 @@
       <div v-else-if="filteredTotpAccounts.length === 0" class="empty-state" style="padding: 60px">
         <i class="fas fa-shield-alt" style="font-size: 48px; margin-bottom: 16px; opacity: 0.3"></i>
         <div>{{ totpSearchQuery ? '没有匹配的账号' : '暂无 2FA 账号' }}</div>
-        <button
-          v-if="!totpSearchQuery"
-          class="btn btn-primary"
-          style="margin-top: 16px"
-          @click="openAddTotpModal"
-        >
+        <button v-if="!totpSearchQuery" class="btn btn-primary" style="margin-top: 16px" @click="openAddTotpModal">
           <i class="fas fa-plus"></i> 添加第一个账号
         </button>
       </div>
@@ -81,55 +58,35 @@
           <!-- 平台分隔标题 -->
           <div
             v-if="totpSettings.groupByPlatform && totpSettings.showPlatformHeaders && 
-                        (index === 0 || account.issuer !== filteredTotpAccounts[index - 1].issuer)"
-            class="totp-platform-header"
-            :class="{ 'header-minimal': totpSettings.hidePlatformText }"
-          >
+                        (index === 0 || (account.issuer || '').toLowerCase() !== (filteredTotpAccounts[index - 1].issuer || '').toLowerCase())"
+            class="totp-platform-header" :class="{ 'header-minimal': totpSettings.hidePlatformText }">
             <template v-if="!totpSettings.hidePlatformText">
               <span class="platform-icon" :style="{ color: getIssuerColor(account.issuer) }">
                 <i :class="getIssuerIcon(account.issuer)"></i>
               </span>
               <span class="platform-name">{{ account.issuer || '未知平台' }}</span>
-              <span class="platform-count"
-                >{{ getPlatformAccountCount(account.issuer) }} 个账号</span
-              >
+              <span class="platform-count">{{ getPlatformAccountCount(account.issuer) }} 个账号</span>
             </template>
           </div>
 
           <!-- 账号卡片 -->
-          <div
-            class="totp-card"
-            :style="{ '--card-accent': account.color || getIssuerColor(account.issuer) }"
-            @click="copyTotpCode(account)"
-            @touchstart="startTotpLongPress(account, $event)"
-            @touchend="cancelTotpLongPress"
-            @touchmove="cancelTotpLongPress"
-            @contextmenu.prevent="showTotpContextMenu(account, $event)"
-          >
+          <div class="totp-card" :style="{ '--card-accent': account.color || getIssuerColor(account.issuer) }"
+            @click="copyTotpCode(account)" @touchstart="startTotpLongPress(account, $event)"
+            @touchend="cancelTotpLongPress" @touchmove="cancelTotpLongPress"
+            @contextmenu.prevent="showTotpContextMenu(account, $event)">
             <!-- 操作按钮 (悬浮) -->
             <div class="totp-card-actions" @click.stop>
-              <button
-                class="btn btn-icon-refined sm"
-                @click="editTotpAccount(account)"
-                title="编辑"
-              >
+              <button class="btn btn-icon-refined sm" @click="editTotpAccount(account)" title="编辑">
                 <i class="fas fa-pen"></i>
               </button>
-              <button
-                class="btn btn-icon-refined sm danger"
-                @click="deleteTotpAccount(account)"
-                title="删除"
-              >
+              <button class="btn btn-icon-refined sm danger" @click="deleteTotpAccount(account)" title="删除">
                 <i class="fas fa-trash"></i>
               </button>
             </div>
 
             <!-- 卡片头部 -->
             <div class="totp-card-header">
-              <div
-                class="totp-issuer-badge"
-                :style="{ background: getIssuerColor(account.issuer) }"
-              >
+              <div class="totp-issuer-badge" :style="{ background: getIssuerColor(account.issuer) }">
                 <i :class="getIssuerIcon(account.issuer)"></i>
               </div>
               <div class="totp-card-info">
@@ -143,15 +100,10 @@
             <!-- 验证码 -->
             <div class="totp-code-area">
               <!-- 主验证码 -->
-              <div
-                class="totp-code-display"
-                :class="{ 
+              <div class="totp-code-display" :class="{ 
                                 'expiring': totpCodes[account.id]?.remaining <= 5,
                                 'code-hidden': totpSettings.hideCode
-                            }"
-                @mouseenter="account._showCode = true"
-                @mouseleave="account._showCode = false"
-              >
+                            }" @mouseenter="account._showCode = true" @mouseleave="account._showCode = false">
                 {{ formatTotpCode(totpCodes[account.id]?.code, totpSettings.allowRevealCode &&
                 account._showCode) }}
               </div>
@@ -159,20 +111,15 @@
               <!-- TOTP 进度条 / HOTP 计数器 -->
               <div v-if="account.otp_type === 'hotp'" class="totp-counter">
                 <span>#{{ totpCodes[account.id]?.counter || 0 }}</span>
-                <button
-                  class="btn-hotp-next"
-                  @click.stop="incrementHotp(account)"
-                  title="生成下一个"
-                >
+                <button class="btn-hotp-next" @click.stop="incrementHotp(account)" title="生成下一个">
                   <i class="fas fa-forward"></i>
                 </button>
               </div>
               <div v-else class="totp-timer">
                 <div class="totp-timer-track">
-                  <div
-                    class="totp-timer-bar"
-                    :style="{ width: ((totpCodes[account.id]?.remaining || 30) / (account.period || 30)) * 100 + '%', background: getIssuerColor(account.issuer) }"
-                  ></div>
+                  <div class="totp-timer-bar"
+                    :style="{ width: ((totpCodes[account.id]?.remaining || 30) / (account.period || 30)) * 100 + '%', background: getIssuerColor(account.issuer) }">
+                  </div>
                 </div>
                 <span class="totp-timer-text">{{ totpCodes[account.id]?.remaining || 30 }}s</span>
               </div>
@@ -182,17 +129,11 @@
       </div>
 
       <!-- 移动端长按菜单 -->
-      <div
-        v-if="totpContextMenu.visible"
-        class="totp-context-menu"
-        :style="{ top: totpContextMenu.y + 'px', left: totpContextMenu.x + 'px' }"
-        @click.stop
-      >
+      <div v-if="totpContextMenu.visible" class="totp-context-menu"
+        :style="{ top: totpContextMenu.y + 'px', left: totpContextMenu.x + 'px' }" @click.stop>
         <div class="totp-context-menu-header">
-          <i
-            :class="getIssuerIcon(totpContextMenu.account?.issuer)"
-            :style="{ color: getIssuerColor(totpContextMenu.account?.issuer) }"
-          ></i>
+          <i :class="getIssuerIcon(totpContextMenu.account?.issuer)"
+            :style="{ color: getIssuerColor(totpContextMenu.account?.issuer) }"></i>
           <span>{{ totpContextMenu.account?.issuer }}</span>
         </div>
         <button class="totp-context-menu-item" @click="handleTotpContextAction('copy')">
@@ -205,11 +146,7 @@
           <i class="fas fa-trash"></i> 删除
         </button>
       </div>
-      <div
-        v-if="totpContextMenu.visible"
-        class="totp-context-menu-backdrop"
-        @click="closeTotpContextMenu"
-      ></div>
+      <div v-if="totpContextMenu.visible" class="totp-context-menu-backdrop" @click="closeTotpContextMenu"></div>
     </div>
   </div>
 
@@ -226,10 +163,7 @@
       </div>
 
       <div v-if="totpGroups.length === 0" class="empty-state" style="padding: 60px">
-        <i
-          class="fas fa-folder-open"
-          style="font-size: 48px; margin-bottom: 16px; opacity: 0.3"
-        ></i>
+        <i class="fas fa-folder-open" style="font-size: 48px; margin-bottom: 16px; opacity: 0.3"></i>
         <p>暂无分组</p>
         <button class="btn btn-primary" style="margin-top: 16px" @click="openAddGroupModal">
           <i class="fas fa-plus"></i> 创建第一个分组
@@ -249,10 +183,7 @@
           <tbody>
             <tr v-for="group in totpGroups" :key="group.id">
               <td>
-                <div
-                  class="group-color-dot"
-                  :style="{ background: group.color || '#8b5cf6' }"
-                ></div>
+                <div class="group-color-dot" :style="{ background: group.color || '#8b5cf6' }"></div>
               </td>
               <td><strong>{{ group.name }}</strong></td>
               <td class="text-center">{{ getGroupAccountCount(group.id) }}</td>
@@ -260,12 +191,8 @@
                 <button class="btn btn-icon-refined" @click="editGroup(group)" title="编辑">
                   <i class="fas fa-pen"></i>
                 </button>
-                <button
-                  class="btn btn-icon-refined"
-                  style="color: var(--danger-color)"
-                  @click="deleteGroup(group)"
-                  title="删除"
-                >
+                <button class="btn btn-icon-refined" style="color: var(--danger-color)" @click="deleteGroup(group)"
+                  title="删除">
                   <i class="fas fa-trash"></i>
                 </button>
               </td>
@@ -300,12 +227,8 @@
         <!-- 账号名称打码 -->
         <div class="setting-item">
           <label class="toggle-label">
-            <input
-              type="checkbox"
-              v-model="totpSettings.maskAccount"
-              class="toggle-checkbox"
-              @change="saveUserSettingsToServer"
-            />
+            <input type="checkbox" v-model="totpSettings.maskAccount" class="toggle-checkbox"
+              @change="saveUserSettingsToServer" />
             <span class="toggle-switch"></span>
             <div class="setting-text">
               <span class="setting-title">账号名称打码</span>
@@ -319,29 +242,19 @@
         <!-- 隐藏验证码 -->
         <div class="setting-item">
           <label class="toggle-label">
-            <input
-              type="checkbox"
-              v-model="totpSettings.hideCode"
-              class="toggle-checkbox"
-              @change="saveUserSettingsToServer"
-            />
+            <input type="checkbox" v-model="totpSettings.hideCode" class="toggle-checkbox"
+              @change="saveUserSettingsToServer" />
             <span class="toggle-switch"></span>
             <div class="setting-text">
               <span class="setting-title">隐藏生成的验证码</span>
-              <span class="setting-desc"
-                >用 "*" 号遮挡验证码的显示，以提高安全性。此功能不会影响复制和粘贴操作。</span
-              >
+              <span class="setting-desc">用 "*" 号遮挡验证码的显示，以提高安全性。此功能不会影响复制和粘贴操作。</span>
             </div>
           </label>
           <!-- 子选项 -->
           <div v-if="totpSettings.hideCode" class="setting-sub">
             <label class="toggle-label">
-              <input
-                type="checkbox"
-                v-model="totpSettings.allowRevealCode"
-                class="toggle-checkbox"
-                @change="saveUserSettingsToServer"
-              />
+              <input type="checkbox" v-model="totpSettings.allowRevealCode" class="toggle-checkbox"
+                @change="saveUserSettingsToServer" />
               <span class="toggle-switch"></span>
               <span class="setting-title">显示被遮挡的验证码</span>
             </label>
@@ -352,12 +265,8 @@
         <!-- 按平台分组显示 -->
         <div class="setting-item">
           <label class="toggle-label">
-            <input
-              type="checkbox"
-              v-model="totpSettings.groupByPlatform"
-              class="toggle-checkbox"
-              @change="saveUserSettingsToServer"
-            />
+            <input type="checkbox" v-model="totpSettings.groupByPlatform" class="toggle-checkbox"
+              @change="saveUserSettingsToServer" />
             <span class="toggle-switch"></span>
             <div class="setting-text">
               <span class="setting-title">按平台分组显示</span>
@@ -367,38 +276,22 @@
           <!-- 子选项 -->
           <div v-if="totpSettings.groupByPlatform" class="setting-sub">
             <label class="toggle-label">
-              <input
-                type="checkbox"
-                v-model="totpSettings.showPlatformHeaders"
-                class="toggle-checkbox"
-                @change="saveUserSettingsToServer"
-              />
+              <input type="checkbox" v-model="totpSettings.showPlatformHeaders" class="toggle-checkbox"
+                @change="saveUserSettingsToServer" />
               <span class="toggle-switch"></span>
               <span class="setting-title">显示分隔标题</span>
             </label>
             <span class="setting-desc" style="margin-left: 52px">在不同平台之间显示分隔标题</span>
 
             <!-- 隐藏标题文字 -->
-            <label
-              v-if="totpSettings.showPlatformHeaders"
-              class="toggle-label"
-              style="margin-top: 12px"
-            >
-              <input
-                type="checkbox"
-                v-model="totpSettings.hidePlatformText"
-                class="toggle-checkbox"
-                @change="saveUserSettingsToServer"
-              />
+            <label v-if="totpSettings.showPlatformHeaders" class="toggle-label" style="margin-top: 12px">
+              <input type="checkbox" v-model="totpSettings.hidePlatformText" class="toggle-checkbox"
+                @change="saveUserSettingsToServer" />
               <span class="toggle-switch"></span>
               <span class="setting-title">隐藏标题文字</span>
             </label>
-            <span
-              v-if="totpSettings.showPlatformHeaders"
-              class="setting-desc"
-              style="margin-left: 52px"
-              >只显示图标和账号数量</span
-            >
+            <span v-if="totpSettings.showPlatformHeaders" class="setting-desc"
+              style="margin-left: 52px">只显示图标和账号数量</span>
           </div>
         </div>
 
@@ -407,18 +300,12 @@
         <!-- 自动保存账号 -->
         <div class="setting-item">
           <label class="toggle-label">
-            <input
-              type="checkbox"
-              v-model="totpSettings.autoSave"
-              class="toggle-checkbox"
-              @change="saveUserSettingsToServer"
-            />
+            <input type="checkbox" v-model="totpSettings.autoSave" class="toggle-checkbox"
+              @change="saveUserSettingsToServer" />
             <span class="toggle-switch"></span>
             <div class="setting-text">
               <span class="setting-title">自动保存账号</span>
-              <span class="setting-desc"
-                >扫描或上传二维码后，新账户会被自动录入，无需点击 "保存" 按钮。</span
-              >
+              <span class="setting-desc">扫描或上传二维码后，新账户会被自动录入，无需点击 "保存" 按钮。</span>
             </div>
           </label>
         </div>
@@ -426,38 +313,24 @@
         <!-- 锁定录入方式 -->
         <div class="setting-item">
           <label class="toggle-label">
-            <input
-              type="checkbox"
-              v-model="totpSettings.lockInputMode"
-              class="toggle-checkbox"
-              @change="saveUserSettingsToServer"
-            />
+            <input type="checkbox" v-model="totpSettings.lockInputMode" class="toggle-checkbox"
+              @change="saveUserSettingsToServer" />
             <span class="toggle-switch"></span>
             <div class="setting-text">
               <span class="setting-title">锁定录入方式</span>
-              <span class="setting-desc"
-                >在默认情况下，数据录入时会提供多种录入的方式。您可以打开此选项来锁定到某一种方式。</span
-              >
+              <span class="setting-desc">在默认情况下，数据录入时会提供多种录入的方式。您可以打开此选项来锁定到某一种方式。</span>
             </div>
           </label>
           <!-- 子选项 -->
           <div v-if="totpSettings.lockInputMode" class="setting-sub">
-            <label class="setting-title" style="margin-bottom: 8px; display: block"
-              >默认录入模式</label
-            >
-            <select
-              v-model="totpSettings.defaultInputMode"
-              class="form-input"
-              style="max-width: 200px"
-              @change="saveUserSettingsToServer"
-            >
+            <label class="setting-title" style="margin-bottom: 8px; display: block">默认录入模式</label>
+            <select v-model="totpSettings.defaultInputMode" class="form-input" style="max-width: 200px"
+              @change="saveUserSettingsToServer">
               <option value="qr">扫描二维码</option>
               <option value="upload">上传二维码</option>
               <option value="manual">手动输入</option>
             </select>
-            <span class="setting-desc" style="margin-top: 8px; display: block"
-              >当 "锁定录入方式" 启用时，锁定为上述录入模式。</span
-            >
+            <span class="setting-desc" style="margin-top: 8px; display: block">当 "锁定录入方式" 启用时，锁定为上述录入模式。</span>
           </div>
         </div>
 
@@ -466,89 +339,59 @@
         <!-- 浏览器扩展程序 -->
         <div class="setting-item extension-setup-item" style="display: block">
           <div class="setting-text" style="margin-bottom: 16px">
-            <span class="setting-title"
-              ><i class="fas fa-puzzle-piece" style="color: var(--accent-color)"></i>
-              浏览器扩展程序</span
-            >
-            <span class="setting-desc"
-              >安装浏览器扩展，即可在网页登录时自动识别并一键填充 2FA 验证码。</span
-            >
+            <span class="setting-title"><i class="fas fa-puzzle-piece" style="color: var(--accent-color)"></i>
+              浏览器扩展程序</span>
+            <span class="setting-desc">安装浏览器扩展，即可在网页登录时自动识别并一键填充 2FA 验证码。</span>
           </div>
 
-          <div
-            class="extension-card"
-            style="
+          <div class="extension-card" style="
               background: var(--bg-secondary);
               border-radius: 12px;
               padding: 20px;
               border: 1px solid var(--border-color);
-            "
-          >
+            ">
             <div style="display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap">
-              <div
-                class="extension-icon-box"
-                style="
+              <div class="extension-icon-box" style="
                   background: white;
                   padding: 10px;
                   border-radius: 12px;
                   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
                   flex-shrink: 0;
-                "
-              >
-                <img
-                  src="https://cdn.simpleicons.org/blueprint"
-                  style="width: 48px; height: 48px; display: block"
-                />
+                ">
+                <img src="https://cdn.simpleicons.org/blueprint" style="width: 48px; height: 48px; display: block" />
               </div>
               <div style="flex: 1; min-width: 200px">
-                <h4
-                  style="
+                <h4 style="
                     margin: 0 0 8px 0;
                     font-size: 16px;
                     display: flex;
                     align-items: center;
                     gap: 8px;
-                  "
-                >
+                  ">
                   API Monitor 2FA 助手
-                  <span
-                    style="
+                  <span style="
                       font-size: 10px;
                       background: var(--accent-color);
                       color: white;
                       padding: 2px 6px;
                       border-radius: 10px;
                       font-weight: normal;
-                    "
-                    >本地专用</span
-                  >
+                    ">本地专用</span>
                 </h4>
-                <p
-                  style="
+                <p style="
                     font-size: 13px;
                     color: var(--text-secondary);
                     margin-bottom: 16px;
                     line-height: 1.5;
-                  "
-                >
+                  ">
                   支持自动识别、实时同步，提供更高效的二步验证体验。
                 </p>
                 <div style="display: flex; gap: 12px; flex-wrap: wrap">
-                  <a
-                    href="/api/totp/extension/download"
-                    class="btn btn-primary btn-sm"
-                    style="text-decoration: none"
-                  >
+                  <a href="/api/totp/extension/download" class="btn btn-primary btn-sm" style="text-decoration: none">
                     <i class="fas fa-download"></i> 下载扩展程序 ZIP
                   </a>
-                  <button
-                    class="btn btn-secondary btn-sm"
-                    @click="totpShowExtensionGuide = !totpShowExtensionGuide"
-                  >
-                    <i
-                      class="fas"
-                      :class="totpShowExtensionGuide ? 'fa-chevron-up' : 'fa-info-circle'"
-                    ></i>
+                  <button class="btn btn-secondary btn-sm" @click="totpShowExtensionGuide = !totpShowExtensionGuide">
+                    <i class="fas" :class="totpShowExtensionGuide ? 'fa-chevron-up' : 'fa-info-circle'"></i>
                     {{ totpShowExtensionGuide ? '隐藏教程' : '安装教程' }}
                   </button>
                 </div>
@@ -556,16 +399,12 @@
             </div>
 
             <!-- 安装教程 -->
-            <div
-              v-if="totpShowExtensionGuide"
-              class="extension-guide-content"
-              style="
+            <div v-if="totpShowExtensionGuide" class="extension-guide-content" style="
                 margin-top: 20px;
                 padding-top: 20px;
                 border-top: 1px dashed var(--border-color);
                 font-size: 13px;
-              "
-            >
+              ">
               <p style="font-weight: bold; margin-bottom: 12px">
                 <i class="fas fa-magic"></i> 安装只需三步：
               </p>
@@ -577,15 +416,13 @@
                 </li>
                 <li>点击 <strong>“加载已解压的扩展程序”</strong>，选择刚才解压的文件夹即可。</li>
               </ol>
-              <div
-                style="
+              <div style="
                   margin-top: 12px;
                   padding: 10px;
                   background: rgba(139, 92, 246, 0.1);
                   border-radius: 8px;
                   color: var(--accent-color);
-                "
-              >
+                ">
                 <i class="fas fa-lightbulb"></i>
                 <strong>提示：</strong> 安装后请在扩展选项中配置服务器地址
                 <code>{{ location.origin }}</code>
@@ -614,13 +451,8 @@
 </div>
 
 <!-- ==================== 统一添加/编辑模态框 ==================== -->
-<div
-  v-if="showTotpModal"
-  class="modal-overlay"
-  @keydown.esc="closeTotpModal"
-  @click.self="closeTotpModal"
-  tabindex="-1"
->
+<div v-if="showTotpModal" class="modal-overlay" @keydown.esc="closeTotpModal" @click.self="closeTotpModal"
+  tabindex="-1">
   <div class="modal totp-modal">
     <div class="modal-header">
       <div class="modal-title">
@@ -632,18 +464,10 @@
 
     <!-- 模态框 Tabs (仅在添加模式显示) -->
     <div class="modal-tabs" v-if="totpModalMode === 'add'">
-      <button
-        class="modal-tab"
-        :class="{ active: totpAddTab === 'scan' }"
-        @click="switchTotpAddTab('scan')"
-      >
+      <button class="modal-tab" :class="{ active: totpAddTab === 'scan' }" @click="switchTotpAddTab('scan')">
         <i class="fas fa-qrcode"></i> 扫码导入
       </button>
-      <button
-        class="modal-tab"
-        :class="{ active: totpAddTab === 'manual' }"
-        @click="switchTotpAddTab('manual')"
-      >
+      <button class="modal-tab" :class="{ active: totpAddTab === 'manual' }" @click="switchTotpAddTab('manual')">
         <i class="fas fa-keyboard"></i> 手动录入
       </button>
     </div>
@@ -652,53 +476,30 @@
       <!-- Tab 1: 扫码/批量导入 -->
       <div v-show="totpModalMode === 'add' && totpAddTab === 'scan'" class="tab-pane fade-in">
         <div class="form-group">
-          <div
-            class="qr-import-controls"
-            style="display: flex; gap: 8px; margin-bottom: 12px; align-items: center"
-          >
-            <button
-              class="btn btn-secondary btn-sm"
-              @click="toggleQrScan"
-              :class="{ 'btn-primary': isScanning }"
-            >
+          <div class="qr-import-controls" style="display: flex; gap: 8px; margin-bottom: 12px; align-items: center">
+            <button class="btn btn-secondary btn-sm" @click="toggleQrScan" :class="{ 'btn-primary': isScanning }">
               <i class="fas" :class="isScanning ? 'fa-stop-circle' : 'fa-camera'"></i>
               <span>{{ isScanning ? '停止扫码' : '扫码导入' }}</span>
             </button>
             <button class="btn btn-secondary btn-sm" @click="$refs.qrFileInput.click()">
               <i class="fas fa-image"></i>
               <span>图片导入</span>
-              <input
-                type="file"
-                ref="qrFileInput"
-                accept="image/*"
-                @change="handleQrUpload"
-                style="display: none"
-              />
+              <input type="file" ref="qrFileInput" accept="image/*" @change="handleQrUpload" style="display: none" />
             </button>
           </div>
 
           <!-- 扫码预览 -->
-          <div
-            v-show="isScanning"
-            id="qr-reader"
-            style="
+          <div v-show="isScanning" id="qr-reader" style="
               width: 100%;
               border-radius: 12px;
               overflow: hidden;
               margin-bottom: 12px;
               border: 1px solid var(--border-color);
               background: #000;
-            "
-          ></div>
+            "></div>
 
-          <div
-            class="qr-paste-zone"
-            v-show="!isScanning"
-            @paste="handleQrPaste"
-            @dragover.prevent
-            @drop.prevent="handleQrUpload({ target: { files: $event.dataTransfer.files } })"
-            tabindex="0"
-          >
+          <div class="qr-paste-zone" v-show="!isScanning" @paste="handleQrPaste" @dragover.prevent
+            @drop.prevent="handleQrUpload({ target: { files: $event.dataTransfer.files } })" tabindex="0">
             <div v-if="qrParsing" class="qr-loading">
               <i class="fas fa-spinner fa-spin"></i> 解析中...
             </div>
@@ -719,12 +520,8 @@
         </div>
 
         <div class="form-group">
-          <textarea
-            v-model="totpImportUris"
-            class="form-input"
-            rows="4"
-            placeholder="每行一个 URI，例如:&#10;otpauth://totp/GitHub:user@example.com?secret=XXXX&issuer=GitHub"
-          ></textarea>
+          <textarea v-model="totpImportUris" class="form-input" rows="4"
+            placeholder="每行一个 URI，例如:&#10;otpauth://totp/GitHub:user@example.com?secret=XXXX&issuer=GitHub"></textarea>
         </div>
       </div>
 
@@ -734,18 +531,12 @@
         <div class="form-group">
           <label>类型</label>
           <div class="totp-type-selector">
-            <button
-              class="type-btn"
-              :class="{ active: totpForm.otp_type === 'totp' }"
-              @click="totpForm.otp_type = 'totp'"
-            >
+            <button class="type-btn" :class="{ active: totpForm.otp_type === 'totp' }"
+              @click="totpForm.otp_type = 'totp'">
               <i class="fas fa-clock"></i> TOTP (时间)
             </button>
-            <button
-              class="type-btn"
-              :class="{ active: totpForm.otp_type === 'hotp' }"
-              @click="totpForm.otp_type = 'hotp'"
-            >
+            <button class="type-btn" :class="{ active: totpForm.otp_type === 'hotp' }"
+              @click="totpForm.otp_type = 'hotp'">
               <i class="fas fa-hashtag"></i> HOTP (计数)
             </button>
           </div>
@@ -753,37 +544,18 @@
 
         <div class="form-group">
           <label><i class="fas fa-building"></i> 发行商</label>
-          <input
-            v-model="totpForm.issuer"
-            type="text"
-            class="form-input"
-            placeholder="如: GitHub, Google"
-          />
+          <input v-model="totpForm.issuer" type="text" class="form-input" placeholder="如: GitHub, Google" />
         </div>
         <div class="form-group">
           <label><i class="fas fa-user"></i> 账户名</label>
-          <input
-            v-model="totpForm.account"
-            type="text"
-            class="form-input"
-            placeholder="如: user@example.com"
-          />
+          <input v-model="totpForm.account" type="text" class="form-input" placeholder="如: user@example.com" />
         </div>
         <div class="form-group">
           <label><i class="fas fa-key"></i> 密钥 (Base32)</label>
           <div class="totp-secret-input">
-            <input
-              v-model="totpForm.secret"
-              :type="totpShowSecret ? 'text' : 'password'"
-              class="form-input"
-              placeholder="JBSWY3DPEHPK3PXP"
-              :disabled="totpModalMode === 'edit'"
-            />
-            <button
-              type="button"
-              class="totp-toggle-secret"
-              @click="totpShowSecret = !totpShowSecret"
-            >
+            <input v-model="totpForm.secret" :type="totpShowSecret ? 'text' : 'password'" class="form-input"
+              placeholder="JBSWY3DPEHPK3PXP" :disabled="totpModalMode === 'edit'" />
+            <button type="button" class="totp-toggle-secret" @click="totpShowSecret = !totpShowSecret">
               <i class="fas" :class="totpShowSecret ? 'fa-eye-slash' : 'fa-eye'"></i>
             </button>
           </div>
@@ -831,19 +603,10 @@
             <div class="form-group">
               <label style="display: block; margin-bottom: 8px">主题色</label>
               <div style="display: flex; gap: 8px; align-items: center">
-                <input
-                  :value="totpForm.color || '#000000'"
-                  @input="totpForm.color = $event.target.value"
-                  type="color"
-                  class="form-input color-input"
-                />
-                <button
-                  type="button"
-                  class="btn btn-secondary btn-sm"
-                  @click="totpForm.color = ''"
-                  :disabled="!totpForm.color"
-                  title="使用平台默认颜色"
-                >
+                <input :value="totpForm.color || '#000000'" @input="totpForm.color = $event.target.value" type="color"
+                  class="form-input color-input" />
+                <button type="button" class="btn btn-secondary btn-sm" @click="totpForm.color = ''"
+                  :disabled="!totpForm.color" title="使用平台默认颜色">
                   <i class="fas fa-undo"></i> 默认
                 </button>
               </div>
@@ -862,12 +625,8 @@
         取消
       </button>
       <!-- 扫码模式下显示“导入”按钮 -->
-      <button
-        v-if="totpModalMode === 'add' && totpAddTab === 'scan'"
-        class="btn btn-primary"
-        @click="importTotpAccounts"
-        :disabled="!totpImportUris.trim()"
-      >
+      <button v-if="totpModalMode === 'add' && totpAddTab === 'scan'" class="btn btn-primary"
+        @click="importTotpAccounts" :disabled="!totpImportUris.trim()">
         <i class="fas fa-file-import"></i> 导入
       </button>
       <!-- 手动录入/编辑模式下显示“保存”按钮 -->
@@ -880,13 +639,8 @@
 </div>
 
 <!-- ==================== 分组模态框 ==================== -->
-<div
-  v-if="showTotpGroupModal"
-  class="modal-overlay"
-  @keydown.esc="showTotpGroupModal = false"
-  @click.self="showTotpGroupModal = false"
-  tabindex="-1"
->
+<div v-if="showTotpGroupModal" class="modal-overlay" @keydown.esc="showTotpGroupModal = false"
+  @click.self="showTotpGroupModal = false" tabindex="-1">
   <div class="modal totp-modal" style="max-width: 400px">
     <div class="modal-header">
       <div class="modal-title">
@@ -900,21 +654,12 @@
     <div class="modal-body">
       <div class="form-group">
         <label>分组名称</label>
-        <input
-          v-model="totpGroupForm.name"
-          type="text"
-          class="form-input"
-          placeholder="如: 工作、个人、游戏"
-        />
+        <input v-model="totpGroupForm.name" type="text" class="form-input" placeholder="如: 工作、个人、游戏" />
       </div>
       <div class="form-group">
         <label>主题色</label>
-        <input
-          :value="totpGroupForm.color || '#000000'"
-          @input="totpGroupForm.color = $event.target.value"
-          type="color"
-          class="form-input color-input"
-        />
+        <input :value="totpGroupForm.color || '#000000'" @input="totpGroupForm.color = $event.target.value" type="color"
+          class="form-input color-input" />
       </div>
     </div>
     <div class="modal-footer">
@@ -925,13 +670,8 @@
 </div>
 
 <!-- ==================== 导出模态框 ==================== -->
-<div
-  v-if="showTotpExportModal"
-  class="modal-overlay"
-  @keydown.esc="showTotpExportModal = false"
-  @click.self="showTotpExportModal = false"
-  tabindex="-1"
->
+<div v-if="showTotpExportModal" class="modal-overlay" @keydown.esc="showTotpExportModal = false"
+  @click.self="showTotpExportModal = false" tabindex="-1">
   <div class="modal totp-modal">
     <div class="modal-header">
       <div class="modal-title"><i class="fas fa-file-export"></i> 导出账号</div>
@@ -942,21 +682,13 @@
     <div class="modal-body">
       <div class="form-group">
         <label><i class="fas fa-link"></i> 导出的 OTP URI</label>
-        <textarea
-          v-model="totpExportUris"
-          class="form-input"
-          rows="8"
-          readonly
-          style="
+        <textarea v-model="totpExportUris" class="form-input" rows="8" readonly style="
             font-family: var(--font-mono);
             font-size: 13px;
             background: var(--bg-secondary);
             cursor: text;
-          "
-        ></textarea>
-        <small class="form-hint"
-          >这是标准的 otpauth:// URI 列表，您可以将其保存或导入其他应用。</small
-        >
+          "></textarea>
+        <small class="form-hint">这是标准的 otpauth:// URI 列表，您可以将其保存或导入其他应用。</small>
       </div>
     </div>
     <div class="modal-footer">
