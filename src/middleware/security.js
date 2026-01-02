@@ -33,8 +33,9 @@ function configureHelmet(options = {}) {
                         "'unsafe-inline'",
                         'https://cdn.jsdelivr.net',
                         'https://fonts.googleapis.com',
+                        'https://cdnjs.cloudflare.com',
                     ],
-                    fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
+                    fontSrc: ["'self'", 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com', 'data:'],
                     imgSrc: ["'self'", 'data:', 'https:', 'blob:'],
                     mediaSrc: ["'self'", 'https:', 'blob:'],
                     connectSrc: [

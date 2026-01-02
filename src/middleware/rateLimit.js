@@ -5,8 +5,44 @@
 
 const rateLimit = require('express-rate-limit');
 const { createLogger } = require('../utils/logger');
+const { getSession, getSessionById } = require('../services/session');
 
 const logger = createLogger('RateLimit');
+
+/**
+ * 检查请求是否来自已登录用户
+ * @param {Object} req - Express 请求对象
+ * @returns {boolean} 是否已登录
+ */
+function isAuthenticated(req) {
+  // 1. 从 Cookie 中获取 session
+  if (getSession(req)) {
+    return true;
+  }
+
+  // 2. 从 URL 参数中获取 session_id
+  const urlSessionId = req.query?.session_id;
+  if (urlSessionId && getSessionById(urlSessionId)) {
+    return true;
+  }
+
+  // 3. 从 X-Session-ID header 中获取
+  const customSessionId = req.headers?.['x-session-id'];
+  if (customSessionId && getSessionById(customSessionId)) {
+    return true;
+  }
+
+  // 4. 从 Authorization header 中获取
+  const authHeader = req.headers?.['authorization'];
+  if (authHeader?.startsWith('Bearer ')) {
+    const sessionId = authHeader.substring(7);
+    if (getSessionById(sessionId)) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 /**
  * 创建速率限制器
@@ -32,7 +68,14 @@ function createLimiter(options = {}) {
     },
     skip: req => {
       // 跳过健康检查端点
-      return req.path === '/health' || req.path === '/api/health';
+      if (req.path === '/health' || req.path === '/api/health') {
+        return true;
+      }
+      // 已登录用户跳过限流
+      if (isAuthenticated(req)) {
+        return true;
+      }
+      return false;
     },
     keyGenerator: req => {
       // 使用标准 IP 逻辑，并附加 User-Agent 以增加区分度
