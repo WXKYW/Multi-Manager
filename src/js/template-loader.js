@@ -26,6 +26,7 @@ const TemplateLoader = {
     'modals.html': '#template-modals',
     'totp.html': '#template-totp',
     'music.html': '#template-music',
+    'ai-chat.html': '#template-ai-chat',
   },
 
   // define critical templates for initial load

@@ -18,6 +18,9 @@ const Events = {
   DASHBOARD_AUTH_FAIL: 'dashboard:auth_fail', // 认证失败
   DASHBOARD_TASK: 'dashboard:task', // 下发任务
   DASHBOARD_PING: 'dashboard:ping', // 心跳检测
+  DASHBOARD_PTY_INPUT: 'dashboard:pty_input', // PTY 输入流
+  DASHBOARD_PTY_RESIZE: 'dashboard:pty_resize', // PTY 窗口缩放
+  AGENT_PTY_DATA: 'agent:pty_data', // PTY 输出流
 
   // Dashboard -> Frontend (房间广播)
   METRICS_UPDATE: 'metrics:update', // 单个主机指标更新
@@ -38,6 +41,7 @@ const TaskTypes = {
   KEEPALIVE: 7, // 心跳保活
   DOCKER_ACTION: 10, // Docker 容器操作
   DOCKER_CHECK_UPDATE: 11, // Docker 检查更新
+  PTY_START: 12, // 启动 PTY 终端
 };
 
 // ==================== 数据结构 ====================

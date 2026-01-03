@@ -60,7 +60,7 @@ export const MODULE_CONFIG = {
     name: 'Hosts',
     shortName: 'Hosts',
     icon: 'fa-hdd',
-    description: 'SSH 终端与服务器监控',
+    description: '终端与服务器监控',
   },
   totp: {
     name: '2FA',
@@ -73,6 +73,12 @@ export const MODULE_CONFIG = {
     shortName: 'Music',
     icon: 'fa-music',
     description: '网易云音乐播放器',
+  },
+  'ai-chat': {
+    name: 'AI Chat',
+    shortName: 'Chat',
+    icon: 'fa-comments',
+    description: 'AI 智能对话助手',
   },
 };
 
@@ -91,7 +97,7 @@ export const MODULE_GROUPS = [
     id: 'api-gateway',
     name: 'API 网关',
     icon: 'fa-bolt',
-    modules: ['openai', 'antigravity', 'gemini-cli'],
+    modules: ['openai', 'antigravity', 'gemini-cli', 'ai-chat'],
   },
   {
     id: 'infrastructure',
@@ -154,6 +160,7 @@ export const store = reactive({
     server: true,
     totp: true,
     music: false,
+    'ai-chat': true,
   },
   channelEnabled: {
     antigravity: true,
@@ -174,6 +181,7 @@ export const store = reactive({
     'server',
     'totp',
     'music',
+    'ai-chat',
   ],
 
   // 界面设置
@@ -282,11 +290,21 @@ export const store = reactive({
   agentInstallLog: '', // 安装日志输出
   agentInstallResult: null, // 'success' | 'error' | null
   agentInstallOS: 'linux', // 'linux' | 'windows'
+  agentInstallProtocol: window.location.protocol.replace(':', ''), // 默认为当前页面协议 (http 或 https)
+  agentInstallHostType: 'domain', // 'domain' | 'ip'
 
   // 批量 Agent 部署
   showBatchAgentModal: false,
   selectedBatchServers: [],
   batchInstallResults: [],
+
+  // Agent 升级相关
+  showUpgradeModal: false,
+  upgradeLog: '',
+  upgradeProgress: 0,
+  upgrading: false,
+  forceUpgrade: false,
+  upgradeFallbackSsh: false, // 是否使用 SSH 覆盖安装作为保底策略
 
   // 快速部署模式
   serverAddMode: 'ssh', // 'ssh' | 'agent'

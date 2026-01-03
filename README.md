@@ -16,7 +16,7 @@
 ---
 
 **一个全能型的 API 管理与服务器监控面板**。
-它不仅能帮您集中管理主机、实时 SSH 终端、Docker 容器监控，还提供了强大的云服务集成功能，包括 Cloudflare、OpenAI、Zeabur、Koyeb、等多种云服务。
+它不仅能帮您集中管理主机、实时 终端、Docker 容器监控，还提供了强大的云服务集成功能，包括 Cloudflare、OpenAI、Zeabur、Koyeb、等多种云服务。
 同样支持Antigravity / Gemini 的模型转 API 调用，同时有完善的额度使用统计、日志记录、模型列表获取、全链路耗时统计等功能。
 
 [🔵 Docker Hub](https://hub.docker.com/r/iwvw/api-monitor) | [🔴 在线演示 (Demo)](https://api-monitor.zeabur.app/)

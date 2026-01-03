@@ -26,8 +26,8 @@
   position: relative;
   /* 改为 relative 配合 flex 居中 */
   width: 90%;
-  max-width: 1000px;
-  height: 85vh;
+  max-width: 1200px;
+  height: 90vh;
   background-color: var(--sidebar-bg);
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
   display: flex;

@@ -417,6 +417,16 @@ class UserSettings extends BaseModel {
       }
     }
 
+    if (!this.hasColumn('public_api_url')) {
+      try {
+        this.getDb()
+          .prepare(`ALTER TABLE ${this.tableName} ADD COLUMN public_api_url TEXT`)
+          .run();
+      } catch (e) {
+        console.warn('Auto-migration for public_api_url failed:', e.message);
+      }
+    }
+
     const data = { ...updates };
 
     // 处理 JSON 字段

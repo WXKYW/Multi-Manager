@@ -25,7 +25,7 @@ data/
 *.db
 *.db-journal
 *.db-shm
-*.db-wal
+*.db-wal5
 
 # ====================
 # 日志
@@ -71,7 +71,7 @@ build/
 out/
 coverage/
 stats.html
-
+public/
 # ====================
 # 备份 & 杂项
 # ====================

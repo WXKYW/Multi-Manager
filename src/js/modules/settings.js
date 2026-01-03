@@ -91,6 +91,8 @@ export const settingsMethods = {
           if (settings.navLayout) this.navLayout = settings.navLayout;
           if (settings.agentDownloadUrl !== undefined)
             this.agentDownloadUrl = settings.agentDownloadUrl;
+          if (settings.publicApiUrl !== undefined)
+            this.publicApiUrl = settings.publicApiUrl;
 
           this.activateFirstVisibleModule();
           return true;
@@ -254,6 +256,7 @@ export const settingsMethods = {
         navLayout: this.navLayout,
         totpSettings: this.totpSettings,
         agentDownloadUrl: this.agentDownloadUrl,
+        publicApiUrl: this.publicApiUrl,
         // 刷新间隔设置
         zeaburRefreshInterval: this.zeaburRefreshInterval,
         koyebRefreshInterval: this.koyebRefreshInterval,
