@@ -898,9 +898,9 @@ func (a *AgentClient) checkContainerImageUpdate(containerID string) DockerImageU
 		ContainerID: containerID,
 	}
 
-	// 1. 获取容器信息
+	// 1. 获取容器信息 (Name 和 Image)
 	inspectCmd := exec.Command("docker", "inspect", "--format",
-		"{{.Name}}|{{.Config.Image}}|{{index .RepoDigests 0}}",
+		"{{.Name}}|{{.Config.Image}}",
 		containerID)
 	output, err := inspectCmd.Output()
 	if err != nil {
@@ -908,7 +908,7 @@ func (a *AgentClient) checkContainerImageUpdate(containerID string) DockerImageU
 		return status
 	}
 
-	parts := strings.SplitN(strings.TrimSpace(string(output)), "|", 3)
+	parts := strings.SplitN(strings.TrimSpace(string(output)), "|", 2)
 	if len(parts) < 2 {
 		status.Error = "解析容器信息失败"
 		return status
@@ -917,24 +917,14 @@ func (a *AgentClient) checkContainerImageUpdate(containerID string) DockerImageU
 	status.ContainerName = strings.TrimPrefix(parts[0], "/")
 	status.Image = parts[1]
 
-	// 2. 获取本地镜像的 Digest
+	// 2. 从镜像获取本地 Digest
 	localDigest := ""
-	if len(parts) >= 3 && parts[2] != "" && parts[2] != "<no value>" {
-		// 从 RepoDigests 提取 digest (格式: image@sha256:xxx)
-		if idx := strings.Index(parts[2], "@"); idx != -1 {
-			localDigest = parts[2][idx+1:]
-		}
-	}
-
-	// 如果 RepoDigests 为空，尝试从镜像 inspect 获取
-	if localDigest == "" {
-		imgInspect := exec.Command("docker", "image", "inspect", "--format",
-			"{{index .RepoDigests 0}}", status.Image)
-		imgOutput, err := imgInspect.Output()
-		if err == nil && strings.TrimSpace(string(imgOutput)) != "" && strings.TrimSpace(string(imgOutput)) != "<no value>" {
-			if idx := strings.Index(string(imgOutput), "@"); idx != -1 {
-				localDigest = strings.TrimSpace(string(imgOutput)[idx+1:])
-			}
+	imgInspect := exec.Command("docker", "image", "inspect", "--format",
+		"{{index .RepoDigests 0}}", status.Image)
+	imgOutput, err := imgInspect.Output()
+	if err == nil && strings.TrimSpace(string(imgOutput)) != "" && strings.TrimSpace(string(imgOutput)) != "<no value>" {
+		if idx := strings.Index(string(imgOutput), "@"); idx != -1 {
+			localDigest = strings.TrimSpace(string(imgOutput)[idx+1:])
 		}
 	}
 

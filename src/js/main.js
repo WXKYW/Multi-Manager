@@ -433,6 +433,7 @@ const app = createApp({
       dockerUpdateResults: [],       // 更新检测结果列表
       dockerOverviewServers: [],     // Docker 标签页的主机列表
       dockerOverviewLoading: false,  // Docker 概览加载状态
+      expandedDockerHosts: [],       // 展开的 Docker 主机列表
       dockerSubTab: 'containers',    // Docker 子标签页
       dockerSelectedServer: '',      // 当前选中的主机 ID
       dockerResourceLoading: false,  // 资源加载状态

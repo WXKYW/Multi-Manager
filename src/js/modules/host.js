@@ -944,6 +944,45 @@ export const hostMethods = {
   },
 
   /**
+   * 切换 Docker 主机卡片展开/收起
+   */
+  toggleDockerHost(serverId) {
+    const index = this.expandedDockerHosts.indexOf(serverId);
+    if (index === -1) {
+      this.expandedDockerHosts.push(serverId);
+    } else {
+      this.expandedDockerHosts.splice(index, 1);
+    }
+  },
+
+  /**
+   * 获取指定主机的可更新容器数量
+   */
+  getDockerServerUpdateCount(serverId) {
+    if (!this.dockerUpdateResults || this.dockerUpdateResults.length === 0) {
+      return 0;
+    }
+
+    // 找到该主机的容器列表
+    const server = this.dockerOverviewServers.find(s => s.id === serverId);
+    if (!server || !server.containers) return 0;
+
+    // 统计有更新的容器数量
+    let count = 0;
+    for (const container of server.containers) {
+      const result = this.dockerUpdateResults.find(r =>
+        r.container_id === container.id ||
+        r.container_id?.startsWith(container.id) ||
+        container.id?.startsWith(r.container_id)
+      );
+      if (result && result.has_update) {
+        count++;
+      }
+    }
+    return count;
+  },
+
+  /**
    * 加载 Docker 概览数据
    * 从所有在线主机中提取 Docker 信息
    */
