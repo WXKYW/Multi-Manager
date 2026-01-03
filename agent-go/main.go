@@ -1611,7 +1611,7 @@ func (a *AgentClient) handleUpgrade(taskId string) {
 		cmd = exec.Command("powershell", "-Command", "Start-Process", "powershell", "-ArgumentList", fmt.Sprintf("'-NoProfile -ExecutionPolicy Bypass -Command \"%s\"'", psCommand), "-WindowStyle", "Hidden")
 	} else {
 		// Linux/MacOS: 使用 curl | bash
-		installUrl := fmt.Sprintf("%s/api/server/agent/install/%s", a.config.ServerURL, a.config.ServerID)
+		installUrl := fmt.Sprintf("%s/api/server/agent/install/linux/%s", a.config.ServerURL, a.config.ServerID)
 		shellCommand := fmt.Sprintf("curl -fsSL %s | sudo bash", installUrl)
 		
 		// 使用 nohup 后台执行
