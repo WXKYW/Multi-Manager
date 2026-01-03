@@ -174,6 +174,73 @@ function registerRoutes(app) {
     }
   });
 
+  // Agent 安装脚本下载 (Linux, 带 Key 校验，匹配前端新生成规则)
+  agentPublicRouter.get('/install/linux/:serverId/:agentKey', (req, res) => {
+    try {
+      const { serverId, agentKey } = req.params;
+      const server = serverStorage.getById(serverId);
+
+      if (!server) {
+        return res.status(404).send('# Error: Server not found');
+      }
+
+      // 校验 Key
+      const storedKey = agentService.getAgentKey(serverId);
+      if (storedKey && storedKey !== agentKey) {
+        return res.status(401).send('# Error: Invalid Agent Key');
+      }
+
+      // 修正: 确保 serverUrl 使用正确协议 (优先使用 API_PUBLIC_URL，否则根据请求头)
+      let serverUrl = process.env.API_PUBLIC_URL;
+      if (!serverUrl) {
+        const protocol = req.protocol;
+        const host = req.get('host');
+        serverUrl = `${protocol}://${host}`;
+      }
+
+      const script = agentService.generateInstallScript(serverId, serverUrl);
+
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.send(script);
+    } catch (error) {
+      res.status(500).send(`# Error: ${error.message}`);
+    }
+  });
+
+  // Agent 安装脚本下载 (Windows, 带 Key 校验，匹配前端新生成规则)
+  agentPublicRouter.get('/install/win/:serverId/:agentKey', (req, res) => {
+    try {
+      const { serverId, agentKey } = req.params;
+      const server = serverStorage.getById(serverId);
+
+      if (!server) {
+        return res.status(404).send('# Error: Server not found');
+      }
+
+      // 校验 Key
+      const storedKey = agentService.getAgentKey(serverId);
+      if (storedKey && storedKey !== agentKey) {
+        return res.status(401).send('# Error: Invalid Agent Key');
+      }
+
+      // 修正: 确保 serverUrl 使用正确协议
+      let serverUrl = process.env.API_PUBLIC_URL;
+      if (!serverUrl) {
+        const protocol = req.protocol;
+        const host = req.get('host');
+        serverUrl = `${protocol}://${host}`;
+      }
+
+      const script = agentService.generateWinInstallScript(serverId, serverUrl);
+
+      // 设置为 UTF-8 编码
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.send(script);
+    } catch (error) {
+      res.status(500).send(`# Error: ${error.message}`);
+    }
+  });
+
   // ==================== 快速安装 API ====================
   // 只需输入名称，自动创建主机并生成安装命令
 
