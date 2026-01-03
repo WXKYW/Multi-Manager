@@ -1,3 +1,36 @@
+<!-- OpenAI Chat Settings Modal -->
+<div v-if="showHChatSettingsModal" class="modal-overlay" @click.self="showHChatSettingsModal = false"
+  style="z-index: 2000;">
+  <div class="modal" style="max-width: 500px">
+    <div class="modal-header">
+      <div class="modal-title"><i class="fas fa-cog"></i> 对话设置</div>
+      <button class="modal-close" @click="showHChatSettingsModal = false">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>系统提示词 (System Prompt)</label>
+        <textarea v-model="openaiChatSystemPrompt" class="form-textarea" rows="3"></textarea>
+      </div>
+      <div class="form-row">
+        <div class="form-group flex-1">
+          <label>Temperature ({{ openaiChatSettings.temperature }})</label>
+          <input type="range" v-model.number="openaiChatSettings.temperature" min="0" max="2" step="0.1"
+            class="form-range" />
+        </div>
+        <div class="form-group flex-1">
+          <label>Max Tokens</label>
+          <input type="number" v-model.number="openaiChatSettings.max_tokens" class="form-input" />
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" @click="showHChatSettingsModal = false" style="width: 100%">完成</button>
+    </div>
+  </div>
+</div>
+
 <!-- 自定义确认对话框 -->
 <div v-if="customDialog.show" class="custom-dialog-overlay"
   @keydown.esc="customDialog.onCancel ? customDialog.onCancel() : (customDialog.show = false)"

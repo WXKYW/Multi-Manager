@@ -2,26 +2,15 @@
 <div class="tab-content openai-tab-content theme-openai" :class="getTabAnimationClass('openai')">
   <!-- OpenApi 子标签页 -->
   <div class="sec-tabs openai-sec-tabs">
-    <button
-      class="tab-btn"
-      :class="{ active: openaiCurrentTab === 'endpoints' }"
-      @click="openaiCurrentTab = 'endpoints'"
-    >
+    <button class="tab-btn" :class="{ active: openaiCurrentTab === 'endpoints' }"
+      @click="openaiCurrentTab = 'endpoints'">
       <i class="fas fa-server"></i> API 端点
     </button>
-    <button
-      class="tab-btn"
-      :class="{ active: openaiCurrentTab === 'accounts' }"
-      @click="openaiCurrentTab = 'accounts'"
-    >
+    <button class="tab-btn" :class="{ active: openaiCurrentTab === 'accounts' }" @click="openaiCurrentTab = 'accounts'">
       <i class="fas fa-users"></i> 账号管理
     </button>
-    <button
-      class="tab-btn"
-      :class="{ active: openaiCurrentTab === 'chat' }"
-      @click="openaiCurrentTab = 'chat'"
-    >
-      <i class="fas fa-comment-dots"></i> 对话 [开发中]
+    <button class="tab-btn" :class="{ active: openaiCurrentTab === 'chat' }" @click="openaiCurrentTab = 'chat'">
+      <i class="fas fa-comment-dots"></i> 对话
     </button>
   </div>
 
@@ -34,39 +23,23 @@
 
     <!-- 端点卡片列表 -->
     <div v-else>
-      <div
-        v-for="endpoint in openaiEndpoints"
-        :key="endpoint.id"
-        class="account-card"
-        :class="{ 'expanded': isOpenaiEndpointExpanded(endpoint.id) }"
-        style="margin-bottom: 12px"
-      >
+      <div v-for="endpoint in openaiEndpoints" :key="endpoint.id" class="account-card"
+        :class="{ 'expanded': isOpenaiEndpointExpanded(endpoint.id) }" style="margin-bottom: 12px">
         <!-- 端点头部 - 可点击展开模型列表 -->
         <div class="account-header" @click="toggleOpenaiModels(endpoint.id)">
           <div class="account-info">
-            <i
-              class="fas fa-chevron-right toggle-icon"
-              :style="{
+            <i class="fas fa-chevron-right toggle-icon" :style="{
               transform: isOpenaiEndpointExpanded(endpoint.id) ? 'rotate(90deg)' : 'rotate(0deg)'
-            }"
-            ></i>
+            }"></i>
             <!-- 头像 -->
-            <div
-              class="zeabur-account-avatar"
-              style="background: linear-gradient(135deg, #10a37f, #059669)"
-            >
-              <span class="avatar-letter"
-                >{{ (endpoint.name || 'A').charAt(0).toUpperCase() }}</span
-              >
+            <div class="zeabur-account-avatar" style="background: linear-gradient(135deg, #10a37f, #059669)">
+              <span class="avatar-letter">{{ (endpoint.name || 'A').charAt(0).toUpperCase() }}</span>
             </div>
             <!-- 端点信息 -->
             <div class="zeabur-account-details">
               <div class="zeabur-account-name">
-                <span
-                  class="ag-status-badge"
-                  style="margin-right: 8px; font-size: 10px"
-                  :class="endpoint.status === 'valid' ? 'ag-status-online' : (endpoint.status === 'invalid' ? 'ag-status-error' : 'ag-status-unknown')"
-                >
+                <span class="ag-status-badge" style="margin-right: 8px; font-size: 10px"
+                  :class="endpoint.status === 'valid' ? 'ag-status-online' : (endpoint.status === 'invalid' ? 'ag-status-error' : 'ag-status-unknown')">
                   {{ endpoint.status === 'valid' ? '有效' : (endpoint.status === 'invalid' ? '无效'
                   : '未验证') }}
                 </span>
@@ -79,26 +52,16 @@
             </div>
           </div>
           <!-- 模型数量徽章 - 点击可刷新 -->
-          <div
-            class="zeabur-balance-panel"
-            v-if="endpoint.models"
-            @click.stop="refreshEndpointModels(endpoint)"
-            style="cursor: pointer"
-            :title="endpoint.refreshing ? '正在刷新...' : '点击刷新模型列表'"
-          >
+          <div class="zeabur-balance-panel" v-if="endpoint.models" @click.stop="refreshEndpointModels(endpoint)"
+            style="cursor: pointer" :title="endpoint.refreshing ? '正在刷新...' : '点击刷新模型列表'">
             <div class="zeabur-balance-item openai-model-count">
-              <div
-                class="zeabur-balance-icon"
-                :class="{ 'refreshing': endpoint.refreshing }"
-                style="background: rgba(16, 163, 127, 0.15); color: #10a37f"
-              >
+              <div class="zeabur-balance-icon" :class="{ 'refreshing': endpoint.refreshing }"
+                style="background: rgba(16, 163, 127, 0.15); color: #10a37f">
                 <i class="fas fa-cube"></i>
               </div>
               <div class="zeabur-balance-info">
                 <span class="zeabur-balance-label">模型</span>
-                <span class="zeabur-balance-value" style="color: #10a37f"
-                  >{{ endpoint.models.length }}</span
-                >
+                <span class="zeabur-balance-value" style="color: #10a37f">{{ endpoint.models.length }}</span>
               </div>
             </div>
           </div>
@@ -106,32 +69,20 @@
 
         <div class="account-card-body">
           <!-- 模型列表 - 可展开/收起 -->
-          <div
-            class="openai-models-container"
-            :class="{ 'collapsed': !isOpenaiEndpointExpanded(endpoint.id) }"
-          >
+          <div class="openai-models-container" :class="{ 'collapsed': !isOpenaiEndpointExpanded(endpoint.id) }">
             <div v-if="endpoint.models && endpoint.models.length > 0" class="models-grid">
-              <div
-                v-for="model in endpoint.models"
-                :key="getModelName(model)"
-                class="model-tag-item"
-                @click.stop="copyToClipboard(getModelName(model))"
-                :title="'点击复制: ' + getModelName(model)"
-              >
+              <div v-for="model in endpoint.models" :key="getModelName(model)" class="model-tag-item"
+                @click.stop="copyToClipboard(getModelName(model))" :title="'点击复制: ' + getModelName(model)">
                 {{ getModelName(model) }}
               </div>
             </div>
-            <div
-              v-else
-              class="empty-models"
-              style="
+            <div v-else class="empty-models" style="
                 display: flex;
                 flex-direction: column;
                 align-items: center;
                 justify-content: center;
                 gap: 8px;
-              "
-            >
+              ">
               <i class="fas fa-cube" style="font-size: 20px; opacity: 0.3"></i>
               <span>暂无模型数据，可在账号管理中刷新获取</span>
             </div>
@@ -154,34 +105,18 @@
           <i class="fas fa-server" style="margin-right: 8px; color: #10a37f"></i>API 端点管理
         </div>
         <div class="openai-management-actions" style="display: flex; gap: 8px">
-          <button
-            class="btn btn-success paas-control-btn"
-            @click="openAddOpenaiEndpointModal"
-            title="添加账号"
-          >
+          <button class="btn btn-success paas-control-btn" @click="openAddOpenaiEndpointModal" title="添加账号">
             <i class="fas fa-plus"></i> <span>添加账号</span>
           </button>
-          <button
-            class="btn btn-secondary paas-control-btn"
-            @click="refreshAllOpenaiEndpoints"
-            :disabled="openaiRefreshing"
-            title="刷新全部"
-          >
+          <button class="btn btn-secondary paas-control-btn" @click="refreshAllOpenaiEndpoints"
+            :disabled="openaiRefreshing" title="刷新全部">
             <i class="fas fa-sync-alt" :class="{ 'fa-spin': openaiRefreshing }"></i>
             <span>刷新全部</span>
           </button>
-          <button
-            class="btn btn-secondary paas-control-btn"
-            @click="exportOpenaiEndpoints"
-            title="导出"
-          >
+          <button class="btn btn-secondary paas-control-btn" @click="exportOpenaiEndpoints" title="导出">
             <i class="fas fa-upload"></i> <span>导出</span>
           </button>
-          <button
-            class="btn btn-secondary paas-control-btn"
-            @click="importOpenaiEndpointsFromFile"
-            title="导入"
-          >
+          <button class="btn btn-secondary paas-control-btn" @click="importOpenaiEndpointsFromFile" title="导入">
             <i class="fas fa-download"></i> <span>导入</span>
           </button>
         </div>
@@ -210,19 +145,13 @@
               <td><code>{{ maskAddress(endpoint.baseUrl, serverIpDisplayMode) }}</code></td>
               <td>
                 <code>{{ endpoint.showKey ? endpoint.apiKey : maskApiKey(endpoint.apiKey) }}</code>
-                <button
-                  class="copy-btn"
-                  @click.stop="endpoint.showKey = !endpoint.showKey"
-                  style="margin-left: 4px"
-                >
+                <button class="copy-btn" @click.stop="endpoint.showKey = !endpoint.showKey" style="margin-left: 4px">
                   <i class="fas" :class="endpoint.showKey ? 'fa-eye-slash' : 'fa-eye'"></i>
                 </button>
               </td>
               <td class="text-center">
-                <span
-                  class="ag-status-badge"
-                  :class="endpoint.status === 'valid' ? 'ag-status-online' : (endpoint.status === 'invalid' ? 'ag-status-error' : 'ag-status-unknown')"
-                >
+                <span class="ag-status-badge"
+                  :class="endpoint.status === 'valid' ? 'ag-status-online' : (endpoint.status === 'invalid' ? 'ag-status-error' : 'ag-status-unknown')">
                   {{ endpoint.status === 'valid' ? '有效' : (endpoint.status === 'invalid' ? '无效'
                   : '未验证') }}
                 </span>
@@ -230,26 +159,14 @@
               <td class="text-center">{{ endpoint.models ? endpoint.models.length : 0 }}</td>
               <td class="actions text-center">
                 <div class="flex-cell">
-                  <button
-                    class="btn btn-icon-refined"
-                    @click="verifyOpenaiEndpoint(endpoint)"
-                    title="验证连接"
-                  >
+                  <button class="btn btn-icon-refined" @click="verifyOpenaiEndpoint(endpoint)" title="验证连接">
                     <i class="fas fa-sync-alt"></i>
                   </button>
-                  <button
-                    class="btn btn-icon-refined"
-                    @click="editOpenaiEndpoint(endpoint)"
-                    title="编辑配置"
-                  >
+                  <button class="btn btn-icon-refined" @click="editOpenaiEndpoint(endpoint)" title="编辑配置">
                     <i class="fas fa-edit"></i>
                   </button>
-                  <button
-                    class="btn btn-icon-refined"
-                    @click="deleteOpenaiEndpoint(endpoint)"
-                    title="删除账号"
-                    style="color: var(--danger-color)"
-                  >
+                  <button class="btn btn-icon-refined" @click="deleteOpenaiEndpoint(endpoint)" title="删除账号"
+                    style="color: var(--danger-color)">
                     <i class="fas fa-trash"></i>
                   </button>
                 </div>
@@ -274,28 +191,102 @@
         <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 12px">
           每行一个端点，格式：<code>名称:API地址:API_Key</code>
         </p>
-        <textarea
-          v-model="openaiBatchText"
-          class="form-textarea"
-          placeholder="每行一个: 名称:https://api.example.com:sk-xxx"
-          style="min-height: 120px; font-family: var(--font-mono); font-size: 12px"
-        ></textarea>
+        <textarea v-model="openaiBatchText" class="form-textarea" placeholder="每行一个: 名称:https://api.example.com:sk-xxx"
+          style="min-height: 120px; font-family: var(--font-mono); font-size: 12px"></textarea>
         <div v-if="openaiBatchError" class="form-error" style="margin-top: 8px">
           {{ openaiBatchError }}
         </div>
         <div v-if="openaiBatchSuccess" class="form-success" style="margin-top: 8px">
           {{ openaiBatchSuccess }}
         </div>
-        <button
-          class="btn btn-primary"
-          @click="batchAddOpenaiEndpoints"
-          :disabled="openaiAdding"
-          style="width: 100%; margin-top: 12px"
-        >
+        <button class="btn btn-primary" @click="batchAddOpenaiEndpoints" :disabled="openaiAdding"
+          style="width: 100%; margin-top: 12px">
           {{ openaiAdding ? '添加中...' : '批量添加' }}
         </button>
       </div>
     </div>
   </div>
+
+  <!-- 对话标签页 -->
+  <div v-if="openaiCurrentTab === 'chat'" class="sub-tab-content quick-fade-in theme-openai-chat">
+    <div class="openai-chat-container">
+      <!-- 顶部设置栏 -->
+      <div class="openai-chat-toolbar">
+        <div class="chat-model-selector">
+          <i class="fas fa-robot"></i>
+          <select v-model="openaiChatModel" class="form-input select-sm">
+            <optgroup v-for="channel in Array.from(new Set(openaiAllModels.map(m => m.owned_by)))" :key="channel"
+              :label="channel">
+              <option v-for="model in openaiAllModels.filter(m => m.owned_by === channel)" :key="model.id"
+                :value="model.id">
+                {{ model.id }}
+              </option>
+            </optgroup>
+          </select>
+          <button class="btn btn-icon-refined" @click="updateOpenaiAllModels(true)" title="刷新模型列表">
+            <i class="fas fa-sync-alt" :class="{ 'fa-spin': openaiLoading }"></i>
+          </button>
+        </div>
+        <div class="chat-actions">
+          <button class="btn btn-secondary btn-sm" @click="clearOpenaiChat">
+            <i class="fas fa-trash-alt"></i> 清除
+          </button>
+          <button class="btn btn-secondary btn-sm" @click="showHChatSettingsModal = true">
+            <i class="fas fa-cog"></i> 设置
+          </button>
+        </div>
+      </div>
+
+      <!-- 消息列表 -->
+      <div class="openai-chat-messages" id="openai-chat-messages">
+        <div v-if="openaiChatMessages.length === 0" class="chat-empty-state">
+          <div class="empty-icon"><i class="fas fa-comment-dots"></i></div>
+          <h3>OpenAI 兼容对话</h3>
+          <p>选择一个模型并开始对话。本模块直接调用配置的 API 端点。</p>
+        </div>
+
+        <div v-for="(msg, index) in openaiChatMessages" :key="index" class="chat-message" :class="msg.role">
+          <div class="message-avatar">
+            <i :class="msg.role === 'user' ? 'fas fa-user' : 'fas fa-robot'"></i>
+          </div>
+          <div class="message-content">
+            <div class="message-role-label">{{ msg.role === 'user' ? '你' : 'AI 助手' }}</div>
+            <!-- 思考过程 (如果存在) -->
+            <div v-if="msg.reasoning" class="message-reasoning">
+              <div class="reasoning-header" @click="msg.showReasoning = !msg.showReasoning">
+                <i class="fas fa-brain"></i> 思考过程
+                <i class="fas" :class="msg.showReasoning !== false ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
+              </div>
+              <div v-show="msg.showReasoning !== false" class="reasoning-content"
+                v-html="renderMarkdown(msg.reasoning)"></div>
+            </div>
+            <!-- 正文 -->
+            <div class="message-text" v-html="renderMarkdown(msg.content)"></div>
+          </div>
+        </div>
+
+        <!-- 正在加载 -->
+        <div v-if="openaiChatLoading" class="chat-message assistant loading">
+          <div class="message-avatar"><i class="fas fa-spinner fa-spin"></i></div>
+          <div class="message-content">
+            <div class="typing-indicator"><span></span><span></span><span></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 输入框 -->
+      <div class="openai-chat-input-wrapper">
+        <div class="input-panel">
+          <textarea v-model="openaiChatMessageInput" class="chat-textarea" placeholder="输入消息，Shift+Enter换行..." rows="1"
+            @keydown.enter.exact.prevent="sendOpenaiChatMessage" @input="autoResizeTextarea($event, true)"></textarea>
+          <button class="btn-send-chat" :disabled="!openaiChatMessageInput.trim() || openaiChatLoading"
+            @click="sendOpenaiChatMessage">
+            <i class="fas fa-paper-plane"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </div>
 <!-- ==================== OpenAI API 管理部分结束 ==================== -->

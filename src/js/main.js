@@ -1604,6 +1604,15 @@ const app = createApp({
       // 点击后关闭下拉菜单
       this.navGroupExpanded = null;
     },
+
+    /**
+     * 自动调整文本框高度
+     */
+    autoResizeTextarea(event) {
+      const el = event.target;
+      el.style.height = 'auto';
+      el.style.height = el.scrollHeight + 'px';
+    },
   },
 });
 
