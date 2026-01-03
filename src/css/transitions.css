@@ -294,12 +294,9 @@
 }
 
 .server-card.expanded>.server-card-body {
+  padding: 0px 0px 10px 0px;
   grid-template-rows: 1fr;
   opacity: 1;
-  overflow: visible;
-}
-
-.server-card.expanded>.server-card-body>div {
   overflow: visible;
 }
 
@@ -307,6 +304,21 @@
 .server-card-body>div {
   min-height: 0;
   overflow: hidden;
+}
+
+/* 展开后内部 div 也要 overflow visible */
+.server-card.expanded>.server-card-body>div {
+  overflow: visible !important;
+}
+
+/* 容器操作下拉菜单 */
+.container-dropdown-menu {
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.container-dropdown-menu .dropdown-item:hover {
+  background: var(--bg-tertiary) !important;
 }
 
 /* ===== Zeabur/OpenAPI 模块 - 使用 Grid 0fr->1fr 方案 ===== */

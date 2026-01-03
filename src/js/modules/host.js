@@ -1571,14 +1571,28 @@ export const hostMethods = {
       const data = await response.json();
       if (data.success) {
         this.showGlobalToast(data.message || 'Docker 操作已执行', 'success');
-        // 延迟刷新以等待同步
-        setTimeout(() => {
-          this.loadServerInfo(serverId);
-          // 同时刷新 Docker 概览
+
+        // 立即更新本地状态（乐观更新）
+        if (this.currentTab === 'docker') {
+          const dockerServer = this.dockerOverviewServers.find(s => s.id === serverId);
+          if (dockerServer?.containers) {
+            const container = dockerServer.containers.find(c => c.id === containerId);
+            if (container) {
+              // 根据操作类型预测新状态
+              if (action === 'start') container.status = 'Up Just now';
+              else if (action === 'stop') container.status = 'Exited';
+              else if (action === 'restart') container.status = 'Up Just now';
+            }
+          }
+        }
+
+        // 500ms 后从服务器获取准确状态
+        setTimeout(async () => {
+          await this.loadServerInfo(serverId);
           if (this.currentTab === 'docker') {
             this.loadDockerOverview();
           }
-        }, 1000);
+        }, 500);
       } else {
         this.showGlobalToast('操作失败: ' + (data.error || data.message || '未知错误'), 'error');
       }
