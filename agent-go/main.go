@@ -614,6 +614,30 @@ func (a *AgentClient) handleTask(id string, taskType int, data string, timeout i
 			result["successful"] = true
 			result["data"] = output
 		}
+	case 21: // DOCKER_COMPOSE_LIST - Compose 项目列表
+		output, err := a.handleDockerComposeList(data)
+		if err != nil {
+			result["data"] = err.Error()
+		} else {
+			result["successful"] = true
+			result["data"] = output
+		}
+	case 22: // DOCKER_COMPOSE_ACTION - Compose 操作
+		output, err := a.handleDockerComposeAction(data)
+		if err != nil {
+			result["data"] = err.Error()
+		} else {
+			result["successful"] = true
+			result["data"] = output
+		}
+	case 23: // DOCKER_CREATE_CONTAINER - 创建容器
+		output, err := a.handleDockerCreateContainer(data)
+		if err != nil {
+			result["data"] = err.Error()
+		} else {
+			result["successful"] = true
+			result["data"] = output
+		}
 	case 5: // UPGRADE
 		go a.handleUpgrade(id)
 		result["successful"] = true
@@ -1403,6 +1427,169 @@ func (a *AgentClient) handleDockerStats(data string) (string, error) {
 
 	jsonResult, _ := json.Marshal(stats)
 	return string(jsonResult), nil
+}
+
+// ==================== Docker Compose 管理 ====================
+
+// DockerComposeProject Compose 项目信息
+type DockerComposeProject struct {
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	ConfigFile string `json:"config_file"`
+}
+
+// handleDockerComposeList 列出 Docker Compose 项目
+func (a *AgentClient) handleDockerComposeList(data string) (string, error) {
+	// 使用 docker compose ls 命令列出所有项目
+	cmd := exec.Command("docker", "compose", "ls", "--format", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		// 尝试使用 docker-compose (旧版)
+		cmd = exec.Command("docker-compose", "ls", "--format", "json")
+		output, err = cmd.Output()
+		if err != nil {
+			return "[]", nil // 没有 compose 项目或命令不可用
+		}
+	}
+
+	// 直接返回 JSON 格式输出
+	trimmed := strings.TrimSpace(string(output))
+	if trimmed == "" {
+		return "[]", nil
+	}
+
+	return trimmed, nil
+}
+
+// DockerComposeActionRequest Compose 操作请求
+type DockerComposeActionRequest struct {
+	Action    string `json:"action"`     // up, down, restart, pull
+	Project   string `json:"project"`    // 项目名称
+	ConfigDir string `json:"config_dir"` // compose 文件所在目录
+}
+
+// handleDockerComposeAction Compose 操作
+func (a *AgentClient) handleDockerComposeAction(data string) (string, error) {
+	var req DockerComposeActionRequest
+	if err := json.Unmarshal([]byte(data), &req); err != nil {
+		return "", fmt.Errorf("解析请求失败: %v", err)
+	}
+
+	if req.Project == "" {
+		return "", fmt.Errorf("缺少项目名称")
+	}
+
+	var args []string
+	var actionDesc string
+
+	switch req.Action {
+	case "up":
+		args = []string{"compose", "-p", req.Project, "up", "-d"}
+		actionDesc = "启动项目"
+	case "down":
+		args = []string{"compose", "-p", req.Project, "down"}
+		actionDesc = "停止项目"
+	case "restart":
+		args = []string{"compose", "-p", req.Project, "restart"}
+		actionDesc = "重启项目"
+	case "pull":
+		args = []string{"compose", "-p", req.Project, "pull"}
+		actionDesc = "更新镜像"
+	default:
+		return "", fmt.Errorf("不支持的操作: %s", req.Action)
+	}
+
+	cmd := exec.Command("docker", args...)
+	if req.ConfigDir != "" {
+		cmd.Dir = req.ConfigDir
+	}
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%s失败: %s", actionDesc, string(output))
+	}
+
+	return fmt.Sprintf("%s成功\n%s", actionDesc, string(output)), nil
+}
+
+// ==================== Docker 容器创建 ====================
+
+// DockerCreateContainerRequest 创建容器请求
+type DockerCreateContainerRequest struct {
+	Name        string            `json:"name"`        // 容器名称
+	Image       string            `json:"image"`       // 镜像名称
+	Ports       []string          `json:"ports"`       // 端口映射，如 ["8080:80", "443:443"]
+	Volumes     []string          `json:"volumes"`     // 卷映射，如 ["/host/path:/container/path"]
+	Env         map[string]string `json:"env"`         // 环境变量
+	Network     string            `json:"network"`     // 网络名称
+	Restart     string            `json:"restart"`     // 重启策略: no, always, unless-stopped, on-failure
+	Privileged  bool              `json:"privileged"`  // 特权模式
+	ExtraArgs   []string          `json:"extra_args"`  // 额外的 docker run 参数
+}
+
+// handleDockerCreateContainer 创建新容器
+func (a *AgentClient) handleDockerCreateContainer(data string) (string, error) {
+	var req DockerCreateContainerRequest
+	if err := json.Unmarshal([]byte(data), &req); err != nil {
+		return "", fmt.Errorf("解析请求失败: %v", err)
+	}
+
+	if req.Image == "" {
+		return "", fmt.Errorf("缺少镜像名称")
+	}
+
+	// 构建 docker run 命令参数
+	args := []string{"run", "-d"}
+
+	// 容器名称
+	if req.Name != "" {
+		args = append(args, "--name", req.Name)
+	}
+
+	// 端口映射
+	for _, port := range req.Ports {
+		args = append(args, "-p", port)
+	}
+
+	// 卷映射
+	for _, vol := range req.Volumes {
+		args = append(args, "-v", vol)
+	}
+
+	// 环境变量
+	for k, v := range req.Env {
+		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
+	}
+
+	// 网络
+	if req.Network != "" {
+		args = append(args, "--network", req.Network)
+	}
+
+	// 重启策略
+	if req.Restart != "" {
+		args = append(args, "--restart", req.Restart)
+	}
+
+	// 特权模式
+	if req.Privileged {
+		args = append(args, "--privileged")
+	}
+
+	// 额外参数
+	args = append(args, req.ExtraArgs...)
+
+	// 最后添加镜像名
+	args = append(args, req.Image)
+
+	cmd := exec.Command("docker", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("创建容器失败: %s", string(output))
+	}
+
+	containerId := strings.TrimSpace(string(output))
+	return fmt.Sprintf("容器创建成功\nID: %s", containerId), nil
 }
 
 // handleUpgrade 执行 Agent 自我升级

@@ -1274,6 +1274,149 @@ export const hostMethods = {
     }
   },
 
+  // ==================== Docker Compose ====================
+
+  /**
+   * 加载 Docker Compose 项目列表
+   */
+  async loadDockerComposeProjects() {
+    if (!this.dockerSelectedServer) return;
+    this.dockerResourceLoading = true;
+    this.dockerComposeProjects = [];
+
+    try {
+      const response = await fetch('/api/server/docker/compose/list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serverId: this.dockerSelectedServer }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        this.dockerComposeProjects = data.data || [];
+      } else {
+        this.showGlobalToast('加载 Compose 失败: ' + data.error, 'error');
+      }
+    } catch (e) {
+      this.showGlobalToast('加载 Compose 失败: ' + e.message, 'error');
+    } finally {
+      this.dockerResourceLoading = false;
+    }
+  },
+
+  /**
+   * Docker Compose 操作
+   */
+  async handleDockerComposeAction(project, action) {
+    if (!this.dockerSelectedServer) return;
+
+    try {
+      this.showGlobalToast(`正在${action === 'up' ? '启动' : action === 'down' ? '停止' : '执行'} ${project}...`, 'info');
+
+      const response = await fetch('/api/server/docker/compose/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          serverId: this.dockerSelectedServer,
+          action,
+          project
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        this.showGlobalToast(data.message || '操作成功', 'success');
+        this.loadDockerComposeProjects();
+      } else {
+        this.showGlobalToast('操作失败: ' + data.error, 'error');
+      }
+    } catch (e) {
+      this.showGlobalToast('操作失败: ' + e.message, 'error');
+    }
+  },
+
+  // ==================== 容器创建 ====================
+
+  /**
+   * 打开创建容器弹窗
+   */
+  openCreateContainerModal() {
+    if (!this.dockerSelectedServer) {
+      this.showGlobalToast('请先选择一台主机', 'warning');
+      return;
+    }
+    this.createContainerForm = {
+      name: '',
+      image: '',
+      ports: '',
+      volumes: '',
+      env: '',
+      network: '',
+      restart: 'unless-stopped',
+    };
+    this.showCreateContainerModal = true;
+  },
+
+  /**
+   * 创建新容器
+   */
+  async createContainer() {
+    if (!this.dockerSelectedServer) return;
+    if (!this.createContainerForm.image) {
+      this.showGlobalToast('请输入镜像名称', 'warning');
+      return;
+    }
+
+    this.createContainerLoading = true;
+
+    try {
+      // 解析端口映射 (格式: 8080:80, 443:443)
+      const ports = this.createContainerForm.ports
+        ? this.createContainerForm.ports.split(',').map(p => p.trim()).filter(p => p)
+        : [];
+
+      // 解析卷映射 (格式: /host:/container, /data:/app/data)
+      const volumes = this.createContainerForm.volumes
+        ? this.createContainerForm.volumes.split(',').map(v => v.trim()).filter(v => v)
+        : [];
+
+      // 解析环境变量 (格式: KEY=value, KEY2=value2)
+      const envPairs = this.createContainerForm.env
+        ? this.createContainerForm.env.split(',').map(e => e.trim()).filter(e => e)
+        : [];
+      const env = {};
+      envPairs.forEach(pair => {
+        const [key, ...valueParts] = pair.split('=');
+        if (key) env[key.trim()] = valueParts.join('=').trim();
+      });
+
+      const response = await fetch('/api/server/docker/container/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          serverId: this.dockerSelectedServer,
+          name: this.createContainerForm.name,
+          image: this.createContainerForm.image,
+          ports,
+          volumes,
+          env,
+          network: this.createContainerForm.network,
+          restart: this.createContainerForm.restart,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        this.showGlobalToast(data.message || '容器创建成功', 'success');
+        this.showCreateContainerModal = false;
+        this.loadDockerOverview(); // 刷新容器列表
+      } else {
+        this.showGlobalToast('创建失败: ' + data.error, 'error');
+      }
+    } catch (e) {
+      this.showGlobalToast('创建失败: ' + e.message, 'error');
+    } finally {
+      this.createContainerLoading = false;
+    }
+  },
+
   getRunningContainers(containers) {
     if (!containers || !Array.isArray(containers)) return 0;
     return containers.filter(c => {

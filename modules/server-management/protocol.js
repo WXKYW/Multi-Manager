@@ -49,6 +49,9 @@ const TaskTypes = {
   DOCKER_VOLUME_ACTION: 18, // Docker Volume 操作
   DOCKER_LOGS: 19, // Docker 容器日志
   DOCKER_STATS: 20, // Docker 容器资源统计
+  DOCKER_COMPOSE_LIST: 21, // Docker Compose 项目列表
+  DOCKER_COMPOSE_ACTION: 22, // Docker Compose 操作 (up/down/restart)
+  DOCKER_CREATE_CONTAINER: 23, // 创建新容器
 };
 
 // ==================== 数据结构 ====================

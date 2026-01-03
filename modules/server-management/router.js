@@ -386,7 +386,6 @@ router.post('/info', async (req, res) => {
  * POST /docker/action
  * { serverId, containerId, action: 'start'|'stop'|'restart'|'pause'|'unpause'|'update'|'pull', image?: string }
  */
-const { TaskTypes: DockerTaskTypes } = require('./protocol');
 
 router.post('/docker/action', async (req, res) => {
   try {
@@ -733,6 +732,109 @@ router.post('/docker/stats', async (req, res) => {
 
     if (result.successful) {
       res.json({ success: true, data: JSON.parse(result.data) });
+    } else {
+      res.status(400).json({ success: false, error: result.data });
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ==================== Docker Compose 管理 ====================
+
+/**
+ * 获取 Docker Compose 项目列表
+ * POST /docker/compose/list
+ */
+router.post('/docker/compose/list', async (req, res) => {
+  try {
+    const { serverId } = req.body;
+    if (!serverId) return res.status(400).json({ success: false, error: '缺少服务器 ID' });
+    if (!agentService.isOnline(serverId)) return res.status(400).json({ success: false, error: '主机不在线' });
+
+    const result = await agentService.sendTaskAndWait(serverId, {
+      type: DockerTaskTypes.DOCKER_COMPOSE_LIST,
+      data: '',
+      timeout: 30,
+    }, 30000);
+
+    if (result.successful) {
+      let projects = [];
+      try {
+        projects = JSON.parse(result.data);
+      } catch (e) {
+        projects = [];
+      }
+      res.json({ success: true, data: projects });
+    } else {
+      res.status(400).json({ success: false, error: result.data });
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * Docker Compose 操作 (up/down/restart/pull)
+ * POST /docker/compose/action
+ */
+router.post('/docker/compose/action', async (req, res) => {
+  try {
+    const { serverId, action, project, configDir } = req.body;
+    if (!serverId || !action || !project) return res.status(400).json({ success: false, error: '缺少参数' });
+    if (!agentService.isOnline(serverId)) return res.status(400).json({ success: false, error: '主机不在线' });
+
+    const taskData = JSON.stringify({ action, project, config_dir: configDir });
+    const timeout = action === 'pull' ? 300 : 120;
+
+    const result = await agentService.sendTaskAndWait(serverId, {
+      type: DockerTaskTypes.DOCKER_COMPOSE_ACTION,
+      data: taskData,
+      timeout,
+    }, timeout * 1000);
+
+    if (result.successful) {
+      res.json({ success: true, message: result.data });
+    } else {
+      res.status(400).json({ success: false, error: result.data });
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ==================== Docker 容器创建 ====================
+
+/**
+ * 创建新容器
+ * POST /docker/container/create
+ */
+router.post('/docker/container/create', async (req, res) => {
+  try {
+    const { serverId, name, image, ports, volumes, env, network, restart, privileged, extraArgs } = req.body;
+    if (!serverId || !image) return res.status(400).json({ success: false, error: '缺少服务器 ID 或镜像名称' });
+    if (!agentService.isOnline(serverId)) return res.status(400).json({ success: false, error: '主机不在线' });
+
+    const taskData = JSON.stringify({
+      name,
+      image,
+      ports: ports || [],
+      volumes: volumes || [],
+      env: env || {},
+      network: network || '',
+      restart: restart || 'unless-stopped',
+      privileged: privileged || false,
+      extra_args: extraArgs || [],
+    });
+
+    const result = await agentService.sendTaskAndWait(serverId, {
+      type: DockerTaskTypes.DOCKER_CREATE_CONTAINER,
+      data: taskData,
+      timeout: 300, // 可能需要拉取镜像
+    }, 300000);
+
+    if (result.successful) {
+      res.json({ success: true, message: result.data });
     } else {
       res.status(400).json({ success: false, error: result.data });
     }

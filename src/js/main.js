@@ -447,6 +447,20 @@ const app = createApp({
       dockerLogsTail: 100,           // 日志行数
       dockerLogsContent: '',         // 日志内容
       dockerLogsLoading: false,      // 日志加载状态
+      // Docker Compose
+      dockerComposeProjects: [],     // Compose 项目列表
+      // 容器创建
+      showCreateContainerModal: false,
+      createContainerForm: {
+        name: '',
+        image: '',
+        ports: '',
+        volumes: '',
+        env: '',
+        network: '',
+        restart: 'unless-stopped',
+      },
+      createContainerLoading: false,
       showAddCredentialModal: false,
       credForm: {
         name: '',
