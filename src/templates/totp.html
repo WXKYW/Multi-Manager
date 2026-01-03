@@ -71,8 +71,8 @@
 
           <!-- 账号卡片 -->
           <div class="totp-card" :style="{ '--card-accent': account.color || getIssuerColor(account.issuer) }"
-            @click="copyTotpCode(account)" @touchstart="startTotpLongPress(account, $event)"
-            @touchend="cancelTotpLongPress" @touchmove="cancelTotpLongPress"
+            @click="copyTotpCode(account)" @touchstart.passive="startTotpLongPress(account, $event)"
+            @touchend.passive="cancelTotpLongPress" @touchmove.passive="cancelTotpLongPress"
             @contextmenu.prevent="showTotpContextMenu(account, $event)">
             <!-- 操作按钮 (悬浮) -->
             <div class="totp-card-actions" @click.stop>
