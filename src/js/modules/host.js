@@ -1572,7 +1572,13 @@ export const hostMethods = {
       if (data.success) {
         this.showGlobalToast(data.message || 'Docker 操作已执行', 'success');
         // 延迟刷新以等待同步
-        setTimeout(() => this.loadServerInfo(serverId), 1000);
+        setTimeout(() => {
+          this.loadServerInfo(serverId);
+          // 同时刷新 Docker 概览
+          if (this.currentTab === 'docker') {
+            this.loadDockerOverview();
+          }
+        }, 1000);
       } else {
         this.showGlobalToast('操作失败: ' + (data.error || data.message || '未知错误'), 'error');
       }

@@ -1484,7 +1484,7 @@
               <div style="border-top: 1px solid var(--border-color);">
                 <!-- 容器列表 -->
                 <div v-for="container in dockerServer.containers" :key="container.id" style="
-                  padding: 10px 16px;
+                  padding: 12px 16px;
                   border-bottom: 1px solid var(--border-color);
                   display: flex;
                   justify-content: space-between;
@@ -1516,7 +1516,7 @@
                         </span>
                       </div>
                       <div
-                        style="font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                        style="font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.4;">
                         {{ container.image }}
                       </div>
                     </div>
@@ -1562,16 +1562,20 @@
                         <i class="fas fa-ellipsis-v"></i>
                       </button>
                       <div v-show="containerMenuOpen === container.id" class="dropdown-menu"
-                        style="position: absolute; right: 0; top: 100%; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; min-width: 120px; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+                        style="position: fixed; transform: translateX(-100%); background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; min-width: 130px; z-index: 10000; box-shadow: 0 4px 16px rgba(0,0,0,0.25); padding: 4px 0;">
                         <button class="dropdown-item"
                           @click="renameDockerContainer(dockerServer.id, container.id, container.name); containerMenuOpen = null;"
-                          style="display: block; width: 100%; padding: 8px 12px; border: none; background: none; text-align: left; cursor: pointer; font-size: 12px; color: var(--text-primary);">
-                          <i class="fas fa-edit" style="width: 16px;"></i> 重命名
+                          style="display: block; width: 100%; padding: 10px 14px; border: none; background: none; text-align: left; cursor: pointer; font-size: 12px; color: var(--text-primary);"
+                          onmouseover="this.style.background='var(--bg-tertiary)'"
+                          onmouseout="this.style.background='none'">
+                          <i class="fas fa-edit" style="width: 18px; color: var(--primary);"></i> 重命名
                         </button>
                         <button class="dropdown-item"
                           @click="updateDockerContainer(dockerServer.id, container.id, container.name); containerMenuOpen = null;"
-                          style="display: block; width: 100%; padding: 8px 12px; border: none; background: none; text-align: left; cursor: pointer; font-size: 12px; color: var(--text-primary);">
-                          <i class="fas fa-sync-alt" style="width: 16px;"></i> 强制更新
+                          style="display: block; width: 100%; padding: 10px 14px; border: none; background: none; text-align: left; cursor: pointer; font-size: 12px; color: var(--text-primary);"
+                          onmouseover="this.style.background='var(--bg-tertiary)'"
+                          onmouseout="this.style.background='none'">
+                          <i class="fas fa-sync-alt" style="width: 18px; color: var(--warning);"></i> 强制更新
                         </button>
                       </div>
                     </div>

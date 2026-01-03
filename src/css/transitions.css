@@ -294,7 +294,6 @@
 }
 
 .server-card.expanded>.server-card-body {
-  padding: 0px 0px 10px 0px;
   grid-template-rows: 1fr;
   opacity: 1;
   overflow: visible;
@@ -488,10 +487,6 @@
   }
 }
 
-/* 设置侧边栏滑入动画 */
-.settings-sidebar {
-  /* animation: sidebarSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1); */
-}
 
 @keyframes sidebarSlideIn {
   from {

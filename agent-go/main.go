@@ -1026,7 +1026,6 @@ func parseImageName(image string) (registry, repo, tag string) {
 }
 
 // getRemoteDigest 从 Registry 获取远程镜像的 Digest
-// 参考 dockerCopilot 实现
 func getRemoteDigest(registry, repo, tag string) (string, error) {
 	// Docker Hub 加速器列表 (当直连失败时尝试)
 	accelerators := []string{
@@ -1088,7 +1087,6 @@ func tryGetDigestFromHost(host, repo, tag string) (string, error) {
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	// 参考 dockerCopilot 的 Accept headers
 	req.Header.Add("Accept", "application/vnd.docker.distribution.manifest.v2+json")
 	req.Header.Add("Accept", "application/vnd.docker.distribution.manifest.list.v2+json")
 	req.Header.Add("Accept", "application/vnd.docker.distribution.manifest.v1+json")
@@ -1115,13 +1113,19 @@ func tryGetDigestFromHost(host, repo, tag string) (string, error) {
 // getBearerToken 从 WWW-Authenticate 解析并获取 bearer token
 func getBearerToken(wwwAuth, repo string, client *http.Client) (string, error) {
 	// 解析格式: Bearer realm="xxx",service="xxx",scope="xxx"
-	raw := strings.TrimPrefix(strings.ToLower(wwwAuth), "bearer ")
-	params := make(map[string]string)
+	// 注意：不能转小写，否则 realm URL 会出错
+	raw := wwwAuth
+	if strings.HasPrefix(strings.ToLower(raw), "bearer ") {
+		raw = raw[7:] // 移除 "Bearer " 前缀
+	}
 	
+	params := make(map[string]string)
+	// 使用正则或手动解析 key="value" 对
+	// 简化实现：按逗号分隔，再按等号分隔
 	for _, part := range strings.Split(raw, ",") {
 		part = strings.TrimSpace(part)
 		if idx := strings.Index(part, "="); idx != -1 {
-			key := strings.TrimSpace(part[:idx])
+			key := strings.ToLower(strings.TrimSpace(part[:idx]))
 			val := strings.Trim(strings.TrimSpace(part[idx+1:]), `"`)
 			params[key] = val
 		}
@@ -1130,26 +1134,37 @@ func getBearerToken(wwwAuth, repo string, client *http.Client) (string, error) {
 	realm := params["realm"]
 	service := params["service"]
 	if realm == "" {
-		return "", fmt.Errorf("无法解析 realm")
+		return "", fmt.Errorf("无法解析 realm from: %s", wwwAuth)
 	}
 
 	// 构建 token URL
 	tokenURL := fmt.Sprintf("%s?service=%s&scope=repository:%s:pull", realm, service, repo)
+	log.Printf("[Docker] Token URL: %s", tokenURL)
 	
 	resp, err := client.Get(tokenURL)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("token 请求失败: %v", err)
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("token 请求返回 %d: %s", resp.StatusCode, string(body))
+	}
+
 	var tokenResp struct {
-		Token string `json:"token"`
+		Token       string `json:"token"`
+		AccessToken string `json:"access_token"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
 		return "", err
 	}
 
-	return tokenResp.Token, nil
+	// 有些 registry 返回 access_token 而不是 token
+	if tokenResp.Token != "" {
+		return tokenResp.Token, nil
+	}
+	return tokenResp.AccessToken, nil
 }
 
 // ==================== Docker 镜像管理 ====================
