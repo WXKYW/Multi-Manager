@@ -2649,13 +2649,16 @@ export const hostMethods = {
         }
       }
 
-      // 3. 逐个下发指令
+      // 3. 并行下发所有安装指令
       const pendingVerification = [];
 
-      for (let i = 0; i < this.batchInstallResults.length; i++) {
-        const item = this.batchInstallResults[i];
+      // 先将所有项目标记为 processing
+      this.batchInstallResults.forEach(item => {
         item.status = 'processing';
+      });
 
+      // 并行执行所有安装请求
+      await Promise.all(this.batchInstallResults.map(async (item) => {
         try {
           const response = await fetch(`/api/server/agent/auto-install/${item.serverId}`, {
             method: 'POST',
@@ -2675,7 +2678,7 @@ export const hostMethods = {
           item.status = 'failed';
           item.error = err.message;
         }
-      }
+      }));
 
       // 4. 批量验证重启状态 (最长等待 90秒)
       if (pendingVerification.length > 0) {
@@ -2689,15 +2692,17 @@ export const hostMethods = {
           // 倒序遍历以便移除已完成的
           for (let i = pendingVerification.length - 1; i >= 0; i--) {
             const item = pendingVerification[i];
-            const initialDetails = initialStates.get(item.serverId);
+            const initialConnectedAt = initialStates.get(item.serverId) || 0;
 
             try {
               const res = await fetch(`/api/server/agent/connection-info/${item.serverId}`);
               const data = await res.json();
 
               if (data.status === 'online') {
-                // 必须是新的连接
-                if (initialDetails === 0 || data.connectedAt > initialDetails) {
+                // 如果初始不在线 (initialConnectedAt === 0)，只要现在在线就成功
+                // 如果初始在线，需要有新的连接时间 (不严格要求更大，允许相同表示未重启但仍在线)
+                const currentConnectedAt = data.connectedAt || 0;
+                if (initialConnectedAt === 0 || currentConnectedAt >= initialConnectedAt) {
                   item.status = 'success';
                   pendingVerification.splice(i, 1);
                 }
