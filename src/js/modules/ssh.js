@@ -714,6 +714,32 @@ export const sshMethods = {
     // 打开终端到容器
     terminal.open(terminalContainer);
 
+    // 实现右键复制/粘贴功能
+    terminal.element.addEventListener('contextmenu', async e => {
+      e.preventDefault();
+      try {
+        if (terminal.hasSelection()) {
+          // 如果有选中内容，执行复制
+          const selection = terminal.getSelection();
+          await navigator.clipboard.writeText(selection);
+          terminal.clearSelection();
+          toast.success('已复制');
+        } else {
+          // 如果没有选中内容，执行粘贴
+          const text = await navigator.clipboard.readText();
+          if (text) {
+            terminal.paste(text);
+          }
+        }
+      } catch (err) {
+        console.error('Clipboard action failed:', err);
+        // 如果剪贴板 API 不可用 (非 HTTPS)，尝试降级提示
+        if (err.name === 'NotAllowedError' || err.name === 'SecurityError') {
+          toast.error('浏览器拒绝访问剪贴板，请允许权限');
+        }
+      }
+    });
+
     // 保存到会话
     session.terminal = terminal;
     session.fit = fitAddon;
