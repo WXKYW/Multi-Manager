@@ -544,7 +544,7 @@ class DatabaseService {
           // Determine timestamp column name
           const columns = db.pragma(`table_info(${name})`);
           const timeCol = columns.find(c =>
-            ['created_at', 'checked_at', 'timestamp'].includes(c.name)
+            ['created_at', 'checked_at', 'timestamp', 'recorded_at', 'start_time'].includes(c.name)
           )?.name;
 
           if (!timeCol) {
@@ -594,22 +594,91 @@ class DatabaseService {
 
       transaction();
 
-      // 3. 按数据库大小清理 (如果超出限制，触发 VACUUM 并再次检查? 或者简单地警告?)
-      // 实现策略：如果文件大小 > 限制，尝试 VACUUM。如果还大，只能删数据(暂不实现自动删数据以防误删，只做 VACUUM)
+      // 3. 按数据库大小清理 - 如果超出限制，自动删除最老的数据直到低于限制
       if (dbSizeMB > 0) {
-        const stats = fs.statSync(this.dbPath);
-        const sizeMB = stats.size / (1024 * 1024);
+        let currentStats = fs.statSync(this.dbPath);
+        let currentSizeMB = currentStats.size / (1024 * 1024);
 
-        if (sizeMB > dbSizeMB) {
+        if (currentSizeMB > dbSizeMB) {
           logger.warn(
-            `数据库大小 (${sizeMB.toFixed(2)}MB) 超过限制 (${dbSizeMB}MB)，尝试执行 VACUUM...`
+            `数据库大小 (${currentSizeMB.toFixed(2)}MB) 超过限制 (${dbSizeMB}MB)，开始自动清理旧数据...`
           );
-          db.exec('VACUUM');
 
-          // 再次检查
-          const newStats = fs.statSync(this.dbPath);
-          const newSizeMB = newStats.size / (1024 * 1024);
-          logger.info(`VACUUM 完成。当前大小: ${newSizeMB.toFixed(2)}MB`);
+          // 最多尝试 10 轮清理，防止无限循环
+          let cleanupRounds = 0;
+          const MAX_CLEANUP_ROUNDS = 10;
+
+          while (currentSizeMB > dbSizeMB && cleanupRounds < MAX_CLEANUP_ROUNDS) {
+            cleanupRounds++;
+            let roundDeleted = 0;
+
+            // 遍历所有日志表，删除每个表最老的 20% 记录
+            tables.forEach(({ name }) => {
+              const columns = db.pragma(`table_info(${name})`);
+              const timeCol = columns.find(c =>
+                ['created_at', 'checked_at', 'timestamp', 'recorded_at', 'start_time'].includes(c.name)
+              )?.name;
+
+              if (!timeCol) return;
+
+              // 获取表记录总数
+              const countResult = db.prepare(`SELECT COUNT(*) as cnt FROM ${name}`).get();
+              const tableCount = countResult.cnt;
+
+              if (tableCount > 10) {
+                // 至少保留 10 条记录
+                // 删除最老的 20% 记录 (至少删除 1 条)
+                const deleteCount = Math.max(1, Math.floor(tableCount * 0.2));
+
+                const deleteResult = db
+                  .prepare(
+                    `
+                    DELETE FROM ${name} 
+                    WHERE rowid IN (
+                      SELECT rowid FROM ${name} 
+                      ORDER BY ${timeCol} ASC 
+                      LIMIT ?
+                    )
+                  `
+                  )
+                  .run(deleteCount);
+
+                if (deleteResult.changes > 0) {
+                  logger.debug(
+                    `[轮次${cleanupRounds}] [${name}] 删除最老 ${deleteResult.changes} 条记录`
+                  );
+                  roundDeleted += deleteResult.changes;
+                  totalDeleted += deleteResult.changes;
+                }
+              }
+            });
+
+            // 如果这一轮没有删除任何数据，停止循环
+            if (roundDeleted === 0) {
+              logger.info('没有更多可清理的日志数据');
+              break;
+            }
+
+            // 执行 VACUUM 回收空间
+            db.exec('VACUUM');
+
+            // 重新检查大小
+            currentStats = fs.statSync(this.dbPath);
+            currentSizeMB = currentStats.size / (1024 * 1024);
+            logger.info(
+              `[轮次${cleanupRounds}] 清理 ${roundDeleted} 条，VACUUM 后大小: ${currentSizeMB.toFixed(2)}MB`
+            );
+          }
+
+          if (currentSizeMB <= dbSizeMB) {
+            logger.success(
+              `数据库大小已降至 ${currentSizeMB.toFixed(2)}MB，低于限制 ${dbSizeMB}MB`
+            );
+          } else {
+            logger.warn(
+              `经过 ${cleanupRounds} 轮清理，数据库大小仍为 ${currentSizeMB.toFixed(2)}MB，可能存在非日志数据占用`
+            );
+          }
         }
       }
 
