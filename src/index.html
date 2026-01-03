@@ -224,7 +224,8 @@
           <div class="top-nav-bar"
             v-if="!singlePageMode && (!isSelfHVideoActive || !isMobile) && (isMobile || (navLayout !== 'bottom' && navLayout !== 'bottom-normal'))">
             <!-- Logo 区域 (CSS 会在移动端隐藏) -->
-            <div class="nav-brand">
+            <div class="nav-brand" @click="showSettingsModal = true" style="cursor: pointer; user-select: none;"
+              title="点击打开设置">
               <img src="./logo.svg" class="nav-logo" alt="Logo" />
               <span class="nav-title">API Monitor</span>
             </div>
@@ -508,6 +509,7 @@
           <div id="template-self-h" v-show="mainActiveTab === 'self-h'"></div>
           <div id="template-totp" v-show="mainActiveTab === 'totp'"></div>
           <div id="template-music" v-show="mainActiveTab === 'music'"></div>
+          <div id="template-ai-chat" v-show="mainActiveTab === 'ai-chat'"></div>
         </div>
 
         <!-- 未登录占位符 -->
@@ -524,7 +526,7 @@
       <!-- 点击背景层 (点击除按钮外的区域展开) -->
       <div class="bar-click-layer" v-if="musicCurrentSong" @click="musicToggleFullPlayer()"></div>
 
-      <div class="bar-progress" @mousedown="musicStartDrag($event)" @touchstart="musicStartDrag($event)" role="slider"
+      <div class="bar-progress" @mousedown="musicStartDrag($event)" @touchstart.passive="musicStartDrag($event)" role="slider"
         :aria-valuenow="musicProgress" aria-valuemin="0" aria-valuemax="100" aria-label="播放进度">
         <div class="bar-fill" :style="{ width: musicProgress + '%' }"></div>
       </div>
@@ -737,7 +739,7 @@
     <div id="template-settings"></div>
     <div id="template-modals"></div>
 
-    <!-- 全局 SSH 终端保活仓库 (不受 v-if 销毁影响) -->
+    <!-- 全局 终端保活仓库 (不受 v-if 销毁影响) -->
     <div id="ssh-terminal-warehouse" style="
           visibility: hidden !important;
           position: absolute !important;

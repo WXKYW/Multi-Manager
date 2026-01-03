@@ -83,6 +83,7 @@ function loadUserSettings() {
       navLayout: settings.main_tabs_layout || 'top',
       totpSettings: settings.totp_settings || {},
       agentDownloadUrl: settings.agent_download_url || '',
+      publicApiUrl: settings.public_api_url || '',
     };
   } catch (error) {
     console.error('加载用户设置失败:', error);
@@ -144,6 +145,8 @@ function saveUserSettings(settings) {
         settings.agentDownloadUrl !== undefined
           ? settings.agentDownloadUrl
           : settings.agent_download_url,
+      public_api_url:
+        settings.publicApiUrl !== undefined ? settings.publicApiUrl : settings.public_api_url,
     };
 
     console.log('[UserSettings] 转换后数据:', JSON.stringify(dbSettings, null, 2));

@@ -1270,21 +1270,31 @@
               <label style="font-weight: 500; color: var(--text-secondary)">
                 <i class="fas fa-terminal" style="margin-right: 8px"></i>一键安装命令
               </label>
-              <div style="
-                  display: flex;
-                  background: var(--bg-tertiary);
-                  border-radius: 8px;
-                  padding: 3px;
-                  border: 1px solid var(--border-color);
-                ">
-                <button @click="agentInstallOS = 'linux'"
-                  :style="agentInstallOS === 'linux' ? 'background: var(--server-primary); color: white; padding: 4px 12px; border-radius: 6px; font-size: 11px; border: none; font-weight: 600; cursor: pointer;' : 'background: transparent; color: var(--text-secondary); padding: 4px 12px; font-size: 11px; border: none; cursor: pointer;'">
-                  Linux
-                </button>
-                <button @click="agentInstallOS = 'windows'"
-                  :style="agentInstallOS === 'windows' ? 'background: var(--server-primary); color: white; padding: 4px 12px; border-radius: 6px; font-size: 11px; border: none; font-weight: 600; cursor: pointer;' : 'background: transparent; color: var(--text-secondary); padding: 4px 12px; font-size: 11px; border: none; cursor: pointer;'">
-                  Windows
-                </button>
+
+              <div style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end;">
+                <!-- 协议选择 -->
+                <div class="pill-group-mini">
+                  <button @click="agentInstallProtocol = 'https'"
+                    :class="{ active: agentInstallProtocol === 'https' }">HTTPS</button>
+                  <button @click="agentInstallProtocol = 'http'"
+                    :class="{ active: agentInstallProtocol === 'http' }">HTTP</button>
+                </div>
+
+                <!-- 地址类型选择 -->
+                <div class="pill-group-mini">
+                  <button @click="agentInstallHostType = 'domain'"
+                    :class="{ active: agentInstallHostType === 'domain' }">域名</button>
+                  <button @click="agentInstallHostType = 'ip'"
+                    :class="{ active: agentInstallHostType === 'ip' }">IP</button>
+                </div>
+
+                <!-- OS 选择 -->
+                <div class="pill-group-mini">
+                  <button @click="agentInstallOS = 'linux'"
+                    :class="{ active: agentInstallOS === 'linux' }">Linux</button>
+                  <button @click="agentInstallOS = 'windows'"
+                    :class="{ active: agentInstallOS === 'windows' }">Windows</button>
+                </div>
               </div>
             </div>
             <div style="position: relative">
@@ -1302,7 +1312,7 @@
                   word-break: break-all;
                   font-family: var(--font-mono);
                 ">
-{{ agentInstallOS === 'linux' ? agentModalData.installCommand : agentModalData.winInstallCommand }}</pre>
+{{ getDynamicInstallCommand(agentInstallOS) }}</pre>
               <button class="btn-icon-refined" @click="copyAgentCommand" style="
                   position: absolute;
                   top: 10px;
@@ -1330,6 +1340,16 @@
                 <strong>一键安装</strong>：点击下方按钮自动通过 SSH 安装
               </li>
               <li><strong>手动安装</strong>：复制上方命令到服务器执行</li>
+              <li><strong>二进制安装</strong>：
+                <ul style="padding-left: 15px; font-size: 11px; opacity: 0.8;">
+                  <li v-if="agentInstallOS === 'linux'">上传并执行:
+                    <code>chmod +x agent-linux-amd64 && ./agent-linux-amd64 service install --url {{ getBaseApiUrl() }} --key {{ agentModalData.agentKey }}</code>
+                  </li>
+                  <li v-else>在管理员终端执行:
+                    <code>.\agent-windows-amd64.exe service install --url {{ getBaseApiUrl() }} --key {{ agentModalData.agentKey }}</code>
+                  </li>
+                </ul>
+              </li>
               <li>Agent 会自识别系统并安装为服务</li>
             </ol>
           </div>
@@ -1397,12 +1417,19 @@
             <i class="fas fa-key"></i> 重新生成密钥
           </button>
         </div>
-        <div style="display: flex; gap: 10px">
+        <div style="display: flex; gap: 10px; align-items: center">
+          <label
+            style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer; margin-right: 4px; user-select: none"
+            title="跳过智能检测，强制使用 SSH 重新安装 Agent (用于修复损坏的安装)">
+            <input type="checkbox" v-model="agentForceSsh" :disabled="agentInstallLoading || agentInstalling"
+              style="accent-color: var(--server-primary)" />
+            强制 SSH 覆盖
+          </label>
           <button class="btn btn-secondary" @click="closeAgentModal">关闭</button>
           <button class="btn btn-primary" @click="autoInstallAgent(agentModalData.serverId)"
-            :disabled="agentInstallLoading">
-            <i class="fas" :class="agentInstallLoading ? 'fa-spinner fa-spin' : 'fa-rocket'"></i>
-            {{ agentInstallLoading ? '安装中...' : '一键安装' }}
+            :disabled="agentInstallLoading || agentInstalling">
+            <i class="fas" :class="agentInstalling ? 'fa-spinner fa-spin' : 'fa-rocket'"></i>
+            {{ agentInstalling ? '安装中...' : '一键安装' }}
           </button>
         </div>
       </div>
@@ -1500,6 +1527,10 @@
                   style="background: rgba(59, 130, 246, 0.1); color: #3b82f6">
                   <i class="fas fa-spinner fa-spin"></i> 处理中
                 </span>
+                <span v-else-if="res.status === 'verifying'" class="status-badge"
+                  style="background: rgba(245, 158, 11, 0.1); color: #f59e0b">
+                  <i class="fas fa-hourglass-half fa-spin"></i> 验证中
+                </span>
                 <span v-else-if="res.status === 'success'" class="status-badge"
                   style="background: rgba(16, 185, 129, 0.1); color: #10b981">
                   <i class="fas fa-check-circle"></i> 成功
@@ -1514,16 +1545,22 @@
         </div>
       </div>
       <div class="modal-footer" style="display: flex; justify-content: space-between; padding: 16px 20px">
-        <div style="color: var(--text-tertiary); font-size: 12px">
+        <div style="color: var(--text-tertiary); font-size: 12px; display: flex; align-items: center; gap: 12px">
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none"
+            title="跳过智能检测，强制使用 SSH 重新安装 Agent">
+            <input type="checkbox" v-model="batchAgentForceSsh" :disabled="agentInstallLoading"
+              style="accent-color: var(--server-primary)" />
+            强制 SSH 覆盖
+          </label>
           <span v-if="agentInstallLoading"><i class="fas fa-spinner fa-spin"
-              style="margin-right: 6px"></i>正在执行批量任务，请勿关闭弹窗...</span>
+              style="margin-right: 6px"></i>正在执行，请勿关闭...</span>
         </div>
         <div style="display: flex; gap: 10px">
           <button class="btn btn-secondary" @click="closeBatchAgentModal" :disabled="agentInstallLoading">
             关闭
           </button>
           <button class="btn btn-primary" @click="runBatchAgentInstall"
-            :disabled="agentInstallLoading || selectedBatchServers.length === 0">
+            :disabled="selectedBatchServers.length === 0 || agentInstallLoading">
             <i class="fas" :class="agentInstallLoading ? 'fa-spinner fa-spin' : 'fa-play'"></i>
             开始批量安装
           </button>

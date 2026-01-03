@@ -12,14 +12,15 @@ export const MODULE_CONFIG = {
     paas: { name: 'PaaS', shortName: 'PaaS', icon: 'fa-cloud', description: 'Zeabur / Koyeb / Fly.io 平台监控' },
     dns: { name: 'DNS', shortName: 'CF', icon: 'fa-globe', description: 'Cloudflare DNS / Workers / Pages 管理' },
     'self-h': { name: 'SelfH', shortName: 'Self-H', icon: 'fa-server', description: '自建服务管理' },
-    server: { name: 'Hosts', shortName: 'Hosts', icon: 'fa-hdd', description: 'SSH 终端与服务器监控' },
+    server: { name: 'Hosts', shortName: 'Hosts', icon: 'fa-hdd', description: '终端与服务器监控' },
     totp: { name: '2FA', shortName: '2FA', icon: 'fa-shield-alt', description: 'TOTP 验证器' },
     music: { name: 'Music', shortName: 'Music', icon: 'fa-music', description: '网易云音乐播放器' },
+    'ai-chat': { name: 'AI Chat', shortName: 'Chat', icon: 'fa-comments', description: 'AI 智能对话助手' },
 };
 
 export const MODULE_GROUPS = [
     { id: 'overview', name: '仪表盘', icon: 'fa-tachometer-alt', modules: ['dashboard'] },
-    { id: 'api-gateway', name: 'API 网关', icon: 'fa-bolt', modules: ['openai', 'antigravity', 'gemini-cli'] },
+    { id: 'api-gateway', name: 'API 网关', icon: 'fa-bolt', modules: ['openai', 'antigravity', 'gemini-cli', 'ai-chat'] },
     { id: 'infrastructure', name: '基础设施', icon: 'fa-cubes', modules: ['paas', 'dns', 'server'] },
     { id: 'toolbox', name: '工具箱', icon: 'fa-toolbox', modules: ['self-h', 'totp', 'music'] },
 ];
@@ -39,9 +40,10 @@ export const useAppStore = defineStore('app', {
             server: true,
             totp: true,
             music: false,
+            'ai-chat': true,
         },
         moduleOrder: [
-            'dashboard', 'openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'self-h', 'server', 'totp', 'music'
+            'dashboard', 'openai', 'antigravity', 'gemini-cli', 'paas', 'dns', 'self-h', 'server', 'totp', 'music', 'ai-chat'
         ],
         // 界面设置
         opacity: 100,

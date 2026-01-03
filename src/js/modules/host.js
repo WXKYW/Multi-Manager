@@ -253,9 +253,9 @@ export const hostMethods = {
     try {
       const tags = this.serverForm.tagsInput
         ? this.serverForm.tagsInput
-            .split(',')
-            .map(t => t.trim())
-            .filter(t => t)
+          .split(',')
+          .map(t => t.trim())
+          .filter(t => t)
         : [];
 
       const payload = {
@@ -1585,6 +1585,7 @@ export const hostMethods = {
     this.agentInstallLog = '';
     this.agentInstallResult = null;
     this.showAgentModal = true;
+    this.agentForceSsh = false;
     this.agentModalData = {
       serverId,
       serverName: server.name,
@@ -1619,13 +1620,68 @@ export const hostMethods = {
   },
 
   /**
+   * 动态生成 Agent 安装命令
+   * 支持协议 (http/https) 和 地址类型 (domain/ip) 切换
+   */
+  getDynamicInstallCommand(osType) {
+    if (!this.agentModalData) return '';
+
+    const { agentKey, serverId } = this.agentModalData;
+    const protocol = this.agentInstallProtocol || 'https';
+
+    // 确定主机名
+    let host = window.location.host; // 默认使用当前页面的域名/端口
+
+    // 1. 优先使用设置中的公网地址 (Public URL)
+    if (this.publicApiUrl && this.publicApiUrl.trim() !== '') {
+      try {
+        let urlStr = this.publicApiUrl.trim();
+        if (!urlStr.startsWith('http')) {
+          urlStr = 'http://' + urlStr; // 补全协议以便解析
+        }
+        const u = new URL(urlStr);
+        host = u.host;
+      } catch (e) {
+        console.warn('Invalid Public API URL:', this.publicApiUrl);
+      }
+    }
+    // 2. 否则使用自动检测/IP逻辑
+    else if (this.agentInstallHostType === 'ip') {
+      // 尝试从 apiUrl 中提取 IP
+      if (this.agentModalData.apiUrl) {
+        try {
+          const urlObj = new URL(this.agentModalData.apiUrl);
+          host = urlObj.host;
+        } catch (e) { }
+      }
+    }
+
+    const baseUrl = `${protocol}://${host}/api/server/agent/install`;
+
+    if (osType === 'linux') {
+      return `curl -fsSL ${baseUrl}/linux/${serverId}/${agentKey} | bash`;
+    } else {
+      return `powershell -c "irm ${baseUrl}/win/${serverId}/${agentKey} | iex"`;
+    }
+  },
+
+  /**
+   * 获取当前配置的基础 API 路径 (用于手动安装教程)
+   */
+  getBaseApiUrl() {
+    const protocol = this.agentInstallProtocol || 'https';
+    let host = window.location.host;
+    if (this.agentInstallHostType === 'ip' && this.agentModalData?.apiUrl) {
+      try { host = new URL(this.agentModalData.apiUrl).host; } catch (e) { }
+    }
+    return `${protocol}://${host}`;
+  },
+
+  /**
    * 复制安装命令到剪贴板
    */
   async copyAgentCommand() {
-    const command =
-      this.agentInstallOS === 'linux'
-        ? this.agentModalData?.installCommand
-        : this.agentModalData?.winInstallCommand;
+    const command = this.getDynamicInstallCommand(this.agentInstallOS);
 
     if (!command) return;
 
@@ -1669,28 +1725,286 @@ export const hostMethods = {
     }
   },
 
+  // ==================== Agent 升级 ====================
   /**
-   * 自动安装 Agent（通过 SSH）
+   * 显示一键升级弹窗
    */
+  showOneKeyUpgradeModal() {
+    this.showUpgradeModal = true;
+    this.upgradeLog = '';
+    this.upgradeProgress = 0;
+    this.upgrading = false;
+    this.forceUpgrade = false;
+  },
+
+  closeUpgradeModal() {
+    if (this.upgrading) {
+      this.showGlobalToast('升级任务将在后台继续执行', 'info');
+    }
+    this.showUpgradeModal = false;
+  },
+
+  /**
+   * 执行一键升级
+   */
+  async performOneKeyUpgrade() {
+    this.showUpgradeModal = true;
+    this.upgrading = true;
+    this.upgradeLog = '开始批量升级任务...\n';
+    this.upgradeProgress = 0;
+    this.forceUpgrade = false;
+
+    // 筛选在线且为 Agent 模式的主机
+    const targetServers = this.serverList.filter(s =>
+      (s.status === 'online' || s.monitor_mode === 'agent' || s.host === '0.0.0.0')
+    );
+
+    if (targetServers.length === 0) {
+      this.upgradeLog += '❌ 没有检测到在线的 Agent 主机。\n';
+      this.upgrading = false;
+      return;
+    }
+
+    this.upgradeLog += `Detected ${targetServers.length} online agents.\n`;
+
+    let successCount = 0;
+    let failCount = 0;
+    const initialStates = new Map();
+
+    // 1. 记录初始连接状态 (通过 API 获取准确的连接建立时间)
+    this.upgradeLog += `正在获取初始连接状态...\n`;
+    for (const server of targetServers) {
+      try {
+        const res = await fetch(`/api/server/agent/connection-info/${server.id}`);
+        const data = await res.json();
+        if (data.status === 'online') {
+          initialStates.set(server.id, data.connectedAt);
+        } else {
+          initialStates.set(server.id, 0); // 视为离线
+        }
+      } catch (e) {
+        console.warn('获取初始状态失败:', e);
+        initialStates.set(server.id, 0);
+      }
+    }
+
+    // 2. 发送升级指令
+    for (let i = 0; i < targetServers.length; i++) {
+      const server = targetServers[i];
+      this.upgradeLog += `[${i + 1}/${targetServers.length}] Sending upgrade command to ${server.name}... `;
+
+      try {
+        const response = await fetch(`/api/server/agent/auto-install/${server.id}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const result = await response.json();
+
+        if (result.success) {
+          this.upgradeLog += '✅ Sent.\n';
+          successCount++;
+        } else {
+          this.upgradeLog += `❌ Failed: ${result.error}\n`;
+          failCount++;
+        }
+      } catch (error) {
+        this.upgradeLog += `❌ Network Error: ${error.message}\n`;
+        failCount++;
+      }
+
+      // Update Progress
+      this.upgradeProgress = Math.round(((i + 1) / targetServers.length) * 50); // 发送阶段占 50%
+
+      // Auto scroll
+      this.$nextTick(() => {
+        const logEl = this.$refs.upgradeLogRef;
+        if (logEl) logEl.scrollTop = logEl.scrollHeight;
+      });
+
+      // Small delay to prevent flood
+      await new Promise(r => setTimeout(r, 200));
+    }
+
+    this.upgrading = false; // 发送结束，但监控继续
+    const useSshFallback = this.upgradeFallbackSsh;
+    this.upgradeLog += `\n🎉 指令下发完成: 成功 ${successCount} 台，失败 ${failCount} 台。${useSshFallback ? ' (策略: 开启 SSH 保底)' : ''}\n`;
+    this.upgradeLog += `⏳ 正在验证 Agent 重启状态 (等待连接重置，限时 30秒)...\n`;
+
+    // 3. 监控重启状态 (等待 New ConnectedAt > Old ConnectedAt)
+    const monitorStartTime = Date.now();
+    // 强制等待 5 秒，给 Agent 时间去断开
+    await new Promise(r => setTimeout(r, 5000));
+
+    const monitorMap = new Map();
+    targetServers.forEach(s => {
+      if (initialStates.has(s.id)) {
+        monitorMap.set(s.id, 'pending');
+      }
+    });
+
+    const checkInterval = setInterval(async () => {
+      const timeElapsed = Date.now() - monitorStartTime;
+      this.upgradeProgress = 50 + Math.min(50, Math.round((timeElapsed / 60000) * 50));
+
+      if (timeElapsed > 30000) { // 30秒超时
+        clearInterval(checkInterval);
+        this.upgradeLog += `\n⚠️ 监控超时。部分 Agent 未能按时上线。\n`;
+
+        // 保底策略逻辑
+        if (useSshFallback) {
+          const timeoutServers = [];
+          for (const [id, status] of monitorMap.entries()) {
+            if (status === 'pending' || status === 'error') {
+              timeoutServers.push(targetServers.find(s => s.id === id));
+            }
+          }
+
+          if (timeoutServers.length > 0) {
+            this.upgradeLog += `🛡️ 触发保底策略：尝试通过 SSH 对 ${timeoutServers.length} 台主机执行强制覆盖安装...\n`;
+            for (const s of timeoutServers) {
+              this.upgradeLog += `   🚀 [${s.name}] 开始 SSH 覆盖安装... `;
+              try {
+                const res = await fetch(`/api/server/agent/auto-install/${s.id}`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ force_ssh: true }) // 显式请求 SSH 覆盖
+                });
+                const data = await res.json();
+                if (data.success) {
+                  this.upgradeLog += '✅ 指令成功下发 (SSH)\n';
+                } else {
+                  this.upgradeLog += `❌ 失败: ${data.error}\n`;
+                }
+              } catch (e) {
+                this.upgradeLog += `❌ 网络错误: ${e.message}\n`;
+              }
+            }
+            this.upgradeLog += `\n💡 保底任务执行完毕，请稍后在列表查看状态。\n`;
+          }
+        } else {
+          this.upgradeLog += `\n💡 请检查网络或尝试手动使用 SSH 重新部署。\n`;
+        }
+
+        this.upgradeProgress = 100;
+        return;
+      }
+
+      let allDone = true;
+      let onlineCount = 0;
+
+      for (const [id, status] of monitorMap.entries()) {
+        if (status === 'ok') {
+          onlineCount++;
+          continue;
+        }
+
+        try {
+          const res = await fetch(`/api/server/agent/connection-info/${id}`);
+          const data = await res.json();
+          const oldConnectedAt = initialStates.get(id);
+
+          if (data.status === 'online') {
+            // 关键判断：必须是新的连接 (连接时间 > 初始记录时间)
+            if (oldConnectedAt === 0 || data.connectedAt > oldConnectedAt) {
+              const serverName = targetServers.find(s => s.id === id)?.name;
+              this.upgradeLog += `   ✅ [${serverName}] 已重新上线 (v${data.version || '?'})\n`;
+              monitorMap.set(id, 'ok');
+              onlineCount++;
+            } else {
+              allDone = false;
+            }
+          } else {
+            allDone = false;
+          }
+        } catch (e) {
+          allDone = false;
+        }
+      }
+
+      if (allDone) {
+        clearInterval(checkInterval);
+        this.upgradeLog += `\n✅ 所有目标 Agent 均已完成升级并重新上线！\n`;
+        this.upgradeProgress = 100;
+      }
+
+      // Auto scroll
+      this.$nextTick(() => {
+        const logEl = this.$refs.upgradeLogRef;
+        if (logEl) logEl.scrollTop = logEl.scrollHeight;
+      });
+
+    }, 3000);
+  },
+
+  /**
+   * 等待 Agent 上线 helper (精细版)
+   * logic: 等待直到 (status=online AND connectedAt > initialConnectedAt)
+   */
+  async waitForAgentRestart(serverId, initialConnectedAt, timeoutMs = 90000) {
+    const start = Date.now();
+
+    // 强制等待 3 秒避免立即读到旧状态
+    await new Promise(r => setTimeout(r, 3000));
+
+    while (Date.now() - start < timeoutMs) {
+      try {
+        const res = await fetch(`/api/server/agent/connection-info/${serverId}`);
+        const data = await res.json();
+
+        if (data.status === 'online') {
+          // 如果初始是0(离线)，只要在线就行
+          // 如果初始有值，必须 > 初始值
+          if (data.connectedAt > initialConnectedAt) {
+            return true;
+          }
+        }
+      } catch (e) { /* ignore network glitch */ }
+
+      await new Promise(r => setTimeout(r, 2000));
+    }
+    return false;
+  },
+
   async autoInstallAgent(serverId) {
-    this.agentInstallLoading = true;
+    // 使用专用的安装中状态
+    this.agentInstalling = true;
     this.agentInstallLog = '正在连接服务器并安装 Agent...\n';
     this.agentInstallResult = null;
+
+    // 1. 获取当前状态作为基准
+    let initialConnectedAt = 0;
+    try {
+      const res = await fetch(`/api/server/agent/connection-info/${serverId}`);
+      const data = await res.json();
+      if (data.status === 'online') initialConnectedAt = data.connectedAt;
+    } catch (e) { console.log('Pre-check failed', e); }
 
     try {
       const response = await fetch(`/api/server/agent/auto-install/${serverId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force_ssh: this.agentForceSsh }),
       });
       const data = await response.json();
 
       if (data.success) {
-        this.agentInstallLog += (data.output || '') + '\n\n✅ Agent 安装成功！';
-        this.agentInstallResult = 'success';
-        this.showGlobalToast('Agent 安装成功！', 'success');
+        this.agentInstallLog += (data.output || '') + '\n\n✅ 安装/升级指令执行成功！\n⏳ 正在验证 Agent 是否重新连接...';
+
+        // 2. 等待真正的重启上线
+        const isSuccess = await this.waitForAgentRestart(serverId, initialConnectedAt);
+
+        if (isSuccess) {
+          this.agentInstallLog += '\n✅ 检测到 Agent 新连接已建立！安装/升级成功！🎉';
+          this.agentInstallResult = 'success';
+          this.showGlobalToast('Agent 就绪', 'success');
+        } else {
+          this.agentInstallLog += '\n⚠️ Agent 未能在规定时间内(90s)重建连接。可能仍在启动中或安装失败。';
+          this.agentInstallResult = 'warning';
+        }
+
       } else {
         this.agentInstallLog +=
-          (data.output || '') + '\n\n❌ 安装失败: ' + (data.error || '未知错误');
+          (data.output || '') + '\n\n❌ 安装失败: ' + (data.details || data.error || '未知错误');
         this.agentInstallResult = 'error';
         this.showGlobalToast('安装失败: ' + (data.error || '未知错误'), 'error');
       }
@@ -1698,9 +2012,8 @@ export const hostMethods = {
       console.error('自动安装 Agent 失败:', error);
       this.agentInstallLog += '\n❌ 网络错误: ' + error.message;
       this.agentInstallResult = 'error';
-      this.showGlobalToast('安装失败: ' + error.message, 'error');
     } finally {
-      this.agentInstallLoading = false;
+      this.agentInstalling = false;
     }
   },
 
@@ -1776,6 +2089,7 @@ export const hostMethods = {
   showBatchAgentInstallModal() {
     this.selectedBatchServers = [];
     this.batchInstallResults = [];
+    this.batchAgentForceSsh = false;
     this.showBatchAgentModal = true;
   },
 
@@ -1812,9 +2126,9 @@ export const hostMethods = {
   async runBatchAgentInstall() {
     if (this.selectedBatchServers.length === 0) return;
 
-    // 直接开始安装，无需确认
-
     this.agentInstallLoading = true;
+
+    // 1. 初始化结果列表
     this.batchInstallResults = this.selectedBatchServers.map(id => {
       const server = this.serverList.find(s => s.id === id);
       return {
@@ -1826,8 +2140,25 @@ export const hostMethods = {
     });
 
     try {
-      // 我们采用逐个调用的方式，以便在 UI 上展示每个的进度，或者直接调用后端的批量接口
-      // 考虑到 UX，逐个调用能看到实时的"处理中"状态
+      // 2. 获取初始连接状态 (用于验证重启)
+      const initialStates = new Map();
+      for (const item of this.batchInstallResults) {
+        try {
+          const res = await fetch(`/api/server/agent/connection-info/${item.serverId}`);
+          const data = await res.json();
+          if (data.status === 'online') {
+            initialStates.set(item.serverId, data.connectedAt);
+          } else {
+            initialStates.set(item.serverId, 0);
+          }
+        } catch (e) {
+          initialStates.set(item.serverId, 0);
+        }
+      }
+
+      // 3. 逐个下发指令
+      const pendingVerification = [];
+
       for (let i = 0; i < this.batchInstallResults.length; i++) {
         const item = this.batchInstallResults[i];
         item.status = 'processing';
@@ -1836,11 +2167,13 @@ export const hostMethods = {
           const response = await fetch(`/api/server/agent/auto-install/${item.serverId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ force_ssh: this.batchAgentForceSsh }),
           });
           const data = await response.json();
 
           if (data.success) {
-            item.status = 'success';
+            item.status = 'verifying'; // 进入验证阶段
+            pendingVerification.push(item);
           } else {
             item.status = 'failed';
             item.error = data.error || '安装失败';
@@ -1848,6 +2181,46 @@ export const hostMethods = {
         } catch (err) {
           item.status = 'failed';
           item.error = err.message;
+        }
+      }
+
+      // 4. 批量验证重启状态 (最长等待 90秒)
+      if (pendingVerification.length > 0) {
+        const startTime = Date.now();
+        const timeoutMs = 90000;
+
+        // 强制等待 3 秒，让 Agent 断开
+        await new Promise(r => setTimeout(r, 3000));
+
+        while (pendingVerification.length > 0 && Date.now() - startTime < timeoutMs) {
+          // 倒序遍历以便移除已完成的
+          for (let i = pendingVerification.length - 1; i >= 0; i--) {
+            const item = pendingVerification[i];
+            const initialDetails = initialStates.get(item.serverId);
+
+            try {
+              const res = await fetch(`/api/server/agent/connection-info/${item.serverId}`);
+              const data = await res.json();
+
+              if (data.status === 'online') {
+                // 必须是新的连接
+                if (initialDetails === 0 || data.connectedAt > initialDetails) {
+                  item.status = 'success';
+                  pendingVerification.splice(i, 1);
+                }
+              }
+            } catch (e) { /* ignore */ }
+          }
+
+          if (pendingVerification.length > 0) {
+            await new Promise(r => setTimeout(r, 2000));
+          }
+        }
+
+        // 5. 标记超时
+        for (const item of pendingVerification) {
+          item.status = 'failed';
+          item.error = '验证超时: Agent 未能在 90秒内重建连接';
         }
       }
 
@@ -1859,4 +2232,5 @@ export const hostMethods = {
       this.agentInstallLoading = false;
     }
   },
+
 };

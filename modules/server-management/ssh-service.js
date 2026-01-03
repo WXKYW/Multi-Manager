@@ -34,7 +34,7 @@ class SSHService {
 
           switch (data.type) {
             case 'connect':
-              const { serverId, cols, rows } = data;
+              const { serverId, cols, rows, protocol } = data;
               currentServerId = serverId;
 
               // 获取服务器配置
@@ -44,7 +44,48 @@ class SSHService {
                 return;
               }
 
-              // 建立 SSH 连接
+              logger.info(`建立终端连接: serverId=${serverId}, protocol=${protocol || 'ssh'}`);
+
+              // ==================== Agent PTY 模式 ====================
+              if (protocol === 'agent') {
+                const agentService = require('./agent-service');
+                const { TaskTypes } = require('./protocol');
+                const crypto = require('crypto');
+
+                if (!agentService.isOnline(serverId)) {
+                  logger.warn(`Agent 终端连接失败: Agent 离线 (serverId=${serverId})`);
+                  ws.send(JSON.stringify({ type: 'error', message: 'Agent 离线，无法连接终端' }));
+                  return;
+                }
+
+                const taskId = 'pty_' + crypto.randomBytes(4).toString('hex');
+                ws._taskId = taskId;
+                ws._serverId = serverId;
+                ws._protocol = 'agent';
+
+                // 监听来自 Agent 的输出
+                const ptyOutputHandler = ptyData => {
+                  if (ws.readyState === ws.OPEN) {
+                    ws.send(JSON.stringify({ type: 'output', data: ptyData }));
+                  }
+                };
+                agentService.on(`pty:${taskId}`, ptyOutputHandler);
+                ws._ptyOutputHandler = ptyOutputHandler;
+
+                // 下发启动 PTY 任务
+                agentService.sendTask(serverId, {
+                  id: taskId,
+                  type: TaskTypes.PTY_START,
+                  data: JSON.stringify({ cols, rows }),
+                });
+
+                logger.info(`Agent PTY 会话已初始化: taskId=${taskId}, serverId=${serverId}`);
+                ws.send(JSON.stringify({ type: 'connected', message: 'Agent PTY 会话已启动' }));
+                return;
+              }
+
+              // ==================== 标准 SSH 模式 ====================
+              logger.info(`尝试建立 SSH 连接: serverId=${serverId} (${serverConfig.name})`);
               sshClient = new Client();
 
               sshClient.on('ready', () => {
@@ -103,13 +144,37 @@ class SSHService {
               break;
 
             case 'input':
-              if (shellStream) {
+              if (ws._protocol === 'agent') {
+                const agentService = require('./agent-service');
+                const { Events } = require('./protocol');
+                agentService.sendTask(ws._serverId, {
+                  type: Events.DASHBOARD_PTY_INPUT, // 注意这里我们直接复用事件名作为类型标识或使用特定指令
+                  id: ws._taskId,
+                  data: data.data,
+                });
+                // 修正：实际应该发送 socket.io 事件
+                const socket = agentService.connections.get(ws._serverId);
+                if (socket) {
+                  socket.emit(Events.DASHBOARD_PTY_INPUT, { id: ws._taskId, data: data.data });
+                }
+              } else if (shellStream) {
                 shellStream.write(data.data);
               }
               break;
 
             case 'resize':
-              if (shellStream) {
+              if (ws._protocol === 'agent') {
+                const agentService = require('./agent-service');
+                const { Events } = require('./protocol');
+                const socket = agentService.connections.get(ws._serverId);
+                if (socket) {
+                  socket.emit(Events.DASHBOARD_PTY_RESIZE, {
+                    id: ws._taskId,
+                    cols: data.cols,
+                    rows: data.rows,
+                  });
+                }
+              } else if (shellStream) {
                 shellStream.setWindow(data.rows, data.cols, 0, 0);
               }
               break;
@@ -129,7 +194,13 @@ class SSHService {
 
       ws.on('close', () => {
         if (sshClient) sshClient.end();
-        logger.info('SSH WebSocket 连接已关闭');
+        if (ws._protocol === 'agent' && ws._taskId) {
+          const agentService = require('./agent-service');
+          if (ws._ptyOutputHandler) {
+            agentService.off(`pty:${ws._taskId}`, ws._ptyOutputHandler);
+          }
+        }
+        logger.info('SSH/Agent WebSocket 连接已关闭');
       });
     });
 

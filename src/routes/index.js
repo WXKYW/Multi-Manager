@@ -7,6 +7,8 @@ const path = require('path');
 const fs = require('fs');
 const { requireAuth } = require('../middleware/auth');
 
+const { loadUserSettings } = require('../services/userSettings');
+
 // 导入核心路由模块
 const authRouter = require('./auth');
 const healthRouter = require('./health');
@@ -160,13 +162,101 @@ function registerRoutes(app) {
         return res.status(404).send('# Error: Server not found');
       }
 
-      const protocol = req.protocol;
-      const host = req.get('host');
-      const serverUrl = `${protocol}://${host}`;
+      const settings = loadUserSettings();
+      let serverUrl = settings.publicApiUrl;
+
+      if (!serverUrl || serverUrl.trim() === '') {
+        serverUrl = process.env.API_PUBLIC_URL;
+      }
+
+      if (!serverUrl || serverUrl.trim() === '') {
+        const protocol = req.protocol;
+        const host = req.get('host');
+        serverUrl = `${protocol}://${host}`;
+      }
 
       const script = agentService.generateWinInstallScript(serverId, serverUrl);
 
       // 设置为 UTF-8 编码，防止 PowerShell 处理中文乱码
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.send(script);
+    } catch (error) {
+      res.status(500).send(`# Error: ${error.message}`);
+    }
+  });
+
+  // Agent 安装脚本下载 (Linux, 带 Key 校验，匹配前端新生成规则)
+  agentPublicRouter.get('/install/linux/:serverId/:agentKey', (req, res) => {
+    try {
+      const { serverId, agentKey } = req.params;
+      const server = serverStorage.getById(serverId);
+
+      if (!server) {
+        return res.status(404).send('# Error: Server not found');
+      }
+
+      // 校验 Key
+      const storedKey = agentService.getAgentKey(serverId);
+      if (storedKey && storedKey !== agentKey) {
+        return res.status(401).send('# Error: Invalid Agent Key');
+      }
+
+      // 修正: 确保 serverUrl 使用正确协议 (优先使用 用户设置 > API_PUBLIC_URL > 请求检测)
+      const settings = loadUserSettings();
+      let serverUrl = settings.publicApiUrl;
+
+      if (!serverUrl || serverUrl.trim() === '') {
+        serverUrl = process.env.API_PUBLIC_URL;
+      }
+
+      if (!serverUrl || serverUrl.trim() === '') {
+        const protocol = req.protocol;
+        const host = req.get('host');
+        serverUrl = `${protocol}://${host}`;
+      }
+
+      const script = agentService.generateInstallScript(serverId, serverUrl);
+
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.send(script);
+    } catch (error) {
+      res.status(500).send(`# Error: ${error.message}`);
+    }
+  });
+
+  // Agent 安装脚本下载 (Windows, 带 Key 校验，匹配前端新生成规则)
+  agentPublicRouter.get('/install/win/:serverId/:agentKey', (req, res) => {
+    try {
+      const { serverId, agentKey } = req.params;
+      const server = serverStorage.getById(serverId);
+
+      if (!server) {
+        return res.status(404).send('# Error: Server not found');
+      }
+
+      // 校验 Key
+      const storedKey = agentService.getAgentKey(serverId);
+      if (storedKey && storedKey !== agentKey) {
+        return res.status(401).send('# Error: Invalid Agent Key');
+      }
+
+      // 修正: 确保 serverUrl 使用正确协议 (优先使用 用户设置 > API_PUBLIC_URL > 请求检测)
+      const settings = loadUserSettings();
+      let serverUrl = settings.publicApiUrl;
+
+      if (!serverUrl || serverUrl.trim() === '') {
+        serverUrl = process.env.API_PUBLIC_URL;
+      }
+
+      if (!serverUrl || serverUrl.trim() === '') {
+        const protocol = req.protocol;
+        const host = req.get('host');
+        serverUrl = `${protocol}://${host}`;
+      }
+
+      const script = agentService.generateWinInstallScript(serverId, serverUrl);
+
+      // 设置为 UTF-8 编码
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.send(script);
     } catch (error) {
@@ -217,19 +307,31 @@ function registerRoutes(app) {
           auth_type: 'password', // 数据库约束只允许 password/key
           status: 'offline',
           monitor_mode: 'agent', // 通过此字段标记为 Agent 模式
-          tags: ['agent-auto'], // 自动标记
+          tags: ['Agent'], // 自动标记
           notes: `通过快速安装 API 创建于 ${new Date().toLocaleString('zh-CN')}`,
         });
         isNew = true;
         logger.info(`[Quick Install] 已创建新主机: ${serverName} (ID: ${server.id})`);
       }
 
-      // 生成安装命令
-      const protocol = req.protocol;
-      const host = req.get('host');
-      const serverUrl = `${protocol}://${host}`;
-      const installUrl = `${serverUrl}/api/server/agent/install/${server.id}`;
+      // 生成安装命令 (优先使用 用户设置 > API_PUBLIC_URL > 请求检测)
+      const settings = loadUserSettings();
+      let serverUrl = settings.publicApiUrl;
+
+      if (!serverUrl || serverUrl.trim() === '') {
+        serverUrl = process.env.API_PUBLIC_URL;
+      }
+
+      if (!serverUrl || serverUrl.trim() === '') {
+        const protocol = req.protocol;
+        const host = req.get('host');
+        serverUrl = `${protocol}://${host}`;
+      }
+
       const agentKey = agentService.getAgentKey(server.id);
+
+      const linuxInstallUrl = `${serverUrl}/api/server/agent/install/linux/${server.id}/${agentKey}`;
+      const winInstallUrl = `${serverUrl}/api/server/agent/install/win/${server.id}/${agentKey}`;
 
       res.json({
         success: true,
@@ -237,8 +339,8 @@ function registerRoutes(app) {
           serverId: server.id,
           serverName: server.name,
           isNew,
-          installCommand: `curl -fsSL "${installUrl}" | sudo bash`,
-          winInstallCommand: `powershell -c "irm ${serverUrl}/api/server/agent/install/win/${server.id} | iex"`,
+          installCommand: `curl -fsSL "${linuxInstallUrl}" | sudo bash`,
+          winInstallCommand: `powershell -c "irm ${winInstallUrl} | iex"`,
           apiUrl: serverUrl,
           // 也提供环境变量方式安装（适用于 Docker 等场景）
           envInstall: {
@@ -287,7 +389,7 @@ function registerRoutes(app) {
           auth_type: 'password', // 数据库约束只允许 password/key
           status: 'offline',
           monitor_mode: 'agent', // 通过此字段标记为 Agent 模式
-          tags: ['agent-auto'],
+          tags: ['Agent'],
           notes: `通过一键安装创建于 ${new Date().toLocaleString('zh-CN')}`,
         });
         console.log(`[Quick Install] 自动创建主机: ${serverName} (ID: ${server.id})`);
@@ -355,7 +457,23 @@ function registerRoutes(app) {
 
       if (!server) return res.status(404).json({ success: false, error: '主机不存在' });
 
-      logger.info(`[Auto-Install] 开始安装 Agent: ${server.name} (${serverId})`);
+      // 策略更新：如果 Agent 在线且未强制 SSH，优先发送升级指令
+      const forceSsh = req.body.force_ssh === true;
+      if (agentService.isAgentOnline(serverId) && !forceSsh) {
+        logger.info(`[Auto-Install] 检测到 Agent 在线: ${server.name}，发送升级指令`);
+        const sent = agentService.sendUpgradeTask(serverId);
+        if (sent) {
+          return res.json({
+            success: true,
+            message: 'Agent 升级指令已下发（后台执行）',
+            output: '正在通过现有的 Agent 连接执行版本更新...'
+          });
+        }
+        logger.warn(`[Auto-Install] Agent 升级指令发送失败，回退到 SSH 模式`);
+      }
+
+      // 如果 Agent 不在线或发送失败，尝试 SSH 安装
+      logger.info(`[Auto-Install] 开始安装 Agent (SSH): ${server.name} (${serverId})`);
 
       const protocol = req.protocol;
       const host = req.get('host');
@@ -372,7 +490,11 @@ function registerRoutes(app) {
 
       logger.info(`[Auto-Install] 执行结果: success=${result.success}, code=${result.code}`);
       if (result.stdout) logger.info(`[Auto-Install] stdout: ${result.stdout.substring(0, 500)}`);
-      if (result.stderr) logger.warn(`[Auto-Install] stderr: ${result.stderr.substring(0, 500)}`);
+
+      const errorDetails = result.error || result.stderr || '未知错误';
+      if (!result.success) {
+        logger.warn(`[Auto-Install] 失败详情: ${errorDetails}`);
+      }
 
       if (result.success) {
         serverStorage.updateStatus(serverId, { status: 'online' });
@@ -381,8 +503,8 @@ function registerRoutes(app) {
         res.status(500).json({
           success: false,
           error: '安装执行失败',
-          details: result.stderr || result.error,
-          stdout: result.stdout,
+          details: errorDetails,
+          output: result.stdout,
           code: result.code,
         });
       }
@@ -401,22 +523,43 @@ function registerRoutes(app) {
 
       if (!server) return res.status(404).json({ success: false, error: '主机不存在' });
 
-      const script = agentService.generateUninstallScript();
-      const result = await sshService.executeCommand(
-        serverId,
-        server,
-        `cat << 'EOF' > /tmp/agent_uninstall.sh\n${script}\nEOF\nsudo bash /tmp/agent_uninstall.sh`
-      );
+      logger.info(`[Uninstall] 开始卸载 Agent (SSH): ${server.name} (${serverId})`);
 
-      if (result.success) {
-        res.json({ success: true, message: 'Agent 卸载命令已执行' });
-      } else {
-        res
-          .status(500)
-          .json({ success: false, error: '卸载执行失败', details: result.stderr || result.error });
+      const script = agentService.generateUninstallScript();
+
+      try {
+        const result = await sshService.executeCommand(
+          serverId,
+          server,
+          `cat << 'EOF' > /tmp/agent_uninstall.sh\n${script}\nEOF\nsudo bash /tmp/agent_uninstall.sh`
+        );
+
+        logger.info(`[Uninstall] SSH 执行结果: success=${result.success}`);
+
+        if (result.success) {
+          res.json({ success: true, message: 'Agent 卸载命令已执行' });
+        } else {
+          const errDetail = result.stderr || result.error || '未知错误';
+          logger.warn(`[Uninstall] 执行失败详情: ${errDetail}`);
+          res.status(500).json({ success: false, error: '卸载执行失败', details: errDetail });
+        }
+      } catch (sshErr) {
+        logger.error(`[Uninstall] SSH 调用异常: ${sshErr.message}`, sshErr);
+        res.status(500).json({ success: false, error: `SSH 调用异常: ${sshErr.message}` });
       }
     } catch (error) {
+      logger.error(`[Uninstall] 路由异常: ${error.message}`, error);
       res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // 获取 Agent 连接详情 (用于精确判定上线状态)
+  agentPublicRouter.get('/connection-info/:serverId', requireAuth, (req, res) => {
+    const info = agentService.getAgentConnectionInfo(req.params.serverId);
+    if (info) {
+      res.json({ success: true, status: 'online', ...info });
+    } else {
+      res.json({ success: true, status: 'offline' });
     }
   });
 
@@ -437,6 +580,7 @@ function registerRoutes(app) {
     'server-management': '/api/server',
     'antigravity-api': '/api/antigravity',
     'gemini-cli-api': '/api/gemini-cli',
+    'ai-chat-api': '/api/ai-chat',
   };
 
   if (fs.existsSync(modulesDir)) {

@@ -51,6 +51,7 @@ async function loadLazyCSS() {
     import('plyr/dist/plyr.css'),
     import('../css/totp.css'),
     import('../css/music.css'),
+    import('../css/ai-chat.css'),
   ];
   await Promise.all(styles);
   console.log('[System] Lazy CSS loaded');
@@ -97,6 +98,7 @@ import { toast } from './modules/toast.js';
 import { streamPlayerMethods } from './modules/stream-player-ui.js';
 import { totpMethods, totpComputed, totpData } from './modules/totp.js';
 import { musicMethods } from './modules/music.js';
+import { aiChatMethods, aiChatData, aiChatComputed } from './modules/ai-chat.js';
 import { formatDateTime, formatFileSize, maskAddress, formatRegion } from './modules/utils.js';
 
 // 导入全局状态
@@ -224,6 +226,10 @@ const app = createApp({
       addAccountSuccess: '',
       expandedAccounts: {},
       refreshInterval: null,
+      navLayout: 'bottom-normal', // top, bottom-normal, bottom
+      agentDownloadUrl: '',
+      publicApiUrl: '',
+      zeaburRefreshInterval: 30000,
       refreshing: false,
       lastFetchAt: 0,
       minFetchInterval: 10000, // Zeabur 数据刷新最小间隔 10 秒
@@ -299,6 +305,10 @@ const app = createApp({
       // Pages 管理相关
       pagesProjects: [],
       pagesLoading: false,
+      agentInstallLoading: false,
+      agentInstalling: false,
+      agentForceSsh: false,
+      batchAgentForceSsh: false,
       showPagesDeploymentsModal: false,
       selectedPagesProject: null,
       pagesDeployments: [],
@@ -466,7 +476,7 @@ const app = createApp({
         description: '',
       },
 
-      // SSH 终端相关
+      // 终端相关
       showSSHTerminalModal: false,
       sshTerminalServer: null,
       sshTerminal: null,
@@ -475,7 +485,7 @@ const app = createApp({
       sshHistoryIndex: -1,
       sshCurrentCommand: '',
       // 多终端会话管理
-      sshSessions: [], // { id, server, terminal, fit, history, historyIndex }
+      sshSessions: [], // { id, server, terminal, fit, type, buffer, history, historyIndex }
       showAddSessionSelectModal: false,
       // 主题观察器
       themeObserver: null,
@@ -549,6 +559,9 @@ const app = createApp({
 
       // TOTP 2FA 验证器模块
       ...totpData,
+
+      // AI Chat 模块
+      ...aiChatData,
     };
   },
 
@@ -928,7 +941,7 @@ const app = createApp({
             });
           }
         } else if (newVal === 'terminal') {
-          // 切换到 SSH 终端视图时，恢复 DOM 挂载并调整大小
+          // 切换到 终端视图时，恢复 DOM 挂载并调整大小
           this.$nextTick(() => {
             this.syncTerminalDOM();
             const session = this.sshSessions.find(s => s.id === this.activeSSHSessionId);
@@ -1083,6 +1096,9 @@ const app = createApp({
               case 'totp':
                 this.loadTotpAccounts();
                 this.startTotpTimer();
+                break;
+              case 'ai-chat':
+                this.aiChatInit();
                 break;
             }
           });
@@ -1414,6 +1430,7 @@ const app = createApp({
     ...streamPlayerMethods,
     ...totpMethods,
     ...musicMethods,
+    ...aiChatMethods,
 
     // ==================== 工具函数 ====================
     formatDateTime,
