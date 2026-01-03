@@ -1343,50 +1343,55 @@
   <!-- ==================== Docker 管理标签页 ==================== -->
   <div v-show="serverCurrentTab === 'docker'" class="sub-tab-content quick-fade-in">
     <div class="panel">
-      <!-- Docker 页面头部 -->
-      <div class="docker-page-header">
-        <div class="docker-logo">
-          <i class="fab fa-docker"></i>
+      <!-- 简洁头部 -->
+      <div class="panel-header"
+        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--border-color);">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div
+            style="width: 40px; height: 40px; border-radius: 10px; background: linear-gradient(135deg, #2496ED, #1a7bc4); display: flex; align-items: center; justify-content: center; color: white; font-size: 18px;">
+            <i class="fab fa-docker"></i>
+          </div>
+          <div>
+            <h3 style="margin: 0; font-size: 16px; font-weight: 700;">Docker 管理</h3>
+            <p style="margin: 0; font-size: 11px; color: var(--text-tertiary);">容器、镜像、网络、存储</p>
+          </div>
         </div>
-        <div style="flex: 1;">
-          <h3 style="margin: 0 0 4px 0; font-size: 18px; font-weight: 700; color: var(--text-primary)">Docker 管理中心</h3>
-          <p style="margin: 0; font-size: 12px; color: var(--text-tertiary)">管理容器、镜像、网络和存储资源</p>
-        </div>
-        <div style="display: flex; gap: 10px; align-items: center">
-          <select v-model="dockerSelectedServer" class="docker-server-select" @change="loadDockerResources">
-            <option value="">🖥️ 选择主机...</option>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <select v-model="dockerSelectedServer" class="form-input"
+            style="padding: 6px 12px; font-size: 12px; border-radius: 8px; min-width: 140px;"
+            @change="loadDockerResources">
+            <option value="">选择主机</option>
             <option v-for="s in dockerOverviewServers" :key="s.id" :value="s.id">{{ s.name }}</option>
           </select>
-          <button class="btn btn-secondary btn-sm" @click="loadDockerResources" :disabled="dockerResourceLoading"
-            style="padding: 8px 14px; border-radius: 10px;">
+          <button class="btn btn-secondary btn-sm" @click="loadDockerResources" :disabled="dockerResourceLoading">
             <i class="fas" :class="dockerResourceLoading ? 'fa-spinner fa-spin' : 'fa-sync-alt'"></i>
           </button>
         </div>
       </div>
 
-      <!-- 子标签切换 (药丸式) -->
-      <div class="docker-sub-tabs">
-        <button class="docker-sub-tab" :class="{ active: dockerSubTab === 'containers' }"
+      <!-- 子标签导航 -->
+      <div style="display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap;">
+        <button class="btn btn-sm" :class="dockerSubTab === 'containers' ? 'btn-primary' : 'btn-secondary'"
           @click="dockerSubTab = 'containers'; loadDockerOverview()">
           <i class="fas fa-cubes"></i> 容器
         </button>
-        <button class="docker-sub-tab" :class="{ active: dockerSubTab === 'compose' }"
+        <button class="btn btn-sm" :class="dockerSubTab === 'compose' ? 'btn-primary' : 'btn-secondary'"
           @click="dockerSubTab = 'compose'; loadDockerComposeProjects()">
           <i class="fas fa-project-diagram"></i> Compose
         </button>
-        <button class="docker-sub-tab" :class="{ active: dockerSubTab === 'images' }"
+        <button class="btn btn-sm" :class="dockerSubTab === 'images' ? 'btn-primary' : 'btn-secondary'"
           @click="dockerSubTab = 'images'; loadDockerImages()">
           <i class="fas fa-layer-group"></i> 镜像
         </button>
-        <button class="docker-sub-tab" :class="{ active: dockerSubTab === 'networks' }"
+        <button class="btn btn-sm" :class="dockerSubTab === 'networks' ? 'btn-primary' : 'btn-secondary'"
           @click="dockerSubTab = 'networks'; loadDockerNetworks()">
           <i class="fas fa-network-wired"></i> 网络
         </button>
-        <button class="docker-sub-tab" :class="{ active: dockerSubTab === 'volumes' }"
+        <button class="btn btn-sm" :class="dockerSubTab === 'volumes' ? 'btn-primary' : 'btn-secondary'"
           @click="dockerSubTab = 'volumes'; loadDockerVolumes()">
           <i class="fas fa-hdd"></i> 存储
         </button>
-        <button class="docker-sub-tab" :class="{ active: dockerSubTab === 'stats' }"
+        <button class="btn btn-sm" :class="dockerSubTab === 'stats' ? 'btn-primary' : 'btn-secondary'"
           @click="dockerSubTab = 'stats'; loadDockerStats()">
           <i class="fas fa-chart-bar"></i> 监控
         </button>
@@ -1679,16 +1684,12 @@
 
     <!-- 日志弹窗 -->
     <div v-if="showDockerLogsModal" class="modal-overlay" @click.self="showDockerLogsModal = false">
-      <div class="modal-container glass-panel modal-lg" style="border-radius: 16px; max-width: 900px;">
+      <div class="modal" style="max-width: 800px; width: 90%;">
         <div class="modal-header">
           <div class="modal-title"><i class="fas fa-file-alt"></i> {{ dockerLogsContainerName }} 日志</div>
-          <button class="close-btn" @click="showDockerLogsModal = false">×</button>
-        </div>
-        <div class="modal-body" style="padding: 0;">
-          <div
-            style="display: flex; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border-color); background: var(--bg-secondary);">
-            <select v-model="dockerLogsTail" class="form-input" style="width: 100px; padding: 4px 8px; font-size: 12px;"
-              @change="refreshDockerLogs">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <select v-model="dockerLogsTail" class="form-input"
+              style="padding: 4px 8px; font-size: 11px; min-width: 80px;" @change="refreshDockerLogs">
               <option :value="50">50 行</option>
               <option :value="100">100 行</option>
               <option :value="200">200 行</option>
@@ -1697,9 +1698,15 @@
             <button class="btn btn-sm btn-secondary" @click="refreshDockerLogs" :disabled="dockerLogsLoading">
               <i class="fas" :class="dockerLogsLoading ? 'fa-spinner fa-spin' : 'fa-sync-alt'"></i>
             </button>
+            <button class="modal-close" @click="showDockerLogsModal = false"><i class="fas fa-times"></i></button>
           </div>
-          <pre
-            style="margin: 0; padding: 16px; background: #1e1e1e; color: #d4d4d4; font-size: 11px; font-family: var(--font-mono); max-height: 500px; overflow: auto; white-space: pre-wrap; word-break: break-all;">{{ dockerLogsContent || '加载中...' }}</pre>
+        </div>
+        <div class="modal-body" style="padding: 0;">
+          <div v-if="dockerLogsLoading" style="padding: 40px; text-align: center;">
+            <div class="ag-spinner-elegant ag-spinner-elegant-sm"></div>
+          </div>
+          <pre v-else
+            style="margin: 0; padding: 12px; background: #0d1117; color: #c9d1d9; font-size: 11px; font-family: var(--font-mono); height: 400px; overflow: auto; white-space: pre-wrap; word-break: break-all;">{{ dockerLogsContent || '暂无日志' }}</pre>
         </div>
       </div>
     </div>
@@ -1776,38 +1783,34 @@
 
     <!-- 创建容器模态框 -->
     <div v-if="showCreateContainerModal" class="modal-overlay" @click.self="showCreateContainerModal = false">
-      <div class="modal-container glass-panel" style="border-radius: 16px; max-width: 560px;">
+      <div class="modal" style="max-width: 500px;">
         <div class="modal-header">
-          <div class="modal-title"><i class="fas fa-plus-circle" style="color: #2496ED;"></i> 创建新容器</div>
-          <button class="close-btn" @click="showCreateContainerModal = false">×</button>
+          <div class="modal-title"><i class="fas fa-plus-circle"></i> 创建容器</div>
+          <button class="modal-close" @click="showCreateContainerModal = false"><i class="fas fa-times"></i></button>
         </div>
         <div class="modal-body">
           <div class="form-group">
-            <label class="form-label">容器名称 <span
-                style="color: var(--text-tertiary); font-weight: normal;">(可选)</span></label>
-            <input type="text" v-model="createContainerForm.name" class="form-input" placeholder="my-container">
+            <label class="form-label">容器名称</label>
+            <input type="text" v-model="createContainerForm.name" class="form-input" placeholder="可选，如 my-nginx">
           </div>
           <div class="form-group">
             <label class="form-label">镜像 <span style="color: #ef4444;">*</span></label>
-            <input type="text" v-model="createContainerForm.image" class="form-input"
-              placeholder="nginx:latest 或 redis:7">
+            <input type="text" v-model="createContainerForm.image" class="form-input" placeholder="nginx:latest">
           </div>
           <div class="form-group">
             <label class="form-label">端口映射 <span
-                style="color: var(--text-tertiary); font-weight: normal;">(逗号分隔)</span></label>
+                style="font-size: 10px; color: var(--text-tertiary);">逗号分隔</span></label>
             <input type="text" v-model="createContainerForm.ports" class="form-input" placeholder="8080:80, 443:443">
           </div>
           <div class="form-group">
             <label class="form-label">卷挂载 <span
-                style="color: var(--text-tertiary); font-weight: normal;">(逗号分隔)</span></label>
-            <input type="text" v-model="createContainerForm.volumes" class="form-input"
-              placeholder="/host/path:/container/path">
+                style="font-size: 10px; color: var(--text-tertiary);">逗号分隔</span></label>
+            <input type="text" v-model="createContainerForm.volumes" class="form-input" placeholder="/data:/app/data">
           </div>
           <div class="form-group">
             <label class="form-label">环境变量 <span
-                style="color: var(--text-tertiary); font-weight: normal;">(逗号分隔)</span></label>
-            <input type="text" v-model="createContainerForm.env" class="form-input"
-              placeholder="KEY=value, MYSQL_ROOT_PASSWORD=123456">
+                style="font-size: 10px; color: var(--text-tertiary);">逗号分隔</span></label>
+            <input type="text" v-model="createContainerForm.env" class="form-input" placeholder="KEY=value">
           </div>
           <div style="display: flex; gap: 12px;">
             <div class="form-group" style="flex: 1;">
@@ -1816,16 +1819,14 @@
                 <option value="">默认</option>
                 <option value="host">host</option>
                 <option value="bridge">bridge</option>
-                <option v-for="net in dockerNetworks" :key="net.id" :value="net.name">{{ net.name }}</option>
               </select>
             </div>
             <div class="form-group" style="flex: 1;">
               <label class="form-label">重启策略</label>
               <select v-model="createContainerForm.restart" class="form-input">
                 <option value="no">不重启</option>
-                <option value="always">总是重启</option>
-                <option value="unless-stopped">除非手动停止</option>
-                <option value="on-failure">失败时重启</option>
+                <option value="always">总是</option>
+                <option value="unless-stopped">除非停止</option>
               </select>
             </div>
           </div>
@@ -1834,7 +1835,7 @@
           <button class="btn btn-secondary" @click="showCreateContainerModal = false">取消</button>
           <button class="btn btn-primary" @click="createContainer" :disabled="createContainerLoading">
             <i class="fas" :class="createContainerLoading ? 'fa-spinner fa-spin' : 'fa-plus'"></i>
-            {{ createContainerLoading ? '创建中...' : '创建容器' }}
+            {{ createContainerLoading ? '创建中...' : '创建' }}
           </button>
         </div>
       </div>
