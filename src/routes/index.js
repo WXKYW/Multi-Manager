@@ -422,8 +422,9 @@ function registerRoutes(app) {
 
       if (!server) return res.status(404).json({ success: false, error: '主机不存在' });
 
-      // 策略更新：如果 Agent 在线，优先发送升级指令
-      if (agentService.isAgentOnline(serverId)) {
+      // 策略更新：如果 Agent 在线且未强制 SSH，优先发送升级指令
+      const forceSsh = req.body.force_ssh === true;
+      if (agentService.isAgentOnline(serverId) && !forceSsh) {
         logger.info(`[Auto-Install] 检测到 Agent 在线: ${server.name}，发送升级指令`);
         const sent = agentService.sendUpgradeTask(serverId);
         if (sent) {
