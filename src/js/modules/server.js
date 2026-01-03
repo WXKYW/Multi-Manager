@@ -485,12 +485,6 @@ function renderServerDetails(server, info) {
                     <h4>💾 磁盘信息</h4>
                     ${renderDiskInfo(info.disk)}
                 </div>
-
-                <!-- Docker 信息 -->
-                <div class="server-detail-section">
-                    <h4>🐳 Docker 信息</h4>
-                    ${renderDockerInfo(info.docker)}
-                </div>
             </div>
 
             <!-- 操作按钮 -->
@@ -498,18 +492,6 @@ function renderServerDetails(server, info) {
                 <button class="btn btn-sm btn-primary" onclick="window.serverModule.refreshServerInfo('${server.id}')">
                     🔄 刷新信息
                 </button>
-                ${info &&
-      info.docker &&
-      info.docker.installed &&
-      info.docker.containers &&
-      info.docker.containers.length > 0
-      ? `
-                    <button class="btn btn-sm btn-info" onclick="window.serverModule.showDockerContainers('${server.id}')">
-                        🐳 查看容器 (${info.docker.containers.length})
-                    </button>
-                `
-      : ''
-    }
                 <button class="btn btn-sm btn-warning" onclick="window.serverModule.rebootServer('${server.id}')">
                     🔄 重启主机
                 </button>
@@ -619,39 +601,6 @@ function renderDiskInfo(disks) {
     `
     )
     .join('');
-}
-
-/**
- * 渲染 Docker 信息
- */
-function renderDockerInfo(docker) {
-  if (!docker || !docker.installed) {
-    return '<p>Docker 未安装</p>';
-  }
-
-  const totalContainers = docker.containers?.length || 0;
-  const runningContainers = docker.containers?.filter(c => c.status.includes('Up')).length || 0;
-  const stoppedContainers = totalContainers - runningContainers;
-
-  return `
-        <div class="server-detail-item">
-            <span class="server-detail-label">容器总数</span>
-            <span class="server-detail-value">${totalContainers}</span>
-        </div>
-        ${totalContainers > 0
-      ? `
-            <div class="server-detail-item">
-                <span class="server-detail-label">运行中</span>
-                <span class="server-detail-value" style="color: #10b981;">${runningContainers}</span>
-            </div>
-            <div class="server-detail-item">
-                <span class="server-detail-label">已停止</span>
-                <span class="server-detail-value" style="color: #ef4444;">${stoppedContainers}</span>
-            </div>
-        `
-      : ''
-    }
-    `;
 }
 
 /**
@@ -799,25 +748,6 @@ function connectSSH(serverId) {
   // 触发 Vue 实例的方法打开 终端
   if (window.vueApp) {
     window.vueApp.openSSHTerminal(server);
-  }
-}
-
-/**
- * 显示 Docker 容器详情
- */
-function showDockerContainers(serverId) {
-  const info = state.serverInfo.get(serverId);
-  if (!info || !info.docker || !info.docker.containers) {
-    toast.error('无法获取容器信息');
-    return;
-  }
-
-  const server = state.servers.find(s => s.id === serverId);
-  if (!server) return;
-
-  // 触发 Vue 实例的方法
-  if (window.vueApp) {
-    window.vueApp.showDockerContainersModal(server, info.docker);
   }
 }
 

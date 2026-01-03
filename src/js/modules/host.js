@@ -943,20 +943,6 @@ export const hostMethods = {
     return result?.error || '';
   },
 
-  showDockerContainersModal(server, dockerData) {
-    this.dockerModalServer = server;
-    this.dockerModalData = dockerData;
-    this.dockerUpdateResults = []; // 清空之前的检测结果
-    this.showDockerModal = true;
-  },
-
-  closeDockerModal() {
-    this.showDockerModal = false;
-    this.dockerModalServer = null;
-    this.dockerModalData = null;
-    this.dockerUpdateResults = [];
-  },
-
   /**
    * 加载 Docker 概览数据
    * 从所有在线主机中提取 Docker 信息
