@@ -12,6 +12,7 @@ const {
   updateUserSettings,
 } = require('../services/userSettings');
 const dbService = require('../db/database');
+const { clearCache: clearStatementCache } = require('../db/statements');
 const { SystemConfig, OperationLog } = require('../db/models');
 const { createLogger, getBuffer } = require('../utils/logger');
 
@@ -270,6 +271,9 @@ router.post('/import-database', async (req, res) => {
     // 关闭当前数据库连接
     dbService.close();
 
+    // 清除预编译语句缓存，确保新连接创建新的 Statement 对象
+    clearStatementCache();
+
     // 替换数据库文件
     const dbPath = path.join(__dirname, '../../data/data.db');
 
@@ -298,6 +302,7 @@ router.post('/import-database', async (req, res) => {
 
     // 尝试恢复数据库连接
     try {
+      clearStatementCache();
       dbService.initialize();
     } catch (e) {
       logger.error('数据库连接恢复失败', e.message);

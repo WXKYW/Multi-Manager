@@ -36,6 +36,7 @@
 
     <!-- CDN 脚本 - 必须在 head 中先加载核心库 (由 Vite 注入) -->
     <%- cdnScriptTags %>
+      <script src="https://lf3-cdn.bytecdntp.com/cdn/expire-1-M/marked/4.0.2/marked.min.js"></script>
 
       <!-- Template Loader imported in main.js -->
       <link rel="stylesheet" href="css/refined-mobile.css" />
@@ -526,8 +527,8 @@
       <!-- 点击背景层 (点击除按钮外的区域展开) -->
       <div class="bar-click-layer" v-if="musicCurrentSong" @click="musicToggleFullPlayer()"></div>
 
-      <div class="bar-progress" @mousedown="musicStartDrag($event)" @touchstart.passive="musicStartDrag($event)" role="slider"
-        :aria-valuenow="musicProgress" aria-valuemin="0" aria-valuemax="100" aria-label="播放进度">
+      <div class="bar-progress" @mousedown="musicStartDrag($event)" @touchstart.passive="musicStartDrag($event)"
+        role="slider" :aria-valuenow="musicProgress" aria-valuemin="0" aria-valuemax="100" aria-label="播放进度">
         <div class="bar-fill" :style="{ width: musicProgress + '%' }"></div>
       </div>
 

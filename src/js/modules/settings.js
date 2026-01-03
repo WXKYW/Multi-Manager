@@ -393,7 +393,7 @@ export const settingsMethods = {
           alert('数据导入成功，应用将自动重启');
           window.location.reload();
         } else {
-          alert('导入失败: ' + result.msg);
+          alert('导入失败: ' + (result.error || result.msg || '未知错误'));
         }
       } catch (err) {
         alert('导入出错');
