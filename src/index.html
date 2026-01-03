@@ -224,7 +224,8 @@
           <div class="top-nav-bar"
             v-if="!singlePageMode && (!isSelfHVideoActive || !isMobile) && (isMobile || (navLayout !== 'bottom' && navLayout !== 'bottom-normal'))">
             <!-- Logo 区域 (CSS 会在移动端隐藏) -->
-            <div class="nav-brand">
+            <div class="nav-brand" @click="showSettingsModal = true" style="cursor: pointer; user-select: none;"
+              title="点击打开设置">
               <img src="./logo.svg" class="nav-logo" alt="Logo" />
               <span class="nav-title">API Monitor</span>
             </div>
