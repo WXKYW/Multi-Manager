@@ -1,5 +1,5 @@
 /**
- * SSH 终端管理模块
+ * 终端管理模块
  * 负责 SSH 会话管理、终端初始化、分屏布局、主题切换等
  */
 
@@ -8,11 +8,11 @@ import { toast } from './toast.js';
 import { sshSplitMethods } from './ssh-split.js';
 
 /**
- * SSH 终端方法集合
+ * 终端方法集合
  */
 export const sshMethods = {
   /**
-   * 打开 SSH 终端(切换到 IDE 视图)
+   * 打开 终端(切换到 IDE 视图)
    */
   openSSHTerminal(server) {
     if (!server) return;
@@ -375,7 +375,7 @@ export const sshMethods = {
   },
 
   /**
-   * 切换 SSH 终端全屏模式 (使用浏览器原生全屏 API)
+   * 切换 终端全屏模式 (使用浏览器原生全屏 API)
    */
   async toggleSSHTerminalFullscreen() {
     const sshLayout = document.querySelector('.ssh-ide-layout');
@@ -935,7 +935,15 @@ export const sshMethods = {
       let session = this.sshSessions.find(s => s.server.id === server.id);
       if (!session) {
         const sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
-        let type = (server.monitor_mode === 'agent') ? 'agent' : 'ssh';
+        // 智能选择连接类型：
+        // 1. monitor_mode 为 agent 时使用 Agent
+        // 2. host 为空、0.0.0.0 或 Docker 内网 IP (172.x.x.x, 10.x.x.x) 时也使用 Agent
+        const isInvalidHost = !server.host ||
+          server.host === '0.0.0.0' ||
+          server.host.startsWith('172.') ||
+          server.host.startsWith('10.') ||
+          server.host.startsWith('192.168.');
+        let type = (server.monitor_mode === 'agent' || (isInvalidHost && server.status === 'online')) ? 'agent' : 'ssh';
 
         session = {
           id: sessionId,
@@ -1002,7 +1010,7 @@ export const sshMethods = {
   },
 
   /**
-   * 关闭 SSH 终端（关闭所有会话）
+   * 关闭 终端（关闭所有会话）
    */
   closeSSHTerminal() {
     // 逆序遍历并逐个关闭，以确保数组删除过程安全

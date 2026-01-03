@@ -17,7 +17,7 @@
       <button class="tab-btn" :class="{ active: serverCurrentTab === 'terminal' }"
         @click="serverCurrentTab = 'terminal'" @dblclick="closeAllSSHSessions" @auxclick.middle="closeAllSSHSessions"
         v-if="sshSessions.length > 0">
-        <i class="fas fa-terminal"></i> SSH 终端
+        <i class="fas fa-terminal"></i> 终端
       </button>
 
       <!-- SSH 快速连接下拉按钮 -->
@@ -440,7 +440,7 @@
         <!-- Action Group (Right) -->
         <div class="action-group" @click.stop style="display: flex; align-items: center; gap: 6px; flex-shrink: 0">
           <button class="btn-icon-refined" @click="openSSHTerminal(server)"
-            style="width: 34px; height: 34px; background: var(--bg-tertiary)" title="SSH 终端">
+            style="width: 34px; height: 34px; background: var(--bg-tertiary)" title="终端">
             <i class="fas fa-terminal" style="font-size: 13px"></i>
           </button>
         </div>
@@ -1858,7 +1858,7 @@ Web服务器,192.168.1.100,22,root,password123
     </div>
   </div>
 
-  <!-- SSH 终端布局 - 嵌入式设计 -->
+  <!-- 终端布局 - 嵌入式设计 -->
   <div v-show="serverCurrentTab === 'terminal'" class="sub-tab-content ssh-terminal-sub-page">
     <div class="ssh-ide-layout" :class="{ fullscreen: sshIdeFullscreen }">
       <!-- 顶部工具栏 -->

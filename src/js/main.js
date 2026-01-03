@@ -468,7 +468,7 @@ const app = createApp({
         description: '',
       },
 
-      // SSH 终端相关
+      // 终端相关
       showSSHTerminalModal: false,
       sshTerminalServer: null,
       sshTerminal: null,
@@ -933,7 +933,7 @@ const app = createApp({
             });
           }
         } else if (newVal === 'terminal') {
-          // 切换到 SSH 终端视图时，恢复 DOM 挂载并调整大小
+          // 切换到 终端视图时，恢复 DOM 挂载并调整大小
           this.$nextTick(() => {
             this.syncTerminalDOM();
             const session = this.sshSessions.find(s => s.id === this.activeSSHSessionId);

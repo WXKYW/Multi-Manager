@@ -12,7 +12,7 @@ export const MODULE_CONFIG = {
     paas: { name: 'PaaS', shortName: 'PaaS', icon: 'fa-cloud', description: 'Zeabur / Koyeb / Fly.io 平台监控' },
     dns: { name: 'DNS', shortName: 'CF', icon: 'fa-globe', description: 'Cloudflare DNS / Workers / Pages 管理' },
     'self-h': { name: 'SelfH', shortName: 'Self-H', icon: 'fa-server', description: '自建服务管理' },
-    server: { name: 'Hosts', shortName: 'Hosts', icon: 'fa-hdd', description: 'SSH 终端与服务器监控' },
+    server: { name: 'Hosts', shortName: 'Hosts', icon: 'fa-hdd', description: '终端与服务器监控' },
     totp: { name: '2FA', shortName: '2FA', icon: 'fa-shield-alt', description: 'TOTP 验证器' },
     music: { name: 'Music', shortName: 'Music', icon: 'fa-music', description: '网易云音乐播放器' },
     'ai-chat': { name: 'AI Chat', shortName: 'Chat', icon: 'fa-comments', description: 'AI 智能对话助手' },

@@ -796,7 +796,7 @@ function connectSSH(serverId) {
     return;
   }
 
-  // 触发 Vue 实例的方法打开 SSH 终端
+  // 触发 Vue 实例的方法打开 终端
   if (window.vueApp) {
     window.vueApp.openSSHTerminal(server);
   }

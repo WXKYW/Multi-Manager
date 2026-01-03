@@ -60,7 +60,7 @@ export const MODULE_CONFIG = {
     name: 'Hosts',
     shortName: 'Hosts',
     icon: 'fa-hdd',
-    description: 'SSH 终端与服务器监控',
+    description: '终端与服务器监控',
   },
   totp: {
     name: '2FA',
