@@ -32,6 +32,14 @@ const (
 	EventDashboardAuthOK = "dashboard:auth_ok"
 	EventDashboardAuthFail = "dashboard:auth_fail"
 	EventDashboardTask   = "dashboard:task"
+	EventDashboardPtyInput = "dashboard:pty_input"
+	EventDashboardPtyResize = "dashboard:pty_resize"
+	EventAgentPtyData    = "agent:pty_data"
+)
+
+// Task Types
+const (
+	TaskTypePtyStart = 12
 )
 
 // Config Agent 配置
@@ -62,6 +70,18 @@ type AgentClient struct {
 	stopChan      chan struct{}
 	mu            sync.Mutex
 	reconnecting  bool
+	ptySessions   map[string]IPty // taskId -> IPty
+}
+
+// IPty PTY 接口实现抽象
+type IPty interface {
+	io.ReadWriteCloser
+	Resize(cols, rows uint32) error
+}
+
+type PTYResizeData struct {
+	Cols uint32 `json:"cols"`
+	Rows uint32 `json:"rows"`
 }
 
 // NewAgentClient 创建新的 Agent 客户端
@@ -70,6 +90,7 @@ func NewAgentClient(config *Config) *AgentClient {
 		config:    config,
 		collector: NewCollector(),
 		stopChan:  make(chan struct{}),
+		ptySessions: make(map[string]IPty),
 	}
 }
 
@@ -386,6 +407,35 @@ func (a *AgentClient) handleEvent(event string, data json.RawMessage) {
 		}
 		json.Unmarshal(data, &task)
 		go a.handleTask(task.ID, task.Type, task.Data, task.Timeout)
+
+	case EventDashboardPtyInput:
+		var input struct {
+			ID   string `json:"id"`
+			Data string `json:"data"`
+		}
+		if err := json.Unmarshal(data, &input); err == nil {
+			a.mu.Lock()
+			pty, ok := a.ptySessions[input.ID]
+			a.mu.Unlock()
+			if ok {
+				pty.Write([]byte(input.Data))
+			}
+		}
+
+	case EventDashboardPtyResize:
+		var resize struct {
+			ID   string `json:"id"`
+			Cols uint32 `json:"cols"`
+			Rows uint32 `json:"rows"`
+		}
+		if err := json.Unmarshal(data, &resize); err == nil {
+			a.mu.Lock()
+			pty, ok := a.ptySessions[resize.ID]
+			a.mu.Unlock()
+			if ok {
+				pty.Resize(resize.Cols, resize.Rows)
+			}
+		}
 	}
 }
 
@@ -492,6 +542,9 @@ func (a *AgentClient) handleTask(id string, taskType int, data string, timeout i
 			result["successful"] = true
 			result["data"] = output
 		}
+	case TaskTypePtyStart: // 启动 PTY
+		go a.handlePTYTask(id, data)
+		return // PTY 任务是长连接，不立刻返回结果
 	default:
 		result["data"] = fmt.Sprintf("不支持的任务类型: %d", taskType)
 	}
@@ -681,6 +734,67 @@ func (a *AgentClient) handleDockerUpdate(req DockerActionRequest) (string, error
 	return fmt.Sprintf("容器 %s 更新成功", containerName), nil
 }
 
+// handlePTYTask 处理 PTY 任务
+func (a *AgentClient) handlePTYTask(taskId string, data string) {
+	log.Printf("[Agent] 启动 PTY 会话: %s", taskId)
+
+	// 解析初始尺寸
+	var resize PTYResizeData
+	if err := json.Unmarshal([]byte(data), &resize); err != nil {
+		resize.Cols = 80
+		resize.Rows = 24
+	}
+	if resize.Cols == 0 {
+		resize.Cols = 80
+	}
+	if resize.Rows == 0 {
+		resize.Rows = 24
+	}
+
+	// 启动 PTY
+	pty, err := StartPTY(resize.Cols, resize.Rows)
+	if err != nil {
+		log.Printf("[Agent] 启动 PTY 失败: %v", err)
+		return
+	}
+
+	// 注册会话
+	a.mu.Lock()
+	a.ptySessions[taskId] = pty
+	a.mu.Unlock()
+
+	// 清理函数
+	defer func() {
+		a.mu.Lock()
+		delete(a.ptySessions, taskId)
+		a.mu.Unlock()
+		pty.Close()
+		log.Printf("[Agent] PTY 会话已关闭: %s", taskId)
+	}()
+
+	// 读取 PTY 输出并发送到服务器
+	buf := make([]byte, 8192)
+	for {
+		n, err := pty.Read(buf)
+		if n > 0 {
+			if a.config.Debug {
+				log.Printf("[Agent] PTY 读取到数据: %d 字节", n)
+			}
+			// 发送实时数据
+			a.emit(EventAgentPtyData, map[string]interface{}{
+				"id":   taskId,
+				"data": string(buf[:n]),
+			})
+		}
+		if err != nil {
+			if err != io.EOF {
+				log.Printf("[Agent] PTY 读取错误: %v", err)
+			}
+			break
+		}
+	}
+}
+
 // Stop 停止 Agent
 func (a *AgentClient) Stop() {
 	close(a.stopChan)
@@ -688,6 +802,11 @@ func (a *AgentClient) Stop() {
 	a.mu.Lock()
 	if a.conn != nil {
 		a.conn.Close()
+	}
+	// 关闭并清理所有 PTY 会话
+	for id, pty := range a.ptySessions {
+		pty.Close()
+		delete(a.ptySessions, id)
 	}
 	a.mu.Unlock()
 
@@ -749,6 +868,19 @@ func main() {
 	background := flag.Bool("b", false, "后台模式 (隐藏控制台窗口)")
 	flag.Parse()
 
+	// 初始化日志文件 (无论是否后台模式)
+	exePath, _ := os.Executable()
+	logPath := filepath.Join(filepath.Dir(exePath), "agent.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err == nil {
+		// 同时输出到文件和控制台 (如果是服务模式，控制台不可见，但这没关系)
+		log.SetOutput(io.MultiWriter(os.Stdout, logFile))
+		log.Println("==================================================")
+		log.Printf("[Agent] 启动时间: %s", time.Now().Format(time.RFC3339))
+	} else {
+		fmt.Printf("无法创建日志文件: %v\n", err)
+	}
+
 	// 后台模式：隐藏控制台窗口
 	if *background {
 		HideConsoleWindow()
@@ -763,7 +895,6 @@ func main() {
 	}
 
 	// 从配置文件加载（使用可执行文件所在目录）
-	exePath, _ := os.Executable()
 	configPath := filepath.Join(filepath.Dir(exePath), "config.json")
 	if data, err := os.ReadFile(configPath); err == nil {
 		json.Unmarshal(data, config)

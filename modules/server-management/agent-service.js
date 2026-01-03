@@ -6,14 +6,16 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const EventEmitter = require('events');
 const { Server: SocketIOServer } = require('socket.io');
 const { serverStorage } = require('./storage');
 const { Events, TaskTypes, validateHostState, stateToFrontendFormat } = require('./protocol');
 const { ServerMetricsHistory, ServerMonitorConfig } = require('./models');
 const userSettings = require('../../src/services/userSettings');
 
-class AgentService {
+class AgentService extends EventEmitter {
   constructor() {
+    super();
     // 调试模式 (环境变量 DEBUG=agent 开启)
     this.debug = process.env.DEBUG?.includes('agent');
 
@@ -454,6 +456,18 @@ class AgentService {
       if (!authenticated) return;
       this.log(`任务结果: ${serverId} -> ${result.id} (${result.successful ? '成功' : '失败'})`);
       // TODO: 处理任务结果 (日志记录、通知等)
+    });
+
+    // 6. 接收 PTY 输出数据流
+    socket.on(Events.AGENT_PTY_DATA, data => {
+      if (!authenticated) return;
+      // 通过内部 EventEmitter 分发数据，供 SSHService 等订阅
+      this.emit(`pty:${data.id}`, data.data);
+
+      // 同时也可以通过 socket.io 广播给感兴趣的前端（如果有直接订阅的话）
+      if (this.io) {
+        this.io.emit(`pty:${data.id}`, data.data);
+      }
     });
 
     // 5. 断开连接

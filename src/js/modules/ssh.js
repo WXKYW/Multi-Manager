@@ -25,6 +25,16 @@ export const sshMethods = {
     }
 
     const sessionId = 'session_' + Date.now();
+
+    // 智能选择连接方式: 优先遵循 monitor_mode，或者如果 Agent 在线且 SSH 不在线则选 Agent
+    let type = 'ssh';
+    if (server.monitor_mode === 'agent') {
+      type = 'agent';
+    } else if (server.status === 'online' && (!server.host || server.host === '0.0.0.0')) {
+      // 如果没有真实 IP 且 Agent 在线，默认为 Agent 模式
+      type = 'agent';
+    }
+
     const session = {
       id: sessionId,
       server: server,
@@ -32,6 +42,11 @@ export const sshMethods = {
       fit: null,
       ws: null,
       connected: false,
+      type: type, // 'ssh' | 'agent'
+      // Agent 模式专有状态
+      buffer: '',
+      history: [],
+      historyIndex: -1,
     };
 
     // 核心修复：在新打开会话或切换前，先将当前所有可见终端 DOM 归还给仓库，防止被 Vue 销毁
@@ -723,18 +738,19 @@ export const sshMethods = {
       `\x1b[1;33m正在连接到 ${session.server.name} (${this.formatHost(session.server.host)})...\x1b[0m`
     );
 
-    // 建立 WebSocket 连接
+    // 建立 WebSocket 连接 (统一支持 SSH 和 Agent PTY)
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws/ssh`);
     session.ws = ws;
 
     ws.onopen = () => {
-      console.log(`[SSH ${sessionId}] WebSocket 已连接`);
+      console.log(`[Terminal ${sessionId}] WebSocket 已连接 (${session.type})`);
       // 发送连接请求
       ws.send(
         JSON.stringify({
           type: 'connect',
           serverId: session.server.id,
+          protocol: session.type === 'agent' ? 'agent' : 'ssh',
           cols: terminal.cols,
           rows: terminal.rows,
         })
@@ -780,26 +796,6 @@ export const sshMethods = {
       }
     };
 
-    ws.onerror = error => {
-      terminal.writeln('\x1b[1;31mWebSocket 连接错误\x1b[0m');
-      console.error('WebSocket error:', error);
-    };
-
-    ws.onclose = () => {
-      console.log(`[SSH ${sessionId}] WebSocket 已关闭`);
-
-      // 清除心跳定时器
-      if (session.heartbeatInterval) {
-        clearInterval(session.heartbeatInterval);
-        session.heartbeatInterval = null;
-      }
-
-      if (session.connected) {
-        terminal.writeln('');
-        terminal.writeln('\x1b[1;33m连接已断开。点击"重新连接"按钮恢复连接。\x1b[0m');
-      }
-      session.connected = false;
-    };
 
     // 监听终端输入，发送到 WebSocket (包含多屏同步逻辑)
     terminal.onData(data => {
@@ -838,6 +834,8 @@ export const sshMethods = {
     // 已使用 ResizeObserver 监听容器，此处无需 window.resize
   },
 
+
+
   /**
    * 为指定主机添加新会话（作为子标签页）
    */
@@ -853,6 +851,8 @@ export const sshMethods = {
     }
 
     const sessionId = 'session_' + Date.now();
+    let type = (server.monitor_mode === 'agent') ? 'agent' : 'ssh';
+
     const session = {
       id: sessionId,
       server: server,
@@ -860,6 +860,10 @@ export const sshMethods = {
       fit: null,
       ws: null,
       connected: false,
+      type: type, // 'ssh' | 'agent'
+      buffer: '',
+      history: [],
+      historyIndex: -1,
     };
 
     this.sshSessions.push(session);
@@ -904,6 +908,8 @@ export const sshMethods = {
       let session = this.sshSessions.find(s => s.server.id === server.id);
       if (!session) {
         const sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+        let type = (server.monitor_mode === 'agent') ? 'agent' : 'ssh';
+
         session = {
           id: sessionId,
           server: server,
@@ -911,6 +917,10 @@ export const sshMethods = {
           fit: null,
           ws: null,
           connected: false,
+          type: type,
+          buffer: '',
+          history: [],
+          historyIndex: -1,
         };
         this.sshSessions.push(session);
       }

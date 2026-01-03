@@ -439,11 +439,6 @@
 
         <!-- Action Group (Right) -->
         <div class="action-group" @click.stop style="display: flex; align-items: center; gap: 6px; flex-shrink: 0">
-          <button class="btn-icon-refined" @click="openAgentTerminal(server)"
-            style="width: 34px; height: 34px; background: var(--bg-tertiary)" title="Agent 终端"
-            v-if="server.status === 'online'">
-            <i class="fas fa-terminal" style="font-size: 13px; color: #10b981;"></i>
-          </button>
           <button class="btn-icon-refined" @click="openSSHTerminal(server)"
             style="width: 34px; height: 34px; background: var(--bg-tertiary)" title="SSH 终端">
             <i class="fas fa-terminal" style="font-size: 13px"></i>
@@ -2066,74 +2061,5 @@ Web服务器,192.168.1.100,22,root,password123
     </div>
   </transition>
 
-  <!-- Agent 终端模态框 -->
-  <transition name="modal-fade">
-    <div v-if="agentTerminalModalOpen" class="modal-overlay" @click.self="closeAgentTerminal">
-      <div class="modal"
-        style="width: 800px; max-width: 95vw; max-height: 90vh; display: flex; flex-direction: column;">
-        <div class="modal-header" style="flex-shrink: 0;">
-          <div class="modal-title" style="display: flex; align-items: center; gap: 10px;">
-            <i class="fas fa-terminal" style="color: #10b981;"></i>
-            <span>Agent 终端</span>
-            <span v-if="terminalServer" style="opacity: 0.6; font-size: 12px; font-weight: normal;">
-              - {{ terminalServer.name }}
-            </span>
-          </div>
-          <button class="close-btn" @click="closeAgentTerminal">
-            <i class="fas fa-times"></i>
-          </button>
-        </div>
-
-        <div class="modal-body" style="flex: 1; display: flex; flex-direction: column; overflow: hidden; padding: 0;">
-          <!-- 终端输出区域 -->
-          <pre id="terminalOutputArea" style="
-              flex: 1;
-              background: #0d1117;
-              color: #e6edf3;
-              font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-              font-size: 13px;
-              line-height: 1.5;
-              padding: 16px;
-              margin: 0;
-              overflow-y: auto;
-              white-space: pre-wrap;
-              word-break: break-all;
-              min-height: 300px;
-              border: none;
-            ">{{ terminalOutput || '欢迎使用 Agent 终端！\n输入命令并按回车执行。\n\n提示：使用 ↑/↓ 键浏览历史命令。\n' }}</pre>
-
-          <!-- 命令输入区域 -->
-          <div style="
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 12px 16px;
-            background: var(--bg-secondary);
-            border-top: 1px solid var(--border-color);
-          ">
-            <span style="color: #10b981; font-family: monospace; font-weight: bold;">$</span>
-            <input id="terminalCommandInput" v-model="terminalCommand" @keydown.enter="runTerminalCommand"
-              @keydown="handleTerminalKeydown" :disabled="terminalRunning" class="form-input" placeholder="输入命令..."
-              autocomplete="off" style="
-                flex: 1;
-                background: var(--bg-tertiary);
-                border: 1px solid var(--border-color);
-                font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-                font-size: 14px;
-              " />
-            <button class="btn btn-primary btn-sm" @click="runTerminalCommand"
-              :disabled="terminalRunning || !terminalCommand.trim()" style="min-width: 80px;">
-              <i v-if="terminalRunning" class="fas fa-spinner fa-spin"></i>
-              <i v-else class="fas fa-paper-plane"></i>
-              {{ terminalRunning ? '运行中' : '执行' }}
-            </button>
-            <button class="btn btn-secondary btn-sm" @click="clearTerminalOutput" title="清空输出">
-              <i class="fas fa-trash-alt"></i>
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </transition>
 </div>
 <!-- ==================== 主机管理部分结束 ==================== -->
