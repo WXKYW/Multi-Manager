@@ -59,7 +59,8 @@ function configureHelmet(options = {}) {
         crossOriginEmbedderPolicy: false, // 某些 CDN 资源需要关闭
 
         // 跨域打开者策略
-        crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+        // 使用 unsafe-none 避免在 HTTP 环境下产生警告
+        crossOriginOpenerPolicy: false,
 
         // 跨域资源策略
         crossOriginResourcePolicy: { policy: 'cross-origin' },
@@ -86,8 +87,8 @@ function configureHelmet(options = {}) {
         // 禁用 MIME 类型嗅探
         noSniff: true,
 
-        // 来源策略
-        originAgentCluster: true,
+        // 来源策略集群 - 关闭以避免在 HTTP 环境下产生 Origin-Agent-Cluster 警告
+        originAgentCluster: false,
 
         // 权限策略
         permittedCrossDomainPolicies: { permittedPolicies: 'none' },

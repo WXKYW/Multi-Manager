@@ -437,8 +437,9 @@
                   <div v-for="(module, index) in moduleOrder" :key="module" class="draggable-module-item"
                     draggable="true" @dragstart="handleDragStart($event, index)" @dragend="handleDragEnd"
                     @dragover.prevent="handleDragOver($event, index)" @drop="handleDrop($event, index)"
-                    @touchstart="handleTouchStart($event, index)" @touchmove="handleTouchMove($event, index)"
-                    @touchend="handleTouchEnd($event, index)">
+                    @touchstart.passive="handleTouchStart($event, index)"
+                    @touchmove.passive="handleTouchMove($event, index)"
+                    @touchend.passive="handleTouchEnd($event, index)">
                     <div style="display: flex; align-items: center; gap: 8px; flex: 1">
                       <i class="fas fa-grip-vertical drag-handle" style="font-size: 10px; opacity: 0.4"></i>
                       <i class="draggable-module-icon fas" :class="getModuleIcon(module)"

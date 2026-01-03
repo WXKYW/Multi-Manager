@@ -110,8 +110,9 @@
                         <tbody v-if="sortedOpenListFiles.length > 0">
                             <tr v-for="file in sortedOpenListFiles" :key="file.name" @click="handleOpenFile(file)"
                                 @contextmenu="showFileContextMenu($event, file, openListPath)"
-                                @touchstart="handleFileTouchStart($event, file, openListPath)"
-                                @touchend="handleFileTouchEnd($event)" @touchmove="handleFileTouchMove()"
+                                @touchstart.passive="handleFileTouchStart($event, file, openListPath)"
+                                @touchend.passive="handleFileTouchEnd($event)"
+                                @touchmove.passive="handleFileTouchMove()"
                                 @auxclick.middle.stop="handleMiddleClickItem(file)">
                                 <td class="col-name">
                                     <div class="file-cell-main">
@@ -120,8 +121,8 @@
                                                 class="file-thumb-icon" referrerpolicy="no-referrer" loading="lazy"
                                                 @mouseenter="showHoverPreview($event, getFileThumbnail(file))"
                                                 @mousemove="moveHoverPreview($event)" @mouseleave="hideHoverPreview"
-                                                @touchstart.stop="showHoverPreview($event, getFileThumbnail(file))"
-                                                @touchend.stop="hideHoverPreview" />
+                                                @touchstart.passive.stop="showHoverPreview($event, getFileThumbnail(file))"
+                                                @touchend.passive.stop="hideHoverPreview" />
                                             <i v-else :class="getFileIconClass(file)"></i>
                                         </div>
                                         <span class="file-name-text" :title="file.name">{{ file.name }}</span>
@@ -152,8 +153,9 @@
                             <div v-for="file in sortedOpenListFiles" :key="file.name" class="file-grid-item"
                                 @click="handleOpenFile(file)"
                                 @contextmenu="showFileContextMenu($event, file, openListPath)"
-                                @touchstart="handleFileTouchStart($event, file, openListPath)"
-                                @touchend="handleFileTouchEnd($event)" @touchmove="handleFileTouchMove()"
+                                @touchstart.passive="handleFileTouchStart($event, file, openListPath)"
+                                @touchend.passive="handleFileTouchEnd($event)"
+                                @touchmove.passive="handleFileTouchMove()"
                                 @auxclick.middle.stop="handleMiddleClickItem(file)">
 
                                 <div class="grid-item-preview">
@@ -625,8 +627,9 @@
                         <tbody v-if="tab.files.length > 0">
                             <tr v-for="file in tab.files" :key="file.name" @click="handleTempTabFile(file)"
                                 @contextmenu="showFileContextMenu($event, file, tab.path)"
-                                @touchstart="handleFileTouchStart($event, file, tab.path)"
-                                @touchend="handleFileTouchEnd($event)" @touchmove="handleFileTouchMove()"
+                                @touchstart.passive="handleFileTouchStart($event, file, tab.path)"
+                                @touchend.passive="handleFileTouchEnd($event)"
+                                @touchmove.passive="handleFileTouchMove()"
                                 @auxclick.middle.stop="handleMiddleClickItem(file)">
                                 <td class="col-name">
                                     <div class="file-cell-main">
