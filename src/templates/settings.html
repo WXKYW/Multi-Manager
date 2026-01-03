@@ -119,6 +119,23 @@
               </div>
             </div>
 
+            <!-- 公网访问地址配置 -->
+            <div class="settings-group">
+              <div class="settings-group-title">
+                <i class="fas fa-link" style="color: var(--primary-color)"></i> 公网访问地址 (Public URL)
+              </div>
+              <div class="settings-description">
+                设置主控端的公网访问地址，用于生成 Agent 安装命令和连接配置。
+              </div>
+              <div class="form-group" style="margin-top: 12px">
+                <input type="text" v-model="publicApiUrl" class="form-input"
+                  placeholder="例如: https://monitor.example.com (留空则自动检测)" />
+                <div class="form-help" style="font-size: 11px; margin-top: 4px">
+                  Agent 将使用此地址连接到主控端。请确保此地址在公网可访问。
+                </div>
+              </div>
+            </div>
+
             <!-- Agent 下载地址配置 -->
             <div class="settings-group">
               <div class="settings-group-title">

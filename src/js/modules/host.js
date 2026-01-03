@@ -1585,6 +1585,7 @@ export const hostMethods = {
     this.agentInstallLog = '';
     this.agentInstallResult = null;
     this.showAgentModal = true;
+    this.agentForceSsh = false;
     this.agentModalData = {
       serverId,
       serverName: server.name,
@@ -1630,16 +1631,27 @@ export const hostMethods = {
 
     // 确定主机名
     let host = window.location.host; // 默认使用当前页面的域名/端口
-    if (this.agentInstallHostType === 'ip') {
+
+    // 1. 优先使用设置中的公网地址 (Public URL)
+    if (this.publicApiUrl && this.publicApiUrl.trim() !== '') {
+      try {
+        let urlStr = this.publicApiUrl.trim();
+        if (!urlStr.startsWith('http')) {
+          urlStr = 'http://' + urlStr; // 补全协议以便解析
+        }
+        const u = new URL(urlStr);
+        host = u.host;
+      } catch (e) {
+        console.warn('Invalid Public API URL:', this.publicApiUrl);
+      }
+    }
+    // 2. 否则使用自动检测/IP逻辑
+    else if (this.agentInstallHostType === 'ip') {
       // 尝试从 apiUrl 中提取 IP
       if (this.agentModalData.apiUrl) {
         try {
           const urlObj = new URL(this.agentModalData.apiUrl);
-          host = urlObj.host; // 这通常就是主控端的地址
-
-          // 如果 host 是域名，且用户强制要 IP，这里其实还是域名。
-          // 真正的解决方法是后端在 apiUrl 中就返回可以直接用的地址。
-          // 不过通常 window.location.host 如果是 IP 访问的就是 IP。
+          host = urlObj.host;
         } catch (e) { }
       }
     }
@@ -1954,7 +1966,8 @@ export const hostMethods = {
   },
 
   async autoInstallAgent(serverId) {
-    this.agentInstallLoading = true;
+    // 使用专用的安装中状态
+    this.agentInstalling = true;
     this.agentInstallLog = '正在连接服务器并安装 Agent...\n';
     this.agentInstallResult = null;
 
@@ -1970,6 +1983,7 @@ export const hostMethods = {
       const response = await fetch(`/api/server/agent/auto-install/${serverId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force_ssh: this.agentForceSsh }),
       });
       const data = await response.json();
 
@@ -1999,7 +2013,7 @@ export const hostMethods = {
       this.agentInstallLog += '\n❌ 网络错误: ' + error.message;
       this.agentInstallResult = 'error';
     } finally {
-      this.agentInstallLoading = false;
+      this.agentInstalling = false;
     }
   },
 
@@ -2075,6 +2089,7 @@ export const hostMethods = {
   showBatchAgentInstallModal() {
     this.selectedBatchServers = [];
     this.batchInstallResults = [];
+    this.batchAgentForceSsh = false;
     this.showBatchAgentModal = true;
   },
 
@@ -2111,9 +2126,9 @@ export const hostMethods = {
   async runBatchAgentInstall() {
     if (this.selectedBatchServers.length === 0) return;
 
-    // 直接开始安装，无需确认
-
     this.agentInstallLoading = true;
+
+    // 1. 初始化结果列表
     this.batchInstallResults = this.selectedBatchServers.map(id => {
       const server = this.serverList.find(s => s.id === id);
       return {
@@ -2125,8 +2140,25 @@ export const hostMethods = {
     });
 
     try {
-      // 我们采用逐个调用的方式，以便在 UI 上展示每个的进度，或者直接调用后端的批量接口
-      // 考虑到 UX，逐个调用能看到实时的"处理中"状态
+      // 2. 获取初始连接状态 (用于验证重启)
+      const initialStates = new Map();
+      for (const item of this.batchInstallResults) {
+        try {
+          const res = await fetch(`/api/server/agent/connection-info/${item.serverId}`);
+          const data = await res.json();
+          if (data.status === 'online') {
+            initialStates.set(item.serverId, data.connectedAt);
+          } else {
+            initialStates.set(item.serverId, 0);
+          }
+        } catch (e) {
+          initialStates.set(item.serverId, 0);
+        }
+      }
+
+      // 3. 逐个下发指令
+      const pendingVerification = [];
+
       for (let i = 0; i < this.batchInstallResults.length; i++) {
         const item = this.batchInstallResults[i];
         item.status = 'processing';
@@ -2135,11 +2167,13 @@ export const hostMethods = {
           const response = await fetch(`/api/server/agent/auto-install/${item.serverId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ force_ssh: this.batchAgentForceSsh }),
           });
           const data = await response.json();
 
           if (data.success) {
-            item.status = 'success';
+            item.status = 'verifying'; // 进入验证阶段
+            pendingVerification.push(item);
           } else {
             item.status = 'failed';
             item.error = data.error || '安装失败';
@@ -2147,6 +2181,46 @@ export const hostMethods = {
         } catch (err) {
           item.status = 'failed';
           item.error = err.message;
+        }
+      }
+
+      // 4. 批量验证重启状态 (最长等待 90秒)
+      if (pendingVerification.length > 0) {
+        const startTime = Date.now();
+        const timeoutMs = 90000;
+
+        // 强制等待 3 秒，让 Agent 断开
+        await new Promise(r => setTimeout(r, 3000));
+
+        while (pendingVerification.length > 0 && Date.now() - startTime < timeoutMs) {
+          // 倒序遍历以便移除已完成的
+          for (let i = pendingVerification.length - 1; i >= 0; i--) {
+            const item = pendingVerification[i];
+            const initialDetails = initialStates.get(item.serverId);
+
+            try {
+              const res = await fetch(`/api/server/agent/connection-info/${item.serverId}`);
+              const data = await res.json();
+
+              if (data.status === 'online') {
+                // 必须是新的连接
+                if (initialDetails === 0 || data.connectedAt > initialDetails) {
+                  item.status = 'success';
+                  pendingVerification.splice(i, 1);
+                }
+              }
+            } catch (e) { /* ignore */ }
+          }
+
+          if (pendingVerification.length > 0) {
+            await new Promise(r => setTimeout(r, 2000));
+          }
+        }
+
+        // 5. 标记超时
+        for (const item of pendingVerification) {
+          item.status = 'failed';
+          item.error = '验证超时: Agent 未能在 90秒内重建连接';
         }
       }
 

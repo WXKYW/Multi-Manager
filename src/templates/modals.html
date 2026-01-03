@@ -1417,12 +1417,19 @@
             <i class="fas fa-key"></i> 重新生成密钥
           </button>
         </div>
-        <div style="display: flex; gap: 10px">
+        <div style="display: flex; gap: 10px; align-items: center">
+          <label
+            style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer; margin-right: 4px; user-select: none"
+            title="跳过智能检测，强制使用 SSH 重新安装 Agent (用于修复损坏的安装)">
+            <input type="checkbox" v-model="agentForceSsh" :disabled="agentInstallLoading || agentInstalling"
+              style="accent-color: var(--server-primary)" />
+            强制 SSH 覆盖
+          </label>
           <button class="btn btn-secondary" @click="closeAgentModal">关闭</button>
           <button class="btn btn-primary" @click="autoInstallAgent(agentModalData.serverId)"
-            :disabled="agentInstallLoading">
-            <i class="fas" :class="agentInstallLoading ? 'fa-spinner fa-spin' : 'fa-rocket'"></i>
-            {{ agentInstallLoading ? '安装中...' : '一键安装' }}
+            :disabled="agentInstallLoading || agentInstalling">
+            <i class="fas" :class="agentInstalling ? 'fa-spinner fa-spin' : 'fa-rocket'"></i>
+            {{ agentInstalling ? '安装中...' : '一键安装' }}
           </button>
         </div>
       </div>
@@ -1520,6 +1527,10 @@
                   style="background: rgba(59, 130, 246, 0.1); color: #3b82f6">
                   <i class="fas fa-spinner fa-spin"></i> 处理中
                 </span>
+                <span v-else-if="res.status === 'verifying'" class="status-badge"
+                  style="background: rgba(245, 158, 11, 0.1); color: #f59e0b">
+                  <i class="fas fa-hourglass-half fa-spin"></i> 验证中
+                </span>
                 <span v-else-if="res.status === 'success'" class="status-badge"
                   style="background: rgba(16, 185, 129, 0.1); color: #10b981">
                   <i class="fas fa-check-circle"></i> 成功
@@ -1534,16 +1545,22 @@
         </div>
       </div>
       <div class="modal-footer" style="display: flex; justify-content: space-between; padding: 16px 20px">
-        <div style="color: var(--text-tertiary); font-size: 12px">
+        <div style="color: var(--text-tertiary); font-size: 12px; display: flex; align-items: center; gap: 12px">
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none"
+            title="跳过智能检测，强制使用 SSH 重新安装 Agent">
+            <input type="checkbox" v-model="batchAgentForceSsh" :disabled="agentInstallLoading"
+              style="accent-color: var(--server-primary)" />
+            强制 SSH 覆盖
+          </label>
           <span v-if="agentInstallLoading"><i class="fas fa-spinner fa-spin"
-              style="margin-right: 6px"></i>正在执行批量任务，请勿关闭弹窗...</span>
+              style="margin-right: 6px"></i>正在执行，请勿关闭...</span>
         </div>
         <div style="display: flex; gap: 10px">
           <button class="btn btn-secondary" @click="closeBatchAgentModal" :disabled="agentInstallLoading">
             关闭
           </button>
           <button class="btn btn-primary" @click="runBatchAgentInstall"
-            :disabled="agentInstallLoading || selectedBatchServers.length === 0">
+            :disabled="selectedBatchServers.length === 0 || agentInstallLoading">
             <i class="fas" :class="agentInstallLoading ? 'fa-spinner fa-spin' : 'fa-play'"></i>
             开始批量安装
           </button>

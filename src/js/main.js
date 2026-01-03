@@ -226,6 +226,10 @@ const app = createApp({
       addAccountSuccess: '',
       expandedAccounts: {},
       refreshInterval: null,
+      navLayout: 'bottom-normal', // top, bottom-normal, bottom
+      agentDownloadUrl: '',
+      publicApiUrl: '',
+      zeaburRefreshInterval: 30000,
       refreshing: false,
       lastFetchAt: 0,
       minFetchInterval: 10000, // Zeabur 数据刷新最小间隔 10 秒
@@ -301,6 +305,10 @@ const app = createApp({
       // Pages 管理相关
       pagesProjects: [],
       pagesLoading: false,
+      agentInstallLoading: false,
+      agentInstalling: false,
+      agentForceSsh: false,
+      batchAgentForceSsh: false,
       showPagesDeploymentsModal: false,
       selectedPagesProject: null,
       pagesDeployments: [],
