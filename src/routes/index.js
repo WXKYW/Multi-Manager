@@ -217,7 +217,7 @@ function registerRoutes(app) {
           auth_type: 'password', // 数据库约束只允许 password/key
           status: 'offline',
           monitor_mode: 'agent', // 通过此字段标记为 Agent 模式
-          tags: ['agent-auto'], // 自动标记
+          tags: ['Agent'], // 自动标记
           notes: `通过快速安装 API 创建于 ${new Date().toLocaleString('zh-CN')}`,
         });
         isNew = true;
@@ -287,7 +287,7 @@ function registerRoutes(app) {
           auth_type: 'password', // 数据库约束只允许 password/key
           status: 'offline',
           monitor_mode: 'agent', // 通过此字段标记为 Agent 模式
-          tags: ['agent-auto'],
+          tags: ['Agent'],
           notes: `通过一键安装创建于 ${new Date().toLocaleString('zh-CN')}`,
         });
         console.log(`[Quick Install] 自动创建主机: ${serverName} (ID: ${server.id})`);
