@@ -983,14 +983,27 @@ export const hostMethods = {
   },
 
   /**
-   * 切换容器操作菜单
+   * 打开容器操作菜单
    */
-  toggleContainerMenu(containerId) {
-    if (this.containerMenuOpen === containerId) {
-      this.containerMenuOpen = null;
-    } else {
-      this.containerMenuOpen = containerId;
-    }
+  openContainerMenu(event, containerId, serverId, containerName) {
+    const btn = event.currentTarget;
+    const rect = btn.getBoundingClientRect();
+
+    // 计算菜单位置 (在按钮右侧下方)
+    this.containerMenuPosition = {
+      x: rect.right - 130, // 菜单宽度约 130px，右对齐
+      y: rect.bottom + 4
+    };
+
+    this.containerMenuData = { serverId, containerId, containerName };
+    this.containerMenuOpen = true;
+  },
+
+  /**
+   * 关闭容器操作菜单
+   */
+  closeContainerMenu() {
+    this.containerMenuOpen = false;
   },
 
   /**

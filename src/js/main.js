@@ -448,7 +448,9 @@ const app = createApp({
       dockerLogsTail: 100,           // 日志行数
       dockerLogsContent: '',         // 日志内容
       dockerLogsLoading: false,      // 日志加载状态
-      containerMenuOpen: null,       // 当前展开的容器菜单 ID
+      containerMenuOpen: false,      // 容器菜单是否打开
+      containerMenuPosition: { x: 0, y: 0 }, // 菜单位置
+      containerMenuData: { serverId: '', containerId: '', containerName: '' }, // 菜单数据
       // Docker Compose
       dockerComposeProjects: [],     // Compose 项目列表
       // 容器创建

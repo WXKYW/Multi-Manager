@@ -902,6 +902,12 @@ export const metricsMethods = {
 
     // 创建新图表
     this.$nextTick(() => {
+      // 销毁旧图表实例（如果存在）
+      const existingChart = Chart.getChart(canvas);
+      if (existingChart) {
+        existingChart.destroy();
+      }
+
       new Chart(canvas, {
         type: 'line',
         data: {
