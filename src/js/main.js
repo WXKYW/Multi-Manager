@@ -479,6 +479,14 @@ const app = createApp({
       // 多终端会话管理
       sshSessions: [], // { id, server, terminal, fit, history, historyIndex }
       showAddSessionSelectModal: false,
+      // Agent 终端相关
+      agentTerminalModalOpen: false,
+      terminalServer: null,
+      terminalCommand: '',
+      terminalOutput: '',
+      terminalHistory: [],
+      terminalHistoryIndex: -1,
+      terminalRunning: false,
       // 主题观察器
       themeObserver: null,
       docObserver: null,

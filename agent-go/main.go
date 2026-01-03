@@ -471,6 +471,14 @@ func (a *AgentClient) handleTask(id string, taskType int, data string, timeout i
 	startTime := time.Now()
 
 	switch taskType {
+	case 1: // COMMAND - 执行命令
+		output, err := a.executeCommand(data, timeout)
+		if err != nil {
+			result["data"] = err.Error()
+		} else {
+			result["successful"] = true
+			result["data"] = output
+		}
 	case 6: // REPORT_HOST_INFO
 		a.reportHostInfo()
 		result["successful"] = true
@@ -492,6 +500,56 @@ func (a *AgentClient) handleTask(id string, taskType int, data string, timeout i
 
 	a.emit(EventAgentTaskResult, result)
 	log.Printf("[Agent] 任务完成: %s", id)
+}
+
+// executeCommand 执行命令并返回输出
+func (a *AgentClient) executeCommand(command string, timeout int) (string, error) {
+	if command == "" {
+		return "", fmt.Errorf("命令不能为空")
+	}
+
+	log.Printf("[Agent] 执行命令: %s", command)
+
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/C", command)
+	} else {
+		cmd = exec.Command("sh", "-c", command)
+	}
+
+	// 设置超时
+	timeoutDuration := 60 * time.Second
+	if timeout > 0 {
+		timeoutDuration = time.Duration(timeout) * time.Second
+	}
+
+	// 使用 context 实现超时
+	done := make(chan error, 1)
+	var output []byte
+	var cmdErr error
+
+	go func() {
+		output, cmdErr = cmd.CombinedOutput()
+		done <- cmdErr
+	}()
+
+	select {
+	case <-time.After(timeoutDuration):
+		// 超时，杀死进程
+		if cmd.Process != nil {
+			cmd.Process.Kill()
+		}
+		return "", fmt.Errorf("命令执行超时 (%d秒)", timeout)
+	case err := <-done:
+		if err != nil {
+			// 命令执行失败但有输出，返回输出内容
+			if len(output) > 0 {
+				return string(output), fmt.Errorf("命令执行失败: %v\n%s", err, string(output))
+			}
+			return "", fmt.Errorf("命令执行失败: %v", err)
+		}
+		return string(output), nil
+	}
 }
 
 // DockerActionRequest Docker 操作请求

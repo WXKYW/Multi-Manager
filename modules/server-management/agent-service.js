@@ -765,6 +765,39 @@ class AgentService {
     });
   }
 
+  /**
+   * 在远程主机执行命令
+   * @param {string} serverId - 主机 ID
+   * @param {string} command - 要执行的命令
+   * @param {number} timeout - 超时时间 (秒)，默认 60
+   * @returns {Promise<{success: boolean, output: string}>}
+   */
+  async executeCommand(serverId, command, timeout = 60) {
+    if (!this.isOnline(serverId)) {
+      throw new Error('主机不在线');
+    }
+
+    if (!command || typeof command !== 'string') {
+      throw new Error('命令不能为空');
+    }
+
+    const result = await this.sendTaskAndWait(
+      serverId,
+      {
+        type: TaskTypes.COMMAND,
+        data: command,
+        timeout: timeout,
+      },
+      (timeout + 5) * 1000 // 给一点额外时间等待 Agent 响应
+    );
+
+    return {
+      success: result.successful,
+      output: result.data || '',
+      delay: result.delay || 0,
+    };
+  }
+
   // ==================== 状态查询 ====================
 
   /**
@@ -981,25 +1014,38 @@ case ${$}ARCH in
 esac
 BINARY_URL="${$}{BINARY_BASE_URL}/${$}{BINARY_NAME}"
 
-# 1. 检查权限
-if [ "${$}EUID" -ne 0 ]; then 
-  echo -e "${$}{RED}错误: 请使用 sudo 运行此脚本${$}{NC}"
-  exit 1
+# 1. 自动检测权限模式
+if [ "${$}EUID" -eq 0 ]; then
+    INSTALL_MODE="system"
+    echo -e "${$}{CYAN}>>> API Monitor Agent 系统级安装 (root)${$}{NC}"
+else
+    INSTALL_MODE="user"
+    INSTALL_DIR="${$}HOME/.local/share/api-monitor-agent"
+    USER_CONFIG_DIR="${$}HOME/.config/api-monitor-agent"
+    USER_SERVICE_DIR="${$}HOME/.config/systemd/user"
+    mkdir -p "${$}USER_CONFIG_DIR" "${$}USER_SERVICE_DIR"
+    echo -e "${$}{CYAN}>>> API Monitor Agent 用户级安装 (无 root)${$}{NC}"
+    echo -e "${$}{YELLOW}    提示: 如需系统级安装，请使用 sudo 运行${$}{NC}"
 fi
 
 # 2. 检测是否为升级安装
 UPGRADE_MODE=false
-if [ -d "${$}INSTALL_DIR" ]; then
-    if [ -f "${$}INSTALL_DIR/agent-bin" ] || [ -f "${$}INSTALL_DIR/agent" ]; then
-        UPGRADE_MODE=true
-        echo -e "${$}{CYAN}>>> 检测到已安装 Agent，将执行升级...${$}{NC}"
-    fi
+if [ -f "${$}INSTALL_DIR/agent" ]; then
+    UPGRADE_MODE=true
+    echo -e "${$}{CYAN}>>> 检测到已安装 Agent，将执行升级...${$}{NC}"
 fi
 
 # 3. 停止现有服务
-if systemctl is-active --quiet ${$}SERVICE_NAME 2>/dev/null; then
-    echo -e "${$}{YELLOW}⏹ 停止现有服务...${$}{NC}"
-    systemctl stop ${$}SERVICE_NAME
+if [ "${$}INSTALL_MODE" = "system" ]; then
+    systemctl is-active --quiet ${$}SERVICE_NAME 2>/dev/null && {
+        echo -e "${$}{YELLOW}⏹ 停止现有服务...${$}{NC}"
+        systemctl stop ${$}SERVICE_NAME
+    }
+else
+    systemctl --user is-active --quiet ${$}SERVICE_NAME 2>/dev/null && {
+        echo -e "${$}{YELLOW}⏹ 停止现有服务...${$}{NC}"
+        systemctl --user stop ${$}SERVICE_NAME
+    }
 fi
 
 # 4. 清理旧版文件 (Node.js Agent 残留)
@@ -1052,7 +1098,8 @@ echo -e "${$}{CYAN}   配置已更新: ${$}SERVER_URL${$}{NC}"
 
 # 8. 创建/更新 systemd 服务
 echo -e "${$}{YELLOW}⚙️ 配置 systemd 服务...${$}{NC}"
-cat > /etc/systemd/system/${$}SERVICE_NAME.service << SERVICEEOF
+if [ "${$}INSTALL_MODE" = "system" ]; then
+    cat > /etc/systemd/system/${$}SERVICE_NAME.service << SERVICEEOF
 [Unit]
 Description=API Monitor Agent (Go)
 After=network.target
@@ -1068,29 +1115,63 @@ RestartSec=10
 [Install]
 WantedBy=multi-user.target
 SERVICEEOF
+    systemctl daemon-reload
+    systemctl enable ${$}SERVICE_NAME
+    systemctl restart ${$}SERVICE_NAME
+else
+    cat > "${$}USER_SERVICE_DIR/${$}SERVICE_NAME.service" << SERVICEEOF
+[Unit]
+Description=API Monitor Agent (User Mode)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=${$}INSTALL_DIR
+ExecStart=${$}INSTALL_DIR/agent
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+SERVICEEOF
+    # 尝试启用 lingering
+    loginctl enable-linger ${$}USER 2>/dev/null || echo -e "${$}{YELLOW}⚠️ lingering 需管理员: loginctl enable-linger ${$}USER${$}{NC}"
+    systemctl --user daemon-reload
+    systemctl --user enable ${$}SERVICE_NAME
+    systemctl --user restart ${$}SERVICE_NAME
+fi
 
 # 9. 启动服务
 echo -e "${$}{YELLOW}🚀 启动服务...${$}{NC}"
-systemctl daemon-reload
-systemctl enable ${$}SERVICE_NAME
-systemctl restart ${$}SERVICE_NAME
 
 # 10. 检查状态
 sleep 1
-if systemctl is-active --quiet ${$}SERVICE_NAME; then
+if [ "${$}INSTALL_MODE" = "system" ]; then
+    SERVICE_STATUS=${$}(systemctl is-active ${$}SERVICE_NAME 2>/dev/null)
+else
+    SERVICE_STATUS=${$}(systemctl --user is-active ${$}SERVICE_NAME 2>/dev/null)
+fi
+
+if [ "${$}SERVICE_STATUS" = "active" ]; then
     echo -e "${$}{GREEN}================================================${$}{NC}"
-    if [ "${$}UPGRADE_MODE" = true ]; then
-        echo -e "${$}{GREEN}  ✅ API Monitor Agent 升级成功!${$}{NC}"
+    echo -e "${$}{GREEN}  ✅ API Monitor Agent 安装成功!${$}{NC}"
+    echo -e "${$}{GREEN}  模式: ${$}INSTALL_MODE${$}{NC}"
+    echo -e "${$}{GREEN}  架构: ${$}ARCH (${$}BINARY_NAME)${$}{NC}"
+    if [ "${$}INSTALL_MODE" = "system" ]; then
+        echo -e "${$}{GREEN}  状态: systemctl status ${$}SERVICE_NAME${$}{NC}"
+        echo -e "${$}{GREEN}  日志: journalctl -u ${$}SERVICE_NAME -f${$}{NC}"
     else
-        echo -e "${$}{GREEN}  ✅ API Monitor Agent 安装成功!${$}{NC}"
+        echo -e "${$}{GREEN}  状态: systemctl --user status ${$}SERVICE_NAME${$}{NC}"
+        echo -e "${$}{GREEN}  日志: journalctl --user -u ${$}SERVICE_NAME -f${$}{NC}"
     fi
-    echo -e "${$}{GREEN}  架构: ${$}ARCH (${$}BINARY_NAME)${$}{NC}"  
-    echo -e "${$}{GREEN}  查看状态: systemctl status ${$}SERVICE_NAME${$}{NC}"
-    echo -e "${$}{GREEN}  查看日志: journalctl -u ${$}SERVICE_NAME -f${$}{NC}"
     echo -e "${$}{GREEN}================================================${$}{NC}"
 else
-    echo -e "${$}{RED}❌ 服务启动失败，请检查日志:${$}{NC}"
-    echo -e "${$}{RED}   journalctl -u ${$}SERVICE_NAME -n 20${$}{NC}"
+    echo -e "${$}{RED}❌ 服务启动失败${$}{NC}"
+    if [ "${$}INSTALL_MODE" = "system" ]; then
+        echo -e "${$}{RED}   journalctl -u ${$}SERVICE_NAME -n 20${$}{NC}"
+    else
+        echo -e "${$}{RED}   journalctl --user -u ${$}SERVICE_NAME -n 20${$}{NC}"
+    fi
     exit 1
 fi
 `;
@@ -1271,23 +1352,32 @@ if ($service -and $service.Status -eq "Running") {
   generateUninstallScript() {
     return `#!/bin/bash
 # API Monitor Agent 卸载脚本
-
-if [ "$EUID" -ne 0 ]; then 
-  echo "请以 root 身份运行"
-  exit 1
-fi
+# 自动检测权限并卸载对应模式的安装
 
 SERVICE_NAME="api-monitor-agent"
-INSTALL_DIR="/opt/api-monitor-agent"
 
-echo "正在停止并移除 API Monitor Agent..."
-
-systemctl stop \$SERVICE_NAME 2>/dev/null || true
-systemctl disable \$SERVICE_NAME 2>/dev/null || true
-rm -f /etc/systemd/system/\$SERVICE_NAME.service
-systemctl daemon-reload
-
-rm -rf "\$INSTALL_DIR"
+if [ "\\$EUID" -eq 0 ]; then
+    # 系统级卸载
+    INSTALL_DIR="/opt/api-monitor-agent"
+    echo "正在卸载 API Monitor Agent (系统级)..."
+    systemctl stop \\$SERVICE_NAME 2>/dev/null || true
+    systemctl disable \\$SERVICE_NAME 2>/dev/null || true
+    rm -f /etc/systemd/system/\\$SERVICE_NAME.service
+    systemctl daemon-reload
+    rm -rf "\\$INSTALL_DIR"
+else
+    # 用户级卸载
+    INSTALL_DIR="\\$HOME/.local/share/api-monitor-agent"
+    CONFIG_DIR="\\$HOME/.config/api-monitor-agent"
+    SERVICE_DIR="\\$HOME/.config/systemd/user"
+    echo "正在卸载 API Monitor Agent (用户级)..."
+    systemctl --user stop \\$SERVICE_NAME 2>/dev/null || true
+    systemctl --user disable \\$SERVICE_NAME 2>/dev/null || true
+    rm -f "\\$SERVICE_DIR/\\$SERVICE_NAME.service"
+    systemctl --user daemon-reload
+    rm -rf "\\$INSTALL_DIR"
+    rm -rf "\\$CONFIG_DIR"
+fi
 
 echo "✅ 卸载完成"
 `;

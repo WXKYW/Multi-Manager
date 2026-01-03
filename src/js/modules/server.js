@@ -264,15 +264,14 @@ function renderServerTableRow(server) {
             </td>
             <td>
                 <strong>${escapeHtml(server.name)}</strong>
-                ${
-                  server.tags && server.tags.length > 0
-                    ? '<br><div style="margin-top: 4px;">' +
-                      server.tags
-                        .map(tag => `<span class="server-tag">${escapeHtml(tag)}</span>`)
-                        .join(' ') +
-                      '</div>'
-                    : ''
-                }
+                ${server.tags && server.tags.length > 0
+      ? '<br><div style="margin-top: 4px;">' +
+      server.tags
+        .map(tag => `<span class="server-tag">${escapeHtml(tag)}</span>`)
+        .join(' ') +
+      '</div>'
+      : ''
+    }
             </td>
             <td>
                 <code style="background: var(--section-bg); padding: 2px 6px; border-radius: 3px; font-size: 12px;">
@@ -332,20 +331,18 @@ function renderServerCard(server) {
                         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px;">
                             <span class="server-name">${escapeHtml(server.name)}</span>
                             <span class="proxied-badge ${statusBadgeClass}">${statusText}</span>
-                            ${
-                              server.tags && server.tags.length > 0
-                                ? server.tags
-                                    .map(
-                                      tag => `<span class="server-tag">${escapeHtml(tag)}</span>`
-                                    )
-                                    .join('')
-                                : ''
-                            }
+                            ${server.tags && server.tags.length > 0
+      ? server.tags
+        .map(
+          tag => `<span class="server-tag">${escapeHtml(tag)}</span>`
+        )
+        .join('')
+      : ''
+    }
                         </div>
                         <div class="server-host" style="margin-top: 6px; background: transparent; padding: 0;">
-                            ${
-                              server.response_time
-                                ? `
+                            ${server.response_time
+      ? `
                                 <div style="display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 12px; font-size: 10px; font-weight: 700; font-family: var(--font-mono); 
                                     background: ${parseInt(server.response_time) < 100 ? 'rgba(16, 185, 129, 0.1)' : parseInt(server.response_time) < 300 ? 'rgba(245, 158, 11, 0.1)' : 'rgba(239, 68, 68, 0.1)'}; 
                                     color: ${parseInt(server.response_time) < 100 ? '#10b981' : parseInt(server.response_time) < 300 ? '#f59e0b' : '#ef4444'};
@@ -354,8 +351,8 @@ function renderServerCard(server) {
                                     <span>${server.response_time}ms</span>
                                 </div>
                             `
-                                : '<span style="font-size: 11px; color: var(--text-tertiary); opacity: 0.5;">未探测</span>'
-                            }
+      : '<span style="font-size: 11px; color: var(--text-tertiary); opacity: 0.5;">未探测</span>'
+    }
                         </div>
                     </div>
                 </div>
@@ -501,19 +498,18 @@ function renderServerDetails(server, info) {
                 <button class="btn btn-sm btn-primary" onclick="window.serverModule.refreshServerInfo('${server.id}')">
                     🔄 刷新信息
                 </button>
-                ${
-                  info &&
-                  info.docker &&
-                  info.docker.installed &&
-                  info.docker.containers &&
-                  info.docker.containers.length > 0
-                    ? `
+                ${info &&
+      info.docker &&
+      info.docker.installed &&
+      info.docker.containers &&
+      info.docker.containers.length > 0
+      ? `
                     <button class="btn btn-sm btn-info" onclick="window.serverModule.showDockerContainers('${server.id}')">
                         🐳 查看容器 (${info.docker.containers.length})
                     </button>
                 `
-                    : ''
-                }
+      : ''
+    }
                 <button class="btn btn-sm btn-warning" onclick="window.serverModule.rebootServer('${server.id}')">
                     🔄 重启主机
                 </button>
@@ -642,9 +638,8 @@ function renderDockerInfo(docker) {
             <span class="server-detail-label">容器总数</span>
             <span class="server-detail-value">${totalContainers}</span>
         </div>
-        ${
-          totalContainers > 0
-            ? `
+        ${totalContainers > 0
+      ? `
             <div class="server-detail-item">
                 <span class="server-detail-label">运行中</span>
                 <span class="server-detail-value" style="color: #10b981;">${runningContainers}</span>
@@ -654,8 +649,8 @@ function renderDockerInfo(docker) {
                 <span class="server-detail-value" style="color: #ef4444;">${stoppedContainers}</span>
             </div>
         `
-            : ''
-        }
+      : ''
+    }
     `;
 }
 
@@ -1394,6 +1389,138 @@ export const serverMethods = {
       this.showGlobalToast('配置更新失败', 'error');
       console.error('更新配置失败:', error);
     }
+  },
+
+  /**
+   * 通过 Agent 执行终端命令
+   * @param {string} serverId - 主机 ID
+   * @param {string} command - 要执行的命令
+   * @param {number} timeout - 超时时间 (秒)
+   * @returns {Promise<{success: boolean, output: string, delay: number}>}
+   */
+  async executeTerminalCommand(serverId, command, timeout = 60) {
+    if (!serverId || !command) {
+      throw new Error('缺少必要参数');
+    }
+
+    const response = await fetch(`/api/server/task/command/${serverId}/sync`, {
+      method: 'POST',
+      headers: {
+        ...this.getAuthHeaders(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ command, timeout: timeout * 1000 }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || '执行失败');
+    }
+
+    return {
+      success: data.success && data.data?.successful,
+      output: data.data?.output || '',
+      delay: data.data?.delay || 0,
+    };
+  },
+
+  /**
+   * 打开 Agent 终端模态框
+   */
+  openAgentTerminal(server) {
+    this.terminalServer = server;
+    this.terminalOutput = '';
+    this.terminalCommand = '';
+    this.terminalHistory = [];
+    this.terminalHistoryIndex = -1;
+    this.agentTerminalModalOpen = true;
+
+    // 聚焦输入框
+    this.$nextTick(() => {
+      const input = document.getElementById('terminalCommandInput');
+      if (input) input.focus();
+    });
+  },
+
+  /**
+   * 关闭 Agent 终端
+   */
+  closeAgentTerminal() {
+    this.agentTerminalModalOpen = false;
+    this.terminalServer = null;
+  },
+
+  /**
+   * 在 Agent 终端执行命令
+   */
+  async runTerminalCommand() {
+    if (!this.terminalCommand.trim() || !this.terminalServer) return;
+
+    const cmd = this.terminalCommand.trim();
+    this.terminalCommand = '';
+
+    // 添加到历史记录
+    this.terminalHistory.push(cmd);
+    this.terminalHistoryIndex = this.terminalHistory.length;
+
+    // 显示命令
+    this.terminalOutput += `\n$ ${cmd}\n`;
+    this.terminalRunning = true;
+
+    try {
+      const result = await this.executeTerminalCommand(this.terminalServer.id, cmd);
+      if (result.output) {
+        this.terminalOutput += result.output;
+        if (!result.output.endsWith('\n')) {
+          this.terminalOutput += '\n';
+        }
+      }
+      if (!result.success && !result.output) {
+        this.terminalOutput += `[命令执行失败]\n`;
+      }
+      // 显示执行时间
+      if (result.delay > 0) {
+        this.terminalOutput += `\n[耗时: ${result.delay}ms]\n`;
+      }
+    } catch (error) {
+      this.terminalOutput += `[错误] ${error.message}\n`;
+    } finally {
+      this.terminalRunning = false;
+      // 滚动到底部
+      this.$nextTick(() => {
+        const outputEl = document.getElementById('terminalOutputArea');
+        if (outputEl) outputEl.scrollTop = outputEl.scrollHeight;
+      });
+    }
+  },
+
+  /**
+   * 处理终端键盘事件 (历史命令)
+   */
+  handleTerminalKeydown(event) {
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (this.terminalHistoryIndex > 0) {
+        this.terminalHistoryIndex--;
+        this.terminalCommand = this.terminalHistory[this.terminalHistoryIndex] || '';
+      }
+    } else if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      if (this.terminalHistoryIndex < this.terminalHistory.length - 1) {
+        this.terminalHistoryIndex++;
+        this.terminalCommand = this.terminalHistory[this.terminalHistoryIndex] || '';
+      } else {
+        this.terminalHistoryIndex = this.terminalHistory.length;
+        this.terminalCommand = '';
+      }
+    }
+  },
+
+  /**
+   * 清空终端输出
+   */
+  clearTerminalOutput() {
+    this.terminalOutput = '';
   },
 };
 
