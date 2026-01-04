@@ -1136,6 +1136,9 @@ const app = createApp({
               case 'ai-chat':
                 this.aiChatInit();
                 break;
+              case 'uptime':
+                this.initUptimeModule();
+                break;
             }
           });
         }
@@ -1225,6 +1228,10 @@ const app = createApp({
             case 'totp':
               this.loadTotpAccounts();
               this.startTotpTimer();
+              break;
+            case 'uptime':
+              this.initUptimeModule();
+              // Hook for auto-refresh if needed, but socket handles it
               break;
           }
         });

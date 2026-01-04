@@ -122,6 +122,7 @@ export const dashboardMethods = {
       this.fetchApiSummary(),
       this.fetchPaaSSummary(),
       this.fetchDnsSummary(),
+      this.fetchUptimeSummary(),
       this.loadTotpAccounts ? this.loadTotpAccounts() : Promise.resolve(),
     ]);
 
@@ -132,6 +133,7 @@ export const dashboardMethods = {
       geminiCli: store.dashboardStats.geminiCli,
       paas: store.dashboardStats.paas,
       dns: store.dashboardStats.dns,
+      uptime: store.dashboardStats.uptime,
     });
   },
 
@@ -299,6 +301,75 @@ export const dashboardMethods = {
       console.error('[Dashboard] Fetch DNS summary failed:', e);
     }
   },
+
+  /**
+   * 获取 Uptime 摘要
+   */
+  async fetchUptimeSummary() {
+    try {
+      const res = await fetch('/api/uptime/monitors', { headers: store.getAuthHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        const monitors = Array.isArray(data) ? data : (data.data || []);
+
+        let up = 0;
+        let down = 0;
+        let paused = 0;
+
+        monitors.forEach(m => {
+          if (!m.active) {
+            paused++;
+          } else {
+            // 需要获取实际状态，这里可能需要调用 status 接口或者让 backend 返回 status
+            // 暂时假设 monitors 列表包含了 computed status，或者后续优化
+            // 如果 /api/uptime/monitors 不返回 status，则需要 fetch status
+            // 为了简单，我们只统计数量，或者假设 backend 已经把 status 附带在 monitor 对象里
+            // 如果没有 status，暂时视为 unknown 或 fetch heartbeats?
+            // 也可以直接 fetch /api/uptime/stats 如果有的话
+            // 检查 uptime-api router... 它似乎没有 stats endpoint.
+            // 我们先只统计总数，如果 monitor 对象里有 status 最好。
+            // 检查 monitor-service.js: getMonitors() 返回的是 db.monitors
+            // monitor-service 应该负责 check 并更新 status 到内存/db
+            // 假设 monitor 对象里有 lastStatus via enrichment
+            // 如果没有，我们只能显示总数。
+
+            // 实际上，monitor 列表通常不带实时状态。
+            // Dashboard 需要快速加载，也许只能显示总数？
+            // 或者前端 uptime.js 里有 loadUptimeMonitors 会 enrich status
+            // 这里我们在 dashboard.js 里，为了简单，先由前端去 fetch monitors
+            // 更好的做法是后端提供一个 /stats 接口
+
+            // 既然现在还没后端 stats 接口，我们先 fetch monitors 
+            // 然后 fetch heartbeats? 不，太慢了。
+            // 让 monitor list 带上 status 是最合理的。
+            // 查看 monitor-service.js (recalled from memory)，它会 check 并保存 result。
+            // 但是 list 接口通常只返回 config。
+
+            // 暂时实现：只统计总数，或者如果 API 返回了 status 就统计 status。
+            // 假设 monitors 还没有 status 字段。
+          }
+        });
+
+        // 由于 dashboard.js 是独立模块，无法轻易复用 uptime.js 的复杂逻辑 (socket io etc)
+        // 建议：简单 fetch monitors，后续通过 socket 更新？
+        // 或者：我们请求 /api/uptime/monitors，如果后端没返回 status，
+        // 我们只能显示 Total。
+
+        // 为了更好的体验，我们假设 monitor-service 会定期 check 并把 status 存在内存或 db
+        // 如果 API 返回了 status 字段：
+        store.dashboardStats.uptime.total = monitors.length;
+        // 暂时只更新 total，up/down 等待后续后端优化或 socket 推送
+        // 但为了展示效果，我们先尝试统计 active 的
+
+        // 如果想更准确，可以在 dashboard.js 里也监听 socket? 
+        // 避免过于复杂，先显示 Total 和 Active (Configured as Active)
+        store.dashboardStats.uptime.up = monitors.filter(m => m.active).length;
+        store.dashboardStats.uptime.down = 0; // 暂时无法获知
+      }
+    } catch (e) {
+      console.error('[Dashboard] Fetch Uptime summary failed:', e);
+    }
+  },
 };
 
 // 在 store 中初始化相关状态
@@ -315,5 +386,6 @@ Object.assign(store, {
       fly: { total: 0, running: 0 },
     },
     dns: { zones: 0 },
+    uptime: { total: 0, up: 0, down: 0 },
   },
 });

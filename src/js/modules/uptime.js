@@ -1,3 +1,6 @@
+import { io } from 'socket.io-client';
+import Chart from 'chart.js/auto';
+
 /**
  * Uptime 监测模块
  * 负责监测目标管理、心跳数据处理、状态计算
@@ -33,6 +36,10 @@ export const uptimeData = {
   uptimeLoading: false,
   uptimeSaving: false,
 
+  // Socket
+  uptimeSocket: null,
+  uptimeChartInstance: null,
+
   // 添加/编辑表单
   uptimeForm: {
     id: null,
@@ -52,6 +59,11 @@ export const uptimeData = {
     dns_resolve_server: '',
     headers: '',
     body: '',
+    // New Fields
+    ignoreTls: false,
+    expiryNotification: 7,
+    tags: [],
+    tagsInput: '', // For UI input
   },
 };
 
@@ -62,154 +74,121 @@ export const uptimeMethods = {
   // ==================== 数据加载 ====================
 
   /**
+   * 初始化模块
+   */
+  initUptimeModule() {
+    if (this.uptimeSocket) return;
+    this.connectUptimeSocket();
+    this.loadUptimeMonitors();
+  },
+
+  connectUptimeSocket() {
+    console.log('[Uptime] Connecting socket...');
+    this.uptimeSocket = io('/', {
+      transports: ['websocket', 'polling']
+    });
+
+    this.uptimeSocket.on('connect', () => {
+      console.log('[Uptime] Socket connected');
+    });
+
+    this.uptimeSocket.on('uptime:heartbeat', (data) => {
+      this.handleRealtimeHeartbeat(data);
+    });
+  },
+
+  handleRealtimeHeartbeat({ monitorId, beat }) {
+    if (!this.uptimeHeartbeats[monitorId]) {
+      this.uptimeHeartbeats[monitorId] = [];
+    }
+
+    // Normalize Status
+    // Backend uses 0 (Down) / 1 (Up), Frontend uses 'down' / 'up' / 'pending'
+    if (typeof beat.status === 'number') {
+      beat.status = beat.status === 1 ? 'up' : 'down';
+    }
+
+    // Unshift new beat
+    this.uptimeHeartbeats[monitorId].unshift(beat);
+    // Keep only 50
+    if (this.uptimeHeartbeats[monitorId].length > 50) {
+      this.uptimeHeartbeats[monitorId].length = 50;
+    }
+
+    // Update stats efficiently
+    // Just re-calc all for simplicity or optimize? Re-calc is fast enough for <100 monitors per beat
+    this.calculateUptimeStats();
+
+    // Refresh charts if this monitor is selected
+    if (this.selectedUptimeMonitor?.id === monitorId) {
+      this.renderUptimeChart();
+    }
+  },
+
+  /**
    * 加载监测列表
    */
   async loadUptimeMonitors() {
     this.uptimeLoading = true;
     try {
-      // TODO: 替换为真实 API
-      // const res = await fetch('/api/uptime/monitors');
-      // this.uptimeMonitors = await res.json();
+      const res = await fetch('/api/uptime/monitors');
+      const data = await res.json();
+      this.uptimeMonitors = data;
 
-      // Mock 数据用于前端开发
-      await this.loadMockUptimeData();
+      // Initialize heartbeats container and load status
+      this.uptimeMonitors.forEach(m => {
+        if (!this.uptimeHeartbeats[m.id]) this.uptimeHeartbeats[m.id] = [];
+        if (m.lastHeartbeat) {
+          // Normalize status
+          if (typeof m.lastHeartbeat.status === 'number') {
+            m.lastHeartbeat.status = m.lastHeartbeat.status === 1 ? 'up' : 'down';
+          }
+          // Pre-fill latest status if provided by API list
+          this.uptimeHeartbeats[m.id] = [m.lastHeartbeat];
+        }
+      });
+      // Further fetch history for each?
+      // For now, list API provided last 1. If user clicks detail, we fetch history.
+      // But for sparklines (charts), we usually need more history.
+      // We will leave history empty for now until detail view or bulk fetch.
+      // Optimization: Fetch bulk history? Or let socket fill it up?
+      // Let's iterate and fetch history for all (or top viewport)
+      // For simplicity, fetch history for all (ok for small number)
+      this.uptimeMonitors.forEach(m => this.loadHeartbeats(m.id));
+
       this.calculateUptimeStats();
     } catch (error) {
-      console.error('加载监测列表失败:', error);
-      this.showToast('加载监测列表失败', 'error');
+      console.error('加载列表失败:', error);
+      // Fallback or Toast?
+      this.showToast('加载列表失败', 'error');
     } finally {
       this.uptimeLoading = false;
     }
   },
 
   /**
-   * 加载 Mock 数据 (开发阶段)
-   */
-  async loadMockUptimeData() {
-    // Mock monitors
-    this.uptimeMonitors = [
-      {
-        id: 1,
-        name: '官网首页',
-        type: 'http',
-        url: 'https://example.com',
-        interval: 60,
-        timeout: 30,
-        retries: 0,
-        active: true,
-        method: 'GET',
-        accepted_status_codes: '200-299',
-      },
-      {
-        id: 2,
-        name: 'API 接口',
-        type: 'http',
-        url: 'https://api.example.com/health',
-        interval: 30,
-        timeout: 10,
-        retries: 1,
-        active: true,
-        method: 'GET',
-        accepted_status_codes: '200-299',
-      },
-      {
-        id: 3,
-        name: '数据库服务器',
-        type: 'tcp',
-        hostname: 'db.example.com',
-        port: 5432,
-        interval: 60,
-        timeout: 10,
-        retries: 0,
-        active: true,
-      },
-      {
-        id: 4,
-        name: 'DNS 解析',
-        type: 'dns',
-        hostname: 'example.com',
-        interval: 300,
-        timeout: 10,
-        retries: 0,
-        active: true,
-        dns_resolve_type: 'A',
-      },
-      {
-        id: 5,
-        name: '备用服务器',
-        type: 'ping',
-        hostname: '8.8.8.8',
-        interval: 60,
-        timeout: 10,
-        retries: 0,
-        active: false, // 已暂停
-      },
-    ];
-
-    // 为每个 monitor 生成 mock 心跳数据
-    const now = Date.now();
-    this.uptimeMonitors.forEach((monitor) => {
-      const beats = [];
-      for (let i = 0; i < 60; i++) {
-        const time = new Date(now - i * monitor.interval * 1000);
-        // 随机生成状态和响应时间
-        const rand = Math.random();
-        let status = 'up';
-        let ping = Math.floor(Math.random() * 150) + 20;
-
-        if (!monitor.active) {
-          status = 'empty';
-          ping = null;
-        } else if (rand < 0.02) {
-          // 2% 几率 down
-          status = 'down';
-          ping = null;
-        } else if (rand < 0.05) {
-          // 3% 几率 pending
-          status = 'pending';
-          ping = Math.floor(Math.random() * 500) + 200;
-        }
-
-        beats.push({
-          id: i,
-          status,
-          time: time.toISOString(),
-          ping,
-          msg: status === 'down' ? 'Connection timeout' : null,
-        });
-      }
-      this.uptimeHeartbeats[monitor.id] = beats;
-    });
-
-    // Mock 最近事件
-    this.uptimeRecentEvents = [
-      {
-        id: 1,
-        monitorId: 2,
-        monitorName: 'API 接口',
-        status: 0,
-        msg: 'Connection refused',
-        time: new Date(now - 3600000).toISOString(),
-      },
-      {
-        id: 2,
-        monitorId: 2,
-        monitorName: 'API 接口',
-        status: 1,
-        msg: '恢复正常',
-        time: new Date(now - 3500000).toISOString(),
-      },
-    ];
-  },
-
-  /**
    * 加载指定 monitor 的心跳数据
    */
-  async loadHeartbeats(monitorId, limit = 50) {
+  async loadHeartbeats(monitorId, limit = 60) {
     try {
-      // TODO: 替换为真实 API
-      // const res = await fetch(`/api/uptime/monitors/${monitorId}/heartbeats?limit=${limit}`);
-      // this.uptimeHeartbeats[monitorId] = await res.json();
+      const res = await fetch(`/api/uptime/monitors/${monitorId}/history`);
+      const data = await res.json();
+
+      // Normalize statuses
+      const normalizedData = data.map(beat => {
+        if (typeof beat.status === 'number') {
+          return { ...beat, status: beat.status === 1 ? 'up' : 'down' };
+        }
+        return beat;
+      });
+
+      this.uptimeHeartbeats[monitorId] = normalizedData;
+      this.calculateUptimeStats(); // Refine stats based on real history
+
+      // Refresh chart if this monitor is selected
+      if (this.selectedUptimeMonitor?.id === monitorId) {
+        this.renderUptimeChart();
+      }
     } catch (error) {
       console.error('加载心跳数据失败:', error);
     }
@@ -226,62 +205,59 @@ export const uptimeMethods = {
       return;
     }
 
-    if (
-      (this.uptimeForm.type === 'http' || this.uptimeForm.type === 'keyword') &&
-      !this.uptimeForm.url
-    ) {
+    // Validation ... (truncated for brevity, logic same)
+    if ((this.uptimeForm.type === 'http' || this.uptimeForm.type === 'keyword') && !this.uptimeForm.url) {
       this.showToast('请输入 URL', 'warning');
       return;
     }
-
-    if (
-      (this.uptimeForm.type === 'tcp' ||
-        this.uptimeForm.type === 'ping' ||
-        this.uptimeForm.type === 'dns') &&
-      !this.uptimeForm.hostname
-    ) {
+    if ((this.uptimeForm.type === 'tcp' || this.uptimeForm.type === 'ping') && !this.uptimeForm.hostname) {
       this.showToast('请输入主机名', 'warning');
       return;
     }
 
+    // Process Tags
+    if (this.uptimeForm.tagsInput) {
+      this.uptimeForm.tags = this.uptimeForm.tagsInput.split(/[,，]/).map(t => t.trim()).filter(Boolean);
+    } else {
+      this.uptimeForm.tags = [];
+    }
+
     this.uptimeSaving = true;
     try {
-      // TODO: 替换为真实 API
-      // const method = this.uptimeForm.id ? 'PUT' : 'POST';
-      // const url = this.uptimeForm.id
-      //   ? `/api/uptime/monitors/${this.uptimeForm.id}`
-      //   : '/api/uptime/monitors';
-      // const res = await fetch(url, {
-      //   method,
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify(this.uptimeForm),
-      // });
+      const method = this.uptimeForm.id ? 'PUT' : 'POST';
+      const url = this.uptimeForm.id ? `/api/uptime/monitors/${this.uptimeForm.id}` : '/api/uptime/monitors';
 
-      // Mock: 添加到本地列表
-      if (this.uptimeForm.id) {
-        // 编辑
-        const idx = this.uptimeMonitors.findIndex((m) => m.id === this.uptimeForm.id);
-        if (idx !== -1) {
-          this.uptimeMonitors[idx] = { ...this.uptimeForm };
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(this.uptimeForm)
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        if (!this.uptimeForm.id) {
+          // New
+          this.uptimeMonitors.push(data);
+          this.uptimeHeartbeats[data.id] = [];
+          this.showToast('监测已创建', 'success');
+        } else {
+          // Updated
+          const idx = this.uptimeMonitors.findIndex(m => m.id === data.id);
+          if (idx !== -1) {
+            this.uptimeMonitors[idx] = data;
+          }
+          this.showToast('监测已更新', 'success');
         }
-        this.showToast('监测已更新', 'success');
+        this.resetUptimeForm();
+        this.uptimeCurrentTab = 'list';
+        this.calculateUptimeStats();
       } else {
-        // 新增
-        const newMonitor = {
-          ...this.uptimeForm,
-          id: Date.now(),
-        };
-        this.uptimeMonitors.push(newMonitor);
-        this.uptimeHeartbeats[newMonitor.id] = [];
-        this.showToast('监测已创建', 'success');
+        throw new Error(data.error || 'Unknown error');
       }
 
-      this.resetUptimeForm();
-      this.uptimeCurrentTab = 'list';
-      this.calculateUptimeStats();
     } catch (error) {
-      console.error('保存监测失败:', error);
-      this.showToast('保存监测失败', 'error');
+      console.error('保存失败:', error);
+      this.showToast('保存失败: ' + error.message, 'error');
     } finally {
       this.uptimeSaving = false;
     }
@@ -294,10 +270,8 @@ export const uptimeMethods = {
     if (!confirm('确定要删除此监测吗？')) return;
 
     try {
-      // TODO: 替换为真实 API
-      // await fetch(`/api/uptime/monitors/${id}`, { method: 'DELETE' });
+      await fetch(`/api/uptime/monitors/${id}`, { method: 'DELETE' });
 
-      // Mock
       this.uptimeMonitors = this.uptimeMonitors.filter((m) => m.id !== id);
       delete this.uptimeHeartbeats[id];
 
@@ -318,19 +292,22 @@ export const uptimeMethods = {
    */
   async toggleUptimeMonitor(monitor) {
     try {
-      // TODO: 替换为真实 API
-      // const action = monitor.active ? 'pause' : 'resume';
-      // await fetch(`/api/uptime/monitors/${monitor.id}/${action}`, { method: 'POST' });
+      const res = await fetch(`/api/uptime/monitors/${monitor.id}/toggle`, { method: 'POST' });
+      const data = await res.json();
 
-      // Mock
-      monitor.active = !monitor.active;
-      this.calculateUptimeStats();
-      this.showToast(monitor.active ? '监测已恢复' : '监测已暂停', 'success');
+      if (res.ok) {
+        monitor.active = data.active;
+        this.calculateUptimeStats();
+        this.showToast(data.active ? '监测已恢复' : '监测已暂停', 'success');
+      } else {
+        this.showToast('操作失败', 'error');
+      }
     } catch (error) {
       console.error('切换监测状态失败:', error);
       this.showToast('操作失败', 'error');
     }
   },
+
 
   // ==================== 表单操作 ====================
 
@@ -363,6 +340,10 @@ export const uptimeMethods = {
       dns_resolve_server: '',
       headers: '',
       body: '',
+      ignoreTls: false,
+      expiryNotification: 7,
+      tags: [],
+      tagsInput: '',
     };
   },
 
@@ -370,7 +351,10 @@ export const uptimeMethods = {
    * 编辑监测
    */
   editUptimeMonitor(monitor) {
-    this.uptimeForm = { ...monitor };
+    this.uptimeForm = {
+      ...monitor,
+      tagsInput: monitor.tags ? monitor.tags.join(', ') : '',
+    };
     this.uptimeCurrentTab = 'add';
   },
 
@@ -380,8 +364,16 @@ export const uptimeMethods = {
   selectUptimeMonitor(monitor) {
     if (this.selectedUptimeMonitor?.id === monitor.id) {
       this.selectedUptimeMonitor = null;
+      if (this.uptimeChartInstance) {
+        this.uptimeChartInstance.destroy();
+        this.uptimeChartInstance = null;
+      }
     } else {
       this.selectedUptimeMonitor = monitor;
+      this.$nextTick(() => {
+        this.loadHeartbeats(monitor.id);
+        this.renderUptimeChart();
+      });
     }
   },
 
@@ -432,9 +424,11 @@ export const uptimeMethods = {
 
     // 从最新到最旧取指定数量
     for (let i = 0; i < maxBars; i++) {
-      if (i < beats.length) {
-        result.unshift(beats[i]); // 倒序插入，使最新在右边
+      const beat = beats[i];
+      if (beat) {
+        result.unshift(beat); // 倒序插入，使最新在右边
       } else {
+        // Fill empty if not enough history
         result.unshift({ status: 'empty', time: null, ping: null });
       }
     }
@@ -503,6 +497,108 @@ export const uptimeMethods = {
   // ==================== UI 辅助 ====================
 
   /**
+   * 显示 Toast 提示 (Wrapper for global toast)
+   */
+  showToast(message, type = 'info') {
+    if (this.showGlobalToast) {
+      this.showGlobalToast(message, type);
+    } else {
+      console.warn('[Uptime] showGlobalToast not found, fallback to alert:', message);
+      // Fallback
+      alert(message);
+    }
+  },
+
+  /**
+   * 渲染详情图表
+   */
+  renderUptimeChart() {
+    if (!this.selectedUptimeMonitor) return;
+    const monitorId = this.selectedUptimeMonitor.id;
+    const heartbeats = this.uptimeHeartbeats[monitorId] || [];
+
+    // Cleanup
+    if (this.uptimeChartInstance) {
+      this.uptimeChartInstance.destroy();
+      this.uptimeChartInstance = null;
+    }
+
+    const ctx = document.getElementById('uptimeDetailChart');
+    if (!ctx) return;
+
+    // Data (reverse to show chronological)
+    // Limit to last 60 points for performance
+    const reversed = [...heartbeats].slice(0, 60).reverse();
+    const labels = reversed.map(b => {
+      const d = new Date(b.time);
+      return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
+    });
+    const data = reversed.map(b => b.ping || 0);
+
+    this.uptimeChartInstance = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: '响应时间 (ms)',
+          data: data,
+          borderColor: '#10b981',
+          backgroundColor: (context) => {
+            const ctx = context.chart.ctx;
+            const gradient = ctx.createLinearGradient(0, 0, 0, 200);
+            gradient.addColorStop(0, 'rgba(16, 185, 129, 0.2)');
+            gradient.addColorStop(1, 'rgba(16, 185, 129, 0)');
+            return gradient;
+          },
+          borderWidth: 2,
+          fill: true,
+          tension: 0.4,
+          pointRadius: 0,
+          pointHoverRadius: 4
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: {
+          intersect: false,
+          mode: 'index',
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            mode: 'index',
+            intersect: false,
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            titleColor: '#fff',
+            bodyColor: '#fff',
+            borderColor: 'rgba(255, 255, 255, 0.1)',
+            borderWidth: 1
+          }
+        },
+        scales: {
+          x: {
+            display: false,
+            grid: { display: false }
+          },
+          y: {
+            beginAtZero: true,
+            grid: {
+              color: 'rgba(156, 163, 175, 0.1)',
+              drawBorder: false
+            },
+            ticks: {
+              color: '#9ca3af',
+              font: { size: 10 }
+            }
+          }
+        }
+      }
+    });
+  },
+
+  /**
    * 获取监测状态
    */
   getUptimeStatus(monitor) {
@@ -567,12 +663,21 @@ export const uptimeMethods = {
     if (beats.length === 0) return '--';
 
     if (position === 'start') {
-      const oldest = beats[beats.length - 1];
-      if (!oldest?.time) return '--';
-      const minutes = Math.floor((Date.now() - new Date(oldest.time).getTime()) / 60000);
-      if (minutes < 60) return `${minutes}m`;
-      if (minutes < 1440) return `${Math.floor(minutes / 60)}h`;
-      return `${Math.floor(minutes / 1440)}d`;
+      // Find oldest relevant beat displayed in the bar (max 60)
+      const count = beats.length > 60 ? 60 : beats.length;
+      const oldestBeat = beats[count - 1]; // beats is sorted desc (0 is newest)
+
+      if (!oldestBeat || !oldestBeat.time) return '--';
+
+      // Calculate time diff from now (or from newest beat?)
+      // Usually "10m ago" means from Now.
+      const diffMs = Date.now() - new Date(oldestBeat.time).getTime();
+      const seconds = Math.floor(diffMs / 1000);
+
+      if (seconds < 60) return `${seconds}秒`;
+      if (seconds < 3600) return `${Math.floor(seconds / 60)}分钟`;
+      if (seconds < 86400) return `${Math.floor(seconds / 3600)}小时`;
+      return `${Math.floor(seconds / 86400)}天`;
     }
 
     return '现在';
@@ -626,7 +731,8 @@ export const uptimeMethods = {
         (m) =>
           m.name.toLowerCase().includes(search) ||
           (m.url && m.url.toLowerCase().includes(search)) ||
-          (m.hostname && m.hostname.toLowerCase().includes(search))
+          (m.hostname && m.hostname.toLowerCase().includes(search)) ||
+          (m.tags && m.tags.some(t => t.toLowerCase().includes(search)))
       );
     }
 
@@ -650,15 +756,28 @@ export const uptimeMethods = {
     const pingEl = tooltip.querySelector('.uptime-tooltip-ping');
 
     timeEl.textContent = this.formatDateTime(beat.time);
-    dotEl.className = `dot ${beat.status}`;
-    statusEl.textContent =
-      beat.status === 'up' ? '正常' : beat.status === 'down' ? '故障' : '等待中';
-    pingEl.textContent = beat.ping ? `响应时间: ${beat.ping}ms` : beat.msg || '';
+
+    // Reset classes
+    dotEl.className = 'dot';
+    dotEl.classList.add(beat.status);
+
+    const pingText = beat.status === 'up' ? `响应时间: ${beat.ping}ms` : '响应时间: Timeout';
+    const statusText = beat.status === 'up' ? '正常' :
+      beat.status === 'down' ? '故障' :
+        beat.status === 'pending' ? '检测中' : '未知';
+
+    statusEl.textContent = statusText;
+    pingEl.textContent = beat.status === 'up' ? pingText : beat.msg || '';
 
     // 定位
     const rect = event.target.getBoundingClientRect();
-    tooltip.style.left = `${rect.left + rect.width / 2}px`;
-    tooltip.style.top = `${rect.bottom + 10}px`;
+    // Center tooltip above the beat pill
+    const left = rect.left + rect.width / 2;
+    const top = rect.top - 10; // Above
+
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+    tooltip.style.transform = 'translate(-50%, -100%)'; // Move up
     tooltip.classList.add('visible');
   },
 
@@ -677,28 +796,9 @@ export const uptimeMethods = {
  * Uptime 计算属性
  */
 export const uptimeComputed = {
+  // Keeping this for compatibility if Vue needs it, 
+  // but most logic is in getFilteredUptimeMonitors method now.
   filteredUptimeMonitors() {
-    let result = this.uptimeMonitors;
-
-    // 状态筛选
-    if (this.uptimeStatusFilter) {
-      result = result.filter((m) => {
-        const status = this.getUptimeStatus(m);
-        return status === this.uptimeStatusFilter;
-      });
-    }
-
-    // 搜索筛选
-    if (this.uptimeSearchText) {
-      const search = this.uptimeSearchText.toLowerCase();
-      result = result.filter(
-        (m) =>
-          m.name.toLowerCase().includes(search) ||
-          (m.url && m.url.toLowerCase().includes(search)) ||
-          (m.hostname && m.hostname.toLowerCase().includes(search))
-      );
-    }
-
-    return result;
+    return uptimeMethods.getFilteredUptimeMonitors.call(this);
   },
 };
