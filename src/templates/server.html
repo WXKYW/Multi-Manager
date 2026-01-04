@@ -722,9 +722,9 @@
 
               <!-- 翻转卡片：仅在有 GPU 数据时允许翻转 -->
               <div class="flip-card" :class="{ 'flipped': server.gpuChartVisible && hasGpuData(server) }"
-                @click="hasGpuData(server) && toggleGpuChart(server)"
-                :style="{ height: '208px', perspective: '1000px', cursor: hasGpuData(server) ? 'pointer' : 'default', marginBottom: 0 }"
-                :title="hasGpuData(server) ? '点击翻转查看 GPU 趋势' : ''">
+                @click="handleGpuCardClick(server)"
+                :style="{ height: '208px', perspective: '1000px', cursor: 'pointer', marginBottom: 0 }"
+                :title="hasGpuData(server) ? '点击翻转查看 GPU 趋势' : '未检测到显卡'">
                 <div class="flip-card-inner" style="
                     position: relative;
                     width: 100%;

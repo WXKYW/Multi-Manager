@@ -2885,4 +2885,30 @@ export const hostMethods = {
     }
   },
 
+
+
+  // ==================== GPU 卡片交互 ====================
+
+  hasGpuData(server) {
+    if (!server || !server.info) return false;
+
+    // 检查是否有静态 GPU 信息
+    const hasStaticInfo = server.info.gpu && (server.info.gpu.Model || server.info.gpu.Usage);
+    if (hasStaticInfo) return true;
+
+    // 检查历史缓存中是否有 GPU 数据
+    if (server.metricsCache && server.metricsCache.some(r => r.gpu_usage !== null && r.gpu_usage !== undefined && r.gpu_usage > 0)) {
+      return true;
+    }
+
+    return false;
+  },
+
+  handleGpuCardClick(server) {
+    if (this.hasGpuData(server)) {
+      this.toggleGpuChart(server);
+    } else {
+      this.showGlobalToast('未检测到显卡，无法查看详情', 'warning');
+    }
+  },
 };
