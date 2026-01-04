@@ -102,24 +102,24 @@ export const uptimeMethods = {
       this.uptimeHeartbeats[monitorId] = [];
     }
 
-    // Normalize Status
-    // Backend uses 0 (Down) / 1 (Up), Frontend uses 'down' / 'up' / 'pending'
+    // 状态标准化
+    // 后端使用 0 (Down) / 1 (Up), 前端使用 'down' / 'up' / 'pending'
     if (typeof beat.status === 'number') {
       beat.status = beat.status === 1 ? 'up' : 'down';
     }
 
-    // Unshift new beat
+    // 插入心跳
     this.uptimeHeartbeats[monitorId].unshift(beat);
-    // Keep only 50
+    // 仅保留 50 条
     if (this.uptimeHeartbeats[monitorId].length > 50) {
       this.uptimeHeartbeats[monitorId].length = 50;
     }
 
-    // Update stats efficiently
-    // Just re-calc all for simplicity or optimize? Re-calc is fast enough for <100 monitors per beat
+    // 高效更新统计
+    // 简单起见重新计算所有数据，对于 <100 个监控项来说足够快
     this.calculateUptimeStats();
 
-    // Refresh charts if this monitor is selected
+    // 如果当前选中的是此监控项，则刷新图表
     if (this.selectedUptimeMonitor?.id === monitorId) {
       this.renderUptimeChart();
     }
@@ -147,13 +147,11 @@ export const uptimeMethods = {
           this.uptimeHeartbeats[m.id] = [m.lastHeartbeat];
         }
       });
-      // Further fetch history for each?
-      // For now, list API provided last 1. If user clicks detail, we fetch history.
-      // But for sparklines (charts), we usually need more history.
-      // We will leave history empty for now until detail view or bulk fetch.
-      // Optimization: Fetch bulk history? Or let socket fill it up?
-      // Let's iterate and fetch history for all (or top viewport)
-      // For simplicity, fetch history for all (ok for small number)
+      // 是否需要进一步获取历史数据？
+      // 目前列表接口提供了最后一条数据。如果用户点击详情，我们再获取完整历史。
+      // 但对于迷你图 (sparklines)，我们通常需要更多历史。
+      // 优化：批量获取历史记录？还是让 Socket 填满它？
+      // 简单起见，这里为所有项获取历史数据 (数量较少时可接受)
       this.uptimeMonitors.forEach(m => this.loadHeartbeats(m.id));
 
       this.calculateUptimeStats();
@@ -205,7 +203,7 @@ export const uptimeMethods = {
       return;
     }
 
-    // Validation ... (truncated for brevity, logic same)
+    // 验证 ...
     if ((this.uptimeForm.type === 'http' || this.uptimeForm.type === 'keyword') && !this.uptimeForm.url) {
       this.showToast('请输入 URL', 'warning');
       return;
@@ -526,8 +524,8 @@ export const uptimeMethods = {
     const ctx = document.getElementById('uptimeDetailChart');
     if (!ctx) return;
 
-    // Data (reverse to show chronological)
-    // Limit to last 60 points for performance
+    // 数据处理 (反转以按时间顺序显示)
+    // 限制最近 60 个点以保证性能
     const reversed = [...heartbeats].slice(0, 60).reverse();
     const labels = reversed.map(b => {
       const d = new Date(b.time);

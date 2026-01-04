@@ -1,6 +1,6 @@
 /**
- * Uptime Storage Service
- * Handles persistence of monitors and heartbeat history using JSON files.
+ * Uptime 存储服务
+ * 处理监控项和心跳历史数据的 JSON 文件持久化
  */
 
 const fs = require('fs');
@@ -11,7 +11,7 @@ const logger = createLogger('UptimeStorage');
 const DATA_DIR = path.join(__dirname, '../../data');
 const HISTORY_DIR = path.join(DATA_DIR, 'uptime-history');
 
-// Ensure data existence
+// 确保数据目录存在
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(HISTORY_DIR)) fs.mkdirSync(HISTORY_DIR, { recursive: true });
 
@@ -57,33 +57,33 @@ class UptimeStorage {
     }
 
     /**
-     * Get all monitors
+     * 获取所有监控项
      */
     getAll() {
         return this.monitors;
     }
 
     /**
-     * Get active monitors
+     * 获取活跃的监控项
      */
     getActive() {
         return this.monitors.filter(m => m.active);
     }
 
     /**
-     * Get single monitor
+     * 获取单个监控项
      */
     getById(id) {
         return this.monitors.find(m => m.id == id);
     }
 
     /**
-     * Create monitor
+     * 创建监控项
      */
     create(data) {
         const newMonitor = {
             ...data,
-            id: Date.now(), // Simple ID
+            id: Date.now(), // 简单 ID 生成
             createdAt: new Date().toISOString()
         };
         this.monitors.push(newMonitor);
@@ -92,7 +92,7 @@ class UptimeStorage {
     }
 
     /**
-     * Update monitor
+     * 更新监控项
      */
     update(id, data) {
         const index = this.monitors.findIndex(m => m.id == id);
@@ -105,14 +105,15 @@ class UptimeStorage {
     }
 
     /**
-     * Delete monitor
+     * 删除监控项
      */
     delete(id) {
         const index = this.monitors.findIndex(m => m.id == id);
         if (index !== -1) {
             this.monitors.splice(index, 1);
             this.saveMonitors();
-            // Optionally clean up history file?
+            // 可选：清理历史文件
+
             const historyFile = path.join(HISTORY_DIR, `${id}.json`);
             if (fs.existsSync(historyFile)) fs.unlinkSync(historyFile);
             return true;
@@ -120,10 +121,10 @@ class UptimeStorage {
         return false;
     }
 
-    // ==================== History Handling ====================
+    // ==================== 历史记录处理 ====================
 
     /**
-     * Save heartbeat
+     * 保存心跳数据
      */
     saveHeartbeat(monitorId, beat) {
         const file = path.join(HISTORY_DIR, `${monitorId}.json`);
@@ -135,10 +136,10 @@ class UptimeStorage {
             }
         } catch (e) { /* ignore */ }
 
-        // Prepend new beat
+        // 插入新记录到头部
         history.unshift(beat);
 
-        // Default Keep last 100 for display (backend can store more if needed, but for json implementation keep it small)
+        // 默认保留最近 100 条用于显示 (后端可以存储更多，但对于 JSON 实现保持精简)
         if (history.length > 200) history = history.slice(0, 200);
 
         try {
@@ -151,7 +152,7 @@ class UptimeStorage {
     }
 
     /**
-     * Get history
+     * 获取历史数据
      */
     getHistory(monitorId, limit = 50) {
         const file = path.join(HISTORY_DIR, `${monitorId}.json`);

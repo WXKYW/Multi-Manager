@@ -7,7 +7,6 @@ import { reactive } from 'vue';
 
 // 确保 reactive 始终从全局 Vue 对象获取，增加鲁棒性
 // 纯 Vue 3 (ESM) 不需要 window.Vue 检测，直接使用导入的 reactive
-// const reactive = (obj) => { ... } - REMOVED
 
 /**
  * 模块配置 - 统一管理所有模块的元数据
@@ -159,7 +158,7 @@ export const store = reactive({
     'self-h': true,
     server: true,
     totp: true,
-    music: false,
+    music: false, // 音乐模块默认隐藏
     uptime: true,
   },
   channelEnabled: {
@@ -217,7 +216,7 @@ export const store = reactive({
   // Cron Scheduler (Added)
   cronTasks: [],
   cronLogs: [],
-  cronEditingTask: null, // { id, name, schedule, command, type, enabled } or null
+  cronEditingTask: null, // 当前编辑的任务对象 { id, name, schedule, command, type, enabled } 或 null
   cronLoading: false,
 
   openListAccounts: [],

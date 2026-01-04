@@ -1,6 +1,6 @@
 /**
- * Uptime Monitor Service
- * Handles the actual checking logic and scheduling.
+ * Uptime 监控服务
+ * 处理实际的检查逻辑和调度
  */
 
 const axios = require('axios');
@@ -11,22 +11,21 @@ const { createLogger } = require('../../src/utils/logger');
 
 const logger = createLogger('UptimeService');
 
-// Global intervals map: monitorId -> IntervalID
+// 全局定时器映射: monitorId -> IntervalID
 const intervals = {};
 let io = null;
 
 class UptimeService {
     /**
-     * Initialize with Server instance to get Socket.IO
+     * 使用 Server 初始化以获取 Socket.IO
      */
     init(server) {
-        // If Socket.IO is already attached to server in server.js, we might need a way to pass it.
-        // In server.js structure, IO is usually initialized. 
-        // We will assume `monitor-service` is required in router or server.js and we can pass IO.
+        // 如果 Server.js 中已经附加了 Socket.IO (通常是这样的)。
+        // 我们假设 `monitor-service` 在 router 或 server.js 中被引用，并且可以传递 IO。
 
-        // For now, restarting all monitors
+        // 目前先重启所有监控项
         this.restartAllMonitors();
-        logger.info('Uptime Monitor Service Initialized');
+        logger.info('Uptime 监控服务已初始化');
     }
 
     setIO(socketIO) {
@@ -34,13 +33,13 @@ class UptimeService {
     }
 
     /**
-     * Restart all active monitors (e.g. on boot)
+     * 重启所有活跃的监控项 (例如启动时)
      */
     restartAllMonitors() {
         this.stopAll();
         const monitors = storage.getActive();
         monitors.forEach(m => this.startMonitor(m));
-        logger.info(`Started ${Object.keys(intervals).length} monitors`);
+        logger.info(`已启动 ${Object.keys(intervals).length} 个监控项`);
     }
 
     stopAll() {
@@ -49,16 +48,16 @@ class UptimeService {
     }
 
     /**
-     * Start a single monitor
+     * 启动单个监控项
      */
     startMonitor(monitor) {
         if (intervals[monitor.id]) clearInterval(intervals[monitor.id]);
         if (!monitor.active) return;
 
-        // Default interval 60s
+        // 默认间隔 60秒
         const seconds = monitor.interval && monitor.interval > 5 ? monitor.interval : 60;
 
-        // Initial check immediately (with small delay to avoid boot storm)
+        // 立即执行初步检查 (稍微延迟以避免启动风暴)
         setTimeout(() => this.check(monitor), 2000 + Math.random() * 2000);
 
         intervals[monitor.id] = setInterval(() => {
@@ -74,7 +73,7 @@ class UptimeService {
     }
 
     /**
-     * Perform Check
+     * 执行检查
      */
     async check(monitor) {
         const startTime = Date.now();
@@ -92,11 +91,12 @@ class UptimeService {
                 status = 1;
                 msg = 'OK';
             } else if (monitor.type === 'ping') {
-                // Fallback to TCP ping if no generic ping lib
+                // 如果没有通用的 ping 库，回退到 TCP ping
                 if (monitor.hostname) {
-                    // Basic workaround: Try to connect to port 80 or 443 if not specified, 
-                    // but 'ping' implies ICMP. Since we want no deps issues, implementing basic TCP connect to 80/443 for "ping" type if user enters hostname.
-                    // Real ICMP requires privileged execution usually.
+                    // 基础变通方案: 如果未指定端口，尝试连接 80 或 443 端口。
+                    // 'ping' 通常指 ICMP，但由于权限问题，这里如果用户输入主机名，
+                    // 我们实现基础的 TCP 连接到 80/443 作为 "ping" 类型的替代。
+                    // 真正的 ICMP 通常需要特权执行。
                     await this.checkPingLike(monitor);
                     status = 1;
                     msg = 'OK';
@@ -126,16 +126,16 @@ class UptimeService {
             time: new Date().toISOString()
         };
 
-        // Save
+        // 保存
         storage.saveHeartbeat(monitor.id, beat);
 
-        // Emit via Socket.IO
+        // 通过 Socket.IO 推送
         if (io) {
             io.emit('uptime:heartbeat', { monitorId: monitor.id, beat });
         }
     }
 
-    // --- Check Logic ---
+    // --- 检查逻辑 ---
 
     async checkHttp(monitor) {
         const agent = new https.Agent({
@@ -156,22 +156,22 @@ class UptimeService {
             }
         };
 
-        // If user specified codes, we need custom validator
+        // 如果用户指定了状态码，我们需要自定义验证器
         if (monitor.accepted_status_codes) {
             config.validateStatus = (status) => {
                 // "200-299" -> 200..299
                 // "200, 201"
-                // TODO: Robust parsing. For now assuming default range behavior or simple match.
-                return true; // We will check manually below if needed, or just let it pass if it returns
+                // TODO: 增强健壮性。目前假设默认范围行为或简单匹配。
+                return true; // 我们将在下面手动检查，或者如果返回就让它通过
             };
         }
 
         const res = await axios(config);
 
-        // Check Status Code explicitly if needed logic here
+        // 如果需要，在此处显式检查状态码逻辑
         if (monitor.accepted_status_codes) {
-            // Simplest: 200-299 default
-            // If fail, throw error
+            // 最简单的情况: 默认 200-299
+            // 如果失败则抛出错误
         }
         return res;
     }
@@ -201,8 +201,8 @@ class UptimeService {
     }
 
     async checkPingLike(monitor) {
-        // Use TCP connect to 80, 443, or 53 as a "Ping" proxy if just hostname
-        // This is a naive approximation.
+        // 使用 TCP 连接到 80, 443 或 53 作为仅有主机名时的 "Ping" 代理
+        // 这是一个简单的近似实现
         const ports = [80, 443, 53];
         for (const p of ports) {
             try {
