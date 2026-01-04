@@ -160,21 +160,27 @@ if (!fs.existsSync(chatImagesDir)) {
 }
 app.use('/uploads/chat_images', express.static(chatImagesDir));
 
+// 导入认证中间件
+const { requireAuth } = require('./src/middleware/auth');
+
 /**
  * 聊天图片上传接口
  * POST /api/chat/upload-image
+ * 使用 requireAuth 统一鉴权 (支持 Cookie/Session/Header)
  */
-app.post('/api/chat/upload-image', (req, res) => {
+app.post('/api/chat/upload-image', requireAuth, (req, res) => {
+  logger.info(`[Upload Debug] Content-Type: ${req.headers['content-type']}`);
+  logger.info(`[Upload Debug] Files keys: ${req.files ? Object.keys(req.files).join(',') : 'null'}`);
+
   try {
     if (!req.files || !req.files.image) {
+      logger.error('[Upload Debug] No image file found in request');
       return res.status(400).json({ success: false, error: '未找到上传的图片文件' });
     }
 
-    const { loadAdminPassword } = require('./src/services/config');
-    const adminPassword = loadAdminPassword();
-    if (adminPassword && req.headers['x-admin-password'] !== adminPassword) {
-      return res.status(401).json({ success: false, error: '未授权' });
-    }
+    // 移除旧的手动密码校验，已由 verifyAuth 接管
+    // const { loadAdminPassword } = require('./src/services/config');
+    // ...
 
     const image = req.files.image;
     const crypto = require('crypto');
@@ -332,9 +338,7 @@ server.listen(PORT, '0.0.0.0', () => {
 
       // Cloudflare DNS 模块
       if (cfAccounts > 0 || cfZones > 0 || cfRecords > 0 || cfTemplates > 0) {
-        logger.groupItem(
-          `Cloudflare DNS: ${cfAccounts} 个账号, ${cfZones} 个域名, ${cfRecords} 条记录, ${cfTemplates} 个模板`
-        );
+        logger.groupItem(`Cloudflare DNS: ${cfAccounts} 个账号, ${cfZones} 个域名, ${cfRecords} 条记录`);
       }
 
       // OpenAI 模块

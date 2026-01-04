@@ -28,7 +28,7 @@ class MonitorService {
    * 启动监控服务 (已废弃自动拨测，仅保留占位符)
    */
   start() {
-    logger.info('监控服务已启动（纯 Agent 模式）');
+    logger.info('监控服务已启动');
   }
 
   /**

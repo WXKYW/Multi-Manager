@@ -257,7 +257,7 @@
                         font-weight: 500;
                       ">Antigravity 前缀</label>
                     <input type="text" class="form-input" v-model="channelModelPrefix['antigravity']"
-                      placeholder="例如: ag/" />
+                      @change="saveUserSettingsToServer" placeholder="例如: ag/" />
                   </div>
                   <div class="form-group" style="margin-bottom: 0">
                     <label class="form-label" style="
@@ -267,7 +267,7 @@
                         font-weight: 500;
                       ">Gemini CLI 前缀</label>
                     <input type="text" class="form-input" v-model="channelModelPrefix['gemini-cli']"
-                      placeholder="例如: gcli/" />
+                      @change="saveUserSettingsToServer" placeholder="例如: gcli/" />
                   </div>
                 </div>
               </div>

@@ -8,6 +8,7 @@ import { toast } from './toast.js';
 
 // 缓存 key 常量（定义在模块级别，避免 Vue 警告）
 const OPENAI_CACHE_KEY = 'openai_endpoints_cache';
+const imageUploadCache = new Map(); // 图片上传缓存
 import { renderMarkdown } from './utils.js';
 
 export const openaiMethods = {
@@ -587,6 +588,16 @@ export const openaiMethods = {
 
   // 图片压缩工具函数
   async compressImage(file, maxSize = 1920, quality = 0.8) {
+    // 优化：如果图片小于 1MB，直接跳过压缩，避免主线程卡顿
+    if (file.size < 1024 * 1024) {
+      console.log(`[图片压缩] ${file.name}: 文件较小 (${(file.size / 1024).toFixed(0)}KB)，跳过压缩`);
+      return new Promise(resolve => {
+        const reader = new FileReader();
+        reader.onload = e => resolve(e.target.result);
+        reader.readAsDataURL(file);
+      });
+    }
+
     return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onload = (e) => {
@@ -635,20 +646,25 @@ export const openaiMethods = {
     });
   },
 
-  // 简单的图片上传缓存 (DataURL -> ServerURL)
-  _imageUploadCache: new Map(),
-
   // 将图片上传到服务器并返回持久化 URL
   async uploadImageToServer(dataUrl, originalFile = null) {
     try {
       // 检查缓存
-      if (this._imageUploadCache.has(dataUrl)) {
-        return this._imageUploadCache.get(dataUrl);
+      if (imageUploadCache.has(dataUrl)) {
+        console.log('[Image Upload] Hit cache:', imageUploadCache.get(dataUrl));
+        return imageUploadCache.get(dataUrl);
       }
 
       // 检查是否已经是服务器 URL (防止重复上传)
       if (dataUrl.startsWith('/uploads/')) return dataUrl;
-      if (!dataUrl.startsWith('data:')) return dataUrl;
+
+      // 注意：如果 dataUrl 不是 base64 也不是 /uploads，可能是一个外部 URL，直接返回
+      if (!dataUrl.startsWith('data:')) {
+        console.log('[Image Upload] External URL detected, skipping upload:', dataUrl.substring(0, 50) + '...');
+        return dataUrl;
+      }
+
+      console.log('[Image Upload] Starting upload for:', originalFile ? originalFile.name : 'pasted_image');
 
       // 转换为 Blob
       const res = await fetch(dataUrl);
@@ -658,24 +674,35 @@ export const openaiMethods = {
       const fileName = originalFile ? originalFile.name : 'pasted_image.jpg';
       formData.append('image', blob, fileName);
 
+      const headers = store.getAuthHeaders();
+      delete headers['Content-Type']; // FormData 此时会自动设置 multipart/form-data 和 boundary
+
       const uploadResponse = await fetch('/api/chat/upload-image', {
         method: 'POST',
-        headers: {
-          'x-admin-password': localStorage.getItem('admin_password') || ''
-        },
+        headers: headers,
         body: formData
       });
 
+      if (!uploadResponse.ok) {
+        const errText = await uploadResponse.text();
+        console.error('[Image Upload] Server returned error:', uploadResponse.status, errText);
+        toast.error(`图片上传服务器失败 (${uploadResponse.status})，将使用 Base64 存储 (可能导致卡顿)`);
+        return dataUrl;
+      }
+
       const result = await uploadResponse.json();
       if (result.success) {
-        this._imageUploadCache.set(dataUrl, result.url);
+        console.log('[Image Upload] Success:', result.url);
+        imageUploadCache.set(dataUrl, result.url);
         return result.url;
       } else {
-        console.error('图片上传失败:', result.error);
+        console.error('[Image Upload] API returned success=false:', result.error);
+        toast.error(`图片上传失败: ${result.error}，将使用 Base64 存储`);
         return dataUrl; // 降级使用 base64
       }
     } catch (e) {
-      console.error('图片上传异常:', e);
+      console.error('[Image Upload] Exception:', e);
+      toast.error(`图片上传异常: ${e.message}，将使用 Base64 存储`);
       return dataUrl;
     }
   },
@@ -796,15 +823,28 @@ export const openaiMethods = {
         ...store.openaiChatMessages,
       ];
 
-      // 显式指定完整路径，防止丢失前缀
       const headers = {
         ...store.getAuthHeaders(),
         'Content-Type': 'application/json',
       };
 
-      // 如果选定了特定端点，添加到 Header 中
-      if (store.openaiChatEndpoint) {
-        headers['x-endpoint-id'] = store.openaiChatEndpoint;
+      // 智能端点路由逻辑
+      let targetEndpointId = store.openaiChatEndpoint;
+
+      // 如果未指定端点 (聚合模式)，尝试从本地数据中查找该模型所属的端点
+      // 帮助后端更准确地路由，避免因后端默认路由失效导致 404/500
+      if (!targetEndpointId && store.openaiChatModel) {
+        const foundEp = store.openaiEndpoints.find(ep =>
+          ep.models && ep.models.some(m => (typeof m === 'string' ? m : m.id) === store.openaiChatModel)
+        );
+        if (foundEp) {
+          targetEndpointId = foundEp.id;
+          console.log(`[Chat] Auto-routed model ${store.openaiChatModel} to endpoint: ${foundEp.name} (${foundEp.id})`);
+        }
+      }
+
+      if (targetEndpointId) {
+        headers['x-endpoint-id'] = targetEndpointId;
       }
 
       const response = await fetch('/api/openai/v1/chat/completions', {
@@ -823,17 +863,17 @@ export const openaiMethods = {
         let errorMessage = `HTTP 错误 ${response.status}`;
         try {
           const errData = await response.json();
-          // 智能提取各种格式的错误消息
+          // 智能提取各种格式的错误消息，并确保转换为字符串以避免 [object Object]
           if (errData.error) {
             if (typeof errData.error === 'string') {
               errorMessage = errData.error;
             } else if (errData.error.message) {
-              errorMessage = errData.error.message;
-            } else if (typeof errData.error === 'object') {
+              errorMessage = String(errData.error.message);
+            } else {
               errorMessage = JSON.stringify(errData.error);
             }
           } else if (errData.message) {
-            errorMessage = errData.message;
+            errorMessage = String(errData.message);
           } else if (typeof errData === 'string') {
             errorMessage = errData;
           } else {
@@ -906,7 +946,7 @@ export const openaiMethods = {
 
       console.error('AI 对话失败:', error);
 
-      // 改进错误提取逻辑，处理各种错误格式
+      // 改进错误提取逻辑，确保不显示 [object Object]
       let displayError = '未知错误';
 
       if (typeof error === 'string') {
@@ -920,7 +960,7 @@ export const openaiMethods = {
           if (typeof error.error === 'string') {
             displayError = error.error;
           } else if (error.error.message) {
-            displayError = error.error.message;
+            displayError = String(error.error.message);
           } else {
             try {
               displayError = JSON.stringify(error.error);
@@ -932,11 +972,17 @@ export const openaiMethods = {
           // 最后尝试 JSON.stringify
           try {
             const str = JSON.stringify(error);
-            displayError = str !== '{}' ? str : '请求失败';
+            displayError = (str && str !== '{}') ? str : String(error);
+            if (displayError === '{}') displayError = '请求失败 (空错误对象)';
           } catch {
             displayError = String(error) || '请求失败';
           }
         }
+      }
+
+      // 最终防线
+      if (typeof displayError === 'object' || displayError === '[object Object]') {
+        displayError = '请求失败 (无法解析错误详情)';
       }
 
       this.showOpenaiToast('对话失败: ' + displayError, 'error');

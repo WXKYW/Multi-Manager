@@ -1670,7 +1670,24 @@ router.post('/v1/chat/completions', requireApiAuth, async (req, res) => {
           res.end();
 
           // 记录成功日志 (包含累计的回复内容和思考过程)
-          const originalMessages = JSON.parse(JSON.stringify(req.body.messages || []));
+          let originalMessages = JSON.parse(JSON.stringify(req.body.messages || []));
+
+          // === 日志净化：移除 Base64 图片 ===
+          originalMessages.forEach(msg => {
+            if (Array.isArray(msg.content)) {
+              msg.content.forEach(part => {
+                if (part.type === 'image_url' && part.image_url?.url?.startsWith('data:')) {
+                  if (part.image_url._original_url) {
+                    // 恢复原始路径，以便在前端预览
+                    part.image_url.url = part.image_url._original_url;
+                  } else {
+                    part.image_url.url = `data:image/... [Base64 hidden, size=${part.image_url.url.length}]`;
+                  }
+                }
+              });
+            }
+          });
+          // =================================
 
           // 确保合并系统指令到日志中
           if (!originalMessages.some(m => m.role === 'system')) {
@@ -1715,7 +1732,24 @@ router.post('/v1/chat/completions', requireApiAuth, async (req, res) => {
           // 确保返回结果中的 model 是带前缀的
           if (result && result.model) result.model = modelWithPrefix;
 
-          const originalMessages = JSON.parse(JSON.stringify(req.body.messages || []));
+          let originalMessages = JSON.parse(JSON.stringify(req.body.messages || []));
+
+          // === 日志净化：移除 Base64 图片 ===
+          originalMessages.forEach(msg => {
+            if (Array.isArray(msg.content)) {
+              msg.content.forEach(part => {
+                if (part.type === 'image_url' && part.image_url?.url?.startsWith('data:')) {
+                  if (part.image_url._original_url) {
+                    // 恢复原始路径，以便在前端预览
+                    part.image_url.url = part.image_url._original_url;
+                  } else {
+                    part.image_url.url = `data:image/... [Base64 hidden, size=${part.image_url.url.length}]`;
+                  }
+                }
+              });
+            }
+          });
+          // =================================
 
           // 确保合并系统指令到日志中
           if (!originalMessages.some(m => m.role === 'system')) {
@@ -1752,7 +1786,24 @@ router.post('/v1/chat/completions', requireApiAuth, async (req, res) => {
         lastError = error;
 
         // 如果是 401 之外的错误（通常是 429 或 5xx），记录日志并继续循环
-        const originalMessages = JSON.parse(JSON.stringify(req.body.messages || []));
+        let originalMessages = JSON.parse(JSON.stringify(req.body.messages || []));
+
+        // === 日志净化：移除 Base64 图片 ===
+        originalMessages.forEach(msg => {
+          if (Array.isArray(msg.content)) {
+            msg.content.forEach(part => {
+              if (part.type === 'image_url' && part.image_url?.url?.startsWith('data:')) {
+                if (part.image_url._original_url) {
+                  // 恢复原始路径，以便在前端预览
+                  part.image_url.url = part.image_url._original_url;
+                } else {
+                  part.image_url.url = `data:image/... [Base64 hidden, size=${part.image_url.url.length}]`;
+                }
+              }
+            });
+          }
+        });
+        // =================================
 
         // 确保合并系统指令到日志中
         if (!originalMessages.some(m => m.role === 'system')) {

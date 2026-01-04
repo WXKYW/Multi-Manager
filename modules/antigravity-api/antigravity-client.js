@@ -3,7 +3,7 @@ const { HttpsProxyAgent } = require('https-proxy-agent');
 const AntigravityRequester = require('./antigravity-requester');
 const storage = require('./storage');
 const path = require('path');
-const _fs = require('fs'); // Reserved for future use
+const fs = require('fs');
 
 // 默认配置 (保留作为 fallback)
 const DEFAULT_CONFIG = {
@@ -408,6 +408,33 @@ function convertOpenAIToAntigravityRequest(openaiRequest, token) {
               parts.push({
                 inlineData: { mimeType: `image/${match[1]}`, data: match[2] },
               });
+            } else if (imageUrl.startsWith('/uploads/')) {
+              // 处理本地上传的图片 (如 /uploads/chat_images/xxx.jpg)
+              try {
+                // 构造文件路径: process.cwd() + /data + /uploads/...
+                const relativePath = imageUrl.startsWith('/') ? imageUrl.slice(1) : imageUrl;
+                const filePath = path.join(process.cwd(), 'data', relativePath);
+
+                if (fs.existsSync(filePath)) {
+                  const fileBuffer = fs.readFileSync(filePath);
+                  const base64Data = fileBuffer.toString('base64');
+                  const ext = path.extname(filePath).toLowerCase();
+                  // 简单的 mime 类型映射
+                  let mimeType = 'image/jpeg';
+                  if (ext === '.png') mimeType = 'image/png';
+                  else if (ext === '.webp') mimeType = 'image/webp';
+                  else if (ext === '.gif') mimeType = 'image/gif';
+
+                  parts.push({
+                    inlineData: { mimeType: mimeType, data: base64Data }
+                  });
+                  console.log(`[Antigravity] Loaded local image: ${filePath} (${Math.round(fileBuffer.length / 1024)}KB)`);
+                } else {
+                  console.warn(`[Antigravity] Image file not found: ${filePath}`);
+                }
+              } catch (e) {
+                console.error(`[Antigravity] Failed to process local image: ${e.message}`);
+              }
             }
           }
         }
@@ -447,7 +474,7 @@ function convertOpenAIToAntigravityRequest(openaiRequest, token) {
               typeof tc.function.arguments === 'string'
                 ? JSON.parse(tc.function.arguments)
                 : tc.function.arguments || {};
-          } catch (e) {}
+          } catch (e) { }
 
           const part = {
             functionCall: { id: tc.id, name: tc.function.name, args },
@@ -524,21 +551,21 @@ function convertOpenAIToAntigravityRequest(openaiRequest, token) {
   const antigravityTools =
     tools && tools.length > 0
       ? tools
-          .map(tool => {
-            const parameters = tool.function?.parameters
-              ? cleanJsonSchema({ ...tool.function.parameters })
-              : {};
-            return {
-              functionDeclarations: [
-                {
-                  name: tool.function?.name,
-                  description: tool.function?.description,
-                  parameters: parameters,
-                },
-              ],
-            };
-          })
-          .filter(t => t.functionDeclarations[0].name)
+        .map(tool => {
+          const parameters = tool.function?.parameters
+            ? cleanJsonSchema({ ...tool.function.parameters })
+            : {};
+          return {
+            functionDeclarations: [
+              {
+                name: tool.function?.name,
+                description: tool.function?.description,
+                parameters: parameters,
+              },
+            ],
+          };
+        })
+        .filter(t => t.functionDeclarations[0].name)
       : [];
 
   const sessionId = token?.sessionId || String(-Math.floor(Math.random() * 9e18));

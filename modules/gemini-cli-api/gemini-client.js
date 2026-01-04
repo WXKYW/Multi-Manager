@@ -208,6 +208,43 @@ class GeminiCliClient {
       };
     }
 
+    // 处理本地文件路径 (/uploads/...)
+    if (imageUrl.startsWith('/uploads/')) {
+      try {
+        const fs = require('fs');
+        const path = require('path');
+        // 构造文件路径: process.cwd() + /data + /uploads/...
+        const relativePath = imageUrl.startsWith('/') ? imageUrl.slice(1) : imageUrl;
+        const filePath = path.join(process.cwd(), 'data', relativePath);
+
+        if (fs.existsSync(filePath)) {
+          const fileBuffer = fs.readFileSync(filePath);
+          const base64Data = fileBuffer.toString('base64');
+          const ext = path.extname(filePath).toLowerCase();
+
+          let mimeType = 'image/jpeg';
+          if (ext === '.png') mimeType = 'image/png';
+          else if (ext === '.webp') mimeType = 'image/webp';
+          else if (ext === '.gif') mimeType = 'image/gif';
+
+          logger.info(`[Gemini-Client] Loaded local image: ${filePath} (${Math.round(fileBuffer.length / 1024)}KB)`);
+
+          return {
+            inlineData: {
+              mimeType: mimeType,
+              data: base64Data
+            }
+          };
+        } else {
+          logger.warn(`[Gemini-Client] Image file not found: ${filePath}`);
+          return null;
+        }
+      } catch (e) {
+        logger.error(`[Gemini-Client] Failed to process local image: ${e.message}`);
+        return null;
+      }
+    }
+
     // HTTP/HTTPS URL 暂不支持（需要下载图片）
     if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
       logger.warn(`HTTP image URLs not yet supported, skipping: ${imageUrl.substring(0, 80)}`);

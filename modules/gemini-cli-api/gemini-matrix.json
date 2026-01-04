@@ -4,31 +4,31 @@
     "maxThinking": false,
     "noThinking": false,
     "search": false,
-    "fakeStream": false,
-    "antiTrunc": true
+    "fakeStream": true,
+    "antiTrunc": false
   },
   "gemini-2.5-flash": {
     "base": true,
     "maxThinking": false,
     "noThinking": false,
     "search": false,
-    "fakeStream": false,
-    "antiTrunc": true
+    "fakeStream": true,
+    "antiTrunc": false
   },
   "gemini-3-pro-preview": {
     "base": true,
     "maxThinking": false,
     "noThinking": false,
     "search": false,
-    "fakeStream": false,
-    "antiTrunc": true
+    "fakeStream": true,
+    "antiTrunc": false
   },
   "gemini-3-flash-preview": {
     "base": true,
     "maxThinking": false,
     "noThinking": false,
     "search": false,
-    "fakeStream": false,
-    "antiTrunc": true
+    "fakeStream": true,
+    "antiTrunc": false
   }
 }

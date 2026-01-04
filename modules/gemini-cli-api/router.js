@@ -1408,7 +1408,25 @@ router.post(['/v1/chat/completions', '/chat/completions'], requireApiKey, async 
           res.end();
 
           // 记录成功日志（包含累积的回复内容）
-          const originalMessages = JSON.parse(JSON.stringify(req.body.messages || []));
+          let originalMessages = JSON.parse(JSON.stringify(req.body.messages || []));
+
+          // === 日志净化：移除 Base64 图片 ===
+          originalMessages.forEach(msg => {
+            if (Array.isArray(msg.content)) {
+              msg.content.forEach(part => {
+                if (part.type === 'image_url' && part.image_url?.url?.startsWith('data:')) {
+                  if (part.image_url._original_url) {
+                    // 恢复原始路径，以便在前端预览
+                    part.image_url.url = part.image_url._original_url;
+                  } else {
+                    part.image_url.url = `data:image/... [Base64 hidden, size=${part.image_url.url.length}]`;
+                  }
+                }
+              });
+            }
+          });
+          // =================================
+
           const settings = await storage.getSettings();
 
           // 确保合并系统指令到日志中
@@ -1476,7 +1494,25 @@ router.post(['/v1/chat/completions', '/chat/completions'], requireApiKey, async 
           };
 
           // 记录成功日志
-          const originalMessages = JSON.parse(JSON.stringify(req.body.messages || []));
+          let originalMessages = JSON.parse(JSON.stringify(req.body.messages || []));
+
+          // === 日志净化：移除 Base64 图片 ===
+          originalMessages.forEach(msg => {
+            if (Array.isArray(msg.content)) {
+              msg.content.forEach(part => {
+                if (part.type === 'image_url' && part.image_url?.url?.startsWith('data:')) {
+                  if (part.image_url._original_url) {
+                    // 恢复原始路径，以便在前端预览
+                    part.image_url.url = part.image_url._original_url;
+                  } else {
+                    part.image_url.url = `data:image/... [Base64 hidden, size=${part.image_url.url.length}]`;
+                  }
+                }
+              });
+            }
+          });
+          // =================================
+
           const settings = await storage.getSettings();
 
           // 确保合并系统指令到日志中
@@ -1540,7 +1576,25 @@ router.post(['/v1/chat/completions', '/chat/completions'], requireApiKey, async 
         }
 
         // 记录错误日志
-        const originalMessages = JSON.parse(JSON.stringify(req.body.messages || []));
+        let originalMessages = JSON.parse(JSON.stringify(req.body.messages || []));
+
+        // === 日志净化：移除 Base64 图片 ===
+        originalMessages.forEach(msg => {
+          if (Array.isArray(msg.content)) {
+            msg.content.forEach(part => {
+              if (part.type === 'image_url' && part.image_url?.url?.startsWith('data:')) {
+                if (part.image_url._original_url) {
+                  // 恢复原始路径，以便在前端预览
+                  part.image_url.url = part.image_url._original_url;
+                } else {
+                  part.image_url.url = `data:image/... [Base64 hidden, size=${part.image_url.url.length}]`;
+                }
+              }
+            });
+          }
+        });
+        // =================================
+
         const settings = await storage.getSettings();
 
         // 确保合并系统指令到日志中

@@ -574,6 +574,67 @@ router.post(
       }
       fullUrl += '/chat/completions';
 
+      // ==================== 图片处理逻辑开始 ====================
+      // 创建请求体的深拷贝，避免污染 req.body (影响日志记录)
+      let upstreamBody = req.body;
+      try {
+        upstreamBody = JSON.parse(JSON.stringify(req.body));
+      } catch (e) {
+        logger.error(`[OpenAI Proxy] Body clone failed: ${e.message}`);
+      }
+
+      // 检查并转换本地图片路径为 Base64，以兼容公网 API
+      // 优化：如果是内部模块 (Gemini CLI / Antigravity)，它们支持直接读取本地文件路径，无需转换
+      // 这样可以避免下游日志中出现巨大的 Base64 字符串，且能正确显示图片路径
+      const isInternalModule = fullUrl.includes('gemini-cli') || fullUrl.includes('antigravity');
+
+      if (!isInternalModule && upstreamBody.messages && Array.isArray(upstreamBody.messages)) {
+        try {
+          const fs = require('fs');
+          const path = require('path');
+
+          for (const msg of upstreamBody.messages) {
+            if (Array.isArray(msg.content)) {
+              for (const part of msg.content) {
+                if (part.type === 'image_url' && part.image_url && part.image_url.url) {
+                  const imageUrl = part.image_url.url;
+                  if (typeof imageUrl === 'string' && imageUrl.startsWith('/uploads/')) {
+                    try {
+                      const relativePath = imageUrl.startsWith('/') ? imageUrl.slice(1) : imageUrl;
+                      const filePath = path.join(process.cwd(), 'data', relativePath);
+
+                      if (fs.existsSync(filePath)) {
+                        const fileBuffer = fs.readFileSync(filePath);
+                        const ext = path.extname(filePath).toLowerCase();
+                        let mimeType = 'image/jpeg';
+                        if (ext === '.png') mimeType = 'image/png';
+                        else if (ext === '.webp') mimeType = 'image/webp';
+                        else if (ext === '.gif') mimeType = 'image/gif';
+
+                        const base64Data = fileBuffer.toString('base64');
+                        // 保存原始路径供下游日志使用
+                        const originalUrl = part.image_url.url;
+                        part.image_url.url = `data:${mimeType};base64,${base64Data}`;
+                        part.image_url._original_url = originalUrl;
+
+                        logger.info(`[OpenAI Proxy] Converted local image to Base64: ${filePath} (${Math.round(fileBuffer.length / 1024)}KB)`);
+                      } else {
+                        logger.warn(`[OpenAI Proxy] Local image file not found: ${filePath}`);
+                      }
+                    } catch (err) {
+                      logger.error(`[OpenAI Proxy] Failed to convert local image: ${err.message}`);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        } catch (e) {
+          logger.error(`[OpenAI Proxy] Image processing loop error: ${e.message}`);
+        }
+      }
+      // ==================== 图片处理逻辑结束 ====================
+
       // 构建请求
       const axios = require('axios');
       const config = {
@@ -584,7 +645,7 @@ router.post(
           'Content-Type': 'application/json',
           Accept: stream ? 'text/event-stream' : 'application/json',
         },
-        data: req.body,
+        data: upstreamBody,
         responseType: stream ? 'stream' : 'json',
         timeout: 60000,
       };
