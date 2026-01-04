@@ -332,6 +332,20 @@ server.listen(PORT, '0.0.0.0', () => {
     logger.warn('主机监控服务启动失败:', error.message);
   }
 
+  // Uptime 监控服务初始化
+  try {
+    const uptimeService = require('./modules/uptime-api/monitor-service');
+    // 注入 Socket.IO (复用 AgentService 的 IO 实例)
+    const agentService = require('./modules/server-management/agent-service');
+    if (agentService.io) {
+      uptimeService.setIO(agentService.io);
+    }
+    uptimeService.init(server);
+    logger.success('Uptime 监控服务已启动');
+  } catch (error) {
+    logger.warn('Uptime 监控服务启动失败:', error.message);
+  }
+
   // 启动自动日志清理任务 (每 12 小时执行一次)
   const AUTO_CLEANUP_INTERVAL = 12 * 60 * 60 * 1000;
   setInterval(() => {

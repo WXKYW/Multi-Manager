@@ -238,7 +238,8 @@ pre,
   .theme-server,
   .theme-paas,
   .theme-totp,
-  .theme-music {
+  .theme-music,
+  .theme-uptime {
     --current-primary: var(--primary-color);
     --current-dark: var(--primary-dark);
   }
@@ -295,6 +296,12 @@ pre,
     --current-primary: #f43f5e;
     --current-dark: #e11d48;
     --current-rgb: 244, 63, 94;
+  }
+
+  .theme-uptime {
+    --current-primary: #10b981;
+    --current-dark: #059669;
+    --current-rgb: 16, 185, 129;
   }
 
   /* 应用动态颜色到通用组件 */
@@ -370,6 +377,11 @@ pre,
   .theme-music .tab-btn.active {
     background: linear-gradient(135deg, #f43f5e, #e11d48) !important;
     box-shadow: 0 2px 8px rgba(244, 63, 94, 0.3);
+  }
+
+  .theme-uptime .tab-btn.active {
+    background: linear-gradient(135deg, #10b981, #059669) !important;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
   }
 
   /* ========================================

@@ -118,7 +118,7 @@
 
 .stats-overview-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: var(--dashboard-grid-gap);
   margin-bottom: var(--dashboard-grid-gap);
 }

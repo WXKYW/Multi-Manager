@@ -1,595 +1,671 @@
-/* ==================== Uptime 监测模块样式 ==================== */
+/* ==================== Uptime 监测模块样式 (Standardized) ==================== */
 
-/* ==================== 主题变量 ==================== */
 :root {
-    --uptime-primary: #10b981;
-    --uptime-down: #ef4444;
-    --uptime-pending: #f59e0b;
-    --uptime-maintenance: #3b82f6;
-    --uptime-unknown: #9ca3af;
+    /* Uptime Specific Colors (Color Management Only) */
+    --uptime-status-up: #10b981;
+    --uptime-status-up-bg: rgba(16, 185, 129, 0.1);
+    --uptime-status-up-border: rgba(16, 185, 129, 0.2);
+
+    --uptime-status-down: #ef4444;
+    --uptime-status-down-bg: rgba(239, 68, 68, 0.1);
+    --uptime-status-down-border: rgba(239, 68, 68, 0.2);
+
+    --uptime-status-pending: #f59e0b;
+    --uptime-status-pending-bg: rgba(245, 158, 11, 0.1);
+    --uptime-status-pending-border: rgba(245, 158, 11, 0.2);
+
+    --uptime-status-unknown: #9ca3af;
 }
 
-/* ==================== 统计药丸 ==================== */
-.uptime-stats-bar {
+/* ==================== 容器与布局 ==================== */
+.uptime-container {
+    width: 100%;
+    margin: 0 auto;
+    padding: 0;
+    box-sizing: border-box;
+    animation: fadeIn 0.4s ease-out;
+}
+
+/* Ensure text colors are readable */
+.theme-uptime {
+    --current-primary: var(--uptime-status-up);
+}
+
+/* 顶部标签栏 - 保持与其他模块一致 (reference styles.css .sec-tabs) */
+.uptime-tabs-scroll-wrapper {
     display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    align-items: center;
-    padding: 12px 16px;
-    margin-bottom: 16px;
-    background: var(--bg-secondary);
-    border-radius: 16px;
-    border: 1px solid var(--border-color);
+    justify-content: center;
+    gap: 6px;
+    padding-bottom: 10px;
 }
 
-.uptime-stat-pill {
-    display: inline-flex;
+/* 复用 styles.css 中的 .tab-btn 样式，此处仅做微调或特定覆盖 */
+.uptime-tabs-scroll-wrapper .tab-btn {
+    /* min-width: 90px; handled by global */
+    border-radius: 8px;
+    /* Standard radius from styles.css */
+}
+
+.uptime-tabs-scroll-wrapper .tab-btn.active {
+    color: #ffffff !important;
+}
+
+/* ==================== 统计概览条 (Aligned with Header/Toolbar) ==================== */
+.uptime-stats-bar-modern {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 10px;
+    background: var(--bg-secondary);
+    padding: 12px 20px;
+    border-radius: 20px;
+    /* Standard Card Radius */
+    border: 1px solid var(--border-color);
+    box-shadow: var(--card-shadow);
+}
+
+.uptime-stat-pill-modern {
+    display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 16px;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-color);
-    border-radius: 24px;
+    padding: 6px 16px;
+    border-radius: 12px;
+    /* Slightly rounder than standard buttons but standard for badges */
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: 1px solid transparent;
     font-size: 13px;
     font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    user-select: none;
-}
-
-.uptime-stat-pill:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-}
-
-.uptime-stat-pill.active {
-    background: var(--primary-color);
-    border-color: var(--primary-color);
-    color: white;
-}
-
-.uptime-stat-pill .stat-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-}
-
-.uptime-stat-pill .stat-dot.up {
-    background: var(--uptime-primary);
-}
-
-.uptime-stat-pill .stat-dot.down {
-    background: var(--uptime-down);
-}
-
-.uptime-stat-pill .stat-dot.pending {
-    background: var(--uptime-pending);
-}
-
-.uptime-stat-pill .stat-dot.unknown {
-    background: var(--uptime-unknown);
-}
-
-.uptime-stat-pill .stat-value {
-    font-weight: 800;
-    font-family: var(--font-mono);
-}
-
-.uptime-stat-pill.up.active {
-    background: linear-gradient(135deg, #10b981, #059669);
-    border-color: #10b981;
-    box-shadow: 0 6px 16px -4px rgba(16, 185, 129, 0.35);
-}
-
-.uptime-stat-pill.down.active {
-    background: linear-gradient(135deg, #ef4444, #dc2626);
-    border-color: #ef4444;
-    box-shadow: 0 6px 16px -4px rgba(239, 68, 68, 0.35);
-}
-
-.uptime-stat-pill.pending.active {
-    background: linear-gradient(135deg, #f59e0b, #d97706);
-    border-color: #f59e0b;
-    box-shadow: 0 6px 16px -4px rgba(245, 158, 11, 0.35);
-}
-
-/* ==================== HeartbeatBar 脉冲条 ==================== */
-.heartbeat-bar-wrapper {
-    position: relative;
-    width: 100%;
-    overflow: hidden;
-    padding: 4px 0;
-}
-
-.heartbeat-bar {
-    display: flex;
-    gap: 2px;
-    height: 28px;
-    align-items: center;
-    justify-content: flex-end;
-}
-
-.heartbeat-bar.small {
-    height: 16px;
-    gap: 1px;
-}
-
-.heartbeat-beat {
-    width: 8px;
-    min-width: 8px;
-    height: 100%;
-    border-radius: 4px;
-    transition: transform 0.15s ease, opacity 0.15s ease;
-    cursor: pointer;
-    position: relative;
-}
-
-.heartbeat-bar.small .heartbeat-beat {
-    width: 5px;
-    min-width: 5px;
-    border-radius: 2.5px;
-}
-
-.heartbeat-beat.up {
-    background: var(--uptime-primary);
-    box-shadow: 0 0 6px rgba(16, 185, 129, 0.3);
-}
-
-.heartbeat-beat.down {
-    background: var(--uptime-down);
-    box-shadow: 0 0 6px rgba(239, 68, 68, 0.3);
-}
-
-.heartbeat-beat.pending {
-    background: var(--uptime-pending);
-    box-shadow: 0 0 6px rgba(245, 158, 11, 0.3);
-}
-
-.heartbeat-beat.maintenance {
-    background: var(--uptime-maintenance);
-    box-shadow: 0 0 6px rgba(59, 130, 246, 0.3);
-}
-
-.heartbeat-beat.empty {
+    color: var(--text-secondary);
     background: var(--bg-tertiary);
-    opacity: 0.4;
-    cursor: default;
 }
 
-.heartbeat-beat:not(.empty):hover {
-    transform: scaleY(1.4);
-    opacity: 0.85;
-    z-index: 10;
+.uptime-stat-pill-modern:hover {
+    border-color: var(--border-color);
+    transform: translateY(-1px);
 }
 
-/* HeartbeatBar 时间标签 */
-.heartbeat-time-labels {
-    display: flex;
-    justify-content: space-between;
-    font-size: 10px;
-    color: var(--text-tertiary);
-    padding: 4px 2px 0;
+.uptime-stat-pill-modern.active {
+    background: var(--bg-primary);
+    /* Inverted for active state or specific color */
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+/* Specific Pill Colors when Active */
+.uptime-stat-pill-modern.active.up {
+    color: var(--uptime-status-up);
+    border-color: var(--uptime-status-up-bg);
+    background: var(--uptime-status-up-bg);
+}
+
+.uptime-stat-pill-modern.active.down {
+    color: var(--uptime-status-down);
+    border-color: var(--uptime-status-down-bg);
+    background: var(--uptime-status-down-bg);
+}
+
+.uptime-stat-pill-modern.active.pending {
+    color: var(--uptime-status-pending);
+    border-color: var(--uptime-status-pending-bg);
+    background: var(--uptime-status-pending-bg);
+}
+
+.stat-pill-count {
     font-family: var(--font-mono);
+    font-weight: 700;
+    opacity: 0.8;
 }
 
-/* ==================== 监测卡片 ==================== */
+/* Search Box Aligned */
+.uptime-search-modern {
+    margin-left: auto;
+    position: relative;
+    width: 240px;
+}
+
+.uptime-search-modern i {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-tertiary);
+    font-size: 14px;
+}
+
+.uptime-search-modern input {
+    width: 100%;
+    padding: 8px 12px 8px 36px;
+    border-radius: 8px;
+    /* Standard Input Radius */
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    font-size: 13px;
+    color: var(--text-primary);
+    transition: all 0.2s;
+}
+
+.uptime-search-modern input:focus {
+    border-color: var(--uptime-status-up);
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.1);
+}
+
+/* Link Style Refinement */
+.monitor-url a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    transition: color 0.2s;
+    border-bottom: 1px dotted transparent;
+}
+
+.monitor-url a:hover {
+    color: var(--uptime-status-up);
+    border-bottom-color: var(--uptime-status-up);
+}
+
+.monitor-url i {
+    opacity: 0.6;
+}
+
+/* Meta Badges */
+.monitor-meta-badges {
+    display: flex;
+    gap: 6px;
+    margin-top: 2px;
+}
+
+.meta-badge {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--bg-tertiary);
+    color: var(--text-tertiary);
+    border: 1px solid transparent;
+}
+
+/* ==================== 监测卡片 (Standard Card Style) ==================== */
+.uptime-monitor-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    /* Reduced from 12px */
+}
+
 .uptime-monitor-card {
     background: var(--card-bg);
+    border-radius: 12px;
+    /* Reduced radius for tighter feel */
+    padding: 10px 14px;
+    /* Reduced from 12px 16px */
     border: 1px solid var(--border-color);
-    border-radius: 16px;
-    margin-bottom: 12px;
+    box-shadow: var(--card-shadow);
     transition: all 0.2s ease;
     overflow: hidden;
+    position: relative;
 }
 
 .uptime-monitor-card:hover {
-    box-shadow: var(--card-shadow);
-    border-color: rgba(var(--primary-rgb), 0.2);
+    box-shadow: var(--card-hover-shadow);
+    border-color: var(--uptime-status-up-border);
+    /* Removed translate Y for stability */
 }
 
-.uptime-monitor-card.paused {
-    opacity: 0.6;
-}
-
-/* Monitor Header */
 .uptime-monitor-header {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    padding: 16px 20px;
-    cursor: pointer;
-    transition: background 0.2s;
-}
-
-.uptime-monitor-header:hover {
-    background: rgba(var(--bg-secondary-rgb), 0.5);
-}
-
-/* Status Indicator */
-.uptime-status-indicator {
-    position: relative;
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    flex-shrink: 0;
-}
-
-.uptime-status-indicator::before {
-    content: '';
-    position: absolute;
-    inset: -5px;
-    border-radius: 50%;
-    opacity: 0.2;
-}
-
-.uptime-status-indicator.up {
-    background: var(--uptime-primary);
-    box-shadow: 0 0 10px var(--uptime-primary);
-}
-
-.uptime-status-indicator.up::before {
-    background: var(--uptime-primary);
-    animation: status-pulse 2s ease-in-out infinite;
-}
-
-.uptime-status-indicator.down {
-    background: var(--uptime-down);
-    box-shadow: 0 0 10px var(--uptime-down);
-}
-
-.uptime-status-indicator.down::before {
-    background: var(--uptime-down);
-}
-
-.uptime-status-indicator.pending {
-    background: var(--uptime-pending);
-    box-shadow: 0 0 10px var(--uptime-pending);
-}
-
-.uptime-status-indicator.pending::before {
-    background: var(--uptime-pending);
-    animation: status-pulse 1s ease-in-out infinite;
-}
-
-.uptime-status-indicator.maintenance {
-    background: var(--uptime-maintenance);
-    box-shadow: 0 0 10px var(--uptime-maintenance);
-}
-
-.uptime-status-indicator.unknown {
-    background: var(--uptime-unknown);
-}
-
-@keyframes status-pulse {
-
-    0%,
-    100% {
-        transform: scale(1);
-        opacity: 0.2;
-    }
-
-    50% {
-        transform: scale(1.8);
-        opacity: 0;
-    }
-}
-
-/* Monitor Info */
-.uptime-monitor-info {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.uptime-monitor-name {
-    font-size: 15px;
-    font-weight: 700;
-    color: var(--text-primary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.uptime-monitor-url {
-    font-size: 12px;
-    color: var(--text-tertiary);
-    font-family: var(--font-mono);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-/* Monitor Stats */
-.uptime-monitor-stats {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex-shrink: 0;
-}
-
-.uptime-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 10px;
-    border-radius: 20px;
-    font-size: 11px;
-    font-weight: 700;
-    font-family: var(--font-mono);
-}
-
-.uptime-badge.ping {
-    background: rgba(16, 185, 129, 0.1);
-    color: var(--uptime-primary);
-    border: 1px solid rgba(16, 185, 129, 0.2);
-}
-
-.uptime-badge.ping.slow {
-    background: rgba(245, 158, 11, 0.1);
-    color: var(--uptime-pending);
-    border-color: rgba(245, 158, 11, 0.2);
-}
-
-.uptime-badge.ping.error {
-    background: rgba(239, 68, 68, 0.1);
-    color: var(--uptime-down);
-    border-color: rgba(239, 68, 68, 0.2);
-}
-
-.uptime-badge.uptime {
-    background: var(--bg-tertiary);
-    color: var(--text-secondary);
-    border: 1px solid var(--border-color);
-}
-
-.uptime-badge.uptime.good {
-    background: rgba(16, 185, 129, 0.08);
-    color: var(--uptime-primary);
-    border-color: rgba(16, 185, 129, 0.15);
-}
-
-.uptime-badge.uptime.warning {
-    background: rgba(245, 158, 11, 0.08);
-    color: var(--uptime-pending);
-    border-color: rgba(245, 158, 11, 0.15);
-}
-
-.uptime-badge.uptime.bad {
-    background: rgba(239, 68, 68, 0.08);
-    color: var(--uptime-down);
-    border-color: rgba(239, 68, 68, 0.15);
-}
-
-/* Monitor HeartbeatBar inline */
-.uptime-monitor-heartbeat {
-    width: 180px;
-    flex-shrink: 0;
-}
-
-/* Monitor Actions */
-.uptime-monitor-actions {
-    display: flex;
-    gap: 6px;
-    flex-shrink: 0;
-}
-
-/* ==================== 监测类型选择器 ==================== */
-.uptime-type-selector {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-    gap: 10px;
-    margin-bottom: 20px;
+    grid-template-columns: auto 1fr auto;
+    gap: 14px;
+    /* Reduced gap */
+    align-items: center;
+    cursor: pointer;
 }
 
-.uptime-type-btn {
+/* 左侧状态条 - 调整为更符合卡片风格的指示器 */
+.monitor-status-icon {
+    width: 32px;
+    /* Small icon */
+    height: 32px;
+    border-radius: 8px;
+    /* Tighter radius */
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    padding: 16px 12px;
+    font-size: 14px;
     background: var(--bg-secondary);
-    border: 2px solid var(--border-color);
-    border-radius: 12px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    color: var(--text-secondary);
+    color: var(--text-tertiary);
+    transition: all 0.3s;
 }
 
-.uptime-type-btn i {
-    font-size: 20px;
+/* ... status colors remain same ... */
+
+/* 主要信息区域 */
+.monitor-main-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    /* Reduced from 6px */
+}
+
+.monitor-name-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.monitor-name {
+    font-size: 15px;
+    /* Slightly smaller header */
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.monitor-url {
+    font-size: 12px;
+    /* Reduced from 13px */
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Meta Badges */
+.monitor-meta-badges {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.meta-badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    border: 1px solid transparent;
+}
+
+/* 右侧统计与图表 */
+.monitor-stats-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 10px;
+}
+
+.stats-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.ping-pill {
+    font-size: 13px;
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.uptime-pill-large {
+    font-size: 16px;
+    font-weight: 800;
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+}
+
+.uptime-pill-large.good {
+    color: var(--uptime-status-up);
+}
+
+.uptime-pill-large.bad {
+    color: var(--uptime-status-down);
+}
+
+/* Heartbeat Bar Inline */
+.heartbeat-bar-inline {
+    display: grid;
+    grid-template-columns: repeat(60, 1fr);
+    gap: 3px;
+    height: 20px;
+    align-items: end;
+    width: 100%;
+    /* Fill container */
+}
+
+/* List view has fewer bars (30), so adapt grid */
+.heartbeat-bar-inline.list-view {
+    grid-template-columns: repeat(30, 1fr);
+    width: 200px;
+    /* Fixed small width for list view to sit on right */
+    height: 16px;
+    /* Smaller height */
+}
+
+.beat-pill {
+    width: 100%;
+    /* Fill grid cell */
+    height: 100%;
+    border-radius: 4px;
+    /* More rounded */
+    background: var(--bg-tertiary);
+    transition: all 0.2s;
     opacity: 0.7;
 }
 
-.uptime-type-btn span {
-    font-size: 12px;
-    font-weight: 600;
+.beat-pill.up {
+    background: var(--uptime-status-up);
+    height: 60%;
 }
 
-.uptime-type-btn:hover {
-    border-color: rgba(var(--primary-rgb), 0.3);
-    background: var(--bg-tertiary);
-    transform: translateY(-2px);
-}
-
-.uptime-type-btn.active {
-    background: rgba(var(--primary-rgb), 0.1);
-    border-color: var(--primary-color);
-    color: var(--primary-color);
-}
-
-.uptime-type-btn.active i {
+.beat-pill.up:hover {
+    height: 100%;
     opacity: 1;
-    transform: scale(1.1);
+    transform: scaleY(1.2);
 }
 
-/* ==================== 添加/编辑表单 ==================== */
-.uptime-form-section {
-    background: var(--section-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 16px;
+.beat-pill.down {
+    background: var(--uptime-status-down);
+    height: 100%;
+}
+
+.beat-pill.pending {
+    background: var(--uptime-status-pending);
+    height: 80%;
+}
+
+.beat-pill.empty {
+    opacity: 0;
+}
+
+/* 展开详情区域 */
+/* 展开详情区域 */
+.monitor-details-expanded {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px dashed var(--border-color);
+    background: transparent;
+    overflow: hidden;
+    animation: slideDown 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes slideDown {
+    0% {
+        opacity: 0;
+        transform: translateY(-10px);
+        max-height: 0;
+        margin-top: 0;
+        padding-top: 0;
+        border-top-color: transparent;
+    }
+
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+        max-height: 600px;
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top-color: var(--border-color);
+    }
+}
+
+.detail-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 16px;
+    /* Reduced from 24px */
+}
+
+@media (max-width: 768px) {
+    .detail-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ==================== 表单样式 (Standard Form) ==================== */
+.uptime-form-card {
+    background: var(--card-bg);
+    border-radius: 12px;
     padding: 20px;
-    margin-bottom: 16px;
+    /* Reduced from 24px */
+    box-shadow: var(--card-shadow);
+    border: 1px solid var(--border-color);
+    width: 100%;
+    max-width: none;
+    margin: 0;
 }
 
-.uptime-form-section h4 {
-    font-size: 14px;
+/* Grid Layout System for Form */
+/* Grid Layout System for Form */
+.uptime-form-grid {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 12px;
+    /* Reduced from 16px */
+}
+
+.col-span-12 {
+    grid-column: span 12;
+}
+
+.col-span-8 {
+    grid-column: span 8;
+}
+
+.col-span-6 {
+    grid-column: span 6;
+}
+
+.col-span-4 {
+    grid-column: span 4;
+}
+
+.col-span-3 {
+    grid-column: span 3;
+}
+
+.col-span-2 {
+    grid-column: span 2;
+}
+
+/* Responsive adjustments */
+@media (max-width: 1024px) {
+
+    .col-span-3,
+    .col-span-4 {
+        grid-column: span 6;
+    }
+}
+
+@media (max-width: 768px) {
+    .uptime-form-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    .col-span-8,
+    .col-span-6,
+    .col-span-4,
+    .col-span-3 {
+        width: 100%;
+    }
+}
+
+.uptime-form-section-title {
+    font-size: 13px;
+    /* Smaller title */
     font-weight: 700;
     color: var(--text-primary);
-    margin-bottom: 16px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+    /* Reduced from 16px */
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
     display: flex;
     align-items: center;
     gap: 8px;
 }
 
-.uptime-form-section h4 i {
-    opacity: 0.6;
+.form-group-modern {
+    margin-bottom: 0;
 }
 
-.uptime-form-row {
+.form-label-modern {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+    /* Reduced from 6px */
+}
+
+.form-input-modern,
+.form-select-modern {
+    width: 100%;
+    padding: 6px 10px;
+    /* Very compact inputs */
+    border-radius: 6px;
+    /* Tighter radius */
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 13px;
+    transition: all 0.2s;
+    font-family: inherit;
+    outline: none;
+    height: 32px;
+    /* Fixed height for consistency */
+}
+
+/* Type Selector Grid */
+.type-selector-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+    /* Even smaller items */
+    gap: 10px;
+    /* Small gap */
+}
+
+.type-option {
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    padding: 10px 6px;
+    /* Minimal padding */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-align: center;
+    font-size: 12px;
+    /* Smaller text */
+}
+
+.type-option i {
+    font-size: 16px;
+    /* Smaller icons */
+}
+
+.type-option:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--text-tertiary);
+}
+
+.type-option.active {
+    background: var(--uptime-status-up-bg);
+    border-color: var(--uptime-status-up);
+    color: var(--uptime-status-up);
+}
+
+/* Toggle Switch Styles */
+.form-switch {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.form-switch input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+    height: 0;
+    width: 0;
+}
+
+.switch-track {
+    width: 36px;
+    height: 20px;
+    background: var(--bg-tertiary);
+    border-radius: 20px;
+    position: relative;
+    border: 1px solid var(--border-color);
+    transition: all 0.3s;
+    display: block;
+    /* Ensure it renders */
+}
+
+.switch-knob {
+    width: 14px;
+    height: 14px;
+    background: white;
+    border-radius: 50%;
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.form-switch input:checked+.switch-track {
+    background: var(--uptime-status-up);
+    border-color: var(--uptime-status-up);
+}
+
+.form-switch input:checked+.switch-track .switch-knob {
+    transform: translateX(16px);
+    /* Adjusted for 36px width (36 - 2 - 14 - 2 = 18? No, 2+16 = 18. Left 2. Total 36. 36-2-14=20. So needs to move to 20. 20-2 = 18px translation? Let's assume math: left 2, width 14. max right is 36-2=34. 34-14=20. So 2 -> 20 is +18px. Safe bet 16px is close but maybe 16px. */
+    transform: translateX(16px);
+}
+
+.switch-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
 }
 
 /* ==================== Tooltip ==================== */
 .uptime-tooltip {
     position: fixed;
     z-index: 10000;
-    padding: 10px 14px;
+    padding: 8px 12px;
     background: var(--card-bg);
     border: 1px solid var(--border-color);
-    border-radius: 10px;
-    box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.15);
+    border-radius: 8px;
+    box-shadow: var(--card-hover-shadow);
     font-size: 12px;
-    max-width: 280px;
     pointer-events: none;
     opacity: 0;
-    transform: translateY(10px);
-    transition: opacity 0.15s, transform 0.15s;
+    transition: opacity 0.15s;
 }
 
 .uptime-tooltip.visible {
     opacity: 1;
-    transform: translateY(0);
 }
 
-.uptime-tooltip::before {
-    content: '';
-    position: absolute;
-    top: -6px;
-    left: 50%;
-    transform: translateX(-50%);
-    border: 6px solid transparent;
-    border-bottom-color: var(--card-bg);
-}
-
-.uptime-tooltip-time {
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 4px;
-}
-
-.uptime-tooltip-status {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.uptime-tooltip-status .dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-}
-
-.uptime-tooltip-status .dot.up {
-    background: var(--uptime-primary);
-}
-
-.uptime-tooltip-status .dot.down {
-    background: var(--uptime-down);
-}
-
-.uptime-tooltip-ping {
-    color: var(--text-tertiary);
-    margin-top: 2px;
-}
-
-/* ==================== 空状态 ==================== */
+/* Empty State */
 .uptime-empty-state {
     text-align: center;
-    padding: 80px 40px;
+    padding: 80px 20px;
     color: var(--text-tertiary);
-}
-
-.uptime-empty-state i {
-    font-size: 64px;
-    margin-bottom: 20px;
-    opacity: 0.3;
-}
-
-.uptime-empty-state h3 {
-    font-size: 20px;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin-bottom: 8px;
-}
-
-.uptime-empty-state p {
-    font-size: 14px;
-    margin-bottom: 24px;
-    max-width: 400px;
-    margin-left: auto;
-    margin-right: auto;
-}
-
-/* ==================== 响应式 ==================== */
-@media (max-width: 768px) {
-    .uptime-stats-bar {
-        padding: 10px 12px;
-    }
-
-    .uptime-stat-pill {
-        padding: 6px 12px;
-        font-size: 12px;
-    }
-
-    .uptime-monitor-header {
-        flex-wrap: wrap;
-        padding: 12px 16px;
-    }
-
-    .uptime-monitor-stats {
-        width: 100%;
-        justify-content: space-between;
-        margin-top: 8px;
-    }
-
-    .uptime-monitor-heartbeat {
-        width: 120px;
-    }
-
-    .uptime-type-selector {
-        grid-template-columns: repeat(2, 1fr);
-    }
-}
-
-@media (max-width: 480px) {
-    .heartbeat-bar {
-        height: 20px;
-    }
-
-    .heartbeat-beat {
-        width: 6px;
-        min-width: 6px;
-    }
-
-    .uptime-monitor-heartbeat {
-        display: none;
-    }
+    background: var(--bg-secondary);
+    border-radius: 20px;
+    border: 1px dashed var(--border-color);
+    margin: 20px 0;
 }
