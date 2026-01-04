@@ -4,23 +4,12 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 
-// 打印 Logo
-console.log(`\x1b[36m
-  ______   _______   ______         ______    ______         __ 
- /      \\ /       \\ /      |       /      \\  /      \\       /  |
-/$$$$$$  |$$$$$$$  |$$$$$$/       /$$$$$$  |/$$$$$$  |      $$ |
-$$ |__$$ |$$ |__$$ |  $$ |        $$ | _$$/ $$ |  $$ |      $$ |
-$$    $$ |$$    $$/   $$ |        $$ |/    |$$ |  $$ |      $$ |
-$$$$$$$$ |$$$$$$$/    $$ |        $$ |$$$$ |$$ |  $$ |      $$/ 
-$$ |  $$ |$$ |       _$$ |_       $$ \\__$$ |$$ \\__$$ |       __ 
-$$ |  $$ |$$ |      / $$   |      $$    $$/ $$    $$/       /  |
-$$/   $$/ $$/       $$$$$$/        $$$$$$/   $$$$$$/        $$/ 
-\x1b[0m\x1b[33m
- >>> Gravity Engineering System v0.1.1 测试版 <<<\x1b[0m
-`);
 // 导入日志工具
-const { createLogger } = require('./src/utils/logger');
+const { createLogger, logger: globalLogger } = require('./src/utils/logger');
 const logger = createLogger('Server');
+
+// 打印简易启动标识 (Logo 移至 logger 记录)
+logger.info('>>> Gravity Engineering System v0.1.2 <<<');
 
 // 导入中间件
 const { configureHelmet, apiSecurityHeaders, corsConfig } = require('./src/middleware/security');
@@ -163,6 +152,58 @@ const agentDir = fs.existsSync(path.join(__dirname, 'dist', 'agent'))
 if (fs.existsSync(agentDir)) {
   app.use('/agent', express.static(agentDir));
 }
+
+// 专门为聊天图片提供服务
+const chatImagesDir = path.join(__dirname, 'data', 'uploads', 'chat_images');
+if (!fs.existsSync(chatImagesDir)) {
+  fs.mkdirSync(chatImagesDir, { recursive: true });
+}
+app.use('/uploads/chat_images', express.static(chatImagesDir));
+
+/**
+ * 聊天图片上传接口
+ * POST /api/chat/upload-image
+ */
+app.post('/api/chat/upload-image', (req, res) => {
+  try {
+    if (!req.files || !req.files.image) {
+      return res.status(400).json({ success: false, error: '未找到上传的图片文件' });
+    }
+
+    const { loadAdminPassword } = require('./src/services/config');
+    const adminPassword = loadAdminPassword();
+    if (adminPassword && req.headers['x-admin-password'] !== adminPassword) {
+      return res.status(401).json({ success: false, error: '未授权' });
+    }
+
+    const image = req.files.image;
+    const crypto = require('crypto');
+    const hash = crypto.createHash('md5').update(image.data).digest('hex');
+    const ext = path.extname(image.name) || '.jpg';
+    const fileName = `${hash}${ext}`;
+    const uploadPath = path.join(chatImagesDir, fileName);
+
+    // 如果文件已存在，直接返回
+    if (fs.existsSync(uploadPath)) {
+      return res.json({
+        success: true,
+        url: `/uploads/chat_images/${fileName}`
+      });
+    }
+
+    image.mv(uploadPath, err => {
+      if (err) {
+        return res.status(500).json({ success: false, error: err.message });
+      }
+      res.json({
+        success: true,
+        url: `/uploads/chat_images/${fileName}`
+      });
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 // 注册所有路由
 // Fly.io module integrated - v4
@@ -369,3 +410,38 @@ server.listen(PORT, '0.0.0.0', () => {
     }
   }, AUTO_CLEANUP_INTERVAL);
 });
+
+// ==================== 优雅停机处理 ====================
+function gracefulShutdown(signal) {
+  logger.info(`收到 ${signal} 信号，准备安全关闭...`);
+
+  // 给一定时间让正在处理的任务完成
+  const shutdownTimer = setTimeout(() => {
+    logger.warn('强制终止进程 (超时)');
+    process.exit(1);
+  }, 5000);
+
+  try {
+    const dbService = require('./src/db/database');
+    dbService.close();
+
+    clearTimeout(shutdownTimer);
+    logger.success('系统已安全退出');
+    process.exit(0);
+  } catch (error) {
+    logger.error('优雅停机时发生错误:', error.message);
+    process.exit(1);
+  }
+}
+
+// 监听进程终止信号
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+// 监听未捕获的异常（由于 better-sqlite3 可能会在某些极端情况下导致未捕获错误）
+process.on('uncaughtException', (err) => {
+  logger.error('发生未捕获的异常:', err.message);
+  // 执行清理后退出
+  gracefulShutdown('UNCAUGHT_EXCEPTION');
+});
+

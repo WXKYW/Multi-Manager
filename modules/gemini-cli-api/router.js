@@ -5,6 +5,8 @@ const storage = require('./storage');
 const client = require('./gemini-client');
 const StreamProcessor = require('./utils/stream-processor');
 const { requireAuth } = require('../../src/middleware/auth');
+const { createLogger } = require('../../src/utils/logger');
+const logger = createLogger('GCLI-Service');
 
 const streamProcessor = new StreamProcessor(client);
 
@@ -23,11 +25,11 @@ const autoCheckService = {
     const intervalMs = parseInt(settings.autoCheckInterval) || 3600000; // 默认 1 小时
 
     if (!enabled) {
-      console.log('[GCLI AutoCheck] 定时检测未启用');
+      logger.info('AutoCheck is disabled');
       return;
     }
 
-    console.log(`[GCLI AutoCheck] 定时检测已启动，间隔: ${Math.round(intervalMs / 60000)} 分钟`);
+    logger.info(`AutoCheck started, interval: ${Math.round(intervalMs / 60000)} min`);
 
     this.timerId = setInterval(() => {
       this.runCheck();
@@ -44,7 +46,7 @@ const autoCheckService = {
     if (this.timerId) {
       clearInterval(this.timerId);
       this.timerId = null;
-      console.log('[GCLI AutoCheck] 定时检测已停止');
+      logger.info('AutoCheck stopped');
     }
   },
 
@@ -52,7 +54,7 @@ const autoCheckService = {
    * 重启定时检测（设置变更时调用）
    */
   restart() {
-    console.log('[GCLI AutoCheck] 重新加载设置...');
+    logger.info('Reloading settings...');
     this.start();
   },
 
@@ -60,7 +62,7 @@ const autoCheckService = {
    * 执行一次模型检测
    */
   async runCheck() {
-    console.log('[GCLI AutoCheck] 开始执行定时模型检测...');
+    logger.info('Running auto model check...');
 
     try {
       const accounts = storage.getAccounts();
@@ -223,7 +225,7 @@ const requireApiKey = async (req, res, next) => {
     }
     next();
   } catch (e) {
-    console.error('API Key 验证出错:', e);
+    logger.error('API Key 验证出错:', e.message);
     res.status(500).json({ error: 'Auth Error' });
   }
 };
@@ -1381,6 +1383,7 @@ router.post(['/v1/chat/completions', '/chat/completions'], requireApiKey, async 
           res.setHeader('Content-Type', 'text/event-stream');
           res.setHeader('Cache-Control', 'no-cache');
           res.setHeader('Connection', 'keep-alive');
+          res.setHeader('X-Accel-Buffering', 'no'); // 禁用反代缓存 (如 Nginx)
 
           // 累积流式响应内容用于日志记录
           let fullContent = '';
@@ -1389,6 +1392,7 @@ router.post(['/v1/chat/completions', '/chat/completions'], requireApiKey, async 
           const stream = streamProcessor.processStream(req.body, account.id);
           for await (const chunk of stream) {
             res.write(chunk);
+            if (res.flush) res.flush(); // 强制刷新缓冲区 (支持 compression 中间件)
             // 尝试解析 chunk 以累积内容
             try {
               if (chunk.startsWith('data: ') && !chunk.includes('[DONE]')) {
@@ -1500,6 +1504,12 @@ router.post(['/v1/chat/completions', '/chat/completions'], requireApiKey, async 
           return res.json(responseData); // 成功后退出
         }
       } catch (error) {
+        const errorStatus = error.response?.status;
+        const errorData = error.response?.data;
+        if (errorStatus === 400) {
+          console.error(`[GCLI] Request failed with 400. Response:`, JSON.stringify(errorData));
+        }
+
         console.warn(
           `[GCLI] Account ${account.name} failed, trying next... Error: ${error.message}`
         );

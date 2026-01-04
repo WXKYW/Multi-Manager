@@ -114,7 +114,7 @@
   <!-- 自定义 CSS -->
   <style id="custom-css"></style>
 
-  <!-- 应用加载屏 (优化 FCP，支持深浅主题) -->
+  <!-- 应用加载屏 -->
   <div id="app-loading" style="
         position: fixed;
         top: 0;
@@ -221,10 +221,10 @@
       <!-- 主内容区 -->
       <main class="app-main">
         <div v-if="isAuthenticated" class="container layout-top" :class="'layout-' + navLayout">
-          <!-- 顶部导航栏 (移动端：CSS会自动转为底部导航；PC端：仅顶部布局显示) -->
+          <!-- 顶部导航栏 -->
           <div class="top-nav-bar"
             v-if="!singlePageMode && (!isSelfHVideoActive || !isMobile) && (isMobile || (navLayout !== 'bottom' && navLayout !== 'bottom-normal'))">
-            <!-- Logo 区域 (CSS 会在移动端隐藏) -->
+            <!-- Logo 区域 -->
             <div class="nav-brand" @click="showSettingsModal = true" style="cursor: pointer; user-select: none;"
               title="点击打开设置">
               <img src="./logo.svg" class="nav-logo" alt="Logo" />
@@ -239,7 +239,7 @@
             ]">
               <!-- 分组式标签页导航 -->
               <div class="main-tabs main-tabs-grouped" v-if="visibleModulesCount > 1">
-                <!-- 首页按钮 (独立显示在最前) -->
+                <!-- 首页按钮 -->
                 <button v-if="moduleVisibility.dashboard" class="nav-group-btn single-module-btn"
                   :class="{ 'active': mainActiveTab === 'dashboard' }" @click="handleGroupModuleClick('dashboard')">
                   <i class="fas fa-tachometer-alt"></i>
@@ -285,8 +285,7 @@
             </div>
           </div>
 
-          <!-- 迷你播放器 (移动端 Apple Music 风格) -->
-          <!-- 单页模式下只在音乐页面和首页显示 -->
+          <!-- 迷你播放器 -->
           <div
             v-if="isMobile && musicCurrentSong && !musicShowFullPlayer && (mainActiveTab === 'music' || mainActiveTab === 'dashboard')"
             class="mini-player" @click="musicShowFullPlayer = true">
@@ -306,7 +305,7 @@
             </div>
           </div>
 
-          <!-- 移动端全屏播放器 (Apple Music 风格) -->
+          <!-- 移动端全屏播放器 -->
           <transition name="mobile-player-slide">
             <div v-if="isMobile && musicShowFullPlayer && musicCurrentSong" class="mobile-full-player"
               :class="{ 'mfp-playlist-active': mfpPlaylistMode }">
@@ -315,7 +314,7 @@
 
               <!-- 主内容 -->
               <div class="mfp-content">
-                <!-- 单一封面：通过 transform 实现大小/位置切换 -->
+                <!-- 单一封面 -->
                 <div class="mfp-cover-container" :class="{ 'compact': mfpLyricsMode || mfpPlaylistMode }">
                   <transition name="mfp-cover-slide" mode="out-in">
                     <img :src="musicCurrentSong.cover + '?param=600y600'" class="mfp-cover" alt="cover"
@@ -324,13 +323,13 @@
                   </transition>
                 </div>
 
-                <!-- 歌曲信息：大模式居中，小模式在封面右侧 -->
+                <!-- 歌曲信息 -->
                 <div class="mfp-info-container" :class="{ 'compact': mfpLyricsMode || mfpPlaylistMode }">
                   <div class="mfp-title">{{ musicCurrentSong.name }}</div>
                   <div class="mfp-artist">{{ musicCurrentSong.artists }}</div>
                 </div>
 
-                <!-- 歌词区域（歌词模式时显示） -->
+                <!-- 歌词区域 -->
                 <transition name="mfp-fade">
                   <div class="mfp-lyrics-area" v-show="mfpLyricsMode">
                     <div class="mfp-lyrics-container" ref="mfpLyricsContainer">
@@ -340,7 +339,6 @@
                         <div class="mfp-line-text">
                           <template v-if="line.isInterlude">
                             <div class="mfp-interlude-dots">
-                              <!-- 倒计式亮起：最后 6s 亮第一个，4s 亮第二个，2s 亮第三个 -->
                               <span class="mfp-dot"
                                 :class="{ 'active': musicCurrentLyricIndex === index && (line.duration - (musicCurrentLyricPercent / 100 * line.duration)) <= 6000 }"></span>
                               <span class="mfp-dot"
@@ -365,7 +363,6 @@
                   </div>
                 </transition>
 
-                <!-- 嵌入式歌单区域（歌单模式时显示） -->
                 <transition name="mfp-fade">
                   <div class="mfp-playlist-area" v-show="mfpPlaylistMode">
                     <div class="mfp-playlist-container">
@@ -454,7 +451,6 @@
             </div>
           </transition>
 
-          <!-- 底部导航容器 (仅底部布局时显示) -->
           <div
             v-if="!singlePageMode && (!isSelfHVideoActive || !isMobile) && (navLayout === 'bottom' || navLayout === 'bottom-normal')"
             class="main-nav-container nav-bottom-fixed" :class="[
@@ -499,7 +495,6 @@
             </div>
           </div>
 
-          <!-- 模块模板占位符 (使用 v-show 实现持久化 DOM，解决切换卡顿) -->
           <div id="template-dashboard" v-show="mainActiveTab === 'dashboard'"></div>
           <div id="template-paas" v-show="mainActiveTab === 'paas'"></div>
           <div id="template-dns" v-show="mainActiveTab === 'dns'"></div>
@@ -513,7 +508,6 @@
           <div id="template-uptime" v-show="mainActiveTab === 'uptime'"></div>
         </div>
 
-        <!-- 未登录占位符 -->
         <div v-else class="guest-placeholder">
           <i class="fas fa-lock"></i>
           <p>请登录以访问控制台</p>
@@ -524,7 +518,6 @@
 
     <!-- 全局音乐播放栏 -->
     <div v-if="mainActiveTab === 'music'" class="music-bottom-bar" :class="{ 'expanded': musicShowFullPlayer }">
-      <!-- 点击背景层 (点击除按钮外的区域展开) -->
       <div class="bar-click-layer" v-if="musicCurrentSong" @click="musicToggleFullPlayer()"></div>
 
       <div class="bar-progress" @mousedown="musicStartDrag($event)" @touchstart.passive="musicStartDrag($event)"
@@ -572,15 +565,11 @@
             </template>
           </div>
         </transition>
-        <!-- 展开状态：显示收起按钮 -->
         <transition name="bar-left-fade">
           <div class="bar-left-content bar-collapse-btn" v-if="musicShowFullPlayer" key="collapse"
             @click="musicToggleFullPlayer()">
             <div class="bar-cover-wrapper collapse-btn-wrapper">
               <i class="fas fa-chevron-down"></i>
-            </div>
-            <div class="bar-info">
-              <!-- <div class="bar-title">收起歌词</div> -->
             </div>
           </div>
         </transition>

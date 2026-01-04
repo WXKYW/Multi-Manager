@@ -11,6 +11,8 @@ const { serverStorage } = require('./storage');
 const { Events, TaskTypes, validateHostState, stateToFrontendFormat } = require('./protocol');
 const { ServerMetricsHistory, ServerMonitorConfig } = require('./models');
 const userSettings = require('../../src/services/userSettings');
+const { createLogger } = require('../../src/utils/logger');
+const logger = createLogger('AgentService');
 
 class AgentService extends EventEmitter {
   constructor() {
@@ -20,8 +22,6 @@ class AgentService extends EventEmitter {
 
     // 全局统一 Agent 密钥
     this.globalAgentKey = null;
-    // 密钥存储路径
-    this.keyFilePath = path.join(__dirname, '../../data/agent-key.txt');
 
     // Socket.IO 服务端实例
     this.io = null;
@@ -54,7 +54,7 @@ class AgentService extends EventEmitter {
    */
   log(message) {
     if (this.debug) {
-      console.log(`[AgentService] ${message}`);
+      logger.debug(message);
     }
   }
 
@@ -63,21 +63,30 @@ class AgentService extends EventEmitter {
    */
   loadOrGenerateGlobalKey() {
     try {
-      const dataDir = path.dirname(this.keyFilePath);
-      if (!fs.existsSync(dataDir)) {
-        fs.mkdirSync(dataDir, { recursive: true });
-      }
+      const { SystemConfig } = require('../../src/db/models');
+      let savedKey = SystemConfig.getConfigValue('agent_global_key');
 
-      if (fs.existsSync(this.keyFilePath)) {
-        this.globalAgentKey = fs.readFileSync(this.keyFilePath, 'utf8').trim();
-        this.log('已加载全局 Agent 密钥');
+      if (savedKey) {
+        this.globalAgentKey = savedKey;
+        this.log('已加载全局 Agent 密钥 (来自数据库)');
       } else {
-        this.globalAgentKey = crypto.randomBytes(16).toString('hex');
-        fs.writeFileSync(this.keyFilePath, this.globalAgentKey);
-        this.log('已生成新的全局 Agent 密钥');
+        // 回退逻辑：尝试从旧的文件系统加载
+        const oldKeyPath = path.join(__dirname, '../../data/agent-key.txt');
+        if (fs.existsSync(oldKeyPath)) {
+          this.globalAgentKey = fs.readFileSync(oldKeyPath, 'utf8').trim();
+          SystemConfig.setConfig('agent_global_key', this.globalAgentKey, 'Global Agent Authentication Key (Migrated)');
+          this.log('已从旧文件迁移 Agent 密钥到数据库');
+
+          // 标记文件可删除（或直接在这里删除，但为了安全建议由用户或清理脚本处理）
+          try { fs.renameSync(oldKeyPath, oldKeyPath + '.bak'); } catch (e) { }
+        } else {
+          this.globalAgentKey = crypto.randomBytes(16).toString('hex');
+          SystemConfig.setConfig('agent_global_key', this.globalAgentKey, 'Global Agent Authentication Key');
+          this.log('已生成新的全局 Agent 密钥并保存至数据库');
+        }
       }
     } catch (error) {
-      console.error('[AgentService] 密钥管理失败:', error.message);
+      logger.error(`Key management failed: ${error.message}`);
       this.globalAgentKey = crypto.randomBytes(16).toString('hex');
     }
   }
@@ -95,7 +104,8 @@ class AgentService extends EventEmitter {
   regenerateGlobalKey() {
     this.globalAgentKey = crypto.randomBytes(16).toString('hex');
     try {
-      fs.writeFileSync(this.keyFilePath, this.globalAgentKey);
+      const { SystemConfig } = require('../../src/db/models');
+      SystemConfig.setConfig('agent_global_key', this.globalAgentKey);
     } catch (e) {
       console.error('[AgentService] 保存密钥失败:', e.message);
     }

@@ -6,8 +6,10 @@ const express = require('express');
 const router = express.Router();
 const storage = require('./storage');
 const axios = require('axios');
+const { createLogger } = require('../../src/utils/logger');
+const logger = createLogger('Fly.io');
 
-console.log('Fly.io Router Loaded');
+logger.info('Module Loaded');
 
 const FLY_API_URL = 'https://api.fly.io/graphql';
 const FLY_MACHINES_URL = 'https://api.machines.dev/v1';
@@ -36,17 +38,17 @@ async function flyRequest(query, variables = {}, token) {
     );
 
     if (response.data.errors) {
-      console.error('[Fly.io] GraphQL Errors:', JSON.stringify(response.data.errors));
+      logger.error('GraphQL Errors:', response.data.errors);
       throw new Error(response.data.errors[0].message);
     }
 
     return response.data;
   } catch (error) {
     if (error.response) {
-      console.error('[Fly.io] API Error:', error.response.status, error.response.data);
+      logger.error(`API Error: ${error.response.status}`, error.response.data);
       throw new Error(error.response.data?.errors?.[0]?.message || error.message);
     }
-    console.error('[Fly.io] Network Error:', error.message);
+    logger.error(`Network Error: ${error.message}`);
     throw error;
   }
 }

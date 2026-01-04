@@ -9,7 +9,6 @@ const { createLogger } = require('../../src/utils/logger');
 
 const logger = createLogger('UptimeStorage');
 const DATA_DIR = path.join(__dirname, '../../data');
-const MONITORS_FILE = path.join(DATA_DIR, 'uptime-monitors.json');
 const HISTORY_DIR = path.join(DATA_DIR, 'uptime-history');
 
 // Ensure data existence
@@ -24,12 +23,23 @@ class UptimeStorage {
 
     loadMonitors() {
         try {
-            if (fs.existsSync(MONITORS_FILE)) {
-                const data = fs.readFileSync(MONITORS_FILE, 'utf8');
+            const { SystemConfig } = require('../../src/db/models');
+            const data = SystemConfig.getConfigValue('uptime_monitors_json');
+            if (data) {
                 this.monitors = JSON.parse(data);
             } else {
-                this.monitors = [];
-                this.saveMonitors();
+                // 尝试从旧文件迁移
+                const oldFile = path.join(__dirname, '../../data/uptime-monitors.json');
+                if (fs.existsSync(oldFile)) {
+                    const fileContent = fs.readFileSync(oldFile, 'utf8');
+                    this.monitors = JSON.parse(fileContent);
+                    SystemConfig.setConfig('uptime_monitors_json', fileContent);
+                    logger.info('Migrated uptime monitors from JSON file to database');
+                    try { fs.renameSync(oldFile, oldFile + '.bak'); } catch (e) { }
+                } else {
+                    this.monitors = [];
+                    this.saveMonitors();
+                }
             }
         } catch (error) {
             logger.error('Failed to load monitors:', error);
@@ -39,7 +49,8 @@ class UptimeStorage {
 
     saveMonitors() {
         try {
-            fs.writeFileSync(MONITORS_FILE, JSON.stringify(this.monitors, null, 2), 'utf8');
+            const { SystemConfig } = require('../../src/db/models');
+            SystemConfig.setConfig('uptime_monitors_json', JSON.stringify(this.monitors));
         } catch (error) {
             logger.error('Failed to save monitors:', error);
         }

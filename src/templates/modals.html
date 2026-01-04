@@ -1,32 +1,205 @@
 <!-- OpenAI Chat Settings Modal -->
 <div v-if="showHChatSettingsModal" class="modal-overlay" @click.self="showHChatSettingsModal = false"
   style="z-index: 2000;">
-  <div class="modal" style="max-width: 500px">
+  <div class="modal hchat-settings-modal" style="max-width: 700px; max-height: 85vh;">
     <div class="modal-header">
       <div class="modal-title"><i class="fas fa-cog"></i> 对话设置</div>
       <button class="modal-close" @click="showHChatSettingsModal = false">
         <i class="fas fa-times"></i>
       </button>
     </div>
-    <div class="modal-body">
-      <div class="form-group">
-        <label>系统提示词 (System Prompt)</label>
-        <textarea v-model="openaiChatSystemPrompt" class="form-textarea" rows="3"></textarea>
-      </div>
-      <div class="form-row">
-        <div class="form-group flex-1">
-          <label>Temperature ({{ openaiChatSettings.temperature }})</label>
-          <input type="range" v-model.number="openaiChatSettings.temperature" min="0" max="2" step="0.1"
-            class="form-range" />
+
+    <!-- 标签页导航 -->
+    <div class="hchat-settings-tabs">
+      <button class="settings-tab" :class="{ active: openaiSettingsTab === 'general' }"
+        @click="openaiSettingsTab = 'general'">
+        <i class="fas fa-sliders-h"></i> 通用
+      </button>
+      <button class="settings-tab" :class="{ active: openaiSettingsTab === 'models' }"
+        @click="openaiSettingsTab = 'models'">
+        <i class="fas fa-robot"></i> 模型管理
+      </button>
+      <button class="settings-tab" :class="{ active: openaiSettingsTab === 'endpoints' }"
+        @click="openaiSettingsTab = 'endpoints'">
+        <i class="fas fa-server"></i> 端点管理
+      </button>
+    </div>
+
+    <div class="modal-body" style="padding: 0; overflow-y: auto; max-height: calc(85vh - 130px);">
+      <!-- 通用设置 -->
+      <div v-show="openaiSettingsTab === 'general'" class="settings-panel">
+        <div class="settings-grid">
+          <!-- 系统提示词卡片 -->
+          <div class="settings-card">
+            <div class="settings-card-header">
+              <span><i class="fas fa-terminal" style="margin-right: 6px"></i>系统提示词 (System Prompt)</span>
+            </div>
+            <textarea v-model="openaiChatSystemPrompt" class="modern-form-control" rows="4"
+              placeholder="例如：你是一个有用的 AI 助手..." style="resize: vertical; min-height: 80px"></textarea>
+          </div>
+
+          <!-- 模型参数卡片 -->
+          <div class="settings-card">
+            <div class="settings-card-header">
+              <span><i class="fas fa-sliders-h" style="margin-right: 6px"></i>参数配置</span>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px">
+              <div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px">
+                  <label>随机性 (Temperature)</label>
+                  <span style="font-family: var(--font-mono); color: #10a37f">{{ openaiChatSettings.temperature
+                    }}</span>
+                </div>
+                <input type="range" v-model.number="openaiChatSettings.temperature" min="0" max="2" step="0.1"
+                  class="form-range" style="width: 100%" />
+                <div
+                  style="display: flex; justify-content: space-between; font-size: 11px; opacity: 0.5; margin-top: 4px">
+                  <span>精确</span>
+                  <span>创意</span>
+                </div>
+              </div>
+              <div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px">
+                  <label>回复长度 (Max Tokens)</label>
+                </div>
+                <input type="number" v-model.number="openaiChatSettings.max_tokens" class="modern-form-control"
+                  placeholder="例如: 2000" />
+              </div>
+            </div>
+          </div>
+
+          <!-- 默认模型卡片 -->
+          <div class="settings-card">
+            <div class="settings-card-header">
+              <span><i class="fas fa-robot" style="margin-right: 6px"></i>默认模型</span>
+            </div>
+            <div class="default-model-card">
+              <div v-if="openaiDefaultChatModel" style="display: flex; align-items: center; gap: 8px">
+                <span class="model-tag">{{ openaiDefaultChatModel }}</span>
+              </div>
+              <div v-else class="text-muted" style="font-size: 13px">
+                <i class="fas fa-info-circle" style="margin-right: 4px"></i> 未设置默认模型，将自动选择
+              </div>
+
+              <button v-if="openaiDefaultChatModel" class="btn btn-sm btn-icon-refined" @click="clearDefaultModel"
+                title="清除默认值">
+                <i class="fas fa-trash-alt" style="color: var(--danger-color)"></i>
+              </button>
+            </div>
+            <div style="font-size: 12px; color: var(--text-tertiary); margin-top: 8px">
+              提示：在“模型管理”标签页中收藏或点击模型即可设为默认。
+            </div>
+          </div>
         </div>
-        <div class="form-group flex-1">
-          <label>Max Tokens</label>
-          <input type="number" v-model.number="openaiChatSettings.max_tokens" class="form-input" />
+      </div>
+
+      <!-- 模型管理 -->
+      <div v-show="openaiSettingsTab === 'models'" class="settings-panel">
+        <div class="model-management-header">
+          <div class="model-search">
+            <i class="fas fa-search"></i>
+            <input v-model="openaiModelSearch" placeholder="搜索模型..." class="form-input" />
+          </div>
+          <select v-model="openaiSelectedEndpointId" class="form-input select-sm endpoint-filter">
+            <option value="">所有端点 (聚合)</option>
+            <option v-for="ep in openaiEndpoints" :key="ep.id" :value="ep.id">{{ ep.name }}</option>
+          </select>
+          <label class="checkbox-label">
+            <input type="checkbox" v-model="openaiShowHiddenModels" />
+            显示隐藏模型
+          </label>
+        </div>
+
+        <!-- 收藏的模型 -->
+        <div v-if="openaiPinnedModels.length > 0" class="model-section">
+          <div class="section-title"><i class="fas fa-star"></i> 收藏模型</div>
+          <div class="model-list">
+            <div v-for="modelId in openaiPinnedModels" :key="'pinned-' + modelId" class="model-item pinned">
+              <span class="model-name">{{ modelId }}</span>
+              <div class="model-actions">
+                <button class="btn-icon" @click="unpinModel(modelId)" title="取消收藏">
+                  <i class="fas fa-star"></i>
+                </button>
+                <button class="btn-icon" @click="hideModel(modelId)" title="隐藏">
+                  <i class="fas fa-eye-slash"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 所有模型 -->
+        <div class="model-section">
+          <div class="section-title">
+            <span><i class="fas fa-list"></i> 所有模型 ({{ filteredModelsForManagement.length }})</span>
+            <button class="btn btn-sm btn-secondary" @click="testAllModelsHealth"
+              :disabled="openaiModelHealthBatchLoading" title="批量检测所有模型">
+              <i class="fas" :class="openaiModelHealthBatchLoading ? 'fa-spinner fa-spin' : 'fa-stethoscope'"></i>
+              {{ openaiModelHealthBatchLoading ? '检测中...' : '批量检测' }}
+            </button>
+          </div>
+          <div class="model-list">
+            <div v-for="model in filteredModelsForManagement" :key="model.id" class="model-item"
+              :class="{ hidden: openaiHiddenModels.includes(model.id), pinned: openaiPinnedModels.includes(model.id) }">
+              <span class="model-health-indicator" :class="openaiModelHealth[model.id]?.status || 'unknown'"
+                :title="openaiModelHealth[model.id]?.status === 'healthy' ? '可用' : (openaiModelHealth[model.id]?.status === 'unhealthy' ? '不可用' : '未检测')">
+              </span>
+              <span class="model-name">{{ model.id }}</span>
+              <span class="model-channel">{{ model.owned_by }}</span>
+              <div class="model-actions">
+                <button class="btn-icon" @click="testModelHealth(model)"
+                  :disabled="openaiModelHealth[model.id]?.loading" title="检测模型">
+                  <i class="fas"
+                    :class="openaiModelHealth[model.id]?.loading ? 'fa-spinner fa-spin' : 'fa-heartbeat'"></i>
+                </button>
+                <button class="btn-icon" @click="togglePinModel(model.id)"
+                  :title="openaiPinnedModels.includes(model.id) ? '取消收藏' : '收藏'"
+                  :class="{ 'is-pinned': openaiPinnedModels.includes(model.id) }">
+                  <i class="fas fa-star"></i>
+                </button>
+                <button class="btn-icon" @click="toggleHideModel(model.id)"
+                  :title="openaiHiddenModels.includes(model.id) ? '显示' : '隐藏'">
+                  <i class="fas" :class="openaiHiddenModels.includes(model.id) ? 'fa-eye' : 'fa-eye-slash'"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 端点管理 -->
+      <div v-show="openaiSettingsTab === 'endpoints'" class="settings-panel">
+        <div class="endpoint-list">
+          <div v-for="endpoint in openaiEndpoints" :key="endpoint.id" class="endpoint-item">
+            <div class="endpoint-info">
+              <div class="endpoint-name">{{ endpoint.name }}</div>
+              <div class="endpoint-url">{{ endpoint.base_url }}</div>
+            </div>
+            <div class="endpoint-status"
+              :class="{'online': endpoint.status === 'valid', 'offline': endpoint.status === 'invalid', 'unknown': !endpoint.status || endpoint.status === 'unknown'}">
+              <i class="fas"
+                :class="endpoint.status === 'valid' ? 'fa-check-circle' : (endpoint.status === 'invalid' ? 'fa-times-circle' : 'fa-question-circle')"></i>
+            </div>
+            <div class="endpoint-actions">
+              <button class="btn btn-sm btn-secondary" @click="testEndpointHealth(endpoint)" title="检测">
+                <i class="fas fa-heartbeat"></i>
+              </button>
+            </div>
+          </div>
+          <div v-if="openaiEndpoints.length === 0" class="empty-state">
+            <i class="fas fa-server"></i>
+            <p>暂无端点配置</p>
+          </div>
+        </div>
+        <div class="endpoint-tip">
+          <i class="fas fa-info-circle"></i>
+          端点在 <strong>API 端点</strong> 标签页中管理
         </div>
       </div>
     </div>
+
     <div class="modal-footer">
-      <button class="btn btn-primary" @click="showHChatSettingsModal = false" style="width: 100%">完成</button>
+      <button class="btn btn-primary" @click="saveOpenaiChatSettings" style="width: 100%">完成</button>
     </div>
   </div>
 </div>
@@ -162,7 +335,7 @@
 <!-- Antigravity Log Detail Modal -->
 <div v-if="showAntigravityLogDetailModal" class="modal-overlay" @click.self="showAntigravityLogDetailModal = false"
   @keydown.esc="showAntigravityLogDetailModal = false" tabindex="-1">
-  <div class="modal" style="max-width: 800px">
+  <div class="modal" style="max-width: 1300px">
     <div class="modal-header" style="justify-content: space-between">
       <div style="display: flex; align-items: center; gap: 15px">
         <div class="modal-title"><i class="fas fa-file-alt"></i> 调用日志详情</div>
@@ -383,7 +556,7 @@
                   </div>
                 </details>
                 <div v-else class="msg-bubble" :class="msg.role === 'user' ? 'user-bubble' : 'assistant-bubble'"
-                  v-html="renderMarkdown(msg.content)"></div>
+                  v-html="getCachedLogHtml(msg, 'content')"></div>
               </div>
 
               <!-- 展示本次 AI 响应 (包含思考过程) -->
@@ -417,13 +590,13 @@
                       <span>思考过程</span>
                     </summary>
                     <div class="reasoning-content-inner"
-                      v-html="renderMarkdown(antigravityLogDetail.detail.response.choices[0].message.reasoning_content)">
+                      v-html="getCachedLogHtml(antigravityLogDetail.detail.response.choices[0].message, 'reasoning_content')">
                     </div>
                   </details>
 
                   <!-- 最终回复正文 -->
                   <div class="response-content"
-                    v-html="renderMarkdown(antigravityLogDetail.detail.response.choices[0].message.content)"></div>
+                    v-html="getCachedLogHtml(antigravityLogDetail.detail.response.choices[0].message, 'content')"></div>
                 </div>
               </div>
             </div>
@@ -459,9 +632,9 @@
 <!-- 全屏图片预览模态框 -->
 <div v-if="showImagePreviewModal" class="modal-overlay image-preview-overlay" @click="showImagePreviewModal = false"
   @keydown.esc="showImagePreviewModal = false" tabindex="-1">
-  <button class="modal-close" @click="showImagePreviewModal = false">
+  <!-- <button class="modal-close" @click="showImagePreviewModal = false">
     <i class="fas fa-times"></i>
-  </button>
+  </button> -->
   <div class="image-preview-container" style="
       position: relative;
       width: 100%;
@@ -496,7 +669,7 @@
 <!-- Gemini CLI Log Detail Modal -->
 <div v-if="showGeminiCliLogDetailModal" class="modal-overlay" @click.self="showGeminiCliLogDetailModal = false"
   @keydown.esc="showGeminiCliLogDetailModal = false" tabindex="-1">
-  <div class="modal" style="max-width: 800px">
+  <div class="modal" style="max-width: 1300px">
     <div class="modal-header" style="justify-content: space-between">
       <div style="display: flex; align-items: center; gap: 15px">
         <div class="modal-title"><i class="fas fa-file-alt"></i> Gemini CLI 调用详情</div>
@@ -685,7 +858,7 @@
                   </div>
                 </details>
                 <div v-else class="msg-bubble" :class="msg.role === 'user' ? 'user-bubble' : 'assistant-bubble'"
-                  v-html="renderMarkdown(msg.content)"></div>
+                  v-html="getCachedLogHtml(msg, 'content')"></div>
               </div>
 
               <!-- 展示本次 AI 响应 -->
@@ -721,13 +894,13 @@
                       <i class="fas fa-chevron-down" style="margin-left: auto; font-size: 10px; opacity: 0.5"></i>
                     </summary>
                     <div class="reasoning-content-inner"
-                      v-html="renderMarkdown(geminiCliLogDetail.detail.response.choices[0].message.reasoning_content)">
+                      v-html="getCachedLogHtml(geminiCliLogDetail.detail.response.choices[0].message, 'reasoning_content')">
                     </div>
                   </details>
 
                   <!-- 最终回复正文 -->
                   <div class="response-content"
-                    v-html="renderMarkdown(geminiCliLogDetail.detail.response.choices[0].message.content)"></div>
+                    v-html="getCachedLogHtml(geminiCliLogDetail.detail.response.choices[0].message, 'content')"></div>
                 </div>
               </div>
             </div>

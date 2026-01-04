@@ -186,6 +186,19 @@ function recordLog(logData) {
             INSERT INTO gemini_cli_logs (account_id, model, is_balanced, request_path, request_method, status_code, duration_ms, client_ip, user_agent, detail)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
+
+    // 安全的对象序列化，防止循环引用导致崩溃
+    const safeStringify = (obj) => {
+      const cache = new Set();
+      return JSON.stringify(obj, (key, value) => {
+        if (typeof value === 'object' && value !== null) {
+          if (cache.has(value)) return '[Circular]';
+          cache.add(value);
+        }
+        return value;
+      });
+    };
+
     stmt.run(
       logData.accountId || null,
       logData.model || null,
@@ -196,7 +209,7 @@ function recordLog(logData) {
       logData.durationMs,
       logData.clientIp || null,
       logData.userAgent || null,
-      logData.detail ? JSON.stringify(logData.detail) : null
+      logData.detail ? safeStringify(logData.detail) : null
     );
   } catch (e) {
     console.error('❌ 记录 Gemini CLI 日志失败:', e.message);
@@ -241,7 +254,7 @@ function getRecentLogs(limit = 100) {
         try {
           const detail = JSON.parse(log.detail);
           model = detail.model || null;
-        } catch (e) {}
+        } catch (e) { }
       }
       return { ...log, model, detail: undefined };
     });

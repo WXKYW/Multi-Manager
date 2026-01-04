@@ -9,6 +9,8 @@
 const https = require('https');
 const http = require('http');
 const { URL } = require('url');
+const { createLogger } = require('../../src/utils/logger');
+const logger = createLogger('OpenAI');
 
 // 健康检查状态常量
 const HealthStatus = {
@@ -67,7 +69,7 @@ function apiRequest(baseUrl, apiKey, method, path, body = null) {
 
       const url = new URL(cleanPath, fullUrl);
 
-      console.log('[OpenAI API] Request URL:', url.href);
+      logger.debug(`Request URL: ${url.href}`);
       const isHttps = url.protocol === 'https:';
       const httpModule = isHttps ? https : http;
 
@@ -285,9 +287,13 @@ async function healthCheckModel(baseUrl, apiKey, model, timeout = DEFAULT_HEALTH
         fullUrl += '/v1';
       }
 
-      const url = new URL('/chat/completions', fullUrl.endsWith('/') ? fullUrl : fullUrl + '/');
+      // 确保 fullUrl 以 / 结尾
+      if (!fullUrl.endsWith('/')) {
+        fullUrl += '/';
+      }
 
-      console.log(`[Health Check] Testing model: ${model} at ${url.href}`);
+      const url = new URL('chat/completions', fullUrl);
+      logger.debug(`Testing model: ${model} at ${url.href}`);
 
       const isHttps = url.protocol === 'https:';
       const httpModule = isHttps ? https : http;
@@ -295,7 +301,7 @@ async function healthCheckModel(baseUrl, apiKey, model, timeout = DEFAULT_HEALTH
       const requestBody = JSON.stringify({
         model: model,
         messages: [{ role: 'user', content: 'hi' }],
-        max_tokens: 1,
+        max_tokens: 16384, // 增加到 16k 以兼容思考模型的需求 (max_tokens must be > budget)
         stream: true, // 使用流式 API
       });
 
@@ -334,7 +340,7 @@ async function healthCheckModel(baseUrl, apiKey, model, timeout = DEFAULT_HEALTH
               status = HealthStatus.FAILED;
             }
 
-            console.log(`[Health Check] ${model}: ${status} (${latency}ms)`);
+            logger.info(`${model}: ${status} (${latency}ms)`);
 
             resolve({
               model,

@@ -427,19 +427,69 @@ export const store = reactive({
 
   // OpenAI Chat
   openaiChatMessages: [],
-  openaiChatModel: '',
-  openaiChatSystemPrompt: '你是一个有用的 AI 助手。',
+  openaiChatAttachments: [], // 当前待发送的附件
+  openaiChatModel: localStorage.getItem('openai_default_model') || '',
+  openaiChatEndpoint: localStorage.getItem('openai_chat_endpoint') || '', // 当前选中的对话端点
+  openaiDefaultChatModel: localStorage.getItem('openai_default_model') || '',
+  openaiChatSystemPrompt: localStorage.getItem('openai_system_prompt') || '你是一个有用的 AI 助手。',
   openaiChatMessageInput: '',
   openaiChatLoading: false,
   openaiAllModels: [],
   openaiModelSearch: '',
-  openaiChatSettings: {
-    temperature: 0.7,
-    top_p: 1,
-    max_tokens: 2000,
-    presence_penalty: 0,
-    frequency_penalty: 0,
+  dropdownModelSearch: '', // 下拉框内部的搜索文本
+  openaiShowEndpointDropdown: false, // 是否显示端点选择下拉框
+  openaiShowModelDropdown: false, // 是否显示模型选择下拉框
+  openaiChatSettings: (() => {
+    try {
+      const saved = localStorage.getItem('openai_chat_settings');
+      return saved ? JSON.parse(saved) : {
+        temperature: 0.7,
+        top_p: 1,
+        max_tokens: 2000,
+        presence_penalty: 0,
+        frequency_penalty: 0,
+      };
+    } catch {
+      return {
+        temperature: 0.7,
+        top_p: 1,
+        max_tokens: 2000,
+        presence_penalty: 0,
+        frequency_penalty: 0,
+      };
+    }
+  })(),
+
+  // Personas (人设系统) - 从后端加载
+  openaiPersonas: [],
+  openaiCurrentPersonaId: null,
+  showPersonaModal: false,
+  editingPersona: null,
+  personaForm: { name: '', systemPrompt: '', icon: 'fa-robot' },
+  showPersonaDropdown: false,
+
+  // Chat History
+  openaiChatSessions: [],           // 所有会话列表
+  openaiChatCurrentSessionId: null, // 当前会话 ID
+  openaiChatHistoryLoading: false,  // 加载状态
+  openaiChatHistoryCollapsed: true, // 侧边栏折叠状态 (默认隐藏)
+  openaiChatSelectedSessionIds: [], // 选中的会话 ID（批量删除使用）
+
+  // Model Management
+  openaiSettingsTab: 'general',     // 设置弹窗当前标签页: general, models, endpoints
+  openaiPinnedModels: (() => { try { return JSON.parse(localStorage.getItem('openai_pinned_models')) || []; } catch { return []; } })(),
+  openaiHiddenModels: (() => { try { return JSON.parse(localStorage.getItem('openai_hidden_models')) || []; } catch { return []; } })(),
+  openaiModelPresets: (() => { try { return JSON.parse(localStorage.getItem('openai_model_presets')) || {}; } catch { return {}; } })(),
+  openaiShowHiddenModels: false,    // 是否显示隐藏的模型
+  openaiModelHealth: {},            // 模型健康状态: { modelId: { status: 'healthy'|'unhealthy'|'unknown', loading: false, latency: 0 } }
+  openaiModelHealthBatchLoading: false, // 批量检测加载状态
+  openaiHealthCheckModal: false,    // 健康检测弹窗显示
+  openaiHealthCheckForm: {          // 健康检测表单
+    useKey: 'single',               // single: 单端点, all: 所有端点
+    concurrency: false,             // 是否开启并发检测
+    timeout: 15                     // 超时时间(s)
   },
+  openaiSelectedEndpointId: '',     // 当前选择的端点 ID (用于筛选模型)
 
   // Antigravity
   antigravityAccounts: [],

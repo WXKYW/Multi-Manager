@@ -120,10 +120,12 @@ function updateEndpoint(id, updates) {
     if (updates.baseUrl !== undefined) updateData.baseUrl = updates.baseUrl;
     if (updates.apiKey !== undefined) updateData.apiKey = updates.apiKey;
     if (updates.status !== undefined) updateData.status = updates.status;
+    if (updates.healthStatus !== undefined) updateData.status = updates.healthStatus; // 映射 healthStatus
     if (updates.enabled !== undefined) updateData.enabled = updates.enabled;
     if (updates.models !== undefined) updateData.models = updates.models;
     if (updates.lastUsed !== undefined) updateData.lastUsed = updates.lastUsed;
     if (updates.lastChecked !== undefined) updateData.lastChecked = updates.lastChecked;
+    if (updates.lastHealthCheck !== undefined) updateData.lastChecked = updates.lastHealthCheck; // 映射 lastHealthCheck
 
     OpenAIEndpoint.updateEndpoint(id, updateData);
 

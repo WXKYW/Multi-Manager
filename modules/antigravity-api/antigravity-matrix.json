@@ -57,6 +57,6 @@
   "gemini-3-flash": {
     "base": true,
     "fakeStream": false,
-    "antiTrunc": false
+    "antiTrunc": true
   }
 }

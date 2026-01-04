@@ -9,7 +9,7 @@
 
 /* 标签页内容的基础样式 */
 .tab-content {
-  padding-bottom: 50px;
+  padding-bottom: 0;
   animation-duration: 0.4s;
   animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   animation-fill-mode: both;
@@ -17,6 +17,13 @@
   backface-visibility: hidden;
   -webkit-font-smoothing: antialiased;
   overflow: visible;
+}
+
+/* 移动端保留底部间距（为底部导航栏留空间） */
+@media (max-width: 768px) {
+  .tab-content {
+    padding-bottom: 50px;
+  }
 }
 
 /* 淡入动画 - 从下方进入 */

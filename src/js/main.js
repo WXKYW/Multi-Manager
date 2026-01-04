@@ -791,9 +791,144 @@ const app = createApp({
 
     // TOTP 验证器模块计算属性
     ...totpComputed,
+
+    // 聊天界面可用的模型列表 (根据端点筛选)
+    filteredChatModels() {
+      // 1. 如果选中了特定端点，直接使用该端点的原始模型列表
+      if (store.openaiChatEndpoint) {
+        const selectedEndpoint = store.openaiEndpoints.find(ep => ep.id === store.openaiChatEndpoint);
+        if (selectedEndpoint && selectedEndpoint.models) {
+          // 将字符串数组转为对象数组，并过滤
+          return selectedEndpoint.models
+            .filter(id => !store.openaiHiddenModels.includes(id) || store.openaiPinnedModels.includes(id))
+            .map(id => ({
+              id: id,
+              owned_by: selectedEndpoint.name || 'custom' // 统一组名，虽然界面上可能不再分组
+            }));
+        }
+        return [];
+      }
+
+      // 2. 自动/全量模式：聚合所有端点的列表
+      // 注意：store.openaiAllModels 可能不全，所以我们需要遍历所有 endpoints 来构建完整列表
+      const allModelsMap = new Map();
+
+      // 先加入 store.openaiAllModels (如果有基本信息)
+      if (store.openaiAllModels && store.openaiAllModels.length) {
+        store.openaiAllModels.forEach(m => allModelsMap.set(m.id, m));
+      }
+
+      // 遍历所有端点进行补充
+      if (store.openaiEndpoints) {
+        store.openaiEndpoints.forEach(ep => {
+          if (ep.models && Array.isArray(ep.models)) {
+            ep.models.forEach(m => {
+              const id = typeof m === 'string' ? m : m.id;
+              if (!allModelsMap.has(id)) {
+                allModelsMap.set(id, {
+                  id: id,
+                  owned_by: ep.name || 'custom',
+                  object: 'model',
+                  created: Date.now()
+                });
+              }
+            });
+          }
+        });
+      }
+
+      let models = Array.from(allModelsMap.values());
+
+      // 默认过滤掉隐藏的模型 (除非已收藏)
+      models = models.filter(m =>
+        !store.openaiHiddenModels.includes(m.id) || store.openaiPinnedModels.includes(m.id)
+      );
+
+      return models;
+    },
+
+    // 下拉框内搜索过滤后的模型列表
+    dropdownFilteredChatModels() {
+      let models = this.filteredChatModels;
+      if (store.dropdownModelSearch) {
+        const search = store.dropdownModelSearch.toLowerCase();
+        models = models.filter(m => m.id.toLowerCase().includes(search));
+      }
+      return models;
+    },
+
+    // 模型管理页面过滤后的模型列表
+    filteredModelsForManagement() {
+      let models = [];
+
+      // 1. 确定基础模型列表
+      if (store.openaiSelectedEndpointId) {
+        // 如果选择了特定端点，直接以该端点的 models 为准
+        const selectedEndpoint = store.openaiEndpoints.find(ep => ep.id === store.openaiSelectedEndpointId);
+        if (selectedEndpoint && selectedEndpoint.models && selectedEndpoint.models.length > 0) {
+          models = selectedEndpoint.models.map(m => {
+            const id = typeof m === 'string' ? m : m.id;
+            // 尝试从全局列表中获取详细信息
+            const existing = (store.openaiAllModels || []).find(am => am.id === id);
+            if (existing) return existing;
+            // 降级构造基础对象
+            return { id: id, owned_by: selectedEndpoint.name || 'custom', object: 'model' };
+          });
+        }
+      } else {
+        // 聚合所有端点的模型
+        const allModelsMap = new Map();
+
+        // 1. 先加入 store.openaiAllModels (如果有基本信息)
+        if (store.openaiAllModels && store.openaiAllModels.length) {
+          store.openaiAllModels.forEach(m => allModelsMap.set(m.id, m));
+        }
+
+        // 2. 遍历所有端点进行补充
+        if (store.openaiEndpoints) {
+          store.openaiEndpoints.forEach(ep => {
+            if (ep.models && Array.isArray(ep.models)) {
+              ep.models.forEach(m => {
+                const id = typeof m === 'string' ? m : m.id;
+                // 如果该模型尚未存在，或者已存在但没有详细信息（例如只是个ID占位），则尝试充实它
+                if (!allModelsMap.has(id)) {
+                  allModelsMap.set(id, {
+                    id: id,
+                    owned_by: ep.name || 'custom',
+                    object: 'model',
+                    created: Date.now()
+                  });
+                }
+              });
+            }
+          });
+        }
+
+        models = Array.from(allModelsMap.values());
+      }
+
+      // 2. 根据搜索过滤
+      if (store.openaiModelSearch) {
+        const search = store.openaiModelSearch.toLowerCase();
+        models = models.filter(m =>
+          m.id.toLowerCase().includes(search) ||
+          (m.owned_by && m.owned_by.toLowerCase().includes(search))
+        );
+      }
+
+      // 3. 根据隐藏状态过滤
+      if (!store.openaiShowHiddenModels) {
+        models = models.filter(m => !(store.openaiHiddenModels || []).includes(m.id));
+      }
+
+      return models;
+    },
   },
 
   async mounted() {
+    // 全局点击监听，用于关闭自定义下拉菜单
+    document.addEventListener('click', this.closeAllDropdowns);
+
     // 0. 检测单页模式 (通过 URL 路径直接访问模块)
     this.detectSinglePageMode();
 
@@ -868,6 +1003,7 @@ const app = createApp({
       console.log('[System] 非核心功能加载完成');
     }, 500);
   },
+
 
   watch: {
     // 监听图表区域展开状态，展开时渲染图表
@@ -1428,6 +1564,7 @@ const app = createApp({
   },
 
   beforeUnmount() {
+    document.removeEventListener('click', this.closeAllDropdowns);
     // 清理定时器，防止内存泄漏
     if (this.refreshInterval) {
       clearInterval(this.refreshInterval);
@@ -1480,6 +1617,29 @@ const app = createApp({
     formatFileSize,
     formatRegion,
     renderMarkdown,
+
+    // 带缓存的日志内容渲染（避免重复解析 Base64 图片）
+    getCachedLogHtml(obj, field = 'content') {
+      if (!obj) return '';
+      const content = obj[field];
+      if (content === undefined || content === null) return '';
+
+      // 生成缓存 key
+      const cacheKey = `_cached_${field}`;
+      const contentKey = `_cachedSource_${field}`;
+
+      // 检查缓存是否有效
+      const contentHash = typeof content === 'string' ? content : JSON.stringify(content);
+      if (obj[cacheKey] && obj[contentKey] === contentHash) {
+        return obj[cacheKey];
+      }
+
+      // 渲染并缓存
+      const html = renderMarkdown(content);
+      obj[cacheKey] = html;
+      obj[contentKey] = contentHash;
+      return html;
+    },
 
     /**
      * 检测单页模式 - 通过 URL 路径直接访问特定模块

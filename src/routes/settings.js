@@ -495,3 +495,157 @@ router.post('/enforce-log-limits', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+/**
+ * 分析数据库各表空间占用
+ * GET /api/settings/database-analysis
+ */
+router.get('/database-analysis', (req, res) => {
+  try {
+    const db = dbService.getDatabase();
+
+    // 获取所有表名
+    const tables = db.prepare(`
+      SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'
+    `).all();
+
+    const analysis = [];
+
+    for (const { name } of tables) {
+      try {
+        // 获取记录数
+        const countResult = db.prepare(`SELECT COUNT(*) as count FROM "${name}"`).get();
+
+        // 估算表大小（通过计算内容长度）
+        let sizeEstimate = 0;
+        let avgRowSize = 0;
+
+        // 对于常见的大数据表，计算内容大小
+        if (name === 'chat_messages') {
+          const sizeResult = db.prepare(`
+            SELECT SUM(LENGTH(content)) + SUM(COALESCE(LENGTH(reasoning), 0)) as total_size
+            FROM chat_messages
+          `).get();
+          sizeEstimate = sizeResult?.total_size || 0;
+        } else if (name === 'api_logs' || name === 'operation_logs') {
+          const sizeResult = db.prepare(`
+            SELECT SUM(LENGTH(COALESCE(details, ''))) + SUM(LENGTH(COALESCE(user_agent, ''))) as total_size
+            FROM "${name}"
+          `).get();
+          sizeEstimate = sizeResult?.total_size || 0;
+        }
+
+        if (countResult.count > 0 && sizeEstimate > 0) {
+          avgRowSize = Math.round(sizeEstimate / countResult.count);
+        }
+
+        analysis.push({
+          table: name,
+          rows: countResult.count,
+          estimatedSizeBytes: sizeEstimate,
+          estimatedSizeMB: (sizeEstimate / 1024 / 1024).toFixed(2),
+          avgRowSizeBytes: avgRowSize
+        });
+      } catch (e) {
+        analysis.push({
+          table: name,
+          rows: 0,
+          error: e.message
+        });
+      }
+    }
+
+    // 按大小排序
+    analysis.sort((a, b) => (b.estimatedSizeBytes || 0) - (a.estimatedSizeBytes || 0));
+
+    // 获取数据库文件大小
+    const fs = require('fs');
+    const dbPath = path.join(__dirname, '../../data/data.db');
+    let dbFileSize = 0;
+    if (fs.existsSync(dbPath)) {
+      dbFileSize = fs.statSync(dbPath).size;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        dbFileSizeMB: (dbFileSize / 1024 / 1024).toFixed(2),
+        tables: analysis
+      }
+    });
+  } catch (error) {
+    logger.error('数据库分析失败', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 清理聊天消息（减少数据库体积）
+ * POST /api/settings/clear-chat-messages
+ */
+router.post('/clear-chat-messages', async (req, res) => {
+  try {
+    const { keepDays = 7, keepSessions = 10 } = req.body;
+    const db = dbService.getDatabase();
+
+    logger.info(`开始清理聊天消息，保留 ${keepDays} 天或最近 ${keepSessions} 个会话`);
+
+    // 获取要保留的会话 ID（最近 N 个）
+    const recentSessions = db.prepare(`
+      SELECT id FROM chat_sessions ORDER BY updated_at DESC LIMIT ?
+    `).all(keepSessions);
+    const recentSessionIds = recentSessions.map(s => s.id);
+
+    // 计算保留日期
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - keepDays);
+    const cutoffStr = cutoffDate.toISOString();
+
+    // 删除旧消息（不在保留会话中且超过保留天数）
+    let deletedMessages = 0;
+    let deletedSessions = 0;
+
+    if (recentSessionIds.length > 0) {
+      const placeholders = recentSessionIds.map(() => '?').join(',');
+
+      // 删除旧会话的消息
+      const msgResult = db.prepare(`
+        DELETE FROM chat_messages 
+        WHERE session_id NOT IN (${placeholders}) 
+        AND created_at < ?
+      `).run(...recentSessionIds, cutoffStr);
+      deletedMessages = msgResult.changes;
+
+      // 删除空会话
+      const sessionResult = db.prepare(`
+        DELETE FROM chat_sessions 
+        WHERE id NOT IN (${placeholders}) 
+        AND created_at < ?
+        AND id NOT IN (SELECT DISTINCT session_id FROM chat_messages)
+      `).run(...recentSessionIds, cutoffStr);
+      deletedSessions = sessionResult.changes;
+    }
+
+    // VACUUM
+    db.exec('VACUUM');
+
+    const fs = require('fs');
+    const dbPath = path.join(__dirname, '../../data/data.db');
+    const newSize = fs.existsSync(dbPath) ? (fs.statSync(dbPath).size / 1024 / 1024).toFixed(2) : 0;
+
+    logger.success(`聊天消息清理完成: 删除 ${deletedMessages} 条消息, ${deletedSessions} 个会话, 数据库大小: ${newSize}MB`);
+
+    res.json({
+      success: true,
+      message: `清理完成`,
+      data: {
+        deletedMessages,
+        deletedSessions,
+        newDbSizeMB: newSize
+      }
+    });
+  } catch (error) {
+    logger.error('清理聊天消息失败', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});

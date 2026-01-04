@@ -899,7 +899,7 @@ body.modal-open {
   justify-content: center;
   gap: 8px;
   height: 38px;
-  padding: 0 18px;
+  padding: 0 15px;
   border-radius: 10px;
   font-weight: 600;
   font-size: 14px;
@@ -2843,7 +2843,7 @@ body.modal-open {
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  margin-bottom: 12px;
+  /* margin-bottom: 12px; */
   overflow: hidden;
 }
 

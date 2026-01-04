@@ -153,6 +153,10 @@ export default defineConfig(({ mode }) => {
           ws: true,
           changeOrigin: true,
         },
+        '/uploads': {
+          target: 'http://127.0.0.1:3000',
+          changeOrigin: true,
+        },
       },
     },
   };

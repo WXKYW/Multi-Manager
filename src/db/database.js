@@ -47,17 +47,37 @@ class DatabaseService {
       // 启用 WAL 模式 (提升并发性能)
       this.db.pragma('journal_mode = WAL');
       this.db.pragma('synchronous = NORMAL');
+      this.db.pragma('wal_autocheckpoint = 1000'); // 每 1000 页自动 checkpoint
 
       // 执行数据库初始化脚本
       this.initializeSchema();
 
       this.initialized = true;
-      logger.success('数据库连接就绪: ' + path.basename(this.dbPath));
+      logger.success('数据库初始化完成');
 
       return this.db;
     } catch (error) {
-      logger.error('数据库初始化失败', error.message);
+      logger.error('初始化数据库连接失败: ' + error.message);
       throw error;
+    }
+  }
+
+  /**
+   * 关闭数据库连接
+   * 在关闭前执行分次 checkpoint 以确保数据合并到主文件并清理临时文件
+   */
+  close() {
+    if (this.db) {
+      try {
+        logger.info('正在关闭数据库连接...');
+        this.db.pragma('wal_checkpoint(TRUNCATE)');
+        this.db.close();
+        this.db = null;
+        this.initialized = false;
+        logger.success('数据库连接已安全关闭');
+      } catch (error) {
+        logger.error('关闭数据库时发生错误: ' + error.message);
+      }
     }
   }
 
@@ -303,6 +323,51 @@ class DatabaseService {
         logger.error('Server Metrics History platform 迁移失败:', err.message);
       }
 
+      // Chat Sessions 迁移: 添加 endpoint_id 和 persona_id 字段
+      try {
+        const chatColumns = this.db.pragma('table_info(chat_sessions)');
+        if (chatColumns.length > 0) {
+          const hasEndpointId = chatColumns.some(col => col.name === 'endpoint_id');
+          if (!hasEndpointId) {
+            logger.info('正在为 chat_sessions 表添加 endpoint_id 字段...');
+            this.db.exec('ALTER TABLE chat_sessions ADD COLUMN endpoint_id TEXT');
+            logger.success('chat_sessions.endpoint_id 字段添加成功');
+          }
+          const hasPersonaId = chatColumns.some(col => col.name === 'persona_id');
+          if (!hasPersonaId) {
+            logger.info('正在为 chat_sessions 表添加 persona_id 字段...');
+            this.db.exec('ALTER TABLE chat_sessions ADD COLUMN persona_id INTEGER');
+            logger.success('chat_sessions.persona_id 字段添加成功');
+          }
+        }
+      } catch (err) {
+        logger.error('Chat Sessions 字段迁移失败:', err.message);
+      }
+
+      // Persona 迁移: 创建 chat_personas 表
+      try {
+        const personaTables = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='chat_personas'").all();
+        if (personaTables.length === 0) {
+          logger.info('正在创建 chat_personas 表...');
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS chat_personas (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT NOT NULL,
+              system_prompt TEXT NOT NULL,
+              icon TEXT DEFAULT 'fa-robot',
+              is_default INTEGER DEFAULT 0,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+              updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+          `);
+          // 插入默认人设
+          this.db.prepare("INSERT INTO chat_personas (name, system_prompt, icon, is_default) VALUES (?, ?, ?, ?)").run('默认助手', '你是一个有用的 AI 助手。', 'fa-robot', 1);
+          logger.success('chat_personas 表创建成功并初始化默认人设');
+        }
+      } catch (err) {
+        logger.error('Persona 表迁移失败:', err.message);
+      }
+
       // Music Settings 迁移: 创建 music_settings 表存储 Cookie
       try {
         const musicTables = this.db
@@ -452,14 +517,45 @@ class DatabaseService {
 
   /**
    * 执行数据库 VACUUM (压缩/整理)
+   * 包含完整的 WAL checkpoint 以确保物理文件大小能正确收缩
    */
   vacuum() {
     try {
       const db = this.getDatabase();
-      logger.info('开始执行数据库 VACUUM...');
+      const beforeSize = fs.statSync(this.dbPath).size;
+
+      logger.info(`开始执行数据库 VACUUM... (当前大小: ${(beforeSize / 1024 / 1024).toFixed(2)}MB)`);
+
+      // 1. 先执行 TRUNCATE 模式的 WAL checkpoint
+      // 这会将 WAL 文件中的所有数据写入主数据库文件，并清空 WAL 文件
+      try {
+        const checkpointResult = db.pragma('wal_checkpoint(TRUNCATE)');
+        logger.debug('WAL Checkpoint 结果:', checkpointResult);
+      } catch (e) {
+        logger.warn('WAL Checkpoint 失败:', e.message);
+      }
+
+      // 2. 执行 VACUUM 压缩数据库
+      // VACUUM 会重建整个数据库文件，释放未使用的页面
       db.exec('VACUUM');
-      logger.success('数据库 VACUUM 完成');
-      return true;
+
+      // 3. 再次执行 checkpoint 确保干净
+      try {
+        db.pragma('wal_checkpoint(TRUNCATE)');
+      } catch (e) {
+        // 忽略
+      }
+
+      const afterSize = fs.statSync(this.dbPath).size;
+      const savedMB = ((beforeSize - afterSize) / 1024 / 1024).toFixed(2);
+
+      logger.success(`数据库 VACUUM 完成: ${(beforeSize / 1024 / 1024).toFixed(2)}MB -> ${(afterSize / 1024 / 1024).toFixed(2)}MB (释放 ${savedMB}MB)`);
+
+      return {
+        beforeSizeMB: (beforeSize / 1024 / 1024).toFixed(2),
+        afterSizeMB: (afterSize / 1024 / 1024).toFixed(2),
+        savedMB: savedMB
+      };
     } catch (error) {
       logger.error('数据库 VACUUM 失败', error.message);
       throw error;

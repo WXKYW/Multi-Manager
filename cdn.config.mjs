@@ -103,6 +103,12 @@ export const cdnDependencies = {
     global: 'Html5Qrcode',
     css: false,
   },
+  katex: {
+    version: '0.16.21',
+    file: '/dist/katex.min.js',
+    global: 'katex',
+    css: '/dist/katex.min.css',
+  },
 };
 
 export function getCdnUrl(provider, pkg, type = 'js') {

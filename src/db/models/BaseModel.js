@@ -91,6 +91,8 @@ class BaseModel {
    */
   update(id, data) {
     const keys = Object.keys(data);
+    if (keys.length === 0) return true; // 没有需要更新的数据，直接返回成功
+
     const setClause = keys.map(key => `${key} = ?`).join(', ');
     const values = [...keys.map(key => data[key]), id];
 
