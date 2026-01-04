@@ -34,7 +34,7 @@ async function loadLazyCSS() {
     import('../css/server.css'),
     import('../css/ssh-ide.css'),
     import('../css/ssh-ide.css'),
-    // xterm.css moved to critical imports
+    // xterm.css 移至关键资源导入
     import('@xterm/xterm/css/xterm.css'),
     import('@applemusic-like-lyrics/core/style.css'),
     import('../css/antigravity.css'),
@@ -46,7 +46,7 @@ async function loadLazyCSS() {
     import('../css/fly.css'),
     import('../css/r2.css'),
     import('../css/chat.css'),
-    // import('../css/template.css'), // Template file, exclude from build
+    // import('../css/template.css'), // 模板文件，从构建中排除
     import('../css/stream-player.css'),
     import('plyr/dist/plyr.css'),
     import('../css/totp.css'),
@@ -68,8 +68,6 @@ import { useAppStore } from './stores/app.js';
 import { useServerStore } from './stores/server.js';
 // FontAwesome 已移至 index.html <head> 中通过 CDN 加载，避免 JS 模块延迟导致的 FOUC
 // import '@fortawesome/fontawesome-free/css/all.min.css';
-
-// xterm.js imports removed - lazy loaded in ssh.js
 
 // 导入功能模块
 import { dashboardMethods } from './modules/dashboard.js';

@@ -6,7 +6,7 @@
  * @module stream-player
  */
 
-// Plyr imports removed for lazy loading
+// 移除 Plyr 静态导入以启用懒加载
 // import Plyr from 'plyr';
 // import 'plyr/dist/plyr.css';
 import { store } from '../store.js';
@@ -210,7 +210,7 @@ async function play(options) {
   // 动态加载 Plyr 和 CSS
   let Plyr;
   try {
-    // plyr.css has been moved to main.js loadLazyCSS to ensure correct injection
+    // plyr.css 已移至 main.js loadLazyCSS 中以确保正确注入
     const module = await import('plyr');
     Plyr = module.default;
   } catch (e) {
@@ -426,7 +426,7 @@ async function togglePictureInPicture() {
  */
 function bindKeyboardShortcuts(container) {
   // Plyr 已内置快捷键支持
-  return () => {};
+  return () => { };
 }
 
 // ==================== 格式检查工具 ====================

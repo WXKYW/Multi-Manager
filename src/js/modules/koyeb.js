@@ -6,6 +6,76 @@
 import { store } from '../store.js';
 import { toast } from './toast.js';
 
+// ============ 常量定义 ============
+
+const KOYEB_STATUS_MAP = {
+  RUNNING: { text: '运行中', class: 'status-running' },
+  HEALTHY: { text: '运行中', class: 'status-running' },
+  STARTING: { text: '启动中', class: 'status-starting' },
+  SUSPENDED: { text: '已暂停', class: 'status-suspended' },
+  PAUSED: { text: '已暂停', class: 'status-suspended' },
+  STOPPED: { text: '已停止', class: 'status-suspended' },
+  ERROR: { text: '错误', class: 'status-error' },
+  ERRORED: { text: '错误', class: 'status-error' },
+  UNHEALTHY: { text: '异常', class: 'status-error' },
+};
+
+/**
+ * 通用重命名逻辑辅助函数
+ */
+async function _renameKoyebResource({
+  account,
+  item,
+  newName,
+  type, // '应用' 或 '服务'
+  apiPath,
+  checkDuplicate
+}) {
+  const finalName = newName.trim();
+  if (!finalName || finalName === item.name) {
+    item.isEditing = false;
+    return;
+  }
+
+  // 检查重名
+  if (checkDuplicate(finalName)) {
+    toast.error(`${type}名称 "${finalName}" 已存在，请使用其他名称`);
+    item.editingName = item.name;
+    item.isEditing = false;
+    return;
+  }
+
+  try {
+    const response = await fetch(apiPath, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accountId: account.id, name: finalName }),
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      toast.success(`${type}重命名成功`);
+      item.name = finalName;
+      item.isEditing = false;
+    } else {
+      throw new Error(result.error);
+    }
+  } catch (error) {
+    console.error(`重命名${type}失败:`, error);
+    let errorMsg = '重命名失败';
+    if (error.message.includes('Validation') || error.message.includes('validation')) {
+      errorMsg = `${type}名称不符合要求，请使用字母、数字和连字符，不能以连字符开头或结尾`;
+    } else if (error.message.includes('already exists') || error.message.includes('duplicate')) {
+      errorMsg = `${type}名称 "${finalName}" 已被使用，请选择其他名称`;
+    } else {
+      errorMsg = `重命名失败: ${error.message}`;
+    }
+    toast.error(errorMsg);
+    item.editingName = item.name;
+  }
+}
+
 export const koyebMethods = {
   // ============ 数据加载 ============
 
@@ -604,114 +674,34 @@ export const koyebMethods = {
    * 重命名 Koyeb 应用
    */
   async renameKoyebApp(account, app) {
-    // 使用 SweetAlert2 或类似机制，或者复用 Zeabur 的编辑逻辑
-    // 这里假设已经进入编辑模式，input 绑定了 app.editingName
-    const newName = app.editingName.trim();
-    if (!newName || newName === app.name) {
-      app.isEditing = false;
-      return;
-    }
-
-    // 检查是否有重名
-    const hasDuplicate = account.projects.some(
-      p => p._id !== app._id && p.name.toLowerCase() === newName.toLowerCase()
-    );
-
-    if (hasDuplicate) {
-      toast.error(`应用名称 "${newName}" 已存在,请使用其他名称`);
-      app.editingName = app.name;
-      app.isEditing = false;
-      return;
-    }
-
-    try {
-      const response = await fetch(`/api/koyeb/apps/${app._id}/rename`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accountId: account.id, name: newName }),
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        toast.success('应用重命名成功');
-        app.name = newName;
-        app.isEditing = false;
-      } else {
-        throw new Error(result.error);
-      }
-    } catch (error) {
-      console.error('重命名应用失败:', error);
-
-      // 提供更友好的错误提示
-      let errorMsg = '重命名失败';
-      if (error.message.includes('Validation') || error.message.includes('validation')) {
-        errorMsg = '应用名称不符合要求,请使用字母、数字和连字符,不能以连字符开头或结尾';
-      } else if (error.message.includes('already exists') || error.message.includes('duplicate')) {
-        errorMsg = `应用名称 "${newName}" 已被使用,请选择其他名称`;
-      } else {
-        errorMsg = `重命名失败: ${error.message}`;
-      }
-
-      toast.error(errorMsg);
-      app.editingName = app.name;
-    }
+    await _renameKoyebResource({
+      account,
+      item: app,
+      newName: app.editingName,
+      type: '应用',
+      apiPath: `/api/koyeb/apps/${app._id}/rename`,
+      checkDuplicate: (name) =>
+        account.projects.some(
+          (p) => p._id !== app._id && p.name.toLowerCase() === name.toLowerCase()
+        ),
+    });
   },
 
   /**
    * 重命名 Koyeb 服务
    */
   async renameKoyebService(account, app, service) {
-    const newName = service.editingName.trim();
-    if (!newName || newName === service.name) {
-      service.isEditing = false;
-      return;
-    }
-
-    // 检查同一应用下是否有重名服务
-    const hasDuplicate = app.services.some(
-      s => s._id !== service._id && s.name.toLowerCase() === newName.toLowerCase()
-    );
-
-    if (hasDuplicate) {
-      toast.error(`服务名称 "${newName}" 在该应用下已存在,请使用其他名称`);
-      service.editingName = service.name;
-      service.isEditing = false;
-      return;
-    }
-
-    try {
-      const response = await fetch(`/api/koyeb/services/${service._id}/rename`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accountId: account.id, name: newName }),
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        toast.success('服务重命名成功');
-        service.name = newName;
-        service.isEditing = false;
-      } else {
-        throw new Error(result.error);
-      }
-    } catch (error) {
-      console.error('重命名服务失败:', error);
-
-      // 提供更友好的错误提示
-      let errorMsg = '重命名失败';
-      if (error.message.includes('Validation') || error.message.includes('validation')) {
-        errorMsg = '服务名称不符合要求,请使用字母、数字和连字符,不能以连字符开头或结尾';
-      } else if (error.message.includes('already exists') || error.message.includes('duplicate')) {
-        errorMsg = `服务名称 "${newName}" 已被使用,请选择其他名称`;
-      } else {
-        errorMsg = `重命名失败: ${error.message}`;
-      }
-
-      toast.error(errorMsg);
-      service.editingName = service.name;
-    }
+    await _renameKoyebResource({
+      account,
+      item: service,
+      newName: service.editingName,
+      type: '服务',
+      apiPath: `/api/koyeb/services/${service._id}/rename`,
+      checkDuplicate: (name) =>
+        app.services.some(
+          (s) => s._id !== service._id && s.name.toLowerCase() === name.toLowerCase()
+        ),
+    });
   },
 
   /**
@@ -784,14 +774,14 @@ export const koyebMethods = {
 
         if (result.success) {
           // Koyeb 日志 API 返回结构适配
-          // 假设现在返回的是 streams/logs/query 的结果，通常是一个对象数组
-          // 每个对象可能有 { msg, created_at, ... } 或者 { result: { msg, ... } }
+          // 如果返回的是流式日志结构
           const rawLogs = result.logs || [];
-          return rawLogs.map(l => {
-            const entry = l.result || l; // 兼容不同结构
+          return rawLogs.map((l) => {
+            // 兼容 { result: { msg } } 或直接 { msg } 的结构
+            const entry = l.result || l;
             return {
               timestamp: entry.created_at ? new Date(entry.created_at).getTime() : Date.now(),
-              message: entry.msg || JSON.stringify(entry),
+              message: entry.msg || (typeof entry === 'string' ? entry : JSON.stringify(entry)),
               level: 'INFO',
             };
           });
@@ -906,36 +896,14 @@ export const koyebMethods = {
    * 获取 Koyeb 状态颜色类
    */
   getKoyebStatusClass(status) {
-    const statusClasses = {
-      RUNNING: 'status-running',
-      HEALTHY: 'status-running',
-      STARTING: 'status-starting',
-      SUSPENDED: 'status-suspended',
-      PAUSED: 'status-suspended',
-      STOPPED: 'status-suspended',
-      ERROR: 'status-error',
-      ERRORED: 'status-error',
-      UNHEALTHY: 'status-error',
-    };
-    return statusClasses[status?.toUpperCase()] || 'status-unknown';
+    return KOYEB_STATUS_MAP[status?.toUpperCase()]?.class || 'status-unknown';
   },
 
   /**
    * 获取 Koyeb 状态显示文本
    */
   getKoyebStatusText(status) {
-    const statusTexts = {
-      RUNNING: '运行中',
-      HEALTHY: '运行中',
-      STARTING: '启动中',
-      SUSPENDED: '已暂停',
-      PAUSED: '已暂停',
-      STOPPED: '已停止',
-      ERROR: '错误',
-      ERRORED: '错误',
-      UNHEALTHY: '异常',
-    };
-    return statusTexts[status?.toUpperCase()] || status || '未知';
+    return KOYEB_STATUS_MAP[status?.toUpperCase()]?.text || status || '未知';
   },
 
   /**

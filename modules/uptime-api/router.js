@@ -1,5 +1,5 @@
 /**
- * Uptime API Router
+ * Uptime API 路由
  */
 
 const express = require('express');
@@ -10,8 +10,8 @@ const monitorService = require('./monitor-service');
 // GET /api/uptime/monitors
 router.get('/monitors', (req, res) => {
     const monitors = storage.getAll();
-    // Attach latest status if desired, or frontend can fetch history separately
-    // Optimization: Frontend will likely want the latest heartbeat for each.
+    // 如有需要可附加最新状态，或者由前端单独获取历史记录
+    // 优化：前端通常需要每个监控项的最新心跳状态。
 
     const result = monitors.map(m => {
         const history = storage.getHistory(m.id, 1);
@@ -26,7 +26,7 @@ router.get('/monitors', (req, res) => {
 
 // GET /api/uptime/monitors/:id/history
 router.get('/monitors/:id/history', (req, res) => {
-    const history = storage.getHistory(req.params.id, 60); // Last 60 points
+    const history = storage.getHistory(req.params.id, 60); // 最近 60 个点
     res.json(history);
 });
 
@@ -54,7 +54,7 @@ router.put('/monitors/:id', (req, res) => {
         const updated = storage.update(id, data);
         if (!updated) return res.status(404).json({ error: 'Not found' });
 
-        // Restart if interval/url changed, or just standard restart
+        // 如果间隔/URL 发生变化，重启监控；或者只是执行标准重启
         monitorService.startMonitor(updated);
 
         res.json(updated);
