@@ -1609,6 +1609,14 @@ ${conversationText}
     }
   },
 
+  // 切换人设下拉框，同时关闭其他下拉框
+  togglePersonaDropdown(event) {
+    if (event) event.stopPropagation();
+    store.showPersonaDropdown = !store.showPersonaDropdown;
+    store.openaiShowEndpointDropdown = false;
+    store.openaiShowModelDropdown = false;
+  },
+
   async selectPersona(personaId) {
     const persona = store.openaiPersonas.find(p => p.id === personaId);
     if (!persona) return;
@@ -2523,6 +2531,7 @@ ${conversationText}
     if (event) event.stopPropagation();
     store.openaiShowEndpointDropdown = !store.openaiShowEndpointDropdown;
     store.openaiShowModelDropdown = false;
+    store.showPersonaDropdown = false;
   },
 
   selectEndpoint(endpointId) {
@@ -2535,6 +2544,7 @@ ${conversationText}
     if (event) event.stopPropagation();
     store.openaiShowModelDropdown = !store.openaiShowModelDropdown;
     store.openaiShowEndpointDropdown = false;
+    store.showPersonaDropdown = false;
     if (store.openaiShowModelDropdown) {
       store.dropdownModelSearch = '';
       this.$nextTick(() => {
@@ -2556,6 +2566,7 @@ ${conversationText}
   closeAllDropdowns() {
     store.openaiShowEndpointDropdown = false;
     store.openaiShowModelDropdown = false;
+    store.showPersonaDropdown = false;
   },
 
   getEndpointName(id) {
