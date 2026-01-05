@@ -23,15 +23,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="mobile-web-app-capable" content="yes" />
 
-  <!-- 关键字体图标预加载 (移出 CSS @import 避免渲染阻塞) -->
-  <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" as="style"
-    crossorigin>
-  <link rel="preload" href="https://unpkg.com/simple-icons-font@14.15.0/font/simple-icons.min.css" as="style"
-    crossorigin>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin>
-  <link rel="stylesheet" href="https://unpkg.com/simple-icons-font@14.15.0/font/simple-icons.min.css" crossorigin>
-
-  <!-- CDN 样式 (由 Vite 注入) -->
+  <!-- CDN 样式 (由 Vite 注入，使用配置的 CDN 提供商) -->
   <%- cdnStyleTags %>
 
     <!-- CDN 脚本 - 必须在 head 中先加载核心库 (由 Vite 注入) -->
