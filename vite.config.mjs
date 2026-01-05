@@ -109,7 +109,8 @@ export default defineConfig(({ mode }) => {
       alias: {
         '@': path.resolve(__dirname, './src'),
         // 关键：确保支持在 HTML 中直接写模板 (Runtime Compilation)
-        vue: 'vue/dist/vue.esm-bundler.js',
+        // 使用 esm-browser 版本确保生产环境 bundle 包含编译器
+        vue: isProduction ? 'vue/dist/vue.esm-browser.prod.js' : 'vue/dist/vue.esm-browser.js',
       },
     },
     define: {
