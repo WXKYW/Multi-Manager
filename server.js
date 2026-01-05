@@ -118,21 +118,36 @@ app.use(loggerMiddleware);
 app.use(cors(corsConfig()));
 app.use('/api', apiSecurityHeaders); // 为 API 端点设置额外安全头
 app.use(express.json({ limit: '50mb' }));
-// 静态文件服务配置
+
+// 1. 静态文件服务配置
 const staticOptions = {
-  maxAge: '1d', // 静态资源缓存 1 天
+  maxAge: '1d',
   immutable: true,
-  index: false,
+  index: 'index.html', // 明确启用 index.html
 };
 
-// 1. 优先服务 dist (生产构建内容)
-if (fs.existsSync(path.join(__dirname, 'dist'))) {
-  app.use(express.static('dist', { ...staticOptions, index: 'index.html' }));
+const distDir = path.join(__dirname, 'dist');
+const srcDir = path.join(__dirname, 'src');
+const publicDir = path.join(__dirname, 'public');
+
+// 优先服务 dist (生产构建内容)
+if (fs.existsSync(distDir)) {
+  logger.info('检测到 dist 目录，启用生产环境静态服');
+  app.use(express.static(distDir, staticOptions));
 }
 
-// 2. 总是服务 public 和 src
-app.use(express.static('public', staticOptions));
-app.use(express.static('src', staticOptions));
+// 总是服务 public (包含公共资源)
+app.use(express.static(publicDir, staticOptions));
+
+// 只有在 dist 不存在时才建议将 src 作为主静态目录
+// 但为了兼容性，我们仍然服务 src，但不作为首选
+if (!fs.existsSync(distDir)) {
+  logger.warn('未检测到 dist 目录，回退到 src 目录服务 (开发模式模拟)');
+  app.use(express.static(srcDir, staticOptions));
+} else {
+  // 如果 dist 存在，src 仅作为底层备份，且 index 设为 false 避免覆盖
+  app.use(express.static(srcDir, { ...staticOptions, index: false }));
+}
 
 // 文件上传中间件
 const fileUpload = require('express-fileupload');
