@@ -473,6 +473,8 @@ export const store = reactive({
   openaiChatHistoryLoading: false,  // 加载状态
   openaiChatHistoryCollapsed: true, // 侧边栏折叠状态 (默认隐藏)
   openaiChatSelectedSessionIds: [], // 选中的会话 ID（批量删除使用）
+  openaiChatAutoScroll: true,        // 自动滚动开关（用户向上滚动时自动关闭）
+  openaiChatLastMessageCount: 0,     // 上一次消息数量（用于检测新消息）
 
   // Model Management
   openaiSettingsTab: 'general',     // 设置弹窗当前标签页: general, models, endpoints
@@ -488,6 +490,21 @@ export const store = reactive({
     concurrency: false,             // 是否开启并发检测
     timeout: 15                     // 超时时间(s)
   },
+
+  // 自动标题生成配置
+  openaiAutoTitleEnabled: (() => {
+    const saved = localStorage.getItem('openai_auto_title_enabled');
+    return saved !== null ? saved === 'true' : true; // 默认启用
+  })(),
+  openaiTitleModels: (() => {
+    try {
+      return JSON.parse(localStorage.getItem('openai_title_models')) || [];
+    } catch { return []; }
+  })(), // 标题生成使用的模型列表（支持容灾）
+  openaiTitleModelToAdd: '', // 待添加的标题模型（下拉框绑定）
+  openaiTitleGenerating: false, // 标题生成中状态
+  openaiTitleLastResult: null, // 上次生成结果 { success, model, title, error }
+
   openaiSelectedEndpointId: '',     // 当前选择的端点 ID (用于筛选模型)
 
   // Antigravity

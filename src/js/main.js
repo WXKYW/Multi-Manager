@@ -1153,6 +1153,12 @@ const app = createApp({
       this.saveUserSettingsToServer();
     },
 
+    'openaiChatMessages.length'() {
+      if (this.mainActiveTab === 'openai') {
+        this.checkAndScrollOnNewMessage();
+      }
+    },
+
     mainActiveTab: {
       handler(newVal, oldVal) {
         // 1. 终端保护与恢复逻辑

@@ -361,7 +361,7 @@ class DatabaseService {
             )
           `);
           // 插入默认人设
-          this.db.prepare("INSERT INTO chat_personas (name, system_prompt, icon, is_default) VALUES (?, ?, ?, ?)").run('默认助手', '你是一个有用的 AI 助手。', 'fa-robot', 1);
+          this.db.prepare('INSERT INTO chat_personas (name, system_prompt, icon, is_default) VALUES (?, ?, ?, ?)').run('默认助手', '你是一个有用的 AI 助手。', 'fa-robot', 1);
           logger.success('chat_personas 表创建成功并初始化默认人设');
         }
       } catch (err) {
