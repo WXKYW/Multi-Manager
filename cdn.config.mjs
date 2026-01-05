@@ -79,18 +79,7 @@ export const cdnDependencies = {
     global: 'DOMPurify',
     css: false,
   },
-  '@fortawesome/fontawesome-free': {
-    version: '7.1.0',
-    file: '/css/all.min.css',
-    global: null,
-    css: true,
-  },
-  'simple-icons-font': {
-    version: '14.15.0',
-    file: '/font/simple-icons.min.css',
-    global: null,
-    css: true,
-  },
+  // 图标库已改为通过 npm 本地包加载，不再需要 CDN
   jsqr: {
     version: '1.4.0',
     file: '/dist/jsQR.js',

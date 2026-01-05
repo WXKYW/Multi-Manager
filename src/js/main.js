@@ -69,11 +69,9 @@ import pinia from './stores/index.js';
 import { useAuthStore } from './stores/auth.js';
 import { useAppStore } from './stores/app.js';
 import { useServerStore } from './stores/server.js';
-// FontAwesome 和 Simple Icons 通过 CDN 加载时在 index.html 注入
-// 未启用 CDN 时，从 npm 本地包加载 Font Awesome (Simple Icons 必须通过 CDN)
-if (typeof __USE_CDN__ === 'undefined' || !__USE_CDN__) {
-  import('@fortawesome/fontawesome-free/css/all.min.css');
-}
+// 图标字体从本地 npm 包加载
+import '@fortawesome/fontawesome-free/css/all.min.css';
+import 'simple-icons-font/font/simple-icons.min.css';
 
 // 导入功能模块
 import { dashboardMethods } from './modules/dashboard.js';
