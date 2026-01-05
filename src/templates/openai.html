@@ -265,8 +265,7 @@
         <div class="sidebar-content-wrapper">
           <div class="chat-history-header">
             <div class="history-header-left">
-              <!-- <span class="history-title" v-if="openaiChatSelectedSessionIds.length === 0">历史记录</span> -->
-              <span class="history-title" v-else>已选 {{ openaiChatSelectedSessionIds.length }}</span>
+              <span class="history-title" v-if="openaiChatSelectedSessionIds.length > 0">已选 {{ openaiChatSelectedSessionIds.length }}</span>
               <div class="history-header-actions">
                 <!-- 全选按钮 -->
                 <button v-if="openaiChatSessions.length > 0" class="btn btn-icon-refined btn-select-all"
