@@ -42,13 +42,13 @@ export const authMethods = {
 
       const loginResult = await loginResponse.json();
       if (loginResult.success) {
-        // 登录成功
-        this.loginPassword = this.setPassword;
+        // 登录成功 - 通过 authStore 更新状态
+        this.authStore.loginPassword = this.setPassword;
+        this.authStore.isAuthenticated = true;
+        this.authStore.showSetPasswordModal = false;
+
         localStorage.setItem('admin_password', this.setPassword);
         localStorage.setItem('password_time', Date.now().toString());
-
-        this.showSetPasswordModal = false;
-        this.isAuthenticated = true;
 
         await this.loadManagedAccounts();
         this.loadProjectCosts();
