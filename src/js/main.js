@@ -61,7 +61,10 @@ async function loadLazyCSS() {
 import './template-loader.js';
 
 // Vue and FontAwesome imports
-import { createApp, toRefs } from 'vue';
+// 必须导入 compile 函数以确保 Vue 模板编译器被打包（否则会被 tree-shaking 掉）
+import { createApp, toRefs, compile } from 'vue';
+// 强制保留 compile 引用到 window，防止被 Terser 优化掉
+window.__VUE_COMPILE__ = compile;
 import pinia from './stores/index.js';
 import { useAuthStore } from './stores/auth.js';
 import { useAppStore } from './stores/app.js';
