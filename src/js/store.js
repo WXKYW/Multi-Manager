@@ -472,6 +472,7 @@ export const store = reactive({
   openaiChatCurrentSessionId: null, // 当前会话 ID
   openaiChatHistoryLoading: false,  // 加载状态
   openaiChatHistoryCollapsed: true, // 侧边栏折叠状态 (默认隐藏)
+  openaiChatMobileSidebarOpen: false, // 移动端侧边栏是否打开
   openaiChatSelectedSessionIds: [], // 选中的会话 ID（批量删除使用）
   openaiChatAutoScroll: true,        // 自动滚动开关（用户向上滚动时自动关闭）
   openaiChatLastMessageCount: 0,     // 上一次消息数量（用于检测新消息）

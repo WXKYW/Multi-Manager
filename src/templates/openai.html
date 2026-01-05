@@ -260,12 +260,16 @@
   <div v-if="openaiCurrentTab === 'chat'" class="sub-tab-content quick-fade-in theme-openai-chat"
     @vue:mounted="loadChatSessions">
     <div class="chat-layout">
+      <!-- 移动端侧边栏遮罩层 -->
+      <div class="mobile-sidebar-overlay" :class="{ 'active': openaiChatMobileSidebarOpen }"
+        @click="openaiChatMobileSidebarOpen = false"></div>
       <!-- 历史记录侧边栏 -->
-      <div class="chat-history-sidebar modern-glass-sidebar">
+      <div class="chat-history-sidebar modern-glass-sidebar" :class="{ 'active-mobile': openaiChatMobileSidebarOpen }">
         <div class="sidebar-content-wrapper">
           <div class="chat-history-header">
             <div class="history-header-left">
-              <span class="history-title" v-if="openaiChatSelectedSessionIds.length > 0">已选 {{ openaiChatSelectedSessionIds.length }}</span>
+              <span class="history-title" v-if="openaiChatSelectedSessionIds.length > 0">已选 {{
+                openaiChatSelectedSessionIds.length }}</span>
               <div class="history-header-actions">
                 <!-- 全选按钮 -->
                 <button v-if="openaiChatSessions.length > 0" class="btn btn-icon-refined btn-select-all"
@@ -446,6 +450,11 @@
               </button>
             </div> -->
             <div class="chat-actions">
+              <!-- 移动端历史记录按钮 -->
+              <button class="btn btn-secondary btn-sm mobile-history-toggle"
+                @click="openaiChatMobileSidebarOpen = !openaiChatMobileSidebarOpen">
+                <i class="fas fa-history"></i> 历史
+              </button>
               <button class="btn btn-secondary btn-sm" @click="clearOpenaiChat">
                 <i class="fas fa-trash-alt"></i> 清除
               </button>

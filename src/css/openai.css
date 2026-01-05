@@ -276,7 +276,7 @@
 
 /* OpenAI Chat UI Styles */
 .theme-openai-chat {
-  height: calc(100vh - 150px);
+  height: calc(100vh - 200px);
   min-height: 500px;
   display: flex;
   flex-direction: column;
@@ -303,6 +303,8 @@
   justify-content: space-between;
   align-items: center;
   gap: 8px;
+  position: relative;
+  z-index: 10;
 }
 
 .chat-model-selector {
@@ -430,6 +432,19 @@
 .chat-message.user {
   align-self: flex-end;
   flex-direction: row-reverse;
+  max-width: 75%;
+}
+
+/* 用户消息内容不应占满整行，让其自适应宽度 */
+.chat-message.user .message-content {
+  flex: unset;
+  align-items: flex-end;
+}
+
+/* 用户消息文本自适应宽度 */
+.chat-message.user .message-text {
+  width: fit-content;
+  max-width: 100%;
 }
 
 .message-avatar {
@@ -1014,11 +1029,96 @@
     max-width: 100%;
   }
 
+  /* 移动端用户消息宽度扩大到 90% */
+  .chat-message.user {
+    max-width: 90%;
+  }
+
+  .chat-message.user .message-text {
+    width: fit-content;
+    max-width: 100%;
+  }
+
+  /* 工具栏整体 */
   .openai-chat-toolbar {
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
     align-items: stretch;
-    padding: 12px;
+    padding: 10px;
+    overflow: visible;
+  }
+
+  /* 选择器容器：简单横排自动换行 */
+  .chat-model-selector {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+    align-items: center;
+  }
+
+  /* 人设选择器 - 固定宽度 */
+  .chat-model-selector .persona-select {
+    flex: 0 0 auto;
+    width: calc(50% - 4px);
+  }
+
+  /* 端点选择器 - 固定宽度 */
+  .chat-model-selector .endpoint-select {
+    flex: 0 0 auto;
+    width: calc(50% - 4px);
+  }
+
+  /* 模型选择器 - 占满整行 */
+  .chat-model-selector .model-selector {
+    flex: 0 0 100%;
+    width: 100%;
+  }
+
+  /* 隐藏工具栏上的图标按钮（收藏、刷新等） */
+  .chat-model-selector .btn-icon-refined {
+    display: none;
+  }
+
+  /* 选择器触发器样式 */
+  .custom-select-container {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .custom-select-trigger {
+    min-width: 0;
+    width: 100%;
+    height: 38px;
+    padding: 6px 10px;
+  }
+
+  .custom-select-trigger .selected-text {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+  }
+
+  .custom-select-trigger i:first-child {
+    font-size: 13px;
+  }
+
+  .custom-select-trigger .arrow {
+    font-size: 10px;
+  }
+
+  /* 操作按钮行 - 均分三个按钮 */
+  .chat-actions {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .chat-actions .btn {
+    flex: 1;
+    justify-content: center;
+    padding: 8px 12px;
+    font-size: 13px;
   }
 
   .chat-model-selector select {
@@ -1027,11 +1127,59 @@
   }
 
   .openai-chat-input-wrapper {
-    padding: 12px;
+    padding: 10px;
   }
 
   .message-text {
     padding: 10px 14px;
+  }
+
+  /* 下拉菜单限制宽度防止溢出 */
+  .custom-select-options {
+    max-width: calc(100vw - 20px);
+    left: auto;
+    right: 0;
+  }
+
+  /* 端点选择器下拉菜单靠右对齐 */
+  .endpoint-select .custom-select-options {
+    right: 0;
+    left: auto;
+  }
+
+  /* ===== 聊天面板自适应高度 ===== */
+  /* 使用 dvh (动态视口高度) 处理移动端地址栏变化 */
+  /* 减去: 顶部图标栏 ~45px + 子标签栏 ~40px + 底部导航栏 ~60px = ~145px */
+  .chat-layout {
+    height: calc(100dvh - 140px);
+    height: calc(100vh - 140px);
+    /* fallback */
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  /* 确保聊天容器填满 chat-layout */
+  .chat-main {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .openai-chat-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .openai-chat-messages {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .openai-chat-input-wrapper {
+    flex-shrink: 0;
   }
 }
 
@@ -1056,6 +1204,32 @@
   border: 1px solid var(--border-color);
   box-shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.15);
   position: relative;
+}
+
+/* 移动端侧边栏遮罩层 */
+.mobile-sidebar-overlay {
+  display: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 99;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+.mobile-sidebar-overlay.active {
+  opacity: 1;
+  visibility: visible;
+}
+
+@media (max-width: 768px) {
+  .mobile-sidebar-overlay {
+    display: block;
+  }
 }
 
 /* Sidebar Container - Glassmorphism */
@@ -1518,12 +1692,27 @@
     left: 0;
     top: 0;
     bottom: 0;
+    width: 280px;
     transform: translateX(-100%);
+    transition: transform 0.3s ease;
     box-shadow: 10px 0 40px rgba(0, 0, 0, 0.3);
+    z-index: 100;
   }
 
   .chat-history-sidebar.active-mobile {
     transform: translateX(0);
+  }
+
+  /* 桌面端隐藏历史按钮 */
+  .mobile-history-toggle {
+    display: flex;
+  }
+}
+
+/* 桌面端隐藏历史按钮 */
+@media (min-width: 769px) {
+  .mobile-history-toggle {
+    display: none !important;
   }
 }
 

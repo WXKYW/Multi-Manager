@@ -16,7 +16,7 @@ class OpenAIEndpoint extends BaseModel {
     const data = {
       id: endpointData.id || `oai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       name: endpointData.name,
-      baseUrl: endpointData.baseUrl || endpointData.base_url,
+      base_url: endpointData.baseUrl || endpointData.base_url,
       api_key: accountSecure.secureEncrypt(endpointData.apiKey || endpointData.api_key),
       status: endpointData.status || 'unknown',
       enabled: endpointData.enabled !== undefined ? (endpointData.enabled ? 1 : 0) : 1,
