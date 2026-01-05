@@ -261,19 +261,13 @@
     @vue:mounted="loadChatSessions">
     <div class="chat-layout">
       <!-- 历史记录侧边栏 -->
-      <div class="chat-history-sidebar" :class="{ collapsed: openaiChatHistoryCollapsed }">
+      <div class="chat-history-sidebar modern-glass-sidebar">
         <div class="sidebar-content-wrapper">
           <div class="chat-history-header">
             <div class="history-header-left">
-              <span class="history-title" v-if="openaiChatSelectedSessionIds.length === 0">历史记录</span>
+              <!-- <span class="history-title" v-if="openaiChatSelectedSessionIds.length === 0">历史记录</span> -->
               <span class="history-title" v-else>已选 {{ openaiChatSelectedSessionIds.length }}</span>
               <div class="history-header-actions">
-                <!-- 批量删除按钮 -->
-                <button v-if="openaiChatSelectedSessionIds.length > 0"
-                  class="btn btn-icon-refined btn-batch-delete text-danger" @click="deleteSelectedOpenaiChatSessions"
-                  title="删除选中项目">
-                  <i class="fas fa-trash-alt"></i>
-                </button>
                 <!-- 全选按钮 -->
                 <button v-if="openaiChatSessions.length > 0" class="btn btn-icon-refined btn-select-all"
                   @click="toggleSelectAllSessions"
@@ -281,19 +275,21 @@
                   <i class="fas"
                     :class="openaiChatSelectedSessionIds.length === openaiChatSessions.length ? 'fa-check-square' : 'fa-square'"></i>
                 </button>
+                <!-- 批量删除按钮 -->
+                <button v-if="openaiChatSelectedSessionIds.length > 0"
+                  class="btn btn-icon-refined btn-batch-delete text-danger" @click="deleteSelectedOpenaiChatSessions"
+                  title="删除选中项目">
+                  <i class="fas fa-trash-alt"></i>
+                </button>
                 <!-- 清空按钮 (仅在未选中任何项目时显示) -->
                 <button v-if="openaiChatSessions.length > 0 && openaiChatSelectedSessionIds.length === 0"
                   class="btn btn-icon-refined btn-clear-history" @click="clearAllOpenaiChatSessions" title="清空历史记录">
-                  <i class="fas fa-trash-sweep"></i>
+                  <i class="fas fa-circle-xmark"></i>
                 </button>
               </div>
             </div>
-            <button class="btn btn-icon-refined toggle-btn" @click="toggleChatHistory"
-              :title="openaiChatHistoryCollapsed ? '展开' : '收起'">
-              <i class="fas" :class="openaiChatHistoryCollapsed ? 'fa-chevron-right' : 'fa-chevron-left'"></i>
-            </button>
           </div>
-          <button class="new-chat-btn" @click="createChatSession" :title="openaiChatHistoryCollapsed ? '新对话' : ''">
+          <button class="new-chat-btn" @click="createChatSession">
             <i class="fas fa-plus"></i>
             <span>新对话</span>
           </button>
@@ -304,12 +300,12 @@
             <div v-else v-for="session in openaiChatSessions" :key="session.id" class="chat-history-item"
               :class="{ active: session.id === openaiChatCurrentSessionId, selected: openaiChatSelectedSessionIds.includes(session.id) }"
               @click="loadChatSession(session.id)">
+              <i class="fas fa-comment-alt"></i>
+              <span class="session-title">{{ getSafeSessionTitle(session.title) }}</span>
               <div class="session-selector" @click.stop="toggleSessionSelection(session.id)">
                 <i class="far"
                   :class="openaiChatSelectedSessionIds.includes(session.id) ? 'fa-check-square' : 'fa-square'"></i>
               </div>
-              <i class="fas fa-comment-alt"></i>
-              <span class="session-title">{{ getSafeSessionTitle(session.title) }}</span>
               <button class="delete-btn" @click.stop="deleteChatSession(session.id)" title="删除">
                 <i class="fas fa-trash"></i>
               </button>
@@ -358,15 +354,15 @@
               <div class="custom-select-container endpoint-select">
                 <div class="custom-select-trigger" @click.stop="toggleEndpointDropdown($event)">
                   <i class="fas fa-server" title="选择 API 端点"></i>
-                  <div class="selected-text" :title="getEndpointName(openaiChatEndpoint) || '所有端点 (聚合)'">
-                    {{ getEndpointName(openaiChatEndpoint) || '所有端点 (聚合)' }}
+                  <div class="selected-text" :title="getEndpointName(openaiChatEndpoint) || '所有端点'">
+                    {{ getEndpointName(openaiChatEndpoint) || '所有端点' }}
                   </div>
                   <i class="fas fa-chevron-down arrow" :class="{ 'open': openaiShowEndpointDropdown }"></i>
                 </div>
                 <!-- 端点下拉列表 -->
                 <div class="custom-select-options full-width" v-if="openaiShowEndpointDropdown" @click.stop>
                   <div class="custom-option" :class="{ 'selected': !openaiChatEndpoint }" @click="selectEndpoint('')">
-                    <div class="option-label">所有端点 (聚合)</div>
+                    <div class="option-label">所有端点</div>
                     <i class="fas fa-check" v-if="!openaiChatEndpoint"></i>
                   </div>
                   <div class="custom-option" v-for="ep in openaiEndpoints" :key="ep.id"
@@ -461,28 +457,47 @@
           </div>
 
           <!-- 消息列表 -->
-          <div class="openai-chat-messages" id="openai-chat-messages">
+          <div class="openai-chat-messages" id="openai-chat-messages"
+            :class="{ 'history-loading': openaiChatHistoryLoading }" @scroll="handleChatScroll($event)">
+
+            <!-- 加载中遮罩 -->
+            <div v-if="openaiChatHistoryLoading" class="chat-loading-overlay">
+              <div class="loading-spinner"></div>
+              <span>加载对话中...</span>
+            </div>
             <div v-if="openaiChatMessages.length === 0" class="chat-empty-state">
               <div class="empty-icon"><i class="fas fa-comment-dots"></i></div>
               <h3>OpenAI 兼容对话</h3>
               <p>选择一个模型并开始对话。本模块直接调用配置的 API 端点。</p>
             </div>
 
-            <div v-for="(msg, index) in openaiChatMessages" :key="index" class="chat-message" :class="msg.role">
+            <div v-for="(msg, index) in openaiChatMessages" :key="index" class="chat-message"
+              :class="[msg.role, { 'new-message': msg.isNew }]">
               <div class="message-avatar">
                 <i :class="msg.role === 'user' ? 'fas fa-user' : 'fas fa-robot'"></i>
               </div>
               <div class="message-content">
                 <div class="message-header">
                   <div class="message-role-label">{{ msg.role === 'user' ? 'MOI' : '哈基喵' }}</div>
+                  <!-- 时间和模型信息 -->
+                  <div class="message-meta">
+                    <span v-if="msg.timestamp" class="message-time">{{ formatMessageTime(msg.timestamp) }}</span>
+                    <span v-else class="message-time">{{ formatMessageTime(new Date()) }}</span>
+                    <span v-if="msg.role === 'assistant' && msg.model" class="message-model" :title="msg.model">{{
+                      msg.model }}</span>
+                    <span v-else-if="msg.role === 'assistant'" class="message-model" :title="openaiChatModel">{{
+                      openaiChatModel }}</span>
+                  </div>
                   <div class="message-actions">
                     <!-- 重新生成按钮（不在加载时显示） -->
                     <button v-if="!openaiChatLoading" class="btn-message-action btn-regenerate"
-                      @click="regenerateOpenaiChat(index)" :title="msg.role === 'user' ? '从这条消息重新生成' : '重新生成此回答'">
+                      @click="regenerateOpenaiChat(index)" :title="msg.role === 'user' ? '从这条消息重新生成' : '重新生成此回答'"
+                      tabindex="-1">
                       <i class="fas fa-redo"></i>
                     </button>
                     <!-- 删除按钮 -->
-                    <button class="btn-message-action btn-delete" @click="deleteOpenaiChatMessage(index)" title="删除此消息">
+                    <button class="btn-message-action btn-delete" @click="deleteOpenaiChatMessage(index)" title="删除此消息"
+                      tabindex="-1">
                       <i class="fas fa-trash-alt"></i>
                     </button>
                   </div>
@@ -491,7 +506,7 @@
                 <div v-if="msg.reasoning" class="message-reasoning">
                   <div class="reasoning-header" @click="msg.showReasoning = !msg.showReasoning">
                     <i class="fas fa-brain"></i> 思考过程
-                    <i class="fas" :class="msg.showReasoning ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
+                    <!-- <i class="fas" :class="msg.showReasoning ? 'fa-chevron-down' : 'fa-chevron-right'"></i> -->
                   </div>
                   <div v-show="msg.showReasoning" class="reasoning-content"
                     v-html="getCachedMessageHtml(msg, 'reasoning')">
@@ -508,7 +523,7 @@
               <div class="message-content">
                 <div class="message-header">
                   <div class="message-role-label">哈基喵</div>
-                  <button class="btn-message-action btn-stop" @click="stopOpenaiChat" title="停止生成">
+                  <button class="btn-message-action btn-stop" @click="stopOpenaiChat" title="停止生成" tabindex="-1">
                     <i class="fas fa-stop"></i>
                   </button>
                 </div>
@@ -523,7 +538,7 @@
             <div v-if="openaiChatAttachments.length > 0" class="chat-attachments-preview">
               <div v-for="(file, index) in openaiChatAttachments" :key="index" class="attachment-item">
                 <img :src="file.url" alt="预览" />
-                <button class="btn-remove-attachment" @click="removeOpenaiChatAttachment(index)">
+                <button class="btn-remove-attachment" @click="removeOpenaiChatAttachment(index)" tabindex="-1">
                   <i class="fas fa-times"></i>
                 </button>
               </div>
@@ -532,19 +547,28 @@
             <div class="input-panel">
               <input type="file" ref="chatFileInput" style="display: none" accept="image/*" multiple
                 @change="handleOpenaiChatFileSelect" />
-              <button class="btn-attachment" @click="$refs.chatFileInput.click()" title="上传图片">
+              <button class="btn-attachment" @click="$refs.chatFileInput.click()" title="上传图片" tabindex="-1">
                 <i class="fas fa-image"></i>
               </button>
+              <div class="input-divider"></div>
               <textarea v-model="openaiChatMessageInput" class="chat-textarea" placeholder="输入消息，Shift+Enter换行..."
                 rows="1" @keydown.enter.exact.prevent="sendOpenaiChatMessage" @input="autoResizeTextarea($event, true)"
                 @paste="handleOpenaiChatPaste"></textarea>
               <button class="btn-send-chat"
                 :disabled="(!openaiChatMessageInput.trim() && openaiChatAttachments.length === 0) || openaiChatLoading"
-                @click="sendOpenaiChatMessage">
+                @click="sendOpenaiChatMessage" tabindex="-1">
                 <i class="fas fa-paper-plane"></i>
               </button>
             </div>
           </div>
+
+          <!-- 滚动到底部按钮 (用户向上滚动时显示) -->
+          <transition name="fade">
+            <button v-if="!openaiChatAutoScroll && openaiChatMessages.length > 0" class="scroll-to-bottom-btn"
+              @click="openaiScrollToBottom(true, true)" title="滚动到底部">
+              <i class="fas fa-chevron-down"></i>
+            </button>
+          </transition>
         </div>
       </div>
     </div>

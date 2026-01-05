@@ -107,6 +107,10 @@ export const transitionsMethods = {
             if (!this.openaiEndpoints || this.openaiEndpoints.length === 0) {
               this.loadOpenaiEndpoints();
             }
+            // 确保滚动到底部
+            this.$nextTick(() => {
+              this.scrollToBottom(true, true);
+            });
             break;
           case 'zeabur':
             if (!this.accounts || this.accounts.length === 0) {

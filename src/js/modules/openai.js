@@ -216,6 +216,192 @@ export const openaiMethods = {
     toast.success('设置已保存');
   },
 
+  // ==================== 自动标题生成设置 ====================
+
+  // 保存自动标题设置
+  saveAutoTitleSettings() {
+    localStorage.setItem('openai_auto_title_enabled', store.openaiAutoTitleEnabled);
+    localStorage.setItem('openai_title_models', JSON.stringify(store.openaiTitleModels));
+  },
+
+  // 添加标题生成模型
+  addTitleModel() {
+    if (!store.openaiTitleModelToAdd) return;
+    if (!store.openaiTitleModels.includes(store.openaiTitleModelToAdd)) {
+      store.openaiTitleModels.push(store.openaiTitleModelToAdd);
+      this.saveAutoTitleSettings();
+    }
+    store.openaiTitleModelToAdd = '';
+  },
+
+  // 移除标题生成模型
+  removeTitleModel(modelId) {
+    const index = store.openaiTitleModels.indexOf(modelId);
+    if (index > -1) {
+      store.openaiTitleModels.splice(index, 1);
+      this.saveAutoTitleSettings();
+    }
+  },
+
+  // 获取可选的标题模型（排除已选的）
+  // 聚合所有端点的模型，与 filteredChatModels 逻辑保持一致
+  filteredTitleModelOptions() {
+    const allModelsMap = new Map();
+
+    // 1. 先加入 store.openaiAllModels
+    if (store.openaiAllModels && store.openaiAllModels.length) {
+      store.openaiAllModels.forEach(m => allModelsMap.set(m.id, m));
+    }
+
+    // 2. 遍历所有端点进行补充
+    if (store.openaiEndpoints) {
+      store.openaiEndpoints.forEach(ep => {
+        if (ep.models && Array.isArray(ep.models)) {
+          ep.models.forEach(m => {
+            const id = typeof m === 'string' ? m : m.id;
+            if (!allModelsMap.has(id)) {
+              allModelsMap.set(id, {
+                id: id,
+                owned_by: ep.name || 'custom',
+                object: 'model',
+                created: Date.now()
+              });
+            }
+          });
+        }
+      });
+    }
+
+    // 3. 转换为数组并排除已选的模型
+    return Array.from(allModelsMap.values())
+      .filter(m => !store.openaiTitleModels.includes(m.id));
+  },
+
+  // 测试标题生成
+  async testTitleGeneration() {
+    store.openaiTitleGenerating = true;
+    store.openaiTitleLastResult = null;
+
+    const testMessages = [
+      { role: 'user', content: '帮我解释一下什么是机器学习' },
+      { role: 'assistant', content: '机器学习是人工智能的一个分支，它使计算机能够从数据中学习...' }
+    ];
+
+    try {
+      const result = await this.generateTitleWithFallback(testMessages);
+      store.openaiTitleLastResult = result;
+    } catch (e) {
+      store.openaiTitleLastResult = { success: false, error: e.message };
+    } finally {
+      store.openaiTitleGenerating = false;
+    }
+  },
+
+  // 使用容灾模式生成标题
+  async generateTitleWithFallback(messages) {
+    // 确定要尝试的模型列表
+    const modelsToTry = store.openaiTitleModels.length > 0
+      ? [...store.openaiTitleModels]
+      : [store.openaiChatModel]; // 如果没有配置，使用当前对话模型
+
+    // 构建生成标题的请求
+    const conversationText = messages.slice(0, 4).map(msg => {
+      const role = msg.role === 'user' ? '用户' : '助手';
+      let text = '';
+      if (typeof msg.content === 'string') {
+        text = msg.content;
+      } else if (Array.isArray(msg.content)) {
+        const textParts = msg.content.filter(p => p.type === 'text').map(p => p.text);
+        text = textParts.join(' ') || '[图片]';
+      }
+      return `${role}: ${text.slice(0, 200)}`;
+    }).join('\n');
+
+    const titlePrompt = `请根据以下对话内容，生成一个简洁的中文标题（最多15个字，不要使用标点符号，直接输出标题内容）：
+
+${conversationText}
+
+标题：`;
+
+    let lastError = null;
+
+    for (const modelId of modelsToTry) {
+      try {
+        console.log(`[生成标题] 尝试模型: ${modelId}`);
+
+        const headers = {
+          ...store.getAuthHeaders(),
+          'Content-Type': 'application/json',
+        };
+
+        // 尝试找到该模型所属的端点
+        const endpoint = store.openaiEndpoints.find(ep =>
+          ep.models && ep.models.some(m => (typeof m === 'string' ? m : m.id) === modelId)
+        );
+        if (endpoint) {
+          headers['x-endpoint-id'] = endpoint.id;
+        }
+
+        const response = await fetch('/api/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify({
+            model: modelId,
+            messages: [{ role: 'user', content: titlePrompt }],
+            max_tokens: 30,
+            temperature: 0.7,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const result = await response.json();
+
+        // 优先从 content 获取，如果为空则尝试从 reasoning_content 获取
+        // （推理模型如 Gemini/DeepSeek-R1 可能把回复放在 reasoning_content 中）
+        let generatedTitle = result.choices?.[0]?.message?.content?.trim() || '';
+
+        // 如果 content 为空，尝试从 reasoning_content 提取最后一句或结论
+        if (!generatedTitle && result.choices?.[0]?.message?.reasoning_content) {
+          const reasoning = result.choices[0].message.reasoning_content.trim();
+          // 尝试提取最后一行（通常是结论/答案）
+          const lines = reasoning.split('\n').filter(l => l.trim());
+          if (lines.length > 0) {
+            generatedTitle = lines[lines.length - 1].trim();
+          }
+        }
+
+        // 清理标题
+        generatedTitle = generatedTitle
+          .replace(/^["'「『【《]|["'」』】》]$/g, '')
+          .replace(/^标题[：:]\s*/i, '')
+          .replace(/\n/g, ' ')
+          .trim();
+
+        if (generatedTitle.length > 20) {
+          generatedTitle = generatedTitle.slice(0, 18) + '...';
+        }
+
+        if (!generatedTitle) {
+          throw new Error('生成的标题为空');
+        }
+
+        console.log(`[生成标题] 成功: ${generatedTitle} (模型: ${modelId})`);
+        return { success: true, title: generatedTitle, model: modelId };
+
+      } catch (e) {
+        console.warn(`[生成标题] 模型 ${modelId} 失败:`, e.message);
+        lastError = e;
+        // 继续尝试下一个模型
+      }
+    }
+
+    // 所有模型都失败了
+    throw lastError || new Error('所有模型都无法生成标题');
+  },
+
   // 切换对话端点
   onChatEndpointChange() {
     localStorage.setItem('openai_chat_endpoint', store.openaiChatEndpoint);
@@ -578,11 +764,40 @@ export const openaiMethods = {
     store.openaiSelectedEndpointId = endpointId;
   },
 
-  // 移除旧的本地过滤方法，改用聚合数据
-  updateOpenaiAllModels(explicitRefresh = false) {
-    this.loadOpenaiEndpoints(true); // 内部调用仍然是静默加载
+  // 刷新模型列表：从后端 API 同步最新模型
+  async updateOpenaiAllModels(explicitRefresh = false) {
     if (explicitRefresh) {
-      toast.success('HChat 模型列表已刷新');
+      // 用户手动刷新：调用后端刷新接口，从远程 API 端点获取最新模型
+      store.openaiLoading = true;
+      try {
+        const response = await fetch('/api/openai/endpoints/refresh', {
+          method: 'POST',
+          headers: store.getAuthHeaders(),
+        });
+        const result = await response.json();
+
+        if (result.success) {
+          // 刷新成功，重新加载端点和模型列表
+          await this.loadOpenaiEndpoints(true);
+
+          // 统计刷新结果
+          const successCount = result.results?.filter(r => r.success).length || 0;
+          const totalCount = result.results?.length || 0;
+          const totalModels = result.results?.reduce((sum, r) => sum + (r.modelsCount || 0), 0) || 0;
+
+          toast.success(`已从 ${successCount}/${totalCount} 个端点刷新 ${totalModels} 个模型`);
+        } else {
+          toast.error('刷新失败: ' + (result.error || '未知错误'));
+        }
+      } catch (error) {
+        console.error('刷新模型列表失败:', error);
+        toast.error('刷新失败: ' + error.message);
+      } finally {
+        store.openaiLoading = false;
+      }
+    } else {
+      // 静默刷新：仅从数据库缓存读取
+      this.loadOpenaiEndpoints(true);
     }
   },
 
@@ -800,7 +1015,7 @@ export const openaiMethods = {
     const contentToSave = typeof userContent === 'string' ? userContent : JSON.stringify(userContent);
 
     // 添加用户消息到前端显示
-    const userMsg = { role: 'user', content: userContent };
+    const userMsg = { role: 'user', content: userContent, timestamp: new Date().toISOString(), isNew: true };
     store.openaiChatMessages.push(userMsg);
 
     // 保存用户消息到数据库
@@ -810,12 +1025,18 @@ export const openaiMethods = {
       }
     });
 
-    this.scrollToBottom();
+    store.openaiChatAutoScroll = true;
+    this.$nextTick(() => {
+      this.openaiScrollToBottom(true, true); // 发送消息，强制滚动
+    });
 
     store.openaiChatLoading = true;
 
     // 创建 AbortController 用于中断请求
     store.openaiChatAbortController = new AbortController();
+
+    // 保存当前会话 ID，用于隔离检查（防止切换会话后内容串扰）
+    const requestSessionId = store.openaiChatCurrentSessionId;
 
     try {
       const messages = [
@@ -891,8 +1112,24 @@ export const openaiMethods = {
       // 处理流式响应
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      const assistantMsg = { role: 'assistant', content: '', reasoning: '', showReasoning: false };
-      store.openaiChatMessages.push(assistantMsg);
+      const assistantMsg = {
+        role: 'assistant',
+        content: '',
+        reasoning: '',
+        showReasoning: false,
+        timestamp: new Date().toISOString(),
+        model: store.openaiChatModel,  // 记录使用的模型
+        isNew: true,
+      };
+
+      // 只有当会话未切换时才向 UI 添加消息
+      if (store.openaiChatCurrentSessionId === requestSessionId) {
+        store.openaiChatMessages.push(assistantMsg);
+        // AI 回复开始时，强制滚动到底部让用户看到回复
+        this.$nextTick(() => {
+          this.openaiScrollToBottom(true, true);
+        });
+      }
 
       let buffer = '';
 
@@ -923,7 +1160,10 @@ export const openaiMethods = {
                 if (delta.content) {
                   assistantMsg.content += delta.content;
                 }
-                this.scrollToBottom(false); // 流式输出时禁用平滑滚动
+                // 只有当会话未切换时才更新 UI
+                if (store.openaiChatCurrentSessionId === requestSessionId) {
+                  this.openaiScrollToBottom(false, false); // 流式输出，智能跟随滚动（非强制）
+                }
               }
             } catch (e) {
               // 忽略解析错误
@@ -932,10 +1172,37 @@ export const openaiMethods = {
         }
       }
 
-      // 保存助手消息到数据库
-      const savedMsg = await this.saveChatMessage('assistant', assistantMsg.content, assistantMsg.reasoning || null);
-      if (savedMsg && savedMsg.id) {
-        assistantMsg.id = savedMsg.id;
+      // 只有当会话未切换时才保存消息和更新状态
+      if (store.openaiChatCurrentSessionId === requestSessionId) {
+        // 保存助手消息到数据库
+        const savedMsg = await this.saveChatMessage('assistant', assistantMsg.content, assistantMsg.reasoning || null);
+        if (savedMsg && savedMsg.id) {
+          assistantMsg.id = savedMsg.id;
+        }
+
+        // 自动生成标题（如果是新对话的第一次回复）
+        const currentSession = store.openaiChatSessions.find(s => s.id === requestSessionId);
+        if (currentSession && currentSession.title === '新对话' && store.openaiChatMessages.length >= 2) {
+          // 后台生成标题，不阻塞用户操作
+          this.generateChatTitle().catch(e => console.error('自动生成标题失败:', e));
+        }
+      } else {
+        // 会话已切换，但仍需保存消息到原会话
+        // 使用临时保存，不影响当前 UI
+        try {
+          await fetch(`/api/chat/sessions/${requestSessionId}/messages`, {
+            method: 'POST',
+            headers: store.getAuthHeaders(),
+            body: JSON.stringify({
+              role: 'assistant',
+              content: assistantMsg.content,
+              reasoning: assistantMsg.reasoning || null
+            }),
+          });
+          console.log('[Chat] 会话已切换，消息已保存到原会话:', requestSessionId);
+        } catch (e) {
+          console.error('[Chat] 保存到原会话失败:', e);
+        }
       }
     } catch (error) {
       // 如果是用户主动中断，不显示错误
@@ -986,14 +1253,23 @@ export const openaiMethods = {
       }
 
       this.showOpenaiToast('对话失败: ' + displayError, 'error');
-      store.openaiChatMessages.push({
-        role: 'assistant',
-        content: '❌ **错误**: ' + displayError,
-      });
+      // 只有会话未切换时才添加错误消息到 UI
+      if (store.openaiChatCurrentSessionId === requestSessionId) {
+        store.openaiChatMessages.push({
+          role: 'assistant',
+          content: '❌ **错误**: ' + displayError,
+        });
+      }
     } finally {
-      store.openaiChatLoading = false;
+      // 只有会话未切换时才更新 loading 状态
+      if (store.openaiChatCurrentSessionId === requestSessionId) {
+        store.openaiChatLoading = false;
+        // 使用 $nextTick 确保 DOM 更新后再强制滚动到底部
+        this.$nextTick(() => {
+          this.openaiScrollToBottom(true, true);
+        });
+      }
       store.openaiChatAbortController = null;
-      this.scrollToBottom();
     }
   },
 
@@ -1129,8 +1405,20 @@ export const openaiMethods = {
         throw errData.error || errData || `HTTP 错误 ${response.status}`;
       }
 
-      const assistantMsg = { role: 'assistant', content: '', reasoning: '', showReasoning: false };
+      const assistantMsg = {
+        role: 'assistant',
+        content: '',
+        reasoning: '',
+        showReasoning: false,
+        timestamp: new Date().toISOString(),
+        model: store.openaiChatModel,
+        isNew: true,
+      };
       store.openaiChatMessages.push(assistantMsg);
+      // AI 回复开始时，强制滚动到底部
+      this.$nextTick(() => {
+        this.openaiScrollToBottom(true, true);
+      });
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -1162,7 +1450,7 @@ export const openaiMethods = {
                 if (delta.content) {
                   assistantMsg.content += delta.content;
                 }
-                this.scrollToBottom(false); // 流式输出时禁用平滑滚动
+                this.openaiScrollToBottom(false); // 流式输出时禁用平滑滚动
               }
             } catch (e) {
               // 忽略解析错误
@@ -1182,34 +1470,97 @@ export const openaiMethods = {
     } finally {
       store.openaiChatLoading = false;
       store.openaiChatAbortController = null;
-      this.scrollToBottom();
+      this.$nextTick(() => {
+        this.openaiScrollToBottom(true, true); // 回复完成，强制滚动
+      });
     }
   },
 
-  scrollToBottom(smooth = true) {
-    // 使用 requestAnimationFrame + setTimeout 确保 DOM 完全渲染
-    requestAnimationFrame(() => {
-      setTimeout(() => {
-        const el = document.getElementById('openai-chat-messages');
-        if (el) {
-          if (smooth) {
-            el.scrollTo({
-              top: el.scrollHeight,
-              behavior: 'smooth'
-            });
-          } else {
-            el.scrollTop = el.scrollHeight;
-          }
-        }
-        // 触发代码高亮
-        document.querySelectorAll('pre code').forEach(block => {
-          if (!block.dataset.highlighted) {
-            hljs.highlightElement(block);
-            block.dataset.highlighted = 'true';
-          }
-        });
-      }, 100);
+  /**
+   * 滚动到底部（参考 NextChat 设计）
+   * @param {boolean} smooth - 是否使用平滑滚动（已弃用，保留兼容性）
+   * @param {boolean} force - 是否强制滚动（忽略用户的滚动位置）
+   */
+  openaiScrollToBottom(smooth = true, force = false) {
+    console.log('[Chat] scrollToBottom called, force:', force);
+
+    const el = document.getElementById('openai-chat-messages');
+    if (!el) {
+      console.log('[Chat] Element not found');
+      return;
+    }
+
+    // 非强制模式：检查是否应该滚动
+    if (!force && !store.openaiChatAutoScroll) {
+      console.log('[Chat] Skipping scroll - user scrolled up');
+      return;
+    }
+
+    // 强制模式时，重新启用自动滚动
+    if (force) {
+      store.openaiChatAutoScroll = true;
+    }
+
+    // 直接滚动到底部
+    el.style.scrollBehavior = 'auto';
+    el.scrollTop = el.scrollHeight;
+
+    console.log('[Chat] Scrolled to bottom, scrollHeight:', el.scrollHeight);
+
+    // 触发代码高亮
+    this.highlightCodeBlocks();
+  },
+
+  /**
+   * 处理聊天区域滚动事件（用于智能脱离）
+   * @param {Event} event - 滚动事件
+   */
+  handleChatScroll(event) {
+    const el = event?.target || document.getElementById('openai-chat-messages');
+    if (!el) return;
+
+    // 计算是否在底部附近（阈值 100px）
+    const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+
+    // 更新自动滚动状态
+    store.openaiChatAutoScroll = isAtBottom;
+  },
+
+  /**
+   * 检查消息数量变化并自动滚动
+   * 类似 NextChat 的 useEffect 监听 messages.length
+   */
+  checkAndScrollOnNewMessage() {
+    const currentCount = store.openaiChatMessages.length;
+    const lastCount = store.openaiChatLastMessageCount;
+
+    // 有新消息时滚动
+    if (currentCount > lastCount && store.openaiChatAutoScroll) {
+      this.openaiScrollToBottom(true, false);
+    }
+
+    // 更新记录
+    store.openaiChatLastMessageCount = currentCount;
+  },
+
+  /**
+   * 触发代码高亮
+   */
+  highlightCodeBlocks() {
+    document.querySelectorAll('pre code').forEach(block => {
+      if (!block.dataset.highlighted) {
+        hljs.highlightElement(block);
+        block.dataset.highlighted = 'true';
+      }
     });
+  },
+
+  // 格式化消息时间为 时:分 格式
+  formatMessageTime(timestamp) {
+    const date = timestamp ? new Date(timestamp) : new Date();
+    const hours = date.getHours().toString().padStart(2, '0');
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    return `${hours}:${minutes}`;
   },
 
   // ==================== Persona Methods (人设系统) ====================
@@ -1382,6 +1733,11 @@ export const openaiMethods = {
         await this.loadPersonas();
       }
 
+      // 进入对话页面时，后台刷新模型列表（从远程 API 获取最新模型）
+      this.updateOpenaiAllModels(true).catch(e => {
+        console.warn('后台刷新模型失败:', e);
+      });
+
       const response = await fetch('/api/chat/sessions', {
         headers: store.getAuthHeaders(),
       });
@@ -1447,11 +1803,100 @@ export const openaiMethods = {
     }
   },
 
+  // 自动生成对话标题
+  async generateChatTitle() {
+    if (!store.openaiChatCurrentSessionId || store.openaiChatMessages.length < 2) return;
+
+    const session = store.openaiChatSessions.find(s => s.id === store.openaiChatCurrentSessionId);
+    if (!session || session.title !== '新对话') return;
+
+    // 检查是否启用自动生成
+    if (!store.openaiAutoTitleEnabled) {
+      // 使用简单的截取方式
+      const firstUserMsg = store.openaiChatMessages.find(m => m.role === 'user');
+      if (firstUserMsg) {
+        let simpleTitle = '';
+        if (typeof firstUserMsg.content === 'string') {
+          simpleTitle = firstUserMsg.content;
+        } else if (Array.isArray(firstUserMsg.content)) {
+          const textParts = firstUserMsg.content.filter(p => p.type === 'text').map(p => p.text);
+          simpleTitle = textParts.join(' ') || '📷 图片对话';
+        }
+        simpleTitle = simpleTitle.slice(0, 18) + (simpleTitle.length > 18 ? '...' : '');
+
+        try {
+          await fetch(`/api/chat/sessions/${store.openaiChatCurrentSessionId}`, {
+            method: 'PUT',
+            headers: store.getAuthHeaders(),
+            body: JSON.stringify({ title: simpleTitle }),
+          });
+          session.title = simpleTitle;
+        } catch (e) {
+          console.error('[生成标题] 保存失败:', e);
+        }
+      }
+      return;
+    }
+
+    // 使用 AI 生成标题（支持容灾）
+    try {
+      const result = await this.generateTitleWithFallback(store.openaiChatMessages);
+
+      if (result.success) {
+        // 更新数据库中的会话标题
+        await fetch(`/api/chat/sessions/${store.openaiChatCurrentSessionId}`, {
+          method: 'PUT',
+          headers: store.getAuthHeaders(),
+          body: JSON.stringify({
+            title: result.title,
+            model: store.openaiChatModel,
+            endpoint_id: store.openaiChatEndpoint || '',
+            system_prompt: store.openaiChatSystemPrompt,
+          }),
+        });
+
+        // 更新本地会话标题
+        session.title = result.title;
+        console.log(`[生成标题] 成功: ${result.title} (模型: ${result.model})`);
+      }
+    } catch (error) {
+      console.error('[生成标题] 所有模型都失败:', error);
+
+      // 回退到截取用户消息
+      const firstUserMsg = store.openaiChatMessages.find(m => m.role === 'user');
+      if (firstUserMsg) {
+        let fallbackTitle = '';
+        if (typeof firstUserMsg.content === 'string') {
+          fallbackTitle = firstUserMsg.content;
+        } else if (Array.isArray(firstUserMsg.content)) {
+          const textParts = firstUserMsg.content.filter(p => p.type === 'text').map(p => p.text);
+          fallbackTitle = textParts.join(' ') || '📷 图片对话';
+        }
+        fallbackTitle = fallbackTitle.slice(0, 18) + (fallbackTitle.length > 18 ? '...' : '');
+
+        try {
+          await fetch(`/api/chat/sessions/${store.openaiChatCurrentSessionId}`, {
+            method: 'PUT',
+            headers: store.getAuthHeaders(),
+            body: JSON.stringify({ title: fallbackTitle }),
+          });
+          session.title = fallbackTitle;
+          console.log('[生成标题] 回退成功:', fallbackTitle);
+        } catch (e) {
+          console.error('[生成标题] 回退保存失败:', e);
+        }
+      }
+    }
+  },
+
   // 加载指定会话
   async loadChatSession(sessionId) {
     if (store.openaiChatCurrentSessionId === sessionId) return;
 
+    // 切换会话时重置 loading 状态（后台请求会继续完成但不影响新会话 UI）
+    store.openaiChatLoading = false;
     store.openaiChatHistoryLoading = true;
+
     try {
       const response = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
         headers: store.getAuthHeaders(),
@@ -1459,6 +1904,11 @@ export const openaiMethods = {
       const data = await response.json();
       if (data.success) {
         store.openaiChatCurrentSessionId = sessionId;
+
+        // 恢复会话的模型和端点设置（先获取会话信息）
+        const session = store.openaiChatSessions.find(s => s.id === sessionId);
+        const sessionModel = session?.model || store.openaiChatModel;
+
         store.openaiChatMessages = data.data.map(msg => {
           let content = msg.content;
           if (content && typeof content === 'string' && content.startsWith('[')) {
@@ -1472,11 +1922,12 @@ export const openaiMethods = {
             content: content,
             reasoning: msg.reasoning,
             showReasoning: false,
+            timestamp: msg.created_at || msg.timestamp,  // 添加时间戳
+            model: msg.model || sessionModel,  // 添加模型信息
           };
         });
 
-        // 恢复会话的模型和端点设置
-        const session = store.openaiChatSessions.find(s => s.id === sessionId);
+        // 应用会话设置
         if (session && session.model) {
           store.openaiChatModel = session.model;
         }
@@ -1504,7 +1955,28 @@ export const openaiMethods = {
           }
         }
 
-        this.scrollToBottom();
+        // 添加淡入动画
+        const messagesEl = document.getElementById('openai-chat-messages');
+        requestAnimationFrame(() => {
+          if (messagesEl) {
+            messagesEl.classList.add('fade-in');
+            setTimeout(() => {
+              messagesEl.classList.remove('fade-in');
+            }, 300);
+          }
+        });
+
+        store.openaiChatAutoScroll = true;
+        store.openaiChatLastMessageCount = store.openaiChatMessages.length;
+        this.$nextTick(() => {
+          this.openaiScrollToBottom(true, true);
+          // 使用 requestAnimationFrame 确保长对话渲染完成后滚动
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              this.openaiScrollToBottom(true, true);
+            });
+          });
+        });
       }
     } catch (error) {
       console.error('加载会话失败:', error);
@@ -1646,39 +2118,7 @@ export const openaiMethods = {
         body: JSON.stringify({ role, content, reasoning }),
       });
       const data = await response.json();
-      const savedMsg = data.success ? data.data : null;
-
-      // 更新会话标题（如果是第一条用户消息）
-      const session = store.openaiChatSessions.find(s => s.id === store.openaiChatCurrentSessionId);
-      if (session && session.title === '新对话' && role === 'user') {
-        // ... (title update logic remains same) ...
-        let titleText = '';
-        if (typeof content === 'string') {
-          titleText = content;
-        } else if (Array.isArray(content)) {
-          const textParts = content.filter(p => p.type === 'text').map(p => p.text);
-          if (textParts.length > 0) titleText = textParts.join(' ');
-          else titleText = '📷 图片对话';
-        } else {
-          titleText = '新对话';
-        }
-
-        const newTitle = titleText.slice(0, 20) + (titleText.length > 20 ? '...' : '');
-        await fetch(`/api/chat/sessions/${store.openaiChatCurrentSessionId}`, {
-          method: 'PUT',
-          headers: store.getAuthHeaders(),
-          body: JSON.stringify({
-            title: newTitle,
-            model: store.openaiChatModel,
-            endpoint_id: store.openaiChatEndpoint || '',
-            system_prompt: store.openaiChatSystemPrompt,
-          }),
-        });
-        session.title = newTitle;
-        session.endpoint_id = store.openaiChatEndpoint || '';
-      }
-
-      return savedMsg;
+      return data.success ? data.data : null;
     } catch (error) {
       console.error('保存消息失败:', error);
       return null;
