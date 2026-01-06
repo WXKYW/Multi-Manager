@@ -29,6 +29,7 @@ const TemplateLoader = {
     'totp.html': '#template-totp',
     'music.html': '#template-music',
     'uptime.html': '#template-uptime',
+    'notification.html': '#template-notification',
   },
 
   // define critical templates for initial load

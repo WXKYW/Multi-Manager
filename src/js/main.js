@@ -52,6 +52,7 @@ async function loadLazyCSS() {
     import('../css/totp.css'),
     import('../css/music.css'),
     import('../css/uptime.css'),
+    import('../css/notification.css'),
   ];
   await Promise.all(styles);
   console.log('[System] Lazy CSS loaded');
@@ -105,6 +106,7 @@ import { musicMethods } from './modules/music.js';
 import { uptimeData, uptimeMethods, uptimeComputed } from './modules/uptime.js';
 import { aliyunMethods } from './modules/aliyun.js';
 import { tencentMethods } from './modules/tencent.js';
+import { notificationData, notificationMethods } from './modules/notification.js';
 import { formatDateTime, formatFileSize, maskAddress, formatRegion } from './modules/utils.js';
 
 // 导入全局状态
@@ -625,6 +627,9 @@ const app = createApp({
 
       // Uptime 监测模块
       ...uptimeData,
+
+      // 通知管理模块
+      ...notificationData,
     };
   },
 
@@ -1668,6 +1673,7 @@ const app = createApp({
     ...uptimeMethods,
     ...aliyunMethods,
     ...tencentMethods,
+    ...notificationMethods,
 
     // ==================== 工具函数 ====================
     formatDateTime,
