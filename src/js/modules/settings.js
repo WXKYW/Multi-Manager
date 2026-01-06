@@ -58,6 +58,7 @@ export const settingsMethods = {
             'paas',
             'dns',
             'aliyun',
+            'tencent',
             'self-h',
             'server',
             'totp',

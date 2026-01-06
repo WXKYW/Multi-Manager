@@ -798,6 +798,7 @@ function registerRoutes(app) {
     'cloudflare-api': '/api/cloudflare',
     'flyio-api': '/api/flyio',
     'aliyun-api': '/api/aliyun',
+    'tencent-api': '/api/tencent',
     'openai-api': '/api/openai',
     'openlist-api': '/api/openlist',
     'server-api': '/api/server',
@@ -831,6 +832,7 @@ function registerRoutes(app) {
             // 模块路由优先挂载
             app.use(routePath, requireAuth, moduleRouter);
           }
+          console.log(`[Router] Mounted ${moduleName} at ${routePath}`);
           logger.success(`模块已挂载 -> ${moduleName} [${routePath}]`);
         } catch (e) {
           logger.error(`模块加载失败: ${moduleName}`, e.message);
