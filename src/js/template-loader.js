@@ -23,6 +23,7 @@ const TemplateLoader = {
     'self-h.html': '#template-self-h',
     'antigravity.html': '#template-antigravity',
     'aliyun.html': '#template-aliyun',
+    'tencent.html': '#template-tencent',
     'settings.html': '#template-settings',
     'modals.html': '#template-modals',
     'totp.html': '#template-totp',

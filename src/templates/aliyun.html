@@ -837,67 +837,68 @@
             </div>
         </div>
     </div>
-    <!-- 添加/编辑解析记录模态框 -->
-    <transition name="modal-fade">
-        <div v-if="store.showAliyunRecordModal" class="modal-overlay" @click.self="store.showAliyunRecordModal = false">
-            <div class="modal" style="width: 500px">
-                <div class="modal-header">
-                    <div class="modal-title">
-                        <i class="fas fa-edit" style="margin-right: 8px"></i>
-                        {{ store.aliyunEditingRecordId ? '编辑解析记录' : '添加解析记录' }}
-                    </div>
-                    <button class="modal-close" @click="store.showAliyunRecordModal = false">&times;</button>
+</transition>
+
+<!-- 添加/编辑解析记录模态框 -->
+<transition name="modal-fade">
+    <div v-if="store.showAliyunRecordModal" class="modal-overlay" @click.self="store.showAliyunRecordModal = false">
+        <div class="modal" style="width: 500px">
+            <div class="modal-header">
+                <div class="modal-title">
+                    <i class="fas fa-edit" style="margin-right: 8px"></i>
+                    {{ store.aliyunEditingRecordId ? '编辑解析记录' : '添加解析记录' }}
                 </div>
-                <div class="modal-body">
-                    <div class="form-row">
-                        <div class="form-group flex-1">
-                            <label class="form-label">主机记录</label>
-                            <input v-model="store.aliyunRecordForm.rr" type="text" class="form-input code-font"
-                                placeholder="如: www, @, *">
-                        </div>
-                        <div class="form-group" style="width: 120px;">
-                            <label class="form-label">记录类型</label>
-                            <select v-model="store.aliyunRecordForm.type" class="form-input code-font">
-                                <option value="A">A</option>
-                                <option value="AAAA">AAAA</option>
-                                <option value="CNAME">CNAME</option>
-                                <option value="TXT">TXT</option>
-                                <option value="MX">MX</option>
-                                <option value="NS">NS</option>
-                            </select>
-                        </div>
+                <button class="modal-close" @click="store.showAliyunRecordModal = false">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-group flex-1">
+                        <label class="form-label">主机记录</label>
+                        <input v-model="store.aliyunRecordForm.rr" type="text" class="form-input code-font"
+                            placeholder="如: www, @, *">
                     </div>
-                    <div class="form-group">
-                        <label class="form-label">记录值</label>
-                        <input v-model="store.aliyunRecordForm.value" type="text" class="form-input code-font"
-                            placeholder="IP 地址、域名或文本内容">
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group flex-1">
-                            <label class="form-label">TTL</label>
-                            <select v-model="store.aliyunRecordForm.ttl" class="form-input code-font">
-                                <option :value="600">10 分钟 (默认)</option>
-                                <option :value="60">1 分钟</option>
-                                <option :value="120">2 分钟</option>
-                                <option :value="1800">30 分钟</option>
-                                <option :value="3600">1 小时</option>
-                                <option :value="86400">24 小时</option>
-                            </select>
-                        </div>
-                        <div v-if="store.aliyunRecordForm.type === 'MX'" class="form-group" style="width: 120px;">
-                            <label class="form-label">优先级</label>
-                            <input v-model="store.aliyunRecordForm.priority" type="number" class="form-input code-font"
-                                min="1" max="50">
-                        </div>
+                    <div class="form-group" style="width: 120px;">
+                        <label class="form-label">记录类型</label>
+                        <select v-model="store.aliyunRecordForm.type" class="form-input code-font">
+                            <option value="A">A</option>
+                            <option value="AAAA">AAAA</option>
+                            <option value="CNAME">CNAME</option>
+                            <option value="TXT">TXT</option>
+                            <option value="MX">MX</option>
+                            <option value="NS">NS</option>
+                        </select>
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button class="btn btn-secondary" @click="store.showAliyunRecordModal = false">取消</button>
-                    <button class="btn btn-primary" @click="aliyunSubmitRecord">
-                        <i class="fas fa-save"></i> 确定
-                    </button>
+                <div class="form-group">
+                    <label class="form-label">记录值</label>
+                    <input v-model="store.aliyunRecordForm.value" type="text" class="form-input code-font"
+                        placeholder="IP 地址、域名或文本内容">
+                </div>
+                <div class="form-row">
+                    <div class="form-group flex-1">
+                        <label class="form-label">TTL</label>
+                        <select v-model="store.aliyunRecordForm.ttl" class="form-input code-font">
+                            <option :value="600">10 分钟 (默认)</option>
+                            <option :value="60">1 分钟</option>
+                            <option :value="120">2 分钟</option>
+                            <option :value="1800">30 分钟</option>
+                            <option :value="3600">1 小时</option>
+                            <option :value="86400">24 小时</option>
+                        </select>
+                    </div>
+                    <div v-if="store.aliyunRecordForm.type === 'MX'" class="form-group" style="width: 120px;">
+                        <label class="form-label">优先级</label>
+                        <input v-model="store.aliyunRecordForm.priority" type="number" class="form-input code-font"
+                            min="1" max="50">
+                    </div>
                 </div>
             </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" @click="store.showAliyunRecordModal = false">取消</button>
+                <button class="btn btn-primary" @click="aliyunSubmitRecord">
+                    <i class="fas fa-save"></i> 确定
+                </button>
+            </div>
         </div>
-    </transition>
+    </div>
 </transition>

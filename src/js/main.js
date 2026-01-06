@@ -104,6 +104,7 @@ import { totpMethods, totpComputed, totpData } from './modules/totp.js';
 import { musicMethods } from './modules/music.js';
 import { uptimeData, uptimeMethods, uptimeComputed } from './modules/uptime.js';
 import { aliyunMethods } from './modules/aliyun.js';
+import { tencentMethods } from './modules/tencent.js';
 import { formatDateTime, formatFileSize, maskAddress, formatRegion } from './modules/utils.js';
 
 // 导入全局状态
@@ -1314,6 +1315,13 @@ const app = createApp({
                   this.aliyunLoadAccounts();
                 }
                 break;
+              case 'tencent':
+                if (this.tencentSwitchTo) {
+                  this.tencentSwitchTo();
+                } else {
+                  this.tencentLoadAccounts();
+                }
+                break;
             }
           });
         }
@@ -1382,6 +1390,12 @@ const app = createApp({
               // 优先加载缓存，然后后台刷新
               this.loadFromOpenaiCache();
               this.loadOpenaiEndpoints(true);
+              break;
+            case 'aliyun':
+              this.aliyunLoadAccounts();
+              break;
+            case 'tencent':
+              this.tencentLoadAccounts();
               break;
             case 'self-h':
               this.loadOpenListAccounts();
@@ -1653,6 +1667,7 @@ const app = createApp({
     ...musicMethods,
     ...uptimeMethods,
     ...aliyunMethods,
+    ...tencentMethods,
 
     // ==================== 工具函数 ====================
     formatDateTime,

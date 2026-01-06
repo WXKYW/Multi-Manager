@@ -44,6 +44,7 @@
     "socket.io": "^4.7.2",
     "socket.io-client": "^4.8.3",
     "ssh2": "^1.17.0",
+    "tencentcloud-sdk-nodejs": "^4.1.165",
     "uuid": "^13.0.0",
     "ws": "^8.18.3",
     "zod": "^4.2.1"

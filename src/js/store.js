@@ -448,6 +448,41 @@ export const store = reactive({
   showAliyunAddFirewallModal: false,
   aliyunFirewallForm: { protocol: 'TCP', port: '', remark: '' },
 
+  // Tencent
+  tencentAccounts: [],
+  tencentDomains: [],
+  tencentCvmInstances: [],
+  tencentLighthouseInstances: [],
+  tencentActiveSubTab: 'dns',
+  tencentSelectedAccountId: null,
+  tencentSelectedDomain: null,
+  tencentRecords: [],
+  tencentLoadingDomains: false,
+  tencentLoadingRecords: false,
+  tencentLoadingCvm: false,
+  tencentLoadingLighthouse: false,
+  showTencentAccountModal: false,
+  showTencentRecordModal: false,
+  showTencentAddDomainModal: false,
+  tencentAccountForm: {
+    id: null,
+    name: '',
+    secretId: '',
+    secretKey: '',
+    regionId: 'ap-guangzhou',
+    description: ''
+  },
+  tencentRecordForm: {
+    subDomain: '',
+    recordType: 'A',
+    value: '',
+    recordLine: '默认',
+    ttl: 600,
+    mx: 10
+  },
+  tencentEditingRecordId: null,
+  tencentAddDomainName: '',
+
   // R2 存储
   r2Buckets: [],
   r2Objects: [],

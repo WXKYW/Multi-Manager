@@ -315,6 +315,34 @@ pre,
     --current-rgb: 255, 106, 0;
   }
 
+  .theme-tencent {
+    --current-primary: #0052d9;
+    --current-dark: #003db3;
+    --current-rgb: 0, 82, 217;
+  }
+
+  /* 通用输入框图标样式 */
+  .input-with-icon {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+  }
+
+  .input-with-icon i {
+    position: absolute;
+    left: 12px;
+    color: var(--text-tertiary);
+    font-size: 14px;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .input-with-icon .form-input {
+    padding-left: 36px !important;
+    width: 100%;
+  }
+
   .theme-aliyun .tab-btn:hover:not(.active) {
     border-color: #ff6a00 !important;
   }
