@@ -108,9 +108,9 @@
    严格统一的间距系统
    ========================================= */
 :root {
-  --dashboard-grid-gap: 24px;
+  --dashboard-grid-gap: 12px;
   /* 全局网格间距变量 */
-  --card-padding: 24px;
+  --card-padding: 18px;
   /* 全局卡片内边距变量 */
   --card-radius: 16px;
   /* 全局卡片圆角 */

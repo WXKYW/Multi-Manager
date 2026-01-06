@@ -415,6 +415,28 @@ export const store = reactive({
   r2PendingDownloadObj: null, // 等待下载的对象
   r2SelectedObjects: [], // 已选中的对象 keys
 
+  // Cloudflare Tunnel
+  tunnels: [],
+  tunnelsLoading: false,
+  showCreateTunnelModal: false,
+  newTunnelName: '',
+  tunnelSaving: false,
+  // Tunnel Token
+  showTunnelTokenModal: false,
+  selectedTunnelToken: '',
+  selectedTunnelForToken: null,
+  // Tunnel Config (Ingress)
+  showTunnelConfigModal: false,
+  selectedTunnelForConfig: null,
+  tunnelConfig: { ingress: [] },
+  tunnelConfigLoading: false,
+  tunnelConfigSaving: false,
+  // Tunnel Connections
+  showTunnelConnectionsModal: false,
+  selectedTunnelForConnections: null,
+  tunnelConnections: [],
+  tunnelConnectionsLoading: false,
+
   // OpenAI
   openaiEndpoints: [],
   openaiCurrentTab: 'endpoints',

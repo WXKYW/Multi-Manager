@@ -833,3 +833,147 @@
     gap: 8px;
   }
 }
+
+/* ==================== Tunnel 管理样式 ==================== */
+
+.tunnel-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tunnel-status-active {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.tunnel-status-inactive {
+  background: rgba(156, 163, 175, 0.15);
+  color: #9ca3af;
+}
+
+.tunnel-status-unknown {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+/* Tunnel Ingress 规则列表 */
+.tunnel-ingress-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tunnel-ingress-item {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.tunnel-ingress-item:hover {
+  border-color: var(--cf-color);
+  box-shadow: 0 2px 8px rgba(243, 128, 32, 0.1);
+}
+
+.tunnel-ingress-item.catch-all {
+  background: rgba(243, 128, 32, 0.05);
+  border-color: rgba(243, 128, 32, 0.3);
+}
+
+.tunnel-ingress-item .form-input {
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.tunnel-ingress-item .form-input:disabled {
+  background: var(--bg-tertiary);
+  color: var(--text-tertiary);
+  cursor: not-allowed;
+}
+
+/* 删除按钮对齐 - 与输入框底部对齐 */
+.tunnel-ingress-item>button {
+  flex-shrink: 0;
+  margin-bottom: 1px;
+  /* 微调与输入框底部对齐 */
+  height: 36px;
+  width: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tunnel-ingress-item .form-input {
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.tunnel-ingress-item .form-input:disabled {
+  background: var(--bg-tertiary);
+  color: var(--text-tertiary);
+  cursor: not-allowed;
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+  .tunnel-ingress-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .tunnel-ingress-item>div:first-child {
+    grid-template-columns: 1fr !important;
+  }
+
+  .tunnel-ingress-item button {
+    align-self: flex-end;
+  }
+}
+
+/* Tunnel Token 显示框 */
+.tunnel-token-box {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px;
+  overflow: hidden;
+}
+
+.tunnel-token-box code {
+  display: block;
+  word-break: break-all;
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+/* Tunnel 命令框 */
+.tunnel-command-box {
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+  padding: 16px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  overflow-x: auto;
+}
+
+.tunnel-command-box code {
+  display: block;
+  word-break: break-all;
+  white-space: pre-wrap;
+  color: var(--cf-color);
+  margin-bottom: 4px;
+}

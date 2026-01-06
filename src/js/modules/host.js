@@ -1825,12 +1825,17 @@ export const hostMethods = {
   hasGpuData(server) {
     if (!server || !server.info) return false;
 
-    // 检查实时 GPU 数据
-    if (server.info.gpu && (server.info.gpu.Model || server.info.gpu.Usage)) {
-      return true;
+    // 检查是否有有效的 GPU 信息
+    // 1. 有 GPU 型号名称 - 明确有 GPU
+    if (server.info.gpu && server.info.gpu.Model) return true;
+
+    // 2. GPU 使用率大于 0 - 说明有 GPU 在工作
+    if (server.info.gpu && server.info.gpu.Usage) {
+      const usageVal = parseFloat(server.info.gpu.Usage);
+      if (usageVal > 0) return true;
     }
 
-    // 检查历史缓存中是否有 GPU 数据
+    // 3. 历史缓存中有大于 0 的 GPU 使用率数据
     if (
       server.metricsCache &&
       server.metricsCache.some(
@@ -2892,11 +2897,17 @@ export const hostMethods = {
   hasGpuData(server) {
     if (!server || !server.info) return false;
 
-    // 检查是否有静态 GPU 信息
-    const hasStaticInfo = server.info.gpu && (server.info.gpu.Model || server.info.gpu.Usage);
-    if (hasStaticInfo) return true;
+    // 检查是否有有效的 GPU 信息
+    // 1. 有 GPU 型号名称 - 明确有 GPU
+    if (server.info.gpu && server.info.gpu.Model) return true;
 
-    // 检查历史缓存中是否有 GPU 数据
+    // 2. GPU 使用率大于 0 - 说明有 GPU 在工作
+    if (server.info.gpu && server.info.gpu.Usage) {
+      const usageVal = parseFloat(server.info.gpu.Usage);
+      if (usageVal > 0) return true;
+    }
+
+    // 3. 历史缓存中有大于 0 的 GPU 使用率数据
     if (server.metricsCache && server.metricsCache.some(r => r.gpu_usage !== null && r.gpu_usage !== undefined && r.gpu_usage > 0)) {
       return true;
     }

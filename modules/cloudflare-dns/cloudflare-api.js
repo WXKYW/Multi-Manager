@@ -1256,6 +1256,267 @@ async function deleteR2Object(auth, accountId, bucketName, objectKey) {
   }
 }
 
+// ==================== Tunnel 管理 ====================
+
+/**
+ * 列出所有 Cloudflare Tunnel
+ * @param {string|object} auth - API Token 或 { email, key }
+ * @param {string} accountId - Cloudflare 账号 ID
+ * @param {Object} options - 过滤选项 { name, is_deleted, existed_at }
+ */
+async function listTunnels(auth, accountId, options = {}) {
+  try {
+    const params = new URLSearchParams();
+    if (options.name) params.append('name', options.name);
+    if (options.is_deleted !== undefined) params.append('is_deleted', options.is_deleted);
+    if (options.existed_at) params.append('existed_at', options.existed_at);
+    params.append('per_page', '100');
+
+    const query = params.toString();
+    const path = `/accounts/${accountId}/cfd_tunnel` + (query ? `?${query}` : '');
+
+    const result = await cfRequest(auth, 'GET', path);
+    return result.result || [];
+  } catch (e) {
+    console.error('[CF-API] 获取 Tunnel 列表失败:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * 获取单个 Tunnel 详情
+ * @param {string|object} auth
+ * @param {string} accountId
+ * @param {string} tunnelId
+ */
+async function getTunnel(auth, accountId, tunnelId) {
+  try {
+    const result = await cfRequest(auth, 'GET', `/accounts/${accountId}/cfd_tunnel/${tunnelId}`);
+    return result.result;
+  } catch (e) {
+    console.error('[CF-API] 获取 Tunnel 详情失败:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * 创建新的 Cloudflare Tunnel
+ * @param {string|object} auth
+ * @param {string} accountId
+ * @param {string} name - Tunnel 名称
+ * @param {string} tunnelSecret - Base64 编码的 32 字节随机密钥（可选，系统会自动生成）
+ */
+async function createTunnel(auth, accountId, name, tunnelSecret = null) {
+  try {
+    const body = { name };
+
+    // 如果未提供密钥，生成一个随机的 32 字节密钥
+    if (tunnelSecret) {
+      body.tunnel_secret = tunnelSecret;
+    } else {
+      // 生成随机密钥（Node.js 环境）
+      const crypto = require('crypto');
+      body.tunnel_secret = crypto.randomBytes(32).toString('base64');
+    }
+
+    // 使用 cloudflared 类型创建隧道
+    body.config_src = 'cloudflare'; // 使用远程管理配置
+
+    const result = await cfRequest(auth, 'POST', `/accounts/${accountId}/cfd_tunnel`, body);
+    return result.result;
+  } catch (e) {
+    console.error('[CF-API] 创建 Tunnel 失败:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * 删除 Cloudflare Tunnel
+ * @param {string|object} auth
+ * @param {string} accountId
+ * @param {string} tunnelId
+ */
+async function deleteTunnel(auth, accountId, tunnelId) {
+  try {
+    // 删除前需要先清理所有连接
+    await cleanupTunnelConnections(auth, accountId, tunnelId);
+
+    const result = await cfRequest(auth, 'DELETE', `/accounts/${accountId}/cfd_tunnel/${tunnelId}`);
+    return result.result;
+  } catch (e) {
+    console.error('[CF-API] 删除 Tunnel 失败:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * 获取 Tunnel 配置（Ingress Rules）
+ * @param {string|object} auth
+ * @param {string} accountId
+ * @param {string} tunnelId
+ */
+async function getTunnelConfiguration(auth, accountId, tunnelId) {
+  try {
+    const result = await cfRequest(
+      auth,
+      'GET',
+      `/accounts/${accountId}/cfd_tunnel/${tunnelId}/configurations`
+    );
+    return result.result?.config || null;
+  } catch (e) {
+    console.error('[CF-API] 获取 Tunnel 配置失败:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * 更新 Tunnel 配置（Ingress Rules）
+ * @param {string|object} auth
+ * @param {string} accountId
+ * @param {string} tunnelId
+ * @param {Object} config - 配置对象，包含 ingress 数组
+ */
+async function updateTunnelConfiguration(auth, accountId, tunnelId, config) {
+  try {
+    const body = { config };
+    const result = await cfRequest(
+      auth,
+      'PUT',
+      `/accounts/${accountId}/cfd_tunnel/${tunnelId}/configurations`,
+      body
+    );
+    return result.result;
+  } catch (e) {
+    console.error('[CF-API] 更新 Tunnel 配置失败:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * 获取 Tunnel Token（用于 cloudflared 连接）
+ * @param {string|object} auth
+ * @param {string} accountId
+ * @param {string} tunnelId
+ */
+async function getTunnelToken(auth, accountId, tunnelId) {
+  try {
+    const result = await cfRequest(
+      auth,
+      'GET',
+      `/accounts/${accountId}/cfd_tunnel/${tunnelId}/token`
+    );
+    return result.result;
+  } catch (e) {
+    console.error('[CF-API] 获取 Tunnel Token 失败:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * 获取 Tunnel 连接状态
+ * @param {string|object} auth
+ * @param {string} accountId
+ * @param {string} tunnelId
+ */
+async function getTunnelConnections(auth, accountId, tunnelId) {
+  try {
+    const result = await cfRequest(
+      auth,
+      'GET',
+      `/accounts/${accountId}/cfd_tunnel/${tunnelId}/connections`
+    );
+    return result.result || [];
+  } catch (e) {
+    console.error('[CF-API] 获取 Tunnel 连接失败:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * 清理 Tunnel 的所有连接
+ * @param {string|object} auth
+ * @param {string} accountId
+ * @param {string} tunnelId
+ * @param {string} clientId - 可选，指定要清理的 connector ID
+ */
+async function cleanupTunnelConnections(auth, accountId, tunnelId, clientId = null) {
+  try {
+    let path = `/accounts/${accountId}/cfd_tunnel/${tunnelId}/connections`;
+    if (clientId) {
+      path += `?client_id=${clientId}`;
+    }
+    const result = await cfRequest(auth, 'DELETE', path);
+    return result.result;
+  } catch (e) {
+    console.error('[CF-API] 清理 Tunnel 连接失败:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * 获取 Tunnel 的 Connector 详情
+ * @param {string|object} auth
+ * @param {string} accountId
+ * @param {string} tunnelId
+ * @param {string} connectorId
+ */
+async function getTunnelConnector(auth, accountId, tunnelId, connectorId) {
+  try {
+    const result = await cfRequest(
+      auth,
+      'GET',
+      `/accounts/${accountId}/cfd_tunnel/${tunnelId}/connectors/${connectorId}`
+    );
+    return result.result;
+  } catch (e) {
+    console.error('[CF-API] 获取 Tunnel Connector 失败:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * 更新 Tunnel 名称
+ * @param {string|object} auth
+ * @param {string} accountId
+ * @param {string} tunnelId
+ * @param {string} name - 新名称
+ */
+async function updateTunnel(auth, accountId, tunnelId, name) {
+  try {
+    const body = { name };
+    const result = await cfRequest(
+      auth,
+      'PATCH',
+      `/accounts/${accountId}/cfd_tunnel/${tunnelId}`,
+      body
+    );
+    return result.result;
+  } catch (e) {
+    console.error('[CF-API] 更新 Tunnel 失败:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * 获取管理 Token（用于访问 Tunnel 管理资源如流式日志）
+ * @param {string|object} auth
+ * @param {string} accountId
+ * @param {string} tunnelId
+ */
+async function getTunnelManagementToken(auth, accountId, tunnelId) {
+  try {
+    const result = await cfRequest(
+      auth,
+      'GET',
+      `/accounts/${accountId}/cfd_tunnel/${tunnelId}/management`
+    );
+    return result.result;
+  } catch (e) {
+    console.error('[CF-API] 获取 Tunnel 管理 Token 失败:', e.message);
+    throw e;
+  }
+}
+
 module.exports = {
   // 验证
   verifyToken,
@@ -1327,4 +1588,18 @@ module.exports = {
   deleteR2Bucket,
   listR2Objects,
   deleteR2Object,
+
+  // Tunnel 管理
+  listTunnels,
+  getTunnel,
+  createTunnel,
+  deleteTunnel,
+  updateTunnel,
+  getTunnelConfiguration,
+  updateTunnelConfiguration,
+  getTunnelToken,
+  getTunnelConnections,
+  cleanupTunnelConnections,
+  getTunnelConnector,
+  getTunnelManagementToken,
 };

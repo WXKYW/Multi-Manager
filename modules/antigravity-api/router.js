@@ -623,6 +623,7 @@ router.post('/accounts/check', async (req, res) => {
     if (settings.disabledCheckModels) {
       try {
         disabledCheckModels = JSON.parse(settings.disabledCheckModels);
+        logger.info(`Disabled check models from settings: ${JSON.stringify(disabledCheckModels)}`);
       } catch (e) {
         disabledCheckModels = [];
       }
@@ -630,7 +631,12 @@ router.post('/accounts/check', async (req, res) => {
 
     // 过滤掉在检测设置中禁用的模型
     if (disabledCheckModels.length > 0) {
+      const beforeFilter = modelsToCheck.length;
+      const filteredOut = modelsToCheck.filter(m => disabledCheckModels.includes(m));
       modelsToCheck = modelsToCheck.filter(m => !disabledCheckModels.includes(m));
+      if (filteredOut.length > 0) {
+        logger.info(`Filtered out ${filteredOut.length} disabled models: ${filteredOut.join(', ')}`);
+      }
     }
 
     // 如果没有已启用的模型，从历史记录补充
@@ -753,11 +759,12 @@ router.post('/accounts/check', async (req, res) => {
       storage.recordModelCheck(modelId, status, errorLog, batchTime, passedAccounts);
     }
 
-    logger.info(`Check complete for ${accountsToCheck.length} accounts`);
+    logger.info(`Check complete for ${accountsToCheck.length} accounts, ${modelsToCheck.length} models`);
     res.json({
       success: true,
       message: `Checked ${accountsToCheck.length} accounts`,
       totalAccounts: accountsToCheck.length,
+      totalModels: modelsToCheck.length,
       batchTime,
     });
   } catch (e) {

@@ -608,6 +608,11 @@ export const selfHMethods = {
     if (tab && tab.isVideo) {
       this.$nextTick(() => {
         this.initVideoPlayerInTab(tab);
+        // 重置 UI 控制显示状态
+        if (store.streamPlayer) {
+          store.streamPlayer.showControls = true;
+          if (store.streamPlayer.hideTimer) clearTimeout(store.streamPlayer.hideTimer);
+        }
       });
     }
   },
@@ -1247,7 +1252,7 @@ export const selfHMethods = {
         keyboard: { focused: true, global: false },
         tooltips: { controls: true, seek: true },
         fullscreen: { enabled: true, fallback: true },
-        hideControls: true,
+        hideControls: true, // 恢复自动隐藏
         clickToPlay: true,
         i18n: {
           restart: '重新播放',
@@ -1398,7 +1403,7 @@ export const selfHMethods = {
     if (!store.streamPlayer) return;
 
     // 如果点击的是控制栏或进度条，由它们自己的事件处理
-    if (e.target.closest('.stream-player-controls')) return;
+    if (e.target.closest('.stream-player-controls') || e.target.closest('.plyr__controls')) return;
 
     // 兼容触摸和鼠标坐标获取
     const getX = () => {
@@ -1746,15 +1751,15 @@ export const selfHMethods = {
                         <table class="table table-sm table-borderless mb-0" style="table-layout: fixed; width: 100%;">
                             <tbody>
                                 ${detailRows
-                                  .map(
-                                    row => `
+            .map(
+              row => `
                                     <tr>
                                         <td style="width: 80px; color: var(--text-tertiary); padding-left: 0; vertical-align: top;">${row.label}</td>
                                         <td style="color: var(--text-primary); word-break: break-all; white-space: normal;">${row.value}</td>
                                     </tr>
                                 `
-                                  )
-                                  .join('')}
+            )
+            .join('')}
                             </tbody>
                         </table>
                     </div>

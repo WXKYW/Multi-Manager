@@ -1337,7 +1337,7 @@
 .btn-icon-refined:hover {
   background: var(--bg-tertiary);
   color: var(--text-primary);
-  transform: scale(1.05);
+  /* transform: scale(1.05); */
 }
 
 .toggle-btn {
