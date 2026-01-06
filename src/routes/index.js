@@ -808,6 +808,7 @@ function registerRoutes(app) {
     'totp-api': '/api/totp',
     'uptime-api': '/api/uptime',
     'cron-api': '/api/cron',
+    'notification-api': '/api/notification',
     // music-api 在下方单独挂载（无需认证）
   };
 

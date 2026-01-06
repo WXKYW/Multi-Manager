@@ -85,6 +85,12 @@ export const MODULE_CONFIG = {
     icon: 'fa-heartbeat',
     description: '站点与服务可用性监测',
   },
+  notification: {
+    name: '通知',
+    shortName: 'Alerts',
+    icon: 'fa-bell',
+    description: '通知渠道与告警规则管理',
+  },
 };
 
 /**
@@ -114,7 +120,7 @@ export const MODULE_GROUPS = [
     id: 'toolbox',
     name: '工具箱',
     icon: 'fa-toolbox',
-    modules: ['self-h', 'totp', 'music'],
+    modules: ['self-h', 'totp', 'music', 'notification'],
   },
 ];
 
@@ -167,6 +173,7 @@ export const store = reactive({
     totp: true,
     music: false, // 音乐模块默认隐藏
     uptime: true,
+    notification: true,
   },
   channelEnabled: {
     antigravity: true,
@@ -189,6 +196,7 @@ export const store = reactive({
     'totp',
     'music',
     'uptime',
+    'notification',
   ],
 
   // 界面设置

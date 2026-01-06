@@ -327,6 +327,10 @@ loadSessions();
 server.listen(PORT, '0.0.0.0', () => {
   logger.success(`主机启动成功 - http://0.0.0.0:${PORT}`);
 
+  // 初始化通知服务
+  const notificationService = require('./modules/notification-api/service');
+  notificationService.init(server);
+
   // 检查密码配置
   if (process.env.ADMIN_PASSWORD) {
     logger.info('管理员密码: 环境变量');

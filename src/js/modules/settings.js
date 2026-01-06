@@ -64,6 +64,7 @@ export const settingsMethods = {
             'totp',
             'music',
             'uptime',
+            'notification',
           ];
           if (settings.moduleVisibility) {
             const filtered = {};

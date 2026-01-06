@@ -81,6 +81,9 @@ class UptimeService {
         let msg = '';
         let ping = 0;
 
+        // 获取上一次的心跳状态
+        const oldBeat = storage.getLastHeartbeat(monitor.id);
+
         try {
             if (monitor.type === 'http') {
                 await this.checkHttp(monitor);
@@ -129,9 +132,47 @@ class UptimeService {
         // 保存
         storage.saveHeartbeat(monitor.id, beat);
 
+        // 检测状态变化并触发通知
+        if (oldBeat && oldBeat.status !== beat.status) {
+            this.triggerNotification(monitor, beat, oldBeat);
+        }
+
         // 通过 Socket.IO 推送
         if (io) {
             io.emit('uptime:heartbeat', { monitorId: monitor.id, beat });
+        }
+    }
+
+    /**
+     * 触发通知
+     */
+    triggerNotification(monitor, newBeat, oldBeat) {
+        try {
+            const notificationService = require('../notification-api/service');
+
+            if (newBeat.status === 0) {
+                // 宕机
+                notificationService.trigger('uptime', 'down', {
+                    monitorId: monitor.id,
+                    monitorName: monitor.name,
+                    url: monitor.url || `${monitor.hostname}:${monitor.port}`,
+                    error: newBeat.msg,
+                    type: monitor.type
+                });
+                logger.warn(`[监控告警] ${monitor.name} 宕机 - ${newBeat.msg}`);
+            } else if (oldBeat.status === 0 && newBeat.status === 1) {
+                // 恢复
+                notificationService.trigger('uptime', 'up', {
+                    monitorId: monitor.id,
+                    monitorName: monitor.name,
+                    url: monitor.url || `${monitor.hostname}:${monitor.port}`,
+                    ping: newBeat.ping,
+                    type: monitor.type
+                });
+                logger.info(`[监控恢复] ${monitor.name} 已恢复 - 响应时间: ${newBeat.ping}ms`);
+            }
+        } catch (error) {
+            logger.error(`触发通知失败: ${error.message}`);
         }
     }
 

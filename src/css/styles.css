@@ -99,6 +99,9 @@ pre,
   --totp-primary: #8b5cf6;
   --totp-dark: #7c3aed;
 
+  --notification-primary: #f59e0b;
+  --notification-dark: #d97706;
+
   /* 常用功能色映射 (核心驱动) */
   --primary-color: var(--paas-primary);
   --primary-dark: var(--paas-dark);
@@ -244,7 +247,8 @@ pre,
   .theme-paas,
   .theme-totp,
   .theme-music,
-  .theme-uptime {
+  .theme-uptime,
+  .theme-notification {
     --current-primary: var(--primary-color);
     --current-dark: var(--primary-dark);
   }
@@ -307,6 +311,12 @@ pre,
     --current-primary: #10b981;
     --current-dark: #059669;
     --current-rgb: 16, 185, 129;
+  }
+
+  .theme-notification {
+    --current-primary: var(--notification-primary);
+    --current-dark: var(--notification-dark);
+    --current-rgb: 245, 158, 11;
   }
 
   .theme-aliyun {
@@ -440,6 +450,11 @@ pre,
   .theme-uptime .tab-btn.active {
     background: linear-gradient(135deg, #10b981, #059669) !important;
     box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+  }
+
+  .theme-notification .tab-btn.active {
+    background: linear-gradient(135deg, var(--notification-primary), var(--notification-dark)) !important;
+    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
   }
 
   /* ========================================
