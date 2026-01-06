@@ -307,34 +307,30 @@ function renderTerminal(level, module, timestamp, traceId, message, data) {
   const displayTime = formatDisplayTimestamp(timestamp);
 
   // 固定宽度定义，确保完美对齐
-  const COL_SYSTEM = 4; // [0]
   const COL_TIME = 13; // HH:mm:ss.SSS
   const COL_LEVEL = 6; // ERROR
   const COL_MODULE = 13; // [ModuleName]
 
-  // 1. 系统 ID (默认为 [0])
-  const sysStr = useColor ? chalk.gray('[0]'.padEnd(COL_SYSTEM)) : '[0]'.padEnd(COL_SYSTEM);
-
-  // 2. 时间戳
+  // 1. 时间戳
   const timeStr = useColor
     ? chalk.gray(displayTime.padEnd(COL_TIME))
     : displayTime.padEnd(COL_TIME);
 
-  // 3. 级别
+  // 2. 级别
   const levelStr = colorFn(level.padEnd(COL_LEVEL));
 
-  // 4. 模块名 (动态配色)
+  // 3. 模块名 (动态配色)
   const rawModule = (module || 'core').substring(0, 10);
   const formattedModule = `[${rawModule}]`.padEnd(COL_MODULE);
   const moduleColorFn = getModuleColor(module);
   const moduleStr = moduleColorFn(formattedModule);
 
   // 组合输出
-  const output = `${sysStr} ${timeStr} ${levelStr} ${moduleStr} ${message}`;
+  const output = `${timeStr} ${levelStr} ${moduleStr} ${message}`;
   console.log(output);
 
   if (data !== undefined && level !== 'INFO') {
-    const indent = ' '.repeat(COL_SYSTEM + COL_TIME + COL_LEVEL + COL_MODULE + 4);
+    const indent = ' '.repeat(COL_TIME + COL_LEVEL + COL_MODULE + 4);
     if (typeof data === 'object') {
       try {
         const json = JSON.stringify(data, null, 2)

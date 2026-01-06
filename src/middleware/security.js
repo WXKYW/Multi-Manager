@@ -14,7 +14,7 @@ function configureHelmet(options = {}) {
     const isDev = process.env.NODE_ENV !== 'production';
 
     return helmet({
-        // 内容安全策略
+        // 内容安全策略 - 放宽以支持更多 CDN 和外部资源
         contentSecurityPolicy: isDev
             ? false // 开发环境禁用 CSP (方便调试)
             : {
@@ -27,31 +27,34 @@ function configureHelmet(options = {}) {
                         'https://cdn.jsdelivr.net',
                         'https://unpkg.com',
                         'https://cdnjs.cloudflare.com',
+                        'https://*.bytecdntp.com', // 字节跳动 CDN
+                        'https://lf3-cdn.bytecdntp.com',
+                        'https://cdn.bootcdn.net', // BootCDN
+                        'https://cdn.staticfile.org', // Staticfile CDN
                     ],
                     styleSrc: [
                         "'self'",
                         "'unsafe-inline'",
-                        'https://cdn.jsdelivr.net',
-                        'https://fonts.googleapis.com',
-                        'https://cdnjs.cloudflare.com',
-                        'https://unpkg.com',
-                        'https://cdn.simpleicons.org',
+                        'https:', // 允许所有 HTTPS 样式
                     ],
-                    fontSrc: ["'self'", 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com', 'https://unpkg.com', 'data:'],
-                    imgSrc: ["'self'", 'data:', 'https:', 'blob:', 'https://cdn.simpleicons.org', 'https://p2.music.126.net'],
-                    mediaSrc: ["'self'", 'https:', 'blob:'],
+                    fontSrc: [
+                        "'self'",
+                        'https:', // 允许所有 HTTPS 字体
+                        'data:',
+                    ],
+                    imgSrc: ["'self'", 'data:', 'https:', 'blob:', 'http:'],
+                    mediaSrc: ["'self'", 'https:', 'blob:', 'http:'],
                     connectSrc: [
                         "'self'",
                         'wss:',
                         'ws:',
-                        'https://api.openai.com',
-                        'https://*.googleapis.com',
-                        'https://accounts.google.com',
+                        'https:',
+                        'http:', // 允许所有 HTTP/HTTPS 连接
                     ],
                     objectSrc: ["'none'"],
                     frameAncestors: ["'self'"],
                     formAction: ["'self'"],
-                    upgradeInsecureRequests: null, // 显式禁用：防止浏览器将请求强制升级为 HTTPS (导致 net::ERR_SSL_PROTOCOL_ERROR)
+                    upgradeInsecureRequests: null, // 显式禁用：防止浏览器将请求强制升级为 HTTPS
                 },
             },
 

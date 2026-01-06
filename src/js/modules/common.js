@@ -76,19 +76,83 @@ export const commonMethods = {
 
   initGlobalKeyListeners() {
     window.addEventListener('keydown', e => {
+      // 1. Esc 快捷键：关闭最上层模态框
       if (e.key === 'Escape') {
-        // 优先关闭最活跃的模态层
-        if (this.showImagePreviewModal) {
-          this.showImagePreviewModal = false;
-        } else if (this.showSettingsModal) {
-          this.showSettingsModal = false;
-        } else if (this.isAnyModalOpen) {
-          this.showServerModal = false;
-          this.showCredentialModal = false;
-          this.showImportServerModal = false;
+        // 如果有自定义对话框 (Confirm/Prompt)，优先处理取消逻辑
+        if (this.customDialog && this.customDialog.show) {
+          if (this.customDialog.onCancel) {
+            this.customDialog.onCancel();
+          } else if (this.customDialog.onConfirm) {
+            this.customDialog.onConfirm(); // Alert 只有确认
+          }
+          return;
+        }
+
+        // 关闭所有已知模态框
+        this.closeAllModals();
+      }
+
+      // 2. Enter 快捷键：在对话框显示时确认
+      if (e.key === 'Enter') {
+        if (this.customDialog && this.customDialog.show) {
+          // 排除 textarea，避免在输入消息时回车触发对话框确认
+          if (e.target.tagName !== 'TEXTAREA') {
+            this.customDialog.onConfirm();
+            e.preventDefault();
+          }
+        } else if (this.openaiHealthCheckModal && !this.openaiModelHealthBatchLoading) {
+          // 健康检测弹窗中的 Enter 逻辑
+          if (e.target.tagName !== 'INPUT') {
+            this.startOpenaiHealthCheck();
+            e.preventDefault();
+          }
         }
       }
     });
+  },
+
+  // 关闭所有已打开的模态框
+  closeAllModals() {
+    // 基础核心模态框
+    this.showSettingsModal = false;
+    this.showServerModal = false;
+    this.showImportServerModal = false;
+    this.showDockerModal = false;
+    this.showSSHTerminalModal = false;
+    this.showImagePreviewModal = false;
+    this.showAddCredentialModal = false;
+
+    // 功能组件
+    if (this.logViewer) this.logViewer.visible = false;
+    if (this.customDialog) this.customDialog.show = false;
+
+    // 各模块账号/资源模态框
+    this.showAddZeaburAccountModal = false;
+    this.showAddKoyebAccountModal = false;
+    this.showAddFlyAccountModal = false;
+    this.showAddDnsAccountModal = false;
+    this.showEditDnsAccountModal = false;
+    this.showDnsRecordModal = false;
+    this.showDnsTemplateModal = false;
+    this.showOpenaiEndpointModal = false;
+    this.showAntigravityAccountModal = false;
+    this.showAddSessionSelectModal = false;
+    this.showAntigravityLogDetailModal = false;
+    this.showGeminiCliLogDetailModal = false;
+    this.showGeminiCliAccountModal = false;
+    this.showAntigravityManualModal = false;
+    this.showNewWorkerModal = false;
+    this.showWorkerRoutesModal = false;
+    this.showWorkerDomainsModal = false;
+    this.showPagesDeploymentsModal = false;
+    this.showPagesDomainsModal = false;
+    this.showAddZoneModal = false;
+    this.showTotpModal = false;
+    this.showTotpImportModal = false;
+    this.showAntigravityAccountModal = false;
+    this.showImagePreviewModal = false;
+    this.openaiHealthCheckModal = false;
+    this.showHChatSettingsModal = false;
   },
 
   initMobileGestures() {

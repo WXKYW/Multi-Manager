@@ -2326,4 +2326,429 @@ export default {
     };
     return modes[mode] || mode || '加载中...';
   },
+
+  // ==================== Tunnel 管理 ====================
+
+  /**
+   * 加载 Tunnel 列表
+   */
+  async loadTunnels() {
+    if (!store.dnsSelectedAccountId) {
+      return;
+    }
+
+    // 只在无缓存数据时显示 loading
+    const isFirstLoad = !store.tunnels || store.tunnels.length === 0;
+    if (isFirstLoad) {
+      store.tunnelsLoading = true;
+    }
+
+    try {
+      const response = await fetch(`/api/cf-dns/accounts/${store.dnsSelectedAccountId}/tunnels`, {
+        headers: store.getAuthHeaders(),
+      });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        store.tunnels = data.tunnels || [];
+      } else {
+        toast.error(data.error || '加载 Tunnel 列表失败');
+      }
+    } catch (error) {
+      toast.error('加载 Tunnel 列表失败: ' + error.message);
+    } finally {
+      store.tunnelsLoading = false;
+    }
+  },
+
+  /**
+   * 打开创建 Tunnel 模态框
+   */
+  openCreateTunnelModal() {
+    store.newTunnelName = '';
+    store.showCreateTunnelModal = true;
+  },
+
+  /**
+   * 创建新 Tunnel
+   */
+  async createTunnel() {
+    const name = store.newTunnelName?.trim();
+    if (!name) {
+      toast.error('请输入 Tunnel 名称');
+      return;
+    }
+
+    // 验证名称格式
+    if (!/^[a-zA-Z0-9-_]+$/.test(name)) {
+      toast.error('Tunnel 名称只能包含字母、数字、连字符和下划线');
+      return;
+    }
+
+    store.tunnelSaving = true;
+
+    try {
+      const response = await fetch(`/api/cf-dns/accounts/${store.dnsSelectedAccountId}/tunnels`, {
+        method: 'POST',
+        headers: {
+          ...store.getAuthHeaders(),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name }),
+      });
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        toast.success(`Tunnel "${name}" 创建成功`);
+        store.showCreateTunnelModal = false;
+        await this.loadTunnels();
+      } else {
+        toast.error(data.error || '创建 Tunnel 失败');
+      }
+    } catch (error) {
+      toast.error('创建 Tunnel 失败: ' + error.message);
+    } finally {
+      store.tunnelSaving = false;
+    }
+  },
+
+  /**
+   * 删除 Tunnel
+   */
+  async deleteTunnel(tunnel) {
+    const confirmed = await store.showConfirm({
+      title: '确认删除 Tunnel',
+      message: `确定要删除 Tunnel "${tunnel.name}" 吗？`,
+      icon: 'fa-trash',
+      confirmText: '删除',
+      confirmClass: 'btn-danger',
+    });
+
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch(
+        `/api/cf-dns/accounts/${store.dnsSelectedAccountId}/tunnels/${tunnel.id}`,
+        {
+          method: 'DELETE',
+          headers: store.getAuthHeaders(),
+        }
+      );
+
+      if (response.ok) {
+        toast.success(`Tunnel "${tunnel.name}" 已删除`);
+        await this.loadTunnels();
+      } else {
+        const data = await response.json();
+        toast.error(data.error || '删除 Tunnel 失败');
+      }
+    } catch (error) {
+      toast.error('删除 Tunnel 失败: ' + error.message);
+    }
+  },
+
+  /**
+   * 获取 Tunnel Token
+   */
+  async getTunnelToken(tunnel) {
+    try {
+      const response = await fetch(
+        `/api/cf-dns/accounts/${store.dnsSelectedAccountId}/tunnels/${tunnel.id}/token`,
+        { headers: store.getAuthHeaders() }
+      );
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        store.selectedTunnelToken = data.token;
+        store.selectedTunnelForToken = tunnel;
+        store.showTunnelTokenModal = true;
+      } else {
+        toast.error(data.error || '获取 Tunnel Token 失败');
+      }
+    } catch (error) {
+      toast.error('获取 Tunnel Token 失败: ' + error.message);
+    }
+  },
+
+  /**
+   * 复制 Tunnel Token
+   */
+  async copyTunnelToken() {
+    try {
+      await navigator.clipboard.writeText(store.selectedTunnelToken);
+      toast.success('Token 已复制到剪贴板');
+    } catch (error) {
+      toast.error('复制失败: ' + error.message);
+    }
+  },
+
+  /**
+   * 复制 cloudflared 运行命令
+   */
+  async copyCloudflaredCommand() {
+    const command = `cloudflared tunnel run --token ${store.selectedTunnelToken}`;
+    try {
+      await navigator.clipboard.writeText(command);
+      toast.success('命令已复制到剪贴板');
+    } catch (error) {
+      toast.error('复制失败: ' + error.message);
+    }
+  },
+
+  /**
+   * 关闭 Token 模态框
+   */
+  closeTunnelTokenModal() {
+    store.showTunnelTokenModal = false;
+    store.selectedTunnelToken = '';
+    store.selectedTunnelForToken = null;
+  },
+
+  /**
+   * 打开 Tunnel 配置模态框
+   */
+  async openTunnelConfigModal(tunnel) {
+    store.selectedTunnelForConfig = tunnel;
+    store.showTunnelConfigModal = true;
+    store.tunnelConfigLoading = true;
+    store.tunnelConfig = { ingress: [] };
+
+    try {
+      const response = await fetch(
+        `/api/cf-dns/accounts/${store.dnsSelectedAccountId}/tunnels/${tunnel.id}/configuration`,
+        { headers: store.getAuthHeaders() }
+      );
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        store.tunnelConfig = data.config || { ingress: [] };
+      } else {
+        toast.error(data.error || '获取 Tunnel 配置失败');
+      }
+    } catch (error) {
+      toast.error('获取 Tunnel 配置失败: ' + error.message);
+    } finally {
+      store.tunnelConfigLoading = false;
+    }
+  },
+
+  /**
+   * 关闭 Tunnel 配置模态框
+   */
+  closeTunnelConfigModal() {
+    store.showTunnelConfigModal = false;
+    store.selectedTunnelForConfig = null;
+    store.tunnelConfig = { ingress: [] };
+  },
+
+  /**
+   * 添加 Ingress 规则
+   */
+  addIngressRule() {
+    if (!store.tunnelConfig.ingress) {
+      store.tunnelConfig.ingress = [];
+    }
+    // 在倒数第二个位置插入（保持 catch-all 在最后）
+    const insertIndex = Math.max(0, store.tunnelConfig.ingress.length - 1);
+    store.tunnelConfig.ingress.splice(insertIndex, 0, {
+      hostname: '',
+      service: 'http://localhost:8080',
+      path: '',
+    });
+  },
+
+  /**
+   * 删除 Ingress 规则
+   */
+  removeIngressRule(index) {
+    store.tunnelConfig.ingress.splice(index, 1);
+  },
+
+  /**
+   * 保存 Tunnel 配置
+   */
+  async saveTunnelConfig() {
+    if (!store.selectedTunnelForConfig) return;
+
+    // 验证配置
+    const ingress = store.tunnelConfig.ingress || [];
+    if (ingress.length === 0) {
+      toast.error('至少需要一条 Ingress 规则');
+      return;
+    }
+
+    // 确保最后一条是 catch-all 规则
+    const lastRule = ingress[ingress.length - 1];
+    if (lastRule.hostname && lastRule.hostname !== '') {
+      // 添加 catch-all 规则
+      ingress.push({ service: 'http_status:404' });
+    }
+
+    store.tunnelConfigSaving = true;
+
+    try {
+      const response = await fetch(
+        `/api/cf-dns/accounts/${store.dnsSelectedAccountId}/tunnels/${store.selectedTunnelForConfig.id}/configuration`,
+        {
+          method: 'PUT',
+          headers: {
+            ...store.getAuthHeaders(),
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ config: store.tunnelConfig }),
+        }
+      );
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        toast.success('Tunnel 配置已保存');
+        this.closeTunnelConfigModal();
+      } else {
+        toast.error(data.error || '保存 Tunnel 配置失败');
+      }
+    } catch (error) {
+      toast.error('保存 Tunnel 配置失败: ' + error.message);
+    } finally {
+      store.tunnelConfigSaving = false;
+    }
+  },
+
+  /**
+   * 打开 Tunnel 连接状态模态框
+   */
+  async openTunnelConnectionsModal(tunnel) {
+    store.selectedTunnelForConnections = tunnel;
+    store.showTunnelConnectionsModal = true;
+    store.tunnelConnectionsLoading = true;
+    store.tunnelConnections = [];
+
+    try {
+      // 如果 tunnel 对象中已有 connections 数据，直接使用
+      if (tunnel.connections && tunnel.connections.length > 0) {
+        // Tunnel 列表 API 返回的 connections 结构可能不同，需要适配
+        store.tunnelConnections = tunnel.connections.map(c => ({
+          id: c.id || c.uuid,
+          clientId: c.client_id || c.id,
+          clientVersion: c.client_version,
+          arch: c.arch,
+          connectedAt: c.opened_at || c.run_at,
+          coloName: c.colo_name,
+        }));
+        store.tunnelConnectionsLoading = false;
+        return;
+      }
+
+      // 否则调用 API 获取
+      const response = await fetch(
+        `/api/cf-dns/accounts/${store.dnsSelectedAccountId}/tunnels/${tunnel.id}/connections`,
+        { headers: store.getAuthHeaders() }
+      );
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        store.tunnelConnections = data.connections || [];
+      } else {
+        toast.error(data.error || '获取 Tunnel 连接失败');
+      }
+    } catch (error) {
+      toast.error('获取 Tunnel 连接失败: ' + error.message);
+    } finally {
+      store.tunnelConnectionsLoading = false;
+    }
+  },
+
+  /**
+   * 关闭 Tunnel 连接模态框
+   */
+  closeTunnelConnectionsModal() {
+    store.showTunnelConnectionsModal = false;
+    store.selectedTunnelForConnections = null;
+    store.tunnelConnections = [];
+  },
+
+  /**
+   * 刷新 Tunnel 连接
+   */
+  async refreshTunnelConnections() {
+    if (store.selectedTunnelForConnections) {
+      await this.openTunnelConnectionsModal(store.selectedTunnelForConnections);
+    }
+  },
+
+  /**
+   * 清理 Tunnel 所有连接
+   */
+  async cleanupTunnelConnections(tunnel) {
+    const confirmed = await store.showConfirm({
+      title: '确认清理连接',
+      message: `确定要清理 Tunnel "${tunnel.name}" 的所有连接吗？\n\n建议在更换 Token 后执行此操作。`,
+      icon: 'fa-trash',
+      confirmText: '清理',
+      confirmClass: 'btn-warning',
+    });
+
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch(
+        `/api/cf-dns/accounts/${store.dnsSelectedAccountId}/tunnels/${tunnel.id}/connections`,
+        {
+          method: 'DELETE',
+          headers: store.getAuthHeaders(),
+        }
+      );
+
+      if (response.ok) {
+        toast.success('连接已清理');
+        // 刷新连接列表
+        if (store.showTunnelConnectionsModal) {
+          await this.openTunnelConnectionsModal(tunnel);
+        }
+        // 刷新 Tunnel 列表以更新状态
+        await this.loadTunnels();
+      } else {
+        const data = await response.json();
+        toast.error(data.error || '清理连接失败');
+      }
+    } catch (error) {
+      toast.error('清理连接失败: ' + error.message);
+    }
+  },
+
+  /**
+   * 获取 Tunnel 状态显示文本
+   */
+  getTunnelStatusText(status) {
+    const map = {
+      inactive: '未连接',
+      active: '已连接',
+      down: '离线',
+      degraded: '降级',
+    };
+    return map[status] || status || '未知';
+  },
+
+  /**
+   * 获取 Tunnel 状态 CSS 类
+   */
+  getTunnelStatusClass(status) {
+    if (status === 'active' || status === 'healthy') return 'tunnel-status-active';
+    if (status === 'inactive' || status === 'down') return 'tunnel-status-inactive';
+    return 'tunnel-status-unknown';
+  },
+
+  /**
+   * 格式化 Tunnel 日期
+   */
+  formatTunnelDate(dateStr) {
+    if (!dateStr) return '-';
+    const date = new Date(dateStr);
+    return date.toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  },
 };

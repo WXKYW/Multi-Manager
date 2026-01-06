@@ -567,8 +567,11 @@
             v-show="openListSubTab === 'temp' && tab.id === openListActiveTempTabId"
             class="openlist-files-layout animate-fade-in" :class="{ 'video-mode-layout': tab.isVideo }">
             <!-- 视频播放模式 - 使用 Plyr -->
-            <div v-if="tab.isVideo" class="openlist-video-tab-view">
-                <div class="plyr-player-wrapper">
+            <div v-if="tab.isVideo" class="openlist-video-tab-view" @mousemove="handleVideoMouseMove"
+                @touchstart="handleVideoMouseMove">
+                <div class="plyr-player-wrapper"
+                    :class="{ 'controls-visible': store.streamPlayer && store.streamPlayer.showControls }"
+                    @click="handleVideoClick">
                     <!-- 顶部操作栏 -->
                     <div class="plyr-player-toolbar">
                         <div class="plyr-toolbar-title">

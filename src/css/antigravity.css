@@ -299,7 +299,7 @@ body .ag-status-unknown {
   background: rgba(0, 0, 0, 0.02) !important;
   border: 1px dashed var(--border-color) !important;
   border-radius: 8px;
-  margin-bottom: 12px;
+  /* margin-bottom: 12px; */
 }
 
 .reasoning-details summary {
@@ -537,11 +537,11 @@ body .ag-status-unknown {
   border-radius: 50%;
 }
 
-input:checked + .slider {
+input:checked+.slider {
   background-color: var(--ag-success);
 }
 
-input:checked + .slider:before {
+input:checked+.slider:before {
   transform: translateX(14px);
 }
 

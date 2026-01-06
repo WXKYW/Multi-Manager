@@ -100,15 +100,25 @@ export default defineConfig(({ mode }) => {
       },
       terserOptions: {
         compress: {
-          drop_console: isProduction,
+          drop_console: false, // 暂时禁用，确保调试信息可见
           drop_debugger: isProduction,
+          pure_funcs: [], // 不要优化掉任何函数调用
+        },
+        mangle: {
+          reserved: ['compile', 'compileToFunction', 'baseCompile'], // 保留编译器函数名
         },
       },
+    },
+    // 强制预构建 Vue 编译器
+    optimizeDeps: {
+      include: ['vue', '@vue/compiler-dom', '@vue/compiler-core'],
     },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
         // 关键：确保支持在 HTML 中直接写模板 (Runtime Compilation)
+        // 必须使用 esm-bundler 版本，它会自动引入 @vue/compiler-dom
+        // esm-browser 版本不包含编译器，会导致 compiler-30 错误
         vue: 'vue/dist/vue.esm-bundler.js',
       },
     },
@@ -151,6 +161,10 @@ export default defineConfig(({ mode }) => {
         '/ws': {
           target: 'http://127.0.0.1:3000',
           ws: true,
+          changeOrigin: true,
+        },
+        '/uploads': {
+          target: 'http://127.0.0.1:3000',
           changeOrigin: true,
         },
       },

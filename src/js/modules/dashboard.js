@@ -122,6 +122,7 @@ export const dashboardMethods = {
       this.fetchApiSummary(),
       this.fetchPaaSSummary(),
       this.fetchDnsSummary(),
+      this.fetchUptimeSummary(),
       this.loadTotpAccounts ? this.loadTotpAccounts() : Promise.resolve(),
     ]);
 
@@ -132,6 +133,7 @@ export const dashboardMethods = {
       geminiCli: store.dashboardStats.geminiCli,
       paas: store.dashboardStats.paas,
       dns: store.dashboardStats.dns,
+      uptime: store.dashboardStats.uptime,
     });
   },
 
@@ -299,6 +301,50 @@ export const dashboardMethods = {
       console.error('[Dashboard] Fetch DNS summary failed:', e);
     }
   },
+
+  /**
+   * 获取 Uptime 摘要
+   */
+  async fetchUptimeSummary() {
+    try {
+      const res = await fetch('/api/uptime/monitors', { headers: store.getAuthHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        const monitors = Array.isArray(data) ? data : (data.data || []);
+
+        let up = 0;
+        let down = 0;
+        let paused = 0;
+
+        // 遍历统计真实状态
+        monitors.forEach(m => {
+          if (!m.active) {
+            paused++;
+          } else {
+            // 根据 lastHeartbeat 判断状态
+            if (m.lastHeartbeat) {
+              const status = m.lastHeartbeat.status;
+              // 兼容数字状态 (1=up, 0=down) 和字符串状态 ('up', 'down')
+              if (status === 1 || status === 'up') {
+                up++;
+              } else {
+                down++;
+              }
+            } else {
+              // 无心跳数据，暂时视为未知，计入 up 避免误报
+              up++; 
+            }
+          }
+        });
+
+        store.dashboardStats.uptime.total = monitors.length;
+        store.dashboardStats.uptime.up = up;
+        store.dashboardStats.uptime.down = down;
+      }
+    } catch (e) {
+      console.error('[Dashboard] Fetch Uptime summary failed:', e);
+    }
+  },
 };
 
 // 在 store 中初始化相关状态
@@ -315,5 +361,6 @@ Object.assign(store, {
       fly: { total: 0, running: 0 },
     },
     dns: { zones: 0 },
+    uptime: { total: 0, up: 0, down: 0 },
   },
 });

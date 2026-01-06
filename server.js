@@ -4,23 +4,12 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 
-// 打印 Logo
-console.log(`\x1b[36m
-  ______   _______   ______         ______    ______         __ 
- /      \\ /       \\ /      |       /      \\  /      \\       /  |
-/$$$$$$  |$$$$$$$  |$$$$$$/       /$$$$$$  |/$$$$$$  |      $$ |
-$$ |__$$ |$$ |__$$ |  $$ |        $$ | _$$/ $$ |  $$ |      $$ |
-$$    $$ |$$    $$/   $$ |        $$ |/    |$$ |  $$ |      $$ |
-$$$$$$$$ |$$$$$$$/    $$ |        $$ |$$$$ |$$ |  $$ |      $$/ 
-$$ |  $$ |$$ |       _$$ |_       $$ \\__$$ |$$ \\__$$ |       __ 
-$$ |  $$ |$$ |      / $$   |      $$    $$/ $$    $$/       /  |
-$$/   $$/ $$/       $$$$$$/        $$$$$$/   $$$$$$/        $$/ 
-\x1b[0m\x1b[33m
- >>> Gravity Engineering System v0.1.1 测试版 <<<\x1b[0m
-`);
 // 导入日志工具
-const { createLogger } = require('./src/utils/logger');
+const { createLogger, logger: globalLogger } = require('./src/utils/logger');
 const logger = createLogger('Server');
+
+// 打印简易启动标识 (Logo 移至 logger 记录)
+logger.info('>>> Gravity Engineering System v0.1.2 <<<');
 
 // 导入中间件
 const { configureHelmet, apiSecurityHeaders, corsConfig } = require('./src/middleware/security');
@@ -60,7 +49,7 @@ const metricsWss = metricsService.init(server);
 const sshService = require('./modules/server-management/ssh-service');
 const sshWss = sshService.init(server);
 
-// 初始化 Agent Socket.IO 服务 (Nezha 风格实时连接)
+// 初始化 Agent Socket.IO 服务
 const agentService = require('./modules/server-management/agent-service');
 agentService.initSocketIO(server);
 
@@ -129,21 +118,36 @@ app.use(loggerMiddleware);
 app.use(cors(corsConfig()));
 app.use('/api', apiSecurityHeaders); // 为 API 端点设置额外安全头
 app.use(express.json({ limit: '50mb' }));
-// 静态文件服务配置
+
+// 1. 静态文件服务配置
 const staticOptions = {
-  maxAge: '1d', // 静态资源缓存 1 天
+  maxAge: '1d',
   immutable: true,
-  index: false,
+  index: 'index.html', // 明确启用 index.html
 };
 
-// 1. 优先服务 dist (生产构建内容)
-if (fs.existsSync(path.join(__dirname, 'dist'))) {
-  app.use(express.static('dist', { ...staticOptions, index: 'index.html' }));
+const distDir = path.join(__dirname, 'dist');
+const srcDir = path.join(__dirname, 'src');
+const publicDir = path.join(__dirname, 'public');
+
+// 优先服务 dist (生产构建内容)
+if (fs.existsSync(distDir)) {
+  logger.info('检测到 dist 目录，启用生产环境静态服');
+  app.use(express.static(distDir, staticOptions));
 }
 
-// 2. 总是服务 public 和 src
-app.use(express.static('public', staticOptions));
-app.use(express.static('src', staticOptions));
+// 总是服务 public (包含公共资源)
+app.use(express.static(publicDir, staticOptions));
+
+// 只有在 dist 不存在时才建议将 src 作为主静态目录
+// 但为了兼容性，我们仍然服务 src，但不作为首选
+if (!fs.existsSync(distDir)) {
+  logger.warn('未检测到 dist 目录，回退到 src 目录服务 (开发模式模拟)');
+  app.use(express.static(srcDir, staticOptions));
+} else {
+  // 如果 dist 存在，src 仅作为底层备份，且 index 设为 false 避免覆盖
+  app.use(express.static(srcDir, { ...staticOptions, index: false }));
+}
 
 // 文件上传中间件
 const fileUpload = require('express-fileupload');
@@ -163,6 +167,64 @@ const agentDir = fs.existsSync(path.join(__dirname, 'dist', 'agent'))
 if (fs.existsSync(agentDir)) {
   app.use('/agent', express.static(agentDir));
 }
+
+// 专门为聊天图片提供服务
+const chatImagesDir = path.join(__dirname, 'data', 'uploads', 'chat_images');
+if (!fs.existsSync(chatImagesDir)) {
+  fs.mkdirSync(chatImagesDir, { recursive: true });
+}
+app.use('/uploads/chat_images', express.static(chatImagesDir));
+
+// 导入认证中间件
+const { requireAuth } = require('./src/middleware/auth');
+
+/**
+ * 聊天图片上传接口
+ * POST /api/chat/upload-image
+ * 使用 requireAuth 统一鉴权 (支持 Cookie/Session/Header)
+ */
+app.post('/api/chat/upload-image', requireAuth, (req, res) => {
+  logger.info(`[Upload Debug] Content-Type: ${req.headers['content-type']}`);
+  logger.info(`[Upload Debug] Files keys: ${req.files ? Object.keys(req.files).join(',') : 'null'}`);
+
+  try {
+    if (!req.files || !req.files.image) {
+      logger.error('[Upload Debug] No image file found in request');
+      return res.status(400).json({ success: false, error: '未找到上传的图片文件' });
+    }
+
+    // 移除旧的手动密码校验，已由 verifyAuth 接管
+    // const { loadAdminPassword } = require('./src/services/config');
+    // ...
+
+    const image = req.files.image;
+    const crypto = require('crypto');
+    const hash = crypto.createHash('md5').update(image.data).digest('hex');
+    const ext = path.extname(image.name) || '.jpg';
+    const fileName = `${hash}${ext}`;
+    const uploadPath = path.join(chatImagesDir, fileName);
+
+    // 如果文件已存在，直接返回
+    if (fs.existsSync(uploadPath)) {
+      return res.json({
+        success: true,
+        url: `/uploads/chat_images/${fileName}`
+      });
+    }
+
+    image.mv(uploadPath, err => {
+      if (err) {
+        return res.status(500).json({ success: false, error: err.message });
+      }
+      res.json({
+        success: true,
+        url: `/uploads/chat_images/${fileName}`
+      });
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
 // 注册所有路由
 // Fly.io module integrated - v4
@@ -291,9 +353,7 @@ server.listen(PORT, '0.0.0.0', () => {
 
       // Cloudflare DNS 模块
       if (cfAccounts > 0 || cfZones > 0 || cfRecords > 0 || cfTemplates > 0) {
-        logger.groupItem(
-          `Cloudflare DNS: ${cfAccounts} 个账号, ${cfZones} 个域名, ${cfRecords} 条记录, ${cfTemplates} 个模板`
-        );
+        logger.groupItem(`Cloudflare DNS: ${cfAccounts} 个账号, ${cfZones} 个域名, ${cfRecords} 条记录`);
       }
 
       // OpenAI 模块
@@ -332,6 +392,20 @@ server.listen(PORT, '0.0.0.0', () => {
     logger.warn('主机监控服务启动失败:', error.message);
   }
 
+  // Uptime 监控服务初始化
+  try {
+    const uptimeService = require('./modules/uptime-api/monitor-service');
+    // 注入 Socket.IO (复用 AgentService 的 IO 实例)
+    const agentService = require('./modules/server-management/agent-service');
+    if (agentService.io) {
+      uptimeService.setIO(agentService.io);
+    }
+    uptimeService.init(server);
+    logger.success('Uptime 监控服务已启动');
+  } catch (error) {
+    logger.warn('Uptime 监控服务启动失败:', error.message);
+  }
+
   // 启动自动日志清理任务 (每 12 小时执行一次)
   const AUTO_CLEANUP_INTERVAL = 12 * 60 * 60 * 1000;
   setInterval(() => {
@@ -355,3 +429,38 @@ server.listen(PORT, '0.0.0.0', () => {
     }
   }, AUTO_CLEANUP_INTERVAL);
 });
+
+// ==================== 优雅停机处理 ====================
+function gracefulShutdown(signal) {
+  logger.info(`收到 ${signal} 信号，准备安全关闭...`);
+
+  // 给一定时间让正在处理的任务完成
+  const shutdownTimer = setTimeout(() => {
+    logger.warn('强制终止进程 (超时)');
+    process.exit(1);
+  }, 5000);
+
+  try {
+    const dbService = require('./src/db/database');
+    dbService.close();
+
+    clearTimeout(shutdownTimer);
+    logger.success('系统已安全退出');
+    process.exit(0);
+  } catch (error) {
+    logger.error('优雅停机时发生错误:', error.message);
+    process.exit(1);
+  }
+}
+
+// 监听进程终止信号
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+// 监听未捕获的异常（由于 better-sqlite3 可能会在某些极端情况下导致未捕获错误）
+process.on('uncaughtException', (err) => {
+  logger.error('发生未捕获的异常:', err.message);
+  // 执行清理后退出
+  gracefulShutdown('UNCAUGHT_EXCEPTION');
+});
+

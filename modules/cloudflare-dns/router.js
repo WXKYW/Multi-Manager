@@ -1371,11 +1371,11 @@ router.get('/accounts/:id/pages', async (req, res) => {
         productionBranch: p.production_branch,
         latestDeployment: p.latest_deployment
           ? {
-              id: p.latest_deployment.id,
-              url: p.latest_deployment.url,
-              status: p.latest_deployment.latest_stage?.status || 'unknown',
-              createdOn: p.latest_deployment.created_on,
-            }
+            id: p.latest_deployment.id,
+            url: p.latest_deployment.url,
+            status: p.latest_deployment.latest_stage?.status || 'unknown',
+            createdOn: p.latest_deployment.created_on,
+          }
           : null,
       })),
       cfAccountId,
@@ -1725,5 +1725,334 @@ router.get(
     }
   }
 );
+
+// ==================== Tunnel 管理 ====================
+
+/**
+ * 获取账号下的所有 Tunnel
+ */
+router.get('/accounts/:id/tunnels', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const account = storage.getAccountById(id);
+    if (!account) {
+      return res.status(404).json({ error: '账号不存在' });
+    }
+
+    storage.touchAccount(id);
+    const auth = account.email ? { email: account.email, key: account.apiToken } : account.apiToken;
+    const cfAccountId = await cfApi.getAccountId(auth);
+
+    const tunnels = await cfApi.listTunnels(auth, cfAccountId, { is_deleted: false });
+
+    res.json({
+      success: true,
+      tunnels: tunnels.map(t => ({
+        id: t.id,
+        name: t.name,
+        status: t.status,
+        createdAt: t.created_at,
+        deletedAt: t.deleted_at,
+        connections: t.connections || [],
+        connsActiveAt: t.conns_active_at,
+        connsPending: t.conns_pending,
+        remoteConfig: t.remote_config,
+      })),
+    });
+  } catch (e) {
+    logger.error('获取 Tunnel 列表失败:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * 获取单个 Tunnel 详情
+ */
+router.get('/accounts/:accountId/tunnels/:tunnelId', async (req, res) => {
+  try {
+    const { accountId, tunnelId } = req.params;
+    const account = storage.getAccountById(accountId);
+    if (!account) {
+      return res.status(404).json({ error: '账号不存在' });
+    }
+
+    storage.touchAccount(accountId);
+    const auth = account.email ? { email: account.email, key: account.apiToken } : account.apiToken;
+    const cfAccountId = await cfApi.getAccountId(auth);
+
+    const tunnel = await cfApi.getTunnel(auth, cfAccountId, tunnelId);
+
+    res.json({
+      success: true,
+      tunnel: {
+        id: tunnel.id,
+        name: tunnel.name,
+        status: tunnel.status,
+        createdAt: tunnel.created_at,
+        connections: tunnel.connections || [],
+        remoteConfig: tunnel.remote_config,
+      },
+    });
+  } catch (e) {
+    logger.error('获取 Tunnel 详情失败:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * 创建新 Tunnel
+ */
+router.post('/accounts/:id/tunnels', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: 'Tunnel 名称不能为空' });
+    }
+
+    const account = storage.getAccountById(id);
+    if (!account) {
+      return res.status(404).json({ error: '账号不存在' });
+    }
+
+    storage.touchAccount(id);
+    const auth = account.email ? { email: account.email, key: account.apiToken } : account.apiToken;
+    const cfAccountId = await cfApi.getAccountId(auth);
+
+    const tunnel = await cfApi.createTunnel(auth, cfAccountId, name);
+    logger.info(`Tunnel 创建成功: ${name} (ID: ${tunnel.id})`);
+
+    res.json({
+      success: true,
+      tunnel: {
+        id: tunnel.id,
+        name: tunnel.name,
+        status: tunnel.status,
+        createdAt: tunnel.created_at,
+      },
+    });
+  } catch (e) {
+    logger.error('创建 Tunnel 失败:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * 删除 Tunnel
+ */
+router.delete('/accounts/:accountId/tunnels/:tunnelId', async (req, res) => {
+  try {
+    const { accountId, tunnelId } = req.params;
+    const account = storage.getAccountById(accountId);
+    if (!account) {
+      return res.status(404).json({ error: '账号不存在' });
+    }
+
+    storage.touchAccount(accountId);
+    const auth = account.email ? { email: account.email, key: account.apiToken } : account.apiToken;
+    const cfAccountId = await cfApi.getAccountId(auth);
+
+    await cfApi.deleteTunnel(auth, cfAccountId, tunnelId);
+    logger.info(`Tunnel 删除成功: ${tunnelId}`);
+
+    res.json({ success: true });
+  } catch (e) {
+    logger.error('删除 Tunnel 失败:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * 更新 Tunnel 名称
+ */
+router.patch('/accounts/:accountId/tunnels/:tunnelId', async (req, res) => {
+  try {
+    const { accountId, tunnelId } = req.params;
+    const { name } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: '名称不能为空' });
+    }
+
+    const account = storage.getAccountById(accountId);
+    if (!account) {
+      return res.status(404).json({ error: '账号不存在' });
+    }
+
+    storage.touchAccount(accountId);
+    const auth = account.email ? { email: account.email, key: account.apiToken } : account.apiToken;
+    const cfAccountId = await cfApi.getAccountId(auth);
+
+    const tunnel = await cfApi.updateTunnel(auth, cfAccountId, tunnelId, name);
+    logger.info(`Tunnel 更新成功: ${tunnelId} -> ${name}`);
+
+    res.json({
+      success: true,
+      tunnel: {
+        id: tunnel.id,
+        name: tunnel.name,
+      },
+    });
+  } catch (e) {
+    logger.error('更新 Tunnel 失败:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * 获取 Tunnel 配置（Ingress Rules）
+ */
+router.get('/accounts/:accountId/tunnels/:tunnelId/configuration', async (req, res) => {
+  try {
+    const { accountId, tunnelId } = req.params;
+    const account = storage.getAccountById(accountId);
+    if (!account) {
+      return res.status(404).json({ error: '账号不存在' });
+    }
+
+    storage.touchAccount(accountId);
+    const auth = account.email ? { email: account.email, key: account.apiToken } : account.apiToken;
+    const cfAccountId = await cfApi.getAccountId(auth);
+
+    const config = await cfApi.getTunnelConfiguration(auth, cfAccountId, tunnelId);
+
+    res.json({
+      success: true,
+      config: config || { ingress: [] },
+    });
+  } catch (e) {
+    logger.error('获取 Tunnel 配置失败:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * 更新 Tunnel 配置（Ingress Rules）
+ */
+router.put('/accounts/:accountId/tunnels/:tunnelId/configuration', async (req, res) => {
+  try {
+    const { accountId, tunnelId } = req.params;
+    const { config } = req.body;
+
+    if (!config) {
+      return res.status(400).json({ error: '配置不能为空' });
+    }
+
+    const account = storage.getAccountById(accountId);
+    if (!account) {
+      return res.status(404).json({ error: '账号不存在' });
+    }
+
+    storage.touchAccount(accountId);
+    const auth = account.email ? { email: account.email, key: account.apiToken } : account.apiToken;
+    const cfAccountId = await cfApi.getAccountId(auth);
+
+    const result = await cfApi.updateTunnelConfiguration(auth, cfAccountId, tunnelId, config);
+    logger.info(`Tunnel 配置更新成功: ${tunnelId}`);
+
+    res.json({
+      success: true,
+      result,
+    });
+  } catch (e) {
+    logger.error('更新 Tunnel 配置失败:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * 获取 Tunnel Token（用于 cloudflared）
+ */
+router.get('/accounts/:accountId/tunnels/:tunnelId/token', async (req, res) => {
+  try {
+    const { accountId, tunnelId } = req.params;
+    const account = storage.getAccountById(accountId);
+    if (!account) {
+      return res.status(404).json({ error: '账号不存在' });
+    }
+
+    storage.touchAccount(accountId);
+    const auth = account.email ? { email: account.email, key: account.apiToken } : account.apiToken;
+    const cfAccountId = await cfApi.getAccountId(auth);
+
+    const token = await cfApi.getTunnelToken(auth, cfAccountId, tunnelId);
+
+    res.json({
+      success: true,
+      token,
+    });
+  } catch (e) {
+    logger.error('获取 Tunnel Token 失败:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * 获取 Tunnel 连接状态
+ */
+router.get('/accounts/:accountId/tunnels/:tunnelId/connections', async (req, res) => {
+  try {
+    const { accountId, tunnelId } = req.params;
+    const account = storage.getAccountById(accountId);
+    if (!account) {
+      return res.status(404).json({ error: '账号不存在' });
+    }
+
+    storage.touchAccount(accountId);
+    const auth = account.email ? { email: account.email, key: account.apiToken } : account.apiToken;
+    const cfAccountId = await cfApi.getAccountId(auth);
+
+    const connections = await cfApi.getTunnelConnections(auth, cfAccountId, tunnelId);
+
+    // 处理不同的 API 响应格式
+    // 连接可能直接是数组，也可能嵌套在 connectors 内
+    const mappedConnections = connections.map(c => ({
+      id: c.id || c.uuid,
+      clientId: c.client_id || c.id,
+      clientVersion: c.client_version || c.version,
+      arch: c.arch || c.platform,
+      connectedAt: c.opened_at || c.connected_at || c.created_at,
+      originIp: c.origin_ip || c.origin,
+      uuid: c.uuid || c.id,
+      coloName: c.colo_name || c.colo,
+    }));
+
+    res.json({
+      success: true,
+      connections: mappedConnections,
+    });
+  } catch (e) {
+    logger.error('获取 Tunnel 连接失败:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * 清理 Tunnel 连接
+ */
+router.delete('/accounts/:accountId/tunnels/:tunnelId/connections', async (req, res) => {
+  try {
+    const { accountId, tunnelId } = req.params;
+    const { clientId } = req.query;
+
+    const account = storage.getAccountById(accountId);
+    if (!account) {
+      return res.status(404).json({ error: '账号不存在' });
+    }
+
+    storage.touchAccount(accountId);
+    const auth = account.email ? { email: account.email, key: account.apiToken } : account.apiToken;
+    const cfAccountId = await cfApi.getAccountId(auth);
+
+    await cfApi.cleanupTunnelConnections(auth, cfAccountId, tunnelId, clientId || null);
+    logger.info(`Tunnel 连接已清理: ${tunnelId}` + (clientId ? ` (Client: ${clientId})` : ''));
+
+    res.json({ success: true });
+  } catch (e) {
+    logger.error('清理 Tunnel 连接失败:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 module.exports = router;

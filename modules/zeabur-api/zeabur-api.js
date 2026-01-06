@@ -3,6 +3,8 @@
  */
 
 const https = require('https');
+const { createLogger } = require('../../src/utils/logger');
+const logger = createLogger('Zeabur');
 
 /**
  * Zeabur GraphQL 查询
@@ -240,13 +242,8 @@ async function fetchUsageData(token, userID, projects = []) {
 
           // 调试日志：输出原始用量数据
           if (process.env.DEBUG_ZEABUR === 'true') {
-            console.log('[Zeabur Debug] Raw usages:', JSON.stringify(usages, null, 2));
-            console.log(
-              '[Zeabur Debug] totalUsage:',
-              totalUsage,
-              'freeQuotaRemaining:',
-              5 - totalUsage
-            );
+            logger.debug('Raw usages:', JSON.stringify(usages, null, 2));
+            logger.debug('totalUsage:', totalUsage, 'freeQuotaRemaining:', 5 - totalUsage);
           }
 
           resolve({

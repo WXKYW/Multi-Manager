@@ -3,6 +3,8 @@
  */
 
 const https = require('https');
+const { createLogger } = require('../../src/utils/logger');
+const logger = createLogger('Koyeb');
 
 const KOYEB_API_BASE = 'app.koyeb.com';
 
@@ -87,7 +89,7 @@ async function fetchAccountData(token) {
         organization = orgs.organizations[0];
       }
     } catch (e) {
-      console.warn('获取组织信息失败:', e.message);
+      logger.warn(`Failed to fetch organization: ${e.message}`);
     }
 
     // 如果没有 profile，使organization 信息回退
@@ -160,7 +162,7 @@ async function fetchAccountData(token) {
                   updatedAt: service.updated_at,
                 };
               } catch (e) {
-                console.warn(`获取服务 ${service.name} 详情失败:`, e.message);
+                logger.warn(`Failed to fetch service ${service.name} details: ${e.message}`);
                 return {
                   _id: service.id,
                   name: service.name,
@@ -189,7 +191,7 @@ async function fetchAccountData(token) {
                 appRegion = instances[0].region || 'unknown';
               }
             } catch (e) {
-              console.warn(`获取应用 ${app.name} 地区失败:`, e.message);
+              logger.warn(`Failed to fetch region for app ${app.name}: ${e.message}`);
             }
           }
 
@@ -202,7 +204,7 @@ async function fetchAccountData(token) {
             updatedAt: app.updated_at,
           };
         } catch (e) {
-          console.warn(`获取应用 ${app.name} 服务失败:`, e.message);
+          logger.warn(`Failed to fetch services for app ${app.name}: ${e.message}`);
           return {
             _id: app.id,
             name: app.name,
@@ -241,7 +243,7 @@ async function fetchServiceLogs(token, serviceId, limit = 100) {
     );
     return response.result || [];
   } catch (error) {
-    console.warn(`获取服务日志失败 (尝试旧接: ${error.message}`);
+    logger.warn(`Failed to fetch logs (retrying with legacy): ${error.message}`);
     try {
       // 备选方案：尝试旧的 /logs 接口
       const response = await koyebRequest(
@@ -457,7 +459,7 @@ function mapKoyebRegion(region) {
   if (!region) return '未知地区';
 
   // 调试日志：确认接收到的地区字符串
-  console.log(`[Koyeb] Mapping region: "${region}"`);
+  logger.debug(`Mapping region: "${region}"`);
 
   const regionMap = {
     was: '华盛顿',

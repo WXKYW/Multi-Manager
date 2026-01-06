@@ -9,7 +9,7 @@
 
 /* 标签页内容的基础样式 */
 .tab-content {
-  padding-bottom: 50px;
+  padding-bottom: 0;
   animation-duration: 0.4s;
   animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   animation-fill-mode: both;
@@ -17,6 +17,13 @@
   backface-visibility: hidden;
   -webkit-font-smoothing: antialiased;
   overflow: visible;
+}
+
+/* 移动端保留底部间距（为底部导航栏留空间） */
+@media (max-width: 768px) {
+  .tab-content {
+    padding-bottom: 50px;
+  }
 }
 
 /* 淡入动画 - 从下方进入 */
@@ -300,14 +307,25 @@
   overflow: visible;
 }
 
-.server-card.expanded>.server-card-body>div {
-  overflow: visible;
-}
-
 /* 内部包装器，确保 Grid 转换生效 */
 .server-card-body>div {
   min-height: 0;
   overflow: hidden;
+}
+
+/* 展开后内部 div 也要 overflow visible */
+.server-card.expanded>.server-card-body>div {
+  overflow: visible !important;
+}
+
+/* 容器操作下拉菜单 */
+.container-dropdown-menu {
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+.container-dropdown-menu .dropdown-item:hover {
+  background: var(--bg-tertiary) !important;
 }
 
 /* ===== Zeabur/OpenAPI 模块 - 使用 Grid 0fr->1fr 方案 ===== */
@@ -488,10 +506,6 @@
   }
 }
 
-/* 设置侧边栏滑入动画 */
-.settings-sidebar {
-  /* animation: sidebarSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1); */
-}
 
 @keyframes sidebarSlideIn {
   from {

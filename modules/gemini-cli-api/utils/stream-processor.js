@@ -1,4 +1,6 @@
 const { Readable } = require('stream');
+const { createLogger } = require('../../../src/utils/logger');
+const logger = createLogger('Gemini-Stream');
 
 class StreamProcessor {
   constructor(client) {
@@ -22,7 +24,7 @@ class StreamProcessor {
       }
 
       const candidate = data.candidates?.[0];
-      if (!candidate) return null;
+      if (!candidate) return {}; // 返回空对象而不是 null，表示 JSON 合法但无内容
 
       const parts = candidate.content?.parts || [];
       let text = '';
@@ -95,7 +97,7 @@ class StreamProcessor {
             const parsed = this.parseGeminiChunk(line.trim());
             if (!parsed) continue;
 
-            let { text, reasoning } = parsed;
+            let { text = '', reasoning = '' } = parsed;
 
             // 抗截断逻辑：检测 [done] 标记
             if (isAntiTrunc && text.includes(this.DONE_MARKER)) {
@@ -123,9 +125,9 @@ class StreamProcessor {
         }
 
         if (!isAntiTrunc || foundDone) break;
-        console.log(`Stream interrupted, attempt ${currentAttempt} failed to find [done].`);
+        logger.warn(`Stream interrupted, attempt ${currentAttempt} failed to find [done].`);
       } catch (e) {
-        console.error(`Stream processing error (Attempt ${currentAttempt}):`, e.message);
+        logger.error(`Stream processing error (Attempt ${currentAttempt}): ${e.message}`);
         if (currentAttempt === 1) {
           throw e; // 第一次尝试失败，抛出异常让外层（如负载均衡/账号重试）处理
         }

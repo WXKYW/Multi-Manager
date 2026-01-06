@@ -167,12 +167,17 @@
   width: 100%;
   border: none;
   background: transparent;
-  color: var(--h-text);
   resize: none;
-  padding: 16px;
+  padding: 10px 1px;
   font-size: 14px;
   outline: none;
-  min-height: 60px;
+  min-height: 40px;
+  line-height: 1.4;
+  height: 40px;
+  /* Force initial height */
+  display: flex;
+  align-items: center;
+  /* Helper if it becomes a flex container, but textarea is replaced */
 }
 
 .chat-input-toolbar {

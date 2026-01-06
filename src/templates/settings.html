@@ -117,55 +117,55 @@
                   </div>
                 </div>
               </div>
-            </div>
 
-            <!-- 公网访问地址配置 -->
-            <div class="settings-group">
-              <div class="settings-group-title">
-                <i class="fas fa-link" style="color: var(--primary-color)"></i> 公网访问地址 (Public URL)
-              </div>
-              <div class="settings-description">
-                设置主控端的公网访问地址，用于生成 Agent 安装命令和连接配置。
-              </div>
-              <div class="form-group" style="margin-top: 12px">
-                <input type="text" v-model="publicApiUrl" class="form-input"
-                  placeholder="例如: https://monitor.example.com (需包含协议和端口，无需 /api 后缀)" />
-                <div class="form-help" style="font-size: 11px; margin-top: 4px">
-                  主控端的基础访问地址。Agent 将基于此地址拼接 API 路径 (如 /api/server/...)。
+              <!-- 公网访问地址配置 -->
+              <div class="settings-group">
+                <div class="settings-group-title">
+                  <i class="fas fa-link" style="color: var(--primary-color)"></i> 公网访问地址 (Public URL)
                 </div>
-              </div>
-            </div>
-
-            <!-- Agent 下载地址配置 -->
-            <div class="settings-group">
-              <div class="settings-group-title">
-                <i class="fas fa-download" style="color: var(--primary-color)"></i> Agent 下载地址
-              </div>
-              <div class="settings-description">
-                配置 Agent 二进制文件的下载目录。默认使用主控端自身提供的文件 (/agent)。
-              </div>
-              <div class="form-group" style="margin-top: 12px">
-                <label class="form-label" style="font-size: 13px">下载来源</label>
-                <div style="display: flex; gap: 8px; margin-bottom: 12px">
-                  <button class="btn btn-sm" :class="!agentDownloadUrl ? 'btn-primary' : 'btn-secondary'"
-                    @click="agentDownloadUrl = ''" style="flex: 1; height: 36px; font-size: 12px">
-                    <i class="fas fa-server" style="margin-right: 4px"></i> 使用主控端
-                  </button>
-                  <button class="btn btn-sm" :class="agentDownloadUrl ? 'btn-primary' : 'btn-secondary'"
-                    @click="agentDownloadUrl = agentDownloadUrl || 'https://'"
-                    style="flex: 1; height: 36px; font-size: 12px">
-                    <i class="fas fa-cloud" style="margin-right: 4px"></i> 自定义 CDN
-                  </button>
+                <div class="settings-description">
+                  设置主控端的公网访问地址，用于生成 Agent 安装命令和连接配置。
                 </div>
-                <div v-if="agentDownloadUrl !== undefined && agentDownloadUrl !== ''">
-                  <input type="text" v-model="agentDownloadUrl" class="form-input"
-                    placeholder="例如: https://cdn.example.com/v1 或 http://IP:3000/agent (无需文件名)" />
+                <div class="form-group" style="margin-top: 12px">
+                  <input type="text" v-model="publicApiUrl" class="form-input"
+                    placeholder="例如: https://monitor.example.com (需包含协议和端口，无需 /api 后缀)" />
                   <div class="form-help" style="font-size: 11px; margin-top: 4px">
-                    请填写**目录**地址。Agent 会自动拼接文件名 (如 .../agent-linux-amd64)。<br>
-                    如果您使用主控端地址，通常是 http://IP:3000/agent
+                    主控端的基础访问地址。Agent 将基于此地址拼接 API 路径 (如 /api/server/...)。
                   </div>
                 </div>
               </div>
+
+              <!-- Agent 下载地址配置 -->
+              <div class="settings-group">
+                <div class="settings-group-title">
+                  <i class="fas fa-download" style="color: var(--primary-color)"></i> Agent 下载地址
+                </div>
+                <div class="settings-description">
+                  配置 Agent 二进制文件的下载目录。默认使用主控端自身提供的文件 (/agent)。
+                </div>
+                <div class="form-group" style="margin-top: 12px">
+                  <div style="display: flex; gap: 8px; margin-bottom: 5px">
+                    <button class="btn btn-sm" :class="!agentDownloadUrl ? 'btn-primary' : 'btn-secondary'"
+                      @click="agentDownloadUrl = ''" style="flex: 1; height: 36px; font-size: 12px">
+                      <i class="fas fa-server" style="margin-right: 4px"></i> 使用主控端
+                    </button>
+                    <button class="btn btn-sm" :class="agentDownloadUrl ? 'btn-primary' : 'btn-secondary'"
+                      @click="agentDownloadUrl = agentDownloadUrl || 'https://'"
+                      style="flex: 1; height: 36px; font-size: 12px">
+                      <i class="fas fa-cloud" style="margin-right: 4px"></i> 自定义 CDN
+                    </button>
+                  </div>
+                  <div v-if="agentDownloadUrl !== undefined && agentDownloadUrl !== ''">
+                    <input type="text" v-model="agentDownloadUrl" class="form-input"
+                      placeholder="例如: https://cdn.example.com/v1 或 http://IP:3000/agent (无需文件名)" />
+                    <div class="form-help" style="font-size: 11px; margin-top: 4px">
+                      请填写**目录**地址。Agent 会自动拼接文件名 (如 .../agent-linux-amd64)。<br>
+                      如果您使用主控端地址，通常是 http://IP:3000/agent
+                    </div>
+                  </div>
+                </div>
+              </div>
+
             </div>
 
             <button class="btn btn-primary" @click="saveUserSettingsToServer" :disabled="antigravitySaving"
@@ -257,7 +257,7 @@
                         font-weight: 500;
                       ">Antigravity 前缀</label>
                     <input type="text" class="form-input" v-model="channelModelPrefix['antigravity']"
-                      placeholder="例如: ag/" />
+                      @change="saveUserSettingsToServer" placeholder="例如: ag/" />
                   </div>
                   <div class="form-group" style="margin-bottom: 0">
                     <label class="form-label" style="
@@ -267,7 +267,7 @@
                         font-weight: 500;
                       ">Gemini CLI 前缀</label>
                     <input type="text" class="form-input" v-model="channelModelPrefix['gemini-cli']"
-                      placeholder="例如: gcli/" />
+                      @change="saveUserSettingsToServer" placeholder="例如: gcli/" />
                   </div>
                 </div>
               </div>

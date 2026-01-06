@@ -2,6 +2,8 @@ const cron = require('node-cron');
 const { exec } = require('child_process');
 const { CronTask, CronLog } = require('./models');
 const axios = require('axios');
+const { createLogger } = require('../../src/utils/logger');
+const logger = createLogger('CronService');
 
 class CronService {
   constructor() {
@@ -26,12 +28,12 @@ class CronService {
         this.scheduleTask(task);
       }
     });
-    console.log(`[CronService] Loaded ${tasks.length} tasks, ${this.scheduledTasks.size} active.`);
+    logger.info(`Loaded ${tasks.length} tasks, ${this.scheduledTasks.size} active.`);
   }
 
   scheduleTask(task) {
     if (!cron.validate(task.schedule)) {
-      console.error(`[CronService] Invalid schedule for task ${task.id}: ${task.schedule}`);
+      logger.error(`Invalid schedule for task ${task.id}: ${task.schedule}`);
       return;
     }
 
@@ -64,7 +66,7 @@ class CronService {
       start_time: startTime,
     });
 
-    console.log(`[CronService] Executing task ${task.name} (${task.id})`);
+    logger.info(`Executing task ${task.name} (${task.id})`);
 
     try {
       let output = '';

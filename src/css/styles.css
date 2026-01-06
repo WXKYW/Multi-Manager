@@ -238,7 +238,8 @@ pre,
   .theme-server,
   .theme-paas,
   .theme-totp,
-  .theme-music {
+  .theme-music,
+  .theme-uptime {
     --current-primary: var(--primary-color);
     --current-dark: var(--primary-dark);
   }
@@ -295,6 +296,12 @@ pre,
     --current-primary: #f43f5e;
     --current-dark: #e11d48;
     --current-rgb: 244, 63, 94;
+  }
+
+  .theme-uptime {
+    --current-primary: #10b981;
+    --current-dark: #059669;
+    --current-rgb: 16, 185, 129;
   }
 
   /* 应用动态颜色到通用组件 */
@@ -370,6 +377,11 @@ pre,
   .theme-music .tab-btn.active {
     background: linear-gradient(135deg, #f43f5e, #e11d48) !important;
     box-shadow: 0 2px 8px rgba(244, 63, 94, 0.3);
+  }
+
+  .theme-uptime .tab-btn.active {
+    background: linear-gradient(135deg, #10b981, #059669) !important;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
   }
 
   /* ========================================
@@ -887,7 +899,7 @@ body.modal-open {
   justify-content: center;
   gap: 8px;
   height: 38px;
-  padding: 0 18px;
+  padding: 0 15px;
   border-radius: 10px;
   font-weight: 600;
   font-size: 14px;
@@ -1114,7 +1126,7 @@ body.modal-open {
 .btn-icon-refined:hover {
   background-color: rgba(var(--primary-rgb), 0.1);
   color: var(--primary-color);
-  transform: rotate(14deg);
+  transform: rotate(15deg);
 }
 
 .btn-icon-refined i {
@@ -2313,11 +2325,85 @@ body.modal-open {
 .spinner {
   width: 40px;
   height: 40px;
-  border: 3px solid var(--border-color);
-  border-top-color: var(--primary-color);
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
+  position: relative;
   margin: 0 auto;
+}
+
+/* 现代渐变双环加载动画 */
+.spinner::before {
+  content: '';
+  box-sizing: border-box;
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  border-top-color: var(--primary-color);
+  border-right-color: var(--primary-color);
+  animation: spinner-rotate 1s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+}
+
+.spinner::after {
+  content: '';
+  box-sizing: border-box;
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-bottom-color: rgba(var(--primary-rgb), 0.4);
+  border-left-color: rgba(var(--primary-rgb), 0.4);
+  animation: spinner-rotate 0.7s cubic-bezier(0.5, 0, 0.5, 1) infinite reverse;
+}
+
+@keyframes spinner-rotate {
+  0% {
+    transform: rotate(0deg);
+  }
+
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* 简化版：纯 CSS 三点加载 */
+.loading-dots {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.loading-dots span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--primary-color);
+  animation: dots-bounce 1.4s ease-in-out infinite both;
+}
+
+.loading-dots span:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.loading-dots span:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+.loading-dots span:nth-child(3) {
+  animation-delay: 0s;
+}
+
+@keyframes dots-bounce {
+
+  0%,
+  80%,
+  100% {
+    transform: scale(0.6);
+    opacity: 0.4;
+  }
+
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 @keyframes spin {
@@ -2831,7 +2917,7 @@ body.modal-open {
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  margin-bottom: 12px;
+  /* margin-bottom: 12px; */
   overflow: hidden;
 }
 

@@ -6,7 +6,8 @@ const { v4: uuidv4 } = require('uuid');
 const axios = require('axios');
 const crypto = require('crypto');
 const fs = require('fs');
-const path = require('path');
+const { createLogger } = require('../../src/utils/logger');
+const logger = createLogger('AntiG-Service');
 const { requireAuth } = require('../../src/middleware/auth');
 const { getSession, getSessionById } = require('../../src/services/session');
 
@@ -31,11 +32,11 @@ const autoCheckService = {
     const intervalMs = parseInt(settings.autoCheckInterval) || 3600000;
 
     if (!enabled) {
-      console.log('[AntiG AutoCheck] 定时检测未启用');
+      logger.info('AutoCheck is disabled');
       return;
     }
 
-    console.log(`[AntiG AutoCheck] 定时检测已启动，间隔: ${Math.round(intervalMs / 60000)} 分钟`);
+    logger.info(`AutoCheck started, interval: ${Math.round(intervalMs / 60000)} min`);
 
     this.timerId = setInterval(() => {
       this.runCheck();
@@ -51,7 +52,7 @@ const autoCheckService = {
     if (this.timerId) {
       clearInterval(this.timerId);
       this.timerId = null;
-      console.log('[AntiG AutoCheck] 定时检测已停止');
+      logger.info('AutoCheck stopped');
     }
   },
 
@@ -59,7 +60,7 @@ const autoCheckService = {
    * 重启定时检测
    */
   restart() {
-    console.log('[AntiG AutoCheck] 重新加载设置...');
+    logger.info('Reloading settings...');
     this.start();
   },
 
@@ -67,12 +68,12 @@ const autoCheckService = {
    * 执行一次模型检测
    */
   async runCheck() {
-    console.log('[AntiG AutoCheck] 开始执行定时模型检测...');
+    logger.info('Running auto model check...');
 
     try {
       const accounts = storage.getAccounts();
       if (accounts.length === 0) {
-        console.log('[AntiG AutoCheck] 没有账号，跳过检测');
+        logger.info('No accounts found, skipping check');
         return;
       }
 
@@ -92,7 +93,7 @@ const autoCheckService = {
           });
           modelsToCheck = Array.from(allModels);
         } catch (e) {
-          console.log('[AntiG AutoCheck] 获取额度失败，使用配置:', e.message);
+          logger.warn(`Failed to fetch quotas, using config: ${e.message}`);
         }
       }
 
@@ -143,9 +144,7 @@ const autoCheckService = {
         m => (globalModelStatus[m] = { ok: false, errors: [], passedIndices: [] })
       );
 
-      console.log(
-        `[AntiG AutoCheck] 检测 ${modelsToCheck.length} 个模型，${accounts.length} 个账号 (并行)`
-      );
+      logger.info(`Checking ${modelsToCheck.length} models across ${accounts.length} accounts (parallel)`);
 
       const checkAccount = async (account, accountIndex) => {
         for (const modelId of modelsToCheck) {
@@ -208,9 +207,8 @@ const autoCheckService = {
         storage.recordModelCheck(modelId, status, errorLog, batchTime, passedAccounts);
       }
 
-      console.log('[AntiG AutoCheck] 定时检测完成');
     } catch (error) {
-      console.error('[AntiG AutoCheck] 定时检测失败:', error.message);
+      logger.error('AutoCheck failed:', error.message);
     } finally {
       // 更新下次执行时间
       const settings = storage.getSettings();
@@ -574,7 +572,7 @@ router.post('/accounts/import', async (req, res) => {
  * 模型健康检测 - 对所有账号执行测试
  */
 router.post('/accounts/check', async (req, res) => {
-  console.log('[AntiG] Starting model check (dialog test)...');
+  logger.info('Starting model check (dialog test)...');
   try {
     const accounts = storage.getAccounts();
     // 检测所有账号，不仅仅是启用的
@@ -603,9 +601,9 @@ router.post('/accounts/check', async (req, res) => {
           }
         });
         modelsToCheck = Array.from(allModels);
-        console.log(`[AntiG] 从额度 API 获取到 ${modelsToCheck.length} 个模型`);
+        logger.info(`Got ${modelsToCheck.length} models from quota API`);
       } catch (e) {
-        console.log('[AntiG] 获取额度失败，使用配置:', e.message);
+        logger.warn(`Failed to fetch quotas, using config: ${e.message}`);
       }
     }
 
@@ -625,6 +623,7 @@ router.post('/accounts/check', async (req, res) => {
     if (settings.disabledCheckModels) {
       try {
         disabledCheckModels = JSON.parse(settings.disabledCheckModels);
+        logger.info(`Disabled check models from settings: ${JSON.stringify(disabledCheckModels)}`);
       } catch (e) {
         disabledCheckModels = [];
       }
@@ -632,7 +631,12 @@ router.post('/accounts/check', async (req, res) => {
 
     // 过滤掉在检测设置中禁用的模型
     if (disabledCheckModels.length > 0) {
+      const beforeFilter = modelsToCheck.length;
+      const filteredOut = modelsToCheck.filter(m => disabledCheckModels.includes(m));
       modelsToCheck = modelsToCheck.filter(m => !disabledCheckModels.includes(m));
+      if (filteredOut.length > 0) {
+        logger.info(`Filtered out ${filteredOut.length} disabled models: ${filteredOut.join(', ')}`);
+      }
     }
 
     // 如果没有已启用的模型，从历史记录补充
@@ -652,9 +656,7 @@ router.post('/accounts/check', async (req, res) => {
       ];
     }
 
-    console.log(
-      `[AntiG] 将检测 ${modelsToCheck.length} 个模型: ${modelsToCheck.slice(0, 5).join(', ')}...`
-    );
+    logger.info(`Will check ${modelsToCheck.length} models: ${modelsToCheck.slice(0, 5).join(', ')}...`);
 
     // 统一批次时间戳
     const batchTime = Math.floor(Date.now() / 1000);
@@ -670,15 +672,13 @@ router.post('/accounts/check', async (req, res) => {
       m => (globalModelStatus[m] = { ok: false, errors: [], passedIndices: [] })
     );
 
-    console.log(
-      `[AntiG] Checking ${modelsToCheck.length} models across ${accountsToCheck.length} accounts at ${batchTime}`
-    );
+    logger.info(`Checking ${modelsToCheck.length} models across ${accountsToCheck.length} accounts at ${batchTime}`);
 
     // 并行检测所有账号
-    console.log(`[AntiG] 并行检测 ${accountsToCheck.length} 个账号...`);
+    logger.info(`Parallel checking ${accountsToCheck.length} accounts...`);
 
     const checkAccount = async (account, accountIndex) => {
-      console.log(`[AntiG] 开始检测账号 #${accountIndex}: ${account.name || account.id}`);
+      logger.info(`Starting check for account #${accountIndex}: ${account.name || account.id}`);
 
       for (const modelId of modelsToCheck) {
         // Claude thinking 模型要求 max_tokens > thinking.budget_tokens (1024)
@@ -710,16 +710,12 @@ router.post('/accounts/check', async (req, res) => {
           if (response && (hasContent || hasToolCalls)) {
             globalModelStatus[modelId].ok = true;
             globalModelStatus[modelId].passedIndices.push(accountIndex);
-            console.log(
-              `\x1b[32m[Antigravity]      ✓ ${modelId} passed for ${account.name}\x1b[0m`
-            );
+            logger.success(`${modelId} passed for ${account.name}`);
           } else {
             const errorMsg =
               response && response.error ? response.error.message : 'Unexpected response structure';
             globalModelStatus[modelId].errors.push(`${account.name}: ${errorMsg}`);
-            console.log(
-              `\x1b[31m[Antigravity]      ✗ ${modelId} failed for ${account.name}: ${errorMsg}\x1b[0m`
-            );
+            logger.warn(`${modelId} failed for ${account.name}: ${errorMsg}`);
           }
         } catch (e) {
           const errorMsg = e.response?.data?.error?.message || e.message || 'Unknown error';
@@ -763,15 +759,16 @@ router.post('/accounts/check', async (req, res) => {
       storage.recordModelCheck(modelId, status, errorLog, batchTime, passedAccounts);
     }
 
-    console.log(`[AntiG] Check complete for ${accountsToCheck.length} accounts`);
+    logger.info(`Check complete for ${accountsToCheck.length} accounts, ${modelsToCheck.length} models`);
     res.json({
       success: true,
       message: `Checked ${accountsToCheck.length} accounts`,
       totalAccounts: accountsToCheck.length,
+      totalModels: modelsToCheck.length,
       batchTime,
     });
   } catch (e) {
-    console.error('[AntiG] Model check error:', e);
+    logger.error('Model check error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -1680,7 +1677,24 @@ router.post('/v1/chat/completions', requireApiAuth, async (req, res) => {
           res.end();
 
           // 记录成功日志 (包含累计的回复内容和思考过程)
-          const originalMessages = JSON.parse(JSON.stringify(req.body.messages || []));
+          let originalMessages = JSON.parse(JSON.stringify(req.body.messages || []));
+
+          // === 日志净化：移除 Base64 图片 ===
+          originalMessages.forEach(msg => {
+            if (Array.isArray(msg.content)) {
+              msg.content.forEach(part => {
+                if (part.type === 'image_url' && part.image_url?.url?.startsWith('data:')) {
+                  if (part.image_url._original_url) {
+                    // 恢复原始路径，以便在前端预览
+                    part.image_url.url = part.image_url._original_url;
+                  } else {
+                    part.image_url.url = `data:image/... [Base64 hidden, size=${part.image_url.url.length}]`;
+                  }
+                }
+              });
+            }
+          });
+          // =================================
 
           // 确保合并系统指令到日志中
           if (!originalMessages.some(m => m.role === 'system')) {
@@ -1725,7 +1739,24 @@ router.post('/v1/chat/completions', requireApiAuth, async (req, res) => {
           // 确保返回结果中的 model 是带前缀的
           if (result && result.model) result.model = modelWithPrefix;
 
-          const originalMessages = JSON.parse(JSON.stringify(req.body.messages || []));
+          let originalMessages = JSON.parse(JSON.stringify(req.body.messages || []));
+
+          // === 日志净化：移除 Base64 图片 ===
+          originalMessages.forEach(msg => {
+            if (Array.isArray(msg.content)) {
+              msg.content.forEach(part => {
+                if (part.type === 'image_url' && part.image_url?.url?.startsWith('data:')) {
+                  if (part.image_url._original_url) {
+                    // 恢复原始路径，以便在前端预览
+                    part.image_url.url = part.image_url._original_url;
+                  } else {
+                    part.image_url.url = `data:image/... [Base64 hidden, size=${part.image_url.url.length}]`;
+                  }
+                }
+              });
+            }
+          });
+          // =================================
 
           // 确保合并系统指令到日志中
           if (!originalMessages.some(m => m.role === 'system')) {
@@ -1762,7 +1793,24 @@ router.post('/v1/chat/completions', requireApiAuth, async (req, res) => {
         lastError = error;
 
         // 如果是 401 之外的错误（通常是 429 或 5xx），记录日志并继续循环
-        const originalMessages = JSON.parse(JSON.stringify(req.body.messages || []));
+        let originalMessages = JSON.parse(JSON.stringify(req.body.messages || []));
+
+        // === 日志净化：移除 Base64 图片 ===
+        originalMessages.forEach(msg => {
+          if (Array.isArray(msg.content)) {
+            msg.content.forEach(part => {
+              if (part.type === 'image_url' && part.image_url?.url?.startsWith('data:')) {
+                if (part.image_url._original_url) {
+                  // 恢复原始路径，以便在前端预览
+                  part.image_url.url = part.image_url._original_url;
+                } else {
+                  part.image_url.url = `data:image/... [Base64 hidden, size=${part.image_url.url.length}]`;
+                }
+              }
+            });
+          }
+        });
+        // =================================
 
         // 确保合并系统指令到日志中
         if (!originalMessages.some(m => m.role === 'system')) {

@@ -327,7 +327,7 @@ function getRecentLogs(limit = 100) {
         try {
           const detail = JSON.parse(log.detail);
           model = detail.model || null;
-        } catch (e) {}
+        } catch (e) { }
       }
       return { ...log, model, detail: undefined };
     });

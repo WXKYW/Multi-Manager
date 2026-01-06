@@ -205,6 +205,7 @@
     opacity: 0;
     transform: translateY(10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -326,8 +327,16 @@
 }
 
 @keyframes blink {
-  0%, 50% { opacity: 1; }
-  51%, 100% { opacity: 0; }
+
+  0%,
+  50% {
+    opacity: 1;
+  }
+
+  51%,
+  100% {
+    opacity: 0;
+  }
 }
 
 /* ========== 输入区域 ========== */
@@ -353,10 +362,33 @@
   border: 1px solid var(--border-color);
   border-radius: 12px;
   background: var(--bg-primary);
+  color: #1f2937;
+  /* Fallback for light mode */
   color: var(--text-primary);
+  /* Try variable first, but if it fails... actually override it */
+  color: var(--text-primary, #1f2937);
   resize: none;
   outline: none;
   transition: border-color 0.2s;
+}
+
+/* Force correct colors if variables fail, assuming light mode default */
+@media (prefers-color-scheme: light) {
+  .ai-chat-textarea {
+    color: #1f2937;
+  }
+}
+
+/* Handle Dark Mode manually if variables are messy */
+@media (prefers-color-scheme: dark) {
+  .ai-chat-textarea {
+    color: #f9fafb;
+  }
+}
+
+[data-theme='dark'] .ai-chat-textarea,
+.theme-dark .ai-chat-textarea {
+  color: #f9fafb;
 }
 
 .ai-chat-textarea:focus {

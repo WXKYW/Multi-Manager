@@ -8,6 +8,8 @@ const storage = require('./storage');
 const openaiApi = require('./openai-api');
 const { proxyLimiter } = require('../../src/middleware/rateLimit');
 const { validate, chatCompletionSchema } = require('../../src/middleware/validation');
+const { createLogger } = require('../../src/utils/logger');
+const logger = createLogger('OpenAI-Service');
 
 // ==================== 端点管理 ====================
 
@@ -520,36 +522,133 @@ router.post(
     const startTime = Date.now();
     try {
       const { model, stream } = req.body;
-      const endpoints = storage
-        .getEndpoints()
-        .filter(ep => ep.status === 'valid' && (ep.enabled === true || ep.enabled === 1));
+      const targetEndpointId = req.headers['x-endpoint-id'];
 
-      if (endpoints.length === 0) {
-        return res
-          .status(503)
-          .json({
-            error: { message: 'No valid OpenAI endpoints available', type: 'service_unavailable' },
-          });
+      let endpoint;
+
+      // 1. 如果指定了端点 ID，优先使用
+      if (targetEndpointId) {
+        endpoint = storage.getEndpointById(targetEndpointId);
+        logger.info(`Targeting endpoint: ${targetEndpointId}, found: ${endpoint ? endpoint.name : 'null'}`);
+
+        if (!endpoint) {
+          return res.status(404).json({ error: { message: 'Specified endpoint not found', type: 'invalid_request_error' } });
+        }
+
+        // 调试：打印详细的 enabled 类型
+        // if (endpoint.enabled !== true && endpoint.enabled !== 1) {
+        //    console.log(`[OpenAI Proxy] Endpoint disabled check: enabled value is ${endpoint.enabled} (type: ${typeof endpoint.enabled})`);
+        // }
+
+        // 暂时移除 enabled 检查，因为 UI 上没有入口启用/禁用，且 status === 'valid' 已足够
+        // if (!endpoint.enabled && endpoint.enabled !== undefined) {
+        //    return res.status(403).json({ error: { message: 'Specified endpoint is disabled', type: 'invalid_request_error' } });
+        // }
+      } else {
+        // 2. 否则走原有的自动路由逻辑
+        // enabled 为 true/1/undefined 时都允许（因为 UI 没有禁用入口，默认都认为是启用的）
+        const endpoints = storage
+          .getEndpoints()
+          .filter(ep => ep.status === 'valid' && (ep.enabled !== false && ep.enabled !== 0));
+
+        if (endpoints.length === 0) {
+          return res
+            .status(503)
+            .json({
+              error: { message: 'No valid OpenAI endpoints available', type: 'service_unavailable' },
+            });
+        }
+
+        // 找到拥有该模型的端点
+        const eligibleEndpoints = endpoints.filter(ep => ep.models && ep.models.includes(model));
+        const targetEndpoints = eligibleEndpoints.length > 0 ? eligibleEndpoints : endpoints;
+
+        // 负载均衡：随机选择一个端点
+        endpoint = targetEndpoints[Math.floor(Math.random() * targetEndpoints.length)];
       }
 
-      // 找到拥有该模型的端点
-      const eligibleEndpoints = endpoints.filter(ep => ep.models && ep.models.includes(model));
-      const targetEndpoints = eligibleEndpoints.length > 0 ? eligibleEndpoints : endpoints;
+      // 智能处理 URL：如果 baseUrl 不以 /v1 结尾且不包含 v1/chat，则尝试补全 /v1
+      let fullUrl = endpoint.baseUrl.replace(/\/+$/, '');
+      if (!fullUrl.toLowerCase().endsWith('/v1') && !fullUrl.toLowerCase().includes('/v1/')) {
+        fullUrl += '/v1';
+      }
+      fullUrl += '/chat/completions';
 
-      // 负载均衡：随机选择一个端点
-      const endpoint = targetEndpoints[Math.floor(Math.random() * targetEndpoints.length)];
+      // ==================== 图片处理逻辑开始 ====================
+      // 创建请求体的深拷贝，避免污染 req.body (影响日志记录)
+      let upstreamBody = req.body;
+      try {
+        upstreamBody = JSON.parse(JSON.stringify(req.body));
+      } catch (e) {
+        logger.error(`[OpenAI Proxy] Body clone failed: ${e.message}`);
+      }
+
+      // 检查并转换本地图片路径为 Base64，以兼容公网 API
+      // 优化：如果是内部模块 (Gemini CLI / Antigravity) 或目标是本地服务器，它们支持直接读取本地文件路径，无需转换
+      // 这样可以避免下游日志中出现巨大的 Base64 字符串，且能正确显示图片路径
+      const isInternalModule = fullUrl.includes('gemini-cli') || fullUrl.includes('antigravity');
+
+      // 检查是否为本地地址（localhost/127.0.0.1/内网地址），本地模块可以直接读取文件
+      const isLocalEndpoint = /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/i.test(fullUrl);
+
+      if (!isInternalModule && !isLocalEndpoint && upstreamBody.messages && Array.isArray(upstreamBody.messages)) {
+        try {
+          const fs = require('fs');
+          const path = require('path');
+
+          for (const msg of upstreamBody.messages) {
+            if (Array.isArray(msg.content)) {
+              for (const part of msg.content) {
+                if (part.type === 'image_url' && part.image_url && part.image_url.url) {
+                  const imageUrl = part.image_url.url;
+                  if (typeof imageUrl === 'string' && imageUrl.startsWith('/uploads/')) {
+                    try {
+                      const relativePath = imageUrl.startsWith('/') ? imageUrl.slice(1) : imageUrl;
+                      const filePath = path.join(process.cwd(), 'data', relativePath);
+
+                      if (fs.existsSync(filePath)) {
+                        const fileBuffer = fs.readFileSync(filePath);
+                        const ext = path.extname(filePath).toLowerCase();
+                        let mimeType = 'image/jpeg';
+                        if (ext === '.png') mimeType = 'image/png';
+                        else if (ext === '.webp') mimeType = 'image/webp';
+                        else if (ext === '.gif') mimeType = 'image/gif';
+
+                        const base64Data = fileBuffer.toString('base64');
+                        // 保存原始路径供下游日志使用
+                        const originalUrl = part.image_url.url;
+                        part.image_url.url = `data:${mimeType};base64,${base64Data}`;
+                        part.image_url._original_url = originalUrl;
+
+                        logger.info(`[OpenAI Proxy] Converted local image to Base64: ${filePath} (${Math.round(fileBuffer.length / 1024)}KB)`);
+                      } else {
+                        logger.warn(`[OpenAI Proxy] Local image file not found: ${filePath}`);
+                      }
+                    } catch (err) {
+                      logger.error(`[OpenAI Proxy] Failed to convert local image: ${err.message}`);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        } catch (e) {
+          logger.error(`[OpenAI Proxy] Image processing loop error: ${e.message}`);
+        }
+      }
+      // ==================== 图片处理逻辑结束 ====================
 
       // 构建请求
       const axios = require('axios');
       const config = {
         method: 'post',
-        url: `${endpoint.baseUrl.replace(/\/+$/, '')}/chat/completions`,
+        url: fullUrl,
         headers: {
           Authorization: `Bearer ${endpoint.apiKey}`,
           'Content-Type': 'application/json',
           Accept: stream ? 'text/event-stream' : 'application/json',
         },
-        data: req.body,
+        data: upstreamBody,
         responseType: stream ? 'stream' : 'json',
         timeout: 60000,
       };
@@ -568,7 +667,7 @@ router.post(
       // 记录使用情况
       storage.touchEndpoint(endpoint.id);
     } catch (e) {
-      console.error('OpenAI Proxy Error:', e.message);
+      logger.error(`OpenAI Proxy Error: ${e.message}`);
 
       // 严格隔离 Axios 错误对象，仅提取必要数据
       const responseStatus = e.response && e.response.status ? e.response.status : 500;
@@ -595,20 +694,33 @@ router.get(['/v1/models', '/models'], async (req, res) => {
     const endpoints = storage
       .getEndpoints()
       .filter(ep => ep.status === 'valid' && (ep.enabled === true || ep.enabled === 1));
-    const allModels = new Set();
+
+    // 使用 Map 来存储模型，Key 为模型 ID
+    const modelMap = new Map();
 
     endpoints.forEach(ep => {
       if (ep.models) {
-        ep.models.forEach(m => allModels.add(m));
+        ep.models.forEach(modelId => {
+          // 如果模型已存在，且 owned_by 不是当前端点，则标记为 'multiple'
+          // 或者我们可以保留第一个端点最为 owned_by，或者用逗号分隔
+          if (modelMap.has(modelId)) {
+            const existing = modelMap.get(modelId);
+            if (!existing.owned_by.includes(ep.name)) {
+              // optional: existing.owned_by += `, ${ep.name}`;
+            }
+          } else {
+            modelMap.set(modelId, {
+              id: modelId,
+              object: 'model',
+              created: Math.floor(Date.now() / 1000),
+              owned_by: ep.name || 'openai', // 使用端点名称作为 owned_by
+            });
+          }
+        });
       }
     });
 
-    const modelList = Array.from(allModels).map(id => ({
-      id,
-      object: 'model',
-      created: Math.floor(Date.now() / 1000),
-      owned_by: 'openai',
-    }));
+    const modelList = Array.from(modelMap.values()).sort((a, b) => a.id.localeCompare(b.id));
 
     res.json({ object: 'list', data: modelList });
   } catch (e) {

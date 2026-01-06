@@ -1,5 +1,7 @@
 const axios = require('axios');
 const { HttpsProxyAgent } = require('https-proxy-agent');
+const { createLogger } = require('../../src/utils/logger');
+const logger = createLogger('Gemini-Client');
 const AntigravityRequester = require('../antigravity-api/antigravity-requester');
 const path = require('path');
 let storage;
@@ -20,6 +22,10 @@ class GeminiCliClient {
     this.requester = new AntigravityRequester({
       binPath: path.join(__dirname, '../antigravity-api/bin'),
     });
+
+    // 内存缓存，提升首字响应速度 (TTFB)
+    this.projectCache = new Map();
+    this.tokenCache = new Map(); // accountId -> {token, expiry}
   }
 
   /**
@@ -52,10 +58,19 @@ class GeminiCliClient {
       } else {
         const role = msg.role === 'assistant' ? 'model' : 'user';
         const parts = this._convertContentToParts(msg.content);
-        contents.push({
-          role: role,
-          parts: parts,
-        });
+
+        // Gemini API 要求消息角色严格交替（user ↔ model）
+        // 如果上一条消息角色相同，则合并 parts 而不是新增消息
+        const lastContent = contents[contents.length - 1];
+        if (lastContent && lastContent.role === role) {
+          // 合并到上一条消息
+          lastContent.parts.push(...parts);
+        } else {
+          contents.push({
+            role: role,
+            parts: parts,
+          });
+        }
       }
     });
 
@@ -74,7 +89,7 @@ class GeminiCliClient {
       temperature: temperature ?? parseFloat(settings.DEFAULT_TEMPERATURE || 1),
       topP: top_p ?? parseFloat(settings.DEFAULT_TOP_P || 0.95),
       topK: parseInt(settings.DEFAULT_TOP_K || 64), // 默认 topK (避免某些模型问题)
-      maxOutputTokens: max_tokens ?? parseInt(settings.DEFAULT_MAX_TOKENS || 8192),
+      maxOutputTokens: Math.min(max_tokens ?? parseInt(settings.DEFAULT_MAX_TOKENS || 8192), 65536), // 限制在 64k (API 限制为 65537 exclusive)
       stopSequences: Array.isArray(stop) ? stop : stop ? [stop] : [],
     };
 
@@ -83,6 +98,11 @@ class GeminiCliClient {
     const thinkingConfig = this._getThinkingConfig(model);
     if (thinkingConfig) {
       generationConfig.thinkingConfig = thinkingConfig;
+      // 关键校验：maxOutputTokens 必须大于等于 thinkingBudget (API 强制要求)
+      if (thinkingConfig.thinkingBudget && generationConfig.maxOutputTokens < thinkingConfig.thinkingBudget + 1024) {
+        generationConfig.maxOutputTokens = Math.min(thinkingConfig.thinkingBudget + 4096, 65536);
+        logger.info(`Adjusted maxOutputTokens for thinking budget (${thinkingConfig.thinkingBudget}): ${generationConfig.maxOutputTokens}`);
+      }
     }
 
     // 构建请求体（参考 CatieCli，只添加有值的字段）
@@ -188,16 +208,50 @@ class GeminiCliClient {
       };
     }
 
+    // 处理本地文件路径 (/uploads/...)
+    if (imageUrl.startsWith('/uploads/')) {
+      try {
+        const fs = require('fs');
+        const path = require('path');
+        // 构造文件路径: process.cwd() + /data + /uploads/...
+        const relativePath = imageUrl.startsWith('/') ? imageUrl.slice(1) : imageUrl;
+        const filePath = path.join(process.cwd(), 'data', relativePath);
+
+        if (fs.existsSync(filePath)) {
+          const fileBuffer = fs.readFileSync(filePath);
+          const base64Data = fileBuffer.toString('base64');
+          const ext = path.extname(filePath).toLowerCase();
+
+          let mimeType = 'image/jpeg';
+          if (ext === '.png') mimeType = 'image/png';
+          else if (ext === '.webp') mimeType = 'image/webp';
+          else if (ext === '.gif') mimeType = 'image/gif';
+
+          logger.info(`[Gemini-Client] Loaded local image: ${filePath} (${Math.round(fileBuffer.length / 1024)}KB)`);
+
+          return {
+            inlineData: {
+              mimeType: mimeType,
+              data: base64Data
+            }
+          };
+        } else {
+          logger.warn(`[Gemini-Client] Image file not found: ${filePath}`);
+          return null;
+        }
+      } catch (e) {
+        logger.error(`[Gemini-Client] Failed to process local image: ${e.message}`);
+        return null;
+      }
+    }
+
     // HTTP/HTTPS URL 暂不支持（需要下载图片）
     if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-      console.warn(
-        '[Gemini CLI] HTTP image URLs not yet supported, skipping:',
-        imageUrl.substring(0, 80)
-      );
+      logger.warn(`HTTP image URLs not yet supported, skipping: ${imageUrl.substring(0, 80)}`);
       return null;
     }
 
-    console.warn('[Gemini CLI] Unsupported image URL format:', imageUrl.substring(0, 50));
+    logger.warn(`Unsupported image URL format: ${imageUrl.substring(0, 50)}`);
     return null;
   }
 
@@ -277,7 +331,7 @@ class GeminiCliClient {
         };
       }
     } catch (e) {
-      console.error('[Gemini CLI] 解析代理设置失败:', e.message);
+      logger.error(`Failed to parse proxy settings: ${e.message}`);
     }
     return {};
   }
@@ -286,18 +340,25 @@ class GeminiCliClient {
    * 获取有效的 Access Token (带缓存和自动刷新逻辑)
    */
   async getAccessToken(accountId) {
+    // 1. 内存缓存优先
+    const cached = this.tokenCache.get(accountId);
+    const now = Math.floor(Date.now() / 1000);
+    if (cached && cached.expiry > now + 60) {
+      return cached.token;
+    }
+
     const account = storage.getAccounts().find(a => a.id === accountId);
     if (!account) throw new Error('Account not found');
 
+    // 2. 数据库缓存
     const tokenRecord = storage.getTokenByAccountId(accountId);
-    const now = Math.floor(Date.now() / 1000);
-
     if (tokenRecord && tokenRecord.expires_at > now + 60) {
+      this.tokenCache.set(accountId, { token: tokenRecord.access_token, expiry: tokenRecord.expires_at });
       return tokenRecord.access_token;
     }
 
     // 刷新 Token
-    console.log(`[Gemini CLI] 正在为账号 ${account.name} 刷新 Token...`);
+    logger.info(`Refreshing token for account ${account.name}...`);
     const params = new URLSearchParams({
       client_id: account.client_id,
       client_secret: account.client_secret,
@@ -323,6 +384,8 @@ class GeminiCliClient {
       email: account.email,
     });
 
+    this.tokenCache.set(accountId, { token: newToken, expiry: newExpiresAt });
+
     return newToken;
   }
 
@@ -335,14 +398,16 @@ class GeminiCliClient {
     const account = storage.getAccounts().find(a => a.id === accountId);
     if (!account) throw new Error('Account not found');
 
-    // 检查是否已缓存 project_id
-    if (account.project_id) {
-      return account.project_id;
+    // 1. 内存缓存优先 (最快)
+    if (this.projectCache.has(accountId)) {
+      return this.projectCache.get(accountId);
     }
 
-    // 检查是否已缓存 cloudaicompanion_project_id
-    if (account.cloudaicompanion_project_id) {
-      return account.cloudaicompanion_project_id;
+    // 2. 数据库缓存优先
+    const cachedId = account.project_id || account.cloudaicompanion_project_id;
+    if (cachedId) {
+      this.projectCache.set(accountId, cachedId);
+      return cachedId;
     }
 
     const accessToken = await this.getAccessToken(accountId);
@@ -350,7 +415,7 @@ class GeminiCliClient {
 
     // 方案1: 尝试从 cloudresourcemanager 获取 GCP 项目 ID (CatieCli 方式)
     try {
-      console.log('[Gemini CLI] 正在从 cloudresourcemanager 获取 GCP 项目 ID...');
+      logger.info('Fetching GCP Project ID from cloudresourcemanager...');
 
       const resp = await axios.get('https://cloudresourcemanager.googleapis.com/v1/projects', {
         ...axiosConfig,
@@ -378,20 +443,19 @@ class GeminiCliClient {
         }
 
         if (projectId) {
-          console.log(`[Gemini CLI] 成功获取 GCP 项目 ID: ${projectId}`);
+          logger.info(`Successfully fetched GCP Project ID: ${projectId}`);
+          this.projectCache.set(accountId, projectId);
           storage.updateAccount(accountId, { project_id: projectId });
           return projectId;
         }
       }
     } catch (e) {
-      console.log(
-        `[Gemini CLI] cloudresourcemanager 获取失败: ${e.message}，尝试 loadCodeAssist...`
-      );
+      logger.info(`cloudresourcemanager failed: ${e.message}, trying loadCodeAssist...`);
     }
 
     // 方案2: Fallback 到 loadCodeAssist (gcli2api 方式)
     try {
-      console.log('[Gemini CLI] 正在从 loadCodeAssist 获取 cloudaicompanionProject...');
+      logger.info('Fetching cloudaicompanionProject from loadCodeAssist...');
 
       const antigravityEndpoint = 'https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal';
       const loadCodeAssistUrl = `${antigravityEndpoint}:loadCodeAssist`;
@@ -410,28 +474,28 @@ class GeminiCliClient {
       );
 
       const cloudaicompanionProject = resp.data.cloudaicompanionProject;
-      console.log('[Gemini CLI] loadCodeAssist 响应:', JSON.stringify(resp.data).substring(0, 500));
+      logger.debug(`loadCodeAssist response: ${JSON.stringify(resp.data).substring(0, 500)}`);
 
       if (cloudaicompanionProject) {
-        console.log(`[Gemini CLI] 成功获取 cloudaicompanionProject: ${cloudaicompanionProject}`);
+        logger.info(`Successfully fetched cloudaicompanionProject: ${cloudaicompanionProject}`);
 
         // 直接更新数据库
         try {
           storage.updateAccount(accountId, {
             cloudaicompanion_project_id: cloudaicompanionProject,
           });
-          console.log('[Gemini CLI] 已缓存 cloudaicompanion_project_id 到数据库');
+          logger.info('Cached cloudaicompanion_project_id to database');
         } catch (dbErr) {
-          console.error('[Gemini CLI] 缓存到数据库失败:', dbErr.message);
+          logger.error(`Failed to cache cloudaicompanion_project_id: ${dbErr.message}`);
         }
 
         return cloudaicompanionProject;
       }
     } catch (e) {
-      console.error('[Gemini CLI] loadCodeAssist 获取失败:', e.message);
+      logger.error(`loadCodeAssist failed: ${e.message}`);
     }
 
-    console.warn('[Gemini CLI] 无法获取任何项目 ID');
+    logger.warn('Unable to fetch any project ID');
     return '';
   }
 
@@ -460,11 +524,9 @@ class GeminiCliClient {
       request: geminiPayload,
     };
 
-    console.log(
-      `[Gemini CLI] 发送请求: URL=${url}, model=${requestBody.model}, project=${requestBody.project}`
-    );
-    console.log('[Gemini CLI] 完整请求体:', JSON.stringify(requestBody).substring(0, 1000));
-    console.log('[Gemini CLI] generationConfig:', JSON.stringify(geminiPayload.generationConfig));
+    logger.debug(`Sending request: URL=${url}, model=${requestBody.model}, project=${requestBody.project}`);
+    logger.debug(`Full payload: ${JSON.stringify(requestBody).substring(0, 1000)}`);
+    logger.debug(`generationConfig: ${JSON.stringify(geminiPayload.generationConfig)}`);
 
     const axiosConfig = await this.getAxiosConfig();
     return axios.post(url, requestBody, {
@@ -475,6 +537,7 @@ class GeminiCliClient {
         'User-Agent': this.userAgent,
       },
       responseType: openaiRequest.stream ? 'stream' : 'json',
+      timeout: 120000, // 增加到 120s 超时，深度思考模型响应较慢
     });
   }
 
@@ -487,7 +550,7 @@ class GeminiCliClient {
 
       // 调用 Google 内部 API 获取模型列表
       const modelsUrl = `${this.v1internalEndpoint}:fetchAvailableModels`;
-      console.log(`[Gemini CLI] 正在从 ${modelsUrl} 获取模型列表`);
+      logger.info(`Fetching model list from ${modelsUrl}...`);
 
       const settings = storage ? await storage.getSettings() : {};
       const proxy = settings.PROXY || null;
@@ -526,9 +589,9 @@ class GeminiCliClient {
             enabled: !disabledModels.includes(modelId),
           };
         });
-        console.log(`[Gemini CLI] 成功获取 ${Object.keys(quotas).length} 个模型`);
+        logger.info(`Successfully fetched ${Object.keys(quotas).length} models`);
       } else {
-        console.warn('[Gemini CLI] 模型列表返回为空，使用内置备选列表');
+        logger.warn('Empty model list received, using fallback');
         throw new Error('Empty model list');
       }
 
@@ -536,12 +599,12 @@ class GeminiCliClient {
     } catch (e) {
       const is403 = e.message.includes('403') || (e.response && e.response.status === 403);
       if (is403) {
-        console.warn('[Gemini CLI] 账号无权在线获取模型列表 (403)，已切换至内置模型列表。');
+        logger.warn('Account does not have permission to fetch models online (403), using fallback.');
       } else {
         const errorMsg = e.response
           ? `HTTP ${e.response.status}: ${JSON.stringify(e.response.data)}`
           : e.message;
-        console.error('[Gemini CLI] 获取模型列表失败:', errorMsg);
+        logger.error(`Failed to fetch models: ${errorMsg}`);
       }
 
       // 失败时提供备选模型列表，防止前端显示空白

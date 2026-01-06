@@ -14,7 +14,8 @@
   margin: 0 auto;
   background: #000;
   border-radius: 16px;
-  overflow: hidden;
+  /* overflow: hidden; */
+  /* 移除强制隐藏，由内部 plyr 处理，防止切断控制条 */
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
 }
 
@@ -33,7 +34,8 @@
   transition: opacity 0.3s ease;
 }
 
-.plyr-player-wrapper:hover .plyr-player-toolbar {
+.plyr-player-wrapper:hover .plyr-player-toolbar,
+.plyr-player-wrapper.controls-visible .plyr-player-toolbar {
   opacity: 1;
 }
 
@@ -96,6 +98,8 @@
 /* 控制栏背景 - 使用简单渐变确保文字可见 */
 .plyr__controls {
   background: linear-gradient(to top, rgba(0, 0, 0, 0.7), transparent) !important;
+  z-index: 20 !important;
+  padding-bottom: 5px !important;
 }
 
 /* 交互优化：手型光标 */
@@ -157,7 +161,8 @@
 
 .openlist-video-tab-view .plyr {
   border-radius: 16px;
-  overflow: hidden;
+  /* overflow: hidden; */
+  /* 移除强制隐藏 */
 }
 
 /* 加载状态 */
@@ -166,6 +171,7 @@
 }
 
 @keyframes plyr-pulse {
+
   0%,
   100% {
     opacity: 1;
@@ -310,12 +316,10 @@
   left: 0;
   right: 0;
   padding: 24px 28px;
-  background: linear-gradient(
-    to bottom,
-    rgba(0, 0, 0, 0.85) 0%,
-    rgba(0, 0, 0, 0.4) 60%,
-    transparent 100%
-  );
+  background: linear-gradient(to bottom,
+      rgba(0, 0, 0, 0.85) 0%,
+      rgba(0, 0, 0, 0.4) 60%,
+      transparent 100%);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -398,6 +402,7 @@
 }
 
 @keyframes audioHintPulse {
+
   0%,
   100% {
     opacity: 0.7;
@@ -438,12 +443,10 @@
   left: 0;
   right: 0;
   padding: 80px 28px 15px;
-  background: linear-gradient(
-    to top,
-    rgba(0, 0, 0, 0.9) 0%,
-    rgba(0, 0, 0, 0.5) 50%,
-    transparent 100%
-  );
+  background: linear-gradient(to top,
+      rgba(0, 0, 0, 0.9) 0%,
+      rgba(0, 0, 0, 0.5) 50%,
+      transparent 100%);
   z-index: 10;
   opacity: 0;
   pointer-events: none;
@@ -1217,9 +1220,9 @@
   padding: 0;
   min-height: unset;
   width: 100%;
-  /* 使用 vh 单位确保有明确的高度约束 */
   height: auto;
-  max-height: calc(100vh - 180px);
+  min-height: 300px;
+  max-height: calc(100vh - 150px);
   display: flex;
   justify-content: center;
   align-items: center;

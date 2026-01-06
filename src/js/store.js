@@ -7,7 +7,6 @@ import { reactive } from 'vue';
 
 // 确保 reactive 始终从全局 Vue 对象获取，增加鲁棒性
 // 纯 Vue 3 (ESM) 不需要 window.Vue 检测，直接使用导入的 reactive
-// const reactive = (obj) => { ... } - REMOVED
 
 /**
  * 模块配置 - 统一管理所有模块的元数据
@@ -74,11 +73,11 @@ export const MODULE_CONFIG = {
     icon: 'fa-music',
     description: '网易云音乐播放器',
   },
-  'ai-chat': {
-    name: 'AI Chat',
-    shortName: 'Chat',
-    icon: 'fa-comments',
-    description: 'AI 智能对话助手',
+  uptime: {
+    name: 'Uptime',
+    shortName: 'Uptime',
+    icon: 'fa-heartbeat',
+    description: '站点与服务可用性监测',
   },
 };
 
@@ -103,7 +102,7 @@ export const MODULE_GROUPS = [
     id: 'infrastructure',
     name: '基础设施',
     icon: 'fa-cubes',
-    modules: ['paas', 'dns', 'server'],
+    modules: ['paas', 'dns', 'server', 'uptime'],
   },
   {
     id: 'toolbox',
@@ -159,8 +158,8 @@ export const store = reactive({
     'self-h': true,
     server: true,
     totp: true,
-    music: false,
-    'ai-chat': true,
+    music: false, // 音乐模块默认隐藏
+    uptime: true,
   },
   channelEnabled: {
     antigravity: true,
@@ -181,7 +180,7 @@ export const store = reactive({
     'server',
     'totp',
     'music',
-    'ai-chat',
+    'uptime',
   ],
 
   // 界面设置
@@ -217,7 +216,7 @@ export const store = reactive({
   // Cron Scheduler (Added)
   cronTasks: [],
   cronLogs: [],
-  cronEditingTask: null, // { id, name, schedule, command, type, enabled } or null
+  cronEditingTask: null, // 当前编辑的任务对象 { id, name, schedule, command, type, enabled } 或 null
   cronLoading: false,
 
   openListAccounts: [],
@@ -416,6 +415,28 @@ export const store = reactive({
   r2PendingDownloadObj: null, // 等待下载的对象
   r2SelectedObjects: [], // 已选中的对象 keys
 
+  // Cloudflare Tunnel
+  tunnels: [],
+  tunnelsLoading: false,
+  showCreateTunnelModal: false,
+  newTunnelName: '',
+  tunnelSaving: false,
+  // Tunnel Token
+  showTunnelTokenModal: false,
+  selectedTunnelToken: '',
+  selectedTunnelForToken: null,
+  // Tunnel Config (Ingress)
+  showTunnelConfigModal: false,
+  selectedTunnelForConfig: null,
+  tunnelConfig: { ingress: [] },
+  tunnelConfigLoading: false,
+  tunnelConfigSaving: false,
+  // Tunnel Connections
+  showTunnelConnectionsModal: false,
+  selectedTunnelForConnections: null,
+  tunnelConnections: [],
+  tunnelConnectionsLoading: false,
+
   // OpenAI
   openaiEndpoints: [],
   openaiCurrentTab: 'endpoints',
@@ -427,19 +448,87 @@ export const store = reactive({
 
   // OpenAI Chat
   openaiChatMessages: [],
-  openaiChatModel: '',
-  openaiChatSystemPrompt: '你是一个有用的 AI 助手。',
+  openaiChatAttachments: [], // 当前待发送的附件
+  openaiChatModel: localStorage.getItem('openai_default_model') || '',
+  openaiChatEndpoint: localStorage.getItem('openai_chat_endpoint') || '', // 当前选中的对话端点
+  openaiDefaultChatModel: localStorage.getItem('openai_default_model') || '',
+  openaiChatSystemPrompt: localStorage.getItem('openai_system_prompt') || '你是一个有用的 AI 助手。',
   openaiChatMessageInput: '',
   openaiChatLoading: false,
   openaiAllModels: [],
   openaiModelSearch: '',
-  openaiChatSettings: {
-    temperature: 0.7,
-    top_p: 1,
-    max_tokens: 2000,
-    presence_penalty: 0,
-    frequency_penalty: 0,
+  dropdownModelSearch: '', // 下拉框内部的搜索文本
+  openaiShowEndpointDropdown: false, // 是否显示端点选择下拉框
+  openaiShowModelDropdown: false, // 是否显示模型选择下拉框
+  openaiChatSettings: (() => {
+    try {
+      const saved = localStorage.getItem('openai_chat_settings');
+      return saved ? JSON.parse(saved) : {
+        temperature: 0.7,
+        top_p: 1,
+        max_tokens: 2000,
+        presence_penalty: 0,
+        frequency_penalty: 0,
+      };
+    } catch {
+      return {
+        temperature: 0.7,
+        top_p: 1,
+        max_tokens: 2000,
+        presence_penalty: 0,
+        frequency_penalty: 0,
+      };
+    }
+  })(),
+
+  // Personas (人设系统) - 从后端加载
+  openaiPersonas: [],
+  openaiCurrentPersonaId: null,
+  showPersonaModal: false,
+  editingPersona: null,
+  personaForm: { name: '', systemPrompt: '', icon: 'fa-robot' },
+  showPersonaDropdown: false,
+
+  // Chat History
+  openaiChatSessions: [],           // 所有会话列表
+  openaiChatCurrentSessionId: null, // 当前会话 ID
+  openaiChatHistoryLoading: false,  // 加载状态
+  openaiChatHistoryCollapsed: true, // 侧边栏折叠状态 (默认隐藏)
+  openaiChatMobileSidebarOpen: false, // 移动端侧边栏是否打开
+  openaiChatSelectedSessionIds: [], // 选中的会话 ID（批量删除使用）
+  openaiChatAutoScroll: true,        // 自动滚动开关（用户向上滚动时自动关闭）
+  openaiChatLastMessageCount: 0,     // 上一次消息数量（用于检测新消息）
+
+  // Model Management
+  openaiSettingsTab: 'general',     // 设置弹窗当前标签页: general, models, endpoints
+  openaiPinnedModels: (() => { try { return JSON.parse(localStorage.getItem('openai_pinned_models')) || []; } catch { return []; } })(),
+  openaiHiddenModels: (() => { try { return JSON.parse(localStorage.getItem('openai_hidden_models')) || []; } catch { return []; } })(),
+  openaiModelPresets: (() => { try { return JSON.parse(localStorage.getItem('openai_model_presets')) || {}; } catch { return {}; } })(),
+  openaiShowHiddenModels: false,    // 是否显示隐藏的模型
+  openaiModelHealth: {},            // 模型健康状态: { modelId: { status: 'healthy'|'unhealthy'|'unknown', loading: false, latency: 0 } }
+  openaiModelHealthBatchLoading: false, // 批量检测加载状态
+  openaiHealthCheckModal: false,    // 健康检测弹窗显示
+  openaiHealthCheckForm: {          // 健康检测表单
+    useKey: 'single',               // single: 单端点, all: 所有端点
+    concurrency: false,             // 是否开启并发检测
+    timeout: 15                     // 超时时间(s)
   },
+
+  // 自动标题生成配置
+  openaiAutoTitleEnabled: (() => {
+    const saved = localStorage.getItem('openai_auto_title_enabled');
+    return saved !== null ? saved === 'true' : true; // 默认启用
+  })(),
+  openaiTitleModels: (() => {
+    try {
+      return JSON.parse(localStorage.getItem('openai_title_models')) || [];
+    } catch { return []; }
+  })(), // 标题生成使用的模型列表（支持容灾）
+  openaiTitleModelToAdd: '', // 待添加的标题模型（下拉框绑定）
+  openaiTitleGenerating: false, // 标题生成中状态
+  openaiTitleLastResult: null, // 上次生成结果 { success, model, title, error }
+
+  openaiSelectedEndpointId: '',     // 当前选择的端点 ID (用于筛选模型)
 
   // Antigravity
   antigravityAccounts: [],

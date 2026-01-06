@@ -25,7 +25,7 @@
     "antiTrunc": false
   },
   "claude-sonnet-4-5": {
-    "base": true,
+    "base": false,
     "fakeStream": false,
     "antiTrunc": false
   },
@@ -35,22 +35,22 @@
     "antiTrunc": true
   },
   "gemini-3-pro-image": {
-    "base": true,
+    "base": false,
     "fakeStream": false,
     "antiTrunc": false
   },
   "claude-opus-4-5-thinking": {
-    "base": true,
+    "base": false,
     "fakeStream": false,
     "antiTrunc": false
   },
   "claude-sonnet-4-5-thinking": {
-    "base": true,
+    "base": false,
     "fakeStream": false,
     "antiTrunc": false
   },
   "rev19-uic3-1p": {
-    "base": true,
+    "base": false,
     "fakeStream": false,
     "antiTrunc": false
   },
