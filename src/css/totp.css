@@ -501,7 +501,7 @@
 }
 
 .totp-modal .modal-body {
-  padding: 15px;
+  padding: 12px;
   /* 增大全局内边距，提升呼吸感 */
 }
 

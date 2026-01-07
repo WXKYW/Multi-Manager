@@ -1313,6 +1313,9 @@ const app = createApp({
               case 'uptime':
                 this.initUptimeModule();
                 break;
+              case 'notification':
+                this.initNotificationModule();
+                break;
               case 'aliyun':
                 if (this.aliyunSwitchTo) {
                   this.aliyunSwitchTo();
@@ -1426,6 +1429,9 @@ const app = createApp({
             case 'uptime':
               this.initUptimeModule();
               // Hook for auto-refresh if needed, but socket handles it
+              break;
+            case 'notification':
+              this.initNotificationModule();
               break;
           }
         });

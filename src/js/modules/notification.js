@@ -154,8 +154,8 @@ export const notificationMethods = {
       enabled: true,
       config: {
         host: 'smtp.gmail.com',
-        port: 587,
-        secure: false,
+        port: 465,
+        secure: true,
         auth: { user: '', pass: '' },
         to: '',
         bot_token: '',
@@ -169,22 +169,39 @@ export const notificationMethods = {
    * 编辑渠道
    */
   editNotificationChannel(channel) {
-    // 注意: 不能读取加密后的配置
+    // 基础配置模板
+    const defaultConfig = {
+      host: '',
+      port: 465,
+      secure: true,
+      auth: { user: '', pass: '' },
+      to: '',
+      bot_token: '',
+      chat_id: '',
+    };
+
+    // 解析并合并原有配置
+    let config = { ...defaultConfig };
+    try {
+      const sourceConfig = typeof channel.config === 'string'
+        ? JSON.parse(channel.config)
+        : (channel.config || {});
+
+      // 递归处理嵌套的 auth 对象
+      config = { ...config, ...sourceConfig };
+      if (sourceConfig.auth) {
+        config.auth = { ...config.auth, ...sourceConfig.auth };
+      }
+    } catch (e) {
+      console.warn('[Notification] Failed to parse channel config:', e);
+    }
+
     this.channelForm = {
       id: channel.id,
       name: channel.name,
       type: channel.type,
-      enabled: channel.enabled === 1,
-      config: {
-        // 需要重新输入配置
-        host: '',
-        port: 587,
-        secure: false,
-        auth: { user: '', pass: '' },
-        to: '',
-        bot_token: '',
-        chat_id: '',
-      },
+      enabled: !!channel.enabled,
+      config: config,
     };
     this.showChannelModal = true;
   },
@@ -313,18 +330,28 @@ export const notificationMethods = {
    * 编辑规则
    */
   editNotificationRule(rule) {
+    // 处理渠道列表（可能是 JSON 字符串）
+    let channels = rule.channels || [];
+    if (typeof channels === 'string') {
+      try {
+        channels = JSON.parse(channels);
+      } catch (e) {
+        channels = [];
+      }
+    }
+
     this.ruleForm = {
       id: rule.id,
       name: rule.name,
       source_module: rule.source_module,
       event_type: rule.event_type,
       severity: rule.severity,
-      channels: rule.channels || [],
-      conditions: rule.conditions || {},
-      suppression: rule.suppression || { repeat_count: 1, silence_minutes: 0 },
-      time_window: rule.time_window || { enabled: false },
+      channels: channels,
+      conditions: typeof rule.conditions === 'string' ? JSON.parse(rule.conditions) : (rule.conditions || {}),
+      suppression: typeof rule.suppression === 'string' ? JSON.parse(rule.suppression) : (rule.suppression || { repeat_count: 1, silence_minutes: 0 }),
+      time_window: typeof rule.time_window === 'string' ? JSON.parse(rule.time_window) : (rule.time_window || { enabled: false }),
       description: rule.description || '',
-      enabled: rule.enabled === 1,
+      enabled: !!rule.enabled,
     };
     this.showRuleModal = true;
   },
@@ -434,6 +461,28 @@ export const notificationMethods = {
     } catch (error) {
       console.error('[Notification] Failed to disable rule:', error);
       this.showGlobalToast('禁用失败', 'error');
+    }
+  },
+
+  /**
+   * 来源模块变更回调
+   */
+  onSourceModuleChange() {
+    if (this.ruleForm.source_module === 'uptime') {
+      this.ruleForm.event_type = 'down';
+    } else if (this.ruleForm.source_module === 'server') {
+      this.ruleForm.event_type = 'offline';
+    }
+  },
+
+  /**
+   * 同步 Email 安全连接设置
+   */
+  syncEmailSecure() {
+    if (this.channelForm.config.port === 465) {
+      this.channelForm.config.secure = true;
+    } else if (this.channelForm.config.port === 587) {
+      this.channelForm.config.secure = false;
     }
   },
 

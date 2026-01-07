@@ -58,7 +58,21 @@ class NotificationService extends EventEmitter {
         try {
             logger.debug(`触发告警: ${sourceModule}/${eventType}`);
 
-            // 查找匹配的规则
+            // 自动处理恢复：如果是恢复事件，重置对应的故障状态追踪
+            // 这样下次故障时 repeat_count 可以重新计数
+            if (eventType === 'up' || eventType === 'online') {
+                const oppositeType = eventType === 'up' ? 'down' : 'offline';
+                const downRules = storage.rule.getBySourceAndEvent(sourceModule, oppositeType);
+                if (downRules.length > 0) {
+                    logger.debug(`检测到恢复事件,正在重置 ${downRules.length} 条故障规则的状态记录`);
+                    for (const rule of downRules) {
+                        const fingerprint = this.generateFingerprint(rule, data);
+                        storage.stateTracking.reset(rule.id, fingerprint);
+                    }
+                }
+            }
+
+            // 查找匹配当前事件的规则
             const rules = storage.rule.getBySourceAndEvent(sourceModule, eventType);
 
             if (rules.length === 0) {
@@ -208,6 +222,11 @@ class NotificationService extends EventEmitter {
         this.queue.push(notification);
 
         logger.debug(`通知已加入队列: ${notification.title} (队列长度: ${this.queue.length})`);
+
+        // 确保队列处理器运行
+        if (!this.processing) {
+            this.startQueueProcessor();
+        }
     }
 
     /**

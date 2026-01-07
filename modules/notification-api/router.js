@@ -23,10 +23,25 @@ router.get('/channels', (req, res) => {
     try {
         const channels = storage.channel.getAll();
         // 不返回敏感配置
-        const safeChannels = channels.map(ch => ({
-            ...ch,
-            config: '***encrypted***',
-        }));
+        const safeChannels = channels.map(ch => {
+            let config = ch.config;
+            try {
+                // 如果是加密字符串，尝试解密
+                if (config && config.startsWith('u2f')) { // 简单的加密特征判断
+                    config = JSON.parse(decrypt(config));
+                } else {
+                    config = JSON.parse(config);
+                }
+            } catch (e) {
+                // 如果解析失败，可能是已加密但未匹配特征，或者本身就是存的明文但格式不对
+                try {
+                    config = JSON.parse(decrypt(ch.config));
+                } catch (e2) {
+                    config = {};
+                }
+            }
+            return { ...ch, config };
+        });
         res.json({ success: true, data: safeChannels });
     } catch (error) {
         logger.error(`获取渠道列表失败: ${error.message}`);
@@ -43,12 +58,24 @@ router.get('/channels/:id', (req, res) => {
         if (!channel) {
             return res.status(404).json({ success: false, error: '渠道不存在' });
         }
-        // 不返回敏感配置
+        let config = channel.config;
+        try {
+            // 尝试解密配置
+            config = JSON.parse(decrypt(config));
+        } catch (e) {
+            // 如果解密失败，尝试直接解析（可能是未加密的旧数据或明文）
+            try {
+                config = JSON.parse(channel.config);
+            } catch (e2) {
+                // 如果都失败，则返回空对象
+                config = {};
+            }
+        }
         res.json({
             success: true,
             data: {
                 ...channel,
-                config: '***encrypted***',
+                config,
             },
         });
     } catch (error) {
@@ -129,7 +156,7 @@ router.delete('/channels/:id', (req, res) => {
 });
 
 /**
- * 测试渠道
+ * 测试渠道 - 发送实际测试消息
  */
 router.post('/channels/:id/test', async (req, res) => {
     try {
@@ -141,17 +168,27 @@ router.post('/channels/:id/test', async (req, res) => {
         // 解密配置
         const config = JSON.parse(decrypt(channel.config));
 
+        const testTitle = '🔔 [测试] API Monitor 通知测试';
+        const testMessage = `这是一条来自 API Monitor 的测试通知。
+
+📋 渠道名称: ${channel.name}
+📧 渠道类型: ${channel.type === 'email' ? 'Email 邮箱' : 'Telegram'}
+⏰ 发送时间: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
+
+如果您收到此消息，说明通知渠道配置正确！`;
+
         let success = false;
         if (channel.type === 'email') {
-            success = await emailChannel.test(config);
+            success = await emailChannel.send(config, testTitle, testMessage);
         } else if (channel.type === 'telegram') {
-            success = await telegramChannel.test(config);
+            success = await telegramChannel.send(config, testTitle, testMessage);
         }
 
         if (success) {
-            res.json({ success: true, message: '测试成功' });
+            logger.info(`渠道测试成功: ${channel.name} (${channel.type})`);
+            res.json({ success: true, message: '测试消息已发送，请检查接收' });
         } else {
-            res.status(500).json({ success: false, error: '测试失败' });
+            res.status(500).json({ success: false, error: '测试消息发送失败' });
         }
     } catch (error) {
         logger.error(`测试渠道失败: ${error.message}`);

@@ -54,13 +54,13 @@
               <div class="channel-type">{{ getChannelTypeName(channel.type) }}</div>
             </div>
             <div class="channel-actions">
-              <button class="btn-icon" @click="testNotificationChannel(channel.id)" title="测试发送">
+              <button class="btn-icon-refined" @click="testNotificationChannel(channel.id)" title="发送测试通知">
                 <i class="fas fa-paper-plane"></i>
               </button>
-              <button class="btn-icon" @click="editNotificationChannel(channel)" title="编辑">
+              <button class="btn-icon-refined" @click="editNotificationChannel(channel)" title="编辑">
                 <i class="fas fa-edit"></i>
               </button>
-              <button class="btn-icon danger" @click="deleteNotificationChannel(channel.id)" title="删除">
+              <button class="btn-icon-refined danger" @click="deleteNotificationChannel(channel.id)" title="删除">
                 <i class="fas fa-trash"></i>
               </button>
             </div>
@@ -87,7 +87,7 @@
         </button>
       </div>
       <div class="notification-filter-bar">
-        <select v-model="notificationRuleFilter" class="form-select" style="width: auto;">
+        <select v-model="notificationRuleFilter" class="form-select-modern" style="width: auto;">
           <option value="">全部模块</option>
           <option value="uptime">Uptime 监控</option>
           <option value="server">主机监控</option>
@@ -121,17 +121,10 @@
               </div>
             </div>
             <div class="rule-actions">
-              <button v-if="!rule.enabled" class="btn btn-sm btn-success" @click="enableNotificationRule(rule.id)"
-                title="启用">
-                <i class="fas fa-play"></i>
-              </button>
-              <button v-else class="btn btn-sm btn-secondary" @click="disableNotificationRule(rule.id)" title="禁用">
-                <i class="fas fa-pause"></i>
-              </button>
-              <button class="btn-icon" @click="editNotificationRule(rule)" title="编辑">
+              <button class="btn-icon-refined" @click="editNotificationRule(rule)" title="编辑">
                 <i class="fas fa-edit"></i>
               </button>
-              <button class="btn-icon danger" @click="deleteNotificationRule(rule.id)" title="删除">
+              <button class="btn-icon-refined danger" @click="deleteNotificationRule(rule.id)" title="删除">
                 <i class="fas fa-trash"></i>
               </button>
             </div>
@@ -154,7 +147,7 @@
     <div v-show="notificationCurrentTab === 'history'" class="sub-tab-content quick-fade-in">
       <div class="notification-toolbar">
         <h3 style="margin: 0; flex: 1;">通知历史</h3>
-        <select v-model="notificationHistoryFilter" class="form-select" style="width: auto;">
+        <select v-model="notificationHistoryFilter" class="form-select-modern" style="width: auto;">
           <option value="">全部状态</option>
           <option value="sent">已发送</option>
           <option value="failed">失败</option>
@@ -184,12 +177,13 @@
           </div>
           <div class="history-content">
             <div class="history-title">{{ log.title }}</div>
-            <div class="history-message">{{ log.message.substring(0, 100) }}{{ log.message.length > 100 ? '...' : '' }}
-            </div>
-            <div class="history-meta">
-              <span class="meta-time">{{ formatNotificationTime(log.created_at) }}</span>
+            <div class="history-message"
+              style="white-space: pre-wrap; margin-top: 8px; font-family: var(--font-mono); font-size: 12px; background: var(--bg-tertiary); padding: 8px; border-radius: 6px;">
+              {{ log.message }}</div>
+            <div class="history-meta" style="margin-top: 8px;">
               <span v-if="log.error_message" class="meta-error">{{ log.error_message }}</span>
               <span v-if="log.retry_count > 0" class="meta-retry">重试 {{ log.retry_count }} 次</span>
+              <span class="meta-time">{{ formatNotificationTime(log.created_at) }}</span>
             </div>
           </div>
         </div>
@@ -212,77 +206,84 @@
       </button>
     </div>
     <div class="modal-body">
-      <div class="form-group">
-        <label>渠道类型</label>
-        <select v-model="channelForm.type" class="form-select" :disabled="channelForm.id !== null">
+      <div class="form-group-modern">
+        <label class="form-label-modern">渠道类型</label>
+        <select v-model="channelForm.type" class="form-select-modern" :disabled="channelForm.id !== null">
           <option value="email">Email</option>
           <option value="telegram">Telegram</option>
         </select>
       </div>
-      <div class="form-group">
-        <label>名称</label>
-        <input type="text" v-model="channelForm.name" class="form-input" placeholder="例如: 默认邮箱">
+      <div class="form-group-modern">
+        <label class="form-label-modern">名称</label>
+        <input type="text" v-model="channelForm.name" class="form-input-modern" placeholder="例如: 默认邮箱">
       </div>
-      <!-- Email 配置 -->
+
+      <!-- Email 专用配置 -->
       <template v-if="channelForm.type === 'email'">
-        <div class="form-group">
-          <label>SMTP 服务器</label>
-          <input type="text" v-model="channelForm.config.host" class="form-input" placeholder="smtp.gmail.com">
+        <div class="form-group-modern">
+          <label class="form-label-modern">SMTP 服务器</label>
+          <input type="text" v-model="channelForm.config.host" class="form-input-modern" placeholder="smtp.gmail.com">
         </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>端口</label>
-            <input type="number" v-model="channelForm.config.port" class="form-input" placeholder="587">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div class="form-group-modern">
+            <label class="form-label-modern">端口</label>
+            <input type="number" v-model.number="channelForm.config.port" class="form-input-modern" placeholder="465"
+              @change="syncEmailSecure">
           </div>
-          <div class="form-group">
-            <label>安全连接</label>
-            <select v-model="channelForm.config.secure" class="form-select">
+          <div class="form-group-modern">
+            <label class="form-label-modern">安全连接</label>
+            <select v-model="channelForm.config.secure" class="form-select-modern">
               <option :value="false">TLS (STARTTLS)</option>
-              <option :value="true">SSL</option>
+              <option :value="true">SSL (Direct)</option>
             </select>
           </div>
         </div>
-        <div class="form-group">
-          <label>发件人邮箱</label>
-          <input type="email" v-model="channelForm.config.auth.user" class="form-input" placeholder="your@gmail.com">
+        <div class="form-group-modern">
+          <label class="form-label-modern">发件人邮箱</label>
+          <input type="email" v-model="channelForm.config.auth.user" class="form-input-modern"
+            placeholder="your@gmail.com">
         </div>
-        <div class="form-group">
-          <label>密码 / App密码</label>
-          <input type="password" v-model="channelForm.config.auth.pass" class="form-input"
+        <div class="form-group-modern">
+          <label class="form-label-modern">密码 / App密码</label>
+          <input type="password" v-model="channelForm.config.auth.pass" class="form-input-modern"
             placeholder="your_app_password">
         </div>
-        <div class="form-group">
-          <label>收件人邮箱</label>
-          <input type="email" v-model="channelForm.config.to" class="form-input" placeholder="recipient@example.com">
+        <div class="form-group-modern">
+          <label class="form-label-modern">收件人邮箱</label>
+          <input type="email" v-model="channelForm.config.to" class="form-input-modern"
+            placeholder="recipient@example.com">
         </div>
       </template>
-      <!-- Telegram 配置 -->
-      <template v-else-if="channelForm.type === 'telegram'">
-        <div class="form-group">
-          <label>Bot Token</label>
-          <input type="text" v-model="channelForm.config.bot_token" class="form-input" placeholder="TOKEN">
+
+      <!-- Telegram 专用配置 -->
+      <template v-if="channelForm.type === 'telegram'">
+        <div class="form-group-modern">
+          <label class="form-label-modern">Bot Token</label>
+          <input type="text" v-model="channelForm.config.bot_token" class="form-input-modern"
+            placeholder="123456789:ABCDefgh...">
         </div>
-        <div class="form-group">
-          <label>Chat ID</label>
-          <input type="text" v-model="channelForm.config.chat_id" class="form-input" placeholder="Chat ID">
+        <div class="form-group-modern">
+          <label class="form-label-modern">Chat ID</label>
+          <input type="text" v-model="channelForm.config.chat_id" class="form-input-modern" placeholder="123456789">
         </div>
       </template>
-      <div class="form-group" style="margin-top: 20px;">
-        <label class="ag-switch">
-          <input type="checkbox" v-model="channelForm.enabled">
-          <div class="ag-switch-track">
-            <div class="ag-switch-knob"></div>
-          </div>
-          <span class="ag-switch-label">启用此渠道</span>
-        </label>
-      </div>
+
     </div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" @click="showChannelModal = false">取消</button>
-      <button class="btn btn-primary" @click="saveChannel" :disabled="notificationSaving">
-        <i v-if="notificationSaving" class="fas fa-spinner fa-spin"></i>
-        <i v-else class="fas fa-save"></i> 保存
-      </button>
+    <div class="modal-footer" style="display: flex; align-items: center; justify-content: space-between;">
+      <label class="ag-switch-container" style="margin: 0;">
+        <div class="ag-switch">
+          <input type="checkbox" v-model="channelForm.enabled">
+          <span class="ag-switch-slider"></span>
+        </div>
+        <span class="ag-switch-label">启用此渠道</span>
+      </label>
+      <div style="display: flex; gap: 10px;">
+        <button class="btn btn-secondary" @click="showChannelModal = false">取消</button>
+        <button class="btn btn-primary" @click="saveChannel" :disabled="notificationSaving">
+          <i v-if="notificationSaving" class="fas fa-spinner fa-spin"></i>
+          <i v-else class="fas fa-save"></i> 保存
+        </button>
+      </div>
     </div>
   </div>
 </div>
@@ -299,71 +300,86 @@
       </button>
     </div>
     <div class="modal-body">
-      <div class="form-group">
-        <label>规则名称</label>
-        <input type="text" v-model="ruleForm.name" class="form-input" placeholder="例如: 宕机告警">
+      <div class="form-group-modern">
+        <label class="form-label-modern">规则名称</label>
+        <input type="text" v-model="ruleForm.name" class="form-input-modern" placeholder="例如: 宕机告警">
       </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>来源模块</label>
-          <select v-model="ruleForm.source_module" class="form-select">
-            <option value="uptime">Uptime 监控</option>
-            <option value="server">主机监控</option>
-            <option value="zeabur">Zeabur</option>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+        <div class="form-group-modern">
+          <label class="form-label-modern">来源模块</label>
+          <select v-model="ruleForm.source_module" class="form-select-modern" @change="onSourceModuleChange">
+            <option value="uptime">Uptime 监测</option>
+            <option value="server">主机管理</option>
           </select>
         </div>
-        <div class="form-group">
-          <label>事件类型</label>
-          <select v-model="ruleForm.event_type" class="form-select">
-            <option v-if="ruleForm.source_module === 'uptime'" value="down">宕机</option>
-            <option v-if="ruleForm.source_module === 'uptime'" value="up">恢复</option>
-            <option v-if="ruleForm.source_module === 'server'" value="offline">离线</option>
+        <div class="form-group-modern">
+          <label class="form-label-modern">事件类型</label>
+          <select v-model="ruleForm.event_type" class="form-select-modern">
+            <template v-if="ruleForm.source_module === 'uptime'">
+              <option value="down">服务宕机 (Down)</option>
+              <option value="up">服务恢复 (Up)</option>
+            </template>
+            <template v-else-if="ruleForm.source_module === 'server'">
+              <option value="offline">主机离线 (Offline)</option>
+              <option value="online">主机上线 (Online)</option>
+            </template>
+            <template v-else>
+              <option value="info">常规消息</option>
+              <option value="error">错误/告警</option>
+            </template>
           </select>
         </div>
       </div>
-      <div class="form-group">
-        <label>告警级别</label>
-        <select v-model="ruleForm.severity" class="form-select">
-          <option value="critical">严重</option>
-          <option value="warning">警告</option>
-          <option value="info">信息</option>
+
+      <div class="form-group-modern">
+        <label class="form-label-modern">告警级别</label>
+        <select v-model="ruleForm.severity" class="form-select-modern">
+          <option value="info">常规 (Info)</option>
+          <option value="warning">重要 (Warning)</option>
+          <option value="critical">紧急 (Critical)</option>
         </select>
       </div>
-      <div class="form-group">
-        <label>通知渠道</label>
-        <div class="checkbox-group"
-          style="max-height: 120px; overflow-y: auto; padding: 10px; background: var(--bg-secondary); border-radius: 6px;">
-          <label v-for="channel in notificationChannels" :key="channel.id" v-if="channel.enabled">
-            <input type="checkbox" :value="channel.id" v-model="ruleForm.channels"> {{ channel.name }}
+
+      <div class="form-group-modern">
+        <label class="form-label-modern">通知渠道</label>
+        <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px;">
+          <label v-for="channel in (notificationChannels || []).filter(c => c.enabled)" :key="channel.id"
+            style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 12px; background: var(--bg-tertiary); border-radius: 8px; border: 1px solid var(--border-color); transition: all 0.2s;">
+            <input type="checkbox" :value="channel.id" v-model="ruleForm.channels"
+              style="width: 16px; height: 16px; accent-color: var(--notification-primary);">
+            <span style="font-size: 13px;">{{ channel.name }}</span>
           </label>
         </div>
       </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>重复抑制 (次)</label>
-          <input type="number" v-model="ruleForm.suppression.repeat_count" class="form-input" min="1">
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+        <div class="form-group-modern">
+          <label class="form-label-modern">重复抑制 (次)</label>
+          <input type="number" v-model.number="ruleForm.suppression.repeat_count" class="form-input-modern" min="1">
         </div>
-        <div class="form-group">
-          <label>静默期 (分钟)</label>
-          <input type="number" v-model="ruleForm.suppression.silence_minutes" class="form-input" min="0">
+        <div class="form-group-modern">
+          <label class="form-label-modern">静默期 (分钟)</label>
+          <input type="number" v-model.number="ruleForm.suppression.silence_minutes" class="form-input-modern" min="0">
         </div>
       </div>
-      <div class="form-group" style="margin-top: 20px;">
-        <label class="ag-switch">
-          <input type="checkbox" v-model="ruleForm.enabled">
-          <div class="ag-switch-track">
-            <div class="ag-switch-knob"></div>
-          </div>
-          <span class="ag-switch-label">启用此规则</span>
-        </label>
-      </div>
+
     </div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" @click="showRuleModal = false">取消</button>
-      <button class="btn btn-primary" @click="saveRule" :disabled="notificationSaving">
-        <i v-if="notificationSaving" class="fas fa-spinner fa-spin"></i>
-        <i v-else class="fas fa-save"></i> 保存
-      </button>
+    <div class="modal-footer" style="display: flex; align-items: center; justify-content: space-between;">
+      <label class="ag-switch-container" style="margin: 0;">
+        <div class="ag-switch">
+          <input type="checkbox" v-model="ruleForm.enabled">
+          <span class="ag-switch-slider"></span>
+        </div>
+        <span class="ag-switch-label">启用此规则</span>
+      </label>
+      <div style="display: flex; gap: 10px;">
+        <button class="btn btn-secondary" @click="showRuleModal = false">取消</button>
+        <button class="btn btn-primary" @click="saveRule" :disabled="notificationSaving">
+          <i v-if="notificationSaving" class="fas fa-spinner fa-spin"></i>
+          <i v-else class="fas fa-save"></i> 保存
+        </button>
+      </div>
     </div>
   </div>
 </div>

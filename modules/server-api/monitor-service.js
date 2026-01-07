@@ -88,6 +88,9 @@ class MonitorService {
     const agentStatus = agentService.getStatus(server.id);
     const agentMetrics = agentService.getMetrics(server.id);
 
+    // 状态记录逻辑
+    const oldStatus = server.status;
+
     try {
       // 1. 先用 TCP ping 测量网络延迟
       const responseTime = await this.tcpPing(server.host, server.port || 22);

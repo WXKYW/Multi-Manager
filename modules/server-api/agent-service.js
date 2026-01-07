@@ -415,6 +415,9 @@ class AgentService extends EventEmitter {
         resolved_id: serverId, // 告知 Agent 实际使用的 ID
       });
 
+      // 触发上线通知
+      this.triggerOnlineAlert(serverId);
+
       // 广播上线状态给前端
       this.broadcastServerStatus(serverId, 'online');
 
@@ -535,6 +538,7 @@ class AgentService extends EventEmitter {
         this.stopHeartbeat(serverId);
         this.updateServerStatus(serverId, 'offline');
         this.broadcastServerStatus(serverId, 'offline');
+        this.triggerOfflineAlert(serverId); // Ensure offline alert is triggered
 
         // 更新兼容缓存
         const status = this.legacyStatus.get(serverId);
@@ -653,13 +657,37 @@ class AgentService extends EventEmitter {
         serverId: serverId,
         serverName: server.name,
         host: server.host,
-        lastSeen: hostInfo?.timestamp,
+        lastSeen: hostInfo?.received_at || Date.now(),
         hostname: hostInfo?.hostname
       });
 
       logger.warn(`[主机告警] ${server.name} (${server.host}) 离线`);
     } catch (error) {
       logger.error(`触发离线告警失败: ${error.message}`);
+    }
+  }
+
+  /**
+   * 触发主机上线通知
+   */
+  triggerOnlineAlert(serverId) {
+    try {
+      const server = serverStorage.getById(serverId);
+      if (!server) return;
+
+      const notificationService = require('../notification-api/service');
+      const hostInfo = this.hostInfoCache.get(serverId);
+
+      notificationService.trigger('server', 'online', {
+        serverId: serverId,
+        serverName: server.name,
+        host: server.host,
+        hostname: hostInfo?.hostname
+      });
+
+      logger.info(`[主机通知] ${server.name} (${server.host}) 已上线`);
+    } catch (error) {
+      logger.error(`触发上线通知失败: ${error.message}`);
     }
   }
 

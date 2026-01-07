@@ -108,19 +108,19 @@ export const MODULE_GROUPS = [
     id: 'api-gateway',
     name: 'API 网关',
     icon: 'fa-bolt',
-    modules: ['openai', 'antigravity', 'gemini-cli', 'ai-chat'],
+    modules: ['openai', 'antigravity', 'gemini-cli'],
   },
   {
     id: 'infrastructure',
     name: '基础设施',
     icon: 'fa-cubes',
-    modules: ['paas', 'dns', 'aliyun', 'server', 'uptime'],
+    modules: ['paas', 'dns', 'aliyun', 'server'],
   },
   {
     id: 'toolbox',
     name: '工具箱',
     icon: 'fa-toolbox',
-    modules: ['self-h', 'totp', 'music', 'notification'],
+    modules: ['self-h', 'totp', 'music', 'uptime', 'notification'],
   },
 ];
 

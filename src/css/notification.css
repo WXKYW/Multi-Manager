@@ -1,21 +1,16 @@
 /* ==================== 通知管理模块样式 ==================== */
+/* 该文件仅包含通知模块特有的样式，通用组件请使用 styles.css 中的全局样式 */
+
+/* 容器与布局 */
 .notification-tab-content {
   transform: none !important;
-  /* 确保不成为 fixed 元素的包含块 */
   position: static !important;
 }
 
-
-/* 容器 */
 .notification-container {
   max-width: 1200px;
   margin: 0 auto;
   padding: 20px;
-}
-
-/* 标准子标签页由全局 styles.css 处理，此处仅保留与标准类名的兼容 */
-.notification-container .sec-tabs {
-  margin-bottom: 24px;
 }
 
 /* 工具栏 */
@@ -150,6 +145,28 @@
   color: #10b981;
 }
 
+/* 品牌化主题覆盖 */
+.theme-notification .notification-channel-card:hover,
+.theme-notification .notification-rule-card:hover {
+  border-color: var(--notification-primary);
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.15);
+}
+
+.theme-notification .btn-primary {
+  background: var(--notification-primary);
+  border-color: var(--notification-dark);
+  color: white;
+}
+
+.theme-notification .btn-primary:hover {
+  background: var(--notification-dark);
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.2);
+}
+
+.theme-notification .form-select-modern {
+  min-width: 130px;
+}
+
 /* ==================== 规则列表 ==================== */
 .notification-rule-list {
   display: flex;
@@ -277,23 +294,29 @@
 }
 
 .history-status {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
-  margin-top: 6px;
+  font-size: 16px;
 }
 
 .history-status.sent {
-  background: #10b981;
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
 }
 
 .history-status.failed {
-  background: #ef4444;
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
 }
 
 .history-status.pending {
-  background: #f59e0b;
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
 }
 
 .history-content {
@@ -324,338 +347,25 @@
 
 .history-meta .meta-time {
   color: var(--text-tertiary);
+  margin-top: 6px;
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 
 .history-meta .meta-error {
   color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
 }
 
 .history-meta .meta-retry {
   color: #f59e0b;
 }
 
-/* ==================== 弹窗 ==================== */
-.notification-modal-overlay {
-  z-index: 100000;
-  /* 提升层级，确保在侧边栏和顶部栏之上 */
-}
-
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
-  /* 稍微加深遮罩 */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  backdrop-filter: blur(4px);
-}
-
-.notification-modal {
-  background: var(--bg-primary);
-  border-radius: 12px;
-  width: 90%;
-  max-width: 500px;
-  max-height: 90vh;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-}
-
-.modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 20px 24px;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.modal-header h3 {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0;
-}
-
-.modal-body {
-  padding: 24px;
-  overflow-y: auto;
-  flex: 1;
-}
-
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  padding: 16px 24px;
-  border-top: 1px solid var(--border-color);
-}
-
-/* 表单 */
-.form-group {
-  margin-bottom: 16px;
-}
-
-.form-group label {
-  display: block;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-primary);
-  margin-bottom: 6px;
-}
-
-.form-input,
-.form-select,
-.form-textarea {
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  font-size: 14px;
-  transition: all 0.2s ease;
-}
-
-.form-input:focus,
-.form-select:focus,
-.form-textarea:focus {
-  outline: none;
-  border-color: var(--primary-color);
-  box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.1);
-}
-
-.form-textarea {
-  resize: vertical;
-  min-height: 80px;
-  font-family: inherit;
-}
-
-.form-row {
-  display: flex;
-  gap: 12px;
-}
-
-.form-row .form-group {
-  flex: 1;
-}
-
-.form-help {
-  padding: 12px;
-  background: var(--bg-tertiary);
-  border-radius: 6px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  line-height: 1.5;
-}
-
-.form-help i {
-  margin-right: 6px;
-}
-
-.form-help code {
-  background: var(--bg-primary);
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-family: 'Monaco', 'Consolas', monospace;
-  font-size: 11px;
-}
-
-.form-help a {
-  color: var(--primary-color);
-  text-decoration: none;
-}
-
-.form-help a:hover {
-  text-decoration: underline;
-}
-
-.checkbox-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.checkbox-group label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  color: var(--text-primary);
-  cursor: pointer;
-}
-
-.checkbox-group input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
-  cursor: pointer;
-}
-
-/* ==================== 按钮样式 ==================== */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  border: none;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  white-space: nowrap;
-}
-
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn-primary {
-  background: var(--primary-color);
-  color: white;
-}
-
-.btn-primary:hover:not(:disabled) {
-  opacity: 0.9;
-  transform: translateY(-1px);
-}
-
-.btn-secondary {
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background: var(--bg-tertiary);
-}
-
-.btn-success {
-  background: #10b981;
-  color: white;
-}
-
-.btn-success:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.btn-danger {
-  background: #ef4444;
-  color: white;
-}
-
-.btn-danger:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.btn-sm {
-  padding: 6px 12px;
-  font-size: 13px;
-}
-
-.btn-icon {
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.btn-icon:hover {
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-}
-
-.btn-icon.danger:hover {
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
-}
-
-/* ==================== 开关切换器 (Standard AG-Switch) ==================== */
-.ag-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.ag-switch input {
-  display: none;
-}
-
-.ag-switch-track {
-  width: 40px;
-  height: 22px;
-  background: var(--bg-tertiary);
-  border-radius: 22px;
-  position: relative;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  border: 1px solid var(--border-color);
-}
-
-.ag-switch-knob {
-  width: 16px;
-  height: 16px;
-  background: #fff;
-  border-radius: 50%;
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-}
-
-.ag-switch input:checked+.ag-switch-track {
-  background: var(--current-primary);
-  border-color: var(--current-primary);
-}
-
-.ag-switch input:checked+.ag-switch-track .ag-switch-knob {
-  left: 20px;
-}
-
-.ag-switch-label {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-primary);
-}
-
-/* ==================== 加载状态 ==================== */
-
-.loading-state {
-  text-align: center;
-  padding: 40px;
-  color: var(--text-tertiary);
-}
-
-/* ==================== 动画 ==================== */
-.fade-in-up {
-  animation: fadeInUp 0.3s ease-out;
-}
-
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
+/* 继承全局 .modal-overlay 定义，仅在需要时进行微调 */
+.notification-modal-overlay {}
 
 /* ==================== 响应式 ==================== */
 @media (max-width: 768px) {
@@ -674,21 +384,5 @@
   .notification-toolbar h3 {
     width: 100%;
     margin-bottom: 12px;
-  }
-
-  .notification-modal {
-    width: 95%;
-    max-height: 95vh;
-  }
-
-  .modal-header,
-  .modal-body,
-  .modal-footer {
-    padding: 16px;
-  }
-
-  .form-row {
-    flex-direction: column;
-    gap: 12px;
   }
 }

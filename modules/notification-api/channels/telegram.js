@@ -74,9 +74,6 @@ class TelegramChannel {
         // 格式化消息内容
         text += this.formatContent(message);
 
-        // 添加时间戳
-        text += `\n\n<code>${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}</code>`;
-
         return text;
     }
 
