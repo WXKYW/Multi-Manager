@@ -44,7 +44,7 @@ export const useAppStore = defineStore('app', {
             'self-h': true,
             server: true,
             totp: true,
-            music: false,
+            music: true,
             uptime: true,
             notification: true,
         },
