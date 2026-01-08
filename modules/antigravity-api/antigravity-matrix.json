@@ -6,8 +6,8 @@
   },
   "gemini-2.5-flash": {
     "base": true,
-    "fakeStream": true,
-    "antiTrunc": true
+    "fakeStream": false,
+    "antiTrunc": false
   },
   "gemini-2.5-flash-lite": {
     "base": true,
@@ -25,7 +25,7 @@
     "antiTrunc": false
   },
   "claude-sonnet-4-5": {
-    "base": false,
+    "base": true,
     "fakeStream": false,
     "antiTrunc": false
   },
@@ -35,22 +35,22 @@
     "antiTrunc": true
   },
   "gemini-3-pro-image": {
-    "base": false,
+    "base": true,
     "fakeStream": false,
     "antiTrunc": false
   },
   "claude-opus-4-5-thinking": {
-    "base": false,
+    "base": true,
     "fakeStream": false,
     "antiTrunc": false
   },
   "claude-sonnet-4-5-thinking": {
-    "base": false,
+    "base": true,
     "fakeStream": false,
     "antiTrunc": false
   },
   "rev19-uic3-1p": {
-    "base": false,
+    "base": true,
     "fakeStream": false,
     "antiTrunc": false
   },

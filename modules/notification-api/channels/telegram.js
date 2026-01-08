@@ -56,20 +56,7 @@ class TelegramChannel {
      * 格式化消息
      */
     formatMessage(title, message) {
-        // 根据严重程度添加不同的图标
-        const severityIcons = {
-            critical: '🚨',
-            warning: '⚠️',
-            info: 'ℹ️',
-        };
-
-        // 提取 severity (从 title 中)
-        let icon = '🔔';
-        if (title.includes('[CRITICAL]')) icon = severityIcons.critical;
-        else if (title.includes('[WARNING]')) icon = severityIcons.warning;
-        else if (title.includes('[INFO]')) icon = severityIcons.info;
-
-        let text = `${icon} <b>${this.escapeHTML(title)}</b>\n\n`;
+        let text = `<b>${this.escapeHTML(title)}</b>\n\n`;
 
         // 格式化消息内容
         text += this.formatContent(message);

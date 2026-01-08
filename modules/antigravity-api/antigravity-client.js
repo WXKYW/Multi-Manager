@@ -1,4 +1,5 @@
 const axios = require('axios');
+const crypto = require('crypto');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const AntigravityRequester = require('./antigravity-requester');
 const storage = require('./storage');
@@ -14,9 +15,62 @@ const DEFAULT_CONFIG = {
   MODELS_URL: 'https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:fetchAvailableModels',
   NO_STREAM_URL: 'https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:generateContent',
   API_HOST: 'daily-cloudcode-pa.sandbox.googleapis.com',
-  USER_AGENT: 'antigravity/1.11.3 windows/amd64',
+  USER_AGENT: 'antigravity/1.104.0 darwin/arm64',
+  // 端点回退顺序：sandbox → daily → prod
+  FALLBACK_BASE_URLS: [
+    'https://daily-cloudcode-pa.sandbox.googleapis.com',
+    'https://daily-cloudcode-pa.googleapis.com',
+    'https://cloudcode-pa.googleapis.com',
+  ],
   SYSTEM_INSTRUCTION: '',
 };
+
+// 模型名称别名映射（CLIProxyAPI 兼容）
+const MODEL_ALIAS_MAP = {
+  'gemini-3-pro-high': 'gemini-3-pro-preview',
+  'gemini-3-pro-image': 'gemini-3-pro-image-preview',
+  'gemini-3-flash': 'gemini-3-flash-preview',
+  'claude-sonnet-4-5': 'gemini-claude-sonnet-4-5',
+  'claude-sonnet-4-5-thinking': 'gemini-claude-sonnet-4-5-thinking',
+  'claude-opus-4-5-thinking': 'gemini-claude-opus-4-5-thinking',
+};
+
+const ALIAS_TO_MODEL_MAP = Object.fromEntries(
+  Object.entries(MODEL_ALIAS_MAP).map(([k, v]) => [v, k])
+);
+
+/**
+ * 生成稳定的 SessionId（基于第一条用户消息的 SHA256 哈希）
+ */
+function generateStableSessionId(contents) {
+  try {
+    for (const content of contents) {
+      if (content.role === 'user' && content.parts?.length > 0) {
+        const text = content.parts[0].text;
+        if (text) {
+          const hash = crypto.createHash('sha256').update(text).digest();
+          const n = hash.readBigInt64BE(0) & BigInt('0x7FFFFFFFFFFFFFFF');
+          return '-' + n.toString();
+        }
+      }
+    }
+  } catch (e) { /* fallback to random */ }
+  return String(-Math.floor(Math.random() * 9e18));
+}
+
+/**
+ * 模型名称转别名（用于 API 请求）
+ */
+function modelName2Alias(modelName) {
+  return MODEL_ALIAS_MAP[modelName] || modelName;
+}
+
+/**
+ * 别名转模型名称（用于响应解析）
+ */
+function alias2ModelName(alias) {
+  return ALIAS_TO_MODEL_MAP[alias] || alias;
+}
 
 let requester = null;
 
@@ -46,6 +100,7 @@ function getConfig() {
     API_HOST: configMap.API_HOST || DEFAULT_CONFIG.API_HOST,
     USER_AGENT: configMap.API_USER_AGENT || DEFAULT_CONFIG.USER_AGENT,
     SYSTEM_INSTRUCTION: configMap.SYSTEM_INSTRUCTION || DEFAULT_CONFIG.SYSTEM_INSTRUCTION,
+    FALLBACK_BASE_URLS: DEFAULT_CONFIG.FALLBACK_BASE_URLS,
     PROXY: configMap.PROXY || '',
     TIMEOUT: parseInt(configMap.TIMEOUT) || 30000,
   };
@@ -568,17 +623,54 @@ function convertOpenAIToAntigravityRequest(openaiRequest, token) {
         .filter(t => t.functionDeclarations[0].name)
       : [];
 
-  const sessionId = token?.sessionId || String(-Math.floor(Math.random() * 9e18));
+  // 使用稳定的 SessionId（基于用户消息哈希）
+  const sessionId = token?.sessionId || generateStableSessionId(contents);
 
   // 合并所有 system 消息（用双换行符分隔），如果没有则使用默认配置
   const mergedSystemText =
     systemParts.length > 0 ? systemParts.join('\n\n') : getConfig().SYSTEM_INSTRUCTION || '';
 
+  // 检测模型类型
+  const isClaude = model.toLowerCase().includes('claude');
+  const isGemini3Pro = model.includes('gemini-3-pro');
+
+  // 处理 thinking 配置
+  let thinkingConfig = generationConfig.thinkingConfig;
+  if (thinkingConfig && !model.startsWith('gemini-3-')) {
+    // 非 Gemini-3 模型：移除 thinkingLevel，设置 thinkingBudget: -1
+    if (thinkingConfig.thinkingLevel) {
+      delete thinkingConfig.thinkingLevel;
+      thinkingConfig.thinkingBudget = -1;
+    }
+  }
+
+  // Claude 模型：确保 thinkingBudget < maxOutputTokens
+  if (isClaude && thinkingConfig?.thinkingBudget > 0) {
+    const maxTokens = generationConfig.maxOutputTokens || 8192;
+    if (thinkingConfig.thinkingBudget >= maxTokens) {
+      thinkingConfig.thinkingBudget = maxTokens - 1;
+    }
+  }
+  // CLIProxyAPI 会在 parts[0] 插入 Antigravity 身份声明，然后追加原有 parts
+  let systemInstructionParts;
+  if (isClaude || isGemini3Pro) {
+    // Antigravity 身份前缀
+    const antigravityIdentity = 'You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding.You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.**Absolute paths only****Proactiveness**';
+
+    // 构建 parts 数组：先放身份声明，再追加原有内容
+    systemInstructionParts = [{ text: antigravityIdentity }];
+    if (mergedSystemText) {
+      systemInstructionParts.push({ text: mergedSystemText });
+    }
+  } else {
+    systemInstructionParts = [{ text: mergedSystemText }];
+  }
+
   const request = {
     contents,
     systemInstruction: {
       role: 'user',
-      parts: [{ text: mergedSystemText }],
+      parts: systemInstructionParts,
     },
     generationConfig,
     sessionId,
@@ -591,10 +683,11 @@ function convertOpenAIToAntigravityRequest(openaiRequest, token) {
 
   return {
     project: token?.project_id || '',
-    requestId: `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    requestId: `agent-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
     request,
-    model: model,
+    model: model,  // 使用原始模型名
     userAgent: 'antigravity',
+    requestType: 'agent',
   };
 }
 
@@ -789,82 +882,233 @@ async function chatCompletions(accountId, requestBody) {
   // 将 OpenAI 格式转换为 Antigravity API 格式
   const antigravityRequest = convertOpenAIToAntigravityRequest(requestBody, tokenObj);
 
-  try {
-    const response = await req.antigravity_fetch(config.NO_STREAM_URL, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(antigravityRequest),
-      proxy: config.PROXY,
-      timeout: config.TIMEOUT,
-    });
+  // Claude 和 Gemini-3-Pro 使用流式端点（CLIProxyAPI 的解决方案）
+  const model = requestBody.model || '';
+  const isClaude = model.toLowerCase().includes('claude');
+  const isGemini3Pro = model.includes('gemini-3-pro');
+  const useStreamEndpoint = isClaude || isGemini3Pro;
 
-    statusCode = response.status;
+  // 多端点回退逻辑
+  const fallbackUrls = config.FALLBACK_BASE_URLS || [];
+  const apiPath = useStreamEndpoint
+    ? '/v1internal:streamGenerateContent?alt=sse'
+    : '/v1internal:generateContent';
 
-    if (statusCode !== 200) {
-      const text = await response.text();
-      throw new Error(`API Error ${statusCode}: ${text}`);
-    }
+  let lastError = null;
+  for (let idx = 0; idx < fallbackUrls.length; idx++) {
+    const baseUrl = fallbackUrls[idx];
+    const fullUrl = baseUrl + apiPath;
+    const urlHost = new URL(baseUrl).host;
+    const requestHeaders = { ...headers, Host: urlHost };
 
-    const data = await response.json();
-
-    // 转换响应为 OpenAI 格式
-    const parts = data.response?.candidates?.[0]?.content?.parts || [];
-    let content = '';
-    let reasoningContent = '';
-    const toolCalls = [];
-
-    for (const part of parts) {
-      if (part.thought === true) {
-        reasoningContent += part.text || '';
-      } else if (part.text !== undefined) {
-        content += part.text;
-      } else if (part.functionCall) {
-        toolCalls.push({
-          id:
-            part.functionCall.id || `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          type: 'function',
-          function: {
-            name: part.functionCall.name,
-            arguments: JSON.stringify(part.functionCall.args || {}),
-          },
-        });
+    try {
+      if (useStreamEndpoint) {
+        // 使用流式端点但收集所有响应
+        const result = await collectStreamResponse(req, fullUrl, requestHeaders, antigravityRequest, config, requestBody.model);
+        return result;
       }
-    }
 
-    const usage = data.response?.usageMetadata || {};
-    const result = {
-      id: `chatcmpl-${Date.now().toString(36)}`,
-      object: 'chat.completion',
-      created: Math.floor(Date.now() / 1000),
-      model: requestBody.model,
-      choices: [
-        {
-          index: 0,
-          message: {
-            role: 'assistant',
-            content: content,
-            reasoning_content: reasoningContent,
+      const response = await req.antigravity_fetch(fullUrl, {
+        method: 'POST',
+        headers: requestHeaders,
+        body: JSON.stringify(antigravityRequest),
+        proxy: config.PROXY,
+        timeout: config.TIMEOUT,
+      });
+
+      statusCode = response.status;
+
+      if (statusCode === 429 && idx + 1 < fallbackUrls.length) {
+        console.log(`[Antigravity] Rate limited on ${urlHost}, trying next endpoint...`);
+        lastError = new Error(`API Error 429 on ${urlHost}`);
+        continue;
+      }
+
+      if (statusCode !== 200) {
+        const text = await response.text();
+        throw new Error(`API Error ${statusCode}: ${text}`);
+      }
+
+      const data = await response.json();
+
+      // 转换响应为 OpenAI 格式
+      const parts = data.response?.candidates?.[0]?.content?.parts || [];
+      let content = '';
+      let reasoningContent = '';
+      const toolCalls = [];
+
+      for (const part of parts) {
+        if (part.thought === true) {
+          reasoningContent += part.text || '';
+        } else if (part.text !== undefined) {
+          content += part.text;
+        } else if (part.functionCall) {
+          toolCalls.push({
+            id:
+              part.functionCall.id || `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            type: 'function',
+            function: {
+              name: part.functionCall.name,
+              arguments: JSON.stringify(part.functionCall.args || {}),
+            },
+          });
+        }
+      }
+
+      const usage = data.response?.usageMetadata || {};
+      const result = {
+        id: `chatcmpl-${Date.now().toString(36)}`,
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model: requestBody.model,
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: content,
+              reasoning_content: reasoningContent,
+            },
+            finish_reason: data.response?.candidates?.[0]?.finishReason?.toLowerCase() || 'stop',
           },
-          finish_reason: data.response?.candidates?.[0]?.finishReason?.toLowerCase() || 'stop',
+        ],
+        usage: {
+          prompt_tokens: usage.promptTokenCount || 0,
+          completion_tokens: usage.candidatesTokenCount || 0,
+          total_tokens: (usage.promptTokenCount || 0) + (usage.candidatesTokenCount || 0),
         },
-      ],
-      usage: {
-        prompt_tokens: usage.promptTokenCount || 0,
-        completion_tokens: usage.candidatesTokenCount || 0,
-        total_tokens: (usage.promptTokenCount || 0) + (usage.candidatesTokenCount || 0),
-      },
-    };
+      };
 
-    // 如果有工具调用，添加到消息中
-    if (toolCalls.length > 0) {
-      result.choices[0].message.tool_calls = toolCalls;
-      result.choices[0].finish_reason = 'tool_calls';
+      // 如果有工具调用，添加到消息中
+      if (toolCalls.length > 0) {
+        result.choices[0].message.tool_calls = toolCalls;
+        result.choices[0].finish_reason = 'tool_calls';
+      }
+
+      return result;
+    } catch (error) {
+      const errorMsg = error.message || '';
+      if (errorMsg.includes('429') && idx + 1 < fallbackUrls.length) {
+        console.log(`[Antigravity] Rate limited, trying next endpoint...`);
+        lastError = error;
+        continue;
+      }
+      if (idx + 1 >= fallbackUrls.length) {
+        throw error;
+      }
+      lastError = error;
     }
-
-    return result;
-  } catch (error) {
-    throw error;
   }
+
+  throw lastError || new Error('All Antigravity endpoints failed');
+}
+
+/**
+ * 收集流式响应并转换为非流式格式（用于 Claude 和 Gemini-3-Pro）
+ */
+async function collectStreamResponse(req, url, headers, antigravityRequest, config, modelName) {
+  let content = '';
+  let reasoningContent = '';
+  const toolCalls = [];
+  let usage = {};
+  let finishReason = 'stop';
+  let statusCode = 200;
+  let errorText = '';
+
+  const stream = req.antigravity_fetchStream(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(antigravityRequest),
+    proxy: config.PROXY,
+    timeout: config.TIMEOUT,
+  });
+
+  await new Promise((resolve, reject) => {
+    let buffer = '';
+    stream
+      .onStart(({ status }) => {
+        statusCode = status;
+      })
+      .onData(chunk => {
+        if (statusCode !== 200) {
+          errorText += chunk;
+          return;
+        }
+        buffer += chunk;
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            const parts = data.response?.candidates?.[0]?.content?.parts;
+
+            if (parts) {
+              for (const part of parts) {
+                if (part.thought === true) {
+                  reasoningContent += part.text || '';
+                } else if (part.text !== undefined) {
+                  content += part.text;
+                } else if (part.functionCall) {
+                  toolCalls.push({
+                    id: part.functionCall.id || `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                    type: 'function',
+                    function: {
+                      name: part.functionCall.name,
+                      arguments: JSON.stringify(part.functionCall.args || {}),
+                    },
+                  });
+                }
+              }
+            }
+
+            if (data.response?.usageMetadata) {
+              usage = data.response.usageMetadata;
+            }
+            if (data.response?.candidates?.[0]?.finishReason) {
+              finishReason = data.response.candidates[0].finishReason.toLowerCase();
+            }
+          } catch (e) { /* ignore parse errors */ }
+        }
+      })
+      .onEnd(() => {
+        if (statusCode !== 200) {
+          reject(new Error(`API Error ${statusCode}: ${errorText}`));
+        } else {
+          resolve();
+        }
+      })
+      .onError(reject);
+  });
+
+  const result = {
+    id: `chatcmpl-${Date.now().toString(36)}`,
+    object: 'chat.completion',
+    created: Math.floor(Date.now() / 1000),
+    model: modelName,
+    choices: [{
+      index: 0,
+      message: {
+        role: 'assistant',
+        content: content,
+        reasoning_content: reasoningContent,
+      },
+      finish_reason: finishReason,
+    }],
+    usage: {
+      prompt_tokens: usage.promptTokenCount || 0,
+      completion_tokens: usage.candidatesTokenCount || 0,
+      total_tokens: (usage.promptTokenCount || 0) + (usage.candidatesTokenCount || 0),
+    },
+  };
+
+  if (toolCalls.length > 0) {
+    result.choices[0].message.tool_calls = toolCalls;
+    result.choices[0].finish_reason = 'tool_calls';
+  }
+
+  return result;
 }
 
 /**

@@ -188,7 +188,14 @@ const autoCheckService = {
           const passedAccounts = globalModelStatus[modelId].passedIndices
             .sort((a, b) => a - b)
             .join(',');
-          const status = globalModelStatus[modelId].ok ? 'ok' : 'error';
+
+          let status = 'error';
+          if (globalModelStatus[modelId].ok) {
+            status = 'ok';
+          } else if (globalModelStatus[modelId].errors.some(e => e.toLowerCase().includes('429') || e.toLowerCase().includes('quota') || e.toLowerCase().includes('exhausted'))) {
+            status = 'quota';
+          }
+
           const errorLog = globalModelStatus[modelId].errors.join('\n');
           storage.recordModelCheck(modelId, status, errorLog, batchTime, passedAccounts);
         }
@@ -202,7 +209,14 @@ const autoCheckService = {
         const passedAccounts = globalModelStatus[modelId].passedIndices
           .sort((a, b) => a - b)
           .join(',');
-        const status = globalModelStatus[modelId].ok ? 'ok' : 'error';
+
+        let status = 'error';
+        if (globalModelStatus[modelId].ok) {
+          status = 'ok';
+        } else if (globalModelStatus[modelId].errors.some(e => e.toLowerCase().includes('429') || e.toLowerCase().includes('quota') || e.toLowerCase().includes('exhausted'))) {
+          status = 'quota';
+        }
+
         const errorLog = globalModelStatus[modelId].errors.join('\n');
         storage.recordModelCheck(modelId, status, errorLog, batchTime, passedAccounts);
       }
@@ -674,24 +688,31 @@ router.post('/accounts/check', async (req, res) => {
 
     logger.info(`Checking ${modelsToCheck.length} models across ${accountsToCheck.length} accounts at ${batchTime}`);
 
-    // 并行检测所有账号
-    logger.info(`Parallel checking ${accountsToCheck.length} accounts...`);
+    // 串行检测：按模型顺序，轮询账号进行检测，避免 429 错误
+    logger.info(`Sequential checking ${modelsToCheck.length} models across ${accountsToCheck.length} accounts...`);
 
-    const checkAccount = async (account, accountIndex) => {
-      logger.info(`Starting check for account #${accountIndex}: ${account.name || account.id}`);
+    // 工具函数：延迟
+    const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-      for (const modelId of modelsToCheck) {
-        // Claude thinking 模型要求 max_tokens > thinking.budget_tokens (1024)
-        const isThinkingModel =
-          modelId.includes('-thinking') || modelId.includes('opus') || modelId.includes('claude');
-        const testMaxTokens = isThinkingModel ? 2048 : 5;
+    // 逐个模型检测，每个模型检测所有账号
+    for (let modelIndex = 0; modelIndex < modelsToCheck.length; modelIndex++) {
+      const modelId = modelsToCheck[modelIndex];
 
-        const testRequest = {
-          model: modelId,
-          messages: [{ role: 'user', content: 'Hi' }],
-          max_tokens: testMaxTokens,
-          stream: false,
-        };
+      // Claude thinking 模型要求 max_tokens > thinking.budget_tokens (1024)
+      const isThinkingModel =
+        modelId.includes('-thinking') || modelId.includes('opus') || modelId.includes('claude');
+      const testMaxTokens = isThinkingModel ? 2048 : 5;
+
+      const testRequest = {
+        model: modelId,
+        messages: [{ role: 'user', content: 'Hi' }],
+        max_tokens: testMaxTokens,
+        stream: false,
+      };
+
+      // 对每个账号进行检测
+      for (let accountIdx = 0; accountIdx < accountsToCheck.length; accountIdx++) {
+        const account = accountsToCheck[accountIdx];
 
         try {
           // 添加超时 (15秒)
@@ -705,12 +726,13 @@ router.post('/accounts/check', async (req, res) => {
           ]);
 
           const hasContent = response?.choices?.[0]?.message?.content !== undefined;
+          const hasReasoning = response?.choices?.[0]?.message?.reasoning_content !== undefined;
           const hasToolCalls = Array.isArray(response?.choices?.[0]?.message?.tool_calls);
 
-          if (response && (hasContent || hasToolCalls)) {
+          if (response && (hasContent || hasReasoning || hasToolCalls)) {
             globalModelStatus[modelId].ok = true;
-            globalModelStatus[modelId].passedIndices.push(accountIndex);
-            logger.success(`${modelId} passed for ${account.name}`);
+            globalModelStatus[modelId].passedIndices.push(accountIdx + 1);
+            logger.success(`${modelId} passed (account: ${account.name})`);
           } else {
             const errorMsg =
               response && response.error ? response.error.message : 'Unexpected response structure';
@@ -719,22 +741,46 @@ router.post('/accounts/check', async (req, res) => {
           }
         } catch (e) {
           const errorMsg = e.response?.data?.error?.message || e.message || 'Unknown error';
-          globalModelStatus[modelId].errors.push(`${account.name}: ${errorMsg}`);
+          // 检测 429 错误
+          if (errorMsg.includes('429') || errorMsg.toLowerCase().includes('quota') || errorMsg.toLowerCase().includes('exhausted')) {
+            globalModelStatus[modelId].errors.push(`${account.name}: quota (429)`);
+          } else {
+            globalModelStatus[modelId].errors.push(`${account.name}: ${errorMsg}`);
+          }
           console.log(
-            `\x1b[31m[Antigravity]      ✗ ${modelId} failed for ${account.name}: ${errorMsg}\x1b[0m`
+            `\x1b[31m[Antigravity]      ✗ ${modelId} failed (${account.name}): ${errorMsg}\x1b[0m`
           );
         }
 
-        // 实时更新数据库，让前端能看到进度
-        const passedAccounts = globalModelStatus[modelId].passedIndices
-          .sort((a, b) => a - b)
-          .join(',');
-        const status = globalModelStatus[modelId].ok ? 'ok' : 'error';
-        const errorLog = globalModelStatus[modelId].errors.join('\n');
-        storage.recordModelCheck(modelId, status, errorLog, batchTime, passedAccounts);
+        // 账号间延迟，避免速率限制
+        if (accountIdx < accountsToCheck.length - 1) {
+          await delay(300);
+        }
       }
 
-      // 更新检测完成后的单个账号状态
+      // 实时更新数据库，让前端能看到进度
+      const passedAccounts = globalModelStatus[modelId].passedIndices
+        .sort((a, b) => a - b)
+        .join(',');
+
+      let status = 'error';
+      if (globalModelStatus[modelId].ok) {
+        status = 'ok';
+      } else if (globalModelStatus[modelId].errors.some(e => e.toLowerCase().includes('429') || e.toLowerCase().includes('quota') || e.toLowerCase().includes('exhausted'))) {
+        status = 'quota';
+      }
+
+      const errorLog = globalModelStatus[modelId].errors.join('\n');
+      storage.recordModelCheck(modelId, status, errorLog, batchTime, passedAccounts);
+
+      // 模型间延迟
+      if (modelIndex < modelsToCheck.length - 1) {
+        await delay(500);
+      }
+    }
+
+    // 更新所有账号的检测时间
+    for (const account of accountsToCheck) {
       storage.updateAccount(account.id, {
         last_check: batchTime,
         check_result: JSON.stringify({
@@ -742,19 +788,21 @@ router.post('/accounts/check', async (req, res) => {
           timestamp: Date.now(),
         }),
       });
-
-      return { accountId: account.id, accountIndex };
-    };
-
-    // 并行执行所有账号检测
-    await Promise.allSettled(accountsToCheck.map((account, i) => checkAccount(account, i + 1)));
+    }
 
     // 检测完成后统一更新数据库
     for (const modelId of modelsToCheck) {
       const passedAccounts = globalModelStatus[modelId].passedIndices
         .sort((a, b) => a - b)
         .join(',');
-      const status = globalModelStatus[modelId].ok ? 'ok' : 'error';
+
+      let status = 'error';
+      if (globalModelStatus[modelId].ok) {
+        status = 'ok';
+      } else if (globalModelStatus[modelId].errors.some(e => e.toLowerCase().includes('429') || e.toLowerCase().includes('quota') || e.toLowerCase().includes('exhausted'))) {
+        status = 'quota';
+      }
+
       const errorLog = globalModelStatus[modelId].errors.join('\n');
       storage.recordModelCheck(modelId, status, errorLog, batchTime, passedAccounts);
     }
