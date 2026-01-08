@@ -1425,8 +1425,10 @@ export const antigravityMethods = {
 
     // 只有检测明确完成且当前账号不在通过列表中，才显示失败
     // 检测完成的标志：status 为 ok 或 error，且有错误日志
-    if (checkComplete && (checkData.status === 'ok' || checkData.status === 'error')) {
-      return 'check-badge-error';
+    if (checkComplete) {
+      if (checkData.status === 'ok') return 'check-badge-success';
+      if (checkData.status === 'quota') return 'check-badge-quota';
+      if (checkData.status === 'error') return 'check-badge-error';
     }
 
     // 其他情况视为未检测（可能正在检测该账号）
@@ -1448,7 +1450,15 @@ export const antigravityMethods = {
       return `账号 #${accountIndex} 通过`;
     }
 
-    if (passedList.length > 0 || checkData.status === 'error') {
+    if (passedList.length > 0) {
+      return `账号 #${accountIndex} 失败`;
+    }
+
+    if (checkData.status === 'quota') {
+      return `账号 #${accountIndex} 额度消耗已尽 (429)`;
+    }
+
+    if (checkData.status === 'error') {
       return `账号 #${accountIndex} 失败`;
     }
 

@@ -1251,7 +1251,7 @@ export const selfHMethods = {
         speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] },
         keyboard: { focused: true, global: false },
         tooltips: { controls: true, seek: true },
-        fullscreen: { enabled: true, fallback: true },
+        fullscreen: { enabled: true, fallback: false },
         hideControls: true, // 恢复自动隐藏
         clickToPlay: true,
         i18n: {
