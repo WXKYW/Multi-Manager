@@ -402,8 +402,17 @@ class NotificationService extends EventEmitter {
             info: 'ℹ️',
         };
 
+
+        // 严重程度中文映射
+        const severityText = {
+            critical: '紧急',
+            warning: '警告',
+            info: '通知',
+        };
+
         const icon = severityIcon[rule.severity] || '🔔';
-        return `${icon} [${rule.severity.toUpperCase()}] ${rule.name}`;
+        const text = severityText[rule.severity] || rule.severity.toUpperCase();
+        return `${icon} [${text}] ${rule.name}`;
     }
 
     /**

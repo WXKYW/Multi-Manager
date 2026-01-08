@@ -41,7 +41,7 @@ export const zeaburMethods = {
           return true;
         }
       }
-    } catch (e) {}
+    } catch (e) { }
     return false;
   },
 
@@ -57,7 +57,7 @@ export const zeaburMethods = {
         // 余额会在 fetchData -> /temp-accounts 请求时由后端自动获取
         // 不再在这里单独刷新，避免并行请求导致数据不一致
       }
-    } catch (error) {}
+    } catch (error) { }
   },
 
   async refreshManagedAccountsBalance() {
@@ -116,7 +116,7 @@ export const zeaburMethods = {
         headers: store.getAuthHeaders(),
         body: JSON.stringify({ accounts: store.managedAccounts }),
       });
-    } catch (error) {}
+    } catch (error) { }
   },
 
   loadProjectCosts() {
@@ -169,7 +169,7 @@ export const zeaburMethods = {
       setTimeout(() => {
         this.fetchData();
       }, 100);
-    } catch (e) {}
+    } catch (e) { }
   },
 
   stopAutoRefresh() {
@@ -564,16 +564,17 @@ export const zeaburMethods = {
     });
 
     if (choice) {
-      const prefixInput = await this.showPrompt({
+      const promptResult = await store.showPrompt({
         title: '生成免费域名',
         message: '请输入您心仪的域名子域前缀：',
         placeholder: '例如: my-awesome-app',
         icon: 'fa-wand-magic-sparkles',
       });
 
-      if (prefixInput && prefixInput.trim()) {
+      // showPrompt 返回 { action, value } 对象
+      if (promptResult.action === 'confirm' && promptResult.value && promptResult.value.trim()) {
         // 核心优化：对于自动域名，仅发送前缀，由 Zeabur 补全后缀
-        const targetDomain = prefixInput.trim();
+        const targetDomain = promptResult.value.trim();
 
         toast.info('正在请求生成...');
         const addRes = await fetch('/api/zeabur/domain/add', {
@@ -1234,7 +1235,7 @@ export const zeaburMethods = {
         const wasAtBottom =
           this.$refs.logsText &&
           this.$refs.logsText.scrollHeight - this.$refs.logsText.scrollTop <=
-            this.$refs.logsText.clientHeight + 10;
+          this.$refs.logsText.clientHeight + 10;
 
         this.logsContent = newLogs;
         this.logsModalInfo.count = result.count;
