@@ -16,6 +16,7 @@ export const settingsMethods = {
       // 顺便加载数据库统计信息
       this.fetchDbStats();
       this.fetchLogSettings(); // 加载日志设置
+      this.fetch2FAStatus(); // 加载 2FA 状态
 
       if (response.ok) {
         const result = await response.json();
@@ -462,5 +463,132 @@ export const settingsMethods = {
   // 如果 main.js 引用了 saveSettings 作为别名
   saveSettings() {
     return this.saveUserSettingsToServer();
+  },
+
+  // ==================== 2FA 双因素认证 ====================
+
+  // 获取 2FA 状态
+  async fetch2FAStatus() {
+    try {
+      const response = await fetch('/api/auth/2fa/status', {
+        headers: store.getAuthHeaders(),
+      });
+      const result = await response.json();
+      if (result.success) {
+        this.twoFA.enabled = result.enabled;
+      }
+    } catch (error) {
+      console.error('获取 2FA 状态失败:', error);
+    }
+  },
+
+  // 开始 2FA 设置流程
+  async start2FASetup() {
+    this.twoFA.loading = true;
+    this.twoFA.error = '';
+    try {
+      const response = await fetch('/api/auth/2fa/setup', {
+        method: 'POST',
+        headers: store.getAuthHeaders(),
+      });
+      const result = await response.json();
+      if (result.success) {
+        this.twoFA.secret = result.secret;
+        this.twoFA.qrCode = result.qrCode;
+        this.twoFA.setupMode = true;
+        this.twoFA.confirmToken = '';
+      } else {
+        this.twoFA.error = result.error || '获取二维码失败';
+      }
+    } catch (error) {
+      this.twoFA.error = '请求失败: ' + error.message;
+    } finally {
+      this.twoFA.loading = false;
+    }
+  },
+
+  // 确认启用 2FA
+  async confirm2FASetup() {
+    if (!this.twoFA.confirmToken || this.twoFA.confirmToken.length !== 6) {
+      this.twoFA.error = '请输入 6 位验证码';
+      return;
+    }
+
+    this.twoFA.loading = true;
+    this.twoFA.error = '';
+    try {
+      const response = await fetch('/api/auth/2fa/enable', {
+        method: 'POST',
+        headers: store.getAuthHeaders(),
+        body: JSON.stringify({
+          secret: this.twoFA.secret,
+          token: this.twoFA.confirmToken,
+        }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        this.twoFA.enabled = true;
+        this.twoFA.setupMode = false;
+        this.twoFA.secret = '';
+        this.twoFA.qrCode = '';
+        this.twoFA.confirmToken = '';
+        this.showGlobalToast('双因素认证已启用', 'success');
+      } else {
+        this.twoFA.error = result.error || '启用失败';
+      }
+    } catch (error) {
+      this.twoFA.error = '请求失败: ' + error.message;
+    } finally {
+      this.twoFA.loading = false;
+    }
+  },
+
+  // 取消 2FA 设置
+  cancel2FASetup() {
+    this.twoFA.setupMode = false;
+    this.twoFA.secret = '';
+    this.twoFA.qrCode = '';
+    this.twoFA.confirmToken = '';
+    this.twoFA.error = '';
+  },
+
+  // 确认禁用 2FA
+  async confirm2FADisable() {
+    if (!this.twoFA.disablePassword) {
+      this.twoFA.error = '请输入密码';
+      return;
+    }
+
+    this.twoFA.loading = true;
+    this.twoFA.error = '';
+    try {
+      const response = await fetch('/api/auth/2fa/disable', {
+        method: 'POST',
+        headers: store.getAuthHeaders(),
+        body: JSON.stringify({
+          password: this.twoFA.disablePassword,
+        }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        this.twoFA.enabled = false;
+        this.twoFA.disableMode = false;
+        this.twoFA.disablePassword = '';
+        this.showGlobalToast('双因素认证已禁用', 'success');
+      } else {
+        this.twoFA.error = result.error || '禁用失败';
+      }
+    } catch (error) {
+      this.twoFA.error = '请求失败: ' + error.message;
+    } finally {
+      this.twoFA.loading = false;
+    }
+  },
+
+  // 取消禁用
+  cancel2FADisable() {
+    this.twoFA.disableMode = false;
+    this.twoFA.disablePassword = '';
+    this.twoFA.error = '';
   },
 };

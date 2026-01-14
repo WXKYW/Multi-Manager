@@ -10,7 +10,7 @@ const {
   CloudflareDnsRecord,
 } = require('../../../modules/cloudflare-api/models');
 const { OpenAIEndpoint, OpenAIHealthHistory } = require('../../../modules/openai-api/models');
-const { SystemConfig, Session, UserSettings, OperationLog } = require('./System');
+const { SystemConfig, Session, UserSettings, OperationLog, LoginAttempt } = require('./System');
 const {
   ServerAccount,
   ServerMonitorLog,
@@ -39,6 +39,7 @@ module.exports = {
   Session,
   UserSettings,
   OperationLog,
+  LoginAttempt,
 
   // 主机管理模块
   ServerAccount,

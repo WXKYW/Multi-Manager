@@ -126,6 +126,11 @@ export const authMethods = {
     }
   },
 
+  // 取消 2FA 验证返回密码输入
+  cancelLogin2FA() {
+    this.authStore.cancelLogin2FA();
+  },
+
   // 修改密码
   async changePassword() {
     this.passwordError = '';

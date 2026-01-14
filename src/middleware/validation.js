@@ -111,6 +111,7 @@ const uuidParamSchema = z.object({
  */
 const loginSchema = z.object({
     password: z.string().min(1, '密码不能为空'),
+    totpToken: z.string().length(6).optional(),
 });
 
 /**
