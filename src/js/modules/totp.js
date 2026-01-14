@@ -582,7 +582,7 @@ export const totpMethods = {
 
     this.$nextTick(async () => {
       try {
-        this.html5QrCode = new Html5Qrcode('qr-reader');
+        this.html5QrCode = new window.Html5Qrcode('qr-reader');
         const config = {
           fps: 15,
           qrbox: { width: 250, height: 250 },
