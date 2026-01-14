@@ -805,3 +805,93 @@ input[type='number'] {
   border-radius: 20px;
   border: 1px solid var(--border-color);
 }
+
+/* 2FA 账户安全模块专用样式 */
+.settings-2fa-container {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-color);
+}
+
+.settings-2fa-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.settings-2fa-title {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-2fa-title-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-2fa-title-text i {
+  color: var(--primary-color);
+}
+
+.settings-2fa-subtitle {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.settings-2fa-setup-panel {
+  background-color: var(--bg-tertiary);
+  border-radius: 12px;
+  padding: 16px;
+  margin-top: 12px;
+  border: 1px solid var(--border-color);
+}
+
+.settings-2fa-qr-wrapper {
+  text-align: center;
+  margin-bottom: 16px;
+}
+
+.settings-2fa-qr-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--text-primary);
+}
+
+.settings-2fa-qr-image {
+  width: 180px;
+  height: 180px;
+  border-radius: 12px;
+  background: #fff;
+  padding: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  margin: 0 auto;
+}
+
+.settings-2fa-manual-key {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 10px;
+}
+
+.settings-2fa-manual-key code {
+  background: var(--bg-secondary);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  color: var(--primary-color);
+}
+
+.settings-2fa-input-large {
+  text-align: center !important;
+  font-size: 20px !important;
+  letter-spacing: 0.3em !important;
+  font-weight: 700 !important;
+  font-family: var(--font-mono);
+}

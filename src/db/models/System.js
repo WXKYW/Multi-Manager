@@ -563,9 +563,179 @@ class OperationLog extends BaseModel {
   }
 }
 
+/**
+ * 登录尝试记录模型
+ * 用于登录保护（防暴力破解）
+ */
+class LoginAttempt extends BaseModel {
+  constructor() {
+    super('login_attempts');
+    this.ensureTable();
+  }
+
+  /**
+   * 确保表存在
+   */
+  ensureTable() {
+    try {
+      const db = this.getDb();
+      db.prepare(`
+        CREATE TABLE IF NOT EXISTS login_attempts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ip_address TEXT NOT NULL,
+          failed_count INTEGER DEFAULT 0,
+          locked_until TEXT,
+          last_attempt TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          UNIQUE(ip_address)
+        )
+      `).run();
+    } catch (e) {
+      // 表可能已存在，忽略错误
+    }
+  }
+
+  /**
+   * 记录失败的登录尝试
+   * @param {string} ip - IP 地址
+   * @returns {Object} 包含是否锁定和剩余尝试次数的信息
+   */
+  recordFailedAttempt(ip) {
+    const db = this.getDb();
+    const now = new Date().toISOString();
+    const maxAttempts = 5;
+    const lockDurationMinutes = 15;
+
+    // 获取或创建记录
+    let record = this.findOneWhere({ ip_address: ip });
+
+    if (!record) {
+      // 首次失败
+      db.prepare(`
+        INSERT INTO login_attempts (ip_address, failed_count, last_attempt)
+        VALUES (?, 1, ?)
+      `).run(ip, now);
+
+      return {
+        locked: false,
+        remainingAttempts: maxAttempts - 1,
+        lockUntil: null,
+      };
+    }
+
+    // 检查是否仍在锁定期
+    if (record.locked_until && new Date(record.locked_until) > new Date()) {
+      return {
+        locked: true,
+        remainingAttempts: 0,
+        lockUntil: record.locked_until,
+      };
+    }
+
+    // 如果锁定已过期，重置计数器
+    if (record.locked_until && new Date(record.locked_until) <= new Date()) {
+      db.prepare(`
+        UPDATE login_attempts
+        SET failed_count = 1, locked_until = NULL, last_attempt = ?
+        WHERE ip_address = ?
+      `).run(now, ip);
+
+      return {
+        locked: false,
+        remainingAttempts: maxAttempts - 1,
+        lockUntil: null,
+      };
+    }
+
+    // 增加失败计数
+    const newCount = record.failed_count + 1;
+
+    if (newCount >= maxAttempts) {
+      // 达到上限，锁定账户
+      const lockUntil = new Date();
+      lockUntil.setMinutes(lockUntil.getMinutes() + lockDurationMinutes);
+      const lockUntilStr = lockUntil.toISOString();
+
+      db.prepare(`
+        UPDATE login_attempts
+        SET failed_count = ?, locked_until = ?, last_attempt = ?
+        WHERE ip_address = ?
+      `).run(newCount, lockUntilStr, now, ip);
+
+      return {
+        locked: true,
+        remainingAttempts: 0,
+        lockUntil: lockUntilStr,
+      };
+    }
+
+    // 更新失败计数
+    db.prepare(`
+      UPDATE login_attempts
+      SET failed_count = ?, last_attempt = ?
+      WHERE ip_address = ?
+    `).run(newCount, now, ip);
+
+    return {
+      locked: false,
+      remainingAttempts: maxAttempts - newCount,
+      lockUntil: null,
+    };
+  }
+
+  /**
+   * 检查 IP 是否被锁定
+   * @param {string} ip - IP 地址
+   * @returns {Object} 锁定状态
+   */
+  isLocked(ip) {
+    const record = this.findOneWhere({ ip_address: ip });
+
+    if (!record || !record.locked_until) {
+      return { locked: false };
+    }
+
+    const lockUntil = new Date(record.locked_until);
+    if (lockUntil > new Date()) {
+      return {
+        locked: true,
+        lockUntil: record.locked_until,
+        remainingSeconds: Math.ceil((lockUntil - new Date()) / 1000),
+      };
+    }
+
+    return { locked: false };
+  }
+
+  /**
+   * 登录成功后重置尝试次数
+   * @param {string} ip - IP 地址
+   */
+  resetAttempts(ip) {
+    const db = this.getDb();
+    db.prepare(`
+      DELETE FROM login_attempts
+      WHERE ip_address = ?
+    `).run(ip);
+  }
+
+  /**
+   * 清理过期的锁定记录
+   */
+  cleanExpiredLocks() {
+    const db = this.getDb();
+    const result = db.prepare(`
+      DELETE FROM login_attempts
+      WHERE locked_until IS NOT NULL AND locked_until < datetime('now')
+    `).run();
+    return result.changes;
+  }
+}
+
 module.exports = {
   SystemConfig: new SystemConfig(),
   Session: new Session(),
   UserSettings: new UserSettings(),
   OperationLog: new OperationLog(),
+  LoginAttempt: new LoginAttempt(),
 };

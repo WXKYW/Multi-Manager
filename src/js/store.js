@@ -154,6 +154,9 @@ export const store = reactive({
   showSetPasswordModal: false,
   loginError: '',
   loginPassword: '',
+  loginLoading: false, // 登录按钮加载状态
+  loginRequire2FA: false, // 是否需要 2FA 验证
+  loginTotpToken: '', // 2FA 验证码输入
   setPassword: '',
   setPasswordConfirm: '',
   setPasswordError: '',
@@ -211,6 +214,26 @@ export const store = reactive({
   singlePageMode: false, // 单页模式（通过 URL 路径访问特定模块时隐藏导航）
   mobileSettingsNavExpanded: false, // 移动端设置导航展开状态
   navGroupExpanded: null, // 当前展开的分组 ID (null 表示都收起)
+
+  // 账户安全设置
+  newPassword: '',
+  confirmPassword: '',
+  passwordError: '',
+  passwordSuccess: '',
+  settingsCurrentTab: 'general',
+
+  // 2FA 双因素认证
+  twoFA: {
+    enabled: false,
+    loading: false,
+    setupMode: false,
+    disableMode: false,
+    secret: '',
+    qrCode: '',
+    confirmToken: '',
+    disablePassword: '',
+    error: '',
+  },
 
   // TOTP 模块设置
   totpSettings: {

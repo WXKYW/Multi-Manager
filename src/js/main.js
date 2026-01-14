@@ -191,6 +191,15 @@ const app = createApp({
         get: () => authStore.loginError,
         set: v => (authStore.loginError = v),
       }),
+      loginRequire2FA: computed({
+        get: () => authStore.loginRequire2FA,
+        set: v => (authStore.loginRequire2FA = v),
+      }),
+      loginTotpToken: computed({
+        get: () => authStore.loginTotpToken,
+        set: v => (authStore.loginTotpToken = v),
+      }),
+      loginLoading: computed(() => authStore.loginLoading),
       setPassword: computed({
         get: () => authStore.setPassword,
         set: v => (authStore.setPassword = v),
@@ -218,6 +227,8 @@ const app = createApp({
       sortedOpenListFiles,
       isSelfHVideoActive,
       moduleGroups: appStore.moduleGroups,
+      // 认证/管理动作
+      handleTotpInput: () => authStore.handleTotpInput(),
     };
   },
   data() {

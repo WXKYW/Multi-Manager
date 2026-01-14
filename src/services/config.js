@@ -6,6 +6,7 @@ const path = require('path');
 const { SystemConfig, ZeaburAccount } = require('../db/models');
 const dbService = require('../db/database');
 const { apiCache } = require('../utils/cache');
+const { hashPasswordSync, isHashed } = require('../utils/password');
 
 // 初始化数据库
 dbService.initialize();
@@ -123,11 +124,13 @@ function isPasswordSavedToFile() {
 }
 
 /**
- * 保存管理员密码到数据库
+ * 保存管理员密码到数据库（自动哈希）
  */
 function saveAdminPassword(password) {
   try {
-    SystemConfig.setConfig('admin_password', password, '管理员密码');
+    // 如果密码尚未哈希，则进行哈希处理
+    const hashedPassword = isHashed(password) ? password : hashPasswordSync(password);
+    SystemConfig.setConfig('admin_password', hashedPassword, '管理员密码(哈希)');
     // 清除缓存
     apiCache.delete('config:admin_password');
     return true;
