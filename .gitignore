@@ -20,7 +20,6 @@ antigravity-accounts-*.json
 docs/MODULE_NAMING.md
 inspect_db.js
 inspect_logs.js
-
 # ====================
 # 用户数据 & 数据库
 # ====================
