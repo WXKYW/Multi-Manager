@@ -12,10 +12,30 @@ const imageUploadCache = new Map(); // 图片上传缓存
 import { renderMarkdown } from './utils.js';
 
 export const openaiMethods = {
+  // 从内容中提取思考标签（支持各种变体如 <think>, <think_nya>, <thinking> 等）
+  extractThinkingContent(content) {
+    if (!content || typeof content !== 'string') return { thinking: '', cleaned: content || '' };
+    
+    // 匹配各种思考标签变体: <think>, <think_nya>, <thinking>, etc.
+    const thinkingPattern = /<(think(?:ing|_\w+)?)\s*>([\s\S]*?)<\/\1>/gi;
+    let thinking = '';
+    let cleaned = content;
+    
+    let match;
+    while ((match = thinkingPattern.exec(content)) !== null) {
+      thinking += match[2].trim() + '\n';
+    }
+    
+    // 移除所有思考标签
+    cleaned = content.replace(thinkingPattern, '').trim();
+    
+    return { thinking: thinking.trim(), cleaned };
+  },
+
   // 带缓存的消息渲染（避免 Base64 图片导致的重复计算）
   getCachedMessageHtml(msg, field = 'content') {
     if (!msg) return '';
-    const content = msg[field];
+    let content = msg[field];
     if (content === undefined || content === null) return '';
 
     // 生成缓存 key
@@ -23,10 +43,22 @@ export const openaiMethods = {
     const contentKey = `_cachedSource_${field}`;
 
     // 检查缓存是否有效（内容未变化）
-    // 对于数组类型内容，使用 JSON.stringify 比较（虽然有性能开销，但只在首次渲染时执行）
     const contentHash = typeof content === 'string' ? content : JSON.stringify(content);
     if (msg[cacheKey] && msg[contentKey] === contentHash) {
       return msg[cacheKey];
+    }
+
+    // 对于 content 字段，先过滤思考标签
+    if (field === 'content' && typeof content === 'string') {
+      const { thinking, cleaned } = this.extractThinkingContent(content);
+      
+      // 如果提取到了思考内容且 msg.reasoning 为空，自动填充
+      if (thinking && !msg.reasoning) {
+        msg.reasoning = thinking;
+        msg.showReasoning = false; // 默认折叠
+      }
+      
+      content = cleaned;
     }
 
     // 渲染并缓存
