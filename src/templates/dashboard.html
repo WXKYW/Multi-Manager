@@ -247,10 +247,9 @@
             <div style="font-size: 11px; color: var(--text-tertiary)">
               总调用 {{ dashboardStats.antigravity.total_calls }} 次
             </div>
-            <div class="api-progress-track">
-              <div class="api-progress-bar" style="background: var(--ag-primary)"
-                :style="{ width: (dashboardStats.antigravity.total_calls ? (dashboardStats.antigravity.success_calls/dashboardStats.antigravity.total_calls*100) : 0) + '%' }">
-              </div>
+            <div class="chart-container"
+              style="position: relative; height: 50px; width: 100%; margin-top: 8px; margin-bottom: 4px;">
+              <canvas ref="agChart" style="width: 100%; height: 100%; display: block;"></canvas>
             </div>
           </div>
           <div class="api-stat-group" @click="mainActiveTab = 'gemini-cli'">
@@ -261,10 +260,9 @@
             <div style="font-size: 11px; color: var(--text-tertiary)">
               总调用 {{ dashboardStats.geminiCli.total_calls }} 次
             </div>
-            <div class="api-progress-track">
-              <div class="api-progress-bar" style="background: var(--gemini-primary)"
-                :style="{ width: (dashboardStats.geminiCli.total_calls ? (dashboardStats.geminiCli.success_calls/dashboardStats.geminiCli.total_calls*100) : 0) + '%' }">
-              </div>
+            <div class="chart-container"
+              style="position: relative; height: 50px; width: 100%; margin-top: 8px; margin-bottom: 4px;">
+              <canvas ref="geminiChart" style="width: 100%; height: 100%; display: block;"></canvas>
             </div>
           </div>
         </div>

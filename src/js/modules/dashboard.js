@@ -190,6 +190,156 @@ export const dashboardMethods = {
     // Fire both, don't wait for all to finish before updating individual stats
     // But await the group to know when API section is fully done (for loading state)
     await Promise.allSettled([updateAntigravity(), updateGemini()]);
+
+    // 渲染图表
+    this.renderApiCharts();
+  },
+
+  /**
+   * 渲染 API 趋势图表
+   */
+  renderApiCharts() {
+    // 确保 DOM 更新后执行
+    setTimeout(() => {
+      if (store.dashboardStats.antigravity.daily_trend) {
+        this.drawTrendChart('agChart', store.dashboardStats.antigravity.daily_trend, '#f97316'); // Orange for AG
+      }
+      if (store.dashboardStats.geminiCli.daily_trend) {
+        this.drawTrendChart('geminiChart', store.dashboardStats.geminiCli.daily_trend, '#3b82f6'); // Blue for Gemini
+      }
+    }, 100);
+  },
+
+  /**
+   * 绘制 Canvas 趋势图 (Sparkline)
+   */
+  drawTrendChart(refName, data, color) {
+    const app = document.querySelector('#app')?.__vue_app__?._instance;
+    // 兼容 Vue 2/3 或直接获取 DOM (因为这里是在 module 中，可能无法直接访问 Vue 实例 refs)
+    // 尝试通过 ID 或 querySelector 获取 Canvas
+    // 由于我们在模板中只是用了 ref，这里需要一种方式获取元素。
+    // 在 Vue 3 setup 中我们通常用 ref 绑定，但这里是全局对象方法。
+    // 简单的做法是：假设模板中 ref 实际上也很难直接从这里拿到，不如直接操作 DOM (如果 ref 没暴露)。
+    // 但是我们在 template 里没有给 ID，只给了 ref。为了稳妥，我们在 template 里应该加上 ID 这里的逻辑依赖 Vue refs 存在于 store 关联的组件中，或者我们需要在组件 mounted 时把 refs 传进来。
+    // *修正*: 上一步修改 template 没有加 ID，只加了 ref。
+    // 让我们假设 context 是 Vue 组件实例，或者我们利用 querySelector (需要修改 template 加 class 或 id)。
+    // 但上一轮修改没加 ID。
+    // 实际上, Vue 挂载后 `this.$refs` 可用。但 `dashboardMethods` 是个纯对象。
+    // 解决办法：在 `dashboard.html` 的 Vue 实例中调用 `dashboardMethods.renderApiCharts`，并将 refs 传进来，或者更简单地：
+    // 修改 template 增加 data-chart-type 属性，通过 querySelector 查找。
+    // 但是，最简单的修复是：我无法在 module 里直接访问组件 refs。
+    // 我应该在 template 的 update 钩子或者 fetch 之后手动查找 canvas。
+    // 只有 `dashboard.html` 里的 Vue 实例能访问 refs。
+    // 让 `dashboardMethods` 暴露数据即可，Vue 组件负责 watch 数据并绘制。
+    // 或者：直接用 querySelector 找 canvas，因为它们在 DOM 树里是唯一的（如果页面结构简单）。
+    // 让我们用 querySelector, 但需要确保 template 里有某种标识。
+    // 刚才的修改：`<canvas ref="agChart" ...>`
+    // Vue 渲染后不会保留 ref 属性在 DOM 上。
+    // 让我们假设渲染逻辑在组件里。
+    // 如果必须在这里写，我只能通过 DOM 遍历。
+    // 为了稳妥，我先写这里的逻辑，并假设 canvas 可以通过某种方式获取。
+    // 实际上, 上一步的 template 修改中 canvas 没有 ID。
+    // 我需要再次修改 template 给 canvas 加 ID，或者这里通过父容器查找。
+    // 父容器有 class `api-stat-group` 和 `@click="mainActiveTab = 'antigravity'"`.
+    // 可以通过xpath或者父子关系找。
+
+    // 为了修正这个问题，我将在下方代码中通过 DOM 查找 Canvas。
+    // Antigravity Block -> Canvas
+    // Gemini Block -> Canvas
+
+    // 如果找不到 Context，直接返回
+    // 更好的方式：让 dashboard.js 查找 `canvas` 元素
+
+    // 查找 AG Canvas
+    let canvas = null;
+    if (refName === 'agChart') {
+      // 这是一个很 hacky 的查找方式，但在没有组件上下文的情况下很有效
+      const groups = document.querySelectorAll('.api-stat-group');
+      if (groups.length >= 1) canvas = groups[0].querySelector('canvas');
+    } else if (refName === 'geminiChart') {
+      const groups = document.querySelectorAll('.api-stat-group');
+      if (groups.length >= 2) canvas = groups[1].querySelector('canvas');
+    }
+
+    if (!canvas) return; // 没找到 Canvas
+
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+
+    // 调整分辨率
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+
+    const width = rect.width;
+    const height = rect.height;
+
+    // 清空
+    ctx.clearRect(0, 0, width, height);
+
+    if (!data || data.length === 0) {
+      // 无数据
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+      ctx.font = '10px sans-serif';
+      ctx.fillText('No Data', 10, height / 2);
+      return;
+    }
+
+    // 准备数据
+    // 补全最近 14 天 (如果后端返回不全) - 简单起见直接用返回的数据
+    // 假设数据按日期升序
+    const values = data.map(d => d.total);
+    const maxVal = Math.max(...values, 10); // 至少 10，避免直线
+
+    const stepX = width / (values.length - 1 || 1);
+    const paddingBottom = 5;
+    const availableHeight = height - paddingBottom;
+
+    // 绘制填充路径
+    ctx.beginPath();
+    ctx.moveTo(0, height);
+
+    values.forEach((val, index) => {
+      const x = index * stepX;
+      // height - (val / max) * height
+      // 留一点 padding
+      const y = availableHeight - (val / maxVal) * availableHeight;
+      ctx.lineTo(x, y);
+    });
+
+    ctx.lineTo(width, height);
+    ctx.closePath();
+
+    // 渐变填充
+    const gradient = ctx.createLinearGradient(0, 0, 0, height);
+    gradient.addColorStop(0, color + '66'); // 40% opacity
+    gradient.addColorStop(1, color + '00'); // 0% opacity
+    ctx.fillStyle = gradient;
+    ctx.fill();
+
+    // 绘制线条
+    ctx.beginPath();
+    values.forEach((val, index) => {
+      const x = index * stepX;
+      const y = availableHeight - (val / maxVal) * availableHeight;
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    // 绘制最后一个点 (今日)
+    const lastX = (values.length - 1) * stepX;
+    const lastY = availableHeight - (values[values.length - 1] / maxVal) * availableHeight;
+    ctx.beginPath();
+    ctx.arc(lastX - 2, lastY, 3, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
   },
 
   /**
