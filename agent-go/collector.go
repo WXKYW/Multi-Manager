@@ -103,6 +103,10 @@ type Collector struct {
 	// GPU 采集频率控制
 	lastGPUMetadataTime time.Time
 
+	// CPU 采集缓存
+	lastCPUTime  time.Time
+	lastCPUUsage float64
+
 	// Windows Native (PDH)
 	pdhQuery   uintptr
 	pdhCounter uintptr
