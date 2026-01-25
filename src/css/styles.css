@@ -44,6 +44,27 @@ textarea {
   resize: none;
 }
 
+button,
+a,
+input,
+select,
+textarea,
+label,
+summary,
+[role="button"],
+[role="link"],
+[role="checkbox"],
+[role="radio"],
+[role="switch"],
+[role="tab"],
+[tabindex] {
+  will-change: transform, background-color, border-color, opacity;
+  transform-origin: center center;
+  backface-visibility: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+
 code,
 pre,
 .code-font,
