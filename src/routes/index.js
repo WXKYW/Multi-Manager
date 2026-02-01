@@ -798,6 +798,7 @@ function registerRoutes(app) {
     'cloudflare-api': '/api/cloudflare',
     'flyio-api': '/api/flyio',
     'aliyun-api': '/api/aliyun',
+    'filebox-api': '/api/filebox',
     'tencent-api': '/api/tencent',
     'openai-api': '/api/openai',
     'openlist-api': '/api/openlist',
@@ -827,7 +828,7 @@ function registerRoutes(app) {
           const routePath = moduleRouteMap[moduleName] || `/api/${moduleName.replace('-api', '')}`;
 
           // 根据模块特性决定是否应用认证中间件
-          if (moduleName === 'antigravity-api' || moduleName === 'gemini-cli-api') {
+          if (moduleName === 'antigravity-api' || moduleName === 'gemini-cli-api' || moduleName === 'filebox-api') {
             app.use(routePath, moduleRouter);
           } else {
             // 模块路由优先挂载

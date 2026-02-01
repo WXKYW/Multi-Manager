@@ -85,6 +85,12 @@ export const MODULE_CONFIG = {
     icon: 'fa-heartbeat',
     description: '站点与服务可用性监测',
   },
+  filebox: {
+    name: '文件柜',
+    shortName: 'FileBox',
+    icon: 'fa-box-open',
+    description: '文件分享与暂存',
+  },
   notification: {
     name: '通知',
     shortName: 'Alerts',
@@ -120,7 +126,7 @@ export const MODULE_GROUPS = [
     id: 'toolbox',
     name: '工具箱',
     icon: 'fa-toolbox',
-    modules: ['self-h', 'totp', 'music', 'uptime', 'notification'],
+    modules: ['self-h', 'totp', 'music', 'uptime', 'filebox', 'notification'],
   },
 ];
 
@@ -176,6 +182,7 @@ export const store = reactive({
     totp: true,
     music: false, // 音乐模块默认隐藏
     uptime: true,
+    filebox: true,
     notification: true,
   },
   channelEnabled: {
@@ -199,6 +206,7 @@ export const store = reactive({
     'totp',
     'music',
     'uptime',
+    'filebox',
     'notification',
   ],
 

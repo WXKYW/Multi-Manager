@@ -250,6 +250,11 @@
   background: rgba(244, 63, 94, 0.12);
 }
 
+.nav-group-dropdown .dropdown-item.filebox-tab.active {
+  color: var(--filebox-primary);
+  background: rgba(var(--filebox-rgb), 0.12);
+}
+
 /* 下拉菜单动画 */
 .dropdown-fade-enter-active,
 .dropdown-fade-leave-active {

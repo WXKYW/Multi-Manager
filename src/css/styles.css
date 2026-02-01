@@ -124,6 +124,10 @@ pre,
   --notification-primary: #f59e0b;
   --notification-dark: #d97706;
 
+  --filebox-primary: #10b981;
+  --filebox-dark: #059669;
+  --filebox-rgb: 16, 185, 129;
+
   /* 常用功能色映射 (核心驱动) */
   --primary-color: var(--paas-primary);
   --primary-dark: var(--paas-dark);
@@ -3403,4 +3407,16 @@ body.modal-open {
     min-width: auto;
     justify-content: space-between;
   }
+}
+
+/* FileBox 主题定义 */
+.theme-filebox {
+  --current-primary: var(--filebox-primary);
+  --current-dark: var(--filebox-dark);
+  --current-rgb: var(--filebox-rgb);
+}
+
+.theme-filebox .tab-btn.active {
+  background: linear-gradient(135deg, var(--current-primary), var(--current-dark)) !important;
+  box-shadow: 0 2px 8px rgba(var(--current-rgb), 0.3);
 }
