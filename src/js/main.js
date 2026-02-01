@@ -52,6 +52,7 @@ async function loadLazyCSS() {
     import('../css/totp.css'),
     import('../css/music.css'),
     import('../css/uptime.css'),
+    import('../css/filebox.css'),
     import('../css/notification.css'),
   ];
   await Promise.all(styles);
@@ -104,6 +105,7 @@ import { streamPlayerMethods } from './modules/stream-player-ui.js';
 import { totpMethods, totpComputed, totpData } from './modules/totp.js';
 import { musicMethods } from './modules/music.js';
 import { uptimeData, uptimeMethods, uptimeComputed } from './modules/uptime.js';
+import { fileboxData, fileboxMethods } from './modules/filebox.js';
 import { aliyunMethods } from './modules/aliyun.js';
 import { tencentMethods } from './modules/tencent.js';
 import { notificationData, notificationMethods } from './modules/notification.js';
@@ -649,6 +651,9 @@ const app = createApp({
 
       // 通知管理模块
       ...notificationData,
+
+      // 文件柜模块
+      ...fileboxData,
     };
   },
 
@@ -857,12 +862,9 @@ const app = createApp({
         this.showNewWorkerModal ||
         this.showWorkerRoutesModal ||
         this.showWorkerDomainsModal ||
-        this.showPagesDeploymentsModal ||
-        this.showPagesDomainsModal ||
-        this.showImagePreviewModal ||
-        this.showAddZoneModal ||
         this.showTotpModal ||
         this.showTotpImportModal ||
+        !!this.fileboxRetrievedEntry ||
         (this.customDialog && this.customDialog.show)
       );
     },
@@ -1047,6 +1049,11 @@ const app = createApp({
         // 如果当前在 Self-H 页（单页模式），立即加载
         if (this.mainActiveTab === 'self-h') {
           this.loadOpenListAccounts();
+        }
+
+        // 如果在文件柜页，立即加载
+        if (this.mainActiveTab === 'filebox') {
+          this.initFileBox();
         }
       }
     });
@@ -1358,6 +1365,9 @@ const app = createApp({
                 break;
               case 'uptime':
                 this.initUptimeModule();
+                break;
+              case 'filebox':
+                this.initFileBox();
                 break;
               case 'notification':
                 this.initNotificationModule();
@@ -1723,6 +1733,7 @@ const app = createApp({
     ...totpMethods,
     ...musicMethods,
     ...uptimeMethods,
+    ...fileboxMethods,
     ...aliyunMethods,
     ...tencentMethods,
     ...notificationMethods,

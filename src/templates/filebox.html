@@ -1,0 +1,258 @@
+<div class="tab-content filebox-tab-content theme-filebox" :class="[getTabAnimationClass('filebox')]">
+    <div class="uptime-container">
+        <!-- 顶部二级导航 -->
+        <div class="sec-tabs">
+            <button class="tab-btn" :class="{ active: fileboxCurrentTab === 'share' }"
+                @click="fileboxCurrentTab = 'share'">
+                <i class="fas fa-paper-plane"></i> 快捷分享
+            </button>
+            <button class="tab-btn" :class="{ active: fileboxCurrentTab === 'retrieve' }"
+                @click="fileboxCurrentTab = 'retrieve'">
+                <i class="fas fa-shipping-fast"></i> 极速取件
+            </button>
+            <button class="tab-btn" :class="{ active: fileboxCurrentTab === 'history' }"
+                @click="fileboxCurrentTab = 'history'">
+                <i class="fas fa-history"></i> 本地历史
+            </button>
+        </div>
+
+        <!-- ========== 取件标签页 (Prominent) ========== -->
+        <div v-show="fileboxCurrentTab === 'retrieve'" class="sub-tab-content fade-in-up">
+            <div class="filebox-header-card" style="margin-top: 20px;">
+                <h2 style="margin: 0; font-size: 24px; color: var(--text-primary);">
+                    <i class="fas fa-shipping-fast" style="color: var(--filebox-primary);"></i> 下一秒，文件到手
+                </h2>
+                <p style="color: var(--text-secondary); margin-top: -10px;">输入取件码，极速提取文件 or 文本</p>
+
+                <div class="filebox-input-wrapper">
+                    <input type="text" v-model="fileboxRetrieveCode" class="filebox-code-input" placeholder="请输入 5 位取件码"
+                        maxlength="5" @keyup.enter="retrieveFileBoxEntry">
+                    <button class="filebox-retrieve-btn" @click="retrieveFileBoxEntry" :disabled="fileboxLoading">
+                        <i class="fas" :class="fileboxLoading ? 'fa-spinner fa-spin' : 'fa-download'"></i>
+                        提取
+                    </button>
+                </div>
+            </div>
+
+            <div class="uptime-form-card" style="margin-top: 20px;">
+                <div class="uptime-form-section-title"><i class="fas fa-info-circle"></i> 取件说明</div>
+                <div style="color: var(--text-secondary); line-height: 1.6; font-size: 14px;">
+                    <p>1. 取件码为分享成功后生成的 5 位随机字符。</p>
+                    <p>2. 请确保取件码在有效期内，过期的内容将自动销毁。</p>
+                    <p>3. 如果分享者开启了“阅后即焚”，内容在首次成功提取后将立即被永久删除。</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== 分享标签页 ========== -->
+        <div v-show="fileboxCurrentTab === 'share'" class="sub-tab-content fade-in-up">
+            <div class="row">
+                <div class="col-md-8 mx-auto">
+                    <div class="uptime-form-card"
+                        style="min-height: 500px; display: flex; flex-direction: column; position: relative;">
+                        <div class="uptime-form-section-title">
+                            <i class="fas fa-cloud-upload-alt"></i> 我要分享
+                        </div>
+
+                        <div class="filebox-share-tabs" style="margin-bottom: 20px;">
+                            <div class="filebox-tab-btn" :class="{ active: fileboxShareType === 'file' }"
+                                @click="fileboxShareType = 'file'">
+                                <i class="fas fa-file-alt"></i> 分享文件
+                            </div>
+                            <div class="filebox-tab-btn" :class="{ active: fileboxShareType === 'text' }"
+                                @click="fileboxShareType = 'text'">
+                                <i class="fas fa-font"></i> 分享文本
+                            </div>
+                        </div>
+
+                        <!-- 文件上传区 -->
+                        <div v-if="fileboxShareType === 'file'" class="filebox-upload-zone"
+                            :class="{ 'drag-active': isDragging }" @dragenter.prevent="isDragging = true"
+                            @dragleave.prevent="isDragging = false" @dragover.prevent @drop.prevent="handleFileDrop"
+                            @click="$refs.fileInput.click()">
+
+                            <input type="file" ref="fileInput" style="display: none" @change="handleFileSelect">
+
+                            <template v-if="!fileboxSelectedFile">
+                                <i class="fas fa-cloud-upload-alt filebox-upload-icon"></i>
+                                <div class="filebox-upload-text">
+                                    <strong>点击选择文件</strong> 或拖拽文件到此处
+                                </div>
+                                <div class="filebox-upload-subtext">建议不超过 100MB</div>
+                            </template>
+                            <template v-else>
+                                <i class="fas fa-file-archive filebox-upload-icon"
+                                    style="color: var(--filebox-primary)"></i>
+                                <div class="filebox-upload-text">
+                                    <strong>{{ fileboxSelectedFile.name }}</strong>
+                                </div>
+                                <div class="filebox-upload-subtext">{{ formatFileSize(fileboxSelectedFile.size) }}</div>
+                                <button class="btn btn-secondary btn-sm"
+                                    @click.stop="fileboxSelectedFile = null">重新选择</button>
+                            </template>
+                        </div>
+
+                        <!-- 文本输入区 -->
+                        <textarea v-else v-model="fileboxShareText" class="filebox-text-area modern-form-control"
+                            placeholder="在此粘贴或输入需要分享的文本内容..."
+                            style="flex: 1; min-height: 200px; padding: 15px;"></textarea>
+
+                        <!-- 配置选项 -->
+                        <div class="settings-grid"
+                            style="margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 20px;">
+                            <div class="settings-card" style="background: transparent; border: none; padding: 0;">
+                                <div style="display: flex; align-items: center; justify-content: space-between;">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <i class="fas fa-hourglass-half" style="color: var(--filebox-primary)"></i>
+                                        <span>有效期</span>
+                                    </div>
+                                    <select v-model="fileboxExpiry" class="form-select-modern" style="width: 120px;">
+                                        <option value="1">1 小时</option>
+                                        <option value="24">24 小时</option>
+                                        <option value="168">7 天</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="settings-card" style="background: transparent; border: none; padding: 0;">
+                                <div style="display: flex; align-items: center; justify-content: space-between;">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <i class="fas fa-fire" style="color: var(--danger-color)"></i>
+                                        <span>阅后即焚</span>
+                                    </div>
+                                    <label class="ag-switch">
+                                        <input type="checkbox" v-model="fileboxBurnAfterReading">
+                                        <div class="ag-switch-track">
+                                            <div class="ag-switch-knob"></div>
+                                        </div>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="margin-top: 30px; text-align: center;">
+                            <button class="btn btn-primary btn-lg" style="min-width: 200px;" @click="shareFileBoxEntry"
+                                :disabled="fileboxLoading || (!fileboxSelectedFile && !fileboxShareText)">
+                                <i class="fas" :class="fileboxLoading ? 'fa-spinner fa-spin' : 'fa-paper-plane'"></i>
+                                立即分享
+                            </button>
+                        </div>
+
+                        <!-- 分享成功覆盖层 -->
+                        <transition name="fade">
+                            <div v-if="fileboxResult" class="filebox-overlay-result">
+                                <div class="filebox-result-card bounce-in">
+                                    <i class="fas fa-check-circle"
+                                        style="font-size: 56px; color: #10b981; margin-bottom: 20px;"></i>
+                                    <h3 style="color: var(--text-primary); margin-bottom: 5px;">分享成功</h3>
+                                    <div class="filebox-code-display">{{ fileboxResult.code }}</div>
+                                    <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 20px;">
+                                        凭此取件码即可在任意终端提取</p>
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-secondary" @click="copyToClipboard(fileboxResult.code)">
+                                            <i class="fas fa-copy"></i> 复制码
+                                        </button>
+                                        <button class="btn btn-primary"
+                                            @click="fileboxResult = null; resetFileBoxForm()">
+                                            <i class="fas fa-plus"></i> 继续分享
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </transition>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== 历史记录标签页 ========== -->
+        <div v-show="fileboxCurrentTab === 'history'" class="sub-tab-content fade-in-up">
+            <div class="uptime-form-card">
+                <div class="uptime-form-section-title"
+                    style="display: flex; justify-content: space-between; align-items: center;">
+                    <span><i class="fas fa-history"></i> 本地分享历史</span>
+                    <span class="meta-badge" style="font-size: 12px;">共 {{ fileboxHistory.length }} 条记录</span>
+                </div>
+
+                <div v-if="fileboxHistory.length === 0" class="empty-state" style="padding: 60px 0;">
+                    <i class="fas fa-box-open" style="font-size: 48px; opacity: 0.2;"></i>
+                    <p style="margin-top: 15px; color: var(--text-tertiary);">尚未分享过任何内容</p>
+                </div>
+
+                <div v-else class="filebox-history-list-modern">
+                    <div v-for="item in fileboxHistory" :key="item.code" class="filebox-history-item">
+                        <div class="item-icon-box" :class="item.type">
+                            <i class="fas" :class="item.type === 'file' ? 'fa-file-alt' : 'fa-paragraph'"></i>
+                        </div>
+                        <div class="item-main">
+                            <div class="item-title">{{ item.type === 'file' ? item.originalName : (item.content ?
+                                item.content : '文本内容') }}</div>
+                            <div class="item-meta">
+                                <span>{{ formatDateTime(item.createdAt) }}</span>
+                                <span v-if="item.type === 'file'" class="dot-separator">•</span>
+                                <span v-if="item.type === 'file'">{{ formatFileSize(item.size) }}</span>
+                            </div>
+                        </div>
+                        <div class="item-code">{{ item.code }}</div>
+                        <div class="item-actions">
+                            <button class="btn btn-icon-refined" @click="copyToClipboard(item.code)" title="复制取件码">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                            <button class="btn btn-icon-refined danger" @click="deleteFileBoxEntry(item.code)"
+                                title="删除记录">
+                                <i class="fas fa-trash-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 取件结果模态框 -->
+    <div v-if="fileboxRetrievedEntry" class="modal-overlay theme-filebox" @click.self="fileboxRetrievedEntry = null"
+        style="z-index: 2000;">
+        <div class="modal" style="max-width: 550px; overflow: hidden;">
+            <div class="modal-header">
+                <div class="modal-title"><i class="fas fa-box-open"></i> 文件提取成功</div>
+                <button class="modal-close" @click="fileboxRetrievedEntry = null">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div class="modal-body text-center" style="padding: 30px;">
+                <div class="retrieved-icon-wrapper" :class="fileboxRetrievedEntry.type">
+                    <i class="fas" :class="fileboxRetrievedEntry.type === 'file' ? 'fa-file-archive' : 'fa-font'"></i>
+                </div>
+
+                <h4 class="retrieved-title">{{ fileboxRetrievedEntry.type === 'file' ?
+                    fileboxRetrievedEntry.originalName : '文本提取结果' }}</h4>
+
+                <div v-if="fileboxRetrievedEntry.type === 'file'" class="retrieved-info-pills">
+                    <div class="info-pill"><i class="fas fa-weight-hanging"></i> {{
+                        formatFileSize(fileboxRetrievedEntry.size) }}</div>
+                    <div class="info-pill"><i class="fas fa-clock"></i> 有效期至: {{
+                        formatDateTime(fileboxRetrievedEntry.expiry) }}</div>
+                </div>
+
+                <div v-if="fileboxRetrievedEntry.type === 'text'" class="retrieved-text-viewer">
+                    <pre>{{ fileboxRetrievedEntry.content }}</pre>
+                </div>
+
+                <div v-if="fileboxRetrievedEntry.burnAfterReading" class="burn-notice">
+                    <i class="fas fa-fire"></i> 此内容开启了“阅后即焚”，提取后已自动销毁
+                </div>
+
+                <div class="d-flex justify-content-center gap-3 mt-4">
+                    <button v-if="fileboxRetrievedEntry.type === 'file'" class="btn btn-primary btn-lg"
+                        @click="downloadFileBoxEntry(fileboxRetrievedEntry.code)">
+                        <i class="fas fa-download"></i> 立即下载
+                    </button>
+                    <button v-else class="btn btn-primary btn-lg"
+                        @click="copyToClipboard(fileboxRetrievedEntry.content)">
+                        <i class="fas fa-copy"></i> 复制文本内容
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
