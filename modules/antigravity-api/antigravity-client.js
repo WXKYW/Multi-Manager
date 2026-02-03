@@ -15,7 +15,7 @@ const DEFAULT_CONFIG = {
   MODELS_URL: 'https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:fetchAvailableModels',
   NO_STREAM_URL: 'https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:generateContent',
   API_HOST: 'daily-cloudcode-pa.sandbox.googleapis.com',
-  USER_AGENT: 'antigravity/1.15.8 (Windows; AMD64)',
+  USER_AGENT: 'antigravity/1.15.8 windows/amd64',
   // 端点回退顺序：sandbox → daily → prod
   FALLBACK_BASE_URLS: [
     'https://daily-cloudcode-pa.googleapis.com',
