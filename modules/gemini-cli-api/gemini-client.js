@@ -514,36 +514,62 @@ class GeminiCliClient {
     // 获取 GCP 项目 ID (参考 CatieCli)
     const projectId = await this.fetchGcpProjectId(accountId);
 
-    const action = openaiRequest.stream ? 'streamGenerateContent' : 'generateContent';
-    // 只有流式请求才需要 alt=sse 参数
-    const url = openaiRequest.stream
-      ? `${this.v1internalEndpoint}:${action}?alt=sse`
-      : `${this.v1internalEndpoint}:${action}`;
+    const endpoints = [
+      'https://daily-cloudcode-pa.googleapis.com/v1internal',
+      'https://cloudcode-pa.googleapis.com/v1internal',
+      'https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal',
+    ];
 
-    // 获取基础模型名（移除前缀和后缀）
-    const baseModel = this._getBaseModelName(openaiRequest.model);
+    let lastError = null;
 
-    const requestBody = {
-      model: baseModel,
-      project: projectId || '', // 使用获取到的项目 ID
-      request: geminiPayload,
-    };
+    for (let i = 0; i < endpoints.length; i++) {
+      const endpoint = endpoints[i];
+      const action = openaiRequest.stream ? 'streamGenerateContent' : 'generateContent';
+      const url = openaiRequest.stream
+        ? `${endpoint}:${action}?alt=sse`
+        : `${endpoint}:${action}`;
 
-    logger.debug(`Sending request: URL=${url}, model=${requestBody.model}, project=${requestBody.project}`);
-    logger.debug(`Full payload: ${JSON.stringify(requestBody).substring(0, 1000)}`);
-    logger.debug(`generationConfig: ${JSON.stringify(geminiPayload.generationConfig)}`);
+      // 获取基础模型名（移除前缀和后缀）
+      const baseModel = this._getBaseModelName(openaiRequest.model);
 
-    const axiosConfig = await this.getAxiosConfig();
-    return axios.post(url, requestBody, {
-      ...axiosConfig,
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        'User-Agent': this.userAgent,
-      },
-      responseType: openaiRequest.stream ? 'stream' : 'json',
-      timeout: 120000, // 增加到 120s 超时，深度思考模型响应较慢
-    });
+      const requestBody = {
+        model: baseModel,
+        project: projectId || '', // 使用获取到的项目 ID
+        request: geminiPayload,
+      };
+
+      if (i === 0) {
+        logger.debug(`Sending request: URL=${url}, model=${requestBody.model}, project=${requestBody.project}`);
+        logger.debug(`Full payload: ${JSON.stringify(requestBody).substring(0, 1000)}`);
+      }
+
+      const axiosConfig = await this.getAxiosConfig();
+      try {
+        return await axios.post(url, requestBody, {
+          ...axiosConfig,
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+            'User-Agent': this.userAgent,
+          },
+          responseType: openaiRequest.stream ? 'stream' : 'json',
+          timeout: 120000,
+        });
+      } catch (e) {
+        lastError = e;
+        const status = e.response?.status;
+        // 404: 模型在此端点不存在，尝试下一个
+        // 429: 限流，尝试下一个
+        if (status === 404 || status === 429) {
+          if (i < endpoints.length - 1) {
+            logger.warn(`Endpoint ${endpoint} failed with ${status}, trying next...`);
+            continue;
+          }
+        }
+        throw e;
+      }
+    }
+    throw lastError;
   }
 
   /**
