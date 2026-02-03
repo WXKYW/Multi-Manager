@@ -14,7 +14,7 @@ try {
 
 class GeminiCliClient {
   constructor() {
-    this.userAgent = 'antigravity/1.15.8 (Windows; AMD64)';
+    this.userAgent = 'antigravity/1.15.8 windows/amd64';
     // 使用 daily 环境端点 (与 Antigravity 保持一致)
     this.v1internalEndpoint = 'https://daily-cloudcode-pa.googleapis.com/v1internal';
 
