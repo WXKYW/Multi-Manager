@@ -258,13 +258,88 @@
 
   <!-- ==================== 设置 ==================== -->
   <div v-show="aiDrawCurrentTab === 'settings'" class="sub-tab-content quick-fade-in">
+    <!-- Provider 管理 -->
     <div class="panel">
       <div class="panel-header">
-        <div class="panel-title"><i class="fas fa-cog" style="margin-right: 8px"></i>模块设置</div>
+        <div class="panel-title">
+          <i class="fas fa-plug" style="margin-right: 8px; color: var(--current-primary)"></i>AI Provider 配置
+          <span style="font-weight: 400; opacity: 0.6; margin-left: 8px">({{ aiDrawProviders.length }})</span>
+        </div>
+        <button class="btn btn-primary" @click="aiDrawOpenProviderModal">
+          <i class="fas fa-plus"></i> 添加 Provider
+        </button>
       </div>
 
+      <!-- Provider 列表 -->
+      <div v-if="aiDrawProviders.length === 0" class="empty-state" style="padding: 40px">
+        <i class="fas fa-plug" style="font-size: 40px; margin-bottom: 12px; opacity: 0.3"></i>
+        <div>暂未配置 AI Provider</div>
+        <div style="font-size: 13px; opacity: 0.7; margin-top: 8px">添加一个 Provider 以启用 AI 辅助功能</div>
+      </div>
+
+      <div v-else class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width: 30%">名称</th>
+              <th class="text-center" style="width: 15%">来源</th>
+              <th style="width: 25%">模型</th>
+              <th class="text-center" style="width: 10%">状态</th>
+              <th class="text-center" style="width: 20%">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="provider in aiDrawProviders" :key="provider.id">
+              <td>
+                <div style="display: flex; align-items: center; gap: 8px">
+                  <i class="fas fa-star" v-if="provider.is_default" style="color: #f59e0b" title="默认 Provider"></i>
+                  <strong>{{ provider.name }}</strong>
+                </div>
+              </td>
+              <td class="text-center">
+                <span class="record-type" :class="provider.source_type">
+                  {{ provider.source_type === 'internal' ? '内部' : '外部' }}
+                </span>
+              </td>
+              <td>
+                <code style="font-size: 12px">{{ provider.default_model || '-' }}</code>
+              </td>
+              <td class="text-center">
+                <span :class="['status-badge', provider.enabled ? 'online' : 'offline']">
+                  {{ provider.enabled ? '启用' : '禁用' }}
+                </span>
+              </td>
+              <td class="actions text-center">
+                <div class="flex-cell">
+                  <button class="btn btn-icon-refined" @click="aiDrawTestProvider(provider)" title="测试连接"
+                    :disabled="aiDrawTestingProvider === provider.id">
+                    <i :class="aiDrawTestingProvider === provider.id ? 'fas fa-spinner fa-spin' : 'fas fa-bolt'"></i>
+                  </button>
+                  <button class="btn btn-icon-refined" @click="aiDrawEditProvider(provider)" title="编辑">
+                    <i class="fas fa-edit"></i>
+                  </button>
+                  <button class="btn btn-icon-refined" v-if="!provider.is_default"
+                    @click="aiDrawSetDefaultProvider(provider.id)" title="设为默认">
+                    <i class="fas fa-star"></i>
+                  </button>
+                  <button class="btn btn-icon-refined" @click="aiDrawDeleteProvider(provider.id)" title="删除"
+                    style="color: var(--danger-color)">
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 统计和其他设置 -->
+    <div class="panel" style="margin-top: 16px">
+      <div class="panel-header">
+        <div class="panel-title"><i class="fas fa-chart-bar" style="margin-right: 8px"></i>统计信息</div>
+      </div>
       <div class="totp-settings-content">
-        <!-- 统计信息 -->
         <div class="settings-stats">
           <div class="stat-item">
             <span class="stat-value">{{ aiDrawProjects.length }}</span>
@@ -278,34 +353,128 @@
             <span class="stat-value">{{ aiDrawProjects.filter(p => p.engine_type === 'drawio').length }}</span>
             <span class="stat-label">Draw.io</span>
           </div>
-        </div>
-
-        <div class="settings-divider"></div>
-
-        <!-- AI Provider 配置提示 -->
-        <div class="setting-item" style="display: block">
-          <div class="setting-text" style="margin-bottom: 12px">
-            <span class="setting-title"><i class="fas fa-robot" style="color: var(--current-primary)"></i> AI
-              辅助功能</span>
-            <span class="setting-desc">AI Draw 复用 AI Chat 模块的 LLM Provider，请前往 AI Chat 模块配置。</span>
+          <div class="stat-item">
+            <span class="stat-value">{{ aiDrawProviders.filter(p => p.enabled).length }}</span>
+            <span class="stat-label">已启用 Provider</span>
           </div>
-          <button class="btn btn-secondary" @click="mainActiveTab = 'ai-chat'">
-            <i class="fas fa-arrow-right"></i> 前往配置
-          </button>
         </div>
 
         <div class="settings-divider"></div>
 
-        <!-- 操作按钮 -->
         <div style="display: flex; gap: 12px; flex-wrap: wrap">
           <button class="btn btn-secondary" @click="aiDrawLoadProjects">
             <i class="fas fa-sync-alt"></i> 刷新项目列表
+          </button>
+          <button class="btn btn-secondary" @click="aiDrawLoadProviders">
+            <i class="fas fa-sync-alt"></i> 刷新 Provider
           </button>
         </div>
       </div>
     </div>
   </div>
 </div>
+
+<!-- Provider 编辑弹窗 -->
+<Teleport to="body">
+  <div v-if="aiDrawShowProviderModal" class="modal-overlay" @click.self="aiDrawShowProviderModal = false">
+    <div class="modal" style="max-width: 520px">
+      <div class="modal-header">
+        <div class="modal-title">
+          <i class="fas fa-plug" style="margin-right: 8px; color: var(--current-primary)"></i>
+          {{ aiDrawEditingProvider ? '编辑 Provider' : '添加 Provider' }}
+        </div>
+        <button class="modal-close" @click="aiDrawShowProviderModal = false">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <div class="modal-body" style="padding: 16px 20px">
+        <!-- 名称 -->
+        <div class="form-group">
+          <label class="form-label">名称 <span style="color: var(--danger-color)">*</span></label>
+          <input type="text" class="form-input" v-model="aiDrawProviderForm.name" placeholder="例如: OpenAI、Claude" />
+        </div>
+
+        <!-- 来源类型 -->
+        <div class="form-group">
+          <label class="form-label">来源类型</label>
+          <div class="ai-draw-source-toggle">
+            <button type="button" class="source-btn" :class="{ active: aiDrawProviderForm.source_type === 'external' }"
+              @click="aiDrawProviderForm.source_type = 'external'">
+              <i class="fas fa-globe"></i>
+              <span>外部 API</span>
+            </button>
+            <button type="button" class="source-btn" :class="{ active: aiDrawProviderForm.source_type === 'internal' }"
+              @click="aiDrawProviderForm.source_type = 'internal'; aiDrawLoadInternalProviders()">
+              <i class="fas fa-link"></i>
+              <span>内部引用</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 外部配置 -->
+        <template v-if="aiDrawProviderForm.source_type === 'external'">
+          <div class="form-group">
+            <label class="form-label">API 地址 <span style="color: var(--danger-color)">*</span></label>
+            <input type="text" class="form-input" v-model="aiDrawProviderForm.base_url"
+              placeholder="https://api.openai.com/v1" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">API 密钥 <span style="color: var(--danger-color)">*</span></label>
+            <input type="password" class="form-input" v-model="aiDrawProviderForm.api_key" placeholder="sk-..." />
+          </div>
+        </template>
+
+        <!-- 内部配置 -->
+        <template v-if="aiDrawProviderForm.source_type === 'internal'">
+          <div class="form-group">
+            <label class="form-label">选择内部 Provider <span style="color: var(--danger-color)">*</span></label>
+            <select class="form-input" v-model="aiDrawProviderForm.internal_provider_id">
+              <option value="">-- 请选择 --</option>
+              <option v-for="p in aiDrawInternalProviders" :key="p.id" :value="p.id">
+                {{ p.name }} ({{ p.default_model || '无默认模型' }})
+              </option>
+            </select>
+            <div v-if="aiDrawInternalProviders.length === 0" class="form-help"
+              style="color: var(--warning-color); margin-top: 8px">
+              <i class="fas fa-exclamation-triangle"></i> 未找到可用的内部 Provider，请先在 AI Chat 模块中配置
+            </div>
+          </div>
+        </template>
+
+        <!-- 默认模型 -->
+        <div class="form-group">
+          <label class="form-label">默认模型</label>
+          <input type="text" class="form-input" v-model="aiDrawProviderForm.default_model"
+            placeholder="gpt-4o、claude-3-opus-20240229 等" />
+          <div class="form-help">留空将使用 Provider 默认模型</div>
+        </div>
+
+        <!-- 选项 -->
+        <div class="form-group" style="display: flex; gap: 24px; padding-top: 8px">
+          <label class="switch-label">
+            <input type="checkbox" v-model="aiDrawProviderForm.enabled" />
+            <span class="switch"></span>
+            <span style="margin-left: 8px">启用</span>
+          </label>
+          <label class="switch-label">
+            <input type="checkbox" v-model="aiDrawProviderForm.is_default" />
+            <span class="switch"></span>
+            <span style="margin-left: 8px">设为默认</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" @click="aiDrawShowProviderModal = false">取消</button>
+        <button class="btn btn-primary" @click="aiDrawSaveProvider" :disabled="aiDrawSavingProvider">
+          <i :class="aiDrawSavingProvider ? 'fas fa-spinner fa-spin' : 'fas fa-check'"></i>
+          {{ aiDrawEditingProvider ? '保存修改' : '添加' }}
+        </button>
+      </div>
+    </div>
+  </div>
+</Teleport>
 
 <!-- 点击外部关闭下拉菜单 -->
 <Teleport to="body">
