@@ -1,12 +1,13 @@
 /**
  * AI Draw 模块 - 业务服务
  * 
- * 复用 ai-chat-api 的 LLM Provider 能力进行 AI 绘图对话
+ * 独立的 LLM Provider 管理，支持：
+ * - external: 自行配置的外部 API
+ * - internal: 复用 ai-chat-api 的 Provider
  */
 
 const { createLogger } = require('../../src/utils/logger');
-const { providerStorage } = require('../ai-chat-api/storage');
-const llmService = require('../ai-chat-api/service');
+const { DrawProviderModel } = require('./models');
 
 const logger = createLogger('AIDraw');
 
@@ -54,11 +55,80 @@ flowchart TD
  */
 class AIDrawService {
     /**
+     * 获取 Provider 的实际配置（处理内部/外部来源）
+     * @param {Object} provider - Provider 记录
+     * @returns {Object} - 包含 base_url, api_key, default_model 的配置
+     */
+    async resolveProviderConfig(provider) {
+        if (!provider) return null;
+
+        if (provider.source_type === 'internal') {
+            // 内部来源：从 ai-chat-api 获取配置
+            try {
+                const { providerStorage } = require('../ai-chat-api/storage');
+                const internalProvider = providerStorage.getById(provider.internal_provider_id);
+                if (!internalProvider) {
+                    logger.warn(`内部 Provider ${provider.internal_provider_id} 不存在`);
+                    return null;
+                }
+                return {
+                    base_url: internalProvider.base_url,
+                    api_key: internalProvider.api_key,
+                    default_model: provider.default_model || internalProvider.default_model,
+                };
+            } catch (e) {
+                logger.error('获取内部 Provider 失败:', e.message);
+                return null;
+            }
+        } else {
+            // 外部来源：直接使用配置
+            return {
+                base_url: provider.base_url,
+                api_key: provider.api_key,
+                default_model: provider.default_model,
+            };
+        }
+    }
+
+    /**
      * 获取默认 Provider
      */
     getDefaultProvider() {
-        const providers = providerStorage.getAll();
-        return providers.find(p => p.is_default) || providers[0] || null;
+        return DrawProviderModel.getDefault();
+    }
+
+    /**
+     * 获取所有 Provider
+     */
+    getAllProviders() {
+        return DrawProviderModel.getAll();
+    }
+
+    /**
+     * 获取启用的 Provider
+     */
+    getEnabledProviders() {
+        return DrawProviderModel.getEnabled();
+    }
+
+    /**
+     * 获取内部可用的 Provider 列表（来自 ai-chat-api）
+     */
+    getInternalProviders() {
+        try {
+            const { providerStorage } = require('../ai-chat-api/storage');
+            const providers = providerStorage.getEnabled();
+            return providers.map(p => ({
+                id: p.id,
+                name: p.name,
+                type: p.type,
+                base_url: p.base_url,
+                default_model: p.default_model,
+            }));
+        } catch (e) {
+            logger.warn('获取内部 Provider 列表失败:', e.message);
+            return [];
+        }
     }
 
     /**
@@ -70,13 +140,19 @@ class AIDrawService {
         // 获取 Provider
         let provider;
         if (providerId) {
-            provider = providerStorage.getById(providerId);
+            provider = DrawProviderModel.getById(providerId);
         } else {
             provider = this.getDefaultProvider();
         }
 
         if (!provider) {
-            throw new Error('未配置 AI Provider，请先在 AI Chat 模块中添加 Provider');
+            throw new Error('未配置 AI Provider，请先在设置中添加 Provider');
+        }
+
+        // 解析实际配置
+        const config = await this.resolveProviderConfig(provider);
+        if (!config) {
+            throw new Error(`Provider "${provider.name}" 配置无效`);
         }
 
         // 构建消息上下文
@@ -86,12 +162,11 @@ class AIDrawService {
             ...messages,
         ];
 
-        logger.info(`[Chat] 使用 Provider: ${provider.name}, 引擎: ${engineType}`);
+        const useModel = model || config.default_model || 'gpt-3.5-turbo';
+        logger.info(`[Chat] 使用 Provider: ${provider.name}, 模型: ${useModel}, 引擎: ${engineType}`);
 
         try {
-            const result = await llmService.chat(provider, contextMessages, {
-                model: model || provider.default_model
-            });
+            const result = await this._callLLM(config, contextMessages, useModel);
             return {
                 content: result.content,
                 usage: result.usage,
@@ -110,7 +185,7 @@ class AIDrawService {
 
         let provider;
         if (providerId) {
-            provider = providerStorage.getById(providerId);
+            provider = DrawProviderModel.getById(providerId);
         } else {
             provider = this.getDefaultProvider();
         }
@@ -119,23 +194,139 @@ class AIDrawService {
             throw new Error('未配置 AI Provider');
         }
 
+        const config = await this.resolveProviderConfig(provider);
+        if (!config) {
+            throw new Error(`Provider "${provider.name}" 配置无效`);
+        }
+
         const systemPrompt = SYSTEM_PROMPTS[engineType] || SYSTEM_PROMPTS.drawio;
         const contextMessages = [
             { role: 'system', content: systemPrompt },
             ...messages,
         ];
 
-        logger.info(`[Stream] 使用 Provider: ${provider.name}, 引擎: ${engineType}`);
+        const useModel = model || config.default_model || 'gpt-3.5-turbo';
+        logger.info(`[Stream] 使用 Provider: ${provider.name}, 模型: ${useModel}, 引擎: ${engineType}`);
 
-        for await (const chunk of llmService.chatStream(provider, contextMessages, {
-            model: model || provider.default_model,
-        })) {
+        for await (const chunk of this._callLLMStream(config, contextMessages, useModel)) {
             yield chunk;
         }
     }
 
     /**
-     * 解析 URL 内容 (简化版，不依赖外部库)
+     * 调用 LLM API (同步)
+     */
+    async _callLLM(config, messages, model) {
+        const url = `${config.base_url}/chat/completions`;
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${config.api_key}`,
+            },
+            body: JSON.stringify({
+                model,
+                messages,
+                temperature: 0.7,
+                max_tokens: 4096,
+                stream: false,
+            }),
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.error?.message || `API 请求失败: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return {
+            content: data.choices?.[0]?.message?.content || '',
+            usage: data.usage || {},
+        };
+    }
+
+    /**
+     * 调用 LLM API (流式)
+     */
+    async *_callLLMStream(config, messages, model) {
+        const url = `${config.base_url}/chat/completions`;
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${config.api_key}`,
+            },
+            body: JSON.stringify({
+                model,
+                messages,
+                temperature: 0.7,
+                max_tokens: 4096,
+                stream: true,
+            }),
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.error?.message || `API 请求失败: ${response.status}`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed || !trimmed.startsWith('data: ')) continue;
+
+                    const data = trimmed.slice(6);
+                    if (data === '[DONE]') return;
+
+                    try {
+                        const json = JSON.parse(data);
+                        const content = json.choices?.[0]?.delta?.content;
+                        if (content) {
+                            yield content;
+                        }
+                    } catch (e) {
+                        // 忽略解析错误
+                    }
+                }
+            }
+        } finally {
+            reader.releaseLock();
+        }
+    }
+
+    /**
+     * 测试 Provider 连接
+     */
+    async testProvider(provider) {
+        const config = await this.resolveProviderConfig(provider);
+        if (!config) {
+            return { success: false, error: '配置无效' };
+        }
+
+        try {
+            const result = await this._callLLM(config, [{ role: 'user', content: 'Hi' }], config.default_model || 'gpt-3.5-turbo');
+            return { success: true, response: result.content.slice(0, 100) };
+        } catch (e) {
+            return { success: false, error: e.message };
+        }
+    }
+
+    /**
+     * 解析 URL 内容 (简化版)
      */
     async parseUrl(url) {
         logger.info(`[ParseURL] 解析: ${url}`);

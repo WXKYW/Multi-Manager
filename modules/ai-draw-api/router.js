@@ -1,10 +1,12 @@
 /**
  * AI Draw 模块 - API 路由
+ * 
+ * 独立的 Provider 管理和项目管理
  */
 
 const express = require('express');
 const router = express.Router();
-const { ProjectModel, ChatHistoryModel } = require('./models');
+const { DrawProviderModel, ProjectModel, ChatHistoryModel } = require('./models');
 const aiDrawService = require('./service');
 const { createLogger } = require('../../src/utils/logger');
 const { requireAuth } = require('../../src/middleware/auth');
@@ -13,6 +15,184 @@ const logger = createLogger('AIDraw');
 
 // 所有路由需要认证
 router.use(requireAuth);
+
+// ==================== Provider API ====================
+
+/**
+ * 获取所有 Provider (不返回 API Key)
+ */
+router.get('/providers', (req, res) => {
+    try {
+        const providers = DrawProviderModel.getAll();
+        const safeProviders = providers.map(p => ({
+            id: p.id,
+            name: p.name,
+            source_type: p.source_type,
+            base_url: p.base_url,
+            default_model: p.default_model,
+            internal_provider_id: p.internal_provider_id,
+            enabled: p.enabled,
+            is_default: p.is_default,
+            sort_order: p.sort_order,
+            created_at: p.created_at,
+            updated_at: p.updated_at,
+            // 不返回 api_key
+        }));
+        res.json({ success: true, data: safeProviders });
+    } catch (error) {
+        logger.error('获取 Provider 列表失败:', error.message);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * 获取内部可用的 Provider 列表（来自 ai-chat-api）
+ */
+router.get('/providers/internal', (req, res) => {
+    try {
+        const providers = aiDrawService.getInternalProviders();
+        res.json({ success: true, data: providers });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * 获取单个 Provider
+ */
+router.get('/providers/:id', (req, res) => {
+    try {
+        const provider = DrawProviderModel.getById(req.params.id);
+        if (!provider) {
+            return res.status(404).json({ success: false, error: 'Provider 不存在' });
+        }
+        // 不返回 api_key
+        const { api_key, ...safeProvider } = provider;
+        res.json({ success: true, data: safeProvider });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * 创建 Provider
+ */
+router.post('/providers', (req, res) => {
+    try {
+        const { name, source_type, base_url, api_key, default_model, internal_provider_id, enabled, is_default } = req.body;
+
+        if (!name) {
+            return res.status(400).json({ success: false, error: '名称不能为空' });
+        }
+
+        if (source_type === 'external' && (!base_url || !api_key)) {
+            return res.status(400).json({ success: false, error: '外部来源需要填写 API 地址和密钥' });
+        }
+
+        if (source_type === 'internal' && !internal_provider_id) {
+            return res.status(400).json({ success: false, error: '内部来源需要选择 Provider' });
+        }
+
+        const provider = DrawProviderModel.create({
+            name,
+            source_type: source_type || 'external',
+            base_url,
+            api_key,
+            default_model,
+            internal_provider_id,
+            enabled: enabled !== false,
+            is_default: Boolean(is_default),
+        });
+
+        logger.info(`Provider 已创建: ${provider.id} (${provider.name})`);
+
+        // 不返回 api_key
+        const { api_key: _, ...safeProvider } = provider;
+        res.json({ success: true, data: safeProvider });
+    } catch (error) {
+        logger.error('创建 Provider 失败:', error.message);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * 更新 Provider
+ */
+router.put('/providers/:id', (req, res) => {
+    try {
+        const { name, source_type, base_url, api_key, default_model, internal_provider_id, enabled, is_default, sort_order } = req.body;
+
+        const provider = DrawProviderModel.update(req.params.id, {
+            name,
+            source_type,
+            base_url,
+            api_key,
+            default_model,
+            internal_provider_id,
+            enabled,
+            is_default,
+            sort_order,
+        });
+
+        if (!provider) {
+            return res.status(404).json({ success: false, error: 'Provider 不存在' });
+        }
+
+        // 不返回 api_key
+        const { api_key: _, ...safeProvider } = provider;
+        res.json({ success: true, data: safeProvider });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * 删除 Provider
+ */
+router.delete('/providers/:id', (req, res) => {
+    try {
+        const deleted = DrawProviderModel.delete(req.params.id);
+        if (!deleted) {
+            return res.status(404).json({ success: false, error: 'Provider 不存在' });
+        }
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * 设置默认 Provider
+ */
+router.post('/providers/:id/set-default', (req, res) => {
+    try {
+        const provider = DrawProviderModel.setDefault(req.params.id);
+        if (!provider) {
+            return res.status(404).json({ success: false, error: 'Provider 不存在' });
+        }
+        const { api_key: _, ...safeProvider } = provider;
+        res.json({ success: true, data: safeProvider });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
+ * 测试 Provider 连接
+ */
+router.post('/providers/:id/test', async (req, res) => {
+    try {
+        const provider = DrawProviderModel.getById(req.params.id);
+        if (!provider) {
+            return res.status(404).json({ success: false, error: 'Provider 不存在' });
+        }
+
+        const result = await aiDrawService.testProvider(provider);
+        res.json({ success: true, data: result });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
 
 // ==================== 项目 API ====================
 
@@ -50,11 +230,12 @@ router.get('/projects/:id', (req, res) => {
  */
 router.post('/projects', (req, res) => {
     try {
-        const { title, engine_type, content } = req.body;
+        const { title, engine_type, content, provider_id } = req.body;
         const project = ProjectModel.create({
             title: title || `Untitled-${Date.now()}`,
             engine_type: engine_type || 'drawio',
             content: content || null,
+            provider_id: provider_id || null,
         });
         logger.info(`项目已创建: ${project.id} (${project.engine_type})`);
         res.json({ success: true, data: project });
@@ -69,12 +250,13 @@ router.post('/projects', (req, res) => {
  */
 router.put('/projects/:id', (req, res) => {
     try {
-        const { title, content, thumbnail, engine_type } = req.body;
+        const { title, content, thumbnail, engine_type, provider_id } = req.body;
         const project = ProjectModel.update(req.params.id, {
             title,
             content,
             thumbnail,
             engine_type,
+            provider_id,
         });
         if (!project) {
             return res.status(404).json({ success: false, error: '项目不存在' });
@@ -244,29 +426,6 @@ router.post('/parse-url', async (req, res) => {
 
         const result = await aiDrawService.parseUrl(url);
         res.json({ success: true, data: result });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-/**
- * 获取可用的 AI Provider 列表
- */
-router.get('/providers', (req, res) => {
-    try {
-        const { providerStorage } = require('../ai-chat-api/storage');
-        const providers = providerStorage.getAll();
-
-        // 不返回 API Key
-        const safeProviders = providers.map(p => ({
-            id: p.id,
-            name: p.name,
-            type: p.type,
-            default_model: p.default_model,
-            is_default: p.is_default,
-        }));
-
-        res.json({ success: true, data: safeProviders });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }

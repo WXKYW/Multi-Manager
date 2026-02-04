@@ -47,6 +47,24 @@ export const aiDrawData = {
     aiDrawChatMessages: [],
     aiDrawChatInput: '',
     aiDrawChatLoading: false,
+
+    // =============== Provider 管理 ===============
+    aiDrawProviders: [],
+    aiDrawInternalProviders: [],
+    aiDrawShowProviderModal: false,
+    aiDrawEditingProvider: null,
+    aiDrawSavingProvider: false,
+    aiDrawTestingProvider: null,
+    aiDrawProviderForm: {
+        name: '',
+        source_type: 'external',
+        base_url: 'https://api.openai.com/v1',
+        api_key: '',
+        default_model: '',
+        internal_provider_id: '',
+        enabled: true,
+        is_default: false,
+    },
 };
 
 /**
@@ -77,7 +95,10 @@ export const aiDrawMethods = {
      */
     async aiDrawInit() {
         console.log('[AI Draw] 初始化模块');
-        await this.aiDrawLoadProjects();
+        await Promise.all([
+            this.aiDrawLoadProjects(),
+            this.aiDrawLoadProviders(),
+        ]);
     },
 
     /**
@@ -95,6 +116,221 @@ export const aiDrawMethods = {
             console.error('[AI Draw] 加载项目失败:', e);
         } finally {
             this.aiDrawLoading = false;
+        }
+    },
+
+    // ==================== Provider 管理方法 ====================
+
+    /**
+     * 加载 Provider 列表
+     */
+    async aiDrawLoadProviders() {
+        try {
+            const [providersRes, internalRes] = await Promise.all([
+                fetch('/api/ai-draw/providers'),
+                fetch('/api/ai-draw/providers/internal'),
+            ]);
+
+            if (providersRes.ok) {
+                const data = await providersRes.json();
+                this.aiDrawProviders = data.data || [];
+            }
+
+            if (internalRes.ok) {
+                const data = await internalRes.json();
+                this.aiDrawInternalProviders = data.data || [];
+            }
+        } catch (e) {
+            console.error('[AI Draw] 加载 Provider 失败:', e);
+        }
+    },
+
+    /**
+     * 重置 Provider 表单
+     */
+    aiDrawResetProviderForm() {
+        this.aiDrawProviderForm = {
+            name: '',
+            source_type: 'external',
+            base_url: 'https://api.openai.com/v1',
+            api_key: '',
+            default_model: '',
+            internal_provider_id: '',
+            enabled: true,
+            is_default: false,
+        };
+    },
+
+    /**
+     * 单独加载内部 Provider 列表
+     */
+    async aiDrawLoadInternalProviders() {
+        try {
+            const res = await fetch('/api/ai-draw/providers/internal');
+            if (res.ok) {
+                const data = await res.json();
+                this.aiDrawInternalProviders = data.data || [];
+            }
+        } catch (e) {
+            console.error('[AI Draw] 加载内部 Provider 失败:', e);
+        }
+    },
+
+    /**
+     * 打开添加 Provider 弹窗
+     */
+    aiDrawOpenProviderModal() {
+        this.aiDrawEditingProvider = null;
+        this.aiDrawResetProviderForm();
+        this.aiDrawShowProviderModal = true;
+    },
+
+    /**
+     * 编辑 Provider
+     */
+    aiDrawEditProvider(provider) {
+        this.aiDrawEditingProvider = provider;
+        this.aiDrawProviderForm = {
+            name: provider.name,
+            source_type: provider.source_type,
+            base_url: provider.base_url || 'https://api.openai.com/v1',
+            api_key: '', // 不回填 API Key
+            default_model: provider.default_model || '',
+            internal_provider_id: provider.internal_provider_id || '',
+            enabled: provider.enabled,
+            is_default: provider.is_default,
+        };
+        this.aiDrawShowProviderModal = true;
+    },
+
+    /**
+     * 保存 Provider
+     */
+    async aiDrawSaveProvider() {
+        const form = this.aiDrawProviderForm;
+
+        // 验证
+        if (!form.name.trim()) {
+            showToast('请输入名称', 'error');
+            return;
+        }
+
+        if (form.source_type === 'external') {
+            if (!form.base_url.trim()) {
+                showToast('请输入 API 地址', 'error');
+                return;
+            }
+            if (!this.aiDrawEditingProvider && !form.api_key.trim()) {
+                showToast('请输入 API 密钥', 'error');
+                return;
+            }
+        }
+
+        if (form.source_type === 'internal' && !form.internal_provider_id) {
+            showToast('请选择内部 Provider', 'error');
+            return;
+        }
+
+        this.aiDrawSavingProvider = true;
+
+        try {
+            const body = {
+                name: form.name.trim(),
+                source_type: form.source_type,
+                default_model: form.default_model.trim() || null,
+                enabled: form.enabled,
+                is_default: form.is_default,
+            };
+
+            if (form.source_type === 'external') {
+                body.base_url = form.base_url.trim();
+                if (form.api_key.trim()) {
+                    body.api_key = form.api_key.trim();
+                }
+            } else {
+                body.internal_provider_id = form.internal_provider_id;
+            }
+
+            const url = this.aiDrawEditingProvider
+                ? `/api/ai-draw/providers/${this.aiDrawEditingProvider.id}`
+                : '/api/ai-draw/providers';
+            const method = this.aiDrawEditingProvider ? 'PUT' : 'POST';
+
+            const res = await fetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+
+            if (res.ok) {
+                showToast(this.aiDrawEditingProvider ? 'Provider 已更新' : 'Provider 已添加', 'success');
+                this.aiDrawShowProviderModal = false;
+                this.aiDrawResetProviderForm();
+                await this.aiDrawLoadProviders();
+            } else {
+                const err = await res.json();
+                showToast(err.error || '保存失败', 'error');
+            }
+        } catch (e) {
+            showToast('保存失败: ' + e.message, 'error');
+        } finally {
+            this.aiDrawSavingProvider = false;
+        }
+    },
+
+    /**
+     * 删除 Provider
+     */
+    async aiDrawDeleteProvider(id) {
+        if (!confirm('确定要删除此 Provider 吗？')) return;
+
+        try {
+            const res = await fetch(`/api/ai-draw/providers/${id}`, { method: 'DELETE' });
+            if (res.ok) {
+                this.aiDrawProviders = this.aiDrawProviders.filter(p => p.id !== id);
+                showToast('已删除', 'success');
+            } else {
+                const err = await res.json();
+                showToast(err.error || '删除失败', 'error');
+            }
+        } catch (e) {
+            showToast('删除失败: ' + e.message, 'error');
+        }
+    },
+
+    /**
+     * 设置默认 Provider
+     */
+    async aiDrawSetDefaultProvider(id) {
+        try {
+            const res = await fetch(`/api/ai-draw/providers/${id}/set-default`, { method: 'POST' });
+            if (res.ok) {
+                await this.aiDrawLoadProviders();
+                showToast('已设为默认', 'success');
+            }
+        } catch (e) {
+            showToast('设置失败: ' + e.message, 'error');
+        }
+    },
+
+    /**
+     * 测试 Provider 连接
+     */
+    async aiDrawTestProvider(provider) {
+        this.aiDrawTestingProvider = provider.id;
+        try {
+            const res = await fetch(`/api/ai-draw/providers/${provider.id}/test`, { method: 'POST' });
+            const data = await res.json();
+
+            if (data.success && data.data.success) {
+                showToast(`连接成功: ${data.data.response || 'OK'}`, 'success');
+            } else {
+                showToast(`连接失败: ${data.data?.error || data.error || '未知错误'}`, 'error');
+            }
+        } catch (e) {
+            showToast('测试失败: ' + e.message, 'error');
+        } finally {
+            this.aiDrawTestingProvider = null;
         }
     },
 
