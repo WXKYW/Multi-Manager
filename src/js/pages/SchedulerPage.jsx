@@ -291,7 +291,7 @@ function CronEditor({ form, setForm, preview, previewError }) {
   );
 }
 
-function WorkflowCanvas({ workflow, runs = [] }) {
+function WorkflowCanvas({ workflow, runs = [], selectedNodeId = '', onSelectNode = null }) {
   const nodes = workflow.nodes || [];
   const edges = workflow.edges || [];
   const latestRun = runs.find((run) => run.workflow_id === workflow.id);
@@ -324,9 +324,14 @@ function WorkflowCanvas({ workflow, runs = [] }) {
         })}
         {nodes.map((node) => {
           const status = nodeStatus[node.id];
+          const selected = selectedNodeId === node.id;
           return (
             <foreignObject key={node.id} x={node.x || 0} y={node.y || 0} width="150" height="72">
-              <div className="h-full rounded-md border border-kumo-line bg-kumo-base p-2">
+              <button
+                type="button"
+                className={`h-full w-full rounded-md border bg-kumo-base p-2 text-left transition-colors ${selected ? 'border-kumo-brand/70 shadow-sm' : 'border-kumo-line'} ${onSelectNode ? 'hover:border-kumo-brand/60' : ''}`}
+                onClick={onSelectNode ? () => onSelectNode(node.id) : undefined}
+              >
                 <div className="truncate text-xs font-semibold text-kumo-strong">{node.name}</div>
                 <div className="mt-1 truncate text-[11px] text-kumo-subtle">{node.type === 'start' ? '开始节点' : node.task_id ? `任务 #${node.task_id}` : taskTypeLabel(node.type)}</div>
                 <div className="mt-2">
@@ -334,7 +339,7 @@ function WorkflowCanvas({ workflow, runs = [] }) {
                     {node.enabled === 0 ? '停用' : status ? statusLabel(status) : '待运行'}
                   </Badge>
                 </div>
-              </div>
+              </button>
             </foreignObject>
           );
         })}
@@ -355,6 +360,7 @@ function SchedulerPage() {
   const [workflowDialogOpen, setWorkflowDialogOpen] = useState(false);
   const [taskForm, setTaskForm] = useState(DEFAULT_TASK_FORM);
   const [workflowForm, setWorkflowForm] = useState(cloneWorkflowForm());
+  const [selectedWorkflowNodeId, setSelectedWorkflowNodeId] = useState('task-1');
   const [cronPreview, setCronPreview] = useState(null);
   const [cronPreviewError, setCronPreviewError] = useState('');
   const [selectedRun, setSelectedRun] = useState(null);
@@ -538,13 +544,65 @@ function SchedulerPage() {
   };
 
   const openCreateWorkflow = () => {
-    setWorkflowForm(cloneWorkflowForm());
+    const nextForm = cloneWorkflowForm();
+    setWorkflowForm(nextForm);
+    setSelectedWorkflowNodeId(nextForm.nodes.find((node) => node.type !== 'start')?.id || nextForm.nodes[0]?.id || '');
     setWorkflowDialogOpen(true);
   };
 
   const openEditWorkflow = (workflow) => {
-    setWorkflowForm(cloneWorkflowForm(workflow));
+    const nextForm = cloneWorkflowForm(workflow);
+    setWorkflowForm(nextForm);
+    setSelectedWorkflowNodeId(nextForm.nodes.find((node) => node.type !== 'start')?.id || nextForm.nodes[0]?.id || '');
     setWorkflowDialogOpen(true);
+  };
+
+  const addWorkflowNode = () => {
+    setWorkflowForm((prev) => {
+      const index = prev.nodes.length + 1;
+      const node = {
+        id: `task-${Date.now()}`,
+        name: `任务 ${index}`,
+        type: 'task',
+        task_id: 0,
+        enabled: 1,
+        x: 80 + index * 150,
+        y: 150,
+      };
+      setSelectedWorkflowNodeId(node.id);
+      return { ...prev, nodes: [...prev.nodes, node] };
+    });
+  };
+
+  const updateWorkflowNode = (nodeId, patch) => {
+    setWorkflowForm((prev) => ({
+      ...prev,
+      nodes: prev.nodes.map((node) => (node.id === nodeId ? { ...node, ...patch } : node)),
+    }));
+  };
+
+  const deleteWorkflowNode = (nodeId) => {
+    setWorkflowForm((prev) => {
+      const nextNodes = prev.nodes.filter((node) => node.id !== nodeId);
+      setSelectedWorkflowNodeId(nextNodes.find((node) => node.type !== 'start')?.id || nextNodes[0]?.id || '');
+      return {
+        ...prev,
+        nodes: nextNodes,
+        edges: prev.edges.filter((edge) => edge.from !== nodeId && edge.to !== nodeId),
+      };
+    });
+  };
+
+  const addWorkflowEdge = () => {
+    setWorkflowForm((prev) => {
+      if (prev.nodes.length < 2) return prev;
+      const from = prev.nodes[Math.max(0, prev.nodes.length - 2)].id;
+      const to = prev.nodes[prev.nodes.length - 1].id;
+      return {
+        ...prev,
+        edges: [...prev.edges, { id: `edge-${Date.now()}`, from, to, condition: 'success' }],
+      };
+    });
   };
 
   const saveWorkflow = async () => {
@@ -712,6 +770,8 @@ function SchedulerPage() {
 
   const nodeItems = useMemo(() => nodes.map((node) => ({ value: node.id, label: `${node.name}（${node.kind === 'local' ? '本机' : 'Agent'}）` })), [nodes]);
   const taskItems = useMemo(() => [{ value: '0', label: '内联任务' }, ...tasks.map((task) => ({ value: String(task.id), label: `${task.name} #${task.id}` }))], [tasks]);
+  const workflowNodeItems = useMemo(() => workflowForm.nodes.map((node) => ({ value: node.id, label: node.name || node.id })), [workflowForm.nodes]);
+  const selectedWorkflowNode = workflowForm.nodes.find((node) => node.id === selectedWorkflowNodeId) || workflowForm.nodes[0] || null;
 
   return (
     <TooltipProvider>
@@ -897,59 +957,116 @@ function SchedulerPage() {
         </Dialog.Root>
 
         <Dialog.Root open={workflowDialogOpen} onOpenChange={setWorkflowDialogOpen}>
-          <Dialog className="w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] overflow-y-auto p-5 sm:w-full sm:max-w-5xl sm:p-6">
+          <Dialog className="w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] overflow-y-auto p-5 sm:w-full sm:max-w-6xl sm:p-6">
             <Dialog.Title className="mb-4 text-base font-bold text-kumo-strong">{workflowForm.id ? '编辑工作流' : '新建工作流'}</Dialog.Title>
-            <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
-              <div className="space-y-4">
-                <div className="grid gap-3 sm:grid-cols-2"><Input size="sm" label="名称" value={workflowForm.name} onChange={(event) => setWorkflowForm((prev) => ({ ...prev, name: event.target.value }))} /><Input size="sm" label="Cron（留空为手动）" value={workflowForm.schedule} onChange={(event) => setWorkflowForm((prev) => ({ ...prev, schedule: event.target.value }))} /></div>
-                <Input size="sm" label="描述" value={workflowForm.description} onChange={(event) => setWorkflowForm((prev) => ({ ...prev, description: event.target.value }))} />
-                <WorkflowCanvas workflow={workflowForm} runs={[]} />
-                <div className="flex gap-2">
-                  <Button size="sm" variant="secondary" onClick={() => setWorkflowForm((prev) => {
-                    const index = prev.nodes.length + 1;
-                    return { ...prev, nodes: [...prev.nodes, { id: `task-${index}`, name: `任务 ${index}`, type: 'task', task_id: 0, enabled: 1, x: 80 + index * 150, y: 150 }] };
-                  })}><Plus className="h-3.5 w-3.5" />新增节点</Button>
-                  <Button size="sm" variant="secondary" onClick={() => setWorkflowForm((prev) => {
-                    if (prev.nodes.length < 2) return prev;
-                    const from = prev.nodes[prev.nodes.length - 2].id;
-                    const to = prev.nodes[prev.nodes.length - 1].id;
-                    return { ...prev, edges: [...prev.edges, { id: `edge-${prev.edges.length + 1}`, from, to, condition: 'success' }] };
-                  })}><ArrowRight className="h-3.5 w-3.5" />连接最后两个节点</Button>
+            <div className="space-y-4">
+              <div className="rounded-md border border-kumo-line p-3">
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_8rem]">
+                  <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+                    <Input size="sm" label="名称" value={workflowForm.name} onChange={(event) => setWorkflowForm((prev) => ({ ...prev, name: event.target.value }))} />
+                    <Input size="sm" label="Cron（留空为手动）" value={workflowForm.schedule} onChange={(event) => setWorkflowForm((prev) => ({ ...prev, schedule: event.target.value }))} />
+                  </div>
+                  <div className="flex items-center justify-between gap-3 rounded-md border border-kumo-line px-3 py-2">
+                    <span className="text-sm font-medium text-kumo-strong">启用</span>
+                    <Switch checked={workflowForm.enabled === 1} onCheckedChange={(checked) => setWorkflowForm((prev) => ({ ...prev, enabled: checked ? 1 : 0 }))} />
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <Input size="sm" label="描述" value={workflowForm.description} onChange={(event) => setWorkflowForm((prev) => ({ ...prev, description: event.target.value }))} />
                 </div>
               </div>
-              <div className="space-y-4">
-                <div className="rounded-md border border-kumo-line p-3">
-                  <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-kumo-strong"><Layers className="h-4 w-4" />节点</div>
-                  <div className="space-y-3">
-                    {workflowForm.nodes.map((node, index) => (
-                      <div key={node.id} className="rounded-md border border-kumo-line p-2">
-                        <Input size="sm" label="节点名称" value={node.name} onChange={(event) => setWorkflowForm((prev) => ({ ...prev, nodes: prev.nodes.map((item, i) => i === index ? { ...item, name: event.target.value } : item) }))} />
-                        {node.type !== 'start' && (
-                          <div className="mt-2 space-y-2">
-                            <Select size="sm" label="引用任务" className="w-full" value={String(node.task_id || 0)} onValueChange={(value) => setWorkflowForm((prev) => ({ ...prev, nodes: prev.nodes.map((item, i) => i === index ? { ...item, task_id: Number(value), type: Number(value) ? 'task' : 'shell' } : item) }))} items={taskItems} />
-                            {!node.task_id && <Textarea size="sm" label="内联命令" value={node.command || ''} onChange={(event) => setWorkflowForm((prev) => ({ ...prev, nodes: prev.nodes.map((item, i) => i === index ? { ...item, command: event.target.value } : item) }))} rows={2} />}
-                            <div className="flex items-center justify-between"><span className="text-xs text-kumo-subtle">启用</span><Switch checked={node.enabled !== 0} onCheckedChange={(checked) => setWorkflowForm((prev) => ({ ...prev, nodes: prev.nodes.map((item, i) => i === index ? { ...item, enabled: checked ? 1 : 0 } : item) }))} /></div>
+
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
+                <div className="space-y-3">
+                  <WorkflowCanvas workflow={workflowForm} runs={[]} selectedNodeId={selectedWorkflowNode?.id} onSelectNode={setSelectedWorkflowNodeId} />
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-kumo-line p-3">
+                    <div className="flex min-w-0 flex-wrap gap-2">
+                      {workflowForm.nodes.map((node) => (
+                        <button
+                          key={node.id}
+                          type="button"
+                          className={`min-w-0 rounded-md border px-3 py-1.5 text-left text-xs transition-colors ${selectedWorkflowNode?.id === node.id ? 'border-kumo-brand/70 bg-kumo-brand/10 text-kumo-strong' : 'border-kumo-line text-kumo-default hover:border-kumo-brand/60'}`}
+                          onClick={() => setSelectedWorkflowNodeId(node.id)}
+                        >
+                          <span className="block max-w-36 truncate font-semibold">{node.name || node.id}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex shrink-0 gap-2">
+                      <Button size="sm" variant="secondary" onClick={addWorkflowNode}><Plus className="h-3.5 w-3.5" />新增节点</Button>
+                      <Button size="sm" variant="secondary" onClick={addWorkflowEdge}><ArrowRight className="h-3.5 w-3.5" />添加依赖</Button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="rounded-md border border-kumo-line p-3">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="flex min-w-0 items-center gap-2 text-sm font-semibold text-kumo-strong">
+                        <Layers className="h-4 w-4 shrink-0" />
+                        <span className="truncate">当前节点</span>
+                      </div>
+                      {selectedWorkflowNode && selectedWorkflowNode.type !== 'start' && (
+                        <IconButton label="删除节点" variant="secondary-destructive" onClick={() => deleteWorkflowNode(selectedWorkflowNode.id)} icon={<Trash className="h-3.5 w-3.5" />} />
+                      )}
+                    </div>
+                    {selectedWorkflowNode ? (
+                      <div className="space-y-3">
+                        <Input size="sm" label="节点名称" value={selectedWorkflowNode.name || ''} onChange={(event) => updateWorkflowNode(selectedWorkflowNode.id, { name: event.target.value })} />
+                        {selectedWorkflowNode.type === 'start' ? (
+                          <div className="rounded-md border border-kumo-line bg-kumo-recessed/30 px-3 py-2 text-xs text-kumo-subtle">开始节点只负责触发流程，不需要绑定任务。</div>
+                        ) : (
+                          <div className="space-y-3">
+                            <Select
+                              size="sm"
+                              label="引用任务"
+                              className="w-full"
+                              value={String(selectedWorkflowNode.task_id || 0)}
+                              onValueChange={(value) => updateWorkflowNode(selectedWorkflowNode.id, { task_id: Number(value), type: Number(value) ? 'task' : 'shell' })}
+                              items={taskItems}
+                            />
+                            {!selectedWorkflowNode.task_id && (
+                              <Textarea size="sm" label="内联命令" value={selectedWorkflowNode.command || ''} onChange={(event) => updateWorkflowNode(selectedWorkflowNode.id, { command: event.target.value })} rows={3} />
+                            )}
+                            <div className="flex items-center justify-between rounded-md border border-kumo-line px-3 py-2">
+                              <span className="text-sm font-medium text-kumo-strong">启用节点</span>
+                              <Switch checked={selectedWorkflowNode.enabled !== 0} onCheckedChange={(checked) => updateWorkflowNode(selectedWorkflowNode.id, { enabled: checked ? 1 : 0 })} />
+                            </div>
                           </div>
                         )}
                       </div>
-                    ))}
+                    ) : (
+                      <div className="rounded-md border border-kumo-line bg-kumo-recessed/30 px-3 py-4 text-center text-xs text-kumo-subtle">请选择一个节点。</div>
+                    )}
                   </div>
-                </div>
-                <div className="rounded-md border border-kumo-line p-3">
-                  <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-kumo-strong"><Sliders className="h-4 w-4" />依赖边</div>
-                  <div className="space-y-2">
-                    {workflowForm.edges.map((edge, index) => (
-                      <div key={edge.id} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 items-center">
-                        <Select size="sm" aria-label="来源" className="w-full" value={edge.from} onValueChange={(value) => setWorkflowForm((prev) => ({ ...prev, edges: prev.edges.map((item, i) => i === index ? { ...item, from: value } : item) }))} items={workflowForm.nodes.map((node) => ({ value: node.id, label: node.name }))} />
-                        <Select size="sm" aria-label="目标" className="w-full" value={edge.to} onValueChange={(value) => setWorkflowForm((prev) => ({ ...prev, edges: prev.edges.map((item, i) => i === index ? { ...item, to: value } : item) }))} items={workflowForm.nodes.map((node) => ({ value: node.id, label: node.name }))} />
-                        <Select size="sm" aria-label="条件" className="w-full" value={edge.condition} onValueChange={(value) => setWorkflowForm((prev) => ({ ...prev, edges: prev.edges.map((item, i) => i === index ? { ...item, condition: value } : item) }))} items={CONDITION_ITEMS} />
-                        <IconButton label="删除边" variant="secondary-destructive" onClick={() => setWorkflowForm((prev) => ({ ...prev, edges: prev.edges.filter((_, i) => i !== index) }))} icon={<Trash className="h-3.5 w-3.5" />} />
-                      </div>
-                    ))}
+
+                  <div className="rounded-md border border-kumo-line p-3">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-kumo-strong"><Sliders className="h-4 w-4" />依赖规则</div>
+                      <Button size="sm" variant="secondary" onClick={addWorkflowEdge}><Plus className="h-3.5 w-3.5" />新增</Button>
+                    </div>
+                    <div className="space-y-2">
+                      {workflowForm.edges.length === 0 && (
+                        <div className="rounded-md border border-kumo-line bg-kumo-recessed/30 px-3 py-4 text-center text-xs text-kumo-subtle">暂无依赖规则，节点会独立存在。</div>
+                      )}
+                      {workflowForm.edges.map((edge, index) => (
+                        <div key={edge.id} className="grid gap-2 rounded-md border border-kumo-line p-2">
+                          <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
+                            <Select size="sm" label="来源" className="w-full" value={edge.from} onValueChange={(value) => setWorkflowForm((prev) => ({ ...prev, edges: prev.edges.map((item, i) => i === index ? { ...item, from: value } : item) }))} items={workflowNodeItems} />
+                            <ArrowRight className="mb-2 h-3.5 w-3.5 text-kumo-subtle" />
+                            <Select size="sm" label="目标" className="w-full" value={edge.to} onValueChange={(value) => setWorkflowForm((prev) => ({ ...prev, edges: prev.edges.map((item, i) => i === index ? { ...item, to: value } : item) }))} items={workflowNodeItems} />
+                          </div>
+                          <div className="grid grid-cols-[1fr_auto] items-end gap-2">
+                            <Select size="sm" label="触发条件" className="w-full" value={edge.condition} onValueChange={(value) => setWorkflowForm((prev) => ({ ...prev, edges: prev.edges.map((item, i) => i === index ? { ...item, condition: value } : item) }))} items={CONDITION_ITEMS} />
+                            <IconButton label="删除依赖" variant="secondary-destructive" onClick={() => setWorkflowForm((prev) => ({ ...prev, edges: prev.edges.filter((_, i) => i !== index) }))} icon={<Trash className="h-3.5 w-3.5" />} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
+
+                  <div className="flex justify-end gap-2"><Button size="sm" variant="secondary" onClick={() => setWorkflowDialogOpen(false)}>取消</Button><Button size="sm" variant="primary" onClick={saveWorkflow} disabled={saving}><Save className="h-3.5 w-3.5" />保存</Button></div>
                 </div>
-                <div className="flex items-center justify-between rounded-md border border-kumo-line p-3"><span className="text-sm font-medium text-kumo-strong">启用工作流</span><Switch checked={workflowForm.enabled === 1} onCheckedChange={(checked) => setWorkflowForm((prev) => ({ ...prev, enabled: checked ? 1 : 0 }))} /></div>
-                <div className="flex justify-end gap-2"><Button size="sm" variant="secondary" onClick={() => setWorkflowDialogOpen(false)}>取消</Button><Button size="sm" variant="primary" onClick={saveWorkflow} disabled={saving}><Save className="h-3.5 w-3.5" />保存</Button></div>
               </div>
             </div>
           </Dialog>

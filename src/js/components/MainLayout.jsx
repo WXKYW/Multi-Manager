@@ -1,9 +1,10 @@
-import React, { lazy, Suspense, useEffect, useMemo } from 'react';
+import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import useStore, { MODULE_GROUPS, MODULE_CONFIG, getModuleName } from '../store.js';
 import {
   Sidebar,
   useSidebar
 } from '@cloudflare/kumo/components/sidebar';
+import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import { Tabs } from '@cloudflare/kumo';
 import AppPageHeader, { AppBreadcrumbs } from './AppPageHeader.jsx';
 import {
@@ -136,39 +137,60 @@ const useMobileClosingNavigation = (onNavigate) => {
   };
 };
 
-const SidebarModuleButton = ({ module, active, icon: IconComponent, onNavigate }) => {
-  const navigateAndClose = useMobileClosingNavigation(onNavigate);
-  const { isMobile } = useSidebar();
-  const config = MODULE_CONFIG[module];
-  if (!config) return null;
-  const tooltip = !isMobile ? config.name : undefined;
+const SidebarTooltipMenuButton = ({ label, children, ...props }) => {
+  const { isMobile, state } = useSidebar();
+  const [tooltipOpen, setTooltipOpen] = useState(false);
+  const allowTooltip = !isMobile && state === 'collapsed';
+
+  useEffect(() => {
+    if (!allowTooltip) setTooltipOpen(false);
+  }, [allowTooltip]);
 
   return (
-    <Sidebar.MenuButton
+    <Sidebar.MenuItem>
+      <Tooltip
+        content={label}
+        side="right"
+        open={allowTooltip ? tooltipOpen : false}
+        onOpenChange={(open) => setTooltipOpen(allowTooltip && open)}
+        render={(
+          <Sidebar.MenuButton {...props} aria-label={label}>
+            {children}
+          </Sidebar.MenuButton>
+        )}
+      />
+    </Sidebar.MenuItem>
+  );
+};
+
+const SidebarModuleButton = ({ module, active, icon: IconComponent, onNavigate }) => {
+  const navigateAndClose = useMobileClosingNavigation(onNavigate);
+  const config = MODULE_CONFIG[module];
+  if (!config) return null;
+
+  return (
+    <SidebarTooltipMenuButton
+      label={config.name}
       active={active}
       aria-current={active ? 'page' : undefined}
       onClick={() => navigateAndClose(module)}
       icon={IconComponent}
-      tooltip={tooltip}
     >
       {config.name}
-    </Sidebar.MenuButton>
+    </SidebarTooltipMenuButton>
   );
 };
 
 const SidebarLogoutButton = ({ onLogout }) => {
-  const { isMobile } = useSidebar();
-  const tooltip = !isMobile ? '安全退出' : undefined;
-
   return (
-    <Sidebar.MenuButton
+    <SidebarTooltipMenuButton
+      label="安全退出"
       onClick={onLogout}
       className="text-kumo-danger hover:bg-kumo-danger/10"
       icon={LogOut}
-      tooltip={tooltip}
     >
       安全退出
-    </Sidebar.MenuButton>
+    </SidebarTooltipMenuButton>
   );
 };
 

@@ -66,6 +66,52 @@ func TestMiddlewareSkipsCodexDiscoveryNoise(t *testing.T) {
 	}
 }
 
+func TestMiddlewareSkipsSuccessfulSystemLogStreamRequest(t *testing.T) {
+	var buf bytes.Buffer
+	previous := Logger()
+	SetLogger(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	defer func() {
+		SetLogger(previous)
+	}()
+
+	handler := Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"success":true}`))
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/system/logs/stream?limit=500", nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	if got := strings.TrimSpace(buf.String()); got != "" {
+		t.Fatalf("expected system log stream request to be skipped, got log %q", got)
+	}
+}
+
+func TestMiddlewareLogsFailedSystemLogStreamRequest(t *testing.T) {
+	var buf bytes.Buffer
+	previous := Logger()
+	SetLogger(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	defer func() {
+		SetLogger(previous)
+	}()
+
+	handler := Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/system/logs/stream?limit=500", nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+
+	logLine := buf.String()
+	if !strings.Contains(logLine, "\"path\":\"/api/system/logs/stream\"") {
+		t.Fatalf("expected failed system log stream request log, got %q", logLine)
+	}
+}
+
 func TestMiddlewareLogsNormalAPIRequest(t *testing.T) {
 	var buf bytes.Buffer
 	previous := Logger()

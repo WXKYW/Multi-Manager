@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Input } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
@@ -20,11 +20,98 @@ function authHeaders() {
   return { 'x-admin-password': localStorage.getItem('admin_password') || '' };
 }
 
-function variant(level) {
-  if (level === 'ERROR') return 'error';
-  if (level === 'WARN') return 'warning';
-  if (level === 'INFO') return 'info';
-  return 'secondary';
+function levelClass(level) {
+  if (level === 'ERROR' || level === 'FATAL') return 'text-red-400';
+  if (level === 'WARN') return 'text-amber-300';
+  if (level === 'DEBUG') return 'text-cyan-300';
+  if (level === 'INFO') return 'text-emerald-300';
+  return 'text-zinc-300';
+}
+
+function formatLogTime(value) {
+  if (!value) return '--:--:--';
+  const date = new Date(value);
+  if (!Number.isNaN(date.getTime())) {
+    return date.toLocaleTimeString('zh-CN', { hour12: false });
+  }
+  const match = String(value).match(/T?(\d{2}:\d{2}:\d{2})/);
+  return match ? match[1] : String(value).slice(0, 8);
+}
+
+function parseRawLog(line) {
+  const raw = line.raw || '';
+  const match = raw.match(/^(\[[^\]]+\])\s+(\S+)\s+\[([A-Z]+)\]\s+\[([^\]]+)\]\s*(.*)$/);
+  const message = line.message || raw;
+  if (!match) {
+    return {
+      source: raw.match(/^(\[[^\]]+\])/)?.[1] || '[backend]',
+      time: formatLogTime(line.time),
+      level: line.level || 'RAW',
+      module: line.module || '-',
+      message: formatDisplayMessage(message),
+    };
+  }
+  return {
+    source: match[1],
+    time: match[2],
+    level: match[3],
+    module: match[4],
+    message: formatDisplayMessage(match[5]),
+  };
+}
+
+function formatDisplayMessage(message) {
+  return String(message || '')
+    .replace(/\s+status=(\d{3})\s+duration=(\d+ms)\b/g, ' - $1 ($2)')
+    .replace(/\s+duration=(\d+ms)\b/g, ' ($1)')
+    .replace(/\s+status=(\d{3})\b/g, ' - $1');
+}
+
+function durationTone(value) {
+  const duration = Number(String(value).match(/\d+/)?.[0]);
+  if (!Number.isFinite(duration)) return 'text-zinc-200';
+  if (duration >= 3000) return 'text-red-400';
+  if (duration >= 1000) return 'text-amber-300';
+  return 'text-emerald-300';
+}
+
+function statusTone(value) {
+  const status = Number(String(value).match(/\d{3}/)?.[0]);
+  if (!Number.isFinite(status)) return 'text-zinc-200';
+  if (status >= 500) return 'text-red-400';
+  if (status >= 400) return 'text-amber-300';
+  if (status >= 300) return 'text-cyan-300';
+  return 'text-emerald-300';
+}
+
+function renderMessageParts(message) {
+  const text = String(message || '');
+  const tokenPattern = /\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b|status=\d{3}|\b\d{3}\b|duration=\d+ms|\(\d+ms\)|\bsession_id=[^\s]+|\bserver_id=[^\s]+/g;
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = tokenPattern.exec(text)) !== null) {
+    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
+    const token = match[0];
+    let className = 'text-zinc-100';
+    if (/^(GET|HEAD|OPTIONS)$/.test(token)) className = 'text-sky-300 font-semibold';
+    else if (/^(POST|PUT|PATCH)$/.test(token)) className = 'text-emerald-300 font-semibold';
+    else if (/^DELETE$/.test(token)) className = 'text-rose-400 font-semibold';
+    else if (/^(status=)?\d{3}$/.test(token)) className = `${statusTone(token)} font-semibold`;
+    else if (/^(duration=|\()\d+ms\)?$/.test(token)) className = `${durationTone(token)} font-semibold`;
+    else if (/^(session_id|server_id)=/.test(token)) className = 'text-zinc-400';
+
+    parts.push(
+      <span key={`${token}-${match.index}`} className={className}>
+        {token}
+      </span>
+    );
+    lastIndex = match.index + token.length;
+  }
+
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+  return parts;
 }
 
 export default function SystemLogsPage() {
@@ -34,6 +121,8 @@ export default function SystemLogsPage() {
   const [logPath, setLogPath] = useState('');
   const [loading, setLoading] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const logViewportRef = useRef(null);
 
   const load = async () => {
     setLoading(true);
@@ -78,6 +167,13 @@ export default function SystemLogsPage() {
     return () => window.clearInterval(timer);
   }, [autoRefresh, level, query]);
 
+  const renderedLines = useMemo(() => lines.map(parseRawLog), [lines]);
+
+  useEffect(() => {
+    if (!autoScroll || !logViewportRef.current) return;
+    logViewportRef.current.scrollTop = logViewportRef.current.scrollHeight;
+  }, [autoScroll, renderedLines]);
+
   return (
     <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4">
       <LayerCard className="p-4">
@@ -92,6 +188,10 @@ export default function SystemLogsPage() {
               <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />
               自动刷新
             </label>
+            <label className="flex h-8 items-center gap-2 rounded-md border border-kumo-line bg-kumo-recessed px-2 text-xs text-kumo-subtle">
+              <Switch checked={autoScroll} onCheckedChange={setAutoScroll} />
+              跟随底部
+            </label>
             <Button size="sm" variant="secondary" onClick={download} icon={<Download className="h-3.5 w-3.5" />}>下载</Button>
             <Button size="sm" variant="primary" onClick={load} loading={loading} icon={<RefreshCw className="h-3.5 w-3.5" />}>刷新</Button>
           </div>
@@ -104,12 +204,13 @@ export default function SystemLogsPage() {
         </div>
       </LayerCard>
 
-      <section className="overflow-hidden rounded-md border border-kumo-line bg-zinc-950 text-zinc-100 shadow-none">
-        <div className="grid border-b border-white/10 bg-white/5 px-3 py-2 font-mono text-[11px] uppercase tracking-normal text-zinc-500 md:grid-cols-[4.5rem_10rem_7rem_minmax(0,1fr)]">
-          <span>级别</span>
-          <span>时间</span>
-          <span>模块</span>
-          <span>消息</span>
+      <section className="overflow-hidden rounded-lg border border-kumo-line bg-[#08090b] text-zinc-100 shadow-none">
+        <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-white/[0.05] px-3 py-2 text-[11px] text-zinc-400">
+          <div className="flex min-w-0 items-center gap-2">
+            <FileText className="h-3.5 w-3.5 text-zinc-300" />
+            <span className="truncate font-semibold text-zinc-100">{logPath || 'app.log'}</span>
+          </div>
+          <span className="shrink-0">{lines.length} lines</span>
         </div>
         {lines.length === 0 ? (
           <div className="flex min-h-80 flex-col items-center justify-center gap-2 px-6 py-12 text-center text-zinc-500">
@@ -118,13 +219,20 @@ export default function SystemLogsPage() {
             <div className="text-xs">调整筛选条件或刷新后再查看。</div>
           </div>
         ) : (
-          <div className="max-h-[calc(100vh-19rem)] min-h-[26rem] overflow-auto px-3 font-mono text-xs">
-            {lines.map((line, index) => (
-              <div key={`${line.time}-${index}`} className="grid gap-2 border-b border-white/5 py-1.5 md:grid-cols-[4.5rem_10rem_7rem_minmax(0,1fr)]">
-                <Badge variant={variant(line.level)}>{line.level || 'RAW'}</Badge>
-                <span className="truncate text-zinc-400">{line.time || '-'}</span>
-                <span className="truncate text-zinc-400">{line.module || '-'}</span>
-                <span className={`min-w-0 whitespace-pre-wrap break-words ${line.matched ? 'bg-yellow-500/20 text-yellow-100' : 'text-zinc-100'}`} title={line.raw}>{line.message || line.raw}</span>
+          <div ref={logViewportRef} className="max-h-[calc(100vh-19rem)] min-h-[26rem] overflow-auto px-3 py-2 font-mono text-xs leading-5">
+            {renderedLines.map((line, index) => (
+              <div
+                key={`${line.time}-${index}`}
+                className="min-w-max whitespace-pre border-b border-white/[0.045] py-0.5 hover:bg-white/[0.06]"
+                title={lines[index]?.raw}
+              >
+                <span className="mr-2 font-semibold text-blue-400">{line.source}</span>
+                <span className="mr-2 text-zinc-400">{line.time}</span>
+                <span className={`mr-2 font-semibold ${levelClass(line.level)}`}>[{line.level}]</span>
+                <span className="mr-2 font-semibold text-sky-300">[{line.module}]</span>
+                <span className={lines[index]?.matched ? 'bg-yellow-500/20 text-yellow-100' : 'text-zinc-100'}>
+                  {renderMessageParts(line.message)}
+                </span>
               </div>
             ))}
           </div>

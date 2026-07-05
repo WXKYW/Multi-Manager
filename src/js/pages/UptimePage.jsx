@@ -341,25 +341,8 @@ function UptimeMonitorDetails({
   onPauseResume,
   onEdit,
   onDelete,
-  formatDateTime,
   expanded = true,
 }) {
-  // 处理心跳时间范围标签
-  const getHeartbeatTimeLabel = () => {
-    if (heartbeats.length === 0) return '--';
-    const count = heartbeats.length > 60 ? 60 : heartbeats.length;
-    const oldestBeat = heartbeats[count - 1];
-    if (!oldestBeat || !oldestBeat.time) return '--';
-
-    const diffMs = Date.now() - new Date(oldestBeat.time).getTime();
-    const seconds = Math.floor(diffMs / 1000);
-
-    if (seconds < 60) return `${seconds}秒`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}分钟`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}小时`;
-    return `${Math.floor(seconds / 86400)}天`;
-  };
-
   const chartData = useMemo(() => {
     return [{
       name: '响应时间',
@@ -372,22 +355,8 @@ function UptimeMonitorDetails({
     }];
   }, [heartbeats, isDarkMode]);
 
-  // 生成 60 颗心跳丸
-  const detailedBeats = useMemo(() => {
-    const result = [];
-    for (let i = 0; i < 60; i++) {
-      const beat = heartbeats[i];
-      if (beat) {
-        result.unshift(beat);
-      } else {
-        result.unshift({ status: 'empty', time: null, ping: null });
-      }
-    }
-    return result;
-  }, [heartbeats]);
-
   return (
-    <div className="space-y-3 border-t border-kumo-line bg-kumo-recessed/25 p-3">
+    <div className="space-y-3 border-t border-kumo-interact/80 bg-kumo-recessed/40 p-3">
       {/* 头部操作栏 */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h5 className="flex items-center gap-1.5 text-xs font-semibold text-kumo-strong">
@@ -428,7 +397,7 @@ function UptimeMonitorDetails({
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_15rem]">
         {/* 图表主栏 (Span 3) */}
-        <ChartCard className="relative h-36">
+        <ChartCard className="relative h-36 !border-kumo-interact/90 !bg-kumo-base">
           {(tooltipBoundary) => (
             <DeferredRender open={expanded} fallback={<ChartWarmupSkeleton height={120} />}>
               <TimeseriesChart
@@ -454,13 +423,13 @@ function UptimeMonitorDetails({
 
         {/* 右侧可用率统计指标 */}
         <div className="grid grid-cols-2 gap-2 lg:grid-cols-1">
-          <div className="rounded-md border border-kumo-line bg-kumo-base p-2">
+          <div className="rounded-md border border-kumo-interact/85 bg-kumo-base p-2">
             <span className="text-[10px] text-kumo-subtle select-none">24小时可用率</span>
-            <span className="mt-1 block font-mono text-base font-semibold text-kumo-strong">{uptime24h}%</span>
+            <span className="mt-1 block text-base font-semibold tabular-nums text-kumo-strong">{uptime24h}%</span>
           </div>
-          <div className="rounded-md border border-kumo-line bg-kumo-base p-2">
+          <div className="rounded-md border border-kumo-interact/85 bg-kumo-base p-2">
             <span className="text-[10px] text-kumo-subtle select-none">30天可用率</span>
-            <span className="mt-1 block font-mono text-base font-semibold text-kumo-strong">{uptime30d}%</span>
+            <span className="mt-1 block text-base font-semibold tabular-nums text-kumo-strong">{uptime30d}%</span>
           </div>
         </div>
       </div>
@@ -470,34 +439,6 @@ function UptimeMonitorDetails({
         <SslCertificatePanel monitorId={monitor.id} />
       )}
 
-      {/* 心跳可视化图表 (60 pills) */}
-      <div>
-        <div className="flex gap-[3px] h-4 items-center">
-          {detailedBeats.map((beat, idx) => {
-            let colorClass = 'bg-kumo-line opacity-20';
-            if (beat.status === 'up') colorClass = 'bg-kumo-success';
-            if (beat.status === 'down') colorClass = 'bg-kumo-danger';
-            if (beat.status === 'pending') colorClass = 'bg-kumo-warning';
-
-            let tooltipText = '';
-            if (beat.status !== 'empty') {
-              tooltipText = `${formatDateTime(beat.time)} - ${beat.status === 'up' ? `正常 (${beat.ping}ms)` : `故障 (${beat.msg || 'Timeout'})`}`;
-            }
-
-            return (
-              <div
-                key={idx}
-                className={`flex-1 h-3.5 rounded-sm transition-all ${colorClass}`}
-                title={tooltipText}
-              />
-            );
-          })}
-        </div>
-        <div className="flex justify-between text-[9px] text-kumo-subtle mt-1.5 font-mono select-none">
-          <span>{getHeartbeatTimeLabel()}前</span>
-          <span>现在</span>
-        </div>
-      </div>
     </div>
   );
 }
@@ -1054,6 +995,11 @@ function UptimePage() {
     return 'text-kumo-danger';
   };
 
+  const formatUptimeRateCompact = (rateStr) => {
+    const rate = Number(rateStr);
+    return Number.isFinite(rate) ? String(Math.round(rate)) : '--';
+  };
+
   // 格式化连接地址
   const getDisplayUrl = (monitor) => {
     if (monitor.type === 'http' || monitor.type === 'keyword' || monitor.type === 'json') {
@@ -1449,7 +1395,7 @@ function UptimePage() {
               )}
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-3 rounded-lg border border-kumo-line/80 bg-kumo-recessed/35 p-2">
               {/* 批量控制条 */}
               {showMonitorSelectionControls && (
                 <div className="flex items-center justify-between app-subcard bg-kumo-recessed/30 px-4 py-2.5">
@@ -1478,25 +1424,25 @@ function UptimePage() {
                   const isExpanded = expandedMonitorId === monitor.id;
 
                   // 状态指示
-                  let statusClass = 'border-kumo-line';
+                  let statusClass = 'border-kumo-interact/75';
                   let statusPillClass = 'bg-kumo-line/20 text-kumo-subtle';
                   let statusText = '暂停/未激活';
 
                   if (monitor.active) {
                     if (!lastBeat) {
-                      statusClass = 'border-kumo-line';
+                      statusClass = 'border-kumo-interact/75';
                       statusPillClass = 'bg-kumo-line/20 text-kumo-subtle';
                       statusText = '等待中';
                     } else if (lastBeat.status === 'up') {
-                      statusClass = 'border-kumo-line';
+                      statusClass = 'border-kumo-interact/75';
                       statusPillClass = 'bg-kumo-success/10 text-kumo-success border border-kumo-success/20';
                       statusText = '正常';
                     } else if (lastBeat.status === 'down') {
-                      statusClass = 'border-kumo-line';
+                      statusClass = 'border-kumo-interact/75';
                       statusPillClass = 'bg-kumo-danger/10 text-kumo-danger border border-kumo-danger/20';
                       statusText = '故障';
                     } else if (lastBeat.status === 'pending') {
-                      statusClass = 'border-kumo-line';
+                      statusClass = 'border-kumo-interact/75';
                       statusPillClass = 'bg-kumo-warning/10 text-kumo-warning border border-kumo-warning/20';
                       statusText = '检测中';
                     }
@@ -1516,12 +1462,12 @@ function UptimePage() {
                   return (
                     <div
                       key={monitor.id}
-                      className={`bg-kumo-base border rounded-lg overflow-hidden    ${statusClass}`}
+                      className={`overflow-hidden rounded-lg border bg-kumo-base shadow-sm ${statusClass}`}
                     >
                       {/* 卡片头部行 */}
                       <div
                         onClick={() => setExpandedMonitorId(isExpanded ? null : monitor.id)}
-                        className="flex flex-col md:flex-row items-start md:items-center justify-between p-2 gap-4 cursor-pointer"
+                        className="flex flex-col md:flex-row items-start md:items-center justify-between p-2 gap-4 cursor-pointer transition-colors hover:bg-kumo-recessed/25"
                       >
                         {/* 左侧选择复选框 & 图标 & 核心信息 */}
                         <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -1539,7 +1485,7 @@ function UptimePage() {
                           )}
 
                           {/* 类型图标 */}
-                          <div className="w-8 h-8 rounded-lg bg-kumo-recessed flex items-center justify-center text-kumo-strong flex-shrink-0">
+                          <div className="w-8 h-8 rounded-lg border border-kumo-line/70 bg-kumo-recessed flex items-center justify-center text-kumo-strong flex-shrink-0">
                             {getUptimeTypeIcon(monitor.type)}
                           </div>
 
@@ -1585,27 +1531,27 @@ function UptimePage() {
                           <div className="flex items-center gap-3 text-right">
                             <div className="flex flex-col">
                               <span className="text-[9px] text-kumo-subtle select-none">时延</span>
-                              <span className="text-xs font-bold text-kumo-strong font-mono">
+                              <span className="text-xs font-bold tabular-nums text-kumo-strong">
                                 {lastBeat && lastBeat.status === 'up' ? `${lastBeat.ping}ms` : '--'}
                               </span>
                             </div>
                             <div className="flex flex-col">
                               <span className="text-[9px] text-kumo-subtle select-none">可用率</span>
-                              <span className={`text-xs font-bold font-mono ${getUptimeRateClass(getUptimeRate(monitor.id, 1))}`}>
-                                {getUptimeRate(monitor.id, 1)}%
+                              <span className={`text-xs font-bold tabular-nums ${getUptimeRateClass(getUptimeRate(monitor.id, 1))}`}>
+                                {formatUptimeRateCompact(getUptimeRate(monitor.id, 1))}%
                               </span>
                             </div>
                           </div>
 
                           {/* 30 心跳丸小条 */}
-                          <div className="flex gap-[2px] items-center h-3.5 select-none flex-shrink-0">
+                          <div className="grid h-4 shrink-0 grid-cols-[repeat(30,4px)] items-center gap-[4px] select-none">
                             {miniBeats.map((beat, idx) => {
                               let colorClass = 'bg-kumo-line opacity-20';
                               if (beat.status === 'up') colorClass = 'bg-kumo-success';
                               if (beat.status === 'down') colorClass = 'bg-kumo-danger';
                               if (beat.status === 'pending') colorClass = 'bg-kumo-warning';
                               return (
-                                <div key={idx} className={`w-[4px] h-3.5 rounded-sm ${colorClass} flex-shrink-0`} />
+                                <div key={idx} className={`h-[14px] w-[4px] rounded-full ${colorClass}`} />
                               );
                             })}
                           </div>
@@ -1618,13 +1564,12 @@ function UptimePage() {
                           monitor={monitor}
                           heartbeats={beats}
                           loading={!!uptimeHeartbeatLoading[monitor.id]}
-                          uptime24h={getUptimeRate(monitor.id, 1)}
-                          uptime30d={getUptimeRate(monitor.id, 30)}
+                          uptime24h={formatUptimeRateCompact(getUptimeRate(monitor.id, 1))}
+                          uptime30d={formatUptimeRateCompact(getUptimeRate(monitor.id, 30))}
                           isDarkMode={isDarkMode}
                           onPauseResume={handleToggleActive}
                           onEdit={handleOpenEdit}
                           onDelete={handleDeleteMonitor}
-                          formatDateTime={formatDateTime}
                           expanded={isExpanded}
                         />
                       </AnimatedCollapse>

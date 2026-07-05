@@ -189,7 +189,7 @@ func (s *terminalCaptureSocket) Events() []capturedSocketEvent {
 func TestAccountsLifecycleAndNullableUpdate(t *testing.T) {
 	service, _ := testService(t)
 
-	res := perform(service, http.MethodPost, "/api/server/accounts", `{"name":"edge","host":"127.0.0.1","port":22,"username":"root","auth_type":"password","password":"secret","tags":["prod"],"traffic_limit_bytes":1099511627776,"traffic_alert_enabled":true}`)
+	res := perform(service, http.MethodPost, "/api/server/accounts", `{"name":"edge","host":"127.0.0.1","port":22,"username":"root","auth_type":"password","password":"secret","tags":["prod"],"traffic_limit_bytes":1099511627776,"traffic_alert_enabled":true,"traffic_cycle_type":"monthly","traffic_cycle_day":15}`)
 	if res.Code != http.StatusOK {
 		t.Fatalf("create status=%d body=%s", res.Code, res.Body.String())
 	}
@@ -201,6 +201,9 @@ func TestAccountsLifecycleAndNullableUpdate(t *testing.T) {
 	}
 	if data["traffic_limit_bytes"] != float64(1099511627776) || data["traffic_alert_enabled"] != true || data["traffic_alert_percent"] != float64(100) {
 		t.Fatalf("unexpected traffic quota fields after create: %#v", data)
+	}
+	if data["traffic_cycle_type"] != "monthly" || data["traffic_cycle_day"] != float64(15) {
+		t.Fatalf("unexpected traffic cycle fields after create: %#v", data)
 	}
 
 	res = perform(service, http.MethodPut, "/api/server/accounts/"+id, `{"description":"updated","tags":["prod","go"]}`)
@@ -214,6 +217,9 @@ func TestAccountsLifecycleAndNullableUpdate(t *testing.T) {
 	}
 	if data["traffic_limit_bytes"] != float64(1099511627776) || data["traffic_alert_enabled"] != true {
 		t.Fatalf("traffic quota should be preserved by partial update: %#v", data)
+	}
+	if data["traffic_cycle_type"] != "monthly" || data["traffic_cycle_day"] != float64(15) {
+		t.Fatalf("traffic cycle should be preserved by partial update: %#v", data)
 	}
 
 	res = perform(service, http.MethodPut, "/api/server/accounts/"+id, `{"traffic_limit_bytes":2199023255552,"traffic_alert_enabled":false}`)

@@ -22,10 +22,10 @@ export const MODULE_CONFIG = {
     description: '全局配置、安全认证与外观主题',
   },
   openai: {
-    name: 'OpenAI',
-    shortName: 'OAI',
+    name: '模型网关',
+    shortName: '模型',
     icon: 'fa-robot',
-    description: 'OpenAI 兼容 API 管理与聊天',
+    description: '模型网关与 OpenAI 兼容 API 管理',
   },
 
   paas: {
@@ -112,12 +112,6 @@ export const MODULE_GROUPS = [
     modules: ['dashboard'],
   },
   {
-    id: 'api-gateway',
-    name: 'API 网关',
-    icon: 'fa-bolt',
-    modules: ['openai'],
-  },
-  {
     id: 'infrastructure',
     name: '云服务',
     icon: 'fa-cubes',
@@ -128,6 +122,12 @@ export const MODULE_GROUPS = [
     name: '工具箱',
     icon: 'fa-toolbox',
     modules: ['scheduler', 'totp', 'uptime', 'filebox', 'notification'],
+  },
+  {
+    id: 'api-gateway',
+    name: 'API 网关',
+    icon: 'fa-bolt',
+    modules: ['openai'],
   },
   {
     id: 'system',

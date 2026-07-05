@@ -579,8 +579,8 @@ function AIAccessConsole({
   const audit = aiAccess?.audit || [];
 
   return (
-    <div className="grid h-full min-h-0 min-w-0 gap-4 pt-3 xl:grid-cols-[minmax(360px,0.82fr)_minmax(0,1.18fr)]">
-      <div className={cx(fixedPanelClass, 'min-h-0 space-y-4 overflow-y-auto px-px pb-2 pr-1')}>
+    <div className="grid h-full min-h-0 min-w-0 gap-4 xl:grid-cols-[minmax(360px,0.82fr)_minmax(0,1.18fr)]">
+      <div className={cx(fixedPanelClass, 'min-h-0 space-y-4 overflow-y-auto px-px pb-2 pr-1 pt-px')}>
         <div className="grid gap-3 sm:grid-cols-2">
           <StatCard icon={Settings} label="可用工具" value={tools.length} />
           <StatCard icon={Plug} label="MCP 服务" value={mcpServers.length} tone="info" />
@@ -704,7 +704,7 @@ function AIAccessConsole({
         </AppCard>
       </div>
 
-      <div className={cx(fixedPanelClass, 'min-h-0 space-y-4 overflow-y-auto px-px pb-2 pr-1')}>
+      <div className={cx(fixedPanelClass, 'min-h-0 space-y-4 overflow-y-auto px-px pb-2 pr-1 pt-px')}>
         <AppCard padding="md">
           <SectionHeader title="连接 AI" action={<InlineStatusPill tone="success">MCP 已就绪</InlineStatusPill>} />
           <div className="grid gap-2 md:grid-cols-3">
@@ -1133,8 +1133,8 @@ function ApiDocsPage() {
       </PageToolbar>
 
       {activeView === 'routes' && (
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-visible p-1">
-          <div className="grid gap-3 pt-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-visible px-1 pb-1 pt-1">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard icon={FileText} label="接口总数" value={summary.total} />
             <StatCard icon={Activity} label="可用接口" value={summary.byStatus.active || 0} tone="success" />
             <StatCard icon={Shield} label="登录保护" value={summary.byAuth.session || 0} tone="warning" />
@@ -1190,7 +1190,7 @@ function ApiDocsPage() {
       )}
 
       {activeView === 'ai' && (
-        <div className="min-h-0 flex-1 overflow-visible p-1">
+        <div className="min-h-0 flex-1 overflow-visible px-1 pb-1 pt-1">
           <AIAccessConsole
             aiAccess={aiAccess}
             loading={aiLoading}

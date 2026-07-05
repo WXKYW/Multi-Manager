@@ -252,6 +252,9 @@ func shouldSkipRequestLog(r *http.Request, status int) bool {
 	if strings.Contains(userAgent, "codex local server discovery") {
 		return true
 	}
+	if status < http.StatusBadRequest && r.URL.Path == "/api/system/logs/stream" {
+		return true
+	}
 	if status < http.StatusBadRequest && isStaticAssetRequest(r.URL.Path) {
 		return true
 	}

@@ -568,6 +568,7 @@ function TrafficTotalSummary({ txTotal, rxTotal, quota, compact = false }) {
     ? 'text-[13px]'
     : 'text-sm';
   const remainingPercent = quota ? clampPercent(100 - quota.percent) : 0;
+  const unlimited = !!quota?.unlimited;
 
   return (
     <div className="grid min-w-0 grid-cols-2 gap-1.5 sm:grid-cols-1">
@@ -587,13 +588,13 @@ function TrafficTotalSummary({ txTotal, rxTotal, quota, compact = false }) {
         <div className={`col-span-2 min-w-0 rounded-md border border-kumo-line/70 bg-kumo-recessed/20 sm:col-span-1 ${itemClassName}`}>
           <Meter
             label="剩余流量"
-            value={remainingPercent}
+            value={unlimited ? 100 : remainingPercent}
             min={0}
             max={100}
-            customValue={`${remainingPercent.toFixed(remainingPercent >= 10 ? 0 : 1)}%`}
+            customValue={unlimited ? '∞' : `${remainingPercent.toFixed(remainingPercent >= 10 ? 0 : 1)}%`}
             className="gap-1 text-[10px] font-semibold text-kumo-subtle"
             trackClassName="!h-1.5 overflow-hidden rounded-full border border-kumo-line/70 bg-kumo-base"
-            indicatorClassName={`!h-full !bg-none ${quota.overLimit ? '!bg-kumo-danger' : quota.nearAlert ? '!bg-kumo-warning' : '!bg-kumo-info'}`}
+            indicatorClassName={`!h-full !bg-none ${unlimited ? '!bg-kumo-info' : quota.overLimit ? '!bg-kumo-danger' : quota.nearAlert ? '!bg-kumo-warning' : '!bg-kumo-info'}`}
           />
         </div>
       )}
@@ -1418,6 +1419,18 @@ const TRAFFIC_QUOTA_UNITS = {
   PB: 1024 * 1024 * 1024 * 1024 * 1024,
 };
 
+const TRAFFIC_CYCLE_OPTIONS = [
+  { value: 'none', label: '不重置' },
+  { value: 'calendar_month', label: '自然月' },
+  { value: 'monthly', label: '每月指定日' },
+  { value: 'custom', label: '自定义范围' },
+];
+
+const normalizeTrafficCycleDayInput = (value) => {
+  const day = Math.round(toNumber(value, 1));
+  return Math.min(28, Math.max(1, day));
+};
+
 const bytesToTrafficQuotaForm = (bytes) => {
   const value = toNumber(bytes, 0);
   if (value <= 0) return { value: '', unit: 'TB' };
@@ -1447,8 +1460,6 @@ const normalizeTrafficAlertPercentInput = (value) => {
 const getTrafficQuota = (server = {}) => {
   const network = server.info?.network || {};
   const limit = toNumber(network.traffic_limit_bytes ?? server.traffic_limit_bytes, 0);
-  if (limit <= 0) return null;
-
   const rawUsed = toNumber(network.traffic_used_bytes, NaN);
   const rxBytes = toNumber(network.rx_total_bytes, NaN);
   const txBytes = toNumber(network.tx_total_bytes, NaN);
@@ -1457,6 +1468,23 @@ const getTrafficQuota = (server = {}) => {
   const used = Number.isFinite(rawUsed)
     ? rawUsed
     : (Number.isFinite(rxBytes) && Number.isFinite(txBytes) ? rxBytes + txBytes : parsedRx + parsedTx);
+  if (limit <= 0) {
+    return {
+      limit,
+      used: Math.max(0, used),
+      remaining: Infinity,
+      percent: 0,
+      barPercent: 0,
+      alertPercent: 100,
+      overLimit: false,
+      nearAlert: false,
+      alertEnabled: false,
+      unlimited: true,
+      usedText: network.traffic_used || formatBytesValue(used),
+      limitText: '∞',
+      remainingText: '无限',
+    };
+  }
   const percent = limit > 0 ? (Math.max(0, used) / limit) * 100 : 0;
   const alertPercent = toNumber(network.traffic_alert_percent ?? server.traffic_alert_percent, 100);
   const overLimit = percent >= 100;
@@ -2014,6 +2042,10 @@ function ServerPage() {
     trafficLimitUnit: 'TB',
     trafficAlertEnabled: false,
     trafficAlertPercent: 100,
+    trafficCycleType: 'none',
+    trafficCycleDay: 1,
+    trafficCycleStart: '',
+    trafficCycleEnd: '',
     monitorMode: 'agent'
   });
   const [selectedCredentialId, setSelectedCredentialId] = useState('');
@@ -3253,6 +3285,10 @@ function ServerPage() {
       trafficLimitUnit: 'TB',
       trafficAlertEnabled: false,
       trafficAlertPercent: 100,
+      trafficCycleType: 'none',
+      trafficCycleDay: 1,
+      trafficCycleStart: '',
+      trafficCycleEnd: '',
       monitorMode: 'agent'
     });
     setSelectedCredentialId('');
@@ -3282,6 +3318,10 @@ function ServerPage() {
       trafficLimitUnit: trafficQuotaForm.unit,
       trafficAlertEnabled: Boolean(server.traffic_alert_enabled),
       trafficAlertPercent: normalizeTrafficAlertPercentInput(server.traffic_alert_percent),
+      trafficCycleType: server.traffic_cycle_type || 'none',
+      trafficCycleDay: normalizeTrafficCycleDayInput(server.traffic_cycle_day),
+      trafficCycleStart: formatDateInputValue(server.traffic_cycle_start),
+      trafficCycleEnd: formatDateInputValue(server.traffic_cycle_end),
       monitorMode: server.monitor_mode || 'agent'
     });
     setServerAddMode('ssh');
@@ -3434,6 +3474,14 @@ function ServerPage() {
       setServerModalError('请填写连接地址和用户名');
       return;
     }
+    if (serverForm.trafficCycleType === 'custom' && serverForm.trafficCycleStart && serverForm.trafficCycleEnd) {
+      const cycleStart = new Date(`${serverForm.trafficCycleStart}T00:00:00`).getTime();
+      const cycleEnd = new Date(`${serverForm.trafficCycleEnd}T23:59:59`).getTime();
+      if (Number.isFinite(cycleStart) && Number.isFinite(cycleEnd) && cycleEnd < cycleStart) {
+        setServerModalError('流量周期结束时间不能早于开始时间');
+        return;
+      }
+    }
     setServerModalSaving(true);
     setServerModalError('');
 
@@ -3455,6 +3503,10 @@ function ServerPage() {
         traffic_limit_bytes: trafficLimitBytes,
         traffic_alert_enabled: trafficAlertEnabled,
         traffic_alert_percent: normalizeTrafficAlertPercentInput(serverForm.trafficAlertPercent),
+        traffic_cycle_type: serverForm.trafficCycleType || 'none',
+        traffic_cycle_day: normalizeTrafficCycleDayInput(serverForm.trafficCycleDay),
+        traffic_cycle_start: serverForm.trafficCycleType === 'custom' ? normalizeStartInputValue(serverForm.trafficCycleStart) : null,
+        traffic_cycle_end: serverForm.trafficCycleType === 'custom' ? normalizeExpiryInputValue(serverForm.trafficCycleEnd) : null,
         monitor_mode: isAgentForm ? 'agent' : 'ssh'
       };
 
@@ -6871,8 +6923,8 @@ function ServerPage() {
                                         {trafficQuota && (
                                           <ExpandedInfoChip
                                             label="剩余流量"
-                                            value={trafficQuota.overLimit ? '已超限' : trafficQuota.remainingText || `${trafficQuota.percent.toFixed(trafficQuota.percent >= 10 ? 0 : 1)}%`}
-                                            valueClassName={trafficQuota.overLimit ? 'text-kumo-danger' : trafficQuota.nearAlert ? 'text-kumo-warning' : 'text-kumo-info'}
+                                            value={trafficQuota.unlimited ? '无限' : trafficQuota.overLimit ? '已超限' : trafficQuota.remainingText || `${trafficQuota.percent.toFixed(trafficQuota.percent >= 10 ? 0 : 1)}%`}
+                                            valueClassName={trafficQuota.unlimited ? 'text-kumo-info' : trafficQuota.overLimit ? 'text-kumo-danger' : trafficQuota.nearAlert ? 'text-kumo-warning' : 'text-kumo-info'}
                                           />
                                         )}
                                       </div>
@@ -8763,6 +8815,64 @@ function ServerPage() {
                         </Button>
                       </div>
                     </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)] sm:items-end">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="font-semibold text-kumo-subtle">流量周期</label>
+                      <Select size="sm"
+                        aria-label="流量周期"
+                        value={serverForm.trafficCycleType}
+                        onValueChange={(value) => setServerForm(prev => ({ ...prev, trafficCycleType: String(value) }))}
+                        className="px-3 py-2"
+                        items={TRAFFIC_CYCLE_OPTIONS}
+                      />
+                    </div>
+                    {serverForm.trafficCycleType === 'monthly' && (
+                      <div className="flex flex-col gap-1.5">
+                        <label className="font-semibold text-kumo-subtle">账单日</label>
+                        <Input size="sm"
+                          aria-label="每月流量重置日"
+                          type="number"
+                          min="1"
+                          max="28"
+                          step="1"
+                          value={serverForm.trafficCycleDay}
+                          onChange={e => setServerForm(prev => ({ ...prev, trafficCycleDay: e.target.value }))}
+                          onBlur={() => setServerForm(prev => ({ ...prev, trafficCycleDay: normalizeTrafficCycleDayInput(prev.trafficCycleDay) }))}
+                          className="px-3 py-2 text-kumo-strong"
+                        />
+                      </div>
+                    )}
+                    {serverForm.trafficCycleType === 'custom' && (
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div className="flex flex-col gap-1.5">
+                          <label className="font-semibold text-kumo-subtle">周期开始</label>
+                          <Input size="sm"
+                            aria-label="流量周期开始"
+                            type="date"
+                            value={serverForm.trafficCycleStart}
+                            onChange={e => setServerForm(prev => ({ ...prev, trafficCycleStart: e.target.value }))}
+                            className="px-3 py-2 text-kumo-strong"
+                          />
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          <label className="font-semibold text-kumo-subtle">周期结束</label>
+                          <Input size="sm"
+                            aria-label="流量周期结束"
+                            type="date"
+                            value={serverForm.trafficCycleEnd}
+                            onChange={e => setServerForm(prev => ({ ...prev, trafficCycleEnd: e.target.value }))}
+                            className="px-3 py-2 text-kumo-strong"
+                          />
+                        </div>
+                      </div>
+                    )}
+                    {(serverForm.trafficCycleType === 'calendar_month' || serverForm.trafficCycleType === 'none') && (
+                      <div className="rounded-md border border-kumo-line bg-kumo-recessed/30 px-3 py-2 text-xs text-kumo-subtle">
+                        {serverForm.trafficCycleType === 'calendar_month' ? '每月 1 日作为新流量周期。' : '不设置重置周期，按累计流量显示。'}
+                      </div>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

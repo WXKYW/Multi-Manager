@@ -9,7 +9,18 @@ import { Select } from '@cloudflare/kumo/components/select';
 import { Table } from '@cloudflare/kumo/components/table';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Autocomplete } from '@cloudflare/kumo/components/autocomplete';
-import { Tabs } from '@cloudflare/kumo';
+import { ChartPalette, Tabs, TimeseriesChart } from '@cloudflare/kumo';
+import * as echarts from 'echarts/core';
+import { LineChart } from 'echarts/charts';
+import {
+  AriaComponent,
+  AxisPointerComponent,
+  BrushComponent,
+  GridComponent,
+  ToolboxComponent,
+  TooltipComponent,
+} from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
 import useTableResize from '../composables/useTableResize.js';
 import useStore from '../store.js';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
@@ -63,158 +74,35 @@ import {
   AlertTriangle,
 } from '../components/Icons.jsx';
 
-function SVGAnalyticsChart({ dailyData }) {
-  if (!dailyData || dailyData.length === 0) {
-    return (
-      <div className="h-full flex items-center justify-center text-kumo-subtle text-xs">
-        暂无趋势数据
-      </div>
-    );
-  }
+echarts.use([
+  LineChart,
+  AxisPointerComponent,
+  BrushComponent,
+  GridComponent,
+  ToolboxComponent,
+  TooltipComponent,
+  CanvasRenderer,
+  AriaComponent,
+]);
 
-  const width = 500;
-  const height = 180;
-  const paddingLeft = 40;
-  const paddingRight = 40;
-  const paddingTop = 20;
-  const paddingBottom = 30;
+function parseAnalyticsDay(day) {
+  const value = String(day || '').trim();
+  if (!value) return NaN;
+  const date = /^\d{4}-\d{1,2}-\d{1,2}$/.test(value)
+    ? new Date(`${value}T00:00:00`)
+    : new Date(`${new Date().getFullYear()}-${value}T00:00:00`);
+  return date.getTime();
+}
 
-  const maxCount = Math.max(...dailyData.map(d => d.count), 5);
-  const maxLatency = Math.max(...dailyData.map(d => d.avgLatency), 500);
-
-  const pointsCount = dailyData.map((d, index) => {
-    const x =
-      paddingLeft + (index / (dailyData.length - 1 || 1)) * (width - paddingLeft - paddingRight);
-    const y = height - paddingBottom - (d.count / maxCount) * (height - paddingTop - paddingBottom);
-    return { x, y, label: d.count, day: d.day };
-  });
-
-  const pointsLatency = dailyData.map((d, index) => {
-    const x =
-      paddingLeft + (index / (dailyData.length - 1 || 1)) * (width - paddingLeft - paddingRight);
-    const y =
-      height - paddingBottom - (d.avgLatency / maxLatency) * (height - paddingTop - paddingBottom);
-    return { x, y, label: d.avgLatency, day: d.day };
-  });
-
-  const countPath = pointsCount.reduce(
-    (path, p, i) => (i === 0 ? `M ${p.x} ${p.y}` : `${path} L ${p.x} ${p.y}`),
-    ''
-  );
-  const latencyPath = pointsLatency.reduce(
-    (path, p, i) => (i === 0 ? `M ${p.x} ${p.y}` : `${path} L ${p.x} ${p.y}`),
-    ''
-  );
-
-  return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full text-kumo-strong">
-      {/* Grid Lines */}
-      {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
-        const y = height - paddingBottom - ratio * (height - paddingTop - paddingBottom);
-        return (
-          <g key={i}>
-            <line
-              x1={paddingLeft}
-              y1={y}
-              x2={width - paddingRight}
-              y2={y}
-              stroke="var(--kumo-line, #e2e8f0)"
-              strokeDasharray="3 3"
-              strokeWidth="0.5"
-            />
-            {/* Left Axis (Requests) */}
-            <text
-              x={paddingLeft - 8}
-              y={y + 4}
-              textAnchor="end"
-              className="text-[9px] fill-kumo-subtle font-mono"
-            >
-              {Math.round(ratio * maxCount)}
-            </text>
-            {/* Right Axis (Latency) */}
-            <text
-              x={width - paddingRight + 8}
-              y={y + 4}
-              textAnchor="start"
-              className="text-[9px] fill-kumo-subtle font-mono"
-            >
-              {Math.round(ratio * maxLatency)} ms
-            </text>
-          </g>
-        );
-      })}
-
-      {/* X Axis Labels */}
-      {dailyData.map((d, index) => {
-        const x =
-          paddingLeft +
-          (index / (dailyData.length - 1 || 1)) * (width - paddingLeft - paddingRight);
-        return (
-          <text
-            key={index}
-            x={x}
-            y={height - 10}
-            textAnchor="middle"
-            className="text-[9px] fill-kumo-subtle font-mono"
-          >
-            {d.day}
-          </text>
-        );
-      })}
-
-      {/* Paths */}
-      <path
-        d={countPath}
-        fill="none"
-        stroke="var(--kumo-brand, #3b82f6)"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d={latencyPath}
-        fill="none"
-        stroke="var(--kumo-warning, #f59e0b)"
-        strokeWidth="2"
-        strokeDasharray="4 2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-
-      {/* Dots & Tooltips */}
-      {pointsCount.map((p, i) => (
-        <g key={`count-dot-${i}`} className="group/dot cursor-pointer">
-          <circle
-            cx={p.x}
-            cy={p.y}
-            r="3.5"
-            className="fill-kumo-brand stroke-kumo-base"
-            strokeWidth="1.5"
-          />
-          <circle cx={p.x} cy={p.y} r="8" className="fill-transparent hover:fill-kumo-brand/10" />
-          <title>{`日期: ${p.day}\n请求数: ${p.label} 次`}</title>
-        </g>
-      ))}
-
-      {pointsLatency.map((p, i) => (
-        <g key={`latency-dot-${i}`} className="group/dot cursor-pointer">
-          <circle
-            cx={p.x}
-            cy={p.y}
-            r="3"
-            className="fill-kumo-warning stroke-kumo-base"
-            strokeWidth="1.5"
-          />
-          <circle cx={p.x} cy={p.y} r="8" className="fill-transparent hover:fill-kumo-warning/10" />
-          <title>{`日期: ${p.day}\n延迟: ${p.label.toFixed(0)} ms`}</title>
-        </g>
-      ))}
-    </svg>
-  );
+function formatAnalyticsDay(timestamp) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 function OpenAIPage() {
   const { theme } = useStore();
+  const isDarkMode = theme === 'dark';
   const [colWidths, startResize] = useTableResize([150, 250, 150, 80, 80, 100, 120]);
 
   // Tab State
@@ -236,6 +124,26 @@ function OpenAIPage() {
   const [analyticsPage, setAnalyticsPage] = useState(1);
   const [analyticsTotal, setAnalyticsTotal] = useState(0);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const analyticsTrendChartData = useMemo(() => [
+    {
+      name: '请求数',
+      color: ChartPalette.categorical(0, isDarkMode),
+      data: (analyticsCharts.daily || [])
+        .map((point) => [parseAnalyticsDay(point.day), Number(point.count) || 0])
+        .filter(([timestamp]) => Number.isFinite(timestamp)),
+    },
+  ], [analyticsCharts.daily, isDarkMode]);
+  const analyticsLatencyChartData = useMemo(() => [
+    {
+      name: '平均延迟',
+      color: ChartPalette.semantic('Warning', isDarkMode),
+      data: (analyticsCharts.daily || [])
+        .map((point) => [parseAnalyticsDay(point.day), Number(point.avgLatency) || 0])
+        .filter(([timestamp]) => Number.isFinite(timestamp)),
+    },
+  ], [analyticsCharts.daily, isDarkMode]);
+  const hasAnalyticsTrendData = analyticsTrendChartData.some((series) => series.data.length > 0);
+  const hasAnalyticsLatencyData = analyticsLatencyChartData.some((series) => series.data.length > 0);
 
   const getAuthHeaders = useCallback(() => {
     const password = localStorage.getItem('admin_password') || '';
@@ -2668,7 +2576,7 @@ function OpenAIPage() {
           />
 
           {/* Analytics Summary Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <AppCard padding="md" className="flex flex-col">
               <span className="text-[10px] font-bold text-kumo-subtle uppercase tracking-wider">
                 总请求次数
@@ -2720,30 +2628,70 @@ function OpenAIPage() {
           </div>
 
           {/* Charts Row */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {/* SVG Line Chart */}
-            <AppCard padding="lg" className="col-span-2 space-y-3">
-              <div className="flex justify-between items-center">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+            <AppCard padding="lg" className="min-w-0 space-y-3">
+              <div className="flex items-center justify-between gap-3">
                 <h4 className="text-xs font-bold text-kumo-strong">请求量与耗时趋势</h4>
-                <div className="flex gap-4 text-[10px]">
-                  <span className="flex items-center gap-1.5 text-kumo-brand font-semibold">
-                    <span className="w-2 h-2 rounded-full bg-kumo-brand" />
-                    请求数 (次)
-                  </span>
-                  <span className="flex items-center gap-1.5 text-kumo-warning font-semibold">
-                    <span className="w-2.5 h-0.5 border-t-2 border-dashed border-kumo-warning" />
-                    延迟 (ms)
-                  </span>
-                </div>
               </div>
-              <div className="h-56">
-                {analyticsLoading ? (
-                  <div className="h-full flex items-center justify-center">
-                    <SkeletonLine className="w-full h-full" />
+              <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+                <div className="min-w-0 space-y-2 overflow-hidden">
+                  <div className="flex items-center gap-1.5 text-[10px] font-semibold text-kumo-brand">
+                    <span className="h-2 w-2 rounded-full bg-kumo-brand" />
+                    请求数
                   </div>
-                ) : (
-                  <SVGAnalyticsChart dailyData={analyticsCharts.daily} />
-                )}
+                  {analyticsLoading || hasAnalyticsTrendData ? (
+                    <TimeseriesChart
+                      echarts={echarts}
+                      isDarkMode={isDarkMode}
+                      type="line"
+                      data={analyticsTrendChartData}
+                      height={204}
+                      xAxisName="时间"
+                      yAxisName="请求"
+                      xAxisTickCount={3}
+                      xAxisTickFormat={formatAnalyticsDay}
+                      yAxisTickFormat={(value) => `${Math.round(value)}`}
+                      tooltipValueFormat={(value) => `${Math.round(value)} 次`}
+                      tooltipFollowCursor="x"
+                      gradient
+                      loading={analyticsLoading && !hasAnalyticsTrendData}
+                      ariaDescription="模型网关请求量趋势"
+                    />
+                  ) : (
+                    <div className="flex h-[204px] items-center justify-center text-center text-xs text-kumo-subtle">
+                      暂无趋势数据
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0 space-y-2 overflow-hidden">
+                  <div className="flex items-center gap-1.5 text-[10px] font-semibold text-kumo-warning">
+                    <span className="h-2 w-2 rounded-full bg-kumo-warning" />
+                    平均延迟
+                  </div>
+                  {analyticsLoading || hasAnalyticsLatencyData ? (
+                    <TimeseriesChart
+                      echarts={echarts}
+                      isDarkMode={isDarkMode}
+                      type="line"
+                      data={analyticsLatencyChartData}
+                      height={204}
+                      xAxisName="时间"
+                      yAxisName="延迟"
+                      xAxisTickCount={3}
+                      xAxisTickFormat={formatAnalyticsDay}
+                      yAxisTickFormat={(value) => `${Math.round(value)}ms`}
+                      tooltipValueFormat={(value) => `${Math.round(value)} ms`}
+                      tooltipFollowCursor="x"
+                      gradient
+                      loading={analyticsLoading && !hasAnalyticsLatencyData}
+                      ariaDescription="模型网关平均响应延迟趋势"
+                    />
+                  ) : (
+                    <div className="flex h-[204px] items-center justify-center text-center text-xs text-kumo-subtle">
+                      暂无延迟数据
+                    </div>
+                  )}
+                </div>
               </div>
             </AppCard>
 

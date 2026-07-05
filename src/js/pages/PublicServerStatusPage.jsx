@@ -1,8 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import io from 'socket.io-client';
+import { Tabs } from '@cloudflare/kumo';
 import { Button } from '@cloudflare/kumo/components/button';
 import { AlertTriangle, RefreshCw, Server, Shield } from '../components/Icons.jsx';
 import CountryFlag from '../components/CountryFlag.jsx';
+
+const COLUMN_TABS = [
+  { value: '3', label: '3列' },
+  { value: '4', label: '4列' },
+];
 
 const normalizePublicPath = () => {
   const path = window.location.pathname.replace(/\/+$/, '');
@@ -173,21 +179,6 @@ const inferCountryCodeFromLocation = (value) => {
   return Object.entries(LOCATION_COUNTRY_CODE_MAP).find(([name]) => normalized.includes(name))?.[1] || '';
 };
 
-const normalizeLocationDisplayText = (value) => {
-  const text = String(value || '').trim();
-  if (!text) return '';
-  return /^[a-z]{2,3}$/i.test(text) ? text.toUpperCase() : text;
-};
-
-const getServerLocationText = (server) => normalizeLocationDisplayText(
-  server.location ||
-  server.region ||
-  server.resolved_country ||
-  server.countryCode ||
-  server.country_code ||
-  '',
-);
-
 const getFlagCountry = (server) => (
   server.countryCode ||
   server.country_code ||
@@ -240,7 +231,7 @@ const compactLoad = (value) => {
 function MetricBar({ label, value, subValue = '', offline = false }) {
   const percent = Math.max(0, Math.min(100, Number(value) || 0));
   return (
-    <div className="flex h-16 min-w-0 flex-col rounded-md border border-kumo-line/70 bg-kumo-recessed/25 px-2.5 py-2">
+    <div className="flex h-16 min-w-0 flex-col rounded-md border border-kumo-interact/80 bg-kumo-recessed/35 px-2.5 py-2">
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-semibold text-kumo-strong">{label}</span>
         <span className="text-xs font-bold tabular-nums text-kumo-strong">{offline ? '--' : formatPercent(percent)}</span>
@@ -269,10 +260,11 @@ const compactMemoryText = (server) => {
 const trafficRemaining = (server) => {
   const limit = Number(server.trafficLimitBytes) || 0;
   const used = Math.max(0, Number(server.trafficUsedBytes) || 0);
+  const unlimited = limit <= 0;
   const remaining = Math.max(0, limit - used);
   const remainingPercent = limit > 0 ? Math.max(0, Math.min(100, (remaining / limit) * 100)) : 0;
   const usedPercent = limit > 0 ? Math.max(0, Math.min(100, (used / limit) * 100)) : 0;
-  return { limit, used, remaining, remainingPercent, usedPercent };
+  return { limit, used, remaining, remainingPercent, usedPercent, unlimited };
 };
 
 const remainingTone = (percent) => {
@@ -308,17 +300,17 @@ const getFlowUnitClassName = (unit) => {
 const FLOW_KIND_CLASS = {
   speed: {
     label: 'text-kumo-success',
-    box: 'border-kumo-line/70 bg-kumo-recessed/25',
+    box: 'border-kumo-interact/75 bg-kumo-recessed/35',
   },
   traffic: {
     label: 'text-kumo-info',
-    box: 'border-kumo-line/70 bg-kumo-recessed/25',
+    box: 'border-kumo-interact/75 bg-kumo-recessed/35',
   },
 };
 
 function FlowUnitBadge({ unit, suffix = '' }) {
   return (
-    <span className={`inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-[4px] px-1 text-[11px] font-bold leading-none ${getFlowUnitClassName(unit)}`}>
+    <span className={`inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-[4px] border px-1 text-xs font-bold leading-none ${getFlowUnitClassName(unit)}`}>
       {unit || 'B'}{suffix}
     </span>
   );
@@ -326,7 +318,7 @@ function FlowUnitBadge({ unit, suffix = '' }) {
 
 function FlowArrow({ children }) {
   return (
-    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[4px] bg-kumo-recessed/70 text-xs font-bold leading-none text-kumo-default">
+    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[4px] border border-kumo-line/70 bg-kumo-recessed/70 text-sm font-bold leading-none text-kumo-default">
       {children}
     </span>
   );
@@ -335,17 +327,17 @@ function FlowArrow({ children }) {
 function FlowPair({ left, right, leftTitle, rightTitle, kind = 'speed', suffix = '' }) {
   const kindClass = FLOW_KIND_CLASS[kind] || FLOW_KIND_CLASS.speed;
   return (
-    <div className={`grid h-[22px] min-w-0 grid-cols-[minmax(0,1fr)_1px_minmax(0,1fr)] items-center overflow-hidden rounded-md border px-1 text-[11px] font-bold tabular-nums leading-none text-kumo-strong ${kindClass.box}`}>
-      <div className="flex min-w-0 items-center justify-end gap-1.5 px-1" title={leftTitle || formatFlowPart(left, suffix)}>
-        <span className="min-w-[2.6rem] truncate text-right">{left.num}</span>
+    <div className={`grid h-[22px] min-w-0 grid-cols-[minmax(0,1fr)_1px_minmax(0,1fr)] items-center overflow-hidden rounded-md border px-0.5 text-xs font-bold tabular-nums leading-none text-kumo-strong ${kindClass.box}`}>
+      <div className="flex min-w-0 items-center justify-end gap-0.5 px-0.5" title={leftTitle || formatFlowPart(left, suffix)}>
+        <span className="min-w-[2.6rem] truncate text-right text-[13px]">{left.num}</span>
         <FlowUnitBadge unit={left.unit} suffix={suffix} />
         <FlowArrow>↓</FlowArrow>
       </div>
       <span aria-hidden="true" className="h-full w-px bg-kumo-line/80" />
-      <div className="flex min-w-0 items-center justify-start gap-1.5 px-1" title={rightTitle || formatFlowPart(right, suffix)}>
+      <div className="flex min-w-0 items-center justify-start gap-0.5 px-0.5" title={rightTitle || formatFlowPart(right, suffix)}>
         <FlowArrow>↑</FlowArrow>
         <FlowUnitBadge unit={right.unit} suffix={suffix} />
-        <span className="min-w-[2.6rem] truncate text-left">{right.num}</span>
+        <span className="min-w-[2.6rem] truncate text-left text-[13px]">{right.num}</span>
       </div>
     </div>
   );
@@ -354,8 +346,8 @@ function FlowPair({ left, right, leftTitle, rightTitle, kind = 'speed', suffix =
 function FlowRow({ label, left, right, leftTitle, rightTitle, kind = 'speed', suffix = '' }) {
   const kindClass = FLOW_KIND_CLASS[kind] || FLOW_KIND_CLASS.speed;
   return (
-    <div className="grid min-h-0 min-w-0 grid-cols-[2.25rem_minmax(0,1fr)] items-center gap-2.5">
-      <span className={`text-[13px] font-bold leading-none ${kindClass.label}`}>{label}</span>
+    <div className="grid min-h-0 min-w-0 grid-cols-[2rem_minmax(0,1fr)] items-center gap-1.5">
+      <span className={`text-xs font-bold leading-none ${kindClass.label}`}>{label}</span>
       <FlowPair left={left} right={right} leftTitle={leftTitle} rightTitle={rightTitle} kind={kind} suffix={suffix} />
     </div>
   );
@@ -363,7 +355,7 @@ function FlowRow({ label, left, right, leftTitle, rightTitle, kind = 'speed', su
 
 function NetworkTrafficPanel({ speedLeft, speedRight, totalLeft, totalRight, speedLeftTitle, speedRightTitle, totalLeftTitle, totalRightTitle }) {
   return (
-    <div className="h-16 min-w-0 rounded-md border border-kumo-line/70 bg-kumo-recessed/25 px-3 py-1.5">
+    <div className="h-16 min-w-0 rounded-md border border-kumo-interact/80 bg-kumo-recessed/35 px-2 py-1.5">
       <div className="grid h-full min-w-0 grid-rows-[22px_auto_22px] items-center gap-0.5">
         <FlowRow label="网速" left={speedLeft} right={speedRight} leftTitle={speedLeftTitle} rightTitle={speedRightTitle} kind="speed" />
         <div className="h-px bg-kumo-line/80" />
@@ -375,20 +367,25 @@ function NetworkTrafficPanel({ speedLeft, speedRight, totalLeft, totalRight, spe
 
 function RemainingMini({ traffic }) {
   const hasLimit = traffic.limit > 0;
+  const unlimited = traffic.unlimited || !hasLimit;
+  const displayPercent = unlimited ? '∞' : formatPercent(traffic.remainingPercent);
+  const displayValue = unlimited ? '无限' : formatCompactBytes(traffic.remaining);
+  const progressWidth = unlimited ? '100%' : `${traffic.remainingPercent}%`;
+  const progressTone = unlimited ? 'bg-kumo-brand' : remainingTone(traffic.remainingPercent);
   return (
-    <div className="flex h-16 min-w-0 flex-col rounded-md border border-kumo-line/70 bg-kumo-recessed/25 px-2.5 py-2">
+    <div className="flex h-16 min-w-0 flex-col rounded-md border border-kumo-interact/80 bg-kumo-recessed/35 px-2 py-2">
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-semibold text-kumo-strong">剩余流量</span>
-        <span className="text-xs font-bold tabular-nums text-kumo-strong">{hasLimit ? formatPercent(traffic.remainingPercent) : '--'}</span>
+        <span className="text-xs font-bold tabular-nums text-kumo-strong">{displayPercent}</span>
       </div>
       <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-kumo-line/70">
         <div
-          className={`h-full rounded-full ${remainingTone(traffic.remainingPercent)}`}
-          style={{ width: hasLimit ? `${traffic.remainingPercent}%` : '0%' }}
+          className={`h-full rounded-full ${progressTone}`}
+          style={{ width: progressWidth }}
         />
       </div>
-      <div className="mt-auto truncate pt-1 text-[11px] font-bold leading-snug text-kumo-strong" title={`${formatCompactBytes(traffic.remaining)} / ${formatCompactBytes(traffic.limit)}`}>
-        {hasLimit ? formatCompactBytes(traffic.remaining) : '--'}
+      <div className="mt-auto truncate pt-1 text-[11px] font-bold leading-snug text-kumo-strong" title={unlimited ? '无限' : `${formatCompactBytes(traffic.remaining)} / ${formatCompactBytes(traffic.limit)}`}>
+        {displayValue}
       </div>
     </div>
   );
@@ -399,7 +396,6 @@ function ServerCard({ server }) {
   const offline = !server.online;
   const traffic = trafficRemaining(server);
   const country = getFlagCountry(server);
-  const locationText = getServerLocationText(server);
   const platformText = getPlatformText(server);
   const memoryText = compactMemoryText(server);
   const diskText = compactDiskText(server);
@@ -432,11 +428,9 @@ function ServerCard({ server }) {
               {server.online ? '在线' : '离线'}
             </span>
           </div>
-          {(server.host || locationText || (showPlatform && platformText)) && (
+          {showPlatform && platformText && (
             <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-kumo-subtle">
-              {server.host && <span className="text-kumo-default">{server.host}</span>}
-              {locationText && <span className="truncate font-semibold uppercase text-kumo-strong" title={locationText}>{locationText}</span>}
-              {showPlatform && platformText && <span className="min-w-0 truncate" title={platformText}>{platformText}</span>}
+              <span className="min-w-0 truncate" title={platformText}>{platformText}</span>
             </div>
           )}
         </div>
@@ -451,7 +445,8 @@ function ServerCard({ server }) {
         <MetricBar label="硬盘" value={server.disk} subValue={diskText} offline={offline} />
       </div>
 
-      <div className="mt-1.5 grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-1.5 text-xs">
+      <div className="mt-1.5 grid grid-cols-3 gap-1.5 text-xs">
+        <div className="col-span-2 min-w-0">
         <NetworkTrafficPanel
           speedLeft={offline ? { num: '0.0', unit: 'B' } : rxSpeed}
           speedRight={offline ? { num: '0.0', unit: 'B' } : txSpeed}
@@ -462,6 +457,7 @@ function ServerCard({ server }) {
           totalLeftTitle={rxTotal.text}
           totalRightTitle={txTotal.text}
         />
+        </div>
         <RemainingMini traffic={traffic} />
       </div>
     </article>
@@ -476,6 +472,10 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
   const [error, setError] = useState('');
   const [fetchedAt, setFetchedAt] = useState('');
   const [, setWsConnected] = useState(false);
+  const [wideColumns, setWideColumns] = useState(() => {
+    const stored = window.localStorage?.getItem('publicServerStatusColumns');
+    return stored === '4' ? 4 : 3;
+  });
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (silent) {
@@ -587,9 +587,20 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
     };
   }, [serverIdKey]);
 
+  const setColumnPreference = useCallback((columns) => {
+    const nextColumns = String(columns) === '4' ? 4 : 3;
+    setWideColumns(nextColumns);
+    window.localStorage?.setItem('publicServerStatusColumns', String(nextColumns));
+  }, []);
+
+  const pageMaxWidthClass = wideColumns === 4 ? 'max-w-[112rem]' : 'max-w-[84rem]';
+  const serverGridClass = wideColumns === 4
+    ? 'grid gap-3 md:grid-cols-2 2xl:grid-cols-4'
+    : 'grid gap-3 md:grid-cols-2 xl:grid-cols-3';
+
   return (
     <div className="min-h-screen bg-kumo-canvas text-kumo-default">
-      <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-4 py-6 sm:px-6 lg:px-8">
+      <main className={`mx-auto flex min-h-screen w-full ${pageMaxWidthClass} flex-col px-4 py-6 sm:px-6 lg:px-8`}>
         <header className="mb-6 flex items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-kumo-line bg-kumo-base text-kumo-brand">
@@ -599,7 +610,27 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
               <div className="truncate text-base font-bold text-kumo-strong">{page?.title || '主机状态'}</div>
             </div>
           </div>
-          <Button size="sm" variant="secondary" onClick={() => load({ silent: true })} loading={refreshing} icon={<RefreshCw className="h-3.5 w-3.5" />}>刷新</Button>
+          <div className="flex shrink-0 items-center gap-2">
+            <Tabs
+              variant="segmented"
+              size="sm"
+              className="hidden w-fit max-w-full sm:block"
+              listClassName="w-fit max-w-full"
+              value={String(wideColumns)}
+              onValueChange={setColumnPreference}
+              tabs={COLUMN_TABS}
+            />
+            <Button
+              size="sm"
+              variant="secondary"
+              shape="square"
+              onClick={() => load({ silent: true })}
+              loading={refreshing}
+              icon={<RefreshCw className="h-3.5 w-3.5" />}
+              aria-label="刷新"
+              title="刷新"
+            />
+          </div>
         </header>
 
         {initialLoading && (
@@ -617,13 +648,10 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
         {!initialLoading && page && (
           <div className="flex flex-col gap-4">
             <section>
-              <div className="flex items-center justify-between gap-3 px-1 py-1.5">
-                <h2 className="text-sm font-bold text-kumo-strong">主机状态</h2>
-              </div>
               {servers.length === 0 ? (
                 <div className="rounded-lg border border-kumo-line bg-kumo-base p-8 text-center text-sm text-kumo-subtle">这个状态页还没有绑定主机。</div>
               ) : (
-                <div className="grid gap-3 lg:grid-cols-2">
+                <div className={serverGridClass}>
                   {servers.map((server) => <ServerCard key={server.id} server={server} />)}
                 </div>
               )}
