@@ -7,10 +7,13 @@ pub const EVENT_AGENT_STATE: &str = "agent:state";
 pub const EVENT_AGENT_TASK_RESULT: &str = "agent:task_result";
 pub const EVENT_DASHBOARD_AUTH_OK: &str = "dashboard:auth_ok";
 pub const EVENT_DASHBOARD_AUTH_FAIL: &str = "dashboard:auth_fail";
+pub const EVENT_DASHBOARD_AUTH_ERROR: &str = "dashboard:auth_error";
 pub const EVENT_DASHBOARD_TASK: &str = "dashboard:task";
 pub const EVENT_DASHBOARD_PTY_INPUT: &str = "dashboard:pty_input";
 pub const EVENT_DASHBOARD_PTY_RESIZE: &str = "dashboard:pty_resize";
+pub const EVENT_DASHBOARD_PTY_STOP: &str = "dashboard:pty_stop";
 pub const EVENT_AGENT_PTY_DATA: &str = "agent:pty_data";
+pub const EVENT_AGENT_PTY_STATUS: &str = "agent:pty_status";
 pub const EVENT_AGENT_TASK_PROGRESS: &str = "agent:task_progress";
 
 #[derive(Serialize, Debug, Clone)]
@@ -19,11 +22,6 @@ pub struct AuthPayload {
     pub key: String,
     pub hostname: String,
     pub version: String,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct AuthFailPayload {
-    pub reason: String,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -58,10 +56,22 @@ pub struct PtyResizePayload {
     pub rows: u32,
 }
 
+#[derive(Deserialize, Debug, Clone)]
+pub struct PtyStopPayload {
+    pub id: String,
+}
+
 #[derive(Serialize, Debug, Clone)]
 pub struct PtyDataPayload {
     pub id: String,
     pub data: String,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct PtyStatusPayload {
+    pub id: String,
+    pub status: String,
+    pub error: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -81,7 +91,7 @@ pub struct TaskProgress {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct DockerCheckUpdateRequest {
-    #[serde(rename = "container_id")]
+    #[serde(rename = "container_id", alias = "containerId")]
     pub container_id: Option<String>,
 }
 
@@ -104,6 +114,7 @@ pub struct DockerImageUpdateStatus {
 
 /// Socket.IO Engine.IO & Socket.IO parser
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum SocketIOMessage {
     Ping,
     Pong,
@@ -118,11 +129,13 @@ pub fn parse_socketio_message(raw: &str) -> SocketIOMessage {
         return SocketIOMessage::Ignored;
     }
 
-    if raw == "3probe" {
+    // 处理原始握手包（0{...}）
+    if raw.starts_with('0') {
         return SocketIOMessage::Raw(raw.to_string());
     }
 
-    if raw.starts_with("40/agent") {
+    // 处理 CONNECT ACK（40{...}）
+    if raw.starts_with("40") {
         return SocketIOMessage::Raw(raw.to_string());
     }
 
@@ -137,14 +150,9 @@ pub fn parse_socketio_message(raw: &str) -> SocketIOMessage {
         '2' => SocketIOMessage::Ping,
         '3' => SocketIOMessage::Pong,
         '4' => {
-            // Socket.IO message formatting.
-            // Check for namespace connect: "0/agent," or "0/agent"
-            if body.starts_with("0/agent") {
-                return SocketIOMessage::NamespaceConnect;
-            }
-            // Check for event: "2/agent,["event_name", data]"
-            if body.starts_with("2/agent,") {
-                let json_part = &body[8..];
+            // Socket.IO 事件消息: "2["event_name", data]"
+            if body.starts_with('2') {
+                let json_part = &body[1..];
                 if let Ok(serde_json::Value::Array(arr)) = serde_json::from_str(json_part) {
                     if arr.len() >= 1 {
                         if let Some(event_name) = arr[0].as_str() {
@@ -166,5 +174,32 @@ pub fn parse_socketio_message(raw: &str) -> SocketIOMessage {
 
 pub fn format_event<T: Serialize>(event: &str, payload: &T) -> String {
     let arr = serde_json::json!([event, payload]);
-    format!("42/agent,{}", arr.to_string())
+    format!("42{}", arr.to_string())
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct NetworkQualityTarget {
+    pub id: Option<i64>,
+    pub name: String,
+    pub host: String,
+    pub port: Option<u16>,
+    #[serde(rename = "type")]
+    pub target_type: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct NetworkQualityProbeResult {
+    pub id: Option<i64>,
+    pub name: String,
+    pub host: String,
+    pub port: u16,
+    pub success: bool,
+    pub latency_ms: Option<f64>,
+    pub error: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct NetworkQualityProbeResponse {
+    pub checked_at: String,
+    pub results: Vec<NetworkQualityProbeResult>,
 }

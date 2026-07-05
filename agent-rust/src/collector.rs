@@ -1,8 +1,10 @@
+use crate::protocol::NetworkQualityProbeResponse;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-use serde::{Serialize, Deserialize};
-use sysinfo::{System, Disks, Networks, Components};
-
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use sysinfo::{Components, Disks, Networks, System};
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct HostInfo {
@@ -44,9 +46,35 @@ pub struct DockerInfo {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct TemperatureReading {
+    pub name: String,
+    pub temperature: f64,
+}
+
+#[derive(Debug, Clone, Default)]
+struct WindowsSensorSnapshot {
+    readings: Vec<TemperatureReading>,
+    cpu_power: f64,
+    updated_at: Option<Instant>,
+    in_flight: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct WindowsConnSnapshot {
+    tcp: i32,
+    udp: i32,
+    updated_at: Option<Instant>,
+    in_flight: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct State {
+    pub timestamp_ms: u64,
+    pub sequence: u64,
+    pub sample_interval_ms: u64,
     pub cpu: f64,
     pub cpu_temp: f64,
+    pub cpu_power: f64,
     pub gpu_temp: f64,
     pub mem_used: u64,
     pub swap_used: u64,
@@ -62,12 +90,14 @@ pub struct State {
     pub tcp_conn_count: i32,
     pub udp_conn_count: i32,
     pub process_count: i32,
-    pub temperatures: Vec<String>,
+    pub temperatures: Vec<TemperatureReading>,
     pub gpu: f64,
     pub gpu_mem_used: u64,
     pub gpu_mem_total: u64,
     pub gpu_power: f64,
     pub docker: DockerInfo,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub network_quality: Option<NetworkQualityProbeResponse>,
 }
 
 pub struct Collector {
@@ -75,37 +105,46 @@ pub struct Collector {
     disks: Disks,
     networks: Networks,
     components: Components,
-    
+
     // Cached values and time tracking
     last_net_rx: u64,
     last_net_tx: u64,
     last_net_time: Instant,
-    
+
     cached_host_info: Arc<Mutex<Option<HostInfo>>>,
-    
+
     last_gpu_usage: f64,
     last_gpu_mem_used: u64,
     last_gpu_power: f64,
     last_gpu_temp: f64,
     last_gpu_time: Instant,
+    last_cpu_energy_uj: Option<u64>,
+    last_cpu_power_time: Option<Instant>,
+    last_cpu_power_value: f64,
+    last_temperature_readings: Vec<TemperatureReading>,
+    last_temperature_time: Instant,
+    windows_sensor_snapshot: Arc<Mutex<WindowsSensorSnapshot>>,
+    windows_conn_snapshot: Arc<Mutex<WindowsConnSnapshot>>,
 }
 
 impl Collector {
     pub fn new() -> Self {
         let mut sys = System::new_all();
         sys.refresh_all();
-        
+
         let disks = Disks::new_with_refreshed_list();
         let networks = Networks::new_with_refreshed_list();
         let components = Components::new_with_refreshed_list();
 
-        // Calculate initial network base
-        let mut total_rx = 0;
-        let mut total_tx = 0;
-        for (_, interface) in &networks {
-            total_rx += interface.total_received();
-            total_tx += interface.total_transmitted();
-        }
+        // Calculate initial network base from external-facing interfaces only.
+        let (total_rx, total_tx) =
+            aggregate_network_totals((&networks).into_iter().map(|(name, interface)| {
+                (
+                    name.as_str(),
+                    interface.total_received(),
+                    interface.total_transmitted(),
+                )
+            }));
 
         Collector {
             sys,
@@ -120,7 +159,18 @@ impl Collector {
             last_gpu_mem_used: 0,
             last_gpu_power: 0.0,
             last_gpu_temp: 0.0,
-            last_gpu_time: Instant::now().checked_sub(Duration::from_secs(3600)).unwrap_or_else(Instant::now),
+            last_gpu_time: Instant::now()
+                .checked_sub(Duration::from_secs(3600))
+                .unwrap_or_else(Instant::now),
+            last_cpu_energy_uj: None,
+            last_cpu_power_time: None,
+            last_cpu_power_value: 0.0,
+            last_temperature_readings: Vec::new(),
+            last_temperature_time: Instant::now()
+                .checked_sub(Duration::from_secs(3600))
+                .unwrap_or_else(Instant::now),
+            windows_sensor_snapshot: Arc::new(Mutex::new(WindowsSensorSnapshot::default())),
+            windows_conn_snapshot: Arc::new(Mutex::new(WindowsConnSnapshot::default())),
         }
     }
 
@@ -133,18 +183,21 @@ impl Collector {
         }
 
         self.sys.refresh_all();
-        
+
         let platform = System::name().unwrap_or_else(|| std::env::consts::OS.to_string());
         let platform_version = System::os_version().unwrap_or_default();
         let arch = System::cpu_arch().unwrap_or_else(|| std::env::consts::ARCH.to_string());
-        
+
         let logical_cores = self.sys.cpus().len();
         let physical_cores = self.sys.physical_core_count().unwrap_or(logical_cores);
-        
+
         let mut cpu_models = Vec::new();
         if let Some(first_cpu) = self.sys.cpus().first() {
-            let model = format!("{} {} Core(s)", first_cpu.vendor_id().trim(), first_cpu.brand().trim());
-            cpu_models.push(model);
+            cpu_models.push(format_cpu_model(
+                first_cpu.vendor_id(),
+                first_cpu.brand(),
+                physical_cores,
+            ));
         } else {
             cpu_models.push(format!("Unknown CPU {} Core(s)", physical_cores));
         }
@@ -158,27 +211,30 @@ impl Collector {
         let mut seen_devices = Vec::new();
         for disk in &self.disks {
             let fs = disk.file_system().to_string_lossy().to_lowercase();
-            if fs == "tmpfs"
-                || fs == "overlay"
-                || fs == "devtmpfs"
-                || fs == "proc"
-                || fs == "sysfs"
-                || fs == "cgroup"
-                || fs == "devpts"
-                || fs == "configfs"
-                || fs == "debugfs"
-                || fs == "tracefs"
-                || fs == "hugetlbfs"
-                || fs == "mqueue"
-                || fs == "pstore"
-                || fs == "securityfs"
-                || fs == "fusectl"
-                || fs == "nsfs"
-                || fs == "autofs"
-                || fs == "binfmt_misc"
-                || fs == "squashfs"
-                || fs == "udev"
-                || fs == "iso9660"
+            let mount_point = disk.mount_point();
+            let is_root = mount_point == Path::new("/") || mount_point.to_string_lossy() == "/";
+            if !is_root
+                && (fs == "tmpfs"
+                    || fs == "overlay"
+                    || fs == "devtmpfs"
+                    || fs == "proc"
+                    || fs == "sysfs"
+                    || fs == "cgroup"
+                    || fs == "devpts"
+                    || fs == "configfs"
+                    || fs == "debugfs"
+                    || fs == "tracefs"
+                    || fs == "hugetlbfs"
+                    || fs == "mqueue"
+                    || fs == "pstore"
+                    || fs == "securityfs"
+                    || fs == "fusectl"
+                    || fs == "nsfs"
+                    || fs == "autofs"
+                    || fs == "binfmt_misc"
+                    || fs == "squashfs"
+                    || fs == "udev"
+                    || fs == "iso9660")
             {
                 continue;
             }
@@ -222,7 +278,7 @@ impl Collector {
             let mut cache = self.cached_host_info.lock().unwrap();
             *cache = Some(host_info.clone());
         }
-        
+
         host_info
     }
 
@@ -242,27 +298,30 @@ impl Collector {
         let mut seen_devices = Vec::new();
         for disk in &self.disks {
             let fs = disk.file_system().to_string_lossy().to_lowercase();
-            if fs == "tmpfs"
-                || fs == "overlay"
-                || fs == "devtmpfs"
-                || fs == "proc"
-                || fs == "sysfs"
-                || fs == "cgroup"
-                || fs == "devpts"
-                || fs == "configfs"
-                || fs == "debugfs"
-                || fs == "tracefs"
-                || fs == "hugetlbfs"
-                || fs == "mqueue"
-                || fs == "pstore"
-                || fs == "securityfs"
-                || fs == "fusectl"
-                || fs == "nsfs"
-                || fs == "autofs"
-                || fs == "binfmt_misc"
-                || fs == "squashfs"
-                || fs == "udev"
-                || fs == "iso9660"
+            let mount_point = disk.mount_point();
+            let is_root = mount_point == Path::new("/") || mount_point.to_string_lossy() == "/";
+            if !is_root
+                && (fs == "tmpfs"
+                    || fs == "overlay"
+                    || fs == "devtmpfs"
+                    || fs == "proc"
+                    || fs == "sysfs"
+                    || fs == "cgroup"
+                    || fs == "devpts"
+                    || fs == "configfs"
+                    || fs == "debugfs"
+                    || fs == "tracefs"
+                    || fs == "hugetlbfs"
+                    || fs == "mqueue"
+                    || fs == "pstore"
+                    || fs == "securityfs"
+                    || fs == "fusectl"
+                    || fs == "nsfs"
+                    || fs == "autofs"
+                    || fs == "binfmt_misc"
+                    || fs == "squashfs"
+                    || fs == "udev"
+                    || fs == "iso9660")
             {
                 continue;
             }
@@ -278,19 +337,21 @@ impl Collector {
 
         // Networks speeds
         self.networks.refresh();
-        let mut total_rx = 0;
-        let mut total_tx = 0;
-        for (_, interface) in &self.networks {
-            total_rx += interface.total_received();
-            total_tx += interface.total_transmitted();
-        }
+        let (total_rx, total_tx) =
+            aggregate_network_totals((&self.networks).into_iter().map(|(name, interface)| {
+                (
+                    name.as_str(),
+                    interface.total_received(),
+                    interface.total_transmitted(),
+                )
+            }));
 
         let now = Instant::now();
         let elapsed = now.duration_since(self.last_net_time).as_secs_f64();
-        
+
         let mut net_in_speed = 0;
         let mut net_out_speed = 0;
-        
+
         if elapsed > 0.0 {
             if total_rx >= self.last_net_rx {
                 net_in_speed = ((total_rx - self.last_net_rx) as f64 / elapsed) as u64;
@@ -299,7 +360,7 @@ impl Collector {
                 net_out_speed = ((total_tx - self.last_net_tx) as f64 / elapsed) as u64;
             }
         }
-        
+
         self.last_net_rx = total_rx;
         self.last_net_tx = total_tx;
         self.last_net_time = now;
@@ -317,23 +378,32 @@ impl Collector {
         };
 
         // TCP & UDP connection counts
-        let (tcp_conn_count, udp_conn_count) = get_conn_counts();
+        let (tcp_conn_count, udp_conn_count) = self.collect_conn_counts();
         let process_count = self.sys.processes().len() as i32;
 
-        // Temperatures
-        let cpu_temp = self.collect_cpu_temperature();
+        // Temperatures and CPU package power
+        let temperatures = self.collect_temperature_readings();
+        let cpu_temp = self.resolve_cpu_temperature(&temperatures);
+        let cpu_power = self.collect_cpu_power();
 
         // GPU metrics
         let (gpu, gpu_mem_used, gpu_power, gpu_temp) = self.collect_gpu_state();
 
-        let gpu_mem_total = self.cached_host_info.lock().unwrap()
+        let gpu_mem_total = self
+            .cached_host_info
+            .lock()
+            .unwrap()
             .as_ref()
             .map(|info| info.gpu_mem_total)
             .unwrap_or(0);
 
         State {
+            timestamp_ms: current_epoch_ms(),
+            sequence: 0,
+            sample_interval_ms: 0,
             cpu,
             cpu_temp,
+            cpu_power,
             gpu_temp,
             mem_used,
             swap_used,
@@ -349,44 +419,425 @@ impl Collector {
             tcp_conn_count,
             udp_conn_count,
             process_count,
-            temperatures: Vec::new(), // Not critical
+            temperatures,
             gpu,
             gpu_mem_used,
             gpu_mem_total,
             gpu_power,
             docker: DockerInfo::default(), // Will be populated in main loop asynchronously
+            network_quality: None,
         }
     }
 
-    fn collect_cpu_temperature(&self) -> f64 {
-        let mut max_temp = 0.0;
+    fn collect_conn_counts(&self) -> (i32, i32) {
+        if cfg!(target_os = "windows") {
+            self.refresh_windows_conn_counts();
+            return self.cached_windows_conn_counts();
+        }
+
+        get_conn_counts()
+    }
+
+    fn cached_windows_conn_counts(&self) -> (i32, i32) {
+        self.windows_conn_snapshot
+            .lock()
+            .map(|snapshot| (snapshot.tcp, snapshot.udp))
+            .unwrap_or((0, 0))
+    }
+
+    fn refresh_windows_conn_counts(&self) {
+        if !cfg!(target_os = "windows") {
+            return;
+        }
+
+        const WINDOWS_CONN_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+
+        {
+            let Ok(mut snapshot) = self.windows_conn_snapshot.lock() else {
+                return;
+            };
+
+            if snapshot.in_flight {
+                return;
+            }
+
+            let is_fresh = snapshot
+                .updated_at
+                .map(|updated_at| updated_at.elapsed() < WINDOWS_CONN_REFRESH_INTERVAL)
+                .unwrap_or(false);
+            if is_fresh {
+                return;
+            }
+
+            snapshot.in_flight = true;
+        }
+
+        let snapshot = Arc::clone(&self.windows_conn_snapshot);
+        std::thread::spawn(move || {
+            let (tcp, udp) = collect_windows_conn_counts();
+            if let Ok(mut snapshot) = snapshot.lock() {
+                snapshot.tcp = tcp;
+                snapshot.udp = udp;
+                snapshot.updated_at = Some(Instant::now());
+                snapshot.in_flight = false;
+            }
+        });
+    }
+
+    fn collect_temperature_readings(&mut self) -> Vec<TemperatureReading> {
+        let now = Instant::now();
+        if now.duration_since(self.last_temperature_time) < Duration::from_millis(5000) {
+            return self.last_temperature_readings.clone();
+        }
+
+        let mut readings = Vec::new();
         for component in &self.components {
-            let name = component.label().to_lowercase();
-            if name.contains("cpu") || name.contains("core") || name.contains("k10temp") || name.contains("zen") {
-                let t = component.temperature();
-                if t as f64 > max_temp && t < 150.0 {
-                    max_temp = t as f64;
-                }
+            let temperature = component.temperature() as f64;
+            if temperature > 0.0 && temperature < 150.0 {
+                readings.push(TemperatureReading {
+                    name: component.label().to_string(),
+                    temperature,
+                });
             }
         }
-        
-        if max_temp == 0.0 {
-            // Fallback to absolute max temp of any sensor
-            for component in &self.components {
-                let t = component.temperature();
-                if t as f64 > max_temp && t < 150.0 {
-                    max_temp = t as f64;
+
+        if cfg!(target_os = "windows") && self.resolve_cpu_temperature(&readings) <= 0.0 {
+            self.refresh_windows_sensors(false);
+            readings.extend(self.cached_windows_temperature_readings());
+        }
+
+        self.last_temperature_readings = readings.clone();
+        self.last_temperature_time = now;
+
+        readings
+    }
+
+    fn cached_windows_temperature_readings(&self) -> Vec<TemperatureReading> {
+        self.windows_sensor_snapshot
+            .lock()
+            .map(|snapshot| snapshot.readings.clone())
+            .unwrap_or_default()
+    }
+
+    fn cached_windows_cpu_power(&self) -> f64 {
+        self.windows_sensor_snapshot
+            .lock()
+            .map(|snapshot| snapshot.cpu_power)
+            .unwrap_or(0.0)
+    }
+
+    fn refresh_windows_sensors(&self, force_blocking: bool) {
+        if !cfg!(target_os = "windows") {
+            return;
+        }
+
+        const WINDOWS_SENSOR_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
+
+        let should_refresh = {
+            let Ok(mut snapshot) = self.windows_sensor_snapshot.lock() else {
+                return;
+            };
+
+            if snapshot.in_flight {
+                return;
+            }
+
+            let is_fresh = snapshot
+                .updated_at
+                .map(|updated_at| updated_at.elapsed() < WINDOWS_SENSOR_REFRESH_INTERVAL)
+                .unwrap_or(false);
+            if !force_blocking && is_fresh {
+                return;
+            }
+
+            snapshot.in_flight = true;
+            force_blocking
+        };
+
+        if should_refresh {
+            let (readings, cpu_power) = Self::collect_windows_sensors();
+            if let Ok(mut snapshot) = self.windows_sensor_snapshot.lock() {
+                snapshot.readings = readings;
+                snapshot.cpu_power = cpu_power;
+                snapshot.updated_at = Some(Instant::now());
+                snapshot.in_flight = false;
+            }
+            return;
+        }
+
+        let snapshot = Arc::clone(&self.windows_sensor_snapshot);
+        std::thread::spawn(move || {
+            let (readings, cpu_power) = Self::collect_windows_sensors();
+            if let Ok(mut snapshot) = snapshot.lock() {
+                snapshot.readings = readings;
+                snapshot.cpu_power = cpu_power;
+                snapshot.updated_at = Some(Instant::now());
+                snapshot.in_flight = false;
+            }
+        });
+    }
+
+    fn collect_windows_sensors() -> (Vec<TemperatureReading>, f64) {
+        let ps_cmd = r#"
+$items = @()
+foreach ($ns in @('root/OpenHardwareMonitor', 'root/LibreHardwareMonitor')) {
+  try {
+    $items += Get-CimInstance -Namespace $ns -ClassName Sensor -ErrorAction Stop |
+      Where-Object { $_.SensorType -eq 'Temperature' } |
+      ForEach-Object { "T`t$($_.Name)`t$($_.Value)" }
+    $items += Get-CimInstance -Namespace $ns -ClassName Sensor -ErrorAction Stop |
+      Where-Object { $_.SensorType -eq 'Power' } |
+      ForEach-Object { "P`t$($_.Name)`t$($_.Value)" }
+  } catch {}
+}
+try {
+  $items += Get-CimInstance -Namespace root/WMI -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction Stop |
+    ForEach-Object { "T`t$($_.InstanceName)`t$([math]::Round(($_.CurrentTemperature / 10) - 273.15, 1))" }
+} catch {}
+$items | Where-Object { $_ }
+"#;
+
+        let Ok(output) = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", ps_cmd])
+            .output()
+        else {
+            return (Vec::new(), 0.0);
+        };
+
+        if !output.status.success() {
+            return (Vec::new(), 0.0);
+        }
+
+        let mut readings = Vec::new();
+        let mut ranked_power = Vec::new();
+
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            let mut parts = line.trim().splitn(3, '\t');
+            let Some(kind) = parts.next() else {
+                continue;
+            };
+            let Some(name) = parts.next() else {
+                continue;
+            };
+            let Some(value) = parts.next() else {
+                continue;
+            };
+
+            match kind {
+                "T" => {
+                    let Ok(temperature) = value.trim().parse::<f64>() else {
+                        continue;
+                    };
+                    if temperature > 0.0 && temperature < 150.0 {
+                        readings.push(TemperatureReading {
+                            name: name.trim().to_string(),
+                            temperature,
+                        });
+                    }
                 }
+                "P" => {
+                    let Ok(power) = value.trim().parse::<f64>() else {
+                        continue;
+                    };
+                    if power > 0.0 && power < 1000.0 {
+                        ranked_power.push((Self::cpu_power_rank(name), power));
+                    }
+                }
+                _ => {}
             }
         }
-        max_temp
+
+        ranked_power.retain(|(rank, _)| *rank > 0);
+        ranked_power.sort_by(|a, b| {
+            b.0.cmp(&a.0)
+                .then_with(|| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal))
+        });
+
+        (
+            readings,
+            ranked_power.first().map(|(_, power)| *power).unwrap_or(0.0),
+        )
+    }
+
+    fn resolve_cpu_temperature(&self, readings: &[TemperatureReading]) -> f64 {
+        let mut ranked: Vec<(i32, f64)> = readings
+            .iter()
+            .map(|reading| {
+                (
+                    Self::cpu_temperature_rank(&reading.name),
+                    reading.temperature,
+                )
+            })
+            .filter(|(rank, temperature)| *rank > 0 && *temperature > 0.0 && *temperature < 150.0)
+            .collect();
+
+        ranked.sort_by(|a, b| {
+            b.0.cmp(&a.0)
+                .then_with(|| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal))
+        });
+        if let Some((_, temperature)) = ranked.first() {
+            return *temperature;
+        }
+
+        readings
+            .iter()
+            .filter(|reading| reading.temperature > 0.0 && reading.temperature < 150.0)
+            .map(|reading| reading.temperature)
+            .fold(0.0, f64::max)
+    }
+
+    fn cpu_temperature_rank(name: &str) -> i32 {
+        let name = name.to_lowercase();
+        if name.contains("gpu")
+            || name.contains("nvidia")
+            || name.contains("radeon")
+            || name.contains("nvme")
+            || name.contains("ssd")
+            || name.contains("hdd")
+            || name.contains("disk")
+            || name.contains("drive")
+            || name.contains("battery")
+            || name.contains("fan")
+            || name.contains("ambient")
+        {
+            return 0;
+        }
+        if name.contains("package")
+            || name.contains("tctl")
+            || name.contains("tdie")
+            || name.contains("x86_pkg")
+        {
+            return 5;
+        }
+        if name.contains("cpu") || name.contains("cpu_thermal") {
+            return 4;
+        }
+        if name.contains("core")
+            || name.contains("coretemp")
+            || name.contains("k10temp")
+            || name.contains("zen")
+        {
+            return 3;
+        }
+        if name.contains("thermal") {
+            return 1;
+        }
+        0
+    }
+
+    fn collect_cpu_power(&mut self) -> f64 {
+        if cfg!(target_os = "windows") {
+            self.refresh_windows_sensors(false);
+            return self.cached_windows_cpu_power();
+        }
+
+        let Some(energy_uj) = Self::read_total_cpu_energy_uj() else {
+            self.last_cpu_energy_uj = None;
+            self.last_cpu_power_time = None;
+            self.last_cpu_power_value = 0.0;
+            return 0.0;
+        };
+
+        let now = Instant::now();
+        let power = match (self.last_cpu_energy_uj, self.last_cpu_power_time) {
+            (Some(previous_energy), Some(previous_time)) if energy_uj >= previous_energy => {
+                let elapsed = now.duration_since(previous_time).as_secs_f64();
+                if elapsed > 0.0 {
+                    (energy_uj - previous_energy) as f64 / 1_000_000.0 / elapsed
+                } else {
+                    0.0
+                }
+            }
+            _ => 0.0,
+        };
+
+        self.last_cpu_energy_uj = Some(energy_uj);
+        self.last_cpu_power_time = Some(now);
+
+        let power = if power.is_finite() && power > 0.0 && power < 1000.0 {
+            power
+        } else {
+            0.0
+        };
+        self.last_cpu_power_value = power;
+        power
+    }
+
+    fn cpu_power_rank(name: &str) -> i32 {
+        let name = name.to_lowercase();
+        if name.contains("gpu")
+            || name.contains("nvidia")
+            || name.contains("radeon")
+            || name.contains("battery")
+            || name.contains("adapter")
+        {
+            return 0;
+        }
+        if name.contains("package") {
+            return 5;
+        }
+        if name.contains("cpu") || name.contains("processor") {
+            return 4;
+        }
+        if name.contains("core") {
+            return 3;
+        }
+        0
+    }
+
+    fn read_total_cpu_energy_uj() -> Option<u64> {
+        let base = Path::new("/sys/class/powercap");
+        let entries = fs::read_dir(base).ok()?;
+        let mut package_total = 0_u64;
+        let mut package_count = 0_u64;
+        let mut fallback_total = 0_u64;
+        let mut fallback_count = 0_u64;
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+
+            let Some(energy) = Self::read_u64(path.join("energy_uj")) else {
+                continue;
+            };
+
+            let name = fs::read_to_string(path.join("name"))
+                .unwrap_or_default()
+                .to_lowercase();
+            let file_name = entry.file_name().to_string_lossy().to_string();
+
+            if name.contains("package") {
+                package_total = package_total.saturating_add(energy);
+                package_count += 1;
+            } else if file_name.starts_with("intel-rapl") && file_name.matches(':').count() <= 1 {
+                fallback_total = fallback_total.saturating_add(energy);
+                fallback_count += 1;
+            }
+        }
+
+        if package_count > 0 {
+            Some(package_total)
+        } else if fallback_count > 0 {
+            Some(fallback_total)
+        } else {
+            None
+        }
+    }
+
+    fn read_u64(path: impl AsRef<Path>) -> Option<u64> {
+        fs::read_to_string(path).ok()?.trim().parse::<u64>().ok()
     }
 
     fn collect_gpu_metadata(&self) -> (Vec<String>, u64) {
         // Try nvidia-smi
         if let Ok(output) = std::process::Command::new("nvidia-smi")
-            .args(["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"])
-            .output() 
+            .args([
+                "--query-gpu=name,memory.total",
+                "--format=csv,noheader,nounits",
+            ])
+            .output()
         {
             if output.status.success() {
                 let text = String::from_utf8_lossy(&output.stdout);
@@ -420,7 +871,9 @@ impl Collector {
                     let mut total_mem = 0;
                     for line in text.lines() {
                         let l = line.trim();
-                        if l.is_empty() { continue; }
+                        if l.is_empty() {
+                            continue;
+                        }
                         let parts: Vec<&str> = l.split(',').collect();
                         if !parts.is_empty() {
                             models.push(parts[0].trim().to_string());
@@ -446,7 +899,10 @@ impl Collector {
         // Check Nvidia GPU stats via nvidia-smi with a brief caching mechanism (e.g. 3 seconds)
         if now.duration_since(self.last_gpu_time) > Duration::from_millis(3000) {
             if let Ok(output) = std::process::Command::new("nvidia-smi")
-                .args(["--query-gpu=utilization.gpu,memory.used,power.draw,temperature.gpu", "--format=csv,noheader,nounits"])
+                .args([
+                    "--query-gpu=utilization.gpu,memory.used,power.draw,temperature.gpu",
+                    "--format=csv,noheader,nounits",
+                ])
                 .output()
             {
                 if output.status.success() {
@@ -470,7 +926,12 @@ impl Collector {
             }
         }
 
-        (self.last_gpu_usage, self.last_gpu_mem_used, self.last_gpu_power, self.last_gpu_temp)
+        (
+            self.last_gpu_usage,
+            self.last_gpu_mem_used,
+            self.last_gpu_power,
+            self.last_gpu_temp,
+        )
     }
 }
 
@@ -500,32 +961,206 @@ async fn get_public_ip() -> String {
     String::new()
 }
 
-fn get_conn_counts() -> (i32, i32) {
-    if cfg!(target_os = "windows") {
-        if let Ok(output) = std::process::Command::new("netstat")
-            .arg("-an")
-            .output()
-        {
-            let text = String::from_utf8_lossy(&output.stdout);
-            let mut tcp = 0;
-            let mut udp = 0;
-            for line in text.lines() {
-                let l = line.trim();
-                if l.starts_with("TCP") {
-                    tcp += 1;
-                } else if l.starts_with("UDP") {
-                    udp += 1;
-                }
+fn current_epoch_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn format_cpu_model(vendor: &str, brand: &str, physical_cores: usize) -> String {
+    let vendor = vendor.trim();
+    let brand = brand.trim();
+
+    match (vendor.is_empty(), brand.is_empty()) {
+        (false, false) => format!("{} {} {} Core(s)", vendor, brand, physical_cores),
+        (false, true) => format!("{} {} Core(s)", vendor, physical_cores),
+        (true, false) => format!("{} {} Core(s)", brand, physical_cores),
+        (true, true) => format!("Unknown CPU {} Core(s)", physical_cores),
+    }
+}
+
+fn collect_windows_conn_counts() -> (i32, i32) {
+    if let Ok(output) = std::process::Command::new("netstat").arg("-an").output() {
+        let text = String::from_utf8_lossy(&output.stdout);
+        let mut tcp = 0;
+        let mut udp = 0;
+        for line in text.lines() {
+            let l = line.trim();
+            if l.starts_with("TCP") {
+                tcp += 1;
+            } else if l.starts_with("UDP") {
+                udp += 1;
             }
-            return (tcp, udp);
         }
-    } else {
-        // Read /proc/net/tcp & /proc/net/udp
-        let tcp_cnt = std::fs::read_to_string("/proc/net/tcp").map(|s| s.lines().count() as i32 - 1).unwrap_or(0)
-            + std::fs::read_to_string("/proc/net/tcp6").map(|s| s.lines().count() as i32 - 1).unwrap_or(0);
-        let udp_cnt = std::fs::read_to_string("/proc/net/udp").map(|s| s.lines().count() as i32 - 1).unwrap_or(0)
-            + std::fs::read_to_string("/proc/net/udp6").map(|s| s.lines().count() as i32 - 1).unwrap_or(0);
-        return (tcp_cnt, udp_cnt);
+        return (tcp, udp);
     }
     (0, 0)
+}
+
+fn get_conn_counts() -> (i32, i32) {
+    let tcp_cnt = std::fs::read_to_string("/proc/net/tcp")
+        .map(|s| s.lines().count() as i32 - 1)
+        .unwrap_or(0)
+        + std::fs::read_to_string("/proc/net/tcp6")
+            .map(|s| s.lines().count() as i32 - 1)
+            .unwrap_or(0);
+    let udp_cnt = std::fs::read_to_string("/proc/net/udp")
+        .map(|s| s.lines().count() as i32 - 1)
+        .unwrap_or(0)
+        + std::fs::read_to_string("/proc/net/udp6")
+            .map(|s| s.lines().count() as i32 - 1)
+            .unwrap_or(0);
+    (tcp_cnt, udp_cnt)
+}
+
+fn aggregate_network_totals<I, S>(interfaces: I) -> (u64, u64)
+where
+    I: IntoIterator<Item = (S, u64, u64)>,
+    S: AsRef<str>,
+{
+    interfaces
+        .into_iter()
+        .filter(|(name, _, _)| should_count_network_interface(name.as_ref()))
+        .fold((0, 0), |(rx_total, tx_total), (_, rx, tx)| {
+            (rx_total.saturating_add(rx), tx_total.saturating_add(tx))
+        })
+}
+
+fn should_count_network_interface(name: &str) -> bool {
+    let normalized = name.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return false;
+    }
+
+    let base_name = normalized.split('@').next().unwrap_or(&normalized);
+    if base_name == "lo" || base_name.starts_with("lo:") || base_name.contains("loopback") {
+        return false;
+    }
+
+    const VIRTUAL_PREFIXES: &[&str] = &[
+        "docker",
+        "br-",
+        "veth",
+        "virbr",
+        "vmnet",
+        "vboxnet",
+        "zt",
+        "tailscale",
+        "tun",
+        "tap",
+        "wg",
+        "flannel",
+        "cni",
+        "kube",
+        "calico",
+        "cali",
+        "podman",
+        "nerdctl",
+        "containerd",
+        "ifb",
+        "ip6tnl",
+        "sit",
+        "gre",
+        "gretap",
+        "erspan",
+        "dummy",
+    ];
+    if VIRTUAL_PREFIXES
+        .iter()
+        .any(|prefix| base_name.starts_with(prefix))
+    {
+        return false;
+    }
+
+    const VIRTUAL_MARKERS: &[&str] = &[
+        "vethernet",
+        "hyper-v",
+        "virtualbox",
+        "vmware",
+        "wsl",
+        "docker",
+        "tailscale",
+        "zerotier",
+        "npcap",
+        "tap-windows",
+        "wireguard",
+    ];
+    !VIRTUAL_MARKERS
+        .iter()
+        .any(|marker| normalized.contains(marker))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{aggregate_network_totals, format_cpu_model, should_count_network_interface};
+
+    #[test]
+    fn format_cpu_model_includes_physical_core_count() {
+        let model = format_cpu_model("GenuineIntel", "13th Gen Intel(R) Core(TM) i7-13700HX", 16);
+
+        assert_eq!(
+            model,
+            "GenuineIntel 13th Gen Intel(R) Core(TM) i7-13700HX 16 Core(s)"
+        );
+    }
+
+    #[test]
+    fn format_cpu_model_handles_missing_vendor_or_brand() {
+        assert_eq!(
+            format_cpu_model("", "13th Gen Intel(R) Core(TM) i7-13700HX", 16),
+            "13th Gen Intel(R) Core(TM) i7-13700HX 16 Core(s)"
+        );
+        assert_eq!(
+            format_cpu_model("GenuineIntel", "", 16),
+            "GenuineIntel 16 Core(s)"
+        );
+        assert_eq!(format_cpu_model("", "", 16), "Unknown CPU 16 Core(s)");
+    }
+
+    #[test]
+    fn aggregate_network_totals_skips_container_and_loopback_interfaces() {
+        let interfaces = [
+            ("lo", 91_071_099_488, 91_071_099_488),
+            ("enp0s6", 4_907_967_079_965, 4_873_139_838_424),
+            ("docker0", 0, 0),
+            ("br-266073283c16", 4_817_677_145_747, 4_835_632_200_041),
+            ("veth2ecfbcc@if2", 415_346_558, 125_317_817),
+        ];
+
+        assert_eq!(
+            aggregate_network_totals(interfaces),
+            (4_907_967_079_965, 4_873_139_838_424)
+        );
+    }
+
+    #[test]
+    fn network_interface_filter_keeps_common_external_interfaces() {
+        for name in ["eth0", "enp0s6", "ens18", "wlan0", "Wi-Fi", "Ethernet"] {
+            assert!(should_count_network_interface(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn network_interface_filter_rejects_common_virtual_interfaces() {
+        for name in [
+            "lo",
+            "docker0",
+            "br-a6a0746c2495",
+            "vethd0508ff@if2",
+            "virbr0",
+            "tailscale0",
+            "wg0",
+            "tun0",
+            "tap0",
+            "cni0",
+            "flannel.1",
+            "vEthernet (WSL)",
+            "VMware Network Adapter VMnet8",
+            "VirtualBox Host-Only Network",
+            "Npcap Loopback Adapter",
+        ] {
+            assert!(!should_count_network_interface(name), "{name}");
+        }
+    }
 }

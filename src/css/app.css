@@ -1,0 +1,378 @@
+@source "../../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
+@import "@cloudflare/kumo/styles/tailwind";
+@import "tailwindcss";
+
+/* ==================== Base Resets ==================== */
+html {
+  font-size: 15px; /* Make the UI slightly more compact globally */
+}
+
+:root {
+  color-scheme: light dark;
+  --app-terminal-bg: var(--color-kumo-neutral-1000, #050505);
+  --app-terminal-fg: var(--color-kumo-neutral-50, #f8f8f8);
+}
+
+:root[data-mode='light'] {
+  color-scheme: light;
+}
+
+:root[data-mode='dark'] {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-kumo-canvas);
+  color: var(--text-color-kumo-default);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+[data-sidebar='trigger'] svg path[d='M6.25 7.25v9.5'] {
+  transform-box: view-box;
+  transform-origin: center;
+  translate: none;
+  transition-property: transform;
+}
+
+[data-sidebar='trigger'][aria-expanded='true'] svg path[d='M6.25 7.25v9.5'] {
+  transform: translateX(1px);
+}
+
+[data-sidebar='trigger'][aria-expanded='false'] svg path[d='M6.25 7.25v9.5'] {
+  transform: translateX(10.5px);
+}
+
+[data-sidebar='rail'] {
+  display: none !important;
+}
+
+.app-card {
+  border: 1px solid var(--color-kumo-line);
+  border-radius: 0.5rem;
+  background-color: var(--color-kumo-base);
+  box-shadow: none;
+  outline: 1px solid color-mix(in oklab, var(--color-kumo-line) 72%, transparent);
+  outline-offset: -1px;
+}
+
+.app-card-md {
+  border-radius: 0.375rem;
+}
+
+.app-subcard {
+  border: 1px solid var(--color-kumo-line);
+  border-radius: 0.5rem;
+  background-color: color-mix(in oklab, var(--color-kumo-recessed) 40%, transparent);
+  box-shadow: none;
+  outline: 1px solid color-mix(in oklab, var(--color-kumo-line) 66%, transparent);
+  outline-offset: -1px;
+}
+
+.app-table-frame {
+  overflow-x: auto;
+}
+
+.app-status-pill {
+  display: inline-flex;
+  align-items: center;
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.app-empty-panel {
+  border: 1px dashed var(--color-kumo-line);
+  border-radius: 0.75rem;
+  background-color: color-mix(in oklab, var(--color-kumo-recessed) 10%, transparent);
+}
+
+[role='dialog'] {
+  max-height: calc(100dvh - 1rem);
+}
+
+th > button[aria-label='Resize column'] {
+  right: 0 !important;
+  z-index: 10;
+  width: 14px !important;
+  justify-content: flex-end !important;
+  visibility: visible !important;
+  background: transparent !important;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+th:hover > button[aria-label='Resize column'],
+th:focus-within > button[aria-label='Resize column'],
+th > button[aria-label='Resize column']:hover,
+th > button[aria-label='Resize column']:active,
+th > button[aria-label='Resize column']:focus-visible {
+  opacity: 1;
+}
+
+th > button[aria-label='Resize column'] > span {
+  width: 2px !important;
+  height: 1.25rem !important;
+  background-color: color-mix(in oklab, var(--text-color-kumo-strong) 32%, transparent) !important;
+}
+
+.dns-workspace {
+  container-type: inline-size;
+}
+
+.dns-split {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto;
+}
+
+.dns-summary-grid {
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+}
+
+.dns-chart-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.dns-table-frame {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.5rem;
+  background-color: var(--color-kumo-base);
+}
+
+.dns-table-frame::after {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border: 1px solid var(--color-kumo-line);
+  border-radius: inherit;
+  content: '';
+  pointer-events: none;
+}
+
+.dns-table-scroll {
+  position: relative;
+  z-index: 0;
+  height: 100%;
+  overflow: auto;
+}
+
+.dns-toolbar-frame {
+  position: relative;
+  border-radius: 0.5rem;
+  background-color: var(--color-kumo-base);
+}
+
+.dns-toolbar-frame::after {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border: 1px solid var(--color-kumo-line);
+  border-radius: inherit;
+  content: '';
+  pointer-events: none;
+}
+
+@container (min-width: 980px) {
+  .dns-split {
+    grid-template-columns: clamp(300px, 38%, 424px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+}
+
+.app-os-windows {
+  color: #0078d4;
+}
+
+.auth-ambient-layer {
+  --auth-cursor-opacity: 0;
+  --auth-cursor-x: 50vw;
+  --auth-cursor-y: 50vh;
+
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+.auth-ambient-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in oklab, var(--color-kumo-line) 58%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--color-kumo-line) 58%, transparent) 1px,
+      transparent 1px
+    );
+  background-position: 0 0;
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse at 62% 48%, black 0%, transparent 72%);
+  opacity: 0.28;
+  pointer-events: none;
+}
+
+.auth-ambient-grid::after {
+  position: absolute;
+  inset: 0;
+  content: '';
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in oklab, var(--color-kumo-brand) 46%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--color-kumo-info) 30%, transparent) 1px,
+      transparent 1px
+    );
+  background-position: 0 0;
+  background-size: inherit;
+  mask-image: radial-gradient(
+    circle 280px at var(--auth-cursor-x) var(--auth-cursor-y),
+    black 0%,
+    transparent 72%
+  );
+  opacity: var(--auth-cursor-opacity);
+  transition: opacity 220ms ease-out;
+  will-change: opacity, mask-image;
+}
+
+.auth-particles-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  mask-image: radial-gradient(ellipse at 60% 48%, black 0%, transparent 78%);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.auth-particles-canvas canvas {
+  filter: saturate(1.14) contrast(1.04);
+}
+
+.auth-cursor-light {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+  opacity: var(--auth-cursor-opacity);
+  transform: translate3d(var(--auth-cursor-x), var(--auth-cursor-y), 0);
+  transition: opacity 220ms ease-out;
+  box-shadow:
+    0 0 126px 58px color-mix(in oklab, var(--color-kumo-brand) 17%, transparent),
+    0 0 236px 104px color-mix(in oklab, var(--color-kumo-info) 8%, transparent);
+  mix-blend-mode: screen;
+  will-change: transform, opacity;
+}
+
+:root[data-mode='dark'] .auth-ambient-grid {
+  opacity: 0.34;
+}
+
+:root[data-mode='dark'] .auth-ambient-grid::after {
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in oklab, var(--color-kumo-brand) 58%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--color-kumo-info) 42%, transparent) 1px,
+      transparent 1px
+    );
+  mask-image: radial-gradient(
+    circle 320px at var(--auth-cursor-x) var(--auth-cursor-y),
+    black 0%,
+    transparent 74%
+  );
+}
+
+:root[data-mode='dark'] .auth-particles-canvas canvas {
+  filter: saturate(1.26) brightness(1.2) contrast(1.08);
+}
+
+:root[data-mode='dark'] .auth-cursor-light {
+  box-shadow:
+    0 0 142px 68px color-mix(in oklab, var(--color-kumo-brand) 22%, transparent),
+    0 0 268px 116px color-mix(in oklab, var(--color-kumo-info) 11%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-particles-canvas {
+    display: none;
+  }
+
+  .auth-cursor-light {
+    display: none;
+  }
+}
+
+.agent-command-textarea {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.app-terminal-surface {
+  background-color: var(--app-terminal-bg);
+  color: var(--app-terminal-fg);
+}
+
+.app-terminal-surface .xterm {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 0.5rem;
+}
+
+.app-terminal-surface .xterm,
+.app-terminal-surface .xterm-viewport,
+.app-terminal-surface .xterm-screen {
+  background-color: var(--app-terminal-bg) !important;
+}
+
+table th,
+table td {
+  white-space: nowrap;
+}
+
+table th > *,
+table td > * {
+  min-width: 0;
+}
+
+/* Hidden scrollbar compatibility for legacy scrollbar-thin usages */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}

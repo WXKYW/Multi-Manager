@@ -1,40 +1,23 @@
-<p align="center">
-  <img src="./src/logo.svg" width="120" height="120" alt="API Monitor Logo">
-</p>
+# API Monitor
 
-<h1 align="center">API Monitor</h1>
+API Monitor 是一个自托管的 API 管理、云资源管理与主机监控面板。
 
-<p align="center">
-  <a href="https://github.com/iwvw/api-monitor/blob/main/LICENSE"><img src="https://img.shields.io/github/license/iwvw/api-monitor" alt="License"></a>
-  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-20+-green.svg" alt="Node.js"></a>
-  <a href="https://www.sqlite.org/"><img src="https://img.shields.io/badge/Storage-SQLite3-orange.svg" alt="Storage"></a>
-  <a href="https://hub.docker.com/r/iwvw/api-monitor"><img src="https://img.shields.io/docker/pulls/iwvw/api-monitor.svg" alt="Docker Pulls"></a>
-  <a href="https://github.com/iwvw/api-monitor/actions"><img src="https://img.shields.io/github/actions/workflow/status/iwvw/api-monitor/docker-publish.yml" alt="Build Status"></a>
-  <img src="https://img.shields.io/badge/Platform-AMD64%20%7C%20ARM64-blue.svg" alt="Platforms">
-  <img src="https://stone.professorlee.work/api/stone/iwvw/API-Monitor" alt="Stone Badge" width="200" />
+集中管理服务器、DNS、对象存储、PaaS、文件分享等。
 
-</p>
+## 功能概览
 
----
+- 主机实例监控、实时指标、WebSocket 更新、终端与文件管理
+- Docker、进程、网络质量、流量配额与告警
+- Cloudflare、阿里云、腾讯云、Koyeb、Fly.io 等云服务管理
+- OpenAI 兼容接口、模型调用记录与用量统计
+- 可用性监测、公开状态页、自定义域名与首页快捷入口
+- 文件中转、TOTP、备份、定时任务、通知模板与系统日志
 
-**一个全能型的 API 管理与服务器监控面板**。
-主机、实时 终端、Docker、云服务集成，包括 Cloudflare、OpenAI、Koyeb。
+## 快速部署
 
-支持Antigravity / Gemini 的模型转 API 调用，有完善的额度使用统计、日志记录、模型列表获取、全链路耗时统计。
-
-[🔵 Docker Hub](https://hub.docker.com/r/iwvw/api-monitor)
-
-> [!WARNING]
-> 请勿在演示环境中输入真实的敏感数据
-
-## 📦 快速开始
- 
-### 1. Docker 部署 (推荐)
-
-**方式一：Docker Compose (最简)**
+### Docker Compose
 
 ```yaml
-version: '3.8'
 services:
   api-monitor:
     image: iwvw/api-monitor:latest
@@ -43,99 +26,69 @@ services:
       - "3000:3000"
     volumes:
       - ./data:/app/data
+    environment:
+      - ADMIN_PASSWORD=<CHANGE_ME>
+      - JWT_SECRET=<CHANGE_ME_TO_A_LONG_RANDOM_STRING>
     restart: unless-stopped
 ```
 
-**方式二：Docker CLI**
+### Docker CLI
 
 ```bash
 docker run -d --name api-monitor \
   -p 3000:3000 \
-  -v $(pwd)/data:/app/data \
+  -v ./data:/app/data \
+  -e ADMIN_PASSWORD=<CHANGE_ME> \
+  -e JWT_SECRET=<CHANGE_ME_TO_A_LONG_RANDOM_STRING> \
   --restart unless-stopped \
   iwvw/api-monitor:latest
 ```
 
-### 2. 本地开发
+## 本地开发
 
 ```bash
-# 克隆仓库
-git clone https://github.com/iwvw/api-monitor.git
-cd api-monitor
-
-# 安装依赖
 npm install
-
-# 启动开发模式 (热重载: 前端 Vite + 后端 Express)
 npm run dev
 ```
 
-如需仅运行生产环境模式：
+常用命令：
 
 ```bash
-npm run build && npm start
+npm run lint
+npm run build
+npm run backend-go:test
+npm run backend-go:build
 ```
 
----
+## 配置
 
-## 🔒 环境变量配置
+可通过环境变量或 `.env` 配置。发布部署至少建议设置：
 
-支持通过 `.env` 文件或 Docker 环境变量进行配置。可参考根目录下的 `.env.example`。
+| 变量 | 说明 |
+| --- | --- |
+| `PORT` | 服务端口，默认 `3000` |
+| `DATA_DIR` | 数据目录，默认 `./data` |
+| `DB_NAME` | SQLite 数据库文件名，默认 `data.db` |
+| `ADMIN_PASSWORD` | 初始化管理员密码，仅首次初始化使用 |
+| `JWT_SECRET` | 会话密钥，建议使用长随机字符串 |
+| `LOG_LEVEL` | 日志级别：`DEBUG`、`INFO`、`WARN`、`ERROR` |
 
-| 变量名 | 默认值 | 说明 |
-| :--- | :--- | :--- |
-| `PORT` | `3000` | 服务运行端口 |
-| `NODE_ENV` | `production` | 运行环境 (`development` / `production`) |
-| `ADMIN_PASSWORD` | - | **初始管理员密码**（首次启动时生效，也可在界面设置） |
-| `JWT_SECRET` | (随机) | **强烈建议设置**。用于加密会话 Token |
-| `DATA_DIR` | `/app/data` | 数据持久化目录 (数据库与日志存放路径) |
-| `DB_NAME` | `data.db` | 数据库文件名 |
-| `LOG_LEVEL` | `INFO` | 日志级别 (`DEBUG`, `INFO`, `WARN`, `ERROR`) |
-| `LOG_RETENTION_DAYS` | `7` | 本地日志文件保留天数 |
-| `TRUST_PROXY` | `false` | 若部署在反代后 (如 Nginx/CF)，建议设为 `true` |
-| `VITE_USE_CDN` | `true` | 是否启用 CDN 加载静态资源 (构建时生效) |
-| `VITE_CDN_PROVIDER`| `npmmirror` | CDN 节点选择 (`npmmirror`, `jsdelivr`, `unpkg`, `bootcdn`) |
+不要把真实密码、Token、Cookie、私钥或云厂商凭证提交到仓库。
 
----
+## 技术栈
 
-## 📁 目录结构
+- 后端：Go + SQLite
+- 前端：React + Vite + Tailwind CSS + Kumo UI
+- Agent：Rust
+- 实时通信：Engine.IO / WebSocket
 
-```
-api-monitor/
-├── server.js              # 应用入口
-├── src/                   # 核心源码
-│   ├── js/modules/        # 前端业务模块
-│   ├── db/                # 数据库层
-│   ├── middleware/        # Express 中间件
-│   ├── routes/            # API 路由
-│   ├── services/          # 业务服务
-│   └── utils/             # 工具函数
-├── modules/               # 可插拔业务模块
-│   ├── server-api/        # 服务器/SSH/Docker
-│   ├── cloudflare-api/    # Cloudflare DNS
-│   ├── antigravity-api/   # Antigravity Agent
-│   ├── music-api/         # 网易云音乐代理
-│   └── ...                # 更多模块
-├── data/                  # 持久化目录 (挂载点)
-└── dist/                  # 生产构建产物
-```
+## 文档
 
-详细架构说明 → [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
+- [文档索引](./docs/README.md)
+- [开发指南](./docs/开发指南.md)
+- [API 接口文档](./docs/API接口文档.md)
+- [Kumo UI 规则](./docs/Kumo%20UI%20规则.md)
 
----
+## 许可证
 
-## 🧩 模块开发指南
-
-本项目采用插件化架构，您可以轻松扩展新功能。详细的开发步骤和规范请参考：
-
-👉 **[模块开发模板使用指南](./modules/_template/README.md)**
-
----
-
-## 📄 许可证
-
-本项目基于 [MIT](LICENSE) 协议开源。
-
-**Made with ❤️ by [iwvw](https://github.com/iwvw) & [jiujiu532](https://github.com/jiujiu532)**
-
-
+[MIT](./LICENSE)

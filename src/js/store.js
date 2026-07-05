@@ -1,23 +1,25 @@
 /**
- * API Monitor - 全局状态管理 (Lightweight Store)
- * 使用 Vue 3 的 reactive API 实现简单的状态分发
+ * API Monitor - 全局状态管理 (Zustand Store)
+ * 基于 Zustand 实现轻量、模块化、标准化的全局状态管理，彻底摆脱 Vue 3 依赖
  */
 
-import { reactive } from 'vue';
+import { create } from 'zustand';
+import { dialog } from './modules/dialog.js';
+import toastManager from './modules/toast.js';
 
-// 确保 reactive 始终从全局 Vue 对象获取，增加鲁棒性
-// 纯 Vue 3 (ESM) 不需要 window.Vue 检测，直接使用导入的 reactive
-
-/**
- * 模块配置 - 统一管理所有模块的元数据
- * @type {Object<string, {name: string, shortName: string, icon: string, description: string}>}
- */
+// ==================== 模块元数据配置 ====================
 export const MODULE_CONFIG = {
   dashboard: {
     name: '仪表盘',
-    shortName: 'Dash',
+    shortName: '总览',
     icon: 'fa-tachometer-alt',
     description: '系统状态与数据概览',
+  },
+  settings: {
+    name: '系统设置',
+    shortName: '设置',
+    icon: 'fa-cog',
+    description: '全局配置、安全认证与外观主题',
   },
   openai: {
     name: 'OpenAI',
@@ -25,18 +27,7 @@ export const MODULE_CONFIG = {
     icon: 'fa-robot',
     description: 'OpenAI 兼容 API 管理与聊天',
   },
-  antigravity: {
-    name: 'AntiG',
-    shortName: 'AntiG',
-    icon: 'fa-rocket',
-    description: 'Antigravity API 代理服务',
-  },
-  'gemini-cli': {
-    name: 'GCLI',
-    shortName: 'GCLI',
-    icon: 'fa-terminal',
-    description: 'Gemini CLI API 代理服务',
-  },
+
   paas: {
     name: 'PaaS',
     shortName: 'PaaS',
@@ -51,77 +42,68 @@ export const MODULE_CONFIG = {
   },
   aliyun: {
     name: '阿里云',
-    shortName: 'Aliyun',
+    shortName: '阿里',
     icon: 'fa-cloud',
     description: '阿里云 DNS / ECS 管理',
   },
-  'self-h': {
-    name: 'SelfH',
-    shortName: 'Self-H',
-    icon: 'fa-server',
-    description: '自建服务管理',
+  scheduler: {
+    name: '定时任务',
+    shortName: '任务',
+    icon: 'fa-clock',
+    description: '定时任务管理',
   },
   tencent: {
     name: '腾讯云',
-    shortName: 'Tencent',
+    shortName: '腾讯',
     icon: 'fa-hdd',
     description: '腾讯云 DNS / CVM 管理',
   },
   server: {
-    name: 'Hosts',
-    shortName: 'Hosts',
+    name: '主机实例',
+    shortName: '主机',
     icon: 'fa-server',
-    description: '终端与服务器监控',
+    description: '主机管理与终端监控',
   },
   totp: {
-    name: '2FA',
+    name: '双因子认证',
     shortName: '2FA',
     icon: 'fa-shield-alt',
     description: 'TOTP 验证器',
   },
-  music: {
-    name: 'Music',
-    shortName: 'Music',
-    icon: 'fa-music',
-    description: '网易云音乐播放器',
-  },
   uptime: {
-    name: 'Uptime',
-    shortName: 'Uptime',
+    name: '可用性监测',
+    shortName: '监控',
     icon: 'fa-heartbeat',
     description: '站点与服务可用性监测',
   },
   filebox: {
     name: '文件柜',
-    shortName: 'FileBox',
+    shortName: '文件',
     icon: 'fa-box-open',
     description: '文件分享与暂存',
   },
   notification: {
     name: '通知',
-    shortName: 'Alerts',
+    shortName: '通知',
     icon: 'fa-bell',
     description: '通知渠道与告警规则管理',
   },
-  'ai-chat': {
-    name: 'AI Chat',
-    shortName: 'Chat',
-    icon: 'fa-comments',
-    description: 'AI 对话助手',
+  apidocs: {
+    name: 'API 文档',
+    shortName: '文档',
+    icon: 'fa-file-code',
+    description: '系统接口索引与 AI 接入蓝图',
+  },
+  systemlogs: {
+    name: '系统日志',
+    shortName: '日志',
+    icon: 'fa-file-alt',
+    description: '统一日志查看器',
   },
 
-  qwen: {
-    name: '通义千问',
-    shortName: 'Qwen',
-    icon: 'fa-magic',
-    description: '通义千问 API 代理服务',
-  },
 };
 
-/**
- * 模块分组配置 - 将模块按功能分类
- * @type {Array<{id: string, name: string, icon: string, modules: string[]}>}
- */
+// ==================== 模块分组配置 ====================
 export const MODULE_GROUPS = [
   {
     id: 'overview',
@@ -133,11 +115,11 @@ export const MODULE_GROUPS = [
     id: 'api-gateway',
     name: 'API 网关',
     icon: 'fa-bolt',
-    modules: ['openai', 'gemini-cli', 'qwen'],
+    modules: ['openai'],
   },
   {
     id: 'infrastructure',
-    name: '基础设施',
+    name: '云服务',
     icon: 'fa-cubes',
     modules: ['paas', 'dns', 'aliyun', 'tencent', 'server'],
   },
@@ -145,884 +127,645 @@ export const MODULE_GROUPS = [
     id: 'toolbox',
     name: '工具箱',
     icon: 'fa-toolbox',
-    modules: ['self-h', 'totp', 'music', 'uptime', 'filebox', 'notification', 'ai-chat'],
+    modules: ['scheduler', 'totp', 'uptime', 'filebox', 'notification'],
+  },
+  {
+    id: 'system',
+    name: '系统',
+    icon: 'fa-cog',
+    modules: ['apidocs', 'systemlogs'],
   },
 ];
 
-/**
- * 获取模块名称
- * @param {string} moduleId - 模块 ID
- * @param {boolean} short - 是否返回简短名称
- * @returns {string}
- */
+// ==================== 兼容性助手函数 ====================
 export function getModuleName(moduleId, short = false) {
   const config = MODULE_CONFIG[moduleId];
   if (!config) return moduleId;
   return short ? config.shortName : config.name;
 }
 
-/**
- * 获取模块图标
- * @param {string} moduleId - 模块 ID
- * @returns {string} FontAwesome 图标类名
- */
 export function getModuleIcon(moduleId) {
   const config = MODULE_CONFIG[moduleId];
   return config ? config.icon : 'fa-cube';
 }
 
-export const store = reactive({
-  // 认证与基础状态
-  isAuthenticated: true,
+const THEME_STORAGE_KEY = 'app_theme_mode';
+const LEGACY_THEME_STORAGE_KEY = 'app_theme';
+const PAGE_WIDTH_STORAGE_KEY = 'app_page_width_mode';
+const SIDEBAR_COLLAPSED_STORAGE_KEY = 'app_sidebar_collapsed';
+const AUTH_LOGGED_OUT_STORAGE_KEY = 'auth_explicitly_logged_out';
+
+export const THEME_MODE_OPTIONS = ['auto', 'light', 'dark'];
+export const PAGE_WIDTH_OPTIONS = ['standard', 'wide', 'full'];
+export const DEFAULT_PAGE_WIDTH_MODE = 'full';
+
+const normalizeThemeMode = (mode, fallback = 'auto') => (
+  THEME_MODE_OPTIONS.includes(mode) ? mode : fallback
+);
+
+const normalizePageWidthMode = (mode, fallback = DEFAULT_PAGE_WIDTH_MODE) => (
+  PAGE_WIDTH_OPTIONS.includes(mode) ? mode : fallback
+);
+
+const normalizeSidebarCollapsed = (value, fallback = false) => {
+  if (value === true || value === 'true' || value === 1 || value === '1') return true;
+  if (value === false || value === 'false' || value === 0 || value === '0') return false;
+  return fallback;
+};
+
+export const DEFAULT_TOTP_SETTINGS = {
+  hideCode: false,
+  allowRevealCode: true,
+  groupByPlatform: true,
+  showPlatformHeaders: true,
+  hidePlatformText: false,
+  maskAccount: false,
+  autoSave: true,
+  lockInputMode: false,
+  defaultInputMode: 'scan',
+};
+
+export const DEFAULT_MODULE_ORDER = MODULE_GROUPS.flatMap((group) => group.modules);
+
+export const DEFAULT_MODULE_VISIBILITY = DEFAULT_MODULE_ORDER.reduce((acc, moduleId) => {
+  acc[moduleId] = true;
+  return acc;
+}, {});
+
+
+export const DEFAULT_CHANNEL_ENABLED = {};
+
+export const DEFAULT_CHANNEL_MODEL_PREFIX = {};
+
+const LEGACY_MODULE_ALIASES = {
+  'self-h': 'scheduler',
+};
+
+const normalizeModuleId = (moduleId) => LEGACY_MODULE_ALIASES[moduleId] || moduleId;
+
+const getAuthHeaders = () => ({
+  'Content-Type': 'application/json',
+  'x-admin-password': localStorage.getItem('admin_password') || useStore.getState().loginPassword || '',
+});
+
+let appearanceSettingsSaveTimer = null;
+let pendingAppearanceSettingsPatch = {};
+
+const scheduleAppearanceSettingsSave = (patch) => {
+  pendingAppearanceSettingsPatch = {
+    ...pendingAppearanceSettingsPatch,
+    ...patch,
+  };
+
+  if (appearanceSettingsSaveTimer) {
+    window.clearTimeout(appearanceSettingsSaveTimer);
+  }
+
+  appearanceSettingsSaveTimer = window.setTimeout(async () => {
+    const payload = pendingAppearanceSettingsPatch;
+    pendingAppearanceSettingsPatch = {};
+    appearanceSettingsSaveTimer = null;
+
+    try {
+      const response = await fetch('/api/settings', {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.success === false) {
+        throw new Error(result.error || 'Failed to save appearance settings');
+      }
+    } catch (error) {
+      console.error('Failed to save appearance settings:', error);
+    }
+  }, 250);
+};
+
+export const applyCustomCss = (css = '') => {
+  if (typeof document === 'undefined') return;
+
+  let style = document.getElementById('custom-css-dynamic');
+  if (!style) {
+    style = document.createElement('style');
+    style.id = 'custom-css-dynamic';
+    document.head.appendChild(style);
+  }
+  style.textContent = css || '';
+};
+
+export const normalizeUserSettings = (settings = {}) => {
+  const validModules = new Set(DEFAULT_MODULE_ORDER);
+  const savedOrder = Array.isArray(settings.moduleOrder)
+    ? settings.moduleOrder
+      .map(normalizeModuleId)
+      .filter((moduleId, index, order) => validModules.has(moduleId) && order.indexOf(moduleId) === index)
+    : [];
+  const moduleOrder = [
+    ...savedOrder,
+    ...DEFAULT_MODULE_ORDER.filter((moduleId) => !savedOrder.includes(moduleId)),
+  ];
+
+  const rawVisibility = settings.moduleVisibility || {};
+  const moduleVisibility = DEFAULT_MODULE_ORDER.reduce((acc, moduleId) => {
+    const legacyModuleId = Object.entries(LEGACY_MODULE_ALIASES).find(([, current]) => current === moduleId)?.[0];
+    acc[moduleId] = moduleId === 'dashboard'
+      ? true
+      : rawVisibility[moduleId] ?? rawVisibility[legacyModuleId] ?? DEFAULT_MODULE_VISIBILITY[moduleId] ?? true;
+    return acc;
+  }, {});
+
+  const rawChannelEnabled = {
+    ...DEFAULT_CHANNEL_ENABLED,
+    ...(settings.channelEnabled || {}),
+  };
+  const rawChannelModelPrefix = {
+    ...DEFAULT_CHANNEL_MODEL_PREFIX,
+    ...(settings.channelModelPrefix || {}),
+  };
+  const allowedChannels = new Set(Object.keys(DEFAULT_CHANNEL_ENABLED));
+  const channelEnabled = Object.fromEntries(
+    Object.entries(rawChannelEnabled).filter(([channel]) => allowedChannels.has(channel))
+  );
+  const channelModelPrefix = Object.fromEntries(
+    Object.entries(rawChannelModelPrefix).filter(([channel]) => allowedChannels.has(channel))
+  );
+
+  return {
+    customCss: settings.customCss || '',
+    themeMode: normalizeThemeMode(
+      settings.themeMode || settings.theme_mode,
+      typeof getInitialThemeMode === 'function' ? getInitialThemeMode() : 'auto'
+    ),
+    pageWidthMode: normalizePageWidthMode(
+      settings.pageWidthMode || settings.page_width_mode,
+      typeof getInitialPageWidthMode === 'function' ? getInitialPageWidthMode() : DEFAULT_PAGE_WIDTH_MODE
+    ),
+    sidebarCollapsed: normalizeSidebarCollapsed(
+      settings.sidebarCollapsed ?? settings.sidebar_collapsed,
+      typeof getInitialSidebarCollapsed === 'function' ? getInitialSidebarCollapsed() : false
+    ),
+    koyebRefreshInterval: Number(settings.koyebRefreshInterval) || 30000,
+    flyRefreshInterval: Number(settings.flyRefreshInterval) || 30000,
+    moduleVisibility,
+    channelEnabled,
+    channelModelPrefix,
+    moduleOrder,
+    load_balancing_strategy: settings.load_balancing_strategy || 'random',
+    serverIpDisplayMode: settings.serverIpDisplayMode || 'normal',
+    vibrationEnabled: settings.vibrationEnabled !== undefined ? Boolean(settings.vibrationEnabled) : true,
+    navLayout: settings.navLayout || 'top',
+    totpSettings: {
+      ...DEFAULT_TOTP_SETTINGS,
+      ...(settings.totpSettings || {}),
+      defaultInputMode: ['scan', 'upload', 'manual'].includes(settings.totpSettings?.defaultInputMode)
+        ? settings.totpSettings.defaultInputMode
+        : DEFAULT_TOTP_SETTINGS.defaultInputMode,
+    },
+    agentDownloadUrl: settings.agentDownloadUrl || '',
+    publicApiUrl: settings.publicApiUrl || '',
+  };
+};
+
+export const getSystemTheme = () => {
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  return 'dark';
+};
+
+export const resolveThemeMode = (themeMode) => {
+  if (themeMode === 'light' || themeMode === 'dark') return themeMode;
+  return getSystemTheme();
+};
+
+export const applyThemeMode = (themeMode) => {
+  if (typeof document === 'undefined') return;
+
+  const effectiveTheme = resolveThemeMode(themeMode);
+  const root = document.documentElement;
+  root.classList.toggle('dark', effectiveTheme === 'dark');
+  root.classList.toggle('light', effectiveTheme === 'light');
+  root.dataset.mode = effectiveTheme;
+  root.dataset.theme = 'kumo';
+  root.dataset.themeMode = themeMode;
+  root.style.colorScheme = effectiveTheme;
+};
+
+// ==================== Zustand Store ====================
+const getInitialThemeMode = () => {
+  try {
+    const savedMode = localStorage.getItem(THEME_STORAGE_KEY);
+    if (normalizeThemeMode(savedMode, null)) return savedMode;
+
+    const legacyTheme = localStorage.getItem(LEGACY_THEME_STORAGE_KEY);
+    if (legacyTheme === 'dark' || legacyTheme === 'light') return legacyTheme;
+  } catch (e) {
+    console.error('Failed to get initial theme mode:', e);
+  }
+  return 'auto';
+};
+
+const initialThemeMode = getInitialThemeMode();
+
+const getInitialPageWidthMode = () => {
+  try {
+    const savedMode = localStorage.getItem(PAGE_WIDTH_STORAGE_KEY);
+    if (normalizePageWidthMode(savedMode, null)) return savedMode;
+  } catch (e) {
+    console.error('Failed to get initial page width mode:', e);
+  }
+  return DEFAULT_PAGE_WIDTH_MODE;
+};
+
+const initialPageWidthMode = getInitialPageWidthMode();
+
+const getInitialSidebarCollapsed = () => {
+  try {
+    return normalizeSidebarCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY), false);
+  } catch (e) {
+    console.error('Failed to get initial sidebar mode:', e);
+  }
+  return false;
+};
+
+const initialSidebarCollapsed = getInitialSidebarCollapsed();
+
+const useStore = create((set, get) => ({
+  // --- 1. 认证状态 ---
+  isAuthenticated: false,
   isCheckingAuth: true,
   showLoginModal: false,
   showSetPasswordModal: false,
   loginError: '',
   loginPassword: '',
-  loginLoading: false, // 登录按钮加载状态
-  loginRequire2FA: false, // 是否需要 2FA 验证
-  loginTotpToken: '', // 2FA 验证码输入
-  setPassword: '',
-  setPasswordConfirm: '',
-  setPasswordError: '',
+  loginLoading: false,
+  loginRequire2FA: false,
+  loginTotpToken: '',
+  isDemoMode: false,
 
-  // 导航与布局
+  // --- 2. 界面与布局状态 ---
   mainActiveTab: 'dashboard',
-  moduleVisibility: {
-    dashboard: true,
-    openai: true,
-    qwen: true,
-    'gemini-cli': true,
-    paas: true,
-    dns: true,
-    aliyun: true,
-    tencent: true,
-    'self-h': true,
-    server: true,
-    totp: true,
-    music: false, // 音乐模块默认隐藏
-    uptime: true,
-    filebox: true,
-    notification: true,
-    'ai-chat': true,
-  },
-  channelEnabled: {
-    antigravity: true,
-    'gemini-cli': true,
-  },
-  channelModelPrefix: {
-    antigravity: '',
-    'gemini-cli': '',
-  },
-  moduleOrder: [
-    'dashboard',
-    'openai',
-    'gemini-cli',
-    'qwen',
-    'paas',
-    'dns',
-    'aliyun',
-    'tencent',
-    'self-h',
-    'server',
-    'totp',
-    'music',
-    'uptime',
-    'filebox',
-    'notification',
-    'ai-chat',
-  ],
-
-  // 界面设置
-  opacity: 100,
-  serverIpDisplayMode: 'normal', // 'normal', 'masked', 'hidden'
-  vibrationEnabled: true, // 移动端震动反馈开关
-  navLayout: 'bottom', // 'sidebar' (左侧), 'top' (顶部) or 'bottom' (底栏)
-  agentDownloadUrl: '', // 自定义 Agent 下载地址，空则使用主控端
-  showSettingsModal: false, // 设置面板显示状态
-  appRevealed: false, // 首屏淡入动画完成
-  appReady: false, // 首屏加载完成，可以启用过渡动画
-  singlePageMode: false, // 单页模式（通过 URL 路径访问特定模块时隐藏导航）
-  mobileSettingsNavExpanded: false, // 移动端设置导航展开状态
-  navGroupExpanded: null, // 当前展开的分组 ID (null 表示都收起)
-
-  // 账户安全设置
-  newPassword: '',
-  confirmPassword: '',
-  passwordError: '',
-  passwordSuccess: '',
-  settingsCurrentTab: 'general',
-
-  // 2FA 双因素认证
-  twoFA: {
-    enabled: false,
-    loading: false,
-    setupMode: false,
-    disableMode: false,
-    secret: '',
-    qrCode: '',
-    confirmToken: '',
-    disablePassword: '',
-    error: '',
-  },
-
-  // TOTP 模块设置
-  totpSettings: {
-    hideCode: false, // 隐藏验证码
-    allowRevealCode: false, // 允许临时显示
-    groupByPlatform: true, // 按平台分组显示
-    showPlatformHeaders: false, // 显示平台分隔标题
-    hidePlatformText: false, // 隐藏标题文字
-    maskAccount: false, // 账号名称打码
-    autoSave: true, // 自动保存账号
-    lockInputMode: false, // 锁定录入方式
-    defaultInputMode: 'qr', // 默认录入模式
-  },
-
-  // Self-H (Self-Hosted) module state
-  selfHCurrentTab: 'openlist',
-  openListSubTab: 'overview',
-
-  // Cron Scheduler (Added)
-  cronTasks: [],
-  cronLogs: [],
-  cronEditingTask: null, // 当前编辑的任务对象 { id, name, schedule, command, type, enabled } 或 null
-  cronLoading: false,
-
-  openListAccounts: [],
-  openListStats: { onlineCount: 0 },
-  currentOpenListAccount: null,
-  newOpenListAcc: { name: '', api_url: '', api_token: '' },
-  openListStorages: [], // 存储挂载点详细信息
-  openListFiles: [],
-  openListFilesLoading: false,
-  openListPath: '/',
-  openListReadme: '',
-  openListSortKey: null, // null 表示跟随后端原始排序
-  openListSortOrder: 'asc', // 'asc', 'desc'
-  openListFileCache: {}, // 路径 -> 文件列表缓存
-  openListPreviewSize: 800, // 预览图最大尺寸
-  openListSearchScope: 0, // 0: 全部, 1: 文件夹, 2: 文件
-  openListSearchActive: false, // 是否处于搜索激活状态 (主列表)
-  openListSearchInput: '', // 搜索输入框内容
-  openListSearchExpanded: false, // 搜索框展开状态
-  // 临时标签页状态 (支持多个)
-  openListTempTabs: [], // 数组项: { id, name, path, files: [], loading: false, pathParts: [] }
-  openListActiveTempTabId: null,
-  // 右键菜单状态
-  openListContextMenu: {
-    visible: false,
-    x: 0,
-    y: 0,
-    file: null,
-    baseDir: '/',
-  },
-  // 交互辅助状态
-  openListInteraction: {
-    lastTapTime: 0,
-    lastTapTabId: null,
-    longPressTimer: null,
-    longPressTriggered: false,
-  },
-  openListLayoutMode: 'list', // 'list' | 'grid'
-
-  // 图片预览弹窗状态
-  imagePreview: {
-    visible: false,
-    url: '',
-    filename: '',
-    loading: false,
-  },
-
-  // 全局数据刷新控制
-  serverList: [],
-  serverLoading: false,
-  serverCurrentTab: 'list',
-  serverPollingEnabled: true,
-  serverPollingTimer: null,
-  serverCountdownInterval: null,
-  serverRefreshCountdown: 0,
-  serverRefreshProgress: 100,
-  serverSearchText: '',
-  serverStatusFilter: 'all',
-  expandedServers: [],
-  monitorConfig: {
-    interval: 60,
-    timeout: 10,
-    logRetentionDays: 7,
-    metrics_retention_days: 30,
-  },
-  // Agent 部署弹窗
-  showAgentModal: false,
-  agentModalData: null,
-  agentInstallLoading: false,
-  agentInstallLog: '', // 安装日志输出
-  agentInstallResult: null, // 'success' | 'error' | null
-  agentInstallOS: 'linux', // 'linux' | 'windows'
-  agentInstallProtocol: window.location.protocol.replace(':', ''), // 默认为当前页面协议 (http 或 https)
-  agentInstallHostType: 'domain', // 'domain' | 'ip'
-
-  // 批量 Agent 部署
-  showBatchAgentModal: false,
-  selectedBatchServers: [],
-  batchInstallResults: [],
-
-  // Agent 升级相关
-  showUpgradeModal: false,
-  upgradeLog: '',
-  upgradeProgress: 0,
-  upgrading: false,
-  forceUpgrade: false,
-  upgradeFallbackSsh: false, // 是否使用 SSH 覆盖安装作为保底策略
-
-  // 快速部署模式
-  serverAddMode: 'ssh', // 'ssh' | 'agent'
-  quickDeployName: '', // 快速部署输入的服务器名称
-  quickDeployResult: null, // 快速部署生成的结果 { serverId, serverName, isNew, installCommand }
-
-  serverCredentials: [],
-  showSSHQuickMenu: false, // SSH 快速连接下拉菜单
-
-  // PaaS 平台监控 (Koyeb + ...)
-  paasCurrentPlatform: 'koyeb', // 'koyeb', etc.
-  paasCurrentTab: 'koyeb', // 'koyeb', 'accounts', 'settings'
-
-  // Koyeb 子模块
-  koyebAccounts: [],
-  koyebManagedAccounts: [],
-  koyebLoading: false,
-  koyebRefreshing: false,
-  koyebLastUpdate: '',
+  sidebarCollapsed: initialSidebarCollapsed,
+  themeMode: initialThemeMode,
+  theme: resolveThemeMode(initialThemeMode),
+  pageWidthMode: initialPageWidthMode,
+  navGroupExpanded: null,
+  userSettingsLoaded: false,
+  userSettingsLoading: false,
+  customCss: '',
+  moduleVisibility: DEFAULT_MODULE_VISIBILITY,
+  moduleOrder: DEFAULT_MODULE_ORDER,
+  channelEnabled: DEFAULT_CHANNEL_ENABLED,
+  channelModelPrefix: DEFAULT_CHANNEL_MODEL_PREFIX,
+  loadBalancingStrategy: 'random',
+  serverIpDisplayMode: 'normal',
+  vibrationEnabled: true,
+  navLayout: 'top',
+  totpSettings: DEFAULT_TOTP_SETTINGS,
+  agentDownloadUrl: '',
+  publicApiUrl: '',
   koyebRefreshInterval: 30000,
-  koyebRefreshIntervalSec: 30, // 秒（用于表单绑定）
-  koyebRefreshCountdown: 30,
-  koyebRefreshProgress: 30,
-  koyebDataRefreshPaused: false,
-  koyebExpandedAccounts: {},
-  showAddKoyebAccountModal: false,
-  newKoyebAccount: { name: '', token: '' },
-  koyebAddingAccount: false,
-  koyebAddAccountError: '',
-  koyebAddAccountSuccess: '',
-  koyebBatchAccounts: '',
-  koyebBatchAddError: '',
-  koyebBatchAddSuccess: '',
-
-  // Fly.io 子模块
-  flyAccounts: [],
-  flyManagedAccounts: [],
-  flyLoading: false,
-  flyRefreshing: false,
-  flyLastUpdate: '',
   flyRefreshInterval: 30000,
-  flyRefreshIntervalSec: 30, // 秒（用于表单绑定）
-  flyRefreshCountdown: 300,
-  flyRefreshProgress: 300,
-  flyDataRefreshPaused: false,
-  flyExpandedAccounts: {},
-  showAddFlyAccountModal: false,
-  newFlyAccount: { name: '', token: '' },
-  flyAddingAccount: false,
-  flyAddAccountError: '',
-  flyAddAccountSuccess: '',
-  flyBatchAccounts: '',
-  flyBatchAddError: '',
-  flyBatchAddSuccess: '',
 
-  // DNS
-  dnsAccounts: [],
+  showAlert: (message, title) => dialog.alert(message, title),
+  showConfirm: (options) => dialog.confirm(options),
+  showPrompt: (options) => dialog.prompt(options),
+  
+  // --- 3. 页面数据占位 ---
+  serverList: [],
   dnsZones: [],
-  dnsCurrentTab: 'dns',
-  computeCurrentTab: 'workers',
-  dnsSelectedAccountId: null,
-  dnsSelectedZoneId: null,
-  dnsSelectedZoneName: '', // 当前选中的域名名称
-  dnsSelectedZoneNameServers: [], // 存储当前域名的 NS 记录
-  dnsSelectedZoneSsl: null, // 当前域名的SSL/TLS信息
-  dnsSelectedZoneAnalytics: null, // 当前域名的Analytics数据
-  showNsPopover: false, // 控制 NS 记录弹出层的显示
-  dnsLoadingZones: false,
-  dnsLoadingRecords: false,
-  dnsLoadingSsl: false, // SSL信息加载中
-  showSslModal: false, // SSL 模式选择弹窗
-  dnsLoadingAnalytics: false, // Analytics加载中
-  dnsAnalyticsTimeRange: '24h', // Analytics时间范围
-  dnsPurgingCache: false, // 缓存清除中状态
   dnsRecords: [],
-  dnsSelectedRecords: [],
-  dnsSearchText: '',
-  isEditingWorker: false, // 是否正在编辑现有 Worker
 
-  // Aliyun
-  aliyunAccounts: [],
-  aliyunDomains: [],
-  aliyunInstances: [],
-  aliyunActiveSubTab: 'dns',
-  aliyunSelectedAccountId: null,
-  aliyunSelectedAccount: null,
-  aliyunSelectedDomain: null,
-  aliyunRecords: [],
-  aliyunLoadingDomains: false,
-  aliyunLoadingRecords: false,
-  aliyunLoadingInstances: false,
-  aliyunSwasInstances: [],
-  aliyunLoadingSwas: false,
-  showAliyunAccountModal: false,
-  showAliyunRecordsDrawer: false,
-  showAliyunRecordModal: false,
-  aliyunAccountForm: {
-    name: '',
-    accessKeyId: '',
-    accessKeySecret: '',
-    regionId: 'cn-hangzhou',
-    description: ''
-  },
-  aliyunRecordForm: {
-    rr: '',
-    type: 'A',
-    value: '',
-    ttl: 600,
-    priority: 10,
-    line: 'default'
-  },
-  aliyunEditingRecordId: null,
-  showAliyunAddDomainModal: false,
-  aliyunAddDomainName: '',
-  aliyunAddDomainResult: null,
-  showAliyunFirewallDrawer: false,
-  showAliyunMetricsDrawer: false,
-  aliyunFirewallRules: [],
-  aliyunLoadingFirewall: false,
-  aliyunSelectedInstance: null,
-  aliyunMetrics: {}, // instanceId -> metrics
-  showAliyunAddFirewallModal: false,
-  aliyunFirewallForm: { protocol: 'TCP', port: '', remark: '' },
-
-  // Tencent
-  tencentAccounts: [],
-  tencentDomains: [],
-  tencentCvmInstances: [],
-  tencentLighthouseInstances: [],
-  tencentActiveSubTab: 'dns',
-  tencentSelectedAccountId: null,
-  tencentSelectedDomain: null,
-  tencentRecords: [],
-  tencentLoadingDomains: false,
-  tencentLoadingRecords: false,
-  tencentLoadingCvm: false,
-  tencentLoadingLighthouse: false,
-  showTencentAccountModal: false,
-  showTencentRecordModal: false,
-  showTencentAddDomainModal: false,
-  tencentAccountForm: {
-    id: null,
-    name: '',
-    secretId: '',
-    secretKey: '',
-    regionId: 'ap-guangzhou',
-    description: ''
-  },
-  tencentRecordForm: {
-    subDomain: '',
-    recordType: 'A',
-    value: '',
-    recordLine: '默认',
-    ttl: 600,
-    mx: 10
-  },
-  tencentEditingRecordId: null,
-  tencentAddDomainName: '',
-
-  // R2 存储
-  r2Buckets: [],
-  r2Objects: [],
-  r2SelectedBucketName: null,
-  r2LoadingBuckets: false,
-  r2LoadingObjects: false,
-  r2PrefixStack: [], // 用于对象浏览的路径栈
-  r2CurrentPrefix: '', // 当前浏览的前缀
-  r2SearchText: '',
-  showR2CreateBucketModal: false,
-  newR2BucketName: '',
-  r2Uploading: false,
-  r2DeletingBucket: false,
-  r2DeletingObject: false,
-  // R2 自定义域名模态框
-  showR2DomainModal: false,
-  r2CustomDomainInput: '',
-  r2PendingDownloadObj: null, // 等待下载的对象
-  r2SelectedObjects: [], // 已选中的对象 keys
-
-  // Cloudflare Tunnel
-  tunnels: [],
-  tunnelsLoading: false,
-  showCreateTunnelModal: false,
-  newTunnelName: '',
-  tunnelSaving: false,
-  // Tunnel Token
-  showTunnelTokenModal: false,
-  selectedTunnelToken: '',
-  selectedTunnelForToken: null,
-  // Tunnel Config (Ingress)
-  showTunnelConfigModal: false,
-  selectedTunnelForConfig: null,
-  tunnelConfig: { ingress: [] },
-  tunnelConfigLoading: false,
-  tunnelConfigSaving: false,
-  // Tunnel Connections
-  showTunnelConnectionsModal: false,
-  selectedTunnelForConnections: null,
-  tunnelConnections: [],
-  tunnelConnectionsLoading: false,
-
-  // OpenAI
-  openaiEndpoints: [],
-  openaiCurrentTab: 'endpoints',
-  openaiLoading: false,
-  openaiRefreshing: false,
-  showOpenaiEndpointModal: false,
-  showOpenaiEndpointsList: false,
-  showHChatSettingsModal: false,
-
-  // OpenAI Chat
-  openaiChatMessages: [],
-  openaiChatAttachments: [], // 当前待发送的附件
-  openaiChatModel: localStorage.getItem('openai_default_model') || '',
-  openaiChatEndpoint: localStorage.getItem('openai_chat_endpoint') || '', // 当前选中的对话端点
-  openaiDefaultChatModel: localStorage.getItem('openai_default_model') || '',
-  openaiChatSystemPrompt: localStorage.getItem('openai_system_prompt') || '你是一个有用的 AI 助手。',
-  openaiChatMessageInput: '',
-  openaiChatLoading: false,
-  openaiAllModels: [],
-  openaiModelSearch: '',
-  dropdownModelSearch: '', // 下拉框内部的搜索文本
-  openaiShowEndpointDropdown: false, // 是否显示端点选择下拉框
-  openaiShowModelDropdown: false, // 是否显示模型选择下拉框
-  openaiChatSettings: (() => {
-    try {
-      const saved = localStorage.getItem('openai_chat_settings');
-      return saved ? JSON.parse(saved) : {
-        temperature: 0.7,
-        top_p: 1,
-        max_tokens: 2000,
-        presence_penalty: 0,
-        frequency_penalty: 0,
-      };
-    } catch {
-      return {
-        temperature: 0.7,
-        top_p: 1,
-        max_tokens: 2000,
-        presence_penalty: 0,
-        frequency_penalty: 0,
-      };
+  // --- 5. 修改状态的方法 ---
+  setMainActiveTab: (tab) => set({ mainActiveTab: tab }),
+  setSidebarCollapsed: (collapsed, persist = true) => {
+    const normalizedCollapsed = normalizeSidebarCollapsed(collapsed);
+    if (persist) {
+      try {
+        localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(normalizedCollapsed));
+      } catch (e) {
+        console.error('Failed to save sidebar mode:', e);
+      }
+      if (get().isAuthenticated) {
+        scheduleAppearanceSettingsSave({ sidebarCollapsed: normalizedCollapsed });
+      }
     }
-  })(),
+    set({ sidebarCollapsed: normalizedCollapsed });
+  },
+  setNavGroupExpanded: (group) => set({ navGroupExpanded: group }),
+  setPageWidthMode: (mode, persist = true) => {
+    const normalizedMode = normalizePageWidthMode(mode);
+    if (persist) {
+      try {
+        localStorage.setItem(PAGE_WIDTH_STORAGE_KEY, normalizedMode);
+      } catch (e) {
+        console.error('Failed to save page width mode:', e);
+      }
+      if (get().isAuthenticated) {
+        scheduleAppearanceSettingsSave({ pageWidthMode: normalizedMode });
+      }
+    }
+    set({ pageWidthMode: normalizedMode });
+  },
+  
+  setThemeMode: (themeMode, persist = true) => {
+    const normalizedMode = normalizeThemeMode(themeMode);
+    const effectiveTheme = resolveThemeMode(normalizedMode);
 
-  // Personas (人设系统) - 从后端加载
-  openaiPersonas: [],
-  openaiCurrentPersonaId: null,
-  showPersonaModal: false,
-  editingPersona: null,
-  personaForm: { name: '', systemPrompt: '', icon: 'fa-robot' },
-  showPersonaDropdown: false,
-
-  // Chat History
-  openaiChatSessions: [],           // 所有会话列表
-  openaiChatCurrentSessionId: null, // 当前会话 ID
-  openaiChatHistoryLoading: false,  // 加载状态
-  openaiChatHistoryCollapsed: true, // 侧边栏折叠状态 (默认隐藏)
-  openaiChatMobileSidebarOpen: false, // 移动端侧边栏是否打开
-  openaiChatSelectedSessionIds: [], // 选中的会话 ID（批量删除使用）
-  openaiChatAutoScroll: true,        // 自动滚动开关（用户向上滚动时自动关闭）
-  openaiChatLastMessageCount: 0,     // 上一次消息数量（用于检测新消息）
-
-  // Model Management
-  openaiSettingsTab: 'general',     // 设置弹窗当前标签页: general, models, endpoints
-  openaiPinnedModels: (() => { try { return JSON.parse(localStorage.getItem('openai_pinned_models')) || []; } catch { return []; } })(),
-  openaiHiddenModels: (() => { try { return JSON.parse(localStorage.getItem('openai_hidden_models')) || []; } catch { return []; } })(),
-  openaiModelPresets: (() => { try { return JSON.parse(localStorage.getItem('openai_model_presets')) || {}; } catch { return {}; } })(),
-  openaiShowHiddenModels: false,    // 是否显示隐藏的模型
-  openaiModelHealth: {},            // 模型健康状态: { modelId: { status: 'healthy'|'unhealthy'|'unknown', loading: false, latency: 0 } }
-  openaiModelHealthBatchLoading: false, // 批量检测加载状态
-  openaiHealthCheckModal: false,    // 健康检测弹窗显示
-  openaiHealthCheckForm: {          // 健康检测表单
-    useKey: 'single',               // single: 单端点, all: 所有端点
-    concurrency: false,             // 是否开启并发检测
-    timeout: 60                     // 超时时间(s)
+    if (persist) {
+      try {
+        localStorage.setItem(THEME_STORAGE_KEY, normalizedMode);
+        localStorage.removeItem(LEGACY_THEME_STORAGE_KEY);
+      } catch (e) {
+        console.error('Failed to save theme mode:', e);
+      }
+      if (get().isAuthenticated) {
+        scheduleAppearanceSettingsSave({ themeMode: normalizedMode });
+      }
+    }
+    applyThemeMode(normalizedMode);
+    set({ themeMode: normalizedMode, theme: effectiveTheme });
   },
 
-  // 自动标题生成配置
-  openaiAutoTitleEnabled: (() => {
-    const saved = localStorage.getItem('openai_auto_title_enabled');
-    return saved !== null ? saved === 'true' : true; // 默认启用
-  })(),
-  openaiTitleModels: (() => {
+  setTheme: (theme, persist = true) => {
+    get().setThemeMode(theme, persist);
+  },
+
+  applyUserSettings: (settings) => {
+    const normalized = normalizeUserSettings(settings);
+    applyCustomCss(normalized.customCss);
+    applyThemeMode(normalized.themeMode);
     try {
-      return JSON.parse(localStorage.getItem('openai_title_models')) || [];
-    } catch { return []; }
-  })(), // 标题生成使用的模型列表（支持容灾）
-  openaiTitleModelToAdd: '', // 待添加的标题模型（下拉框绑定）
-  openaiTitleGenerating: false, // 标题生成中状态
-  openaiTitleLastResult: null, // 上次生成结果 { success, model, title, error }
-
-  openaiSelectedEndpointId: '',     // 当前选择的端点 ID (用于筛选模型)
-
-  // Antigravity
-  antigravityAccounts: [],
-  antigravityCurrentTab: 'quotas',
-  antigravityQuotaSelectedAccountId: '',
-  antigravityLoading: false,
-  antigravitySaving: false,
-  antigravityQuotaLoading: false,
-  antigravityQuotas: {},
-  antigravityQuotasLastUpdated: '',
-  antigravityStats: null,
-  antigravityLogs: [],
-  antigravityLogFilterAccount: '',
-  antigravityLogFilterModel: '',
-  antigravitySettings: [],
-  agShowApiKey: false,
-  agRefreshingAll: false,
-  agLogDetailShowRaw: false, // 是否显示原始 JSON
-  antigravityLogDetail: null, // 移入 store
-  currentTime: Date.now(), // 全局当前时间，用于驱动倒计时
-  antigravityQuotaViewMode: 'list',
-  antigravityModelRedirects: [],
-  antigravityMatrix: null,
-  newRedirectSource: '',
-  newRedirectTarget: '',
-  agEditingRedirectSource: null,
-  antigravityCheckLoading: false, // 模型检测中
-  antigravityChecking: false, // 正在执行检测
-  antigravityCheckHistory: { models: [], times: [], matrix: {} }, // 检测历史矩阵
-  antigravityAutoCheck: false, // 定时检测开关 (UI 状态)
-  antigravityAutoCheckInterval: 3600000, // 默认 1 小时
-  antigravityAutoCheckStatus: null, // 后端定时器状态 { running, enabled, intervalMs, nextRunTime }
-  antigravityDisabledCheckModels: [], // 禁用检测的模型列表
-
-  // Gemini CLI
-  geminiCliAccounts: [],
-  geminiCliCurrentTab: 'models',
-  geminiCliLoading: false,
-  geminiCliSaving: false,
-  showGeminiCliAccountModal: false,
-  showGeminiCliLogDetailModal: false, // 移入 store
-  geminiCliLogDetail: null, // 移入 store
-  showGeminiCliOAuthExpand: false,
-  geminiCliOAuthUrl: '',
-  geminiCliOauthReturnUrl: '',
-  // 使用 Antigravity 的 Client ID 以获得 API 访问权限 (与 Antigravity 模块共用)
-  geminiCliCustomClientId: '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com',
-  geminiCliCustomClientSecret: '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',
-  geminiCliOAuthRedirectUri: 'http://localhost:8045/oauth-callback',
-  geminiCliCustomProjectId: '',
-  geminiCliAllowRandomProjectId: true,
-  geminiCliStats: null,
-  geminiCliLogs: [],
-  geminiCliSettings: {},
-  gcliBaseUrl: 'Loading...',
-  gcliCurlExample: 'Generating example...',
-  geminiCliEditingAccount: null,
-  geminiCliModels: {},
-  geminiCliMatrix: null, // Stores the model matrix configuration
-  geminiCliModelLoading: false,
-  geminiCliModelRedirects: [], // Stores model redirect rules
-  newGeminiCliRedirectSource: '',
-  newGeminiCliRedirectTarget: '',
-  gcliEditingRedirectSource: null,
-  geminiCliModelSelectedAccountId: '',
-  geminiCliLogFilterAccount: '',
-  geminiCliLogFilterModel: '',
-  gcliLogDetailShowRaw: false, // 是否显示原始 JSON (Gemini CLI)
-  geminiCliCheckLoading: false, // 模型检测中
-  geminiCliChecking: false, // 正在执行检测
-  geminiCliCheckHistory: { models: [], times: [], matrix: {} }, // 检测历史矩阵
-  geminiCliAutoCheck: false, // 定时检测开关 (UI 状态)
-  geminiCliAutoCheckInterval: 3600000, // 默认 1 小时
-  geminiCliAutoCheckStatus: null, // 后端定时器状态 { running, enabled, intervalMs, nextRunTime }
-  geminiCliDisabledCheckModels: [], // 禁用检测的模型列表
-  geminiCliQuotaLoading: false, // 额度查询中
-  geminiCliQuotaData: [], // 额度数据 [{ accountId, accountName, buckets: [{modelId, remainingFraction, resetTime}] }]
-  geminiCliQuotaModels: [], // 额度中出现的所有模型 ID 列表
-
-  // ===== Qwen 模块 =====
-  qwenCurrentTab: 'models',
-  qwenModels: [],
-  qwenModelsLoading: false,
-  qwenModelRedirects: [],
-  qwenNewRedirectSource: '',
-  qwenNewRedirectTarget: '',
-  qwenEditingRedirectSource: null,
-  qwenAccounts: [],
-  qwenAccountsLoading: false,
-  qwenShowAddAccount: false,
-  qwenAccountAddMode: 'token', // 'token'
-  qwenAccountForm: { name: '', email: '', password: '', token: '' },
-  qwenAccountFormError: '',
-  qwenAccountAdding: false,
-  qwenAccountRefreshing: false,
-  qwenSaving: false,
-  qwenShowApiKey: false,
-  qwenLogs: [],
-  qwenLogsLoading: false,
-  qwenLogFilterModel: '',
-  qwenLogFilterAccount: '',
-  qwenLogDetailVisible: false,
-  qwenLogDetailContent: '',
-  qwenLogDetail: null,
-  qwenLogDetailShowRaw: false,
-  qwenSettingsForm: { API_KEY: '', SYSTEM_INSTRUCTION: '' },
-  qwenMatrix: {},
-  qwenModelsSyncing: false,
-  qwenStats: { total_calls: 0, success_calls: 0, total_tokens: 0 },
-  qwenBaseUrl: 'Loading...',
-  qwenCurlExample: 'Generating example...',
-
-  // Qwen 模型检测 (对齐 GCLI/DeepSeek)
-  qwenCheckHistory: { models: [], times: [], matrix: {} },
-  qwenChecking: false,
-  qwenDisabledCheckModels: [],
-
-  // ===== 音乐播放器模块 =====
-  musicReady: false,
-  musicCurrentTab: 'home', // 'home', 'discover', 'search', 'library', 'settings'
-  musicSearchKeyword: '',
-  musicSearchLoading: false,
-  musicSearchResults: [], // 歌曲搜索结果
-  musicSearchPlaylists: [], // 歌单搜索结果
-  musicSearchArtists: [], // 歌手搜索结果
-  musicSearchType: 'songs', // 'songs', 'playlists', 'artists'
-  musicSearchOffset: 0, // 分页偏移
-  musicSearchHasMore: true, // 是否有更多结果
-  musicSearchLoadingMore: false, // 加载更多中
-  musicShowSearchTab: false, // 是否显示搜索标签
-  musicPlaying: false,
-  musicBuffering: false,
-  musicWidgetLoading: false, // 仪表盘音乐卡片加载状态
-  musicCurrentSong: null,
-  musicPlaylist: [],
-  musicCurrentIndex: -1,
-  musicVolume: 80,
-  musicMuted: false,
-  musicRepeatMode: 'none', // 'none', 'all', 'one'
-  musicShuffleEnabled: false,
-  musicIsDragging: false, // 进度条拖动状态
-  musicCurrentTime: 0,
-  musicDuration: 0,
-  musicProgress: 0,
-  musicLyrics: [],
-  musicLyricsTranslation: [],
-  musicCurrentLyricIndex: 0,
-  musicCurrentLyricText: '', // 当前主歌词文字
-  musicCurrentLyricTranslation: '', // 当前翻译歌词文字
-  musicNextLyricText: '', // 下一句主歌词
-  musicNextLyricTranslation: '', // 下一句翻译
-  musicCurrentLyricPercent: 0, // 当前行播放进度 (0-100)
-  musicShowFullPlayer: false,
-  musicShowPlaylistDrawer: false,
-  musicDailyRecommend: [],
-  musicRecommendLoading: false,
-  musicHotPlaylists: [],
-  musicPlaylistsLoading: false,
-  musicCurrentPlaylistDetail: null,
-  musicPlaylistDetailLoading: false,
-  musicApiUrl: '', // NCM API 地址，空则使用内置
-  musicUnblockUrl: '', // 解锁服务地址，空则使用内置
-  musicQuality: 'exhigh', // 'standard', 'higher', 'exhigh', 'lossless'
-  musicAutoPlay: true,
-  mfpLyricsMode: false,
-  mfpPlaylistMode: false,
-
-  // 登录相关
-  musicUser: null, // { userId, nickname, avatarUrl, vipType }
-  musicLoginLoading: false,
-  musicShowLoginModal: false, // 显示网易云登录弹窗
-  musicLoginStatusText: '请使用网易云音乐 App 扫码登录', // 登录状态文字
-  musicQrKey: '',
-  musicQrImg: '',
-  musicQrExpired: false,
-  musicQrChecking: false,
-  musicMyPlaylists: [], // 用户创建的歌单
-  musicCollectedPlaylists: [], // 用户收藏的歌单
-  musicLikedPlaylist: null, // 喜欢的音乐歌单
-  musicShowDetail: false, // 显示歌单详情页
-  musicPlaylistVisibleCount: 50, // 歌单懒加载：当前可见的歌曲数量
-  musicShowUserDropdown: false, // 显示用户下拉菜单
-
-  // 流媒体播放器 (Stream Player)
-  streamPlayer: {
-    visible: false,
-    loading: false,
-    playing: false,
-    currentTime: 0,
-    duration: 0,
-    buffered: 0,
-    volume: 1,
-    muted: false,
-    playbackRate: 1,
-    fullscreen: false,
-    filename: '',
-    url: '',
-
-    // 音频警告
-    audioWarning: false,
-    audioWarningMessage: '',
-
-    // 不支持格式对话框
-    showUnsupportedDialog: false,
-    unsupportedFormat: '',
-    unsupportedUrl: '',
-    unsupportedFilename: '',
-
-    // 播放器 UI 交互
-    showControls: true,
-    controlsTimer: null,
-    hideTimer: null,
-    isLongPressing: false,
-    lastTapTime: 0,
-    animationType: null,
-    animationText: '',
-    bufferedTime: 0,
-    isDragging: false,
-    dragTime: 0,
-    webFullscreen: false,
-
-    // 播放速度选项
-    playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2],
-  },
-
-  // 统一日志查看器 (Log Viewer)
-  logViewer: {
-    visible: false,
-    title: '日志查看器',
-    subtitle: '',
-    logs: [], // { id, timestamp, level, message, raw }
-    loading: false,
-    autoScroll: true,
-    filterText: '',
-    levelFilter: 'ALL', // ALL, INFO, WARN, ERROR
-    wrapText: true,
-    fullscreen: false,
-    source: null, // 'koyeb', 'system', etc.
-    streamActive: false, // 是否正在接收实时流
-  },
-
-  // 系统日志流 (System Log Stream)
-  systemLogs: [],
-  logWs: null,
-  logWsConnected: false,
-  logWsConnecting: false,
-  logWsAutoReconnect: false,
-  autoScrollLogs: true,
-  logFileSize: '',
-  logFileInfo: null,
-
-  // 实时指标流 (Real-time Metrics Stream)
-  metricsWs: null,
-  metricsWsConnected: false,
-  metricsWsConnecting: false,
-
-  // 自定义对话框状态
-  customDialog: {
-    show: false,
-    title: '',
-    message: '',
-    icon: '',
-    confirmText: '',
-    cancelText: '',
-    deleteText: '', // 新增删除按钮文本
-    confirmClass: '',
-    isPrompt: false,
-    promptValue: '',
-    placeholder: '',
-    onConfirm: null,
-    onCancel: null,
-    onDelete: null, // 新增删除回调
-  },
-
-  // 常用工具方法
-  getAuthHeaders() {
-    return {
-      'Content-Type': 'application/json',
-      'x-admin-password': this.loginPassword,
-    };
-  },
-
-  showAlert(message, title = '提示', icon = 'fa-info-circle', isHtml = false) {
-    return new Promise(resolve => {
-      this.customDialog = {
-        show: true,
-        title: title,
-        message: message,
-        icon: icon,
-        confirmText: '确定',
-        cancelText: '',
-        deleteText: '',
-        confirmClass: 'btn-primary',
-        isHtml: isHtml,
-        onConfirm: () => {
-          this.customDialog.show = false;
-          resolve(true);
-        },
-        onCancel: null,
-        onDelete: null,
-      };
+      localStorage.setItem(THEME_STORAGE_KEY, normalized.themeMode);
+      localStorage.removeItem(LEGACY_THEME_STORAGE_KEY);
+      localStorage.setItem(PAGE_WIDTH_STORAGE_KEY, normalized.pageWidthMode);
+      localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(normalized.sidebarCollapsed));
+    } catch (e) {
+      console.error('Failed to cache appearance settings:', e);
+    }
+    set({
+      userSettingsLoaded: true,
+      themeMode: normalized.themeMode,
+      theme: resolveThemeMode(normalized.themeMode),
+      pageWidthMode: normalized.pageWidthMode,
+      sidebarCollapsed: normalized.sidebarCollapsed,
+      customCss: normalized.customCss,
+      moduleVisibility: normalized.moduleVisibility,
+      moduleOrder: normalized.moduleOrder,
+      channelEnabled: normalized.channelEnabled,
+      channelModelPrefix: normalized.channelModelPrefix,
+      loadBalancingStrategy: normalized.load_balancing_strategy,
+      serverIpDisplayMode: normalized.serverIpDisplayMode,
+      vibrationEnabled: normalized.vibrationEnabled,
+      navLayout: normalized.navLayout,
+      totpSettings: normalized.totpSettings,
+      agentDownloadUrl: normalized.agentDownloadUrl,
+      publicApiUrl: normalized.publicApiUrl,
+      koyebRefreshInterval: normalized.koyebRefreshInterval,
+      flyRefreshInterval: normalized.flyRefreshInterval,
     });
+    return normalized;
   },
 
-  showConfirm(options) {
-    return new Promise(resolve => {
-      this.customDialog = {
-        show: true,
-        title: options.title || '确认',
-        message: options.message || '',
-        icon: options.icon || 'fa-question-circle',
-        confirmText: options.confirmText || '确定',
-        cancelText: options.cancelText || '取消',
-        deleteText: options.deleteText || '',
-        confirmClass: options.confirmClass || 'btn-primary',
-        onConfirm: () => {
-          this.customDialog.show = false;
-          resolve(true);
-        },
-        onCancel: () => {
-          this.customDialog.show = false;
-          resolve(false);
-        },
-        onDelete: options.onDelete || null,
-      };
-    });
+  loadUserSettings: async () => {
+    set({ userSettingsLoading: true });
+    try {
+      const response = await fetch('/api/settings', {
+        headers: getAuthHeaders(),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Failed to load settings');
+      }
+      const rawSettings = result.data || {};
+      const normalized = get().applyUserSettings(rawSettings);
+      const appearancePatch = {};
+      if (!rawSettings.themeMode && !rawSettings.theme_mode) {
+        appearancePatch.themeMode = normalized.themeMode;
+      }
+      if (!rawSettings.pageWidthMode && !rawSettings.page_width_mode) {
+        appearancePatch.pageWidthMode = normalized.pageWidthMode;
+      }
+      if (rawSettings.sidebarCollapsed === undefined && rawSettings.sidebar_collapsed === undefined) {
+        appearancePatch.sidebarCollapsed = normalized.sidebarCollapsed;
+      }
+      if (Object.keys(appearancePatch).length > 0) {
+        scheduleAppearanceSettingsSave(appearancePatch);
+      }
+      return normalized;
+    } catch (error) {
+      console.error('Failed to load user settings:', error);
+      return null;
+    } finally {
+      set({ userSettingsLoading: false });
+    }
   },
 
-  showPrompt(options) {
-    return new Promise(resolve => {
-      this.customDialog = {
-        show: true,
-        title: options.title || '输入',
-        message: options.message || '',
-        icon: options.icon || 'fa-edit',
-        confirmText: options.confirmText || '确定',
-        cancelText: options.cancelText || '取消',
-        deleteText: options.deleteText || '',
-        isPrompt: true,
-        promptValue: options.promptValue || '',
-        placeholder: options.placeholder || '',
-        confirmClass: options.confirmClass || 'btn-primary',
-        onConfirm: () => {
-          const val = this.customDialog.promptValue;
-          this.customDialog.show = false;
-          resolve({ action: 'confirm', value: val });
-        },
-        onCancel: () => {
-          this.customDialog.show = false;
-          resolve({ action: 'cancel' });
-        },
-        onDelete: () => {
-          this.customDialog.show = false;
-          resolve({ action: 'delete' });
-        },
-      };
-    });
+  setLoginPassword: (password) => set({ loginPassword: password }),
+  setLoginTotpToken: (token) => set({ loginTotpToken: token }),
+  
+  cancelLogin2FA: () => set({ loginRequire2FA: false, loginTotpToken: '', loginError: '' }),
+
+  // --- 5. 异步认证动作 ---
+  
+  // 校验当前登录状态
+  checkAuth: async () => {
+    set({ isCheckingAuth: true });
+    try {
+      const explicitlyLoggedOut = !!localStorage.getItem(AUTH_LOGGED_OUT_STORAGE_KEY);
+
+      // 1. 优先检查当前 Session 是否已认证；显式退出后不再信任残留 Cookie。
+      if (!explicitlyLoggedOut) {
+        const sessionRes = await fetch('/api/auth/session');
+        const { authenticated } = await sessionRes.json();
+        if (authenticated) {
+          set({ isAuthenticated: true, showLoginModal: false, isCheckingAuth: false });
+          return true;
+        }
+      }
+
+      // 2. 如果 Session 不存在，再检查基本配置并尝试自动登录
+      const res = await fetch('/api/auth/check-password');
+      const { hasPassword, isDemoMode } = await res.json();
+      set({ isDemoMode });
+
+      if (isDemoMode) {
+        if (explicitlyLoggedOut) {
+          set({ isAuthenticated: false, showLoginModal: true, loginPassword: '' });
+          return false;
+        }
+
+        const savedTime = localStorage.getItem('password_time');
+        const now = Date.now();
+        const isValidSession = savedTime && now - parseInt(savedTime) < 4 * 24 * 60 * 60 * 1000;
+
+        if (!isValidSession) {
+          set({ loginPassword: '' });
+          return await get().verifyPassword();
+        } else {
+          set({ isAuthenticated: true, showLoginModal: false });
+          return true;
+        }
+      }
+
+      if (!hasPassword) {
+        set({ showSetPasswordModal: true, isAuthenticated: false });
+        return false;
+      }
+
+      const savedPassword = localStorage.getItem('admin_password');
+      const savedTime = localStorage.getItem('password_time');
+
+      if (!explicitlyLoggedOut && savedPassword && savedTime) {
+        const now = Date.now();
+        if (now - parseInt(savedTime) < 4 * 24 * 60 * 60 * 1000) {
+          set({ loginPassword: savedPassword });
+          await get().verifyPassword(true); // 静默验证
+          if (!get().isAuthenticated) {
+            set({ showLoginModal: true });
+          }
+          return get().isAuthenticated;
+        }
+      }
+
+      set({ showLoginModal: true });
+      return false;
+    } catch (e) {
+      console.error('Auth check error:', e);
+      set({ showLoginModal: true });
+      return false;
+    } finally {
+      set({ isCheckingAuth: false });
+    }
   },
+
+  // 验证登录密码
+  verifyPassword: async (silent = false) => {
+    set({ loginError: '', loginLoading: true });
+    try {
+      const { loginPassword, loginRequire2FA, loginTotpToken } = get();
+      const requestBody = { password: loginPassword };
+      
+      if (loginRequire2FA && loginTotpToken) {
+        requestBody.totpToken = loginTotpToken;
+      }
+
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const result = await response.json();
+
+      if (response.status === 429) {
+        const errorMsg = result.error || '登录尝试过于频繁，请稍后再试';
+        set({ loginError: errorMsg });
+        toastManager.warning(errorMsg);
+        return false;
+      }
+
+      if (result.require2FA && !result.success) {
+        set({ loginRequire2FA: true, loginTotpToken: '' });
+        if (result.error) {
+          set({ loginError: result.error });
+        }
+        return false;
+      }
+
+      if (result.success) {
+        set({
+          isAuthenticated: true,
+          showLoginModal: false,
+          loginRequire2FA: false,
+          loginTotpToken: '',
+        });
+
+        localStorage.setItem('admin_password', loginPassword);
+        localStorage.setItem('password_time', Date.now().toString());
+        localStorage.removeItem(AUTH_LOGGED_OUT_STORAGE_KEY);
+
+        if (!silent) {
+          toastManager.success('登录成功，欢迎回来！');
+        }
+        return true;
+      } else {
+        let errorMsg = '密码错误，请重试';
+        const errData = result.error;
+        if (errData) {
+          if (typeof errData === 'string') {
+            errorMsg = errData;
+          } else if (errData.message) {
+            errorMsg = errData.message;
+          }
+        }
+        set({ loginError: errorMsg });
+        if (!silent) {
+          toastManager.error(errorMsg);
+        }
+        return false;
+      }
+    } catch (error) {
+      const catchMsg = error.message || '网络验证失败';
+      set({ loginError: catchMsg });
+      if (!silent) {
+        toastManager.error(catchMsg);
+      }
+      return false;
+    } finally {
+      set({ loginLoading: false });
+    }
+  },
+
+  // 登出
+  logout: async () => {
+    try {
+      localStorage.setItem(AUTH_LOGGED_OUT_STORAGE_KEY, Date.now().toString());
+      localStorage.removeItem('admin_password');
+      localStorage.removeItem('password_time');
+    } catch (error) {
+      console.error('Failed to clear auth cache:', error);
+    }
+
+    set({
+      isAuthenticated: false,
+      showLoginModal: true,
+      showSetPasswordModal: false,
+      loginPassword: '',
+      loginError: '',
+      loginLoading: false,
+      loginRequire2FA: false,
+      loginTotpToken: '',
+    });
+
+    try {
+      const response = await fetch('/api/auth/logout', {
+        method: 'POST',
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.success === false) {
+        throw new Error(result.error || '后端会话注销失败');
+      }
+      toastManager.success('已安全登出');
+    } catch (error) {
+      console.error('Logout request failed:', error);
+      toastManager.warning('已清除本地登录状态，但后端会话注销失败，请重试或重启服务后确认');
+    }
+  },
+}));
+
+export const store = new Proxy({}, {
+  get(target, prop) {
+    if (prop === 'getAuthHeaders') {
+      return getAuthHeaders;
+    }
+    return useStore.getState()[prop];
+  },
+  set(target, prop, value) {
+    useStore.setState({ [prop]: value });
+    return true;
+  }
 });
+
+export default useStore;
