@@ -296,39 +296,78 @@ const getByteParts = (value) => {
 
 const formatFlowPart = (part, suffix = '') => `${part.num}${part.unit}${suffix}`;
 
-function FlowValue({ direction, part, title, tone = 'text-kumo-strong', suffix = '' }) {
+const getFlowUnitClassName = (unit) => {
+  const normalized = String(unit || 'B').toUpperCase();
+  if (normalized === 'K') return 'border-kumo-info/65 bg-kumo-info/25 text-kumo-info';
+  if (normalized === 'M') return 'border-kumo-success/65 bg-kumo-success/25 text-kumo-success';
+  if (normalized === 'G') return 'border-kumo-warning/65 bg-kumo-warning/25 text-kumo-warning';
+  if (normalized === 'T') return 'border-kumo-brand/65 bg-kumo-brand/20 text-kumo-brand';
+  return 'border-kumo-interact/70 bg-kumo-recessed/70 text-kumo-default';
+};
+
+const FLOW_KIND_CLASS = {
+  speed: {
+    label: 'text-kumo-success',
+    box: 'border-kumo-line/70 bg-kumo-recessed/25',
+  },
+  traffic: {
+    label: 'text-kumo-info',
+    box: 'border-kumo-line/70 bg-kumo-recessed/25',
+  },
+};
+
+function FlowUnitBadge({ unit, suffix = '' }) {
   return (
-    <span className="inline-grid min-w-0 grid-cols-[0.85rem_minmax(2.9rem,1fr)_1.35rem] items-center gap-1" title={title || formatFlowPart(part, suffix)}>
-      <span className={`text-center text-xs leading-none ${tone}`}>{direction}</span>
-      <span className={`flex h-5 min-w-0 items-center justify-end rounded border border-kumo-line bg-kumo-base px-1.5 text-[11px] font-bold tabular-nums leading-none ${tone}`}>
-        <span className="truncate">{part.num}</span>
-      </span>
-      <span className="flex h-5 items-center justify-center rounded border border-kumo-line bg-kumo-base text-[10px] font-bold leading-none text-kumo-subtle">
-        {part.unit}{suffix}
-      </span>
+    <span className={`inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-[4px] px-1 text-[11px] font-bold leading-none ${getFlowUnitClassName(unit)}`}>
+      {unit || 'B'}{suffix}
     </span>
   );
 }
 
-function FlowRow({ label, left, right, leftTitle, rightTitle, suffix = '' }) {
+function FlowArrow({ children }) {
   return (
-    <div className="grid min-h-0 min-w-0 grid-cols-[2.5rem_minmax(0,1fr)] items-center gap-2">
-      <span className="text-xs font-semibold leading-none text-kumo-strong">{label}</span>
-      <div className="grid min-w-0 grid-cols-2 gap-1.5">
-        <FlowValue direction="↓" part={left} title={leftTitle} tone="text-kumo-success" suffix={suffix} />
-        <FlowValue direction="↑" part={right} title={rightTitle} tone="text-kumo-info" suffix={suffix} />
+    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[4px] bg-kumo-recessed/70 text-xs font-bold leading-none text-kumo-default">
+      {children}
+    </span>
+  );
+}
+
+function FlowPair({ left, right, leftTitle, rightTitle, kind = 'speed', suffix = '' }) {
+  const kindClass = FLOW_KIND_CLASS[kind] || FLOW_KIND_CLASS.speed;
+  return (
+    <div className={`grid h-[22px] min-w-0 grid-cols-[minmax(0,1fr)_1px_minmax(0,1fr)] items-center overflow-hidden rounded-md border px-1 text-[11px] font-bold tabular-nums leading-none text-kumo-strong ${kindClass.box}`}>
+      <div className="flex min-w-0 items-center justify-end gap-1.5 px-1" title={leftTitle || formatFlowPart(left, suffix)}>
+        <span className="min-w-[2.6rem] truncate text-right">{left.num}</span>
+        <FlowUnitBadge unit={left.unit} suffix={suffix} />
+        <FlowArrow>↓</FlowArrow>
       </div>
+      <span aria-hidden="true" className="h-full w-px bg-kumo-line/80" />
+      <div className="flex min-w-0 items-center justify-start gap-1.5 px-1" title={rightTitle || formatFlowPart(right, suffix)}>
+        <FlowArrow>↑</FlowArrow>
+        <FlowUnitBadge unit={right.unit} suffix={suffix} />
+        <span className="min-w-[2.6rem] truncate text-left">{right.num}</span>
+      </div>
+    </div>
+  );
+}
+
+function FlowRow({ label, left, right, leftTitle, rightTitle, kind = 'speed', suffix = '' }) {
+  const kindClass = FLOW_KIND_CLASS[kind] || FLOW_KIND_CLASS.speed;
+  return (
+    <div className="grid min-h-0 min-w-0 grid-cols-[2.25rem_minmax(0,1fr)] items-center gap-2.5">
+      <span className={`text-[13px] font-bold leading-none ${kindClass.label}`}>{label}</span>
+      <FlowPair left={left} right={right} leftTitle={leftTitle} rightTitle={rightTitle} kind={kind} suffix={suffix} />
     </div>
   );
 }
 
 function NetworkTrafficPanel({ speedLeft, speedRight, totalLeft, totalRight, speedLeftTitle, speedRightTitle, totalLeftTitle, totalRightTitle }) {
   return (
-    <div className="h-16 min-w-0 rounded-md border border-kumo-line/70 bg-kumo-recessed/25 px-2.5 py-1.5">
-      <div className="grid h-full min-w-0 grid-rows-[1fr_auto_1fr] gap-1">
-        <FlowRow label="网速" left={speedLeft} right={speedRight} leftTitle={speedLeftTitle} rightTitle={speedRightTitle} />
+    <div className="h-16 min-w-0 rounded-md border border-kumo-line/70 bg-kumo-recessed/25 px-3 py-1.5">
+      <div className="grid h-full min-w-0 grid-rows-[22px_auto_22px] items-center gap-0.5">
+        <FlowRow label="网速" left={speedLeft} right={speedRight} leftTitle={speedLeftTitle} rightTitle={speedRightTitle} kind="speed" />
         <div className="h-px bg-kumo-line/80" />
-        <FlowRow label="流量" left={totalLeft} right={totalRight} leftTitle={totalLeftTitle} rightTitle={totalRightTitle} />
+        <FlowRow label="流量" left={totalLeft} right={totalRight} leftTitle={totalLeftTitle} rightTitle={totalRightTitle} kind="traffic" />
       </div>
     </div>
   );
@@ -374,7 +413,7 @@ function ServerCard({ server }) {
   ].filter(Boolean).join(' · ');
 
   return (
-    <article className={`flex h-full flex-col rounded-lg border p-3 shadow-sm ${server.online ? 'border-kumo-line bg-kumo-base' : 'border-kumo-danger/25 bg-kumo-danger/5'}`}>
+    <article className={`flex h-full flex-col rounded-lg border p-2.5 shadow-sm ${server.online ? 'border-kumo-line bg-kumo-base' : 'border-kumo-danger/25 bg-kumo-danger/5'}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2.5">
@@ -406,13 +445,13 @@ function ServerCard({ server }) {
         </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-3 gap-2">
+      <div className="mt-2 grid grid-cols-3 gap-1.5">
         <MetricBar label="CPU" value={server.cpu} subValue={cpuDetailText} offline={offline} />
         <MetricBar label="内存" value={server.memory} subValue={memoryText} offline={offline} />
         <MetricBar label="硬盘" value={server.disk} subValue={diskText} offline={offline} />
       </div>
 
-      <div className="mt-2 grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-2 text-xs">
+      <div className="mt-1.5 grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-1.5 text-xs">
         <NetworkTrafficPanel
           speedLeft={offline ? { num: '0.0', unit: 'B' } : rxSpeed}
           speedRight={offline ? { num: '0.0', unit: 'B' } : txSpeed}

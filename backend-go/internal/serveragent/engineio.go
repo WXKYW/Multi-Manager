@@ -311,16 +311,57 @@ func (s *EngineIOServer) handleWebSocketMessages(session *EngineIOSession, conn 
 func (s *EngineIOServer) writeLoop(session *EngineIOSession, conn *websocket.Conn, done <-chan struct{}) {
 	ticker := time.NewTicker(s.pingInterval)
 	defer ticker.Stop()
+	pongTimeout := time.NewTimer(s.pingTimeout)
+	if !pongTimeout.Stop() {
+		<-pongTimeout.C
+	}
+	defer pongTimeout.Stop()
+
+	var awaitingPong bool
+	var pingSentAt time.Time
 
 	for {
 		select {
 		case <-done:
 			return
 		case <-ticker.C:
+			if awaitingPong {
+				session.mu.RLock()
+				lastActivity := session.LastActivity
+				session.mu.RUnlock()
+				if !lastActivity.After(pingSentAt) {
+					_ = conn.Close()
+					return
+				}
+				awaitingPong = false
+			}
+
 			// 发送 ping
 			if err := s.safeWrite(session, websocket.TextMessage, []byte("2")); err != nil {
+				_ = conn.Close()
 				return
 			}
+			awaitingPong = true
+			pingSentAt = time.Now()
+			if !pongTimeout.Stop() {
+				select {
+				case <-pongTimeout.C:
+				default:
+				}
+			}
+			pongTimeout.Reset(s.pingTimeout)
+		case <-pongTimeout.C:
+			if !awaitingPong {
+				continue
+			}
+			session.mu.RLock()
+			lastActivity := session.LastActivity
+			session.mu.RUnlock()
+			if !lastActivity.After(pingSentAt) {
+				_ = conn.Close()
+				return
+			}
+			awaitingPong = false
 		default:
 			// 检查是否有待发送的消息
 			session.mu.Lock()
@@ -331,6 +372,7 @@ func (s *EngineIOServer) writeLoop(session *EngineIOSession, conn *websocket.Con
 
 				for _, msg := range messages {
 					if err := s.safeWrite(session, websocket.TextMessage, []byte(msg)); err != nil {
+						_ = conn.Close()
 						return
 					}
 				}
@@ -761,5 +803,10 @@ func (s *EngineIOServer) safeWrite(session *EngineIOSession, messageType int, da
 	if session.wsConn == nil {
 		return fmt.Errorf("connection closed")
 	}
+	writeTimeout := s.pingTimeout
+	if writeTimeout <= 0 {
+		writeTimeout = 10 * time.Second
+	}
+	_ = session.wsConn.SetWriteDeadline(time.Now().Add(writeTimeout))
 	return session.wsConn.WriteMessage(messageType, data)
 }
