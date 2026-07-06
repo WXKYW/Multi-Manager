@@ -11,7 +11,7 @@ import { Tabs } from '@cloudflare/kumo';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
 import useStore from '../store.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
-import { getStatusPillClass } from '../components/ui/AppPrimitives.jsx';
+import { getStatusPillClass, SectionCard } from '../components/ui/AppPrimitives.jsx';
 import {
   Server,
   Users,
@@ -2187,13 +2187,11 @@ function PaasPage() {
       {activeTab === 'accounts' && (
         <div className="space-y-6">
           {/* Koyeb Panel */}
-          <div className="app-card p-4 space-y-4">
-            <div className="flex justify-between items-center border-b border-kumo-line pb-3">
-              <h3 className="text-sm font-bold text-kumo-strong flex items-center gap-2">
-                <Database className="w-4 h-4 text-kumo-info" />
-                <span>Koyeb 账号管理</span>
-              </h3>
-              <div className="flex gap-2">
+          <SectionCard
+            title="Koyeb 账号管理"
+            icon={<Database className="h-4 w-4 text-kumo-info" />}
+            actions={(
+              <>
                 <Button size="sm" onClick={() => setShowAddKoyebModal(true)} className="text-xs flex items-center gap-1">
                   <Plus className="w-3.5 h-3.5" />
                   <span>添加账号</span>
@@ -2206,8 +2204,10 @@ function PaasPage() {
                   <Download className="w-3.5 h-3.5" />
                   <span>导入</span>
                 </Button>
-              </div>
-            </div>
+              </>
+            )}
+            bodyClassName="space-y-4"
+          >
 
             {/* Managed accounts table */}
             <div className="overflow-x-auto">
@@ -2286,16 +2286,14 @@ function PaasPage() {
                 <span>批量验证并添加 Koyeb 账号</span>
               </Button>
             </div>
-          </div>
+          </SectionCard>
 
           {/* Fly.io Panel */}
-          <div className="app-card p-4 space-y-4">
-            <div className="flex justify-between items-center border-b border-kumo-line pb-3">
-              <h3 className="text-sm font-bold text-kumo-strong flex items-center gap-2">
-                <Rocket className="w-4 h-4 text-kumo-brand" />
-                <span>Fly.io 账号管理</span>
-              </h3>
-              <div className="flex gap-2">
+          <SectionCard
+            title="Fly.io 账号管理"
+            icon={<Rocket className="h-4 w-4 text-kumo-brand" />}
+            actions={(
+              <>
                 <Button size="sm" onClick={() => setShowAddFlyModal(true)} className="text-xs flex items-center gap-1">
                   <Plus className="w-3.5 h-3.5" />
                   <span>添加账号</span>
@@ -2308,8 +2306,10 @@ function PaasPage() {
                   <Download className="w-3.5 h-3.5" />
                   <span>导入</span>
                 </Button>
-              </div>
-            </div>
+              </>
+            )}
+            bodyClassName="space-y-4"
+          >
 
             {/* Managed fly accounts */}
             <div className="overflow-x-auto">
@@ -2386,23 +2386,23 @@ function PaasPage() {
                 <span>批量验证并添加 Fly.io 账号</span>
               </Button>
             </div>
-          </div>
+          </SectionCard>
         </div>
       )}
 
       {/* ==================== Settings Tab Content ==================== */}
       {activeTab === 'settings' && (
-        <div className="app-card p-5 space-y-4">
-          <div className="flex justify-between items-center border-b border-kumo-line pb-3">
-            <h3 className="text-sm font-bold text-kumo-strong flex items-center gap-2">
-              <Settings className="w-4 h-4 text-kumo-brand" />
-              <span>模块刷新策略配置</span>
-            </h3>
+        <SectionCard
+          title="模块刷新策略配置"
+          icon={<Settings className="h-4 w-4 text-kumo-brand" />}
+          action={(
             <Button size="sm" onClick={saveSettings} className="text-xs flex items-center gap-1">
               <Save className="w-3.5 h-3.5" />
               <span>保存配置</span>
             </Button>
-          </div>
+          )}
+          bodyPadding="lg"
+        >
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-1.5">
@@ -2430,7 +2430,7 @@ function PaasPage() {
               />
             </div>
           </div>
-        </div>
+        </SectionCard>
       )}
 
       {/* ==================== Modals & Dialogs ==================== */}

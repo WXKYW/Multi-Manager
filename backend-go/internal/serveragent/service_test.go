@@ -565,6 +565,45 @@ func TestDockerOverviewInvalidLiveJSONDoesNotInferInstalled(t *testing.T) {
 	}
 }
 
+func TestDockerOverviewQueriesServersConcurrently(t *testing.T) {
+	service, db := testService(t)
+	_, err := db.ExecContext(context.Background(), `
+		INSERT INTO server_accounts (id, name, host, username, auth_type, status, cached_info) VALUES
+		('docker-one', 'docker one', '', 'root', 'password', 'online', '{"docker":{"installed":false}}'),
+		('docker-two', 'docker two', '', 'root', 'password', 'online', '{"docker":{"installed":false}}')
+	`)
+	if err != nil {
+		t.Fatalf("insert accounts: %v", err)
+	}
+
+	reply := func(taskType int, data string) string {
+		if taskType != dockerTaskContainers {
+			t.Fatalf("unexpected task type: %d data=%s", taskType, data)
+		}
+		time.Sleep(120 * time.Millisecond)
+		return `[{"id":"abc123","name":"web","state":"running"}]`
+	}
+	service.registry.Register("docker-one", &taskReplySocket{t: t, service: service, reply: reply})
+	service.registry.Register("docker-two", &taskReplySocket{t: t, service: service, reply: reply})
+
+	started := time.Now()
+	res := perform(service, http.MethodGet, "/api/server/v2/docker/overview?scope=containers", "")
+	elapsed := time.Since(started)
+	if res.Code != http.StatusOK {
+		t.Fatalf("overview status=%d body=%s", res.Code, res.Body.String())
+	}
+	if elapsed >= 220*time.Millisecond {
+		t.Fatalf("overview queried servers serially, elapsed=%s", elapsed)
+	}
+
+	payload := decodePayload(t, res)
+	data := payload["data"].(map[string]interface{})
+	servers := data["servers"].([]interface{})
+	if len(servers) != 2 {
+		t.Fatalf("expected 2 servers, got %#v", servers)
+	}
+}
+
 func TestDockerProxyRoutesUseDockerSemanticsOverAgentTasks(t *testing.T) {
 	service, db := testService(t)
 	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, cached_info) VALUES ('docker-agent', 'docker', '', 'root', 'password', '{"docker":{"installed":true}}')`)

@@ -5,7 +5,7 @@ import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
-import { LayerCard, Tabs } from '@cloudflare/kumo';
+import { Tabs } from '@cloudflare/kumo';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
 import useStore, {
@@ -16,6 +16,7 @@ import useStore, {
   normalizeUserSettings,
 } from '../store.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
+import { AppCard, SectionCard } from '../components/ui/AppPrimitives.jsx';
 import { BackupPanel } from './BackupPage.jsx';
 import {
   Activity,
@@ -61,23 +62,6 @@ const PAGE_WIDTH_OPTIONS = [
   { value: 'standard', label: '标准' },
   { value: 'wide', label: '宽屏' },
   { value: 'full', label: '全宽' },
-];
-
-const LOAD_BALANCING_OPTIONS = [
-  { value: 'random', label: '随机' },
-  { value: 'round_robin', label: '轮询' },
-];
-
-const SERVER_IP_DISPLAY_OPTIONS = [
-  { value: 'normal', label: '明文' },
-  { value: 'masked', label: '打码' },
-  { value: 'hidden', label: '隐藏' },
-];
-
-const TOTP_INPUT_MODE_OPTIONS = [
-  { value: 'scan', label: '扫码导入' },
-  { value: 'upload', label: '上传二维码' },
-  { value: 'manual', label: '手动录入' },
 ];
 
 
@@ -128,18 +112,6 @@ const moduleRows = DEFAULT_MODULE_ORDER.map((moduleId) => {
   };
 });
 
-function SectionHeader({ title, description, actions }) {
-  return (
-    <div className="flex flex-col gap-3 border-b border-kumo-line p-5 sm:flex-row sm:items-start sm:justify-between">
-      <div className="min-w-0">
-        <h2 className="text-base font-bold text-kumo-strong">{title}</h2>
-        {description && <p className="mt-1 text-xs leading-relaxed text-kumo-subtle">{description}</p>}
-      </div>
-      {actions && <div className="flex shrink-0 flex-wrap gap-2">{actions}</div>}
-    </div>
-  );
-}
-
 function FieldRow({ title, description, children }) {
   return (
     <div className="grid gap-3 border-b border-kumo-line px-5 py-4 last:border-b-0 md:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)] md:items-center">
@@ -154,7 +126,7 @@ function FieldRow({ title, description, children }) {
 
 function StatCard({ label, value, hint, icon: Icon }) {
   return (
-    <LayerCard className="p-5">
+    <AppCard padding="lg">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="text-[11px] font-semibold uppercase tracking-normal text-kumo-subtle">{label}</div>
@@ -167,19 +139,7 @@ function StatCard({ label, value, hint, icon: Icon }) {
           </div>
         )}
       </div>
-    </LayerCard>
-  );
-}
-
-function ToggleLine({ title, description, checked, onCheckedChange, disabled = false }) {
-  return (
-    <div className="flex items-start justify-between gap-4 border-b border-kumo-line py-4 last:border-b-0">
-      <div className="min-w-0">
-        <div className="text-sm font-semibold text-kumo-strong">{title}</div>
-        {description && <div className="mt-1 text-xs leading-relaxed text-kumo-subtle">{description}</div>}
-      </div>
-      <Switch checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} />
-    </div>
+    </AppCard>
   );
 }
 
@@ -199,6 +159,7 @@ function SettingsPage() {
   const fileInputRef = useRef(null);
   const [activeTab, setActiveTab] = useState('general');
   const [settings, setSettings] = useState(() => normalizeUserSettings());
+  const [settingsPatch, setSettingsPatch] = useState({});
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsSaving, setSettingsSaving] = useState(false);
 
@@ -251,16 +212,7 @@ function SettingsPage() {
 
   const patchSettings = useCallback((patch) => {
     setSettings((prev) => normalizeUserSettings({ ...prev, ...patch }));
-  }, []);
-
-  const updateTotpSetting = useCallback((key, value) => {
-    setSettings((prev) => normalizeUserSettings({
-      ...prev,
-      totpSettings: {
-        ...prev.totpSettings,
-        [key]: value,
-      },
-    }));
+    setSettingsPatch((prev) => ({ ...prev, ...patch }));
   }, []);
 
   const handleThemeModeChange = useCallback((value) => {
@@ -281,6 +233,7 @@ function SettingsPage() {
     if (!response.ok || !result.success) throw new Error(result.error || '加载用户设置失败');
     const normalized = normalizeUserSettings(result.data || {});
     setSettings(normalized);
+    setSettingsPatch({});
     applyUserSettings(normalized);
     return normalized;
   }, [applyUserSettings]);
@@ -351,18 +304,24 @@ function SettingsPage() {
     refreshAll(false);
   }, [refreshAll]);
 
-  const persistSettings = async (nextSettings = settings, successMessage = '设置已保存') => {
-    const normalized = normalizeUserSettings(nextSettings);
+  const persistSettings = async (successMessage = '设置已保存') => {
+    const patch = settingsPatch;
+    if (Object.keys(patch).length === 0) {
+      toast.info('没有需要保存的设置');
+      return true;
+    }
     setSettingsSaving(true);
     try {
       const response = await fetch('/api/settings', {
-        method: 'POST',
+        method: 'PATCH',
         headers: getAuthHeaders(),
-        body: JSON.stringify(normalized),
+        body: JSON.stringify(patch),
       });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.error || '保存设置失败');
 
+      const normalized = normalizeUserSettings(result.data || { ...settings, ...patch });
+      setSettingsPatch({});
       setSettings(normalized);
       applyUserSettings(normalized);
       applyCustomCss(normalized.customCss);
@@ -677,26 +636,33 @@ function SettingsPage() {
           >
             刷新
           </Button>
-          <Button size="sm"
-            variant="primary"
-            onClick={() => persistSettings()}
-            loading={settingsSaving}
-            icon={<Save className="h-4 w-4" />}
-          >
-            保存用户设置
-          </Button>
+          {['general', 'modules', 'appearance'].includes(activeTab) && (
+            <Button size="sm"
+              variant="primary"
+              onClick={() => persistSettings()}
+              loading={settingsSaving}
+              icon={<Save className="h-4 w-4" />}
+            >
+              保存当前页设置
+            </Button>
+          )}
         </div>
       </div>
 
       {activeTab === 'general' && (
-        <div className="grid gap-4 lg:grid-cols-4">
+        <div className="grid items-start gap-4 lg:grid-cols-4">
           <StatCard label="运行状态" value="正常" hint={settingsLoading ? '同步中' : '已连接后端'} icon={Check} />
           <StatCard label="公网入口" value={settings.publicApiUrl || currentOrigin} hint="/api 自动拼接" icon={Globe} />
           <StatCard label="数据库大小" value={formatFileSize(databaseSizeBytes)} hint={databaseSizeHint} icon={Database} />
           <StatCard label="日志文件" value={logFileInfo?.sizeFormatted || `${logSettings.logFileSizeMB || 10} MB 上限`} hint="app.log" icon={FileText} />
 
-          <LayerCard className="lg:col-span-2">
-            <SectionHeader title="公网访问与 Agent" description="这些值会被后端用于生成 Agent 安装命令、下载地址和对外 API 连接配置。" />
+          <SectionCard
+            title="部署访问地址"
+            description="用于生成公开状态页、回调地址和对外 API 连接配置。"
+            icon={<Globe className="h-4 w-4 text-kumo-brand" />}
+            className="lg:col-span-4"
+            bodyPadding="none"
+          >
             <FieldRow title="公网 API 地址" description="主控端可从公网访问时填写，留空则使用当前访问来源。">
               <Input size="sm"
                 label="公网 API 地址"
@@ -705,62 +671,26 @@ function SettingsPage() {
                 placeholder="https://monitor.example.com"
               />
             </FieldRow>
-            <FieldRow title="Agent 下载目录" description="留空使用主控端内置 /agent 目录；自定义时填写目录 URL，不填写文件名。">
-              <Input size="sm"
-                label="Agent 下载目录"
-                value={settings.agentDownloadUrl}
-                onChange={(e) => patchSettings({ agentDownloadUrl: e.target.value })}
-                placeholder="https://cdn.example.com/agent"
-              />
-            </FieldRow>
-          </LayerCard>
-
-          <LayerCard className="lg:col-span-2">
-            <SectionHeader title="运行偏好" description="这些设置会同步给对应业务页面和后端用户设置表。" />
-            <FieldRow title="主机地址显示" description="控制主机实例页和安装命令中的地址脱敏策略。">
-              <Select size="sm"
-                label="主机地址显示"
-                value={settings.serverIpDisplayMode}
-                onValueChange={(value) => patchSettings({ serverIpDisplayMode: String(value) })}
-                items={SERVER_IP_DISPLAY_OPTIONS}
-              />
-            </FieldRow>
-            <FieldRow title="PaaS 自动刷新" description="Koyeb 和 Fly.io 状态拉取间隔，单位秒。">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Input size="sm"
-                  label="Koyeb 秒数"
-                  type="number"
-                  min="5"
-                  value={Math.round(settings.koyebRefreshInterval / 1000)}
-                  onChange={(e) => patchSettings({ koyebRefreshInterval: Math.max(5, toInt(e.target.value, 30)) * 1000 })}
-                />
-                <Input size="sm"
-                  label="Fly.io 秒数"
-                  type="number"
-                  min="5"
-                  value={Math.round(settings.flyRefreshInterval / 1000)}
-                  onChange={(e) => patchSettings({ flyRefreshInterval: Math.max(5, toInt(e.target.value, 30)) * 1000 })}
-                />
-              </div>
-            </FieldRow>
-          </LayerCard>
+          </SectionCard>
         </div>
       )}
 
 
 
       {activeTab === 'modules' && (
-        <LayerCard className="overflow-x-auto p-0">
-          <SectionHeader
-            title="功能模块"
-            description="模块顺序和显隐会立即影响左侧导航；系统设置入口固定显示。"
-            actions={
+        <SectionCard
+          title="功能模块"
+          description="模块顺序和显隐会立即影响左侧导航；系统设置入口固定显示。"
+          icon={<Activity className="h-4 w-4 text-kumo-brand" />}
+          actions={
               <>
                 <Button size="sm" onClick={() => setAllModulesVisibility(true)} icon={<Eye className="h-4 w-4" />}>显示全部</Button>
                 <Button size="sm" onClick={() => setAllModulesVisibility(false)} icon={<EyeOff className="h-4 w-4" />}>隐藏可选模块</Button>
               </>
-            }
-          />
+          }
+          bodyPadding="none"
+          bodyClassName="overflow-x-auto"
+        >
           <Table layout="fixed">
             <colgroup>
               <col className="w-[82px]" />
@@ -818,13 +748,17 @@ function SettingsPage() {
               })}
             </Table.Body>
           </Table>
-        </LayerCard>
+        </SectionCard>
       )}
 
       {activeTab === 'security' && (
-        <div className="grid gap-4 xl:grid-cols-2">
-          <LayerCard>
-            <SectionHeader title="管理员密码" description="后端接口为 /api/auth/change-password，修改成功后会退出当前会话。" />
+        <div className="grid items-start gap-4 xl:grid-cols-2">
+          <SectionCard
+            title="管理员密码"
+            description="后端接口为 /api/auth/change-password，修改成功后会退出当前会话。"
+            icon={<Lock className="h-4 w-4 text-kumo-brand" />}
+            bodyPadding="none"
+          >
             <div className="grid max-w-xl gap-4 p-5">
               <Input size="sm"
                 label="当前密码"
@@ -856,27 +790,28 @@ function SettingsPage() {
                 </Button>
               </div>
             </div>
-          </LayerCard>
+          </SectionCard>
 
-          <LayerCard className="p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-base font-bold text-kumo-strong">双因子认证</h2>
-                <p className="mt-1 text-xs text-kumo-subtle">当前登录保护状态</p>
-              </div>
+          <SectionCard
+            title="双因子认证"
+            description="当前登录保护状态"
+            icon={<Shield className="h-4 w-4 text-kumo-brand" />}
+            meta={(
               <Badge variant={twoFA.enabled ? 'success' : 'warning'}>
                 {twoFA.enabled ? '已启用' : '未启用'}
               </Badge>
-            </div>
+            )}
+            bodyPadding="lg"
+          >
 
             {twoFA.error && (
-              <div className="mt-4 rounded-md border border-kumo-danger/20 bg-kumo-danger/10 px-3 py-2 text-xs text-kumo-danger">
+              <div className="rounded-md border border-kumo-danger/20 bg-kumo-danger/10 px-3 py-2 text-xs text-kumo-danger">
                 {twoFA.error}
               </div>
             )}
 
             {!twoFA.enabled && !twoFA.setupMode && (
-              <Button size="sm" className="mt-5 w-full" variant="primary" onClick={start2FASetup} loading={twoFA.loading} disabled={isDemoMode}>
+              <Button size="sm" className={`${twoFA.error ? 'mt-5' : ''} w-full`} variant="primary" onClick={start2FASetup} loading={twoFA.loading} disabled={isDemoMode}>
                 启用 2FA
               </Button>
             )}
@@ -924,20 +859,22 @@ function SettingsPage() {
                 </div>
               </div>
             )}
-          </LayerCard>
+          </SectionCard>
         </div>
       )}
 
       {activeTab === 'database' && (
         <div className="grid items-start gap-4 xl:grid-cols-2">
-          <LayerCard className="overflow-x-auto p-0">
-            <SectionHeader
-              title="数据库统计"
-              description={dbStats?.dbPath || 'SQLite 数据文件'}
-              actions={
+          <SectionCard
+            title="数据库统计"
+            description={dbStats?.dbPath || 'SQLite 数据文件'}
+            icon={<Database className="h-4 w-4 text-kumo-brand" />}
+            actions={
                 <Button size="sm" onClick={fetchDbState} loading={databaseBusy} icon={<RefreshCw className="h-4 w-4" />}>刷新统计</Button>
-              }
-            />
+            }
+            bodyPadding="none"
+            bodyClassName="overflow-x-auto"
+          >
             {databaseStorage && (
               <div className="grid gap-3 border-b border-kumo-line px-5 py-3 text-xs text-kumo-subtle md:grid-cols-4">
                 <div>
@@ -991,11 +928,15 @@ function SettingsPage() {
                 ))}
               </Table.Body>
             </Table>
-          </LayerCard>
+          </SectionCard>
 
           <div className="grid content-start gap-3">
-            <LayerCard className="p-4">
-              <h2 className="text-base font-bold text-kumo-strong">备份与恢复</h2>
+            <SectionCard
+              title="数据库导入导出"
+              description="导出当前 SQLite 数据库，或先预检后替换当前数据库。"
+              icon={<Download className="h-4 w-4 text-kumo-brand" />}
+              bodyClassName="space-y-3"
+            >
               <Input
                 ref={fileInputRef}
                 type="file"
@@ -1004,7 +945,7 @@ function SettingsPage() {
                 className="hidden"
                 onChange={previewDatabaseImport}
               />
-              <div className="mt-3 grid gap-2">
+              <div className="grid gap-2">
                 <Button size="sm" className="justify-start" onClick={exportDatabase} icon={<Download className="h-4 w-4" />}>导出数据库</Button>
                 <Button size="sm" className="justify-start" onClick={importDatabase} loading={databaseBusy} icon={<Upload className="h-4 w-4" />}>上传并预检数据库</Button>
               </div>
@@ -1055,14 +996,16 @@ function SettingsPage() {
                   </div>
                 </div>
               )}
-              <div className="mt-4 border-t border-kumo-line pt-4">
-                <BackupPanel embedded />
-              </div>
-            </LayerCard>
+            </SectionCard>
 
-            <LayerCard className="p-4">
-              <h2 className="text-base font-bold text-kumo-strong">维护操作</h2>
-              <div className="mt-3 grid gap-2">
+            <BackupPanel embedded />
+
+            <SectionCard
+              title="维护操作"
+              icon={<HardDrive className="h-4 w-4 text-kumo-brand" />}
+              bodyClassName="space-y-3"
+            >
+              <div className="grid gap-2">
                 <Button size="sm" className="justify-start" onClick={() => postSettingsAction('/api/settings/vacuum-database', '数据库已压缩', fetchDbState)} loading={databaseBusy}>
                   压缩数据库
                 </Button>
@@ -1108,35 +1051,41 @@ function SettingsPage() {
                   </div>
                 )}
               </div>
-            </LayerCard>
+            </SectionCard>
           </div>
         </div>
       )}
 
       {activeTab === 'logs' && (
         <div className="grid gap-4">
-          <LayerCard>
-            <SectionHeader
-              title="审计与保留"
-              description="这里只管理数据库审计记录与日志保留策略；应用运行日志请到左侧「系统日志」查看。"
-              actions={
+          <SectionCard
+            title="审计与保留"
+            description="这里只管理数据库审计记录与日志保留策略；应用运行日志请到左侧「系统日志」查看。"
+            icon={<FileText className="h-4 w-4 text-kumo-brand" />}
+            actions={
                 <>
                   <Button size="sm" onClick={saveLogSettings} loading={logsBusy} icon={<Save className="h-4 w-4" />}>保存保留策略</Button>
                   <Button size="sm" onClick={() => postSettingsAction('/api/settings/enforce-log-limits', '日志限制已执行', fetchLogState)} loading={logsBusy}>立即执行限制</Button>
                 </>
-              }
-            />
+            }
+            bodyPadding="none"
+          >
             <div className="grid gap-4 p-5 md:grid-cols-4">
               <Input size="sm" label="保留天数" type="number" min="0" value={logSettings.days} onChange={(e) => setLogSettings((prev) => ({ ...prev, days: Math.max(0, toInt(e.target.value, 0)) }))} />
               <Input size="sm" label="单表最大条数" type="number" min="0" value={logSettings.count} onChange={(e) => setLogSettings((prev) => ({ ...prev, count: Math.max(0, toInt(e.target.value, 0)) }))} />
               <Input size="sm" label="数据库最大 MB" type="number" min="0" value={logSettings.dbSizeMB} onChange={(e) => setLogSettings((prev) => ({ ...prev, dbSizeMB: Math.max(0, toInt(e.target.value, 0)) }))} />
               <Input size="sm" label="app.log 最大 MB" type="number" min="1" value={logSettings.logFileSizeMB} onChange={(e) => setLogSettings((prev) => ({ ...prev, logFileSizeMB: Math.max(1, toInt(e.target.value, 10)) }))} />
             </div>
-          </LayerCard>
+          </SectionCard>
 
           <div className="grid gap-4">
-            <LayerCard className="overflow-x-auto p-0">
-              <SectionHeader title="审计记录" description="最近 100 条数据库操作记录" />
+            <SectionCard
+              title="审计记录"
+              description="最近 100 条数据库操作记录"
+              icon={<Database className="h-4 w-4 text-kumo-brand" />}
+              bodyPadding="none"
+              bodyClassName="overflow-x-auto"
+            >
               <Table layout="fixed">
                 <colgroup>
                   <col className="w-[170px]" />
@@ -1168,15 +1117,19 @@ function SettingsPage() {
                   )}
                 </Table.Body>
               </Table>
-            </LayerCard>
+            </SectionCard>
           </div>
         </div>
       )}
 
       {activeTab === 'appearance' && (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
-          <LayerCard>
-            <SectionHeader title="界面外观" description={`当前生效主题: ${theme === 'dark' ? '深色' : '浅色'}`} />
+        <div className="grid items-start gap-4">
+          <SectionCard
+            title="界面外观"
+            description={`当前生效主题: ${theme === 'dark' ? '深色' : '浅色'}`}
+            icon={<Sun className="h-4 w-4 text-kumo-brand" />}
+            bodyPadding="none"
+          >
             <FieldRow title="主题模式" description="云端偏好，切换后立即生效并自动同步。">
               <Select size="sm" label="主题模式" value={themeMode} onValueChange={handleThemeModeChange} items={THEME_OPTIONS} />
             </FieldRow>
@@ -1186,36 +1139,13 @@ function SettingsPage() {
             <FieldRow title="触感反馈" description="移动端交互振动开关。">
               <Switch checked={settings.vibrationEnabled} onCheckedChange={(checked) => patchSettings({ vibrationEnabled: checked })} />
             </FieldRow>
-          </LayerCard>
+          </SectionCard>
 
-          <LayerCard className="p-5">
-            <h2 className="text-base font-bold text-kumo-strong">TOTP 显示偏好</h2>
-            <div className="mt-2 text-xs leading-relaxed text-kumo-subtle">这些选项会被 2FA 工具页读取。</div>
-            <div className="mt-4">
-              <ToggleLine title="账号名称打码" checked={!!settings.totpSettings.maskAccount} onCheckedChange={(checked) => updateTotpSetting('maskAccount', checked)} />
-              <ToggleLine title="遮挡验证码" checked={!!settings.totpSettings.hideCode} onCheckedChange={(checked) => updateTotpSetting('hideCode', checked)} />
-              <ToggleLine title="允许悬浮显示验证码" checked={!!settings.totpSettings.allowRevealCode} onCheckedChange={(checked) => updateTotpSetting('allowRevealCode', checked)} />
-              <ToggleLine title="按站点分组" checked={!!settings.totpSettings.groupByPlatform} onCheckedChange={(checked) => updateTotpSetting('groupByPlatform', checked)} />
-              <ToggleLine title="显示站点标题" checked={!!settings.totpSettings.showPlatformHeaders} onCheckedChange={(checked) => updateTotpSetting('showPlatformHeaders', checked)} />
-              <ToggleLine title="隐藏站点文字" checked={!!settings.totpSettings.hidePlatformText} onCheckedChange={(checked) => updateTotpSetting('hidePlatformText', checked)} />
-              <ToggleLine title="扫码后自动导入" checked={!!settings.totpSettings.autoSave} onCheckedChange={(checked) => updateTotpSetting('autoSave', checked)} />
-              <ToggleLine title="锁定默认录入方式" checked={!!settings.totpSettings.lockInputMode} onCheckedChange={(checked) => updateTotpSetting('lockInputMode', checked)} />
-            </div>
-            <div className="mt-4">
-              <Select size="sm"
-                label="默认录入方式"
-                value={settings.totpSettings.defaultInputMode}
-                onValueChange={(value) => updateTotpSetting('defaultInputMode', String(value))}
-                items={TOTP_INPUT_MODE_OPTIONS}
-              />
-            </div>
-          </LayerCard>
-
-          <LayerCard className="xl:col-span-2">
-            <SectionHeader
-              title="自定义 CSS"
-              description="应用会立即注入当前页面，保存后写入后端用户设置。"
-              actions={
+          <SectionCard
+            title="自定义 CSS"
+            description="应用会立即注入当前页面，保存后写入后端用户设置。"
+            icon={<Terminal className="h-4 w-4 text-kumo-brand" />}
+            actions={
                 <>
                   <Button size="sm" onClick={() => applyCustomCss(settings.customCss)}>预览</Button>
                   <Button size="sm" variant="secondary-destructive" onClick={() => {
@@ -1223,8 +1153,9 @@ function SettingsPage() {
                     applyCustomCss('');
                   }}>清空</Button>
                 </>
-              }
-            />
+            }
+            bodyPadding="none"
+          >
             <div className="p-5">
               <Textarea
                 label="CSS"
@@ -1234,21 +1165,20 @@ function SettingsPage() {
                 className="min-h-64 font-mono text-sm"
               />
             </div>
-          </LayerCard>
+          </SectionCard>
         </div>
       )}
 
       {activeTab === 'about' && (
         <div className="grid gap-4 lg:grid-cols-1">
-          <LayerCard className="p-6 lg:col-span-2">
-            <div className="flex items-center gap-4">
-              <img src="/logo.svg" alt="" className="h-12 w-12 object-contain" />
-              <div>
-                <h2 className="text-xl font-bold text-kumo-strong">API Monitor</h2>
-                <p className="mt-1 text-xs text-kumo-subtle">React 前端 + Go 后端</p>
-              </div>
-            </div>
-            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+          <SectionCard
+            title="API Monitor"
+            description="React 前端 + Go 后端"
+            icon={<img src="/logo.svg" alt="" className="h-6 w-6 object-contain" />}
+            className="lg:col-span-2"
+            bodyPadding="xl"
+          >
+            <div className="grid gap-3 sm:grid-cols-3">
               <div className="rounded-lg border border-kumo-line bg-kumo-recessed p-4">
                 <div className="text-xs text-kumo-subtle">当前源</div>
                 <div className="mt-1 truncate font-mono text-sm text-kumo-strong">{currentOrigin}</div>
@@ -1271,7 +1201,7 @@ function SettingsPage() {
                 </div>
               </div>
             </div>
-          </LayerCard>
+          </SectionCard>
 
           {/* <LayerCard className="p-6">
             <h2 className="text-base font-bold text-kumo-strong">已对接接口</h2>

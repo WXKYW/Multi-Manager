@@ -12,7 +12,7 @@ import useTableResize from '../composables/useTableResize.js';
 import useStore from '../store.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
-import { getStatusPillClass } from '../components/ui/AppPrimitives.jsx';
+import { getStatusPillClass, SectionCard } from '../components/ui/AppPrimitives.jsx';
 import {
   Database,
   Globe,
@@ -608,10 +608,12 @@ function AliyunPage() {
 
             {/* 4. Accounts Tab */}
             {activeTab === 'accounts' && (
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-sm font-bold text-kumo-strong">阿里云账号列表</h3>
-                  <Button size="sm"
+              <SectionCard
+                title="阿里云账号列表"
+                icon={<Cloud className="h-4 w-4 text-kumo-brand" />}
+                action={(
+                  <Button
+                    size="sm"
                     onClick={() => {
                       setEditingAccount(null);
                       setAccountForm({ name: '', accessKeyId: '', accessKeySecret: '', regionId: 'cn-hangzhou', description: '' });
@@ -622,9 +624,10 @@ function AliyunPage() {
                     <Plus className="w-3.5 h-3.5" />
                     <span>添加账号</span>
                   </Button>
-                </div>
-
-                <div className="app-card overflow-hidden">
+                )}
+                bodyPadding="none"
+                bodyClassName="overflow-x-auto"
+              >
                   <Table layout="fixed">
                     <colgroup>
                       {accountsColWidths.map((w, idx) => (
@@ -695,8 +698,7 @@ function AliyunPage() {
                       )}
                     </Table.Body>
                   </Table>
-                </div>
-              </div>
+              </SectionCard>
             )}
           </>
         )}

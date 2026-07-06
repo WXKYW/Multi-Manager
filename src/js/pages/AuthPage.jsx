@@ -2,8 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Banner } from '@cloudflare/kumo/components/banner';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Input } from '@cloudflare/kumo/components/input';
-import { LayerCard } from '@cloudflare/kumo/components/layer-card';
 import useStore from '../store.js';
+import { SectionCard } from '../components/ui/AppPrimitives.jsx';
 import {
   AlertTriangle,
   ArrowRight,
@@ -348,20 +348,16 @@ function AuthShell({ mode, title, description, children }) {
             </div>
           </div>
 
-          <LayerCard className="w-full app-card/95 p-5 backdrop-blur-sm sm:p-6">
-            <div className="mb-5 flex items-start justify-between gap-4 border-b border-kumo-line pb-4">
-              <div className="min-w-0">
-                <div className="mb-1 text-[11px] font-medium text-kumo-subtle">{modeLabel}</div>
-                <h2 className="text-lg font-semibold text-kumo-strong">{title}</h2>
-                <p className="mt-1 text-xs leading-relaxed text-kumo-subtle">{description}</p>
-              </div>
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-kumo-line bg-kumo-recessed text-kumo-brand">
-                {mode === 'setup' ? <Rocket className="size-4" /> : <Shield className="size-4" />}
-              </span>
-            </div>
-
+          <SectionCard
+            title={title}
+            description={description}
+            icon={mode === 'setup' ? <Rocket className="size-4 text-kumo-brand" /> : <Shield className="size-4 text-kumo-brand" />}
+            meta={<span className="text-[11px] font-medium text-kumo-subtle">{modeLabel}</span>}
+            className="w-full app-card/95 backdrop-blur-sm"
+            bodyPadding="lg"
+          >
             {children}
-          </LayerCard>
+          </SectionCard>
         </div>
       </section>
     </main>

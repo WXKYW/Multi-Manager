@@ -35,7 +35,7 @@ import {
   AppTable,
   InlineStatusPill,
   EmptyState,
-  SectionHeader,
+  SectionCard,
   iconButtonIconClass,
   actionIconClass,
   cx,
@@ -2058,15 +2058,15 @@ function OpenAIPage() {
 
       {/* ==================== 1. API 端点 Tab ==================== */}
       {activeTab === 'endpoints' && (
-        <div className="space-y-3">
-          <SectionHeader
-            title="API 端点"
-            description={
+        <SectionCard
+          title="API 端点"
+          description={
               modelHealthBatchLoading
                 ? '正在批量检测模型可用性...'
                 : `共 ${endpoints.length} 个端点`
-            }
-            action={
+          }
+          icon={<Server className="h-4 w-4 text-kumo-brand" />}
+          action={
               <div className="flex gap-2">
                 <Button
                   size="sm"
@@ -2088,10 +2088,9 @@ function OpenAIPage() {
                   <span>刷新列表</span>
                 </Button>
               </div>
-            }
-          />
-
-          <div className="space-y-2.5">
+          }
+          bodyClassName="space-y-2.5"
+        >
             {endpointsLoading ? (
               <div className="space-y-2.5">
                 {[...Array(2)].map((_, i) => (
@@ -2266,18 +2265,16 @@ function OpenAIPage() {
                 );
               })
             )}
-          </div>
-        </div>
+        </SectionCard>
       )}
 
       {/* ==================== 2. 账号管理 Tab ==================== */}
       {activeTab === 'accounts' && (
-        <div className="space-y-4">
-          {/* Toolbar */}
-          <SectionHeader
-            title="API 端点管理"
-            description="管理和配置您的 OpenAI 兼容 API 端点"
-            action={
+        <SectionCard
+          title="API 端点管理"
+          description="管理和配置您的 OpenAI 兼容 API 端点"
+          icon={<Users className="h-4 w-4 text-kumo-brand" />}
+          actions={
               <div className="flex flex-wrap gap-2">
                 <Button
                   size="sm"
@@ -2316,8 +2313,9 @@ function OpenAIPage() {
                   <span>导入</span>
                 </Button>
               </div>
-            }
-          />
+          }
+          bodyClassName="space-y-4"
+        >
 
           {/* Table */}
           <DataTableFrame>
@@ -2538,17 +2536,16 @@ function OpenAIPage() {
               {batchAdding ? '添加中...' : '批量添加'}
             </Button>
           </AppCard>
-        </div>
+        </SectionCard>
       )}
 
       {/* ==================== 3. 网关分析 Tab ==================== */}
       {activeTab === 'analytics' && (
-        <div className="space-y-4">
-          {/* Header & Controls */}
-          <SectionHeader
-            title="网关分析"
-            description="API 代理流量与性能多维分析"
-            action={
+        <SectionCard
+          title="网关分析"
+          description="API 代理流量与性能多维分析"
+          icon={<Activity className="h-4 w-4 text-kumo-brand" />}
+          actions={
               <div className="flex items-center gap-3">
                 <Select
                   size="sm"
@@ -2572,8 +2569,9 @@ function OpenAIPage() {
                   <span>刷新</span>
                 </Button>
               </div>
-            }
-          />
+          }
+          bodyClassName="space-y-4"
+        >
 
           {/* Analytics Summary Cards */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -2834,7 +2832,7 @@ function OpenAIPage() {
               </div>
             </div>
           )}
-        </div>
+        </SectionCard>
       )}
 
       {/* ==================== dialogs & modals ==================== */}

@@ -7,6 +7,8 @@ import { Info } from '../Icons.jsx';
 
 export const pageStackClass = 'flex w-full min-w-0 flex-col gap-3 sm:gap-4';
 export const pageToolbarClass = 'flex flex-wrap items-center justify-between gap-3 border-b border-kumo-line pb-3';
+export const sectionCardHeaderClass = 'flex min-h-[56px] items-center justify-between gap-3 border-b border-kumo-line bg-kumo-recessed/20 px-4 py-3.5';
+export const sectionCardTitleClass = 'inline-flex min-w-0 max-w-full items-center gap-2 text-sm font-bold text-kumo-strong';
 export const iconButtonIconClass = 'h-3.5 w-3.5';
 export const actionIconClass = 'h-4 w-4';
 
@@ -63,6 +65,53 @@ export function AppCard({
       )}
     >
       {children}
+    </LayerCard>
+  );
+}
+
+export function SectionCard({
+  title,
+  description,
+  icon,
+  meta,
+  action,
+  actions,
+  children,
+  className = '',
+  headerClassName = '',
+  bodyClassName = '',
+  bodyPadding = 'md',
+  titleClassName = '',
+  descriptionClassName = '',
+  ...props
+}) {
+  const trailing = [meta, action, actions].filter(Boolean);
+  return (
+    <LayerCard
+      {...props}
+      className={cx('flex flex-col overflow-hidden p-0 shadow-none', className)}
+    >
+      <LayerCard.Secondary className={cx(sectionCardHeaderClass, headerClassName)}>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+          <div className={cx(sectionCardTitleClass, titleClassName)}>
+            {icon}
+            {typeof title === 'string' || typeof title === 'number' ? (
+              <span className="min-w-0 truncate">{title}</span>
+            ) : (
+              title
+            )}
+          </div>
+          {description && (
+            <div className={cx('min-w-0 flex-1 basis-40 truncate text-xs font-normal text-kumo-subtle', descriptionClassName)}>
+              {description}
+            </div>
+          )}
+        </div>
+        {trailing.length > 0 && <div className="flex shrink-0 items-center gap-2">{trailing}</div>}
+      </LayerCard.Secondary>
+      <LayerCard.Primary className={cx(cardPaddingClass[bodyPadding] || cardPaddingClass.md, bodyClassName)}>
+        {children}
+      </LayerCard.Primary>
     </LayerCard>
   );
 }
@@ -181,18 +230,6 @@ export function EmptyState({
 
   if (!card) return content;
   return <AppCard padding="none">{content}</AppCard>;
-}
-
-export function SectionHeader({ title, description, action, className = '' }) {
-  return (
-    <div className={cx('mb-3 flex min-w-0 items-center justify-between gap-3', className)}>
-      <div className="min-w-0">
-        <h2 className="truncate text-sm font-semibold text-kumo-strong">{title}</h2>
-        {description && <p className="mt-0.5 truncate text-xs text-kumo-subtle">{description}</p>}
-      </div>
-      {action && <div className="shrink-0">{action}</div>}
-    </div>
-  );
 }
 
 export function ChartBoundaryBox({ className = '', children }) {

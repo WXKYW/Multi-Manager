@@ -15,6 +15,7 @@ import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
 import { BRAND_COLOR_FALLBACK, getIssuerColor, getIssuerIcon } from '../components/ui/BrandIcon.jsx';
+import { SectionCard } from '../components/ui/AppPrimitives.jsx';
 import {
   Key,
   FolderOpen,
@@ -1149,10 +1150,13 @@ function TotpPage() {
       {totpCurrentTab === 'settings' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
           {/* Settings Options (Span 2) */}
-          <div className="lg:col-span-2 app-card p-5 space-y-5">
-            <h3 className="text-sm font-semibold text-kumo-strong border-b border-kumo-line pb-2.5 select-none">
-              安全与显示配置
-            </h3>
+          <SectionCard
+            title="安全与显示配置"
+            icon={<Shield className="h-4 w-4 text-kumo-brand" />}
+            className="lg:col-span-2"
+            bodyPadding="lg"
+            bodyClassName="space-y-5"
+          >
 
             {/* Toggle 1: maskAccount */}
             <div className="flex items-start justify-between">
@@ -1184,6 +1188,20 @@ function TotpPage() {
               />
             </div>
 
+            <div className="flex items-start justify-between border-t border-kumo-line pt-4">
+              <div className="space-y-0.5">
+                <h4 className="text-xs font-semibold text-kumo-strong">允许悬浮显示验证码</h4>
+                <p className="text-[10px] text-kumo-subtle">
+                  开启后鼠标悬浮在验证码卡片上时临时显示被遮挡的验证码。
+                </p>
+              </div>
+              <Switch
+                checked={!!totpSettings.allowRevealCode}
+                onCheckedChange={(checked) => updateSetting('allowRevealCode', checked)}
+                size="sm"
+              />
+            </div>
+
             {/* Toggle 3: groupByPlatform */}
             <div className="flex items-start justify-between border-t border-kumo-line pt-4">
               <div className="space-y-0.5">
@@ -1195,6 +1213,36 @@ function TotpPage() {
               <Switch
                 checked={!!totpSettings.groupByPlatform}
                 onCheckedChange={(checked) => updateSetting('groupByPlatform', checked)}
+                size="sm"
+              />
+            </div>
+
+            <div className="flex items-start justify-between border-t border-kumo-line pt-4">
+              <div className="space-y-0.5">
+                <h4 className="text-xs font-semibold text-kumo-strong">显示站点标题</h4>
+                <p className="text-[10px] text-kumo-subtle">
+                  按站点分组时，在每组账号前显示站点名称和账号数量。
+                </p>
+              </div>
+              <Switch
+                checked={!!totpSettings.showPlatformHeaders}
+                onCheckedChange={(checked) => updateSetting('showPlatformHeaders', checked)}
+                disabled={!totpSettings.groupByPlatform}
+                size="sm"
+              />
+            </div>
+
+            <div className="flex items-start justify-between border-t border-kumo-line pt-4">
+              <div className="space-y-0.5">
+                <h4 className="text-xs font-semibold text-kumo-strong">隐藏站点文字</h4>
+                <p className="text-[10px] text-kumo-subtle">
+                  只保留颜色标识和账号数量，减少站点名称在共享屏幕中暴露。
+                </p>
+              </div>
+              <Switch
+                checked={!!totpSettings.hidePlatformText}
+                onCheckedChange={(checked) => updateSetting('hidePlatformText', checked)}
+                disabled={!totpSettings.groupByPlatform || !totpSettings.showPlatformHeaders}
                 size="sm"
               />
             </div>
@@ -1261,15 +1309,16 @@ function TotpPage() {
                 手动刷新验证码
               </Button>
             </div>
-          </div>
+          </SectionCard>
 
           {/* Right Column: Browser Extension Helper Card */}
-          <div className="app-card p-5 flex flex-col justify-between">
+          <SectionCard
+            title="浏览器插件助手"
+            icon={<Bot className="h-4 w-4 text-kumo-brand" />}
+            bodyPadding="lg"
+            bodyClassName="flex flex-col justify-between"
+          >
             <div className="space-y-3.5">
-              <h3 className="text-sm font-semibold text-kumo-strong border-b border-kumo-line pb-2.5 select-none flex items-center gap-2">
-                <Bot className="w-4 h-4 text-kumo-brand" />
-                浏览器插件助手
-              </h3>
               <p className="text-xs text-kumo-subtle leading-relaxed">
                 下载安装 2FA 浏览器插件，在 PC 端登录账号需要验证码时可一键实现自动检索与快捷填充。
               </p>
@@ -1325,7 +1374,7 @@ function TotpPage() {
                 </div>
               </AnimatedCollapse>
             </div>
-          </div>
+          </SectionCard>
         </div>
       )}
 

@@ -13,6 +13,7 @@ import { Empty } from '@cloudflare/kumo/components/empty';
 import { Tooltip, TooltipProvider } from '@cloudflare/kumo/components/tooltip';
 import { Tabs } from '@cloudflare/kumo';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
+import { AppCard, SectionCard } from '../components/ui/AppPrimitives.jsx';
 import {
   Activity,
   ArrowRight,
@@ -805,23 +806,30 @@ function SchedulerPage() {
             ['工作流', stats.workflows, <GitBranch className="h-4 w-4" />],
             ['失败运行', stats.failedRuns, <Activity className="h-4 w-4" />],
           ].map(([label, value, icon]) => (
-            <div key={label} className="rounded-md border border-kumo-line p-3">
+            <AppCard key={label} padding="sm">
               <div className="flex items-center justify-between text-xs text-kumo-subtle">
                 <span>{label}</span>
                 {icon}
               </div>
               <div className="mt-2 font-mono text-xl font-bold text-kumo-strong">{value}</div>
-            </div>
+            </AppCard>
           ))}
         </div>
 
 
         {activeTab === 'tasks' && (
-          <section className="space-y-3">
-            {loading ? <SkeletonLine className="h-28" /> : tasks.length === 0 ? (
+          <SectionCard
+            title="任务列表"
+            description="Shell、HTTP、内部接口或 Agent 任务都在这里统一调度。"
+            icon={<Clock className="h-4 w-4 text-kumo-brand" />}
+            bodyPadding="none"
+          >
+            {loading ? (
+              <div className="p-4"><SkeletonLine className="h-28" /></div>
+            ) : tasks.length === 0 ? (
               <Empty size="sm" icon={<Clock className="h-8 w-8 text-kumo-inactive" />} title="暂无任务" description="创建 Shell、HTTP、内部接口或 Agent 任务后，可作为定时任务或工作流节点运行。" contents={<Button size="sm" variant="primary" onClick={openCreateTask}><Plus className="h-3.5 w-3.5" />新建任务</Button>} />
             ) : (
-              <div className="overflow-x-auto rounded-md border border-kumo-line">
+              <div className="overflow-x-auto">
                 <Table layout="fixed" className="min-w-[1080px]">
                   <colgroup><col className="w-[220px]" /><col className="w-[104px]" /><col className="w-[128px]" /><col className="w-[190px]" /><col className="w-[180px]" /><col className="w-[180px]" /><col className="w-[160px]" /></colgroup>
                   <Table.Header><Table.Row><Table.Head>任务</Table.Head><Table.Head>状态</Table.Head><Table.Head>类型</Table.Head><Table.Head>周期</Table.Head><Table.Head>下次运行</Table.Head><Table.Head>最近结果</Table.Head><Table.Head>操作</Table.Head></Table.Row></Table.Header>
@@ -848,11 +856,16 @@ function SchedulerPage() {
                 </Table>
               </div>
             )}
-          </section>
+          </SectionCard>
         )}
 
         {activeTab === 'workflows' && (
-          <section className="space-y-3">
+          <SectionCard
+            title="工作流编排"
+            description="将多个任务连接成 DAG，并按成功、失败或完成条件自动执行。"
+            icon={<GitBranch className="h-4 w-4 text-kumo-brand" />}
+            bodyClassName="space-y-3"
+          >
             {workflows.length === 0 ? (
               <Empty size="sm" icon={<GitBranch className="h-8 w-8 text-kumo-inactive" />} title="暂无工作流" description="将多个任务连接成 DAG，按成功、失败或完成条件自动编排。" contents={<Button size="sm" variant="primary" onClick={openCreateWorkflow}><Plus className="h-3.5 w-3.5" />新建工作流</Button>} />
             ) : (
@@ -875,19 +888,26 @@ function SchedulerPage() {
                 ))}
               </div>
             )}
-          </section>
+          </SectionCard>
         )}
 
         {activeTab === 'runs' && (
-          <section className="space-y-3">
-            <div className="flex justify-end gap-2">
-              <Button size="sm" variant="secondary" onClick={clearOldRuns}><Trash className="h-3.5 w-3.5" />清理 30 天前</Button>
-              <Button size="sm" variant="secondary-destructive" onClick={clearAllRuns}><Trash className="h-3.5 w-3.5" />清空全部</Button>
-            </div>
+          <SectionCard
+            title="运行记录"
+            description="查看任务和工作流的状态、耗时与输出摘要。"
+            icon={<Activity className="h-4 w-4 text-kumo-brand" />}
+            actions={(
+              <>
+                <Button size="sm" variant="secondary" onClick={clearOldRuns}><Trash className="h-3.5 w-3.5" />清理 30 天前</Button>
+                <Button size="sm" variant="secondary-destructive" onClick={clearAllRuns}><Trash className="h-3.5 w-3.5" />清空全部</Button>
+              </>
+            )}
+            bodyPadding="none"
+          >
             {runs.length === 0 ? (
               <Empty size="sm" icon={<Activity className="h-8 w-8 text-kumo-inactive" />} title="暂无运行记录" description="手动运行任务或工作流后，会在这里看到状态、耗时和节点输出。" />
             ) : (
-              <div className="overflow-x-auto rounded-md border border-kumo-line">
+              <div className="overflow-x-auto">
                 <Table layout="fixed" className="min-w-[920px]">
                   <colgroup><col /><col className="w-[110px]" /><col className="w-[130px]" /><col className="w-[180px]" /><col className="w-[120px]" /><col className="w-[128px]" /></colgroup>
                   <Table.Header><Table.Row><Table.Head>运行对象</Table.Head><Table.Head>状态</Table.Head><Table.Head>触发方式</Table.Head><Table.Head>开始时间</Table.Head><Table.Head>耗时</Table.Head><Table.Head>操作</Table.Head></Table.Row></Table.Header>
@@ -910,13 +930,18 @@ function SchedulerPage() {
                 </Table>
               </div>
             )}
-          </section>
+          </SectionCard>
         )}
 
         {activeTab === 'nodes' && (
-          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <SectionCard
+            title="执行节点"
+            description="本机与 Agent 节点的在线状态、并发和能力标签。"
+            icon={<Server className="h-4 w-4 text-kumo-brand" />}
+            bodyClassName="grid gap-3 sm:grid-cols-2 xl:grid-cols-3"
+          >
             {nodes.map((node) => (
-              <div key={node.id} className="rounded-md border border-kumo-line p-3">
+              <AppCard key={node.id} padding="sm">
                 <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2"><Server className="h-4 w-4 text-kumo-brand" /><div className="font-semibold text-kumo-strong">{node.name}</div></div><Badge variant={statusBadgeVariant(node.status)} appearance="dot">{statusLabel(node.status)}</Badge></div>
                 <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                   <div><span className="text-kumo-subtle">类型</span><div className="mt-1 text-kumo-strong">{node.kind === 'local' ? '本机' : 'Agent'}</div></div>
@@ -924,9 +949,9 @@ function SchedulerPage() {
                   <div className="col-span-2"><span className="text-kumo-subtle">标签</span><div className="mt-1 flex flex-wrap gap-1">{(node.labels || []).length === 0 ? <span className="text-kumo-subtle">无</span> : node.labels.map((label) => <Badge key={label} variant="secondary">{label}</Badge>)}</div></div>
                 </div>
                 <div className="mt-3 text-xs text-kumo-subtle">{node.capability_note}</div>
-              </div>
+              </AppCard>
             ))}
-          </section>
+          </SectionCard>
         )}
 
         <Dialog.Root open={taskDialogOpen} onOpenChange={setTaskDialogOpen}>

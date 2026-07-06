@@ -14,7 +14,7 @@ import {
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import useStore from '../store.js';
-import { AppCard, ChartCard, PageStack } from '../components/ui/AppPrimitives.jsx';
+import { AppCard, ChartBoundaryBox, PageStack, SectionCard } from '../components/ui/AppPrimitives.jsx';
 import { parseDashboardTrendTimestamp } from '../modules/dashboardMetrics.js';
 import {
   Cpu,
@@ -881,20 +881,16 @@ function DashboardPage({ onNavigate } = {}) {
         
         {/* Left Column: API Trend Graph + Host Performance */}
         <div className="grid min-w-0 gap-3 sm:gap-4">
-          <ChartCard className="flex min-h-0 flex-col sm:min-h-[260px] sm:p-5">
-            {(tooltipBoundary) => (
-              <>
-                <div className="flex items-center justify-between border-b border-kumo-line pb-2 sm:pb-3">
-                  <h3 className="text-xs font-semibold text-kumo-strong flex items-center gap-1.5 select-none sm:text-sm sm:gap-2">
-                    <Activity className="h-3.5 w-3.5 text-kumo-brand sm:h-4 sm:w-4" />
-                    系统 API 调用趋势
-                  </h3>
-                  <span className="text-[10px] text-kumo-subtle app-subcard bg-kumo-recessed px-2 py-0.5 rounded font-medium">
-                    最近 7 天
-                  </span>
-                </div>
-
-                <div className="min-w-0 pt-2 sm:pt-4">
+          <SectionCard
+            title="系统 API 调用趋势"
+            icon={<Activity className="h-4 w-4 text-kumo-brand" />}
+            meta={<Badge variant="neutral">最近 7 天</Badge>}
+            bodyClassName="flex min-h-0 flex-col sm:p-5"
+          >
+            <ChartBoundaryBox>
+              {(tooltipBoundary) => (
+                <>
+                <div className="min-w-0">
                   {loading || hasApiTrendCalls ? (
                     <div className="min-w-0 overflow-hidden" style={{ height: apiChartHeight }}>
                       <TimeseriesChart
@@ -926,27 +922,25 @@ function DashboardPage({ onNavigate } = {}) {
                   <span className="w-1.5 h-1.5 rounded-full bg-kumo-brand flex-shrink-0" />
                   <span>{apiTrendStatusText}</span>
                 </div>
-              </>
-            )}
-          </ChartCard>
+                </>
+              )}
+            </ChartBoundaryBox>
+          </SectionCard>
 
-          <AppCard padding="sm" className="sm:p-5">
-            <div className="flex flex-col gap-2 border-b border-kumo-line pb-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:pb-3">
-              <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-kumo-success/10 text-kumo-success sm:h-8 sm:w-8">
-                  <Cpu className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                </div>
-                <div className="min-w-0">
-                  <h3 className="text-xs font-semibold text-kumo-strong sm:text-sm">宿主机性能</h3>
-                  <p className="truncate text-[11px] text-kumo-subtle" title={stats.host?.hostname || '-'}>
-                    {stats.host?.hostname || '等待采样'} · {stats.host?.platformLabel || '本机运行环境'}
-                  </p>
-                </div>
-              </div>
+          <SectionCard
+            title={(
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="shrink-0">宿主机性能</span>
+                <span className="flex min-w-0 flex-col gap-0.5 text-[10px] font-normal leading-tight text-kumo-subtle sm:text-[11px]">
+                  <span className="truncate">主机: {stats.host?.hostname || '等待采样'}</span>
+                  <span className="truncate">系统: {stats.host?.platformLabel || '本机运行环境'}</span>
+                </span>
+              </span>
+            )}
+            icon={<Cpu className="h-4 w-4 text-kumo-success" />}
+            bodyClassName="sm:p-5"
+            meta={(
               <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-                {/* <span className="rounded border border-kumo-line bg-kumo-recessed px-2 py-0.5 text-[11px] font-semibold text-kumo-subtle">
-                  2s 实时
-                </span> */}
                 <span className={`w-fit rounded border px-2 py-0.5 text-[11px] font-semibold ${hostHealthTone}`}>
                   CPU {formatPercent(hostCpuUsage)}
                 </span>
@@ -957,9 +951,9 @@ function DashboardPage({ onNavigate } = {}) {
                   DISK {formatPercent(hostDiskUsage)}
                 </span>
               </div>
-            </div>
-
-            <div className="mt-3 grid gap-3 sm:mt-4 md:grid-cols-3 md:[&>*+*]:border-l md:[&>*+*]:border-kumo-line md:[&>*+*]:pl-4 md:[&>*:not(:last-child)]:pr-4">
+            )}
+          >
+            <div className="grid gap-3 md:grid-cols-3 md:[&>*+*]:border-l md:[&>*+*]:border-kumo-line md:[&>*+*]:pl-4 md:[&>*:not(:last-child)]:pr-4">
               <MiniMeter label="CPU" value={hostCpuUsage} detail={`${formatPercent(hostCpuUsage)} / ${stats.host?.cpu?.cores || 0}C`} tone="success" />
               <MiniMeter label="内存" value={hostMemoryUsage} detail={`${formatBytes(stats.host?.memory?.used)} / ${formatBytes(stats.host?.memory?.total)}`} tone="info" />
               <MiniMeter label="磁盘" value={hostDiskUsage} detail={`${formatBytes(stats.host?.disk?.used)} / ${formatBytes(stats.host?.disk?.total)}`} tone="brand" />
@@ -979,19 +973,17 @@ function DashboardPage({ onNavigate } = {}) {
                 <span className="truncate text-right font-semibold text-kumo-strong">{stats.host?.disk?.root || '-'}</span>
               </div>
             </div>
-          </AppCard>
+          </SectionCard>
         </div>
 
         {/* Right Column: Services & Tools List */}
-        <AppCard padding="sm" className="flex min-h-0 flex-col justify-between sm:min-h-[340px] sm:p-5">
-          <div className="border-b border-kumo-line pb-2 sm:pb-3.5">
-            <h3 className="text-xs font-semibold text-kumo-strong flex items-center gap-1.5 select-none sm:text-sm sm:gap-2">
-              <Box className="h-3.5 w-3.5 text-kumo-brand sm:h-4 sm:w-4" />
-              服务 & 工具
-            </h3>
-          </div>
-
-          <div className="flex-1 space-y-2.5 py-2.5 sm:py-3.5">
+        <SectionCard
+          title="服务与工具"
+          icon={<Box className="h-4 w-4 text-kumo-brand" />}
+          className="h-full"
+          bodyClassName="flex min-h-0 flex-1 flex-col sm:min-h-[340px] sm:p-5"
+        >
+          <div className="flex-1 space-y-2.5">
             {/* Koyeb */}
             <div
               onClick={() => navigateToModule('paas')}
@@ -1076,7 +1068,7 @@ function DashboardPage({ onNavigate } = {}) {
           {/* <div className="text-[10px] text-kumo-subtle border-t border-kumo-line pt-2 select-none text-center sm:pt-3">
             点击以上卡片可直接跳转相应模块管理。
           </div> */}
-        </AppCard>
+        </SectionCard>
 
       </div>
 

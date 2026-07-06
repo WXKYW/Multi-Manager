@@ -7,7 +7,7 @@ import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
-import { ClipboardText, LayerCard, Meter, Tabs } from '@cloudflare/kumo';
+import { ClipboardText, Meter, Tabs } from '@cloudflare/kumo';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
@@ -25,6 +25,7 @@ import {
   Trash,
   Upload,
 } from '../components/Icons.jsx';
+import { SectionCard } from '../components/ui/AppPrimitives.jsx';
 
 const DEFAULT_FILEBOX_MAX_FILE_SIZE = 100 * 1024 * 1024;
 const EXPIRY_OPTIONS = [
@@ -635,16 +636,13 @@ function FileboxPage({ publicVoidOnly = false } = {}) {
 
       {activeTab === 'share' && (
         <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(22rem,1fr)]">
-          <LayerCard className="p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-kumo-line pb-4">
-              <div>
-                <h2 className="text-base font-bold text-kumo-strong">创建分享</h2>
-                <p className="mt-1 text-xs text-kumo-subtle">生成可直接访问的下载链接，支持文件、文本。</p>
-              </div>
-              <Tabs {...TOOL_TABS_PROPS} value={shareType} onValueChange={(value) => { setShareType(value); setResult(null); }} tabs={SHARE_TYPE_TABS} />
-            </div>
-
-            <div className="mt-4 grid gap-4">
+          <SectionCard
+            title="创建分享"
+            description="生成可直接访问的下载链接，支持文件、文本。"
+            icon={<Send className="h-4 w-4 text-kumo-brand" />}
+            action={<Tabs {...TOOL_TABS_PROPS} value={shareType} onValueChange={(value) => { setShareType(value); setResult(null); }} tabs={SHARE_TYPE_TABS} />}
+            bodyClassName="grid gap-4"
+          >
               {shareType === 'file' ? (
                 <div
                   className="rounded-md border border-dashed border-kumo-line bg-kumo-recessed/35 p-6 text-center"
@@ -681,13 +679,11 @@ function FileboxPage({ publicVoidOnly = false } = {}) {
                 <Button size="sm" variant="secondary" onClick={resetShare}>重置</Button>
                 <Button size="sm" variant="primary" onClick={createShare} loading={loading} icon={<Send className="h-4 w-4" />}>创建分享</Button>
               </div>
-            </div>
-          </LayerCard>
+          </SectionCard>
 
-          <LayerCard className="p-5">
-            <h2 className="text-base font-bold text-kumo-strong">分享结果</h2>
+          <SectionCard title="分享结果" icon={<FileText className="h-4 w-4 text-kumo-brand" />}>
             {!result ? (
-              <div className="mt-4 space-y-3">
+              <div className="space-y-3">
                 <div className="rounded-md border border-dashed border-kumo-line p-8 text-center text-xs text-kumo-subtle">创建后会在这里显示链接、二维码和取用信息。</div>
                 <div className="grid gap-2 rounded-md border border-kumo-line bg-kumo-recessed/30 p-3 text-xs">
                   <div className="flex justify-between gap-3"><span className="text-kumo-subtle">类型</span><span className="font-semibold text-kumo-strong">{shareType === 'file' ? '文件' : '文本'}</span></div>
@@ -713,24 +709,25 @@ function FileboxPage({ publicVoidOnly = false } = {}) {
                 </div>
               </div>
             )}
-          </LayerCard>
+          </SectionCard>
         </div>
       )}
 
       {activeTab === 'history' && (
         <div className="grid gap-4">
-          <LayerCard className="p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-kumo-line pb-3">
-              <div>
-                <h2 className="text-base font-bold text-kumo-strong">分享记录</h2>
-                <p className="mt-1 text-xs text-kumo-subtle">本地最近记录和服务端有效分享。</p>
-              </div>
-              <div className="flex gap-2">
+          <SectionCard
+            title="分享记录"
+            description="本地最近记录和服务端有效分享。"
+            icon={<History className="h-4 w-4 text-kumo-brand" />}
+            actions={(
+              <>
                 <Button size="sm" variant="secondary" onClick={loadServerHistory} loading={historyLoading} icon={<RefreshCw className="h-4 w-4" />}>刷新</Button>
                 <Button size="sm" variant="secondary" onClick={runCleanup} icon={<Clock className="h-4 w-4" />}>清理过期</Button>
-              </div>
-            </div>
-            <div className="mt-4 overflow-x-auto">
+              </>
+            )}
+            bodyPadding="none"
+            bodyClassName="overflow-x-auto"
+          >
               <Table layout="fixed" className="min-w-[820px]">
                 <colgroup><col /><col className="w-24" /><col className="w-32" /><col className="w-36" /><col className="w-32" /></colgroup>
                 <Table.Header><Table.Row><Table.Head>内容</Table.Head><Table.Head>分享码</Table.Head><Table.Head>下载次数</Table.Head><Table.Head>到期</Table.Head><Table.Head>操作</Table.Head></Table.Row></Table.Header>
@@ -750,27 +747,24 @@ function FileboxPage({ publicVoidOnly = false } = {}) {
                   ))}
                 </Table.Body>
               </Table>
-            </div>
-          </LayerCard>
+          </SectionCard>
 
           <div className="grid gap-4 xl:grid-cols-2">
-            <LayerCard className="p-5">
-              <h2 className="text-base font-bold text-kumo-strong">本地最近创建</h2>
-              <div className="mt-3 divide-y divide-kumo-line">
+            <SectionCard title="本地最近创建" icon={<History className="h-4 w-4 text-kumo-brand" />} bodyPadding="none">
+              <div className="divide-y divide-kumo-line">
                 {localHistory.length === 0 ? <div className="py-8 text-center text-xs text-kumo-subtle">暂无本地记录</div> : localHistory.slice(0, 8).map((entry) => (
-                  <div key={entry.code} className="flex items-center justify-between gap-3 py-2.5">
+                  <div key={entry.code} className="flex items-center justify-between gap-3 px-4 py-2.5">
                     <EntryName entry={entry} />
                     <div className="flex shrink-0 items-center gap-2"><span className="font-mono text-xs text-kumo-brand">{entry.code}</span><Button size="sm" variant="secondary" onClick={() => copyLink(entry.code)}>复制</Button></div>
                   </div>
                 ))}
               </div>
-            </LayerCard>
+            </SectionCard>
 
-            <LayerCard className="p-5">
-              <h2 className="text-base font-bold text-kumo-strong">访问日志</h2>
-              <div className="mt-3 max-h-72 overflow-auto divide-y divide-kumo-line">
+            <SectionCard title="访问日志" icon={<Clock className="h-4 w-4 text-kumo-brand" />} bodyPadding="none">
+              <div className="max-h-72 overflow-auto divide-y divide-kumo-line">
                 {accessLogs.length === 0 ? <div className="py-8 text-center text-xs text-kumo-subtle">暂无访问日志</div> : accessLogs.slice(0, 20).map((log) => (
-                  <div key={log.id} className="grid grid-cols-[5rem_5rem_minmax(0,1fr)_9rem] gap-2 py-2 text-xs">
+                  <div key={log.id} className="grid grid-cols-[5rem_5rem_minmax(0,1fr)_9rem] gap-2 px-4 py-2 text-xs">
                     <span className="font-mono text-kumo-brand">{log.code}</span>
                     <span className="text-kumo-strong">{log.action}</span>
                     <span className="truncate text-kumo-subtle">{log.ipAddress || log.userAgent || '-'}</span>
@@ -778,21 +772,19 @@ function FileboxPage({ publicVoidOnly = false } = {}) {
                   </div>
                 ))}
               </div>
-            </LayerCard>
+            </SectionCard>
           </div>
         </div>
       )}
 
       {activeTab === 'settings' && (
-        <LayerCard className="p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-kumo-line pb-4">
-            <div>
-              <h2 className="text-base font-bold text-kumo-strong">文件柜策略</h2>
-              <p className="mt-1 text-xs text-kumo-subtle">这些限制由后端执行，影响新创建的分享。</p>
-            </div>
-            <Button size="sm" variant="secondary" onClick={loadSettings} loading={settingsLoading} icon={<RefreshCw className="h-4 w-4" />}>刷新</Button>
-          </div>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <SectionCard
+          title="文件柜策略"
+          description="这些限制由后端执行，影响新创建的分享。"
+          icon={<Settings className="h-4 w-4 text-kumo-brand" />}
+          action={<Button size="sm" variant="secondary" onClick={loadSettings} loading={settingsLoading} icon={<RefreshCw className="h-4 w-4" />}>刷新</Button>}
+        >
+          <div className="grid gap-4 md:grid-cols-2">
             <Input size="sm" label="最大文件大小 MB" type="number" min="1" value={Math.round((fileboxSettings.max_file_size || DEFAULT_FILEBOX_MAX_FILE_SIZE) / 1024 / 1024)} onChange={(event) => setFileboxSettings((prev) => ({ ...prev, max_file_size: Math.max(1, Number(event.target.value) || 1) * 1024 * 1024 }))} />
             <Input size="sm" label="默认有效期小时" type="number" min="1" value={fileboxSettings.default_expiry_hours || 24} onChange={(event) => setFileboxSettings((prev) => ({ ...prev, default_expiry_hours: Math.max(1, Number(event.target.value) || 24) }))} />
             <div className="md:col-span-2">
@@ -804,21 +796,19 @@ function FileboxPage({ publicVoidOnly = false } = {}) {
             </div>
           </div>
           <div className="mt-4 flex justify-end border-t border-kumo-line pt-4"><Button size="sm" variant="primary" onClick={saveSettings} loading={settingsLoading} icon={<Lock className="h-4 w-4" />}>保存策略</Button></div>
-        </LayerCard>
+        </SectionCard>
       )}
 
       {activeTab === 'void' && (
         <div className={`grid items-start gap-4 ${publicVoidOnly ? 'mx-auto w-full max-w-2xl' : 'xl:grid-cols-[minmax(0,1fr)_minmax(24rem,0.9fr)]'}`}>
           {!publicVoidOnly && (
-          <LayerCard className="p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-kumo-line pb-4">
-              <div>
-                <h2 className="text-base font-bold text-kumo-strong">虚空传输</h2>
-                <p className="mt-1 text-xs text-kumo-subtle">点对点直连传输，服务器只暂存握手信令。</p>
-              </div>
-              <Badge variant="success">P2P</Badge>
-            </div>
-            <div className="mt-4 grid gap-4">
+          <SectionCard
+            title="虚空传输"
+            description="点对点直连传输，服务器只暂存握手信令。"
+            icon={<Send className="h-4 w-4 text-kumo-brand" />}
+            meta={<Badge variant="success">P2P</Badge>}
+            bodyClassName="grid gap-4"
+          >
               <div
                 className="rounded-md border border-dashed border-kumo-line bg-kumo-recessed/35 p-5 text-center transition-colors hover:border-kumo-brand/50"
                 onDragOver={(event) => event.preventDefault()}
@@ -843,19 +833,16 @@ function FileboxPage({ publicVoidOnly = false } = {}) {
                 <Button size="sm" variant="secondary" onClick={() => resetVoidTransfer('已停止')}>停止</Button>
                 <Button size="sm" variant="primary" disabled={!voidCanSend} onClick={startVoidSend} icon={<Send className="h-4 w-4" />}>创建虚空传输</Button>
               </div>
-            </div>
-          </LayerCard>
+          </SectionCard>
           )}
 
-          <LayerCard className="p-5">
-            <div className="flex items-start justify-between gap-3 border-b border-kumo-line pb-4">
-              <div>
-                <h2 className="text-base font-bold text-kumo-strong">{publicVoidOnly ? '接收虚空传输' : '连接状态'}</h2>
-                <p className="mt-1 text-xs text-kumo-subtle">{publicVoidOnly ? '保持本页打开，直连建立后会自动接收。' : '接收方扫码后在这里建立连接。'}</p>
-              </div>
-              <Badge variant={voidStatusVariant}>{voidProgress}%</Badge>
-            </div>
-            <div className="mt-4 grid gap-4">
+          <SectionCard
+            title={publicVoidOnly ? '接收虚空传输' : '连接状态'}
+            description={publicVoidOnly ? '保持本页打开，直连建立后会自动接收。' : '接收方扫码后在这里建立连接。'}
+            icon={<Send className="h-4 w-4 text-kumo-brand" />}
+            meta={<Badge variant={voidStatusVariant}>{voidProgress}%</Badge>}
+            bodyClassName="grid gap-4"
+          >
               <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
                 <Input size="sm" label="房间号" value={voidRoom} onChange={(event) => setVoidRoom(normalizeVoidRoom(event.target.value))} placeholder="扫码会自动填入" />
                 <div className="flex items-end gap-2">
@@ -907,8 +894,7 @@ function FileboxPage({ publicVoidOnly = false } = {}) {
               ) : (
                 !publicVoidOnly && <div className="rounded-md border border-dashed border-kumo-line p-8 text-center text-xs text-kumo-subtle">创建虚空传输后会显示二维码和接收链接。</div>
               )}
-            </div>
-          </LayerCard>
+          </SectionCard>
         </div>
       )}
     </div>

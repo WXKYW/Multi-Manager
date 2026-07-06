@@ -22,7 +22,7 @@ import { Table } from '@cloudflare/kumo/components/table';
 import { ChartPalette, Tabs, TimeseriesChart } from '@cloudflare/kumo';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { AnimatedCollapse, DeferredRender } from '../components/AnimatedCollapse.jsx';
-import { AppCard, ChartCard, ChartWarmupSkeleton, DataTableFrame } from '../components/ui/AppPrimitives.jsx';
+import { ChartCard, ChartWarmupSkeleton, DataTableFrame, SectionCard } from '../components/ui/AppPrimitives.jsx';
 import useStore from '../store.js';
 import {
   Activity,
@@ -1584,21 +1584,16 @@ function UptimePage() {
 
       {uptimeCurrentTab === 'status-pages' && (
         <div className="grid gap-4 xl:grid-cols-[minmax(24rem,0.9fr)_minmax(0,1.1fr)]">
-          <AppCard padding="lg" className="space-y-4">
-            <div className="flex items-start justify-between gap-3 border-b border-kumo-line pb-4">
-              <div className="min-w-0">
-                <h3 className="flex items-center gap-2 text-sm font-semibold text-kumo-strong">
-                  <Globe className="h-4 w-4" />
-                  {statusPageForm.id ? '编辑状态页' : '新建状态页'}
-                </h3>
-                <p className="mt-1 text-xs leading-relaxed text-kumo-subtle">
-                  生成可公开访问的单页状态看板，可绑定独立域名或使用 /status/slug。
-                </p>
-              </div>
-              {statusPageForm.id && (
-                <Button size="sm" variant="secondary" shape="square" icon={<X className="h-3.5 w-3.5" />} onClick={resetStatusPageForm} aria-label="取消编辑" />
-              )}
-            </div>
+          <SectionCard
+            title={statusPageForm.id ? '编辑状态页' : '新建状态页'}
+            description="生成可公开访问的单页状态看板，可绑定独立域名或使用 /status/slug。"
+            icon={<Globe className="h-4 w-4 text-kumo-brand" />}
+            action={statusPageForm.id ? (
+              <Button size="sm" variant="secondary" shape="square" icon={<X className="h-3.5 w-3.5" />} onClick={resetStatusPageForm} aria-label="取消编辑" />
+            ) : null}
+            bodyPadding="lg"
+            bodyClassName="space-y-4"
+          >
 
             <div className="grid gap-3 sm:grid-cols-2">
               <Input
@@ -1726,22 +1721,21 @@ function UptimePage() {
                 {statusPageForm.id ? '保存状态页' : '创建状态页'}
               </Button>
             </div>
-          </AppCard>
+          </SectionCard>
 
-          <AppCard padding="lg" className="space-y-4">
-            <div className="flex flex-col gap-3 border-b border-kumo-line pb-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h3 className="flex items-center gap-2 text-sm font-semibold text-kumo-strong">
-                  <Globe className="h-4 w-4" />
-                  已发布状态页
-                </h3>
-                <p className="mt-1 text-xs text-kumo-subtle">公开单页会显示整体状态、监测项、延迟和 24h 可用率。</p>
-              </div>
-              <div className="flex flex-wrap gap-2">
+          <SectionCard
+            title="已发布状态页"
+            description="公开单页会显示整体状态、监测项、延迟和 24h 可用率。"
+            icon={<Globe className="h-4 w-4 text-kumo-brand" />}
+            actions={(
+              <>
                 <Button size="sm" variant="secondary" icon={<RotateCw className="h-3.5 w-3.5" />} onClick={loadUptimeStatusPages} disabled={uptimeMetaLoading}>刷新</Button>
                 <Button size="sm" variant="secondary" icon={<Plus className="h-3.5 w-3.5" />} onClick={createDefaultStatusPage} disabled={uptimeMetaLoading}>默认页</Button>
-              </div>
-            </div>
+              </>
+            )}
+            bodyPadding="lg"
+            bodyClassName="space-y-4"
+          >
 
             {uptimeMetaLoading && uptimeStatusPages.length === 0 ? (
               <div className="space-y-3">
@@ -1797,23 +1791,17 @@ function UptimePage() {
                 })}
               </div>
             )}
-          </AppCard>
+          </SectionCard>
         </div>
       )}
 
       {uptimeCurrentTab === 'maintenance' && (
-        <AppCard padding="lg" className="space-y-4">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-kumo-line pb-4">
-            <div>
-              <h3 className="text-sm font-semibold text-kumo-strong flex items-center gap-2">
-                <Shield className="w-4 h-4" />
-                维护窗口
-              </h3>
-              <p className="text-xs text-kumo-subtle mt-1">
-                维护期内仍记录检测结果，但会抑制对应告警通知。
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
+        <SectionCard
+          title="维护窗口"
+          description="维护期内仍记录检测结果，但会抑制对应告警通知。"
+          icon={<Shield className="h-4 w-4 text-kumo-brand" />}
+          actions={(
+            <>
               <Button
                 size="sm"
                 variant="secondary"
@@ -1832,8 +1820,11 @@ function UptimePage() {
               >
                 创建 1 小时窗口
               </Button>
-            </div>
-          </div>
+            </>
+          )}
+          bodyPadding="lg"
+          bodyClassName="space-y-4"
+        >
 
           <div className="text-[11px] text-kumo-subtle">
             已选择 {selectedMonitorIds.length} 个监测目标用于快速维护窗口。
@@ -1895,15 +1886,17 @@ function UptimePage() {
               </Table.Body>
             </Table>
           </DataTableFrame>
-        </AppCard>
+        </SectionCard>
       )}
 
       {/* ==================== 2. 添加/修改监测目标 ==================== */}
       {uptimeCurrentTab === 'add' && (
-        <AppCard padding="xl" className="space-y-6">
-          <h3 className="text-sm font-semibold text-kumo-strong border-b border-kumo-line pb-3 select-none">
-            {uptimeForm.id ? '编辑监测目标' : '新建监测目标'}
-          </h3>
+        <SectionCard
+          title={uptimeForm.id ? '编辑监测目标' : '新建监测目标'}
+          icon={<Activity className="h-4 w-4 text-kumo-brand" />}
+          bodyPadding="xl"
+          bodyClassName="space-y-6"
+        >
 
           <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
             {/* 监控类型选择 (Full Width) */}
@@ -2158,24 +2151,18 @@ function UptimePage() {
               保存目标
             </Button>
           </div>
-        </AppCard>
+        </SectionCard>
       )}
 
       {/* ==================== 3. 统计报表 Tab ==================== */}
       {uptimeCurrentTab === 'stats' && (
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
-          <AppCard padding="lg" className="space-y-4">
-            <div className="flex flex-col gap-3 border-b border-kumo-line pb-4 md:flex-row md:items-center md:justify-between">
-              <div>
-                <h3 className="text-sm font-semibold text-kumo-strong flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4" />
-                  配置迁移预览
-                </h3>
-                <p className="text-xs text-kumo-subtle mt-1">
-                  导入前会先比对监测目标、状态页和维护窗口，确认后才写入。
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
+          <SectionCard
+            title="配置迁移预览"
+            description="导入前会先比对监测目标、状态页和维护窗口，确认后才写入。"
+            icon={<TrendingUp className="h-4 w-4 text-kumo-brand" />}
+            actions={(
+              <>
                 <Input
                   ref={uptimeImportInputRef}
                   type="file"
@@ -2190,8 +2177,11 @@ function UptimePage() {
                 <Button size="sm" variant="primary" onClick={() => uptimeImportInputRef.current?.click()} loading={uptimeMetaLoading} icon={<Upload className="w-3.5 h-3.5" />}>
                   选择导入文件
                 </Button>
-              </div>
-            </div>
+              </>
+            )}
+            bodyPadding="lg"
+            bodyClassName="space-y-4"
+          >
 
             {!uptimeImportPreview ? (
               <div className="flex flex-col items-center justify-center py-16 text-kumo-subtle">
@@ -2249,10 +2239,14 @@ function UptimePage() {
                 </DataTableFrame>
               </div>
             )}
-          </AppCard>
+          </SectionCard>
 
-          <AppCard padding="lg" className="space-y-4">
-            <h3 className="text-sm font-semibold text-kumo-strong">导入确认</h3>
+          <SectionCard
+            title="导入确认"
+            icon={<Upload className="h-4 w-4 text-kumo-brand" />}
+            bodyPadding="lg"
+            bodyClassName="space-y-4"
+          >
             <p className="text-xs leading-relaxed text-kumo-subtle">
               导入会按名称、类型、地址等字段匹配已有监测目标；同 slug 状态页、同标题维护窗口会更新。
             </p>
@@ -2279,7 +2273,7 @@ function UptimePage() {
                 清除预览
               </Button>
             )}
-          </AppCard>
+          </SectionCard>
         </div>
       )}
     </div>

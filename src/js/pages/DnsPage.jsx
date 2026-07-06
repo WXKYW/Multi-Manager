@@ -24,6 +24,7 @@ import useStore from '../store.js';
 import useTableResize from '../composables/useTableResize.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
+import { SectionCard } from '../components/ui/AppPrimitives.jsx';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
 import {
@@ -1783,7 +1784,12 @@ function DnsPage() {
       </div>
 
       {!selectedAccountId && !['accounts', 'templates'].includes(activeTab) ? (
-        <LayerCard className="p-8">
+        <SectionCard
+          title="Cloudflare 账号"
+          description="添加 API 令牌后即可管理 DNS、Workers、Pages、R2 和 Tunnel。"
+          icon={<Cloud className="h-4 w-4 text-kumo-brand" />}
+          bodyPadding="xl"
+        >
           <div className="flex flex-col items-center gap-3 text-center text-sm text-kumo-subtle">
             <Cloud className="h-10 w-10 text-kumo-subtle" />
             <div>尚未配置 Cloudflare 账号，请先在“账号”中添加 API 令牌。</div>
@@ -1791,7 +1797,7 @@ function DnsPage() {
               去添加账号
             </Button>
           </div>
-        </LayerCard>
+        </SectionCard>
       ) : (
         <>
           {activeTab === 'dns' && (
@@ -2238,16 +2244,18 @@ function DnsPage() {
           )}
 
           {activeTab === 'workers' && (
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="text-sm text-kumo-subtle">
-                  {workerSubdomain ? <>默认子域名：<span className="font-mono text-kumo-strong">{workerSubdomain}.workers.dev</span></> : 'Workers 默认子域名未返回'}
-                </div>
+            <SectionCard
+              title="Workers"
+              description={workerSubdomain ? <>默认子域名：<span className="font-mono text-kumo-strong">{workerSubdomain}.workers.dev</span></> : 'Workers 默认子域名未返回'}
+              icon={<Terminal className="h-4 w-4 text-kumo-brand" />}
+              action={(
                 <Button size="sm" onClick={() => openWorkerModal()} icon={<Plus className="h-4 w-4" />}>
                   新建 Worker
                 </Button>
-              </div>
-              <LayerCard className="overflow-x-auto p-0">
+              )}
+              bodyPadding="none"
+              bodyClassName="overflow-x-auto"
+            >
                 <Table layout="fixed">
                   <colgroup>{workerColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
                   <Table.Header variant="compact">
@@ -2287,12 +2295,16 @@ function DnsPage() {
                     ))}
                   </Table.Body>
                 </Table>
-              </LayerCard>
-            </div>
+            </SectionCard>
           )}
 
           {activeTab === 'pages' && (
-            <LayerCard className="overflow-x-auto p-0">
+            <SectionCard
+              title="Pages 项目"
+              icon={<Layers className="h-4 w-4 text-kumo-brand" />}
+              bodyPadding="none"
+              bodyClassName="overflow-x-auto"
+            >
               <Table layout="fixed">
                 <colgroup>{pageColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
                 <Table.Header variant="compact">
@@ -2336,7 +2348,7 @@ function DnsPage() {
                   ))}
                 </Table.Body>
               </Table>
-            </LayerCard>
+            </SectionCard>
           )}
 
           {activeTab === 'r2' && (
@@ -2585,13 +2597,17 @@ function DnsPage() {
           )}
 
           {activeTab === 'tunnels' && (
-            <div className="flex flex-col gap-4">
-              <div className="flex justify-end">
+            <SectionCard
+              title="Tunnel"
+              icon={<Lock className="h-4 w-4 text-kumo-brand" />}
+              action={(
                 <Button size="sm" onClick={() => { setTunnelForm({ name: '' }); setModal({ type: 'tunnelCreate', data: null }); }} icon={<Plus className="h-4 w-4" />}>
                   创建 Tunnel
                 </Button>
-              </div>
-              <LayerCard className="overflow-x-auto p-0">
+              )}
+              bodyPadding="none"
+              bodyClassName="overflow-x-auto"
+            >
                 <Table layout="fixed">
                   <colgroup>{tunnelColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
                   <Table.Header variant="compact">
@@ -2632,18 +2648,23 @@ function DnsPage() {
                     ))}
                   </Table.Body>
                 </Table>
-              </LayerCard>
-            </div>
+            </SectionCard>
           )}
 
           {activeTab === 'templates' && (
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-wrap justify-end gap-2">
+            <SectionCard
+              title="DNS 模板"
+              icon={<FileText className="h-4 w-4 text-kumo-brand" />}
+              actions={(
+                <>
                 <Button size="sm" variant="secondary" onClick={() => openImportModal('templates')} icon={<Upload className="h-4 w-4" />}>导入模板</Button>
                 <Button size="sm" variant="secondary" onClick={() => downloadJson(`cloudflare-dns-templates-${Date.now()}.json`, { version: '1.0', templates })} icon={<Download className="h-4 w-4" />}>导出模板</Button>
                 <Button size="sm" onClick={() => openTemplateModal()} icon={<Plus className="h-4 w-4" />}>添加模板</Button>
-              </div>
-              <LayerCard className="overflow-x-auto p-0">
+                </>
+              )}
+              bodyPadding="none"
+              bodyClassName="overflow-x-auto"
+            >
                 <Table layout="fixed">
                   <colgroup>{templateColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
                   <Table.Header variant="compact">
@@ -2680,18 +2701,23 @@ function DnsPage() {
                     ))}
                   </Table.Body>
                 </Table>
-              </LayerCard>
-            </div>
+            </SectionCard>
           )}
 
           {activeTab === 'accounts' && (
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-wrap justify-end gap-2">
+            <SectionCard
+              title="Cloudflare 账号"
+              icon={<Settings className="h-4 w-4 text-kumo-brand" />}
+              actions={(
+                <>
                 <Button size="sm" variant="secondary" onClick={exportAccounts} icon={<Download className="h-4 w-4" />}>导出账号</Button>
                 <Button size="sm" variant="secondary" onClick={() => openImportModal('accounts')} icon={<Upload className="h-4 w-4" />}>导入账号</Button>
                 <Button size="sm" onClick={() => openAccountModal()} icon={<Plus className="h-4 w-4" />}>添加账号</Button>
-              </div>
-              <LayerCard className="overflow-x-auto p-0">
+                </>
+              )}
+              bodyPadding="none"
+              bodyClassName="overflow-x-auto"
+            >
                 <Table layout="fixed">
                   <colgroup>{accountColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
                   <Table.Header variant="compact">
@@ -2737,8 +2763,7 @@ function DnsPage() {
                     ))}
                   </Table.Body>
                 </Table>
-              </LayerCard>
-            </div>
+            </SectionCard>
           )}
         </>
       )}

@@ -9,6 +9,13 @@ const PublicServerStatusPage = lazy(() => import('./pages/PublicServerStatusPage
 
 const isLocalHost = (host) => /^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(host || '');
 
+const isDockerMockPreviewRoute = () => (
+  typeof window !== 'undefined'
+  && import.meta.env?.DEV
+  && isLocalHost(window.location.host)
+  && new URLSearchParams(window.location.search).has('mockDocker')
+);
+
 const getPublicStatusRouteMode = () => {
   if (typeof window === 'undefined') return false;
   const path = window.location.pathname.replace(/\/+$/, '') || '/';
@@ -22,11 +29,22 @@ function App() {
   const { isAuthenticated, checkAuth, isCheckingAuth, themeMode } = useStore();
   const [domainStatusRoute, setDomainStatusRoute] = useState(null);
   const publicStatusRouteMode = getPublicStatusRouteMode();
+  const dockerMockPreview = isDockerMockPreviewRoute();
 
   // 挂载时自动运行初始身份校验
   useEffect(() => {
+    if (dockerMockPreview) {
+      useStore.setState({
+        isAuthenticated: true,
+        isCheckingAuth: false,
+        showLoginModal: false,
+        showSetPasswordModal: false,
+        userSettingsLoaded: true,
+      });
+      return;
+    }
     checkAuth();
-  }, [checkAuth]);
+  }, [checkAuth, dockerMockPreview]);
 
   // 同步主题至 html class
   useEffect(() => {
@@ -82,7 +100,7 @@ function App() {
     return null;
   }
 
-  if (isAuthenticated) {
+  if (isAuthenticated || dockerMockPreview) {
     return <MainLayout />;
   }
 

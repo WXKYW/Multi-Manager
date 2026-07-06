@@ -4,9 +4,9 @@ import { Input } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Switch } from '@cloudflare/kumo/components/switch';
-import { LayerCard } from '@cloudflare/kumo';
 import { toast } from '../modules/toast.js';
 import { Download, FileText, RefreshCw, Search } from '../components/Icons.jsx';
+import { SectionCard } from '../components/ui/AppPrimitives.jsx';
 
 const LEVELS = [
   { value: 'all', label: '全部' },
@@ -176,13 +176,12 @@ export default function SystemLogsPage() {
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4">
-      <LayerCard className="p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-kumo-line pb-3">
-          <div className="min-w-0">
-            <h1 className="text-lg font-semibold text-kumo-strong">系统日志</h1>
-            <p className="mt-1 truncate text-xs text-kumo-subtle">{logPath || '查看、筛选并下载 Go 后端应用日志。'}</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
+      <SectionCard
+        title="系统日志"
+        description={logPath || '查看、筛选并下载 Go 后端应用日志。'}
+        icon={<FileText className="h-4 w-4 text-kumo-brand" />}
+        actions={(
+          <>
             <Badge variant="secondary">{lines.length} 条</Badge>
             <label className="flex h-8 items-center gap-2 rounded-md border border-kumo-line bg-kumo-recessed px-2 text-xs text-kumo-subtle">
               <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />
@@ -194,24 +193,23 @@ export default function SystemLogsPage() {
             </label>
             <Button size="sm" variant="secondary" onClick={download} icon={<Download className="h-3.5 w-3.5" />}>下载</Button>
             <Button size="sm" variant="primary" onClick={load} loading={loading} icon={<RefreshCw className="h-3.5 w-3.5" />}>刷新</Button>
-          </div>
-        </div>
-
-        <div className="mt-3 grid gap-3 md:grid-cols-[11rem_minmax(0,1fr)_auto] md:items-end">
+          </>
+        )}
+      >
+        <div className="grid gap-3 md:grid-cols-[11rem_minmax(0,1fr)_auto] md:items-end">
           <Select size="sm" label="级别" className="w-full" value={level} onValueChange={setLevel} items={LEVELS} />
           <Input size="sm" label="关键字 / 正则" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && load()} placeholder="输入关键字或正则后回车" />
           <Button size="sm" variant="secondary" onClick={load} icon={<Search className="h-3.5 w-3.5" />}>检索</Button>
         </div>
-      </LayerCard>
+      </SectionCard>
 
-      <section className="overflow-hidden rounded-lg border border-kumo-line bg-[#08090b] text-zinc-100 shadow-none">
-        <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-white/[0.05] px-3 py-2 text-[11px] text-zinc-400">
-          <div className="flex min-w-0 items-center gap-2">
-            <FileText className="h-3.5 w-3.5 text-zinc-300" />
-            <span className="truncate font-semibold text-zinc-100">{logPath || 'app.log'}</span>
-          </div>
-          <span className="shrink-0">{lines.length} lines</span>
-        </div>
+      <SectionCard
+        title={logPath || 'app.log'}
+        icon={<FileText className="h-4 w-4 text-kumo-brand" />}
+        meta={<span className="text-[10px] font-mono text-kumo-subtle">{lines.length} lines</span>}
+        bodyPadding="none"
+        bodyClassName="bg-[#08090b] text-zinc-100"
+      >
         {lines.length === 0 ? (
           <div className="flex min-h-80 flex-col items-center justify-center gap-2 px-6 py-12 text-center text-zinc-500">
             <FileText className="h-8 w-8" />
@@ -237,7 +235,7 @@ export default function SystemLogsPage() {
             ))}
           </div>
         )}
-      </section>
+      </SectionCard>
     </div>
   );
 }

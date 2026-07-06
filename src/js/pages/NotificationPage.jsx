@@ -10,6 +10,7 @@ import { Checkbox } from '@cloudflare/kumo/components/checkbox';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Tabs } from '@cloudflare/kumo';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
+import { SectionCard } from '../components/ui/AppPrimitives.jsx';
 import {
   Bell,
   Plus,
@@ -1018,15 +1019,13 @@ function NotificationPage() {
       {notificationCurrentTab === 'events' && (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {notificationEventCatalog.map((item) => (
-            <div key={item.module} className="app-card p-4">
-              <div className="flex items-center justify-between gap-3 border-b border-kumo-line pb-3">
-                <div className="flex items-center gap-2">
-                  <Info className="w-4 h-4 text-kumo-brand" />
-                  <h3 className="text-sm font-bold text-kumo-strong">{getSourceModuleName(item.module)}</h3>
-                </div>
-                <span className="text-[10px] font-mono text-kumo-subtle">{item.events?.length || 0}</span>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
+            <SectionCard
+              key={item.module}
+              title={getSourceModuleName(item.module)}
+              icon={<Info className="w-4 h-4 text-kumo-brand" />}
+              meta={<span className="text-[10px] font-mono text-kumo-subtle">{item.events?.length || 0}</span>}
+            >
+              <div className="flex flex-wrap gap-2">
                 {(item.events || []).map((eventName) => (
                   <span
                     key={`${item.module}-${eventName}`}
@@ -1036,7 +1035,7 @@ function NotificationPage() {
                   </span>
                 ))}
               </div>
-            </div>
+            </SectionCard>
           ))}
         </div>
       )}
@@ -1157,11 +1156,13 @@ function NotificationPage() {
 
       {/* ==================== 4. 全局配置 Tab ==================== */}
       {notificationCurrentTab === 'settings' && (
-        <div className="app-card p-6 space-y-6">
-          <h3 className="text-sm font-semibold text-kumo-strong border-b border-kumo-line pb-3 select-none">
-            全局配置选项
-          </h3>
-
+        <SectionCard
+          title="全局配置选项"
+          description="配置通知聚合、限频与看板链接。"
+          icon={<Settings className="w-4 h-4 text-kumo-brand" />}
+          bodyClassName="space-y-6"
+          bodyPadding="xl"
+        >
           <div className="space-y-4">
             {/* Base URL */}
             <div className="space-y-1.5">
@@ -1223,7 +1224,7 @@ function NotificationPage() {
               保存全局配置
             </Button>
           </div>
-        </div>
+        </SectionCard>
       )}
 
       {/* ==================== 6. 弹窗 1: 添加/编辑通道 ==================== */}

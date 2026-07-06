@@ -104,6 +104,9 @@ const LEGACY_MODULE_PATHS = {
 
 const getPathModule = (pathname) => {
   const normalized = pathname.replace(/\/+$/, '') || '/';
+  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mockDocker')) {
+    return 'server';
+  }
   if (normalized === '/') return 'dashboard';
   const route = normalized.slice(1);
   if (LEGACY_MODULE_PATHS[route]) return LEGACY_MODULE_PATHS[route];
@@ -282,6 +285,9 @@ function MainLayout() {
       const currentTab = useStore.getState().mainActiveTab;
       if (currentTab !== routeTab) {
         useStore.getState().setMainActiveTab(routeTab);
+      }
+      if (routeTab === 'server' && new URLSearchParams(window.location.search).has('mockDocker') && window.location.pathname !== '/server') {
+        window.history.replaceState({ module: 'server' }, '', `/server${window.location.search}`);
       }
     };
 

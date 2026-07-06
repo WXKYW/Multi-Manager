@@ -12,7 +12,7 @@ import {
   InlineStatusPill,
   PageStack,
   PageToolbar,
-  SectionHeader,
+  SectionCard,
   cx,
 } from '../components/ui/AppPrimitives.jsx';
 import {
@@ -419,10 +419,12 @@ function RouteDetail({ route, openapiRoute }) {
   const curl = `curl -X ${route.methods?.[0] || 'GET'} "${window.location.origin}${route.prefix}"`;
 
   return (
-    <AppCard padding="lg" className={cx(fixedPanelClass, 'min-h-0 overflow-y-auto')}>
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-kumo-line pb-4">
-        <div className="min-w-0">
-          <div className="mb-2 flex flex-wrap items-center gap-2">
+    <SectionCard
+      title={<span className="break-all font-mono text-base">{route.prefix}</span>}
+      description={route.description}
+      icon={<FileText className="h-4 w-4 text-kumo-brand" />}
+      meta={(
+        <div className="flex flex-wrap items-center gap-2">
             <InlineStatusPill tone={STATUS_TONE[route.status]}>
               {STATUS_LABEL[route.status] || route.status}
             </InlineStatusPill>
@@ -432,12 +434,9 @@ function RouteDetail({ route, openapiRoute }) {
             <InlineStatusPill tone="neutral">
               {RESPONSE_LABEL[route.responseMode] || route.responseMode}
             </InlineStatusPill>
-          </div>
-          <h2 className="break-all font-mono text-base font-bold text-kumo-strong">
-            {route.prefix}
-          </h2>
-          <p className="mt-2 text-sm leading-relaxed text-kumo-subtle">{route.description}</p>
         </div>
+      )}
+      actions={(
         <div className="flex shrink-0 gap-2">
           <Button
             size="sm"
@@ -458,7 +457,11 @@ function RouteDetail({ route, openapiRoute }) {
             <span>cURL</span>
           </Button>
         </div>
-      </div>
+      )}
+      className={cx(fixedPanelClass, 'min-h-0')}
+      bodyPadding="lg"
+      bodyClassName="min-h-0 overflow-y-auto"
+    >
 
       <div className="grid gap-3 py-4 sm:grid-cols-2">
         <InfoRow label="模块" value={route.module} />
@@ -494,7 +497,7 @@ function RouteDetail({ route, openapiRoute }) {
           </div>
         )}
       </div>
-    </AppCard>
+    </SectionCard>
   );
 }
 
@@ -588,8 +591,7 @@ function AIAccessConsole({
           <StatCard icon={Activity} label="审计记录" value={audit.length} tone="warning" />
         </div>
 
-        <AppCard padding="md">
-          <SectionHeader title="Agent Key" />
+        <SectionCard title="Agent Key" icon={<Key className="h-4 w-4 text-kumo-brand" />}>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <div className="min-w-0 flex-1 truncate rounded-md border border-kumo-line bg-kumo-recessed/40 px-3 py-2 font-mono text-xs font-bold text-kumo-strong">
               {keyVisible ? agentKey.value : agentKey.masked}
@@ -605,10 +607,9 @@ function AIAccessConsole({
               <span>轮换</span>
             </Button>
           </div>
-        </AppCard>
+        </SectionCard>
 
-        <AppCard padding="md">
-          <SectionHeader title="接入地址" />
+        <SectionCard title="接入地址" icon={<Plug className="h-4 w-4 text-kumo-brand" />}>
           <div className="space-y-2">
             {Object.entries(endpoints).map(([key, value]) => (
               <button
@@ -622,10 +623,9 @@ function AIAccessConsole({
               </button>
             ))}
           </div>
-        </AppCard>
+        </SectionCard>
 
-        <AppCard padding="md">
-          <SectionHeader title="调用策略" />
+        <SectionCard title="调用策略" icon={<Shield className="h-4 w-4 text-kumo-brand" />}>
           <div className="grid gap-2 text-xs text-kumo-subtle">
             <div className="flex items-center justify-between gap-2 rounded-md border border-kumo-line/80 bg-kumo-recessed/25 px-3 py-2">
               <span>允许方法</span>
@@ -639,10 +639,9 @@ function AIAccessConsole({
               {policy.auth || 'Agent Key 调用会写入审计记录。'}
             </div>
           </div>
-        </AppCard>
+        </SectionCard>
 
-        <AppCard padding="md">
-          <SectionHeader title="MCP 服务" />
+        <SectionCard title="MCP 服务" icon={<Plug className="h-4 w-4 text-kumo-brand" />} bodyClassName="space-y-3">
           <div className="grid gap-2">
             <Input size="sm" value={mcpForm.name} onChange={(event) => setMcpForm({ ...mcpForm, name: event.target.value })} placeholder="服务名称" className="text-xs" />
             <div className="grid gap-2 sm:grid-cols-2">
@@ -701,12 +700,15 @@ function AIAccessConsole({
               </div>
             ))}
           </div>
-        </AppCard>
+        </SectionCard>
       </div>
 
       <div className={cx(fixedPanelClass, 'min-h-0 space-y-4 overflow-y-auto px-px pb-2 pr-1 pt-px')}>
-        <AppCard padding="md">
-          <SectionHeader title="连接 AI" action={<InlineStatusPill tone="success">MCP 已就绪</InlineStatusPill>} />
+        <SectionCard
+          title="连接 AI"
+          icon={<Bot className="h-4 w-4 text-kumo-brand" />}
+          action={<InlineStatusPill tone="success">MCP 已就绪</InlineStatusPill>}
+        >
           <div className="grid gap-2 md:grid-cols-3">
             {[
               { step: '1', title: '复制配置', text: '复制 Codex MCP 或 Claude Desktop 配置，配置内已包含 Agent Key。' },
@@ -724,19 +726,20 @@ function AIAccessConsole({
               </div>
             ))}
           </div>
-        </AppCard>
+        </SectionCard>
 
-        <AppCard padding="md">
-          <SectionHeader title="一键配置" action={<Button size="sm" variant="secondary" onClick={onRefresh}>刷新</Button>} />
-          <div className="grid gap-3">
-            <SnippetBox label="Codex MCP" value={formatJSON(configs.codex)} onCopy={onCopy} />
-            <SnippetBox label="Claude Desktop" value={formatJSON(configs.claudeDesktop)} onCopy={onCopy} />
-            <SnippetBox label="cURL" value={configs.curl || ''} onCopy={onCopy} />
-          </div>
-        </AppCard>
+        <SectionCard
+          title="一键配置"
+          icon={<Settings className="h-4 w-4 text-kumo-brand" />}
+          action={<Button size="sm" variant="secondary" onClick={onRefresh}>刷新</Button>}
+          bodyClassName="grid gap-3"
+        >
+          <SnippetBox label="Codex MCP" value={formatJSON(configs.codex)} onCopy={onCopy} />
+          <SnippetBox label="Claude Desktop" value={formatJSON(configs.claudeDesktop)} onCopy={onCopy} />
+          <SnippetBox label="cURL" value={configs.curl || ''} onCopy={onCopy} />
+        </SectionCard>
 
-        <AppCard padding="md">
-          <SectionHeader title="Skill 管理" />
+        <SectionCard title="Skill 管理" icon={<Bot className="h-4 w-4 text-kumo-brand" />} bodyClassName="space-y-3">
           <div className="grid gap-2">
             <div className="grid gap-2 sm:grid-cols-2">
               <Input size="sm" value={skillForm.name} onChange={(event) => setSkillForm({ ...skillForm, name: event.target.value })} placeholder="Skill 名称" className="text-xs" />
@@ -791,10 +794,13 @@ function AIAccessConsole({
               </div>
             ))}
           </div>
-        </AppCard>
+        </SectionCard>
 
-        <AppCard padding="md">
-          <SectionHeader title="AI 工具" action={<InlineStatusPill tone="info">Agent 可调用</InlineStatusPill>} />
+        <SectionCard
+          title="AI 工具"
+          icon={<Settings className="h-4 w-4 text-kumo-brand" />}
+          action={<InlineStatusPill tone="info">Agent 可调用</InlineStatusPill>}
+        >
           <div className="grid gap-2">
             {tools.map((tool) => (
               <div key={tool.name} className="rounded-md border border-kumo-line/80 bg-kumo-recessed/25 p-3">
@@ -808,10 +814,13 @@ function AIAccessConsole({
               </div>
             ))}
           </div>
-        </AppCard>
+        </SectionCard>
 
-        <AppCard padding="md">
-          <SectionHeader title="调用审计" action={<Button size="sm" variant="secondary" onClick={onClearAudit}>清空</Button>} />
+        <SectionCard
+          title="调用审计"
+          icon={<Activity className="h-4 w-4 text-kumo-brand" />}
+          action={<Button size="sm" variant="secondary" onClick={onClearAudit}>清空</Button>}
+        >
           <div className="space-y-2">
             {audit.length === 0 && <div className="rounded-md border border-kumo-line/80 bg-kumo-recessed/25 p-3 text-xs text-kumo-subtle">暂无审计记录</div>}
             {audit.map((item) => (
@@ -827,7 +836,7 @@ function AIAccessConsole({
               </div>
             ))}
           </div>
-        </AppCard>
+        </SectionCard>
       </div>
     </div>
   );

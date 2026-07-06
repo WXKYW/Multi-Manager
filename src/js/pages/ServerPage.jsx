@@ -10,7 +10,7 @@ import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Checkbox } from '@cloudflare/kumo/components/checkbox';
 import { Switch } from '@cloudflare/kumo/components/switch';
-import { ChartLegend, ChartPalette, ClipboardText, LayerCard, Meter, Tabs, TimeseriesChart } from '@cloudflare/kumo';
+import { ChartLegend, ChartPalette, ClipboardText, Collapsible, LayerCard, Meter, Tabs, TimeseriesChart } from '@cloudflare/kumo';
 import { Table } from '@cloudflare/kumo/components/table';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { AnimatedCollapse, DeferredRender } from '../components/AnimatedCollapse.jsx';
@@ -21,6 +21,7 @@ import {
   ChartBoundaryBox,
   ChartWarmupSkeleton,
   ScrollableTable,
+  SectionCard,
 } from '../components/ui/AppPrimitives.jsx';
 import useTableResize from '../composables/useTableResize.js';
 import { formatUptime, formatFileSize, formatDateTime, maskAddress, parseSpeed } from '../modules/utils.js';
@@ -73,7 +74,6 @@ import {
   Cloud,
   Globe,
   Activity,
-  History,
   RefreshCw,
   ArrowRight,
   Box,
@@ -174,18 +174,13 @@ const COMPACT_INLINE_BOX_CLASS = 'border border-kumo-interact/70 shadow-none';
 const COMPACT_INLINE_SUBBOX_CLASS = 'border border-kumo-interact/70 shadow-none';
 const COMPACT_STICKY_ACTION_CLASS = 'border-l border-kumo-interact/60 before:!w-1 before:!-left-1';
 const COMPACT_ACTION_BUTTON_CLASS = '!shadow-none';
-const SERVER_SECONDARY_BAR_CLASS = 'flex flex-col gap-2 rounded-md border border-kumo-line/90 bg-kumo-base px-2 py-1.5 lg:flex-row lg:items-center lg:justify-between';
+const SERVER_SECTION_HEADER_CLASS = 'flex min-h-[56px] items-center justify-between gap-3 border-b border-kumo-line bg-kumo-recessed/20 px-4 py-3.5';
+const SERVER_SECONDARY_BAR_CLASS = 'flex min-h-[46px] flex-col gap-2 rounded-md border border-kumo-line/90 bg-kumo-base px-3 py-2 lg:flex-row lg:items-center lg:justify-between';
 const SERVER_SECONDARY_TABS_GROUP_CLASS = 'flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto whitespace-nowrap p-0.5 scrollbar-thin sm:gap-2';
-const HOST_FILTER_TABS_CLASS = 'w-fit max-w-full !ring !ring-inset !ring-kumo-interact/50';
+const HOST_FILTER_TABS_CLASS = 'w-fit max-w-full';
 const HOST_FILTER_TABS_LIST_CLASS = 'w-fit max-w-full';
-const HOST_FILTER_TABS_INDICATOR_CLASS = '!shadow-none !ring-0 border border-kumo-interact/60';
-const HOST_TOOLBAR_BUTTON_CLASS = '!h-6.5 !rounded-md !shadow-none';
-const HOST_TOOLBAR_SELECT_CLASS = '!h-6.5 !app-card app-card-md px-2.5 py-1 text-xs focus:outline-none';
-const MANAGEMENT_CARD_CLASS = 'self-start overflow-hidden p-0 shadow-none';
-const MANAGEMENT_CARD_HEADER_CLASS = 'flex h-9 items-center justify-between gap-3 border-b border-kumo-line bg-kumo-recessed/20 px-3';
-const MANAGEMENT_CARD_TITLE_CLASS = 'flex min-w-0 items-center gap-2 text-sm font-bold text-kumo-strong';
+const HOST_FILTER_TABS_INDICATOR_CLASS = undefined;
 const MANAGEMENT_CARD_ICON_CLASS = 'h-3.5 w-3.5 shrink-0 text-kumo-brand';
-const MANAGEMENT_CARD_BODY_CLASS = 'p-3';
 const SERVER_MODULE_TAB_ICON_CLASS = 'h-3.5 w-3.5 shrink-0';
 const COMPACT_EXPAND_EXIT_MS = 230;
 const SERVER_CHART_SERIES_DEFER_MS = 44;
@@ -988,6 +983,8 @@ const toNumber = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const DOCKER_STATS_HISTORY_LIMIT = 48;
+const DOCKER_STATS_MOCK_POINTS = 24;
 const SERVER_CHART_COALESCE_WINDOW_MS = 500;
 const SERVER_NETWORK_QUALITY_MAX_POINTS = 240;
 const SERVER_EXPAND_INTERACTION_GUARD_MS = 420;
@@ -1593,7 +1590,7 @@ const getServerMetricDisplay = (serverId, metricsSource, isExpanded, isDarkMode)
     rxColor,
     cpuMemSeries: isExpanded ? getMetricSeries(chartRecords, [
       { name: 'CPU (%)', color: cpuColor, value: r => toNumber(r.cpu_usage, 0) },
-      { name: 'Memory (%)', color: memColor, value: r => toNumber(r.mem_usage, 0) },
+      { name: '内存 (%)', color: memColor, value: r => toNumber(r.mem_usage, 0) },
       { name: 'CPU Temp (°C)', color: cpuTempColor, value: getCpuTemp },
     ], { normalized: true }) : EMPTY_METRIC_RECORDS,
     gpuSeries: isExpanded ? getMetricSeries(chartRecords, [
@@ -1925,6 +1922,46 @@ const getComposeStatus = (project = {}) => (
   String(project.Status || project.status || '-')
 );
 
+const formatComposeStatusLabel = (status = '') => {
+  const normalized = String(status || '').trim();
+  const lower = normalized.toLowerCase();
+  const count = normalized.match(/\((\d+)\)/)?.[1];
+  if (lower.includes('running')) return count ? `运行中 ${count} 个服务` : '运行中';
+  if (lower.includes('exited') || lower.includes('stopped')) return count ? `已停止 ${count} 个服务` : '已停止';
+  if (lower.includes('paused')) return count ? `已暂停 ${count} 个服务` : '已暂停';
+  return normalized || '-';
+};
+
+const getDockerTaskStateLabel = (state = '') => {
+  const normalized = String(state || '').toLowerCase();
+  if (normalized === 'success' || normalized === 'succeeded') return '成功';
+  if (normalized === 'failed' || normalized === 'error') return '失败';
+  if (normalized === 'timeout') return '超时';
+  if (normalized === 'cancelled' || normalized === 'canceled') return '已取消';
+  if (normalized === 'pending' || normalized === 'queued') return '排队中';
+  if (normalized === 'running' || normalized === 'processing') return '执行中';
+  return state || '执行中';
+};
+
+const getDockerTaskActionLabel = (action = '') => {
+  const labels = {
+    'container.checkUpdates': '检测容器更新',
+    'container.update': '更新容器',
+    'container.start': '启动容器',
+    'container.stop': '停止容器',
+    'container.restart': '重启容器',
+    'container.pause': '暂停容器',
+    'container.unpause': '恢复容器',
+    'container.delete': '删除容器',
+    'compose.up': '启动 Compose 项目',
+    'compose.down': '停止 Compose 项目',
+    'image.prune': '清理镜像',
+    'network.prune': '清理网络',
+    'volume.prune': '清理存储卷',
+  };
+  return labels[action] || action || '-';
+};
+
 const getDockerOverviewScope = (tab) => {
   const scopes = {
     containers: 'containers',
@@ -1935,6 +1972,119 @@ const getDockerOverviewScope = (tab) => {
     stats: 'stats',
   };
   return scopes[tab] || 'containers';
+};
+
+const getDockerOverviewResourceCount = (server = {}, tab = '') => {
+  const resources = server.resources || {};
+  if (tab === 'compose') return asArray(resources.composeProjects).length;
+  if (tab === 'images') return asArray(resources.images).length;
+  if (tab === 'networks') return asArray(resources.networks).length;
+  if (tab === 'volumes') return asArray(resources.volumes).length;
+  if (tab === 'stats') return asArray(resources.stats).length;
+  return asArray(resources.containers).length;
+};
+
+const isDockerOverviewHostVisible = (server = {}, tab = '') => (
+  !!server.docker?.installed || getDockerOverviewResourceCount(server, tab) > 0
+);
+
+const isDockerMockPreviewEnabled = () => (
+  typeof window !== 'undefined'
+  && import.meta.env?.DEV
+  && new URLSearchParams(window.location.search).has('mockDocker')
+);
+
+const DOCKER_LOG_TAIL_ITEMS = [
+  { value: '100', label: '100 行' },
+  { value: '200', label: '200 行' },
+  { value: '500', label: '500 行' },
+  { value: '1000', label: '1000 行' },
+];
+
+const createMockDockerOverview = () => {
+  const servers = [
+    {
+      id: 'mock-hk',
+      name: '香港',
+      status: 'online',
+      docker: { installed: true },
+      resources: {
+        containers: [
+          { id: 'ca0c6b6aced2', name: 'siyuan1', image: 'demoshang/siyuan:latest', state: 'running', status: 'Up 3 days', ports: '-' },
+          { id: '76cb1d7413f9', name: 'siyuan', image: 'demoshang/siyuan:latest', state: 'running', status: 'Up 9 days', ports: '6806:6806/tcp' },
+          { id: 'd47c255e2d48', name: 'api-monitor', image: 'iwvw/api-monitor:dev', state: 'running', status: 'Up 2 hours', ports: '3000:3000/tcp' },
+          { id: '3b671d99cb57', name: 'vertex2api', image: 'iwvw/vertex2api:main', state: 'running', status: 'Up 12 hours', ports: '2156:2156/tcp' },
+          { id: '9561e5097b35', name: 'mongo', image: 'mongo:latest', state: 'running', status: 'Up 22 days', ports: '27017/tcp' },
+          { id: 'b201e1bcdd78', name: 'openresty', image: '1panel/openresty:1.29.2.5-0-noble', state: 'running', status: 'Up 22 days', ports: '80:80/tcp, 443:443/tcp' },
+          { id: '6679aee4b9d1', name: 'halowebui', image: 'ghcr.io/ztx888/halowebui:slim', state: 'running', status: 'Up 8 days', ports: '3770:8080/tcp' },
+          { id: 'a2d735c4b8f0', name: 'wordai', image: 'iwvw/wordai:latest', state: 'running', status: 'Up 5 days', ports: '8380:80/tcp' },
+          { id: 'a8c2ff1900df', name: 'uptime-kuma', image: 'louislam/uptime-kuma:2', state: 'running', status: 'Up 17 days', ports: '3001:3001/tcp' },
+          { id: 'c782442c1f12', name: 'redis', image: 'redis:alpine', state: 'running', status: 'Up 17 days', ports: '6379/tcp' },
+          { id: 'ea19ab776a20', name: 'mx-server', image: 'innei/mx-server:11.0.5', state: 'running', status: 'Up 4 days', ports: '2333:2333/tcp' },
+          { id: '93ab2010df58', name: 'shiro', image: 'innei/shiroi:latest', state: 'paused', status: 'Paused', ports: '2323:2323/tcp' },
+        ],
+        images: [
+          { id: 'sha256:api', repository: 'iwvw/api-monitor', tag: 'dev', size: '218MB', created: '2026-07-04' },
+          { id: 'sha256:redis', repository: 'redis', tag: 'alpine', size: '42MB', created: '2026-06-29' },
+        ],
+        networks: [
+          { id: 'net-front', name: 'frontend', driver: 'bridge', scope: 'local' },
+          { id: 'net-db', name: 'database', driver: 'bridge', scope: 'local' },
+        ],
+        volumes: [
+          { name: 'mongo_data', driver: 'local', mountpoint: '/var/lib/docker/volumes/mongo_data/_data' },
+          { name: 'kuma_data', driver: 'local', mountpoint: '/var/lib/docker/volumes/kuma_data/_data' },
+        ],
+        stats: [
+          { container_id: 'd47c255e2d48', name: 'api-monitor', cpu_percent: '1.8%', mem_usage: '122MiB / 1.9GiB', mem_percent: '6.2%', net_io: '12MB / 8MB', block_io: '55MB / 4MB' },
+          { container_id: '9561e5097b35', name: 'mongo', cpu_percent: '0.7%', mem_usage: '346MiB / 1.9GiB', mem_percent: '17.8%', net_io: '4MB / 5MB', block_io: '210MB / 40MB' },
+        ],
+        composeProjects: [
+          { Name: 'edge-stack', Status: 'running(4)', ConfigFiles: '/srv/edge/docker-compose.yml', WorkingDir: '/srv/edge' },
+        ],
+      },
+    },
+    {
+      id: 'mock-sg',
+      name: '新加坡',
+      status: 'online',
+      docker: { installed: true },
+      resources: {
+        containers: [
+          { id: 'f1c1f2a10111', name: 'gateway', image: 'nginx:1.27-alpine', state: 'running', status: 'Up 4 days', ports: '8080:80/tcp' },
+          { id: 'f1c1f2a10222', name: 'worker', image: 'iwvw/worker:main', state: 'running', status: 'Up 2 days', ports: '-' },
+          { id: 'f1c1f2a10333', name: 'archive-db', image: 'postgres:16-alpine', state: 'exited', status: 'Exited (0) 3 hours ago', ports: '5432/tcp' },
+        ],
+        images: [
+          { id: 'sha256:nginx-sg', repository: 'nginx', tag: '1.27-alpine', size: '74MB', created: '2026-07-02' },
+          { id: 'sha256:worker-sg', repository: 'iwvw/worker', tag: 'main', size: '156MB', created: '2026-07-03' },
+        ],
+        networks: [
+          { id: 'net-edge-sg', name: 'edge', driver: 'bridge', scope: 'local' },
+        ],
+        volumes: [
+          { name: 'archive_pgdata', driver: 'local', mountpoint: '/var/lib/docker/volumes/archive_pgdata/_data' },
+        ],
+        stats: [
+          { container_id: 'f1c1f2a10111', name: 'gateway', cpu_percent: '0.9%', mem_usage: '86MiB / 1.9GiB', mem_percent: '4.4%', net_io: '6MB / 9MB', block_io: '18MB / 7MB' },
+          { container_id: 'f1c1f2a10222', name: 'worker', cpu_percent: '1.4%', mem_usage: '214MiB / 1.9GiB', mem_percent: '11.1%', net_io: '8MB / 5MB', block_io: '72MB / 13MB' },
+        ],
+        composeProjects: [],
+      },
+    },
+  ];
+
+  const updateChecks = [
+    { serverId: 'mock-hk', containerId: 'd47c255e2d48', containerName: 'api-monitor', image: 'iwvw/api-monitor:dev', currentDigest: 'sha256:local-api', latestDigest: 'sha256:remote-api', hasUpdate: true },
+    { serverId: 'mock-hk', containerId: '9561e5097b35', containerName: 'mongo', image: 'mongo:latest', currentDigest: 'sha256:local-mongo', latestDigest: 'sha256:remote-mongo', hasUpdate: true },
+    { serverId: 'mock-hk', containerId: 'ca0c6b6aced2', containerName: 'siyuan1', image: 'demoshang/siyuan:latest', currentDigest: 'sha256:siyuan', latestDigest: 'sha256:siyuan', hasUpdate: false },
+    { serverId: 'mock-sg', containerId: 'f1c1f2a10222', containerName: 'worker', image: 'iwvw/worker:main', currentDigest: 'sha256:local-worker', latestDigest: 'sha256:remote-worker', hasUpdate: true },
+  ];
+
+  return {
+    servers: servers.map(normalizeDockerOverviewServer),
+    updateChecks,
+  };
 };
 
 const hasServerDockerInstalled = (server = {}) => {
@@ -1962,9 +2112,116 @@ const getDockerStatNetIo = (stat = {}) => stat.net_io || stat.NetIO || '-';
 
 const getDockerStatBlockIo = (stat = {}) => stat.block_io || stat.BlockIO || '-';
 
+const parseDockerByteValue = (value) => {
+  if (value === null || value === undefined || value === '') return 0;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+
+  const text = String(value).trim();
+  const match = text.match(/(-?\d+(?:\.\d+)?)\s*([kmgtp]?i?b)?/i);
+  if (!match) return toNumber(text, 0);
+
+  const number = Number.parseFloat(match[1]);
+  if (!Number.isFinite(number)) return 0;
+  const unit = String(match[2] || '').toLowerCase();
+  const multipliers = {
+    b: 1,
+    kb: 1000,
+    mb: 1000 ** 2,
+    gb: 1000 ** 3,
+    tb: 1000 ** 4,
+    kib: 1024,
+    mib: 1024 ** 2,
+    gib: 1024 ** 3,
+    tib: 1024 ** 4,
+  };
+  return number * (multipliers[unit] || 1);
+};
+
+const parseDockerIoPair = (value) => {
+  const [first = '', second = ''] = String(value || '').split('/');
+  return [parseDockerByteValue(first), parseDockerByteValue(second)];
+};
+
+const getDockerStatKey = (stat = {}) => (
+  String(stat.serverId || '') + ':' + String(stat.container_id || stat.ID || stat.id || getDockerStatName(stat))
+);
+
+const normalizeDockerStatSnapshot = (stat = {}, index = 0, timestamp = Date.now()) => {
+  const [netIn, netOut] = parseDockerIoPair(getDockerStatNetIo(stat));
+  const [blockRead, blockWrite] = parseDockerIoPair(getDockerStatBlockIo(stat));
+  return {
+    key: getDockerStatKey(stat) || `docker-stat-${index}`,
+    name: getDockerStatName(stat),
+    serverId: String(stat.serverId || ''),
+    serverName: stat.serverName || '',
+    timestamp,
+    cpu: getDockerStatCpuPercent(stat),
+    memory: getDockerStatMemPercent(stat),
+    netIn,
+    netOut,
+    blockRead,
+    blockWrite,
+  };
+};
+
+const createDockerStatsSeedHistory = (stats = [], timestamp = Date.now()) => {
+  const interval = 30 * 1000;
+  return Array.from({ length: DOCKER_STATS_MOCK_POINTS }, (_, pointIndex) => {
+    const pointTime = timestamp - (DOCKER_STATS_MOCK_POINTS - 1 - pointIndex) * interval;
+    const progress = pointIndex / Math.max(1, DOCKER_STATS_MOCK_POINTS - 1);
+    return stats.map((stat, statIndex) => {
+      const base = normalizeDockerStatSnapshot(stat, statIndex, pointTime);
+      const wave = Math.sin((pointIndex + statIndex) * 0.75) * 0.18;
+      const pulse = pointIndex % 9 === statIndex % 5 ? 0.22 : 0;
+      const factor = Math.max(0.2, 0.82 + wave + pulse + progress * 0.08);
+      return {
+        ...base,
+        cpu: clampPercent(base.cpu * factor),
+        memory: clampPercent(base.memory * (0.96 + Math.sin(pointIndex / 5 + statIndex) * 0.025)),
+        netIn: base.netIn * factor,
+        netOut: base.netOut * Math.max(0.2, 0.9 + Math.cos((pointIndex + statIndex) * 0.6) * 0.16),
+        blockRead: base.blockRead * Math.max(0.2, 0.88 + Math.sin((pointIndex + statIndex) * 0.35) * 0.12),
+        blockWrite: base.blockWrite * Math.max(0.2, 0.86 + Math.cos((pointIndex + statIndex) * 0.4) * 0.14),
+      };
+    });
+  });
+};
+
+const buildDockerStatSeries = (history = [], metric, isDarkMode) => {
+  const seriesMap = new Map();
+  history.forEach(snapshot => {
+    snapshot.forEach((item, index) => {
+      if (!seriesMap.has(item.key)) {
+        seriesMap.set(item.key, {
+          name: item.name,
+          color: ChartPalette.categorical(index, isDarkMode),
+          data: [],
+        });
+      }
+      seriesMap.get(item.key).data.push([item.timestamp, item[metric] ?? 0]);
+    });
+  });
+  return Array.from(seriesMap.values()).filter(series => series.data.some(([, value]) => toNumber(value, 0) > 0));
+};
+
+const buildDockerPairSeries = (history = [], metrics) => metrics.map(metric => ({
+  name: metric.name,
+  color: metric.color,
+  data: history.map(snapshot => {
+    const total = snapshot.reduce((sum, item) => sum + toNumber(item[metric.key], 0), 0);
+    return [snapshot[0]?.timestamp || Date.now(), total];
+  }),
+})).filter(series => series.data.some(([, value]) => value > 0));
+
 
 function ServerPage() {
-  const { setMainActiveTab, theme, publicApiUrl } = useStore();
+  const {
+    setMainActiveTab,
+    theme,
+    publicApiUrl,
+    serverIpDisplayMode: storedServerIpDisplayMode,
+    agentDownloadUrl: storedAgentDownloadUrl,
+  } = useStore();
   const isCompactViewport = useMediaQuery('(max-width: 640px)');
   const isDenseViewport = useMediaQuery('(max-width: 1120px)');
   const expandedMainChartHeight = isCompactViewport ? 88 : isDenseViewport ? 100 : 112;
@@ -1984,7 +2241,7 @@ function ServerPage() {
   const staticTimeseriesEcharts = useMemo(() => createFastTimeseriesEcharts(echarts, SERVER_STATIC_CHART_ANIMATION_OPTIONS), []);
 
 
-  const [serverCurrentTab, setServerCurrentTab] = useState('list'); // 'list', 'history', 'docker', 'management', 'terminal'
+  const [serverCurrentTab, setServerCurrentTab] = useState('list'); // 'list', 'status-pages', 'docker', 'management', 'terminal'
 
   // 主机列表状态
   const [serverList, setServerList] = useState([]);
@@ -2080,23 +2337,13 @@ function ServerPage() {
   const [serverBatchError, setServerBatchError] = useState('');
   const [serverBatchSuccess, setServerBatchSuccess] = useState('');
   const [serverAddingBatch, setServerAddingBatch] = useState(false);
-  const [serverIpDisplayMode, setServerIpDisplayMode] = useState('normal'); // 'normal', 'masked', 'hidden'
+  const [serverIpDisplayMode, setServerIpDisplayMode] = useState(storedServerIpDisplayMode || 'normal'); // 'normal', 'masked', 'hidden'
+  const [serverSettingsSaving, setServerSettingsSaving] = useState(false);
+  const [serverSettingsForm, setServerSettingsForm] = useState({
+    agentDownloadUrl: storedAgentDownloadUrl || '',
+  });
 
-  // 历史记录
-  const [metricsHistoryTimeRange, setMetricsHistoryTimeRange] = useState('1h'); // '1h', '6h', '24h', '7d', 'all'
-  const [metricsHistoryList, setMetricsHistoryList] = useState([]);
-  const [metricsHistoryTotal, setMetricsHistoryTotal] = useState(0);
-  const [metricsHistoryFilter, setMetricsHistoryFilter] = useState({ serverId: '' });
-  const [metricsHistoryLoading, setMetricsHistoryLoading] = useState(false);
-  const [metricsHistoryPagination, setMetricsHistoryPagination] = useState({ page: 1, pageSize: 30, totalPages: 1 });
-  const [showMetricsCharts, setShowMetricsCharts] = useState(true);
-  const [expandedMetricsServers, setExpandedMetricsServers] = useState([]);
-  const [metricsCollectorStatus, setMetricsCollectorStatus] = useState(null);
   const [networkQualityByServer, setNetworkQualityByServer] = useState({});
-
-  // 全局采集参数
-  const [metricsCollectInterval, setMetricsCollectInterval] = useState(5);
-  const [monitorConfig, setMonitorConfig] = useState({ metrics_retention_days: 30 });
 
   // Docker 状态
   const [dockerOverviewServers, setDockerOverviewServers] = useState([]);
@@ -2106,6 +2353,8 @@ function ServerPage() {
   const [dockerSearchQuery, setDockerSearchQuery] = useState('');
   const [dockerContainerStateFilter, setDockerContainerStateFilter] = useState('all');
   const [dockerSelectedServer, setDockerSelectedServer] = useState('');
+  const [expandedDockerOverviewServers, setExpandedDockerOverviewServers] = useState([]);
+  const [showDockerTaskDetails, setShowDockerTaskDetails] = useState(false);
   const [dockerTasks, setDockerTasks] = useState([]);
   const [dockerTaskStreamConnected, setDockerTaskStreamConnected] = useState(false);
   const [dockerTaskStreamError, setDockerTaskStreamError] = useState('');
@@ -2114,6 +2363,7 @@ function ServerPage() {
   const [dockerNetworks, setDockerNetworks] = useState([]);
   const [dockerVolumes, setDockerVolumes] = useState([]);
   const [dockerStats, setDockerStats] = useState([]);
+  const [dockerStatsHistory, setDockerStatsHistory] = useState([]);
   const [dockerComposeProjects, setDockerComposeProjects] = useState([]);
   const [dockerUpdateChecks, setDockerUpdateChecks] = useState({});
   const [dockerUpdateCheckLoading, setDockerUpdateCheckLoading] = useState({});
@@ -2127,6 +2377,22 @@ function ServerPage() {
   const [dockerLogsContainer, setDockerLogsContainer] = useState(null);
   const [dockerLogsServer, setDockerLogsServer] = useState(null);
   const [dockerLogsTail, setDockerLogsTail] = useState(200);
+
+  useEffect(() => {
+    if (dockerStats.length === 0) {
+      setDockerStatsHistory([]);
+      return;
+    }
+
+    const timestamp = Date.now();
+    const nextSnapshot = dockerStats.map((stat, index) => normalizeDockerStatSnapshot(stat, index, timestamp));
+    setDockerStatsHistory(prev => {
+      if (prev.length === 0 && isDockerMockPreviewEnabled()) {
+        return createDockerStatsSeedHistory(dockerStats, timestamp);
+      }
+      return [...prev, nextSnapshot].slice(-DOCKER_STATS_HISTORY_LIMIT);
+    });
+  }, [dockerStats]);
 
   // Agent 升级
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
@@ -2174,6 +2440,8 @@ function ServerPage() {
   const serverModalPortalRef = useRef(null);
   const credentialModalPortalRef = useRef(null);
   const dockerTaskStreamRef = useRef(null);
+  const dockerRefreshTimerRef = useRef(null);
+  const dockerInitialExpandRef = useRef(false);
   const terminalResizeTimers = useRef({});
   const socketRef = useRef(null);
   const pendingMetricUpdatesRef = useRef([]);
@@ -2190,15 +2458,58 @@ function ServerPage() {
   const sshSyncEnabledRef = useRef(false);
   const sftpPathByServerRef = useRef({});
 
-  const [historyColWidths, startHistoryResize] = useTableResize([180, 150, 100, 100, 100, 150]);
   const [dockerColWidths, startDockerResize] = useTableResize([180, 200, 90, 90, 150, 240]);
   const [imagesColWidths, startImagesResize] = useTableResize([250, 100, 100, 150, 100]);
   const [networksColWidths, startNetworksResize] = useTableResize([180, 180, 120, 120, 150, 100]);
   const [volumesColWidths, startVolumesResize] = useTableResize([240, 140, 120, 150, 100]);
-  const [statsColWidths, startStatsResize] = useTableResize([180, 120, 160, 120, 120, 150]);
   const showServerStatusSidebar = activeTerminalSidebar === 'status';
   const showSftpSidebar = activeTerminalSidebar === 'sftp';
   const showCommandSidebar = activeTerminalSidebar === 'commands';
+
+  useEffect(() => {
+    setServerIpDisplayMode(storedServerIpDisplayMode || 'normal');
+  }, [storedServerIpDisplayMode]);
+
+  useEffect(() => {
+    setServerSettingsForm(prev => ({
+      ...prev,
+      agentDownloadUrl: storedAgentDownloadUrl || '',
+    }));
+  }, [storedAgentDownloadUrl]);
+
+  const getSettingsAuthHeaders = useCallback(() => ({
+    'Content-Type': 'application/json',
+    'x-admin-password': localStorage.getItem('admin_password') || useStore.getState().loginPassword || '',
+  }), []);
+
+  const handleServerIpDisplayModeChange = useCallback((value) => {
+    setServerIpDisplayMode(String(value));
+  }, []);
+
+  const saveServerModuleSettings = useCallback(async () => {
+    const patch = {
+      serverIpDisplayMode,
+      agentDownloadUrl: String(serverSettingsForm.agentDownloadUrl || '').trim(),
+    };
+    setServerSettingsSaving(true);
+    try {
+      const response = await fetch('/api/settings', {
+        method: 'PATCH',
+        headers: getSettingsAuthHeaders(),
+        body: JSON.stringify(patch),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || '保存主机偏好失败');
+      }
+      useStore.setState(patch);
+      toast.success('主机偏好已保存');
+    } catch (error) {
+      toast.error(error.message || '保存主机偏好失败');
+    } finally {
+      setServerSettingsSaving(false);
+    }
+  }, [getSettingsAuthHeaders, serverIpDisplayMode, serverSettingsForm.agentDownloadUrl]);
 
   useEffect(() => {
     visibleSessionIdsRef.current = visibleSessionIds;
@@ -2293,6 +2604,10 @@ function ServerPage() {
   useEffect(() => {
     loadServerList();
     loadCredentials();
+    if (isDockerMockPreviewEnabled()) {
+      setServerCurrentTab('docker');
+      setDockerSubTab('containers');
+    }
     const connectTimer = setTimeout(() => {
       connectMetricsStream();
     }, 0);
@@ -2320,6 +2635,10 @@ function ServerPage() {
       }
       if (dockerTaskStreamRef.current) {
         dockerTaskStreamRef.current.close();
+      }
+      if (dockerRefreshTimerRef.current) {
+        clearTimeout(dockerRefreshTimerRef.current);
+        dockerRefreshTimerRef.current = null;
       }
       if (metricFlushTimerRef.current) {
         clearInterval(metricFlushTimerRef.current);
@@ -4029,6 +4348,24 @@ function ServerPage() {
     return { variant: 'neutral', label: '已检测', title: '远端或本地摘要不完整，无法严格判断' };
   };
 
+  const summarizeDockerTaskMessage = (task = {}) => {
+    const raw = String(task.message || '');
+    if (!raw) return '';
+    const trimmed = raw.trim();
+    if (!trimmed.startsWith('[') && !trimmed.startsWith('{')) return raw.length > 96 ? `${raw.slice(0, 96)}...` : raw;
+    try {
+      const parsed = JSON.parse(trimmed);
+      const list = Array.isArray(parsed) ? parsed : [parsed];
+      const updateCount = list.filter(item => item?.has_update || item?.hasUpdate).length;
+      if (task.action === 'container.checkUpdates' || list.some(item => item?.container_name || item?.containerName)) {
+        return updateCount > 0 ? `发现 ${updateCount} 个可更新容器` : `已检查 ${list.length} 个容器`;
+      }
+      return `返回 ${list.length} 条结果`;
+    } catch (error) {
+      return raw.length > 96 ? `${raw.slice(0, 96)}...` : raw;
+    }
+  };
+
   const getDockerStateBadge = (state) => {
     if (state === 'running') return { variant: 'success', label: '运行' };
     if (state === 'paused' || state === 'restarting') return { variant: 'warning', label: state === 'paused' ? '暂停' : '重启中' };
@@ -4458,132 +4795,6 @@ function ServerPage() {
       toast.error('默认凭据设置失败');
     }
   };
-
-
-
-  const updateMetricsCollectInterval = async (val) => {
-    const nextValue = Math.max(1, Math.round(toNumber(val, 5)));
-    setMetricsCollectInterval(nextValue);
-    try {
-      await fetch('/api/server/monitor/config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ metrics_collect_interval: nextValue * 60 })
-      });
-      toast.success('指标采集时间间隔更新成功');
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const updateMetricsRetentionDays = async (value) => {
-    const nextValue = Math.max(1, Math.min(180, Math.round(toNumber(value, 30))));
-    setMonitorConfig({ metrics_retention_days: nextValue });
-    try {
-      await fetch('/api/server/monitor/config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ metrics_retention_days: nextValue })
-      });
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-
-
-  useEffect(() => {
-    if (serverCurrentTab === 'history') {
-      loadMetricsHistory(1);
-    }
-  }, [serverCurrentTab, metricsHistoryTimeRange, metricsHistoryFilter.serverId]);
-
-  const loadMetricsHistory = async (page = 1) => {
-    setMetricsHistoryLoading(true);
-    try {
-      let startTime = null;
-      const now = Date.now();
-      if (metricsHistoryTimeRange === '1h') startTime = formatSqliteUTCDateTime(now - 60 * 60 * 1000);
-      else if (metricsHistoryTimeRange === '6h') startTime = formatSqliteUTCDateTime(now - 6 * 60 * 60 * 1000);
-      else if (metricsHistoryTimeRange === '24h') startTime = formatSqliteUTCDateTime(now - 24 * 60 * 60 * 1000);
-      else if (metricsHistoryTimeRange === '7d') startTime = formatSqliteUTCDateTime(now - 7 * 24 * 60 * 60 * 1000);
-
-      const params = new URLSearchParams({
-        page,
-        pageSize: 15,
-        serverId: metricsHistoryFilter.serverId
-      });
-      if (startTime) params.append('startTime', startTime);
-
-      const response = await fetch(`/api/server/metrics/history?${params}`);
-      const data = await response.json();
-      if (data.success) {
-        setMetricsHistoryList(data.data || []);
-        setMetricsHistoryTotal(data.pagination?.total || 0);
-        setMetricsHistoryPagination({
-          page: data.pagination?.page || 1,
-          pageSize: data.pagination?.pageSize || 15,
-          totalPages: data.pagination?.totalPages || 1
-        });
-      }
-
-      // 读取采集器状态
-      const statusRes = await fetch('/api/server/monitor/status');
-      const statusData = await statusRes.json();
-      if (statusData.success) {
-        setMetricsCollectorStatus(statusData.status);
-        if (statusData.status?.interval) {
-          setMetricsCollectInterval(Math.floor(statusData.status.interval / 60000));
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setMetricsHistoryLoading(false);
-    }
-  };
-
-  const triggerManualCollect = async () => {
-    toast.info('正在发送指令手动采集历史指标点...');
-    try {
-      const res = await fetch('/api/server/monitor/collect', { method: 'POST' });
-      const data = await res.json();
-      if (data.success) {
-        toast.success('就绪：新指标点采集完成！');
-        loadMetricsHistory(1);
-      }
-    } catch (e) {
-      toast.error('采集失败');
-    }
-  };
-
-  const clearMetricsHistory = async () => {
-    if (!(await dialog.confirm('确定要清除数据库中存储的所有的历史监控记录吗？'))) return;
-    try {
-      const res = await fetch('/api/server/metrics/history', { method: 'DELETE' });
-      const data = await res.json();
-      if (data.success) {
-        toast.success('监控历史记录清空成功');
-        loadMetricsHistory(1);
-      }
-    } catch (e) {
-      toast.error('清空失败');
-    }
-  };
-
-  // 按主机对历史数据进行分类展示
-  const groupedMetricsHistory = useMemo(() => {
-    const groups = {};
-    metricsHistoryList.forEach(rec => {
-      const serverId = rec.server_id || 'unknown';
-      if (!groups[serverId]) groups[serverId] = [];
-      groups[serverId].push(rec);
-    });
-    return groups;
-  }, [metricsHistoryList]);
-
-
-
   useEffect(() => {
     if (serverCurrentTab === 'docker') {
       ensureDockerTaskStream();
@@ -4619,7 +4830,7 @@ function ServerPage() {
             // 任务成功完成时，如果正在当前标签页，触发静默刷新列表
             if (task.state === 'success') {
               toast.success(`任务 [${task.action}] 执行成功`);
-              setTimeout(() => loadDockerResources(), 800);
+              scheduleDockerResourceRefresh();
             } else if (task.state === 'failed') {
               toast.error(`任务 [${task.action}] 失败: ${task.error || ''}`);
             }
@@ -4771,23 +4982,49 @@ function ServerPage() {
     return null;
   };
 
-  const submitDockerTask = async (action, payload = {}) => {
+  const scheduleDockerResourceRefresh = (delayMs = 650) => {
+    if (dockerRefreshTimerRef.current) clearTimeout(dockerRefreshTimerRef.current);
+    dockerRefreshTimerRef.current = setTimeout(() => {
+      dockerRefreshTimerRef.current = null;
+      loadDockerResources({ silent: true });
+    }, delayMs);
+  };
+
+  const submitDockerTask = async (action, payload = {}, options = {}) => {
     const serverId = payload.serverId || dockerSelectedServer;
     if (!serverId) {
       toast.warning('请先选择一台主机');
-      return;
+      return { ok: false };
     }
     const pendingKey = getDockerActionKey(serverId, action, payload);
     if (dockerActionPending[pendingKey]) {
       toast.info('该 Docker 操作正在执行中');
-      return;
+      return { ok: false };
     }
-    const confirmation = getDockerTaskConfirmation(action, payload);
-    if (confirmation?.deleteResource) {
-      if (!(await dialog.deleteResource(confirmation))) return;
-    } else if (confirmation && !(await dialog.confirm(confirmation))) {
-      return;
+    if (!options.skipConfirm) {
+      const confirmation = getDockerTaskConfirmation(action, payload);
+      if (confirmation?.deleteResource) {
+        if (!(await dialog.deleteResource(confirmation))) return { ok: false };
+      } else if (confirmation && !(await dialog.confirm(confirmation))) {
+        return { ok: false };
+      }
     }
+
+    if (isDockerMockPreviewEnabled()) {
+      const taskId = `mock-${action}-${Date.now()}`;
+      setDockerTasks(prev => [{
+        taskId,
+        state: 'success',
+        progress: 100,
+        action,
+        domain: 'docker',
+        serverId,
+        message: `${payload.containerName || payload.image || payload.name || 'Docker 资源'} 模拟执行成功`,
+      }, ...prev].slice(0, 30));
+      if (!options.silent) toast.success('Mock 模式: Docker 操作已模拟完成');
+      return { ok: true, taskId };
+    }
+
     setDockerActionPending(prev => ({ ...prev, [pendingKey]: true }));
     try {
       const resourceProxyRequest = getDockerProxyRequest(serverId, action, payload);
@@ -4797,10 +5034,10 @@ function ServerPage() {
         if (!res.ok || !data.success) {
           throw new Error(data.error || data.message || 'Docker operation failed');
         }
-        toast.success('Docker 操作执行成功');
+        if (!options.silent) toast.success('Docker 操作执行成功');
         clearDockerActionPending(serverId, action);
-        setTimeout(() => loadDockerResources(), 400);
-        return;
+        scheduleDockerResourceRefresh(400);
+        return { ok: true };
       }
 
       const proxyAction = getDockerProxyContainerAction(action);
@@ -4816,10 +5053,10 @@ function ServerPage() {
         if (!res.ok || !data.success) {
           throw new Error(data.error || data.message || 'Docker 操作失败');
         }
-        toast.success('Docker 操作执行成功');
+        if (!options.silent) toast.success('Docker 操作执行成功');
         clearDockerActionPending(serverId, action);
-        setTimeout(() => loadDockerResources(), 400);
-        return;
+        scheduleDockerResourceRefresh(400);
+        return { ok: true };
       }
 
       const res = await fetch('/api/server/v2/tasks', {
@@ -4834,7 +5071,8 @@ function ServerPage() {
       });
       const data = await res.json();
       if (data.success) {
-        toast.info('Docker 管理任务提交成功，正在等待后台调度');
+        if (!options.silent) toast.info('Docker 管理任务提交成功，正在等待后台调度');
+        return { ok: true, taskId: data.taskId || data.data?.taskId };
       } else {
         toast.error('提交失败: ' + data.error);
         setDockerActionPending(prev => {
@@ -4842,6 +5080,7 @@ function ServerPage() {
           delete next[pendingKey];
           return next;
         });
+        return { ok: false };
       }
     } catch (e) {
       toast.error(e?.message || '服务下发异常');
@@ -4850,10 +5089,39 @@ function ServerPage() {
         delete next[pendingKey];
         return next;
       });
+      return { ok: false };
     }
   };
 
-  const loadDockerResources = async () => {
+  const loadDockerResources = async (options = {}) => {
+    if (isDockerMockPreviewEnabled()) {
+      const mock = createMockDockerOverview();
+      setDockerOverviewServers(mock.servers);
+      setDockerImages(mock.servers.flatMap(s => s.resources.images.map(img => ({ ...img, serverName: s.name, serverId: s.id }))));
+      setDockerNetworks(mock.servers.flatMap(s => s.resources.networks.map(n => ({ ...n, serverName: s.name, serverId: s.id }))));
+      setDockerVolumes(mock.servers.flatMap(s => s.resources.volumes.map(v => ({ ...v, serverName: s.name, serverId: s.id }))));
+      setDockerStats(mock.servers.flatMap(s => s.resources.stats.map(stat => ({ ...stat, serverName: s.name, serverId: s.id }))));
+      setDockerComposeProjects(mock.servers.flatMap(s => s.resources.composeProjects.map(p => ({ ...p, serverName: s.name, serverId: s.id }))));
+      mock.updateChecks.forEach(check => storeDockerUpdateChecks(check.serverId, [check], check));
+      setDockerTasks(prev => (prev.length > 0 ? prev : [{
+        taskId: 'mock-check-updates',
+        state: 'success',
+        progress: 100,
+        action: 'container.checkUpdates',
+        domain: 'docker',
+        message: JSON.stringify(mock.updateChecks.map(check => ({
+          container_id: check.containerId,
+          container_name: check.containerName,
+          image: check.image,
+          current_digest: check.currentDigest,
+          latest_digest: check.latestDigest,
+          has_update: check.hasUpdate,
+        }))),
+      }]));
+      setDockerTaskStreamConnected(true);
+      setDockerResourceLoading(false);
+      return;
+    }
     setDockerResourceLoading(true);
     try {
       const params = new URLSearchParams();
@@ -4885,12 +5153,14 @@ function ServerPage() {
       }
     } catch (e) {
       console.error(e);
-      setDockerOverviewServers([]);
-      setDockerImages([]);
-      setDockerNetworks([]);
-      setDockerVolumes([]);
-      setDockerStats([]);
-      setDockerComposeProjects([]);
+      if (!options.silent) {
+        setDockerOverviewServers([]);
+        setDockerImages([]);
+        setDockerNetworks([]);
+        setDockerVolumes([]);
+        setDockerStats([]);
+        setDockerComposeProjects([]);
+      }
     } finally {
       setDockerResourceLoading(false);
     }
@@ -4901,7 +5171,12 @@ function ServerPage() {
     const filterContainers = (server) => {
       const containers = asArray(server.resources?.containers).filter(container => {
         const state = getDockerContainerState(container);
-        if (dockerContainerStateFilter !== 'all' && state !== dockerContainerStateFilter) return false;
+        const updateCheck = getDockerContainerUpdateCheck(server.id, container);
+        if (dockerContainerStateFilter === 'updatable') {
+          if (!updateCheck?.hasUpdate) return false;
+        } else if (dockerContainerStateFilter !== 'all' && state !== dockerContainerStateFilter) {
+          return false;
+        }
         if (!query) return true;
         return [
           getDockerContainerName(container),
@@ -4924,6 +5199,310 @@ function ServerPage() {
     if (dockerSelectedServer) return servers;
     return servers.filter(server => asArray(server.resources?.containers).length > 0);
   }, [dockerOverviewServers, dockerSelectedServer, dockerSearchQuery, dockerContainerStateFilter]);
+
+  const dockerStatsChartData = useMemo(() => {
+    const isDarkMode = theme === 'dark';
+    const netInColor = ChartPalette.categorical(0, isDarkMode);
+    const netOutColor = ChartPalette.semantic('Success', isDarkMode);
+    const readColor = ChartPalette.semantic('Warning', isDarkMode);
+    const writeColor = ChartPalette.categorical(3, isDarkMode);
+    return {
+      cpu: buildDockerStatSeries(dockerStatsHistory, 'cpu', isDarkMode),
+      memory: buildDockerStatSeries(dockerStatsHistory, 'memory', isDarkMode),
+      network: buildDockerPairSeries(dockerStatsHistory, [
+        { key: 'netIn', name: '接收', color: netInColor },
+        { key: 'netOut', name: '发送', color: netOutColor },
+      ]),
+      disk: buildDockerPairSeries(dockerStatsHistory, [
+        { key: 'blockRead', name: '读取', color: readColor },
+        { key: 'blockWrite', name: '写入', color: writeColor },
+      ]),
+    };
+  }, [dockerStatsHistory, theme]);
+
+  const dockerStatsSummary = useMemo(() => {
+    const latest = dockerStatsHistory[dockerStatsHistory.length - 1] || [];
+    return latest.reduce((summary, item) => ({
+      cpu: summary.cpu + toNumber(item.cpu, 0),
+      memory: summary.memory + toNumber(item.memory, 0),
+      netIn: summary.netIn + toNumber(item.netIn, 0),
+      netOut: summary.netOut + toNumber(item.netOut, 0),
+      blockRead: summary.blockRead + toNumber(item.blockRead, 0),
+      blockWrite: summary.blockWrite + toNumber(item.blockWrite, 0),
+    }), { cpu: 0, memory: 0, netIn: 0, netOut: 0, blockRead: 0, blockWrite: 0 });
+  }, [dockerStatsHistory]);
+
+  const dockerResourceSummary = useMemo(() => ({
+    compose: dockerComposeProjects.length,
+    images: dockerImages.length,
+    networks: dockerNetworks.length,
+    volumes: dockerVolumes.length,
+    stats: dockerStats.length,
+  }), [dockerComposeProjects.length, dockerImages.length, dockerNetworks.length, dockerVolumes.length, dockerStats.length]);
+
+  const renderDockerSimpleLogCard = () => (
+    <LayerCard className="overflow-hidden p-0">
+      <LayerCard.Secondary className="flex min-h-[52px] items-center justify-between gap-2 px-3 py-3.5">
+        <span className="inline-flex min-w-0 items-center gap-2 text-xs font-bold text-kumo-strong">
+          <Activity className="h-4 w-4 shrink-0 text-kumo-brand" />
+          简化日志
+        </span>
+        <Badge variant={dockerTaskStreamConnected ? 'success' : 'warning'} appearance="dot">
+          {dockerTaskStreamConnected ? '实时连接' : '重连中'}
+        </Badge>
+      </LayerCard.Secondary>
+      <LayerCard.Primary className="space-y-2 p-3">
+        {dockerTasks.length === 0 ? (
+          <div className="text-xs text-kumo-subtle">暂无后台任务</div>
+        ) : (
+          <>
+            {(() => {
+              const latestTask = dockerTasks[0];
+              const stateVariant = latestTask.state === 'success' ? 'success' : latestTask.state === 'failed' ? 'error' : 'warning';
+              return (
+                <div className="space-y-1.5">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Badge variant={stateVariant} appearance="dot">{getDockerTaskStateLabel(latestTask.state)}</Badge>
+                    <span className="min-w-0 truncate text-[11px] font-semibold text-kumo-strong" title={getDockerTaskActionLabel(latestTask.action)}>{getDockerTaskActionLabel(latestTask.action)}</span>
+                  </div>
+                  <div className="line-clamp-2 text-[11px] leading-relaxed text-kumo-subtle" title={String(latestTask.message || '')}>
+                    {summarizeDockerTaskMessage(latestTask)}
+                  </div>
+                </div>
+              );
+            })()}
+            <Collapsible.Root open={showDockerTaskDetails} onOpenChange={setShowDockerTaskDetails}>
+              <Collapsible.Trigger render={<Button size="sm" variant="secondary" className="w-full justify-center" icon={showDockerTaskDetails ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />} />}>
+                {showDockerTaskDetails ? '收起任务' : `查看任务 ${dockerTasks.length}`}
+              </Collapsible.Trigger>
+              <Collapsible.Panel className="mt-2 max-h-40 overflow-y-auto border-t border-kumo-line pt-2">
+                <div className="flex flex-col gap-1.5">
+                  {dockerTasks.slice(0, 8).map(t => {
+                    const stateVariant = t.state === 'success' ? 'success' : t.state === 'failed' ? 'error' : 'warning';
+                    return (
+                      <div key={t.taskId} className="min-w-0 rounded-md border border-kumo-line/70 bg-kumo-recessed/20 p-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <Badge variant={stateVariant} appearance="dot">{getDockerTaskStateLabel(t.state)}</Badge>
+                          <span className="min-w-0 truncate text-[11px] font-semibold text-kumo-strong" title={getDockerTaskActionLabel(t.action)}>{getDockerTaskActionLabel(t.action)}</span>
+                        </div>
+                        <div className="mt-1 truncate text-[11px] text-kumo-subtle" title={String(t.message || '')}>
+                          {summarizeDockerTaskMessage(t)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Collapsible.Panel>
+            </Collapsible.Root>
+          </>
+        )}
+      </LayerCard.Primary>
+    </LayerCard>
+  );
+
+  const renderDockerResourceSideRail = (activeLabel, activeCount, summaryItems = [], countLabel = '数量', countUnit = '项') => (
+    <div className="flex min-w-0 flex-col gap-3 xl:sticky xl:top-0 xl:self-start">
+      <LayerCard className="overflow-hidden p-0">
+        <LayerCard.Secondary className="flex min-h-[52px] items-center justify-between gap-2 px-3 py-3.5">
+          <span className="inline-flex min-w-0 items-center gap-2 text-xs font-bold text-kumo-strong">
+            <Settings className="h-4 w-4 shrink-0 text-kumo-brand" />
+            管理
+          </span>
+          <span className="flex shrink-0 items-center gap-1.5">
+            <Badge variant="neutral">{activeCount} {countUnit}</Badge>
+            <Button
+              shape="square"
+              size="sm"
+              variant="secondary"
+              icon={<RefreshCw className={`h-3.5 w-3.5 ${dockerResourceLoading ? 'animate-spin' : ''}`} />}
+              disabled={dockerResourceLoading}
+              onClick={loadDockerResources}
+              aria-label="刷新 Docker 数据"
+              title="刷新 Docker 数据"
+            />
+          </span>
+        </LayerCard.Secondary>
+        <LayerCard.Primary className="space-y-3 p-3">
+          <div className="grid grid-cols-2 gap-1.5">
+            <div className="rounded-md border border-kumo-line/70 bg-kumo-recessed/20 px-2 py-1.5">
+              <div className="text-[10px] text-kumo-subtle">当前</div>
+              <div className="mt-0.5 truncate text-sm font-bold text-kumo-strong">{activeLabel}</div>
+            </div>
+            <div className="rounded-md border border-kumo-line/70 bg-kumo-recessed/20 px-2 py-1.5">
+              <div className="text-[10px] text-kumo-subtle">{countLabel}</div>
+              <div className="mt-0.5 text-sm font-bold text-kumo-strong">{activeCount}</div>
+            </div>
+            {summaryItems.map(item => (
+              <div key={item.label} className="rounded-md border border-kumo-line/70 bg-kumo-recessed/20 px-2 py-1.5">
+                <div className="text-[10px] text-kumo-subtle">{item.label}</div>
+                <div className={`mt-0.5 truncate text-sm font-bold ${item.className || 'text-kumo-strong'}`}>{item.value}</div>
+              </div>
+            ))}
+          </div>
+        </LayerCard.Primary>
+      </LayerCard>
+      {renderDockerSimpleLogCard()}
+    </div>
+  );
+
+  const getDockerContainerSummary = (containers = [], serverId = '') => {
+    const list = asArray(containers);
+    return list.reduce((summary, container) => {
+      const state = getDockerContainerState(container);
+      if (state === 'running') summary.running += 1;
+      else if (state === 'paused') summary.paused += 1;
+      else summary.stopped += 1;
+      const updateCheck = serverId ? getDockerContainerUpdateCheck(serverId, container) : null;
+      if (updateCheck?.hasUpdate) summary.updatable += 1;
+      return summary;
+    }, { total: list.length, running: 0, paused: 0, stopped: 0, updatable: 0 });
+  };
+
+  const getVisibleUpdatableDockerContainers = () => (
+    visibleDockerContainerServers.flatMap(server => (
+      asArray(server.resources?.containers)
+        .filter(container => getDockerContainerUpdateCheck(server.id, container)?.hasUpdate)
+        .map(container => ({
+          server,
+          container,
+          payload: {
+            serverId: server.id,
+            containerId: getDockerContainerId(container),
+            containerName: getDockerContainerName(container),
+            image: getDockerContainerImage(container),
+          },
+        }))
+    ))
+  );
+
+  const visibleUpdatableDockerContainers = useMemo(
+    () => getVisibleUpdatableDockerContainers(),
+    [visibleDockerContainerServers, dockerUpdateChecks]
+  );
+
+  const hasDockerResourceData = dockerOverviewServers.length > 0
+    || dockerImages.length > 0
+    || dockerNetworks.length > 0
+    || dockerVolumes.length > 0
+    || dockerStats.length > 0
+    || dockerComposeProjects.length > 0;
+  const showDockerBlockingLoading = dockerResourceLoading && !hasDockerResourceData;
+  const dockerContainerTotals = visibleDockerContainerServers.reduce((totals, server) => {
+    const summary = getDockerContainerSummary(server.resources?.containers, server.id);
+    totals.total += summary.total;
+    totals.running += summary.running;
+    totals.paused += summary.paused;
+    totals.stopped += summary.stopped;
+    totals.updatable += summary.updatable;
+    return totals;
+  }, { total: 0, running: 0, paused: 0, stopped: 0, updatable: 0 });
+
+  useEffect(() => {
+    if (dockerSubTab !== 'containers' || visibleDockerContainerServers.length === 0) return;
+    if (dockerSelectedServer) {
+      setExpandedDockerOverviewServers([dockerSelectedServer]);
+      return;
+    }
+    if (dockerInitialExpandRef.current) return;
+    dockerInitialExpandRef.current = true;
+    setExpandedDockerOverviewServers([visibleDockerContainerServers[0].id]);
+  }, [dockerSubTab, dockerSelectedServer, visibleDockerContainerServers]);
+
+  useEffect(() => {
+    if (!['compose', 'images', 'networks', 'volumes', 'stats'].includes(dockerSubTab)) return;
+    const hostIds = dockerOverviewServers
+      .filter(server => isDockerOverviewHostVisible(server, dockerSubTab))
+      .map(server => server.id);
+    if (hostIds.length === 0) return;
+    setExpandedDockerOverviewServers(prev => (
+      prev.some(id => hostIds.includes(id)) ? prev : [hostIds[0]]
+    ));
+  }, [dockerSubTab, dockerOverviewServers]);
+
+  const toggleDockerOverviewServer = (serverId) => {
+    setExpandedDockerOverviewServers(prev => (
+      prev.includes(serverId)
+        ? prev.filter(id => id !== serverId)
+        : [...prev, serverId]
+    ));
+  };
+
+  const selectDockerContainerScope = (serverId, filter = 'all') => {
+    setDockerSelectedServer(serverId || '');
+    setDockerContainerStateFilter(filter);
+    if (serverId) setExpandedDockerOverviewServers([serverId]);
+  };
+
+  const renderDockerFilterChip = (serverId, filter, label, variant = 'neutral', title = '') => {
+    const active = String(dockerSelectedServer || '') === String(serverId || '')
+      && dockerContainerStateFilter === filter;
+    const toneClass = active
+      ? ''
+      : variant === 'success'
+        ? '!border-kumo-success/45 !bg-kumo-success/10 !text-kumo-success hover:!bg-kumo-success/15'
+        : variant === 'warning'
+          ? '!border-kumo-warning/55 !bg-kumo-warning/12 !text-kumo-warning hover:!bg-kumo-warning/18'
+          : variant === 'error'
+            ? '!border-kumo-danger/50 !bg-kumo-danger/10 !text-kumo-danger hover:!bg-kumo-danger/15'
+            : '!border-kumo-interact/70 !bg-kumo-recessed/35 !text-kumo-strong hover:!bg-kumo-recessed/55';
+    return (
+      <Button
+        type="button"
+        size="sm"
+        variant={active ? 'primary' : 'secondary'}
+        onClick={(event) => {
+          event.stopPropagation();
+          selectDockerContainerScope(serverId, filter);
+        }}
+        title={title || label}
+        className={`!h-7 !rounded-full !px-3 !text-xs !font-semibold !shadow-none ${toneClass}`}
+      >
+        {label}
+      </Button>
+    );
+  };
+
+  const batchUpdateVisibleDockerContainers = async (serverId = '') => {
+    const targets = getVisibleUpdatableDockerContainers()
+      .filter(item => !serverId || item.server.id === serverId);
+    const scopeName = serverId
+      ? (visibleDockerContainerServers.find(server => server.id === serverId)?.name || '当前主机')
+      : '当前筛选';
+    if (targets.length === 0) {
+      toast.warning(`${scopeName}下没有已检测出的可更新容器`);
+      return;
+    }
+    const confirmed = await dialog.confirm({
+      title: '批量更新容器',
+      message: `将更新${scopeName}下 ${targets.length} 个可更新容器。更新会拉取镜像并重建容器，相关服务可能短暂中断。`,
+      confirmText: '开始更新',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
+
+    const queue = [...targets];
+    let submitted = 0;
+    let failed = 0;
+    const workers = Array.from({ length: Math.min(3, queue.length) }, async () => {
+      while (queue.length > 0) {
+        const item = queue.shift();
+        try {
+          const result = await submitDockerTask('container.update', item.payload, { skipConfirm: true, silent: true });
+          if (result?.ok) submitted += 1;
+          else failed += 1;
+        } catch (error) {
+          failed += 1;
+        }
+      }
+    });
+    await Promise.all(workers);
+
+    if (failed > 0) {
+      toast.warning(`已提交 ${submitted} 个更新任务，${failed} 个提交失败`);
+    } else {
+      toast.success(`已提交 ${submitted} 个容器更新任务`);
+    }
+  };
 
   const setDockerUpdateLoadingForAliases = (serverId, fallback, loading) => {
     const aliases = getDockerUpdateAliases(serverId, fallback);
@@ -5063,6 +5642,66 @@ function ServerPage() {
       {message}
     </div>
   );
+
+  const renderDockerHostResourceSection = ({
+    server,
+    icon,
+    count = 0,
+    countLabel = '项',
+    badges = [],
+    actions = null,
+    children,
+  }) => {
+    const isOpen = expandedDockerOverviewServers.includes(server.id);
+    return (
+      <Collapsible.Root key={server.id} open={isOpen} onOpenChange={() => toggleDockerOverviewServer(server.id)}>
+        <LayerCard className="overflow-hidden p-0">
+          <LayerCard.Secondary
+            role="button"
+            tabIndex={0}
+            onClick={() => toggleDockerOverviewServer(server.id)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                toggleDockerOverviewServer(server.id);
+              }
+            }}
+            className="flex min-h-[52px] cursor-pointer flex-wrap items-center justify-between gap-2 px-3 py-3.5"
+          >
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              {icon}
+              <span className="min-w-0 truncate text-xs font-bold text-kumo-strong">{server.name}</span>
+              <Badge variant="neutral">{count} {countLabel}</Badge>
+              {badges.map((badge) => (
+                <Badge key={badge.label} variant={badge.variant || 'neutral'} appearance={badge.appearance}>
+                  {badge.label}
+                </Badge>
+              ))}
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              {actions}
+              <Button
+                size="sm"
+                variant="secondary"
+                icon={isOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  toggleDockerOverviewServer(server.id);
+                }}
+              >
+                {isOpen ? '收起' : '展开'}
+              </Button>
+            </div>
+          </LayerCard.Secondary>
+          <Collapsible.Panel>
+            <LayerCard.Primary className="p-3">
+              {children}
+            </LayerCard.Primary>
+          </Collapsible.Panel>
+        </LayerCard>
+      </Collapsible.Root>
+    );
+  };
 
 
 
@@ -5672,7 +6311,7 @@ function ServerPage() {
       id: sessionId,
       connected: false,
       attachToPtyId,
-      name: `${sourceSession.name || sourceSession.server?.name || 'Terminal'} 共享`,
+      name: `${sourceSession.name || sourceSession.server?.name || '终端'} 共享`,
     };
 
     saveTerminalsToWarehouse();
@@ -5922,7 +6561,6 @@ function ServerPage() {
             tabs={[
               { value: 'list', label: <ServerModuleTabLabel icon={Server} short="主机">主机管理</ServerModuleTabLabel> },
               { value: 'status-pages', label: <ServerModuleTabLabel icon={Globe} short="状态">状态页</ServerModuleTabLabel> },
-              { value: 'history', label: <ServerModuleTabLabel icon={History} short="历史">历史记录</ServerModuleTabLabel> },
               { value: 'docker', label: <ServerModuleTabLabel icon={Box}>Docker</ServerModuleTabLabel> },
               { value: 'management', label: <ServerModuleTabLabel icon={Settings} short="管理">后台管理</ServerModuleTabLabel> },
               ...(sshSessions.length > 0
@@ -6006,48 +6644,48 @@ function ServerPage() {
       </div>
 
       {serverCurrentTab === 'status-pages' && (
-        <div className="grid gap-4 xl:grid-cols-[minmax(24rem,0.9fr)_minmax(0,1.1fr)]">
-          <LayerCard className="space-y-4 p-4">
-            <div className="flex items-start justify-between gap-3 border-b border-kumo-line pb-4">
+        <div className="grid items-start gap-4 xl:grid-cols-[minmax(24rem,0.9fr)_minmax(0,1.1fr)]">
+          <LayerCard className="overflow-hidden p-0">
+            <LayerCard.Secondary className={SERVER_SECTION_HEADER_CLASS}>
               <div className="min-w-0">
                 <h3 className="flex items-center gap-2 text-sm font-semibold text-kumo-strong">
                   <Globe className="h-4 w-4" />
                   {serverStatusPageForm.id ? '编辑主机状态页' : '新建主机状态页'}
                 </h3>
-                <p className="mt-1 text-xs leading-relaxed text-kumo-subtle">对外展示主机在线状态、资源占用、网速和流量摘要。</p>
               </div>
               {serverStatusPageForm.id && (
                 <Button size="sm" variant="secondary" shape="square" icon={<X className="h-3.5 w-3.5" />} onClick={resetServerStatusPageForm} aria-label="取消编辑" />
               )}
-            </div>
+            </LayerCard.Secondary>
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Input size="sm" label="名称" value={serverStatusPageForm.title} onChange={(event) => setServerStatusPageForm(prev => ({ ...prev, title: event.target.value, slug: prev.slug || normalizeServerStatusSlug(event.target.value) }))} placeholder="基础设施状态" />
-              <Input size="sm" label="Slug" value={serverStatusPageForm.slug} onChange={(event) => setServerStatusPageForm(prev => ({ ...prev, slug: normalizeServerStatusSlug(event.target.value) }))} placeholder="infra" />
-              <Input size="sm" label="自定义域名" value={serverStatusPageForm.domain} onChange={(event) => setServerStatusPageForm(prev => ({ ...prev, domain: normalizeServerStatusDomain(event.target.value) }))} placeholder="status.example.com" />
-              <Input size="sm" label="缓存秒数" type="number" min="30" value={serverStatusPageForm.cacheSeconds} onChange={(event) => setServerStatusPageForm(prev => ({ ...prev, cacheSeconds: event.target.value }))} />
-              <div className="sm:col-span-2">
-                <Textarea size="sm" label="说明" value={serverStatusPageForm.description} onChange={(event) => setServerStatusPageForm(prev => ({ ...prev, description: event.target.value }))} placeholder="这里展示公开基础设施的实时状态。" rows={3} />
-              </div>
-            </div>
-
-            <div className="grid gap-2 sm:grid-cols-2">
-              {[
-                ['public', '公开访问', '关闭后公开 API 和单页都会不可用。'],
-                ['hideHosts', '隐藏地址', '公开页不显示主机 IP 或连接地址。'],
-                ['showTraffic', '显示流量', '展示已用流量和流量上限。'],
-                ['showCharts', '历史指标', '公开接口下发最近指标历史。'],
-                ['showOnDashboard', '首页快捷卡片', '在仪表盘显示跳转到此状态页的快捷入口。'],
-              ].map(([key, title, desc]) => (
-                <div key={key} className="flex items-center justify-between gap-3 rounded-lg border border-kumo-line bg-kumo-recessed/30 p-3">
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-kumo-strong">{title}</div>
-                    <div className="mt-1 text-xs text-kumo-subtle">{desc}</div>
-                  </div>
-                  <Switch checked={!!serverStatusPageForm[key]} onCheckedChange={(checked) => setServerStatusPageForm(prev => ({ ...prev, [key]: checked }))} />
+            <LayerCard.Primary className="space-y-4 p-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input size="sm" label="名称" value={serverStatusPageForm.title} onChange={(event) => setServerStatusPageForm(prev => ({ ...prev, title: event.target.value, slug: prev.slug || normalizeServerStatusSlug(event.target.value) }))} placeholder="基础设施状态" />
+                <Input size="sm" label="Slug" value={serverStatusPageForm.slug} onChange={(event) => setServerStatusPageForm(prev => ({ ...prev, slug: normalizeServerStatusSlug(event.target.value) }))} placeholder="infra" />
+                <Input size="sm" label="自定义域名" value={serverStatusPageForm.domain} onChange={(event) => setServerStatusPageForm(prev => ({ ...prev, domain: normalizeServerStatusDomain(event.target.value) }))} placeholder="status.example.com" />
+                <Input size="sm" label="缓存秒数" type="number" min="30" value={serverStatusPageForm.cacheSeconds} onChange={(event) => setServerStatusPageForm(prev => ({ ...prev, cacheSeconds: event.target.value }))} />
+                <div className="sm:col-span-2">
+                  <Textarea size="sm" label="说明" value={serverStatusPageForm.description} onChange={(event) => setServerStatusPageForm(prev => ({ ...prev, description: event.target.value }))} placeholder="这里展示公开基础设施的实时状态。" rows={3} />
                 </div>
-              ))}
-            </div>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2">
+                {[
+                  ['public', '公开访问', '关闭后公开 API 和单页都会不可用。'],
+                  ['hideHosts', '隐藏地址', '公开页不显示主机 IP 或连接地址。'],
+                  ['showTraffic', '显示流量', '展示已用流量和流量上限。'],
+                  ['showCharts', '历史指标', '公开接口下发最近指标历史。'],
+                  ['showOnDashboard', '首页快捷卡片', '在仪表盘显示跳转到此状态页的快捷入口。'],
+                ].map(([key, title, desc]) => (
+                  <div key={key} className="flex items-center justify-between gap-3 rounded-md border border-kumo-line bg-kumo-recessed/30 p-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-kumo-strong">{title}</div>
+                      <div className="mt-1 text-xs text-kumo-subtle">{desc}</div>
+                    </div>
+                    <Switch checked={!!serverStatusPageForm[key]} onCheckedChange={(checked) => setServerStatusPageForm(prev => ({ ...prev, [key]: checked }))} />
+                  </div>
+                ))}
+              </div>
 
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
@@ -6073,29 +6711,39 @@ function ServerPage() {
 
             <div className="rounded-lg border border-kumo-line bg-kumo-recessed/35 p-3 text-xs text-kumo-subtle">
               <div className="font-semibold text-kumo-strong">预览地址</div>
-              <div className="mt-2 space-y-1 font-mono">
-                <div className="truncate">{getServerStatusPageUrl(serverStatusPageForm, 'servers')}</div>
-                <div className="truncate">{getServerStatusPageUrl(serverStatusPageForm, 's')}</div>
-                {getServerStatusDomainUrl(serverStatusPageForm) && <div className="truncate">{getServerStatusDomainUrl(serverStatusPageForm)}</div>}
+              <div className="mt-2 space-y-1.5">
+                {[getServerStatusPageUrl(serverStatusPageForm, 'servers'), getServerStatusPageUrl(serverStatusPageForm, 's'), getServerStatusDomainUrl(serverStatusPageForm)]
+                  .filter(Boolean)
+                  .map((url) => (
+                    <ClipboardText
+                      key={url}
+                      size="sm"
+                      text={url}
+                      className="w-full"
+                      tooltip={{ text: '复制地址', copiedText: '地址已复制', side: 'top' }}
+                      labels={{ copyAction: '复制状态页地址' }}
+                    />
+                  ))}
               </div>
             </div>
 
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button size="sm" variant="secondary" onClick={resetServerStatusPageForm}>重置</Button>
-              <Button size="sm" variant="primary" loading={serverStatusPagesLoading} onClick={saveServerStatusPage} icon={<Save className="h-3.5 w-3.5" />}>{serverStatusPageForm.id ? '保存状态页' : '创建状态页'}</Button>
-            </div>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button size="sm" variant="secondary" onClick={resetServerStatusPageForm}>重置</Button>
+                <Button size="sm" variant="primary" loading={serverStatusPagesLoading} onClick={saveServerStatusPage} icon={<Save className="h-3.5 w-3.5" />}>{serverStatusPageForm.id ? '保存状态页' : '创建状态页'}</Button>
+              </div>
+            </LayerCard.Primary>
           </LayerCard>
 
-          <LayerCard className="space-y-4 p-4">
-            <div className="flex flex-col gap-3 border-b border-kumo-line pb-4 sm:flex-row sm:items-center sm:justify-between">
+          <LayerCard className="overflow-hidden p-0">
+            <LayerCard.Secondary className={SERVER_SECTION_HEADER_CLASS}>
               <div>
                 <h3 className="flex items-center gap-2 text-sm font-semibold text-kumo-strong"><Globe className="h-4 w-4" />已发布状态页</h3>
-                <p className="mt-1 text-xs text-kumo-subtle">公开单页会显示主机状态、资源占用、网速和流量。</p>
               </div>
               <Button size="sm" variant="secondary" icon={<RotateCw className="h-3.5 w-3.5" />} onClick={loadServerStatusPages} loading={serverStatusPagesLoading}>刷新</Button>
-            </div>
+            </LayerCard.Secondary>
 
-            {serverStatusPages.length === 0 ? (
+            <LayerCard.Primary className="p-4">
+              {serverStatusPages.length === 0 ? (
               <div className="flex min-h-56 flex-col items-center justify-center rounded-lg border border-dashed border-kumo-line text-center text-sm text-kumo-subtle">
                 <Globe className="mb-3 h-8 w-8 opacity-40" />
                 暂无主机状态页。
@@ -6125,16 +6773,24 @@ function ServerPage() {
                           <Button size="sm" variant="destructive" shape="square" icon={<Trash className="h-3.5 w-3.5" />} onClick={() => deleteServerStatusPage(page)} aria-label="删除主机状态页" />
                         </div>
                       </div>
-                      <div className="mt-3 grid gap-2 text-xs">
+                      <div className="mt-3 grid gap-2">
                         {[statusUrl, compactUrl, domainUrl].filter(Boolean).map((url) => (
-                          <button key={url} type="button" onClick={() => copyServerStatusUrl(url)} className="truncate rounded border border-kumo-line bg-kumo-recessed px-2 py-1 text-left font-mono text-kumo-subtle hover:text-kumo-brand">{url}</button>
+                          <ClipboardText
+                            key={url}
+                            size="sm"
+                            text={url}
+                            className="w-full"
+                            tooltip={{ text: '复制地址', copiedText: '地址已复制', side: 'top' }}
+                            labels={{ copyAction: '复制状态页地址' }}
+                          />
                         ))}
                       </div>
                     </div>
                   );
                 })}
               </div>
-            )}
+              )}
+            </LayerCard.Primary>
           </LayerCard>
         </div>
       )}
@@ -6165,7 +6821,7 @@ function ServerPage() {
                 listClassName={HOST_FILTER_TABS_LIST_CLASS}
                 indicatorClassName={HOST_FILTER_TABS_INDICATOR_CLASS}
                 value={serverIpDisplayMode}
-                onValueChange={setServerIpDisplayMode}
+                onValueChange={handleServerIpDisplayModeChange}
                 tabs={[
                   { value: 'normal', label: '明文' },
                   { value: 'masked', label: '打码' },
@@ -7188,164 +7844,6 @@ function ServerPage() {
         </div>
       )}
 
-      {/* ==================== 2. 历史记录 ==================== */}
-      {serverCurrentTab === 'history' && (
-        <div className="flex flex-col gap-4">
-          <div className={SERVER_SECONDARY_BAR_CLASS}>
-            <div className={SERVER_SECONDARY_TABS_GROUP_CLASS}>
-              <Tabs
-                {...TOOL_TABS_PROPS}
-                className={HOST_FILTER_TABS_CLASS}
-                listClassName={HOST_FILTER_TABS_LIST_CLASS}
-                indicatorClassName={HOST_FILTER_TABS_INDICATOR_CLASS}
-                value={metricsHistoryTimeRange}
-                onValueChange={setMetricsHistoryTimeRange}
-                tabs={[
-                  { value: '1h', label: '1h' },
-                  { value: '6h', label: '6h' },
-                  { value: '24h', label: '24h' },
-                  { value: '7d', label: '7d' },
-                ]}
-              />
-
-              <Button size="sm"
-                variant="secondary"
-                onClick={triggerManualCollect}
-                className={`flex items-center gap-1 text-xs font-semibold ${HOST_TOOLBAR_BUTTON_CLASS}`}
-              >
-                立即采集
-              </Button>
-
-              <Button size="sm"
-                variant="secondary-destructive"
-                onClick={clearMetricsHistory}
-                className={`flex items-center gap-1 text-kumo-danger font-semibold ${HOST_TOOLBAR_BUTTON_CLASS}`}
-              >
-                清空数据
-              </Button>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-kumo-subtle font-medium">过滤主机</span>
-              <Select
-                aria-label="过滤主机" size="sm"
-                value={metricsHistoryFilter.serverId}
-                onValueChange={(value) => setMetricsHistoryFilter({ serverId: String(value) })}
-                placeholder="全部主机"
-                className={HOST_TOOLBAR_SELECT_CLASS}
-                items={[
-                  { value: '', label: '全部主机' },
-                  ...serverList.map(s => ({ value: String(s.id), label: s.name || s.id })),
-                ]}
-              />
-            </div>
-          </div>
-
-          {/* 采集器参数微型概览 */}
-          {metricsCollectorStatus && (
-            <div className="flex flex-wrap gap-4 text-xs font-semibold text-kumo-subtle bg-kumo-base border border-kumo-line p-3 rounded-lg">
-              <div className="flex items-center gap-1.5">
-                <span className={`w-2 h-2 rounded-full ${metricsCollectorStatus.isRunning ? 'bg-kumo-success' : 'bg-kumo-danger'}`}></span>
-                <span>采集状态: {metricsCollectorStatus.isRunning ? '运行中' : '停止'}</span>
-              </div>
-              <div className="border-l border-kumo-line pl-3">
-                <span>采集间隔: {metricsCollectInterval} 分钟</span>
-              </div>
-              <div className="border-l border-kumo-line pl-3">
-                <span>最大保留天数: {monitorConfig.metrics_retention_days} 天</span>
-              </div>
-            </div>
-          )}
-
-          {/* 数据大列表表格 */}
-          <div className="app-card overflow-hidden">
-            {metricsHistoryLoading ? (
-              <Table layout="fixed">
-                <colgroup>
-                  {historyColWidths.map((width, idx) => (
-                    <col key={idx} style={{ width }} />
-                  ))}
-                </colgroup>
-                <Table.Header>
-                  <Table.Row className="bg-kumo-recessed/45 border-b border-kumo-line font-bold text-kumo-strong">
-                    <Table.Head className="p-3">记录时间</Table.Head>
-                    <Table.Head className="p-3">主机</Table.Head>
-                    <Table.Head className="p-3 text-center">CPU 使用率</Table.Head>
-                    <Table.Head className="p-3 text-center">内存使用率</Table.Head>
-                    <Table.Head className="p-3 text-center">磁盘使用率</Table.Head>
-                    <Table.Head className="p-3">系统负载</Table.Head>
-                  </Table.Row>
-                </Table.Header>
-                <Table.Body>
-                  {[...Array(5)].map((_, idx) => (
-                    <Table.Row key={idx} className="border-b border-kumo-line">
-                      <Table.Cell className="p-3"><SkeletonLine className="w-32 h-4" /></Table.Cell>
-                      <Table.Cell className="p-3"><SkeletonLine className="w-24 h-4" /></Table.Cell>
-                      <Table.Cell className="p-3 text-center"><SkeletonLine className="w-12 h-4 mx-auto" /></Table.Cell>
-                      <Table.Cell className="p-3 text-center"><SkeletonLine className="w-12 h-4 mx-auto" /></Table.Cell>
-                      <Table.Cell className="p-3 text-center"><SkeletonLine className="w-12 h-4 mx-auto" /></Table.Cell>
-                      <Table.Cell className="p-3"><SkeletonLine className="w-16 h-4" /></Table.Cell>
-                    </Table.Row>
-                  ))}
-                </Table.Body>
-              </Table>
-            ) : metricsHistoryList.length === 0 ? (
-              <div className="p-16 text-center text-xs text-kumo-subtle">
-                暂无历史记录指标
-              </div>
-            ) : (
-              <Table layout="fixed">
-                <colgroup>
-                  {historyColWidths.map((width, idx) => (
-                    <col key={idx} style={{ width }} />
-                  ))}
-                </colgroup>
-                <Table.Header>
-                  <Table.Row className="bg-kumo-recessed/45 border-b border-kumo-line font-bold text-kumo-strong">
-                    <Table.Head className="p-3 relative">
-                      记录时间
-                      <Table.ResizeHandle onMouseDown={(e) => startHistoryResize(0, e)} />
-                    </Table.Head>
-                    <Table.Head className="p-3 relative">
-                      主机
-                      <Table.ResizeHandle onMouseDown={(e) => startHistoryResize(1, e)} />
-                    </Table.Head>
-                    <Table.Head className="p-3 text-center relative">
-                      CPU 使用率
-                      <Table.ResizeHandle onMouseDown={(e) => startHistoryResize(2, e)} />
-                    </Table.Head>
-                    <Table.Head className="p-3 text-center relative">
-                      内存使用率
-                      <Table.ResizeHandle onMouseDown={(e) => startHistoryResize(3, e)} />
-                    </Table.Head>
-                    <Table.Head className="p-3 text-center relative">
-                      磁盘使用率
-                      <Table.ResizeHandle onMouseDown={(e) => startHistoryResize(4, e)} />
-                    </Table.Head>
-                    <Table.Head className="p-3 relative">
-                      系统负载
-                      <Table.ResizeHandle onMouseDown={(e) => startHistoryResize(5, e)} />
-                    </Table.Head>
-                  </Table.Row>
-                </Table.Header>
-                <Table.Body>
-                  {metricsHistoryList.map(rec => (
-                    <Table.Row key={rec.id} className="border-b border-kumo-line hover:bg-kumo-recessed/15">
-                      <Table.Cell className="p-3 font-semibold text-kumo-strong">{formatDateTime(rec.recorded_at)}</Table.Cell>
-                      <Table.Cell className="p-3">{rec.server_name}</Table.Cell>
-                      <Table.Cell className="p-3 text-center font-bold text-kumo-success">{rec.cpu_usage?.toFixed(1)}%</Table.Cell>
-                      <Table.Cell className="p-3 text-center font-bold text-kumo-info">{rec.mem_usage?.toFixed(1)}%</Table.Cell>
-                      <Table.Cell className="p-3 text-center">{rec.disk_usage?.toFixed(1)}%</Table.Cell>
-                      <Table.Cell className="p-3"><code className="bg-kumo-recessed px-1.5 py-0.5 rounded font-mono text-[10px]">{rec.cpu_load || '-'}</code></Table.Cell>
-                    </Table.Row>
-                  ))}
-                </Table.Body>
-              </Table>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* ==================== 3. Docker 控制台 ==================== */}
       {serverCurrentTab === 'docker' && (
         <div className="flex flex-col gap-4">
@@ -7370,18 +7868,6 @@ function ServerPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="text-xs text-kumo-subtle font-medium">选择主机</span>
-              <Select
-                aria-label="选择 Docker 主机" size="sm"
-                value={dockerSelectedServer}
-                onValueChange={(value) => setDockerSelectedServer(String(value))}
-                placeholder="全部 Docker 主机"
-                className={HOST_TOOLBAR_SELECT_CLASS}
-                items={[
-                  { value: '', label: '全部 Docker 主机' },
-                  ...dockerHostOptions,
-                ]}
-              />
               {dockerSubTab === 'containers' && (
                 <>
                   <Input
@@ -7403,6 +7889,7 @@ function ServerPage() {
                       { value: 'running', label: '运行' },
                       { value: 'paused', label: '暂停' },
                       { value: 'stopped', label: '停止' },
+                      { value: 'updatable', label: '可更新' },
                     ]}
                   />
                 </>
@@ -7428,83 +7915,102 @@ function ServerPage() {
                   检测可更新
                 </Button>
               )}
-              {dockerSubTab === 'images' && (
+              {dockerSubTab === 'containers' && (
                 <Button
                   size="sm"
-                  variant="secondary-destructive"
-                  icon={<Trash className="h-3.5 w-3.5" />}
-                  disabled={!dockerSelectedServer || isDockerActionPending(dockerSelectedServer, 'image.prune', {})}
-                  title={dockerSelectedServer ? '清理未使用镜像' : '请先选择单台 Docker 主机'}
-                  onClick={() => submitDockerTask('image.prune')}
+                  variant="primary"
+                  icon={<Upload className="h-3.5 w-3.5" />}
+                  disabled={visibleUpdatableDockerContainers.length === 0}
+                  onClick={batchUpdateVisibleDockerContainers}
+                  title={visibleUpdatableDockerContainers.length > 0 ? '更新当前筛选下可更新的容器' : '请先检测出可更新容器'}
                 >
-                  清理镜像
+                  一键更新 {visibleUpdatableDockerContainers.length > 0 ? visibleUpdatableDockerContainers.length : ''}
                 </Button>
               )}
-              {dockerSubTab === 'networks' && (
+              {dockerSubTab === 'containers' && visibleDockerContainerServers.length > 1 && (
                 <Button
                   size="sm"
-                  variant="secondary-destructive"
-                  icon={<Trash className="h-3.5 w-3.5" />}
-                  disabled={!dockerSelectedServer || isDockerActionPending(dockerSelectedServer, 'network.prune', {})}
-                  title={dockerSelectedServer ? '清理未使用网络' : '请先选择单台 Docker 主机'}
-                  onClick={() => submitDockerTask('network.prune')}
+                  variant="secondary"
+                  icon={expandedDockerOverviewServers.length >= visibleDockerContainerServers.length ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  onClick={() => {
+                    setExpandedDockerOverviewServers(prev => (
+                      prev.length >= visibleDockerContainerServers.length
+                        ? []
+                        : visibleDockerContainerServers.map(server => server.id)
+                    ));
+                  }}
                 >
-                  清理网络
-                </Button>
-              )}
-              {dockerSubTab === 'volumes' && (
-                <Button
-                  size="sm"
-                  variant="secondary-destructive"
-                  icon={<Trash className="h-3.5 w-3.5" />}
-                  disabled={!dockerSelectedServer || isDockerActionPending(dockerSelectedServer, 'volume.prune', {})}
-                  title={dockerSelectedServer ? '清理未使用存储卷' : '请先选择单台 Docker 主机'}
-                  onClick={() => submitDockerTask('volume.prune')}
-                >
-                  清理存储卷
+                  {expandedDockerOverviewServers.length >= visibleDockerContainerServers.length ? '收起主机' : '展开主机'}
                 </Button>
               )}
             </div>
           </div>
 
           {/* Docker 任务中心 */}
-          {dockerTasks.length > 0 && (
-            <div className="app-subcard bg-kumo-recessed p-3 rounded-lg text-xs font-mono text-kumo-default flex flex-col gap-1.5">
-              <div className="flex justify-between border-b border-kumo-line pb-1.5 mb-1">
-                <span className="inline-flex items-center gap-1.5 font-bold text-kumo-brand"><Activity className="h-3.5 w-3.5" />后台 Docker 任务流水</span>
-                <span className="text-[10px] text-kumo-subtle">SSE 实时长连接</span>
-              </div>
-              <div className="max-h-24 overflow-y-auto flex flex-col gap-1">
-                {dockerTasks.map(t => {
-                  const progress = clampPercent(toNumber(t.progress, 0));
-                  const showProgress = !['success', 'failed', 'timeout', 'cancelled'].includes(t.state) && progress > 0;
+          {dockerSubTab !== 'containers' && dockerSubTab === 'task-center' && dockerTasks.length > 0 && (
+            <Collapsible.Root open={showDockerTaskDetails} onOpenChange={setShowDockerTaskDetails}>
+              <div className="app-subcard bg-kumo-recessed p-2.5 rounded-lg text-xs text-kumo-default">
+                {(() => {
+                  const latestTask = dockerTasks[0];
+                  const progress = clampPercent(toNumber(latestTask.progress, 0));
+                  const showProgress = !['success', 'failed', 'timeout', 'cancelled'].includes(latestTask.state) && progress > 0;
+                  const stateVariant = latestTask.state === 'success' ? 'success' : latestTask.state === 'failed' ? 'error' : 'warning';
                   return (
-                    <div key={t.taskId} className="flex flex-col gap-1">
-                      <div className="flex justify-between gap-4">
-                        <span className={t.state === 'success' ? 'text-kumo-success' : t.state === 'failed' ? 'text-kumo-danger' : 'text-kumo-warning'}>
-                          [{t.state?.toUpperCase()}] {t.action}
-                        </span>
-                        <span className="text-kumo-subtle">{showProgress ? `${progress}% · ` : ''}{t.message}</span>
+                    <>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <Activity className="h-3.5 w-3.5 shrink-0 text-kumo-brand" />
+                          <span className="shrink-0 font-bold text-kumo-brand">Docker 任务</span>
+                          <Badge variant={stateVariant} appearance="dot">{getDockerTaskStateLabel(latestTask.state)}</Badge>
+                          <span className="min-w-0 truncate text-kumo-subtle">{getDockerTaskActionLabel(latestTask.action)}</span>
+                          <span className="min-w-0 truncate text-kumo-subtle">{summarizeDockerTaskMessage(latestTask)}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={dockerTaskStreamConnected ? 'success' : 'warning'} appearance="dot">
+                            {dockerTaskStreamConnected ? '实时连接' : '重连中'}
+                          </Badge>
+                          <Collapsible.Trigger render={<Button size="sm" variant="secondary" icon={showDockerTaskDetails ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />} />}>
+                            {showDockerTaskDetails ? '收起' : `详情 ${dockerTasks.length}`}
+                          </Collapsible.Trigger>
+                        </div>
                       </div>
                       {showProgress && (
                         <Meter
                           label="Docker 任务进度"
                           value={progress}
                           showValue={false}
-                          className="gap-0"
+                          className="mt-2 gap-0"
                           trackClassName="!h-1 overflow-hidden rounded-full bg-kumo-base"
                           indicatorClassName="!h-full !bg-none !bg-kumo-brand"
                         />
                       )}
-                    </div>
+                    </>
                   );
-                })}
+                })()}
+                <Collapsible.Panel className="mt-2 max-h-36 overflow-y-auto border-t border-kumo-line pt-2">
+                  <div className="flex flex-col gap-1.5">
+                    {dockerTasks.slice(0, 12).map(t => {
+                      const progress = clampPercent(toNumber(t.progress, 0));
+                      const showProgress = !['success', 'failed', 'timeout', 'cancelled'].includes(t.state) && progress > 0;
+                      const stateVariant = t.state === 'success' ? 'success' : t.state === 'failed' ? 'error' : 'warning';
+                      return (
+                        <div key={t.taskId} className="grid min-w-0 grid-cols-[7rem_minmax(0,1fr)_minmax(0,1.25fr)] items-center gap-2 text-[11px]">
+                          <Badge variant={stateVariant} appearance="dot">{getDockerTaskStateLabel(t.state)}</Badge>
+                          <span className="truncate font-semibold text-kumo-strong" title={getDockerTaskActionLabel(t.action)}>{getDockerTaskActionLabel(t.action)}</span>
+                          <span className="truncate text-kumo-subtle" title={String(t.message || '')}>
+                            {showProgress ? `${progress}% · ` : ''}{summarizeDockerTaskMessage(t)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </Collapsible.Panel>
               </div>
-            </div>
+            </Collapsible.Root>
           )}
 
           {/* 内容区域 */}
-          {dockerResourceLoading ? (
+          {showDockerBlockingLoading ? (
             <div className="app-card overflow-hidden p-4">
               <div className="space-y-4">
                 {[...Array(3)].map((_, i) => (
@@ -7519,24 +8025,74 @@ function ServerPage() {
             <div className="flex flex-col gap-4">
               {/* 1. 容器管理 */}
               {dockerSubTab === 'containers' && (
-                <div className="flex flex-col gap-3">
-                  {dockerOverviewServers.length === 0 ? (
-                    renderDockerEmptyState('未检测到可用的 Docker 主机')
-                  ) : visibleDockerContainerServers.length === 0 ? (
-                    renderDockerEmptyState('当前筛选下没有容器')
-                  ) : (
-                    visibleDockerContainerServers.map(server => (
-                      <div key={server.id} className="app-card overflow-hidden">
-                        <div className="bg-kumo-recessed/35 p-3 border-b border-kumo-line flex items-center justify-between">
-                          <span className="text-xs font-bold text-kumo-strong flex items-center gap-2">
-                            <Box className="h-3.5 w-3.5" /> {server.name}
-                          </span>
-                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-kumo-brand/10 text-kumo-brand font-bold">
-                            {server.resources.containers.length} 个容器
-                          </span>
-                        </div>
+                <div className="grid min-w-0 gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
+                  <div className="flex min-w-0 flex-col gap-3 xl:order-2">
+                    {dockerOverviewServers.length === 0 ? (
+                      renderDockerEmptyState('未检测到可用的 Docker 主机')
+                    ) : visibleDockerContainerServers.length === 0 ? (
+                      renderDockerEmptyState('当前筛选下没有容器')
+                    ) : (
+                      visibleDockerContainerServers.map(server => {
+                        const summary = getDockerContainerSummary(server.resources?.containers, server.id);
+                        const isOpen = expandedDockerOverviewServers.includes(server.id);
+                        return (
+                        <Collapsible.Root
+                          key={server.id}
+                          open={isOpen}
+                          onOpenChange={() => toggleDockerOverviewServer(server.id)}
+                        >
+                          <LayerCard className="overflow-hidden p-0">
+                            <LayerCard.Secondary
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => toggleDockerOverviewServer(server.id)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                  event.preventDefault();
+                                  toggleDockerOverviewServer(server.id);
+                                }
+                              }}
+                              className="flex min-h-[52px] cursor-pointer flex-wrap items-center justify-between gap-2 px-3 py-3.5"
+                            >
+                              <div className="flex min-w-0 items-center gap-2">
+                                <Box className="h-4 w-4 shrink-0 text-kumo-brand" />
+                                <span className="truncate text-xs font-bold text-kumo-strong">{server.name}</span>
+                                {renderDockerFilterChip(server.id, 'all', `${summary.total} 容器`, 'neutral', `${server.name} 全部容器`)}
+                                {renderDockerFilterChip(server.id, 'running', `${summary.running} 运行`, 'success', `${server.name} 运行容器`)}
+                                {summary.paused > 0 && renderDockerFilterChip(server.id, 'paused', `${summary.paused} 暂停`, 'warning', `${server.name} 暂停容器`)}
+                                {summary.stopped > 0 && renderDockerFilterChip(server.id, 'stopped', `${summary.stopped} 停止`, 'error', `${server.name} 停止容器`)}
+                                {summary.updatable > 0 && renderDockerFilterChip(server.id, 'updatable', `${summary.updatable} 可更新`, 'warning', `${server.name} 可更新容器`)}
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                {summary.updatable > 0 && (
+                                  <Button
+                                    size="sm"
+                                    variant="primary"
+                                    icon={<Upload className="h-3.5 w-3.5" />}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      batchUpdateVisibleDockerContainers();
+                                    }}
+                                  >
+                                    更新可更新
+                                  </Button>
+                                )}
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  icon={isOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    toggleDockerOverviewServer(server.id);
+                                  }}
+                                >
+                                  {isOpen ? '收起' : '展开'}
+                                </Button>
+                              </div>
+                            </LayerCard.Secondary>
 
-                        <div className="p-2">
+                          <Collapsible.Panel>
+                            <LayerCard.Primary className="p-2">
                           {server.resources.containers.length === 0 ? (
                             <div className="p-8 text-center text-xs text-kumo-subtle">
                               当前主机没有容器
@@ -7660,375 +8216,678 @@ function ServerPage() {
                               </Table.Body>
                             </ScrollableTable>
                           )}
+                            </LayerCard.Primary>
+                          </Collapsible.Panel>
+                        </LayerCard>
+                        </Collapsible.Root>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  <div className="flex min-w-0 flex-col gap-3 xl:order-1 xl:sticky xl:top-0 xl:self-start">
+                    <LayerCard className="order-3 overflow-hidden p-0">
+                      <LayerCard.Secondary className="flex min-h-[52px] items-center justify-between gap-2 px-3 py-3.5">
+                        <span className="inline-flex min-w-0 items-center gap-2 text-xs font-bold text-kumo-strong">
+                          <Activity className="h-4 w-4 shrink-0 text-kumo-brand" />
+                          简化日志
+                        </span>
+                        <Badge variant={dockerTaskStreamConnected ? 'success' : 'warning'} appearance="dot">
+                          {dockerTaskStreamConnected ? '实时连接' : '重连中'}
+                        </Badge>
+                      </LayerCard.Secondary>
+                      <LayerCard.Primary className="space-y-2 p-3">
+                        {dockerTasks.length === 0 ? (
+                          <div className="text-xs text-kumo-subtle">暂无后台任务</div>
+                        ) : (
+                          <>
+                            {(() => {
+                              const latestTask = dockerTasks[0];
+                              const stateVariant = latestTask.state === 'success' ? 'success' : latestTask.state === 'failed' ? 'error' : 'warning';
+                              return (
+                                <div className="space-y-1.5">
+                                  <div className="flex min-w-0 items-center gap-2">
+                                    <Badge variant={stateVariant} appearance="dot">{getDockerTaskStateLabel(latestTask.state)}</Badge>
+                                    <span className="min-w-0 truncate text-[11px] font-semibold text-kumo-strong" title={getDockerTaskActionLabel(latestTask.action)}>{getDockerTaskActionLabel(latestTask.action)}</span>
+                                  </div>
+                                  <div className="line-clamp-2 text-[11px] leading-relaxed text-kumo-subtle" title={String(latestTask.message || '')}>
+                                    {summarizeDockerTaskMessage(latestTask)}
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                            <Collapsible.Root open={showDockerTaskDetails} onOpenChange={setShowDockerTaskDetails}>
+                              <Collapsible.Trigger render={<Button size="sm" variant="secondary" className="w-full justify-center" icon={showDockerTaskDetails ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />} />}>
+                                {showDockerTaskDetails ? '收起任务' : `查看任务 ${dockerTasks.length}`}
+                              </Collapsible.Trigger>
+                              <Collapsible.Panel className="mt-2 max-h-40 overflow-y-auto border-t border-kumo-line pt-2">
+                                <div className="flex flex-col gap-1.5">
+                                  {dockerTasks.slice(0, 8).map(t => {
+                                    const stateVariant = t.state === 'success' ? 'success' : t.state === 'failed' ? 'error' : 'warning';
+                                    return (
+                                      <div key={t.taskId} className="min-w-0 rounded-md border border-kumo-line/70 bg-kumo-recessed/20 p-2">
+                                        <div className="flex min-w-0 items-center gap-2">
+                                          <Badge variant={stateVariant} appearance="dot">{getDockerTaskStateLabel(t.state)}</Badge>
+                                          <span className="min-w-0 truncate text-[11px] font-semibold text-kumo-strong" title={getDockerTaskActionLabel(t.action)}>{getDockerTaskActionLabel(t.action)}</span>
+                                        </div>
+                                        <div className="mt-1 truncate text-[11px] text-kumo-subtle" title={String(t.message || '')}>
+                                          {summarizeDockerTaskMessage(t)}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </Collapsible.Panel>
+                            </Collapsible.Root>
+                          </>
+                        )}
+                      </LayerCard.Primary>
+                    </LayerCard>
+
+                    <LayerCard className="order-1 overflow-hidden p-0">
+                      <LayerCard.Secondary className="flex min-h-[52px] items-center justify-between gap-2 px-3 py-3.5">
+                        <span className="inline-flex min-w-0 items-center gap-2 text-xs font-bold text-kumo-strong">
+                          <Settings className="h-4 w-4 shrink-0 text-kumo-brand" />
+                          管理
+                        </span>
+                        <span className="flex shrink-0 items-center gap-1.5">
+                          <Badge variant="neutral">{visibleDockerContainerServers.length} 主机</Badge>
+                          <Button
+                            shape="square"
+                            size="sm"
+                            variant="secondary"
+                            icon={<RefreshCw className={`h-3.5 w-3.5 ${dockerBulkUpdateChecking ? 'animate-spin' : ''}`} />}
+                            disabled={dockerBulkUpdateChecking || visibleDockerContainerServers.length === 0}
+                            onClick={checkVisibleDockerUpdates}
+                            aria-label="检测可更新"
+                            title="检测可更新"
+                          />
+                          <Button
+                            shape="square"
+                            size="sm"
+                            variant="primary"
+                            icon={<Upload className="h-3.5 w-3.5" />}
+                            disabled={visibleUpdatableDockerContainers.length === 0}
+                            onClick={batchUpdateVisibleDockerContainers}
+                            aria-label="一键更新"
+                            title={visibleUpdatableDockerContainers.length > 0 ? `一键更新 ${visibleUpdatableDockerContainers.length} 个容器` : '请先检测出可更新容器'}
+                          />
+                        </span>
+                      </LayerCard.Secondary>
+                      <LayerCard.Primary className="space-y-3 p-3">
+                        <div className="grid grid-cols-4 gap-1.5">
+                          <div className="rounded-md border border-kumo-line/70 bg-kumo-recessed/20 px-2 py-1.5">
+                            <div className="text-[10px] text-kumo-subtle">容器</div>
+                            <div className="mt-0.5 text-sm font-bold text-kumo-strong">{dockerContainerTotals.total}</div>
+                          </div>
+                          <div className="rounded-md border border-kumo-line/70 bg-kumo-recessed/20 px-2 py-1.5">
+                            <div className="text-[10px] text-kumo-subtle">运行</div>
+                            <div className="mt-0.5 text-sm font-bold text-kumo-success">{dockerContainerTotals.running}</div>
+                          </div>
+                          <div className="rounded-md border border-kumo-line/70 bg-kumo-recessed/20 px-2 py-1.5">
+                            <div className="text-[10px] text-kumo-subtle">停止</div>
+                            <div className="mt-0.5 text-sm font-bold text-kumo-subtle">{dockerContainerTotals.stopped}</div>
+                          </div>
+                          <div className="rounded-md border border-kumo-line/70 bg-kumo-recessed/20 px-2 py-1.5">
+                            <div className="text-[10px] text-kumo-subtle">更新</div>
+                            <div className="mt-0.5 text-sm font-bold text-kumo-warning">{dockerContainerTotals.updatable}</div>
+                          </div>
                         </div>
-                      </div>
-                    ))
-                  )}
+
+                        <div className="flex flex-col gap-2">
+                          {visibleDockerContainerServers.map(server => {
+                            const summary = getDockerContainerSummary(server.resources?.containers, server.id);
+                            const isOpen = expandedDockerOverviewServers.includes(server.id);
+                            return (
+                              <Collapsible.Root
+                                key={`management-${server.id}`}
+                                open={isOpen}
+                                onOpenChange={() => toggleDockerOverviewServer(server.id)}
+                              >
+                                <div className={`overflow-hidden rounded-md border ${isOpen ? 'border-kumo-brand/55 bg-kumo-brand/5' : 'border-kumo-line/80 bg-kumo-base'}`}>
+                                  <div
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => toggleDockerOverviewServer(server.id)}
+                                    onKeyDown={(event) => {
+                                      if (event.key === 'Enter' || event.key === ' ') {
+                                        event.preventDefault();
+                                        toggleDockerOverviewServer(server.id);
+                                      }
+                                    }}
+                                    className="flex min-h-10 cursor-pointer items-center justify-between gap-2 px-2.5 py-2"
+                                  >
+                                    <span className="flex min-w-0 items-center gap-2">
+                                      <Box className="h-3.5 w-3.5 shrink-0 text-kumo-brand" />
+                                      <span className="min-w-0 truncate text-xs font-bold text-kumo-strong">{server.name}</span>
+                                    </span>
+                                    <span className="flex shrink-0 items-center gap-1.5">
+                                      {renderDockerFilterChip(server.id, 'all', String(summary.total), 'neutral', `${server.name} 全部容器`)}
+                                      {summary.updatable > 0 && renderDockerFilterChip(server.id, 'updatable', String(summary.updatable), 'warning', `${server.name} 可更新容器`)}
+                                    </span>
+                                  </div>
+
+                                  <Collapsible.Panel>
+                                    <div className="border-t border-kumo-line/70 px-2.5 py-2">
+                                      <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <div className="flex flex-wrap gap-1.5">
+                                          {renderDockerFilterChip(server.id, 'running', `${summary.running} 运行`, 'success', `${server.name} 运行容器`)}
+                                          {summary.paused > 0 && renderDockerFilterChip(server.id, 'paused', `${summary.paused} 暂停`, 'warning', `${server.name} 暂停容器`)}
+                                          {summary.stopped > 0 && renderDockerFilterChip(server.id, 'stopped', `${summary.stopped} 停止`, 'error', `${server.name} 停止容器`)}
+                                          {summary.updatable > 0 && renderDockerFilterChip(server.id, 'updatable', `${summary.updatable} 可更新`, 'warning', `${server.name} 可更新容器`)}
+                                        </div>
+                                        <Button
+                                          shape="square"
+                                          size="sm"
+                                          variant="primary"
+                                          icon={<Upload className="h-3.5 w-3.5" />}
+                                          disabled={summary.updatable === 0}
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            batchUpdateVisibleDockerContainers(server.id);
+                                          }}
+                                          aria-label={`更新 ${server.name} 可更新容器`}
+                                          title={summary.updatable > 0 ? `更新 ${server.name} 的 ${summary.updatable} 个可更新容器` : `${server.name} 暂无可更新容器`}
+                                        />
+                                      </div>
+                                    </div>
+                                  </Collapsible.Panel>
+                                </div>
+                              </Collapsible.Root>
+                            );
+                          })}
+                        </div>
+                      </LayerCard.Primary>
+                    </LayerCard>
+                </div>
                 </div>
               )}
 
               {/* 2. Compose */}
-              {dockerSubTab === 'compose' && (
-                <div className="app-card overflow-hidden p-3.5">
-                  {dockerComposeProjects.length === 0 ? (
-                    <div className="p-12 text-center text-xs text-kumo-subtle">
-                      当前主机中未检索到 Compose 项目
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-3">
-                      {dockerComposeProjects.map(proj => {
-                        const projectName = getComposeProjectName(proj);
-                        const configFiles = getComposeConfigFiles(proj);
-                        const status = getComposeStatus(proj);
-                        const composePayload = { serverId: proj.serverId, project: projectName, configFile: configFiles };
-                        const composeUpPending = isDockerActionPending(proj.serverId, 'compose.up', composePayload);
-                        const composeDownPending = isDockerActionPending(proj.serverId, 'compose.down', composePayload);
-                        return (
-                          <div key={`${proj.serverId}-${projectName}-${configFiles}`} className="flex justify-between items-center p-3 border border-kumo-line rounded-lg bg-kumo-canvas/15 hover:border-kumo-brand/50">
-                            <div className="flex flex-col gap-0.5 min-w-0">
-                              <span className="text-xs font-bold text-kumo-strong truncate">{projectName}</span>
-                              <span className="text-[10px] text-kumo-subtle truncate max-w-[400px]" title={configFiles}>{configFiles || '-'}</span>
-                            </div>
-
-                            <div className="flex items-center gap-3">
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${status.includes('running') ? 'bg-kumo-success/15 text-kumo-success' : 'bg-kumo-danger/15 text-kumo-danger'}`}>
-                                {status}
-                              </span>
-                              <div className="flex gap-1">
-                                <Button size="sm"
-                                  variant="primary"
-                                  disabled={composeUpPending || composeDownPending}
-                                  onClick={() => submitDockerTask('compose.up', composePayload)}
-                                  className="text-kumo-inverse text-[10px] font-semibold"
-                                >
-                                  {composeUpPending ? 'Up 中' : 'Up 启动'}
-                                </Button>
-                                <Button size="sm"
-                                  variant="secondary"
-                                  disabled={composeUpPending || composeDownPending}
-                                  onClick={() => submitDockerTask('compose.down', composePayload)}
-                                  className="text-kumo-subtle text-[10px]"
-                                >
-                                  {composeDownPending ? 'Down 中' : 'Down 停止'}
-                                </Button>
+              {dockerSubTab === 'compose' && (() => {
+                const hosts = dockerOverviewServers.filter(server => isDockerOverviewHostVisible(server, 'compose'));
+                const runningProjects = dockerComposeProjects.filter(item => getComposeStatus(item).includes('running')).length;
+                return (
+                  <div className="grid min-w-0 gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
+                    {renderDockerResourceSideRail('Compose', hosts.length, [
+                      { label: '项目', value: dockerComposeProjects.length },
+                      { label: '运行', value: runningProjects, className: 'text-kumo-success' },
+                    ], '主机', '台')}
+                    <div className="flex min-w-0 flex-col gap-3">
+                      {hosts.length === 0 ? (
+                        renderDockerEmptyState('未检测到可用的 Docker 主机')
+                      ) : (
+                        hosts.map(server => {
+                          const projects = asArray(server.resources?.composeProjects);
+                          const running = projects.filter(project => getComposeStatus(project).includes('running')).length;
+                          return renderDockerHostResourceSection({
+                            server,
+                            icon: <FolderOpen className="h-4 w-4 shrink-0 text-kumo-brand" />,
+                            count: projects.length,
+                            countLabel: '项目',
+                            badges: running > 0 ? [{ label: `${running} 运行`, variant: 'success', appearance: 'dot' }] : [],
+                            children: projects.length === 0 ? (
+                              <div className="rounded-md border border-dashed border-kumo-line p-8 text-center text-xs text-kumo-subtle">
+                                当前主机未检索到 Compose 项目
                               </div>
-                            </div>
-                          </div>
-                        );
-                      })}
+                            ) : (
+                              <div className="flex flex-col gap-2">
+                                {projects.map(proj => {
+                                  const projectName = getComposeProjectName(proj);
+                                  const configFiles = getComposeConfigFiles(proj);
+                                  const status = getComposeStatus(proj);
+                                  const statusLabel = formatComposeStatusLabel(status);
+                                  const composePayload = { serverId: server.id, project: projectName, configFile: configFiles };
+                                  const composeUpPending = isDockerActionPending(server.id, 'compose.up', composePayload);
+                                  const composeDownPending = isDockerActionPending(server.id, 'compose.down', composePayload);
+                                  return (
+                                    <div key={`${server.id}-${projectName}-${configFiles}`} className="flex min-h-[52px] items-center justify-between gap-3 rounded-md border border-kumo-line bg-kumo-base p-3">
+                                      <div className="flex min-w-0 flex-col gap-0.5">
+                                        <span className="truncate text-xs font-bold text-kumo-strong">{projectName}</span>
+                                        <span className="max-w-[48rem] truncate text-[10px] text-kumo-subtle" title={configFiles}>{configFiles || '-'}</span>
+                                      </div>
+                                      <div className="flex shrink-0 items-center gap-2">
+                                        <Badge variant={status.includes('running') ? 'success' : 'error'} appearance="dot">{statusLabel}</Badge>
+                                        <Button size="sm" variant="primary" disabled={composeUpPending || composeDownPending} onClick={() => submitDockerTask('compose.up', composePayload)}>
+                                          {composeUpPending ? '启动中' : '启动'}
+                                        </Button>
+                                        <Button size="sm" variant="secondary" disabled={composeUpPending || composeDownPending} onClick={() => submitDockerTask('compose.down', composePayload)}>
+                                          {composeDownPending ? '停止中' : '停止'}
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ),
+                          });
+                        })
+                      )}
                     </div>
-                  )}
-                </div>
-              )}
+                  </div>
+                );
+              })()}
 
               {/* 3. 镜像管理 */}
-              {dockerSubTab === 'images' && (
-                <div className="flex flex-col gap-2">
-                  <div className="app-card overflow-hidden p-2">
-                    {dockerImages.length === 0 ? (
-                      <div className="p-12 text-center text-xs text-kumo-subtle">当前主机中未检索到镜像</div>
-                    ) : (
-                      <ScrollableTable layout="fixed" widths={imagesColWidths}>
-                        <colgroup>
-                          {imagesColWidths.map((width, idx) => (
-                            <col key={idx} style={{ width }} />
-                          ))}
-                        </colgroup>
-                        <Table.Header>
-                          <Table.Row className="bg-kumo-recessed/25 border-b border-kumo-line font-bold">
-                            <Table.Head className="p-2.5 relative">
-                              镜像仓库
-                              <Table.ResizeHandle onMouseDown={(e) => startImagesResize(0, e)} />
-                            </Table.Head>
-                            <Table.Head className="p-2.5 relative">
-                              标签
-                              <Table.ResizeHandle onMouseDown={(e) => startImagesResize(1, e)} />
-                            </Table.Head>
-                            <Table.Head className="p-2.5 relative">
-                              大小
-                              <Table.ResizeHandle onMouseDown={(e) => startImagesResize(2, e)} />
-                            </Table.Head>
-                            <Table.Head className="p-2.5 relative">
-                              所在主机
-                              <Table.ResizeHandle onMouseDown={(e) => startImagesResize(3, e)} />
-                            </Table.Head>
-                            <Table.Head className="p-2.5 text-right relative">
-                              操作
-                              <Table.ResizeHandle onMouseDown={(e) => startImagesResize(4, e)} />
-                            </Table.Head>
-                          </Table.Row>
-                        </Table.Header>
-                        <Table.Body>
-                          {dockerImages.map((img, i) => {
-                            const removePayload = { serverId: img.serverId, image: img.id };
-                            const removePending = isDockerActionPending(img.serverId, 'image.remove', removePayload);
-                            return (
-                              <Table.Row key={`${img.serverId}-${img.id}-${i}`} className="border-b border-kumo-line hover:bg-kumo-recessed/10">
-                                <Table.Cell className="p-2.5 font-bold text-kumo-strong truncate">{img.repository}</Table.Cell>
-                                <Table.Cell className="p-2.5"><span className="px-1.5 py-0.5 rounded bg-kumo-recessed font-mono text-[10px]">{img.tag}</span></Table.Cell>
-                                <Table.Cell className="p-2.5 text-kumo-subtle truncate">{img.size}</Table.Cell>
-                                <Table.Cell className="p-2.5 truncate">{img.serverName}</Table.Cell>
-                                <Table.Cell className="p-2.5 text-right">
-                                  <Button
-                                    shape="square" size="sm"
-                                    variant="ghost"
-                                    aria-label="删除镜像"
-                                    disabled={removePending}
-                                    onClick={() => submitDockerTask('image.remove', removePayload)}
-                                    className="text-kumo-danger"
-                                  >
-                                    {removePending ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />}
-                                  </Button>
-                                </Table.Cell>
-                              </Table.Row>
-                            );
-                          })}
-                        </Table.Body>
-                      </ScrollableTable>
-                    )}
+              {dockerSubTab === 'images' && (() => {
+                const hosts = dockerOverviewServers.filter(server => isDockerOverviewHostVisible(server, 'images'));
+                return (
+                  <div className="grid min-w-0 gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
+                    {renderDockerResourceSideRail('镜像', hosts.length, [
+                      { label: '镜像', value: dockerImages.length },
+                      { label: '仓库', value: new Set(dockerImages.map(item => item.repository)).size },
+                    ], '主机', '台')}
+                    <div className="flex min-w-0 flex-col gap-3">
+                      {hosts.length === 0 ? (
+                        renderDockerEmptyState('未检测到可用的 Docker 主机')
+                      ) : (
+                        hosts.map(server => {
+                          const images = asArray(server.resources?.images);
+                          const prunePayload = { serverId: server.id };
+                          const prunePending = isDockerActionPending(server.id, 'image.prune', prunePayload);
+                          return renderDockerHostResourceSection({
+                            server,
+                            icon: <HardDrive className="h-4 w-4 shrink-0 text-kumo-brand" />,
+                            count: images.length,
+                            countLabel: '镜像',
+                            badges: images.length > 0 ? [{ label: `${new Set(images.map(img => img.repository)).size} 仓库` }] : [],
+                            actions: (
+                              <Button
+                                size="sm"
+                                variant="secondary-destructive"
+                                icon={prunePending ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />}
+                                disabled={prunePending}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  submitDockerTask('image.prune', prunePayload);
+                                }}
+                              >
+                                清理镜像
+                              </Button>
+                            ),
+                            children: images.length === 0 ? (
+                              <div className="rounded-md border border-dashed border-kumo-line p-8 text-center text-xs text-kumo-subtle">
+                                当前主机未检索到镜像
+                              </div>
+                            ) : (
+                              <ScrollableTable layout="fixed" widths={[imagesColWidths[0], imagesColWidths[1], imagesColWidths[2], imagesColWidths[4]]}>
+                                <colgroup>
+                                  {[imagesColWidths[0], imagesColWidths[1], imagesColWidths[2], imagesColWidths[4]].map((width, idx) => (
+                                    <col key={idx} style={{ width }} />
+                                  ))}
+                                </colgroup>
+                                <Table.Header>
+                                  <Table.Row className="border-b border-kumo-line bg-kumo-recessed/25 font-bold">
+                                    <Table.Head className="relative p-2.5">镜像仓库<Table.ResizeHandle onMouseDown={(e) => startImagesResize(0, e)} /></Table.Head>
+                                    <Table.Head className="relative p-2.5">标签<Table.ResizeHandle onMouseDown={(e) => startImagesResize(1, e)} /></Table.Head>
+                                    <Table.Head className="relative p-2.5">大小<Table.ResizeHandle onMouseDown={(e) => startImagesResize(2, e)} /></Table.Head>
+                                    <Table.Head className="relative p-2.5 text-right">操作<Table.ResizeHandle onMouseDown={(e) => startImagesResize(4, e)} /></Table.Head>
+                                  </Table.Row>
+                                </Table.Header>
+                                <Table.Body>
+                                  {images.map((img, i) => {
+                                    const removePayload = { serverId: server.id, image: img.id || `${img.repository}:${img.tag}` };
+                                    const removePending = isDockerActionPending(server.id, 'image.remove', removePayload);
+                                    return (
+                                      <Table.Row key={`${server.id}-${img.id || img.repository}-${i}`} className="border-b border-kumo-line hover:bg-kumo-recessed/10">
+                                        <Table.Cell className="truncate p-2.5 font-bold text-kumo-strong">{img.repository}</Table.Cell>
+                                        <Table.Cell className="p-2.5"><span className="rounded bg-kumo-recessed px-1.5 py-0.5 font-mono text-[10px]">{img.tag || '-'}</span></Table.Cell>
+                                        <Table.Cell className="truncate p-2.5 text-kumo-subtle">{img.size || '-'}</Table.Cell>
+                                        <Table.Cell className="p-2.5 text-right">
+                                          <Button
+                                            shape="square"
+                                            size="sm"
+                                            variant="ghost"
+                                            aria-label={`删除 ${img.repository || '镜像'}`}
+                                            disabled={removePending}
+                                            onClick={() => submitDockerTask('image.remove', removePayload)}
+                                            className="text-kumo-danger"
+                                          >
+                                            {removePending ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />}
+                                          </Button>
+                                        </Table.Cell>
+                                      </Table.Row>
+                                    );
+                                  })}
+                                </Table.Body>
+                              </ScrollableTable>
+                            ),
+                          });
+                        })
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* 4. 网络管理 */}
-              {dockerSubTab === 'networks' && (
-                <div className="flex flex-col gap-2">
-                  <div className="app-card overflow-hidden p-2">
-                    {dockerNetworks.length === 0 ? (
-                      <div className="p-12 text-center text-xs text-kumo-subtle">当前主机中未检索到 Docker 网络</div>
-                    ) : (
-                      <ScrollableTable layout="fixed" widths={networksColWidths}>
-                        <colgroup>
-                          {networksColWidths.map((width, idx) => (
-                            <col key={idx} style={{ width }} />
-                          ))}
-                        </colgroup>
-                        <Table.Header>
-                          <Table.Row className="bg-kumo-recessed/25 border-b border-kumo-line font-bold">
-                            <Table.Head className="p-2.5 relative">
-                              名称
-                              <Table.ResizeHandle onMouseDown={(e) => startNetworksResize(0, e)} />
-                            </Table.Head>
-                            <Table.Head className="p-2.5 relative">
-                              ID
-                              <Table.ResizeHandle onMouseDown={(e) => startNetworksResize(1, e)} />
-                            </Table.Head>
-                            <Table.Head className="p-2.5 relative">
-                              驱动
-                              <Table.ResizeHandle onMouseDown={(e) => startNetworksResize(2, e)} />
-                            </Table.Head>
-                            <Table.Head className="p-2.5 relative">
-                              范围
-                              <Table.ResizeHandle onMouseDown={(e) => startNetworksResize(3, e)} />
-                            </Table.Head>
-                            <Table.Head className="p-2.5 relative">
-                              所在主机
-                              <Table.ResizeHandle onMouseDown={(e) => startNetworksResize(4, e)} />
-                            </Table.Head>
-                            <Table.Head className="p-2.5 text-right relative">
-                              操作
-                              <Table.ResizeHandle onMouseDown={(e) => startNetworksResize(5, e)} />
-                            </Table.Head>
-                          </Table.Row>
-                        </Table.Header>
-                        <Table.Body>
-                          {dockerNetworks.map((network, i) => {
-                            const isBuiltinNetwork = ['bridge', 'host', 'none'].includes(network.name);
-                            const removePayload = { serverId: network.serverId, name: network.name };
-                            const removePending = isDockerActionPending(network.serverId, 'network.remove', removePayload);
-                            return (
-                              <Table.Row key={`${network.serverId}-${network.id || network.name}-${i}`} className="border-b border-kumo-line hover:bg-kumo-recessed/10">
-                                <Table.Cell className="p-2.5 font-bold text-kumo-strong truncate">{network.name}</Table.Cell>
-                                <Table.Cell className="p-2.5 font-mono text-[11px] text-kumo-subtle truncate">{network.id || '-'}</Table.Cell>
-                                <Table.Cell className="p-2.5">{network.driver || '-'}</Table.Cell>
-                                <Table.Cell className="p-2.5">{network.scope || '-'}</Table.Cell>
-                                <Table.Cell className="p-2.5 truncate">{network.serverName}</Table.Cell>
-                                <Table.Cell className="p-2.5 text-right">
-                                  <Button
-                                    shape="square" size="sm"
-                                    variant="ghost"
-                                    aria-label="删除网络"
-                                    disabled={isBuiltinNetwork || removePending}
-                                    onClick={() => submitDockerTask('network.remove', removePayload)}
-                                    className="text-kumo-danger disabled:opacity-40"
-                                  >
-                                    {removePending ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />}
-                                  </Button>
-                                </Table.Cell>
-                              </Table.Row>
-                            );
-                          })}
-                        </Table.Body>
-                      </ScrollableTable>
-                    )}
+              {dockerSubTab === 'networks' && (() => {
+                const hosts = dockerOverviewServers.filter(server => isDockerOverviewHostVisible(server, 'networks'));
+                return (
+                  <div className="grid min-w-0 gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
+                    {renderDockerResourceSideRail('网络', hosts.length, [
+                      { label: '网络', value: dockerNetworks.length },
+                      { label: '驱动', value: new Set(dockerNetworks.map(item => item.driver || '-')).size },
+                    ], '主机', '台')}
+                    <div className="flex min-w-0 flex-col gap-3">
+                      {hosts.length === 0 ? (
+                        renderDockerEmptyState('未检测到可用的 Docker 主机')
+                      ) : (
+                        hosts.map(server => {
+                          const networks = asArray(server.resources?.networks);
+                          const prunePayload = { serverId: server.id };
+                          const prunePending = isDockerActionPending(server.id, 'network.prune', prunePayload);
+                          return renderDockerHostResourceSection({
+                            server,
+                            icon: <Globe className="h-4 w-4 shrink-0 text-kumo-brand" />,
+                            count: networks.length,
+                            countLabel: '网络',
+                            badges: networks.length > 0 ? [{ label: `${new Set(networks.map(network => network.driver || '-')).size} 驱动` }] : [],
+                            actions: (
+                              <Button
+                                size="sm"
+                                variant="secondary-destructive"
+                                icon={prunePending ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />}
+                                disabled={prunePending}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  submitDockerTask('network.prune', prunePayload);
+                                }}
+                              >
+                                清理网络
+                              </Button>
+                            ),
+                            children: networks.length === 0 ? (
+                              <div className="rounded-md border border-dashed border-kumo-line p-8 text-center text-xs text-kumo-subtle">
+                                当前主机未检索到 Docker 网络
+                              </div>
+                            ) : (
+                              <ScrollableTable layout="fixed" widths={[networksColWidths[0], networksColWidths[1], networksColWidths[2], networksColWidths[3], networksColWidths[5]]}>
+                                <colgroup>
+                                  {[networksColWidths[0], networksColWidths[1], networksColWidths[2], networksColWidths[3], networksColWidths[5]].map((width, idx) => (
+                                    <col key={idx} style={{ width }} />
+                                  ))}
+                                </colgroup>
+                                <Table.Header>
+                                  <Table.Row className="border-b border-kumo-line bg-kumo-recessed/25 font-bold">
+                                    <Table.Head className="relative p-2.5">名称<Table.ResizeHandle onMouseDown={(e) => startNetworksResize(0, e)} /></Table.Head>
+                                    <Table.Head className="relative p-2.5">ID<Table.ResizeHandle onMouseDown={(e) => startNetworksResize(1, e)} /></Table.Head>
+                                    <Table.Head className="relative p-2.5">驱动<Table.ResizeHandle onMouseDown={(e) => startNetworksResize(2, e)} /></Table.Head>
+                                    <Table.Head className="relative p-2.5">范围<Table.ResizeHandle onMouseDown={(e) => startNetworksResize(3, e)} /></Table.Head>
+                                    <Table.Head className="relative p-2.5 text-right">操作<Table.ResizeHandle onMouseDown={(e) => startNetworksResize(5, e)} /></Table.Head>
+                                  </Table.Row>
+                                </Table.Header>
+                                <Table.Body>
+                                  {networks.map((network, i) => {
+                                    const isBuiltinNetwork = ['bridge', 'host', 'none'].includes(network.name);
+                                    const removePayload = { serverId: server.id, name: network.name };
+                                    const removePending = isDockerActionPending(server.id, 'network.remove', removePayload);
+                                    return (
+                                      <Table.Row key={`${server.id}-${network.id || network.name}-${i}`} className="border-b border-kumo-line hover:bg-kumo-recessed/10">
+                                        <Table.Cell className="truncate p-2.5 font-bold text-kumo-strong">{network.name}</Table.Cell>
+                                        <Table.Cell className="truncate p-2.5 font-mono text-[11px] text-kumo-subtle">{network.id || '-'}</Table.Cell>
+                                        <Table.Cell className="p-2.5">{network.driver || '-'}</Table.Cell>
+                                        <Table.Cell className="p-2.5">{network.scope || '-'}</Table.Cell>
+                                        <Table.Cell className="p-2.5 text-right">
+                                          <Button
+                                            shape="square"
+                                            size="sm"
+                                            variant="ghost"
+                                            aria-label={`删除 ${network.name || '网络'}`}
+                                            disabled={isBuiltinNetwork || removePending}
+                                            onClick={() => submitDockerTask('network.remove', removePayload)}
+                                            className="text-kumo-danger disabled:opacity-40"
+                                          >
+                                            {removePending ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />}
+                                          </Button>
+                                        </Table.Cell>
+                                      </Table.Row>
+                                    );
+                                  })}
+                                </Table.Body>
+                              </ScrollableTable>
+                            ),
+                          });
+                        })
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* 5. 存储卷管理 */}
-              {dockerSubTab === 'volumes' && (
-                <div className="flex flex-col gap-2">
-                  <div className="app-card overflow-hidden p-2">
-                    {dockerVolumes.length === 0 ? (
-                      <div className="p-12 text-center text-xs text-kumo-subtle">当前主机中未检索到 Docker 存储卷</div>
-                    ) : (
-                      <ScrollableTable layout="fixed" widths={volumesColWidths}>
-                        <colgroup>
-                          {volumesColWidths.map((width, idx) => (
-                            <col key={idx} style={{ width }} />
-                          ))}
-                        </colgroup>
-                        <Table.Header>
-                          <Table.Row className="bg-kumo-recessed/25 border-b border-kumo-line font-bold">
-                            <Table.Head className="p-2.5 relative">
-                              名称
-                              <Table.ResizeHandle onMouseDown={(e) => startVolumesResize(0, e)} />
-                            </Table.Head>
-                            <Table.Head className="p-2.5 relative">
-                              驱动
-                              <Table.ResizeHandle onMouseDown={(e) => startVolumesResize(1, e)} />
-                            </Table.Head>
-                            <Table.Head className="p-2.5 relative">
-                              范围
-                              <Table.ResizeHandle onMouseDown={(e) => startVolumesResize(2, e)} />
-                            </Table.Head>
-                            <Table.Head className="p-2.5 relative">
-                              所在主机
-                              <Table.ResizeHandle onMouseDown={(e) => startVolumesResize(3, e)} />
-                            </Table.Head>
-                            <Table.Head className="p-2.5 text-right relative">
-                              操作
-                              <Table.ResizeHandle onMouseDown={(e) => startVolumesResize(4, e)} />
-                            </Table.Head>
-                          </Table.Row>
-                        </Table.Header>
-                        <Table.Body>
-                          {dockerVolumes.map((volume, i) => {
-                            const removePayload = { serverId: volume.serverId, name: volume.name };
-                            const removePending = isDockerActionPending(volume.serverId, 'volume.remove', removePayload);
-                            return (
-                              <Table.Row key={`${volume.serverId}-${volume.name}-${i}`} className="border-b border-kumo-line hover:bg-kumo-recessed/10">
-                                <Table.Cell className="p-2.5 font-bold text-kumo-strong truncate">{volume.name}</Table.Cell>
-                                <Table.Cell className="p-2.5">{volume.driver || '-'}</Table.Cell>
-                                <Table.Cell className="p-2.5">{volume.scope || '-'}</Table.Cell>
-                                <Table.Cell className="p-2.5 truncate">{volume.serverName}</Table.Cell>
-                                <Table.Cell className="p-2.5 text-right">
-                                  <Button
-                                    shape="square" size="sm"
-                                    variant="ghost"
-                                    aria-label="删除存储卷"
-                                    disabled={removePending}
-                                    onClick={() => submitDockerTask('volume.remove', removePayload)}
-                                    className="text-kumo-danger"
-                                  >
-                                    {removePending ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />}
-                                  </Button>
-                                </Table.Cell>
-                              </Table.Row>
-                            );
-                          })}
-                        </Table.Body>
-                      </ScrollableTable>
-                    )}
+              {dockerSubTab === 'volumes' && (() => {
+                const hosts = dockerOverviewServers.filter(server => isDockerOverviewHostVisible(server, 'volumes'));
+                return (
+                  <div className="grid min-w-0 gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
+                    {renderDockerResourceSideRail('存储卷', hosts.length, [
+                      { label: '存储卷', value: dockerVolumes.length },
+                      { label: '驱动', value: new Set(dockerVolumes.map(item => item.driver || '-')).size },
+                    ], '主机', '台')}
+                    <div className="flex min-w-0 flex-col gap-3">
+                      {hosts.length === 0 ? (
+                        renderDockerEmptyState('未检测到可用的 Docker 主机')
+                      ) : (
+                        hosts.map(server => {
+                          const volumes = asArray(server.resources?.volumes);
+                          const prunePayload = { serverId: server.id };
+                          const prunePending = isDockerActionPending(server.id, 'volume.prune', prunePayload);
+                          return renderDockerHostResourceSection({
+                            server,
+                            icon: <Database className="h-4 w-4 shrink-0 text-kumo-brand" />,
+                            count: volumes.length,
+                            countLabel: '存储卷',
+                            badges: volumes.length > 0 ? [{ label: `${new Set(volumes.map(volume => volume.driver || '-')).size} 驱动` }] : [],
+                            actions: (
+                              <Button
+                                size="sm"
+                                variant="secondary-destructive"
+                                icon={prunePending ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />}
+                                disabled={prunePending}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  submitDockerTask('volume.prune', prunePayload);
+                                }}
+                              >
+                                清理存储卷
+                              </Button>
+                            ),
+                            children: volumes.length === 0 ? (
+                              <div className="rounded-md border border-dashed border-kumo-line p-8 text-center text-xs text-kumo-subtle">
+                                当前主机未检索到 Docker 存储卷
+                              </div>
+                            ) : (
+                              <ScrollableTable layout="fixed" widths={[volumesColWidths[0], volumesColWidths[1], volumesColWidths[2], volumesColWidths[4]]}>
+                                <colgroup>
+                                  {[volumesColWidths[0], volumesColWidths[1], volumesColWidths[2], volumesColWidths[4]].map((width, idx) => (
+                                    <col key={idx} style={{ width }} />
+                                  ))}
+                                </colgroup>
+                                <Table.Header>
+                                  <Table.Row className="border-b border-kumo-line bg-kumo-recessed/25 font-bold">
+                                    <Table.Head className="relative p-2.5">名称<Table.ResizeHandle onMouseDown={(e) => startVolumesResize(0, e)} /></Table.Head>
+                                    <Table.Head className="relative p-2.5">驱动<Table.ResizeHandle onMouseDown={(e) => startVolumesResize(1, e)} /></Table.Head>
+                                    <Table.Head className="relative p-2.5">范围<Table.ResizeHandle onMouseDown={(e) => startVolumesResize(2, e)} /></Table.Head>
+                                    <Table.Head className="relative p-2.5 text-right">操作<Table.ResizeHandle onMouseDown={(e) => startVolumesResize(4, e)} /></Table.Head>
+                                  </Table.Row>
+                                </Table.Header>
+                                <Table.Body>
+                                  {volumes.map((volume, i) => {
+                                    const removePayload = { serverId: server.id, name: volume.name };
+                                    const removePending = isDockerActionPending(server.id, 'volume.remove', removePayload);
+                                    return (
+                                      <Table.Row key={`${server.id}-${volume.name}-${i}`} className="border-b border-kumo-line hover:bg-kumo-recessed/10">
+                                        <Table.Cell className="truncate p-2.5 font-bold text-kumo-strong">{volume.name}</Table.Cell>
+                                        <Table.Cell className="p-2.5">{volume.driver || '-'}</Table.Cell>
+                                        <Table.Cell className="p-2.5">{volume.scope || '-'}</Table.Cell>
+                                        <Table.Cell className="p-2.5 text-right">
+                                          <Button
+                                            shape="square"
+                                            size="sm"
+                                            variant="ghost"
+                                            aria-label={`删除 ${volume.name || '存储卷'}`}
+                                            disabled={removePending}
+                                            onClick={() => submitDockerTask('volume.remove', removePayload)}
+                                            className="text-kumo-danger"
+                                          >
+                                            {removePending ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />}
+                                          </Button>
+                                        </Table.Cell>
+                                      </Table.Row>
+                                    );
+                                  })}
+                                </Table.Body>
+                              </ScrollableTable>
+                            ),
+                          });
+                        })
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* 6. 实时统计 */}
-              {dockerSubTab === 'stats' && (
-                <div className="app-card overflow-hidden p-2">
-                  {dockerStats.length === 0 ? (
-                    <div className="p-12 text-center text-xs text-kumo-subtle">当前主机中未检索到 Docker 资源统计</div>
-                  ) : (
-                    <div className="flex flex-col gap-3">
-                      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                        {dockerStats.map((stat, i) => {
-                          const name = getDockerStatName(stat);
-                          const cpuPercent = getDockerStatCpuPercent(stat);
-                          const memPercent = getDockerStatMemPercent(stat);
-                          return (
-                            <div key={`${stat.serverId}-${stat.container_id || stat.ID || name}-${i}-visual`} className="rounded-md border border-kumo-line bg-kumo-recessed/20 p-3">
-                              <div className="mb-2 flex min-w-0 items-center justify-between gap-2">
-                                <span className="truncate text-xs font-bold text-kumo-strong" title={name}>{name}</span>
-                                <span className="shrink-0 text-[10px] font-semibold text-kumo-subtle">{stat.serverName}</span>
+              {dockerSubTab === 'stats' && (() => {
+                const hosts = dockerOverviewServers.filter(server => isDockerOverviewHostVisible(server, 'stats'));
+                return (
+                  <div className="grid min-w-0 gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
+                    {renderDockerResourceSideRail('实时统计', hosts.length, [
+                      { label: '容器', value: dockerStats.length },
+                      { label: 'CPU', value: `${dockerStatsSummary.cpu.toFixed(1)}%`, className: 'text-kumo-success' },
+                      { label: '内存', value: `${dockerStatsSummary.memory.toFixed(1)}%`, className: 'text-kumo-info' },
+                      { label: '网络', value: `${formatBytesValue(dockerStatsSummary.netIn)} / ${formatBytesValue(dockerStatsSummary.netOut)}` },
+                      { label: '磁盘', value: `${formatBytesValue(dockerStatsSummary.blockRead)} / ${formatBytesValue(dockerStatsSummary.blockWrite)}` },
+                    ], '主机', '台')}
+                    <div className="flex min-w-0 flex-col gap-3">
+                      {hosts.length === 0 ? (
+                        renderDockerEmptyState('未检测到可用的 Docker 主机')
+                      ) : (
+                        hosts.map(server => {
+                          const currentStats = asArray(server.resources?.stats);
+                          const serverHistory = dockerStatsHistory
+                            .map(snapshot => snapshot.filter(item => item.serverId === server.id))
+                            .filter(snapshot => snapshot.length > 0);
+                          const latest = serverHistory[serverHistory.length - 1] || [];
+                          const summary = latest.reduce((acc, item) => ({
+                            cpu: acc.cpu + toNumber(item.cpu, 0),
+                            memory: acc.memory + toNumber(item.memory, 0),
+                            netIn: acc.netIn + toNumber(item.netIn, 0),
+                            netOut: acc.netOut + toNumber(item.netOut, 0),
+                            blockRead: acc.blockRead + toNumber(item.blockRead, 0),
+                            blockWrite: acc.blockWrite + toNumber(item.blockWrite, 0),
+                          }), { cpu: 0, memory: 0, netIn: 0, netOut: 0, blockRead: 0, blockWrite: 0 });
+                          const isDarkMode = theme === 'dark';
+                          const netInColor = ChartPalette.categorical(0, isDarkMode);
+                          const netOutColor = ChartPalette.semantic('Success', isDarkMode);
+                          const readColor = ChartPalette.semantic('Warning', isDarkMode);
+                          const writeColor = ChartPalette.categorical(3, isDarkMode);
+                          const charts = [
+                            {
+                              key: 'cpu',
+                              title: 'CPU 使用率',
+                              description: '当前主机容器 CPU 占用趋势',
+                              data: buildDockerStatSeries(serverHistory, 'cpu', isDarkMode),
+                              value: `${summary.cpu.toFixed(1)}%`,
+                              yAxisTickFormat: formatPercentAxis,
+                              tooltipValueFormat: value => `${toNumber(value, 0).toFixed(2)}%`,
+                            },
+                            {
+                              key: 'memory',
+                              title: '内存使用率',
+                              description: '当前主机容器内存占用趋势',
+                              data: buildDockerStatSeries(serverHistory, 'memory', isDarkMode),
+                              value: `${summary.memory.toFixed(1)}%`,
+                              yAxisTickFormat: formatPercentAxis,
+                              tooltipValueFormat: value => `${toNumber(value, 0).toFixed(2)}%`,
+                            },
+                            {
+                              key: 'network',
+                              title: '网络 I/O',
+                              description: '当前主机容器接收与发送流量',
+                              data: buildDockerPairSeries(serverHistory, [
+                                { key: 'netIn', name: '接收', color: netInColor },
+                                { key: 'netOut', name: '发送', color: netOutColor },
+                              ]),
+                              value: `${formatBytesValue(summary.netIn)} / ${formatBytesValue(summary.netOut)}`,
+                              yAxisTickFormat: formatBytesValue,
+                              tooltipValueFormat: formatBytesValue,
+                            },
+                            {
+                              key: 'disk',
+                              title: '磁盘 I/O',
+                              description: '当前主机容器读取与写入流量',
+                              data: buildDockerPairSeries(serverHistory, [
+                                { key: 'blockRead', name: '读取', color: readColor },
+                                { key: 'blockWrite', name: '写入', color: writeColor },
+                              ]),
+                              value: `${formatBytesValue(summary.blockRead)} / ${formatBytesValue(summary.blockWrite)}`,
+                              yAxisTickFormat: formatBytesValue,
+                              tooltipValueFormat: formatBytesValue,
+                            },
+                          ];
+                          return renderDockerHostResourceSection({
+                            server,
+                            icon: <Activity className="h-4 w-4 shrink-0 text-kumo-brand" />,
+                            count: currentStats.length,
+                            countLabel: '容器',
+                            badges: currentStats.length > 0 ? [
+                              { label: `CPU ${summary.cpu.toFixed(1)}%`, variant: 'success', appearance: 'dot' },
+                              { label: `内存 ${summary.memory.toFixed(1)}%`, variant: 'info', appearance: 'dot' },
+                            ] : [],
+                            children: currentStats.length === 0 ? (
+                              <div className="rounded-md border border-dashed border-kumo-line p-8 text-center text-xs text-kumo-subtle">
+                                当前主机未检索到 Docker 资源统计
                               </div>
-                              <div className="grid gap-2">
-                                <Meter
-                                  label="CPU"
-                                  value={cpuPercent}
-                                  customValue={`${cpuPercent.toFixed(1)}%`}
-                                  className="gap-1 text-[11px]"
-                                  trackClassName="!h-1.5 overflow-hidden rounded-full bg-kumo-base"
-                                  indicatorClassName="!h-full !bg-none !bg-kumo-success"
-                                />
-                                <Meter
-                                  label="内存"
-                                  value={memPercent}
-                                  customValue={`${memPercent.toFixed(1)}% · ${getDockerStatMemUsage(stat)}`}
-                                  className="gap-1 text-[11px]"
-                                  trackClassName="!h-1.5 overflow-hidden rounded-full bg-kumo-base"
-                                  indicatorClassName="!h-full !bg-none !bg-kumo-info"
-                                />
+                            ) : (
+                              <div className="grid gap-3 xl:grid-cols-2">
+                                {charts.map(chart => (
+                                  <ChartBoundaryBox key={chart.key} className="min-w-0 rounded-md border border-kumo-line bg-kumo-base p-3">
+                                    {(tooltipBoundary) => (
+                                      <div className="min-w-0">
+                                        <div className="mb-3 flex min-w-0 items-start justify-between gap-3">
+                                          <div className="min-w-0">
+                                            <div className="truncate text-sm font-bold text-kumo-strong">{chart.title}</div>
+                                            <div className="mt-0.5 truncate text-xs text-kumo-subtle">{chart.description}</div>
+                                          </div>
+                                          <Badge variant="neutral">{chart.value}</Badge>
+                                        </div>
+                                        {chart.data.length === 0 ? (
+                                          <div className="flex h-[220px] items-center justify-center rounded-md border border-dashed border-kumo-line text-center text-xs text-kumo-subtle">
+                                            暂无可绘制数据
+                                          </div>
+                                        ) : (
+                                          <TimeseriesChart
+                                            echarts={fastTimeseriesEcharts}
+                                            data={chart.data}
+                                            height={220}
+                                            isDarkMode={isDarkMode}
+                                            gradient
+                                            loading={dockerResourceLoading}
+                                            tooltipBoundary={tooltipBoundary ?? undefined}
+                                            tooltipFollowCursor="x"
+                                            xAxisTickCount={isCompactViewport ? 3 : 5}
+                                            yAxisTickCount={4}
+                                            xAxisTickFormat={expandedChartXAxisTickFormat}
+                                            yAxisTickFormat={chart.yAxisTickFormat}
+                                            tooltipValueFormat={chart.tooltipValueFormat}
+                                            optionUpdateBehavior={SERVER_FAST_CHART_UPDATE_BEHAVIOR}
+                                            ariaDescription={`${server.name} ${chart.title}`}
+                                          />
+                                        )}
+                                      </div>
+                                    )}
+                                  </ChartBoundaryBox>
+                                ))}
                               </div>
-                              <div className="mt-2 grid grid-cols-2 gap-2 text-[10px] text-kumo-subtle">
-                                <span className="truncate font-mono" title={getDockerStatNetIo(stat)}>NET {getDockerStatNetIo(stat)}</span>
-                                <span className="truncate text-right font-mono" title={getDockerStatBlockIo(stat)}>IO {getDockerStatBlockIo(stat)}</span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <ScrollableTable layout="fixed" widths={statsColWidths}>
-                        <colgroup>
-                          {statsColWidths.map((width, idx) => (
-                            <col key={idx} style={{ width }} />
-                          ))}
-                        </colgroup>
-                        <Table.Header>
-                          <Table.Row className="bg-kumo-recessed/25 border-b border-kumo-line font-bold">
-                            <Table.Head className="p-2.5 relative">
-                              容器
-                              <Table.ResizeHandle onMouseDown={(e) => startStatsResize(0, e)} />
-                            </Table.Head>
-                            <Table.Head className="p-2.5 relative">
-                              CPU
-                              <Table.ResizeHandle onMouseDown={(e) => startStatsResize(1, e)} />
-                            </Table.Head>
-                            <Table.Head className="p-2.5 relative">
-                              内存
-                              <Table.ResizeHandle onMouseDown={(e) => startStatsResize(2, e)} />
-                            </Table.Head>
-                            <Table.Head className="p-2.5 relative">
-                              内存占比
-                              <Table.ResizeHandle onMouseDown={(e) => startStatsResize(3, e)} />
-                            </Table.Head>
-                            <Table.Head className="p-2.5 relative">
-                              网络 IO
-                              <Table.ResizeHandle onMouseDown={(e) => startStatsResize(4, e)} />
-                            </Table.Head>
-                            <Table.Head className="p-2.5 relative">
-                              所在主机
-                              <Table.ResizeHandle onMouseDown={(e) => startStatsResize(5, e)} />
-                            </Table.Head>
-                          </Table.Row>
-                        </Table.Header>
-                        <Table.Body>
-                          {dockerStats.map((stat, i) => (
-                            <Table.Row key={`${stat.serverId}-${stat.container_id || stat.name}-${i}`} className="border-b border-kumo-line hover:bg-kumo-recessed/10">
-                              <Table.Cell className="p-2.5 font-bold text-kumo-strong truncate" title={stat.container_id || stat.ID || getDockerStatName(stat)}>{getDockerStatName(stat)}</Table.Cell>
-                              <Table.Cell className="p-2.5 font-mono text-kumo-success">{stat.cpu_percent || stat.CPUPerc || '-'}</Table.Cell>
-                              <Table.Cell className="p-2.5 font-mono text-kumo-default">{getDockerStatMemUsage(stat)}</Table.Cell>
-                              <Table.Cell className="p-2.5 font-mono text-kumo-info">{stat.mem_percent || stat.MemPerc || '-'}</Table.Cell>
-                              <Table.Cell className="p-2.5 font-mono text-[11px] text-kumo-subtle truncate">{getDockerStatNetIo(stat)}</Table.Cell>
-                              <Table.Cell className="p-2.5 truncate">{stat.serverName}</Table.Cell>
-                            </Table.Row>
-                          ))}
-                        </Table.Body>
-                      </ScrollableTable>
+                            ),
+                          });
+                        })
+                      )}
                     </div>
-                  )}
-                </div>
-              )}
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>
@@ -8036,65 +8895,67 @@ function ServerPage() {
 
       {/* ==================== 4. 后台管理 ==================== */}
       {serverCurrentTab === 'management' && (
-        <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
-
-            <LayerCard className={MANAGEMENT_CARD_CLASS}>
-              <div className={MANAGEMENT_CARD_HEADER_CLASS}>
-                <div className={MANAGEMENT_CARD_TITLE_CLASS}>
-                  <Activity className={MANAGEMENT_CARD_ICON_CLASS} />
-                  <span className="truncate">监控采集</span>
-                </div>
-                <span className="text-xs font-semibold text-kumo-subtle">{metricsCollectInterval}m</span>
-              </div>
-              <div className={`${MANAGEMENT_CARD_BODY_CLASS} flex flex-col gap-3`}>
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-xs font-semibold text-kumo-subtle">采集间隔</span>
-                  <Tabs
-                    {...TOOL_TABS_PROPS}
-                    className={HOST_FILTER_TABS_CLASS}
-                    listClassName={HOST_FILTER_TABS_LIST_CLASS}
-                    indicatorClassName={HOST_FILTER_TABS_INDICATOR_CLASS}
-                    value={String(metricsCollectInterval)}
-                    onValueChange={(value) => updateMetricsCollectInterval(Number(value))}
-                    tabs={METRICS_COLLECT_INTERVAL_TABS}
+        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
+            <SectionCard
+              title="主机偏好"
+              description="主机列表显示和 Agent 安装下载配置。"
+              icon={<Settings className={MANAGEMENT_CARD_ICON_CLASS} />}
+              className="xl:col-span-2"
+              actions={(
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={saveServerModuleSettings}
+                  loading={serverSettingsSaving}
+                  icon={<Save className="h-3.5 w-3.5" />}
+                >
+                  保存偏好
+                </Button>
+              )}
+              bodyPadding="none"
+            >
+              <div className="grid gap-4 p-4 md:grid-cols-2">
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-semibold text-kumo-subtle">主机地址显示</label>
+                  <Select
+                    size="sm"
+                    label="主机地址显示"
+                    value={serverIpDisplayMode}
+                    onValueChange={handleServerIpDisplayModeChange}
+                    items={[
+                      { value: 'normal', label: '明文' },
+                      { value: 'masked', label: '打码' },
+                      { value: 'hidden', label: '隐藏' },
+                    ]}
                   />
+                  <div className="text-[11px] leading-relaxed text-kumo-subtle">
+                    控制主机列表和详情展开区里的地址展示方式。
+                  </div>
                 </div>
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-xs font-semibold text-kumo-subtle">保留天数</span>
-                  <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_112px] sm:items-center">
-                    <Tabs
-                      {...TOOL_TABS_PROPS}
-                      className={HOST_FILTER_TABS_CLASS}
-                      listClassName={HOST_FILTER_TABS_LIST_CLASS}
-                      indicatorClassName={HOST_FILTER_TABS_INDICATOR_CLASS}
-                      value={String(monitorConfig.metrics_retention_days)}
-                      onValueChange={updateMetricsRetentionDays}
-                      tabs={METRICS_RETENTION_TABS}
-                    />
-                    <Input
-                      size="sm"
-                      aria-label="历史数据保留天数"
-                      type="number"
-                      min="1"
-                      max="180"
-                      value={monitorConfig.metrics_retention_days}
-                      onChange={(event) => updateMetricsRetentionDays(event.target.value)}
-                    />
+                <div className="grid gap-1.5">
+                  <label className="text-xs font-semibold text-kumo-subtle">Agent 下载目录</label>
+                  <Input
+                    size="sm"
+                    label="Agent 下载目录"
+                    value={serverSettingsForm.agentDownloadUrl}
+                    onChange={(event) => setServerSettingsForm(prev => ({ ...prev, agentDownloadUrl: event.target.value }))}
+                    placeholder="https://cdn.example.com/agent"
+                  />
+                  <div className="text-[11px] leading-relaxed text-kumo-subtle">
+                    留空使用主控端内置 /agent 目录；自定义时填写目录 URL，不填写文件名。
                   </div>
                 </div>
               </div>
-            </LayerCard>
+            </SectionCard>
 
-            <LayerCard className={MANAGEMENT_CARD_CLASS}>
-              <div className={MANAGEMENT_CARD_HEADER_CLASS}>
-                <div className={MANAGEMENT_CARD_TITLE_CLASS}>
-                  <FolderOpen className={MANAGEMENT_CARD_ICON_CLASS} />
-                  <span className="truncate">批量录入</span>
-                </div>
-                <span className="text-xs font-semibold text-kumo-subtle">CSV</span>
-              </div>
-              <div className={`${MANAGEMENT_CARD_BODY_CLASS} flex flex-col gap-2`}>
+            <SectionCard
+              title="批量录入"
+              description="按 CSV 格式快速添加多台主机。"
+              icon={<FolderOpen className={MANAGEMENT_CARD_ICON_CLASS} />}
+              meta={<span className="text-xs font-semibold text-kumo-subtle">CSV</span>}
+              bodyPadding="sm"
+              bodyClassName="flex flex-col gap-2"
+            >
                 <Textarea
                   label="主机列表"
                   aria-label="批量快速添加主机"
@@ -8117,18 +8978,13 @@ function ServerPage() {
                 >
                   批量录入
                 </Button>
-              </div>
-            </LayerCard>
-          </div>
+            </SectionCard>
 
-          <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
-
-            <LayerCard className={MANAGEMENT_CARD_CLASS}>
-              <div className={MANAGEMENT_CARD_HEADER_CLASS}>
-                <div className={MANAGEMENT_CARD_TITLE_CLASS}>
-                  <Key className={MANAGEMENT_CARD_ICON_CLASS} />
-                  <span className="truncate">SSH 凭据库</span>
-                </div>
+            <SectionCard
+              title="SSH 凭据库"
+              description="保存可复用的主机登录凭据。"
+              icon={<Key className={MANAGEMENT_CARD_ICON_CLASS} />}
+              actions={(
                 <Button
                   size="sm"
                   variant="primary"
@@ -8137,8 +8993,9 @@ function ServerPage() {
                 >
                   添加
                 </Button>
-              </div>
-              <div className="p-0">
+              )}
+              bodyPadding="none"
+            >
                 {serverCredentials.length === 0 ? (
                   <div className="px-3 py-8 text-center text-xs text-kumo-subtle">暂无预设访问凭据</div>
                 ) : (
@@ -8201,18 +9058,16 @@ function ServerPage() {
                     </Table>
                   </div>
                 )}
-              </div>
-            </LayerCard>
+            </SectionCard>
 
-            <LayerCard className={MANAGEMENT_CARD_CLASS}>
-              <div className={MANAGEMENT_CARD_HEADER_CLASS}>
-                <div className={MANAGEMENT_CARD_TITLE_CLASS}>
-                  <Database className={MANAGEMENT_CARD_ICON_CLASS} />
-                  <span className="truncate">配置迁移</span>
-                </div>
-                <span className="text-xs font-semibold text-kumo-subtle">JSON</span>
-              </div>
-              <div className={`${MANAGEMENT_CARD_BODY_CLASS} flex flex-wrap items-center gap-2`}>
+            <SectionCard
+              title="配置迁移"
+              description="导入或导出主机配置备份。"
+              icon={<Database className={MANAGEMENT_CARD_ICON_CLASS} />}
+              meta={<span className="text-xs font-semibold text-kumo-subtle">JSON</span>}
+              bodyPadding="sm"
+              bodyClassName="flex flex-wrap items-center gap-2"
+            >
                 <Button
                   size="sm"
                   variant="secondary"
@@ -8229,17 +9084,13 @@ function ServerPage() {
                 >
                   导入配置
                 </Button>
-              </div>
-            </LayerCard>
-          </div>
+            </SectionCard>
 
-          <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
-            <LayerCard className={MANAGEMENT_CARD_CLASS}>
-              <div className={MANAGEMENT_CARD_HEADER_CLASS}>
-                <div className={MANAGEMENT_CARD_TITLE_CLASS}>
-                  <Globe className={MANAGEMENT_CARD_ICON_CLASS} />
-                  <span className="truncate">网络拨测目标</span>
-                </div>
+            <SectionCard
+              title="网络拨测目标"
+              description="按主机终端侧配置 TCP / HTTP 拨测目标。"
+              icon={<Globe className={MANAGEMENT_CARD_ICON_CLASS} />}
+              actions={(
                 <Button
                   size="sm"
                   variant="primary"
@@ -8260,13 +9111,14 @@ function ServerPage() {
                 >
                   添加
                 </Button>
-              </div>
-              <div className="p-0">
+              )}
+              bodyPadding="none"
+            >
                 {networkTargets.length === 0 ? (
                   <div className="px-3 py-8 text-center text-xs text-kumo-subtle">暂无监测目标</div>
                 ) : (
                   <div className="max-h-64 overflow-auto">
-                    <Table layout=" ">
+                    <Table layout="fixed">
                       <colgroup>
                         <col style={{ width: 80 }} />
                         <col style={{ width: 150 }} />
@@ -8342,9 +9194,7 @@ function ServerPage() {
                     </Table>
                   </div>
                 )}
-              </div>
-            </LayerCard>
-          </div>
+            </SectionCard>
         </div>
       )}
 
@@ -8368,7 +9218,7 @@ function ServerPage() {
             color: terminalCpuColor,
           },
           {
-            label: 'Mem',
+            label: '内存',
             value: activeInfo.memory?.Usage || '-',
             width: activeInfo.memory?.Usage || '0%',
             valueClassName: 'text-kumo-info',
@@ -8508,7 +9358,7 @@ function ServerPage() {
                               className="h-6 min-w-0 justify-start px-0 text-[10px] font-semibold text-kumo-strong"
                             >
                               <TerminalIcon className="h-3.5 w-3.5 shrink-0" />
-                              <span className="truncate">{slotSession?.name || 'Terminal'}</span>
+                              <span className="truncate">{slotSession?.name || '终端'}</span>
                             </Button>
                             <div className="flex items-center gap-1">
                               <Button
@@ -8517,7 +9367,7 @@ function ServerPage() {
                                 onClick={() => triggerSplitPane(id, 'right')}
                                 title="左右分屏"
                               >
-                                Split
+                                分屏
                               </Button>
                               <Button
                                 shape="square" size="sm"
@@ -8566,7 +9416,7 @@ function ServerPage() {
                           </div>
                           <div className="flex flex-col gap-2.5">
                             {resourceMetrics.map(metric => {
-                              const label = metric.label === 'Mem' ? 'Memory' : metric.label;
+                              const label = metric.label;
                               return (
                                 <div key={metric.label} className="min-w-0">
                                   <div className="mb-1 flex items-center justify-between gap-2 text-[10px]">
@@ -9767,22 +10617,18 @@ function ServerPage() {
 
           <div className="flex flex-col gap-3 border-t border-kumo-line bg-kumo-recessed/25 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3">
-              <span className="text-xs text-kumo-subtle font-medium">日志行数:</span>
-              <select
-                value={dockerLogsTail}
-                onChange={(e) => {
-                  const val = Number(e.target.value);
+              <Select
+                size="sm"
+                label="日志行数"
+                value={String(dockerLogsTail)}
+                onValueChange={(value) => {
+                  const val = Number(value);
                   setDockerLogsTail(val);
                   loadDockerContainerLogs(dockerLogsServer, dockerLogsContainer, val);
                 }}
                 disabled={dockerLogsLoading}
-                className="text-xs rounded border border-kumo-line bg-kumo-canvas p-1 text-kumo-strong outline-none"
-              >
-                <option value={100}>100 行</option>
-                <option value={200}>200 行</option>
-                <option value={500}>500 行</option>
-                <option value={1000}>1000 行</option>
-              </select>
+                items={DOCKER_LOG_TAIL_ITEMS}
+              />
               {dockerLogsLoading && (
                 <span className="inline-flex items-center gap-1 text-[11px] text-kumo-subtle">
                   <RefreshCw className="h-3 w-3 animate-spin" />
@@ -9840,6 +10686,7 @@ function ServerPage() {
             </div>
             <div className="flex-1 overflow-auto p-4 flex flex-col gap-3">
               <Input
+                size="sm"
                 label="目标名称"
                 required
                 value={networkTargetForm.name}
@@ -9847,14 +10694,16 @@ function ServerPage() {
                 placeholder="例如: 电信"
               />
               <Input
+                size="sm"
                 label="节点地址 (IP / Host)"
                 required
                 value={networkTargetForm.host}
                 onChange={e => setNetworkTargetForm(prev => ({ ...prev, host: e.target.value }))}
                 placeholder="例如: hb-ct-v4.ip.zstaticcdn.com"
               />
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_9rem]">
                 <Input
+                  size="sm"
                   label="端口"
                   type="number"
                   required
@@ -9862,16 +10711,19 @@ function ServerPage() {
                   onChange={e => setNetworkTargetForm(prev => ({ ...prev, port: parseInt(e.target.value) || 0 }))}
                 />
                 <Select
+                  size="sm"
                   label="协议"
                   value={networkTargetForm.type}
-                  onChange={e => setNetworkTargetForm(prev => ({ ...prev, type: e.target.value }))}
-                  options={[
+                  onValueChange={(value) => setNetworkTargetForm(prev => ({ ...prev, type: String(value) }))}
+                  className="w-full min-w-0"
+                  items={[
                     { label: 'TCP', value: 'tcp' },
                     { label: 'UDP', value: 'udp' }
                   ]}
                 />
               </div>
               <Input
+                size="sm"
                 label="排序权重"
                 type="number"
                 value={networkTargetForm.order_index}
