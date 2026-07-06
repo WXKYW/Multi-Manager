@@ -647,6 +647,11 @@ func TestDockerProxyRoutesUseDockerSemanticsOverAgentTasks(t *testing.T) {
 				if req["project"] != "edge" || req["config_file"] != "/srv/edge/docker-compose.yml" {
 					t.Fatalf("unexpected compose action data: %s", data)
 				}
+				for _, alias := range []string{"configFile", "configFiles", "ConfigFiles", "configDir", "config_dir"} {
+					if _, exists := req[alias]; exists {
+						t.Fatalf("compose action kept alias field %s: %s", alias, data)
+					}
+				}
 				return "compose " + action + " success"
 			default:
 				t.Fatalf("unexpected task type: %d", taskType)

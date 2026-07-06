@@ -2061,7 +2061,7 @@ const getDockerOverviewResourceCount = (server = {}, tab = '') => {
 };
 
 const isDockerOverviewHostVisible = (server = {}, tab = '') => (
-  !!server.docker?.installed || getDockerOverviewResourceCount(server, tab) > 0
+  isServerOnline(server) && (!!server.docker?.installed || getDockerOverviewResourceCount(server, tab) > 0)
 );
 
 const isDockerMockPreviewEnabled = () => (
@@ -2521,7 +2521,6 @@ function ServerPage() {
   const credentialModalPortalRef = useRef(null);
   const dockerTaskStreamRef = useRef(null);
   const dockerRefreshTimerRef = useRef(null);
-  const dockerInitialExpandRef = useRef(false);
   const dockerTaskMetaRef = useRef({});
   const terminalResizeTimers = useRef({});
   const socketRef = useRef(null);
@@ -5198,13 +5197,13 @@ function ServerPage() {
       if (['up', 'down', 'restart', 'pull'].includes(composeAction)) {
         const project = payload.project || payload.projectName || payload.name;
         if (!project) throw new Error('Missing compose project');
-        const configFile = payload.configFile || payload.config_file || payload.configFiles || payload.ConfigFiles || '';
+        const configFile = payload.config_file || payload.configFile || payload.configFiles || payload.ConfigFiles || '';
         return {
           url: `/api/server/v2/docker/${encodeURIComponent(serverId)}/stacks/${encodeURIComponent(project)}/${composeAction}`,
           options: {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ configFile }),
+            body: JSON.stringify({ config_file: configFile }),
           },
         };
       }
@@ -5777,25 +5776,17 @@ function ServerPage() {
   }, { total: 0, running: 0, paused: 0, stopped: 0, updatable: 0 });
 
   useEffect(() => {
-    if (dockerSubTab !== 'containers' || visibleDockerContainerServers.length === 0) return;
-    if (dockerSelectedServer) {
-      setExpandedDockerOverviewServers([dockerSelectedServer]);
-      return;
-    }
-    if (dockerInitialExpandRef.current) return;
-    dockerInitialExpandRef.current = true;
-    setExpandedDockerOverviewServers([visibleDockerContainerServers[0].id]);
-  }, [dockerSubTab, dockerSelectedServer, visibleDockerContainerServers]);
+    if (dockerSubTab !== 'containers') return;
+    const hostIds = visibleDockerContainerServers.map(server => server.id);
+    setExpandedDockerOverviewServers(prev => prev.filter(id => hostIds.includes(id)));
+  }, [dockerSubTab, visibleDockerContainerServers]);
 
   useEffect(() => {
     if (!['compose', 'images', 'networks', 'volumes', 'stats'].includes(dockerSubTab)) return;
     const hostIds = dockerOverviewServers
       .filter(server => isDockerOverviewHostVisible(server, dockerSubTab))
       .map(server => server.id);
-    if (hostIds.length === 0) return;
-    setExpandedDockerOverviewServers(prev => (
-      prev.some(id => hostIds.includes(id)) ? prev : [hostIds[0]]
-    ));
+    setExpandedDockerOverviewServers(prev => prev.filter(id => hostIds.includes(id)));
   }, [dockerSubTab, dockerOverviewServers]);
 
   const toggleDockerOverviewServer = (serverId) => {
@@ -6131,6 +6122,35 @@ function ServerPage() {
       toast.warning(`已清理 ${ok} 台主机镜像，${failed} 台提交失败`);
     } else {
       toast.success(`已提交 ${ok} 台主机镜像清理`);
+    }
+  };
+
+  const pruneDockerNetworksForHosts = async (hosts, options = {}) => {
+    const targets = asArray(hosts).filter(server => server?.id);
+    if (targets.length === 0) {
+      toast.warning('当前没有可清理网络的主机');
+      return;
+    }
+    const confirmKey = options.confirmKey || `network.prune.all::${targets.map(server => server.id).join('|')}`;
+    if (!confirmDockerUpdatePress(confirmKey, `清理 ${targets.length} 台主机未使用网络`)) return;
+
+    let ok = 0;
+    let failed = 0;
+    const queue = [...targets];
+    const workers = Array.from({ length: Math.min(3, queue.length) }, async () => {
+      while (queue.length > 0) {
+        const server = queue.shift();
+        const result = await submitDockerTask('network.prune', { serverId: server.id }, { skipConfirm: true, silent: true });
+        if (result?.ok) ok += 1;
+        else failed += 1;
+      }
+    });
+    await Promise.all(workers);
+
+    if (failed > 0) {
+      toast.warning(`已清理 ${ok} 台主机网络，${failed} 台提交失败`);
+    } else {
+      toast.success(`已提交 ${ok} 台主机网络清理`);
     }
   };
 
@@ -8987,7 +9007,7 @@ function ServerPage() {
                                   const status = getComposeStatus(proj);
                                   const statusLower = status.toLowerCase();
                                   const statusLabel = formatComposeStatusLabel(status);
-                                  const composePayload = { serverId: server.id, project: projectName, configFile: configFiles };
+                                  const composePayload = { serverId: server.id, project: projectName, config_file: configFiles };
                                   const composeUpPending = isDockerActionPending(server.id, 'compose.up', composePayload);
                                   const composeDownPending = isDockerActionPending(server.id, 'compose.down', composePayload);
                                   const composeRestartPending = isDockerActionPending(server.id, 'compose.restart', composePayload);
@@ -9225,6 +9245,7 @@ function ServerPage() {
               {/* 4. 网络管理 */}
               {dockerSubTab === 'networks' && (() => {
                 const hosts = dockerOverviewServers.filter(server => isDockerOverviewHostVisible(server, 'networks'));
+                const allNetworkPruneConfirmKey = `network.prune.all::${hosts.map(server => server.id).join('|')}`;
                 return (
                   <div className="grid min-w-0 gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
                     {renderDockerResourceSideRail({
@@ -9236,6 +9257,19 @@ function ServerPage() {
                       summaryItems: [
                         { label: '驱动', value: new Set(dockerNetworks.map(item => getDockerNetworkDriver(item))).size },
                       ],
+                      actions: (
+                        <Button
+                          size="sm"
+                          variant={isDockerUpdateConfirmActive(allNetworkPruneConfirmKey) ? 'secondary-destructive' : 'primary'}
+                          icon={<Trash className="h-3.5 w-3.5" />}
+                          disabled={hosts.length === 0}
+                          onClick={() => pruneDockerNetworksForHosts(hosts, { confirmKey: allNetworkPruneConfirmKey })}
+                          aria-label={isDockerUpdateConfirmActive(allNetworkPruneConfirmKey) ? '再次确认一键清理网络' : '一键清理网络'}
+                          title={isDockerUpdateConfirmActive(allNetworkPruneConfirmKey) ? '再次点击确认清理全部主机网络' : '一键清理全部主机未使用网络'}
+                        >
+                          {isDockerUpdateConfirmActive(allNetworkPruneConfirmKey) ? '再次确认' : '一键清理'}
+                        </Button>
+                      ),
                       getHostCount: server => asArray(server.resources?.networks).length,
                       getHostBadges: server => {
                         const networks = asArray(server.resources?.networks);

@@ -32,7 +32,7 @@ html {
       color-mix(in oklab, var(--color-kumo-canvas) 86%, white 14%) 0%,
       color-mix(in oklab, var(--color-kumo-canvas) 90%, white 10%) 100%
     );
-  --app-main-surface: color-mix(in oklab, var(--color-kumo-base) 94%, white 6%);
+  --app-main-surface: var(--color-kumo-base);
   background:
     linear-gradient(
       180deg,

@@ -386,9 +386,13 @@ func (s *Service) writeDockerComposeActionResult(w http.ResponseWriter, r *http.
 }
 
 func normalizeDockerComposeActionBody(body map[string]interface{}, project, action string) {
+	configFile := dockerComposeConfigFileFromPayload(body)
+	for _, key := range []string{"configFile", "configFiles", "ConfigFiles", "configDir", "config_dir"} {
+		delete(body, key)
+	}
 	body["project"] = project
 	body["action"] = action
-	body["config_file"] = dockerComposeConfigFileFromPayload(body)
+	body["config_file"] = configFile
 }
 
 func dockerComposeConfigFileFromPayload(payload map[string]interface{}) string {
