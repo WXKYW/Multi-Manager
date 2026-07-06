@@ -818,7 +818,7 @@ function TotpPage() {
   return (
     <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4">
       {/* ==================== 顶部 Tab 导航 ==================== */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-kumo-line pb-4 gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-kumo-line pb-3">
         <Tabs
           {...MODULE_TABS_PROPS}
           value={totpCurrentTab}
@@ -831,7 +831,7 @@ function TotpPage() {
         />
 
         {totpCurrentTab === 'accounts' && (
-          <div className="flex items-center gap-2 w-full md:w-auto">
+          <div className="flex w-full min-w-0 flex-wrap items-center gap-2 md:w-auto md:justify-end">
             <Select
               aria-label="TOTP 分组筛选" size="sm"
               value={totpFilterGroup}
