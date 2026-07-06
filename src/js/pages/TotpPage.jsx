@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import jsQR from 'jsqr';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
+import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input, Textarea } from '@cloudflare/kumo/components/input';
@@ -263,6 +264,10 @@ function TotpPage() {
     });
     return counts;
   }, [totpAccounts]);
+
+  const groupById = useMemo(() => {
+    return Object.fromEntries(totpGroups.map((group) => [String(group.id), group]));
+  }, [totpGroups]);
 
   // ==================== 账号编辑与删除 ====================
   const handleOpenAddAccount = () => {
@@ -906,6 +911,7 @@ function TotpPage() {
                 const period = account.period || 30;
                 const ratio = Math.max(0, Math.min(100, (remaining / period) * 100));
                 const codeParts = getTotpCodeParts(account, codeDetail.code);
+                const accountGroup = account.group_id ? groupById[String(account.group_id)] : null;
                 
                 // Show platform header if settings enable it
                 const showHeader =
@@ -962,6 +968,15 @@ function TotpPage() {
                             {totpSettings.maskAccount ? maskEmail(account.account) : account.account}
                           </div>
                         </div>
+                        {accountGroup && (
+                          <Badge
+                            variant="outline"
+                            className="max-w-20 shrink-0 truncate px-1.5 text-[10px] leading-4"
+                            title={`分组: ${accountGroup.name}`}
+                          >
+                            {accountGroup.name}
+                          </Badge>
+                        )}
                         <div className="flex shrink-0 items-center gap-0.5 opacity-65 transition-opacity group-hover/card:opacity-100">
                           <Button
                             shape="square" size="sm"
