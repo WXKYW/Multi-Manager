@@ -4800,7 +4800,7 @@ function ServerPage() {
       ensureDockerTaskStream();
       loadDockerResources();
     }
-  }, [serverCurrentTab, dockerSubTab, dockerSelectedServer, dockerHostOptionKey]);
+  }, [serverCurrentTab, dockerSubTab, dockerHostOptionKey]);
 
   const ensureDockerTaskStream = () => {
     if (dockerTaskStreamRef.current) return;
@@ -5126,9 +5126,6 @@ function ServerPage() {
     try {
       const params = new URLSearchParams();
       params.set('scope', getDockerOverviewScope(dockerSubTab));
-      if (dockerSelectedServer) {
-        params.set('serverId', dockerSelectedServer);
-      }
 
       const response = await fetch(`/api/server/v2/docker/overview?${params.toString()}`);
       const data = await response.json();
@@ -5166,6 +5163,18 @@ function ServerPage() {
     }
   };
 
+  const dockerContainerManagementServers = useMemo(() => (
+    dockerOverviewServers
+      .map(server => ({
+        ...server,
+        resources: {
+          ...server.resources,
+          containers: asArray(server.resources?.containers),
+        },
+      }))
+      .filter(server => asArray(server.resources?.containers).length > 0)
+  ), [dockerOverviewServers]);
+
   const visibleDockerContainerServers = useMemo(() => {
     const query = dockerSearchQuery.trim().toLowerCase();
     const filterContainers = (server) => {
@@ -5196,9 +5205,8 @@ function ServerPage() {
     };
 
     const servers = dockerOverviewServers.map(filterContainers);
-    if (dockerSelectedServer) return servers;
     return servers.filter(server => asArray(server.resources?.containers).length > 0);
-  }, [dockerOverviewServers, dockerSelectedServer, dockerSearchQuery, dockerContainerStateFilter]);
+  }, [dockerOverviewServers, dockerSearchQuery, dockerContainerStateFilter]);
 
   const dockerStatsChartData = useMemo(() => {
     const isDarkMode = theme === 'dark';
@@ -5358,9 +5366,10 @@ function ServerPage() {
     }, { total: list.length, running: 0, paused: 0, stopped: 0, updatable: 0 });
   };
 
-  const getVisibleUpdatableDockerContainers = () => (
-    visibleDockerContainerServers.flatMap(server => (
-      asArray(server.resources?.containers)
+  const getUpdatableDockerContainers = (servers, serverId = '') => (
+    servers.flatMap(server => {
+      if (serverId && String(server.id) !== String(serverId)) return [];
+      return asArray(server.resources?.containers)
         .filter(container => getDockerContainerUpdateCheck(server.id, container)?.hasUpdate)
         .map(container => ({
           server,
@@ -5371,13 +5380,21 @@ function ServerPage() {
             containerName: getDockerContainerName(container),
             image: getDockerContainerImage(container),
           },
-        }))
-    ))
+        }));
+    })
+  );
+
+  const getVisibleUpdatableDockerContainers = () => (
+    getUpdatableDockerContainers(visibleDockerContainerServers)
   );
 
   const visibleUpdatableDockerContainers = useMemo(
     () => getVisibleUpdatableDockerContainers(),
     [visibleDockerContainerServers, dockerUpdateChecks]
+  );
+  const dockerContainerManagementUpdatableContainers = useMemo(
+    () => getUpdatableDockerContainers(dockerContainerManagementServers),
+    [dockerContainerManagementServers, dockerUpdateChecks]
   );
 
   const hasDockerResourceData = dockerOverviewServers.length > 0
@@ -5388,6 +5405,15 @@ function ServerPage() {
     || dockerComposeProjects.length > 0;
   const showDockerBlockingLoading = dockerResourceLoading && !hasDockerResourceData;
   const dockerContainerTotals = visibleDockerContainerServers.reduce((totals, server) => {
+    const summary = getDockerContainerSummary(server.resources?.containers, server.id);
+    totals.total += summary.total;
+    totals.running += summary.running;
+    totals.paused += summary.paused;
+    totals.stopped += summary.stopped;
+    totals.updatable += summary.updatable;
+    return totals;
+  }, { total: 0, running: 0, paused: 0, stopped: 0, updatable: 0 });
+  const dockerContainerManagementTotals = dockerContainerManagementServers.reduce((totals, server) => {
     const summary = getDockerContainerSummary(server.resources?.containers, server.id);
     totals.total += summary.total;
     totals.running += summary.running;
@@ -5462,12 +5488,16 @@ function ServerPage() {
     );
   };
 
-  const batchUpdateVisibleDockerContainers = async (serverId = '') => {
-    const targets = getVisibleUpdatableDockerContainers()
-      .filter(item => !serverId || item.server.id === serverId);
+  const batchUpdateVisibleDockerContainers = async (serverId = '', useAllServers = false) => {
+    const sourceServers = serverId || useAllServers ? dockerContainerManagementServers : visibleDockerContainerServers;
+    const targets = getUpdatableDockerContainers(sourceServers, serverId);
     const scopeName = serverId
-      ? (visibleDockerContainerServers.find(server => server.id === serverId)?.name || '当前主机')
-      : '当前筛选';
+      ? (
+        dockerContainerManagementServers.find(server => String(server.id) === String(serverId))?.name
+        || visibleDockerContainerServers.find(server => String(server.id) === String(serverId))?.name
+        || '当前主机'
+      )
+      : useAllServers ? '全部主机' : '当前筛选';
     if (targets.length === 0) {
       toast.warning(`${scopeName}下没有已检测出的可更新容器`);
       return;
@@ -5586,10 +5616,10 @@ function ServerPage() {
     }
   };
 
-  const checkVisibleDockerUpdates = async () => {
-    const targets = visibleDockerContainerServers.filter(server => asArray(server.resources?.containers).length > 0);
+  const checkDockerUpdatesForServers = async (servers, emptyMessage = '当前没有可检测的 Docker 容器') => {
+    const targets = servers.filter(server => asArray(server.resources?.containers).length > 0);
     if (targets.length === 0) {
-      toast.warning('当前没有可检测的 Docker 容器');
+      toast.warning(emptyMessage);
       return;
     }
 
@@ -5636,6 +5666,14 @@ function ServerPage() {
       setDockerBulkUpdateCheckServers({});
     }
   };
+
+  const checkVisibleDockerUpdates = async () => (
+    checkDockerUpdatesForServers(visibleDockerContainerServers, '当前筛选下没有可检测的 Docker 容器')
+  );
+
+  const checkAllDockerUpdates = async () => (
+    checkDockerUpdatesForServers(dockerContainerManagementServers, '当前没有可检测的 Docker 容器')
+  );
 
   const renderDockerEmptyState = (message) => (
     <div className="app-card p-10 text-center text-xs text-kumo-subtle">
@@ -8291,26 +8329,26 @@ function ServerPage() {
                           管理
                         </span>
                         <span className="flex shrink-0 items-center gap-1.5">
-                          <Badge variant="neutral">{visibleDockerContainerServers.length} 主机</Badge>
+                          <Badge variant="neutral">{dockerContainerManagementServers.length} 主机</Badge>
                           <Button
                             shape="square"
                             size="sm"
                             variant="secondary"
                             icon={<RefreshCw className={`h-3.5 w-3.5 ${dockerBulkUpdateChecking ? 'animate-spin' : ''}`} />}
-                            disabled={dockerBulkUpdateChecking || visibleDockerContainerServers.length === 0}
-                            onClick={checkVisibleDockerUpdates}
+                            disabled={dockerBulkUpdateChecking || dockerContainerManagementServers.length === 0}
+                            onClick={checkAllDockerUpdates}
                             aria-label="检测可更新"
-                            title="检测可更新"
+                            title="检测全部主机可更新"
                           />
                           <Button
                             shape="square"
                             size="sm"
                             variant="primary"
                             icon={<Upload className="h-3.5 w-3.5" />}
-                            disabled={visibleUpdatableDockerContainers.length === 0}
-                            onClick={batchUpdateVisibleDockerContainers}
+                            disabled={dockerContainerManagementUpdatableContainers.length === 0}
+                            onClick={() => batchUpdateVisibleDockerContainers('', true)}
                             aria-label="一键更新"
-                            title={visibleUpdatableDockerContainers.length > 0 ? `一键更新 ${visibleUpdatableDockerContainers.length} 个容器` : '请先检测出可更新容器'}
+                            title={dockerContainerManagementUpdatableContainers.length > 0 ? `一键更新全部主机 ${dockerContainerManagementUpdatableContainers.length} 个容器` : '请先检测出可更新容器'}
                           />
                         </span>
                       </LayerCard.Secondary>
@@ -8318,24 +8356,24 @@ function ServerPage() {
                         <div className="grid grid-cols-4 gap-1.5">
                           <div className="rounded-md border border-kumo-line/70 bg-kumo-recessed/20 px-2 py-1.5">
                             <div className="text-[10px] text-kumo-subtle">容器</div>
-                            <div className="mt-0.5 text-sm font-bold text-kumo-strong">{dockerContainerTotals.total}</div>
+                            <div className="mt-0.5 text-sm font-bold text-kumo-strong">{dockerContainerManagementTotals.total}</div>
                           </div>
                           <div className="rounded-md border border-kumo-line/70 bg-kumo-recessed/20 px-2 py-1.5">
                             <div className="text-[10px] text-kumo-subtle">运行</div>
-                            <div className="mt-0.5 text-sm font-bold text-kumo-success">{dockerContainerTotals.running}</div>
+                            <div className="mt-0.5 text-sm font-bold text-kumo-success">{dockerContainerManagementTotals.running}</div>
                           </div>
                           <div className="rounded-md border border-kumo-line/70 bg-kumo-recessed/20 px-2 py-1.5">
                             <div className="text-[10px] text-kumo-subtle">停止</div>
-                            <div className="mt-0.5 text-sm font-bold text-kumo-subtle">{dockerContainerTotals.stopped}</div>
+                            <div className="mt-0.5 text-sm font-bold text-kumo-subtle">{dockerContainerManagementTotals.stopped}</div>
                           </div>
                           <div className="rounded-md border border-kumo-line/70 bg-kumo-recessed/20 px-2 py-1.5">
                             <div className="text-[10px] text-kumo-subtle">更新</div>
-                            <div className="mt-0.5 text-sm font-bold text-kumo-warning">{dockerContainerTotals.updatable}</div>
+                            <div className="mt-0.5 text-sm font-bold text-kumo-warning">{dockerContainerManagementTotals.updatable}</div>
                           </div>
                         </div>
 
                         <div className="flex flex-col gap-2">
-                          {visibleDockerContainerServers.map(server => {
+                          {dockerContainerManagementServers.map(server => {
                             const summary = getDockerContainerSummary(server.resources?.containers, server.id);
                             const isOpen = expandedDockerOverviewServers.includes(server.id);
                             return (
