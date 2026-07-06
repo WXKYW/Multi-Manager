@@ -56,6 +56,9 @@ func TestTOTPAccountGroupCodeImportAndExportFlow(t *testing.T) {
 	if !accountPayload.Success || accountPayload.Data.ID == "" || accountPayload.Data.Secret != "" || !accountPayload.Data.HasSecret {
 		t.Fatalf("unexpected account payload: %#v", accountPayload)
 	}
+	if accountPayload.Data.GroupID == nil || *accountPayload.Data.GroupID != groupPayload.Data.ID {
+		t.Fatalf("account group_id = %#v, want %q", accountPayload.Data.GroupID, groupPayload.Data.ID)
+	}
 
 	code, err := totpCode(secret, time.Now(), 6, 30, "SHA1")
 	if err != nil {

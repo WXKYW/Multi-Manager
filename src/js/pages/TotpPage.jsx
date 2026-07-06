@@ -13,6 +13,7 @@ import { LayerCard, Tabs } from '@cloudflare/kumo';
 import { DEFAULT_TOTP_SETTINGS } from '../store.js';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
+import { buildTotpAccountPayload } from '../modules/totpPayload.js';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
 import { BRAND_COLOR_FALLBACK, getIssuerColor, getIssuerIcon } from '../components/ui/BrandIcon.jsx';
 import { SectionCard } from '../components/ui/AppPrimitives.jsx';
@@ -345,21 +346,9 @@ function TotpPage() {
 
     setAccountModalSaving(true);
     try {
-      const payload = {
-        otp_type: accountForm.otp_type,
-        issuer: accountForm.issuer.trim(),
-        account: accountForm.account.trim(),
-        algorithm: accountForm.algorithm,
-        digits: Number(accountForm.digits),
-        period: Number(accountForm.period),
-        counter: Number(accountForm.counter),
-        group_id: accountForm.group_id ? Number(accountForm.group_id) : null,
-        color: accountForm.color || null,
-      };
-
-      if (accountModalMode === 'add') {
-        payload.secret = accountForm.secret.replace(/\s/g, '');
-      }
+      const payload = buildTotpAccountPayload(accountForm, {
+        includeSecret: accountModalMode === 'add',
+      });
 
       const url =
         accountModalMode === 'add'
