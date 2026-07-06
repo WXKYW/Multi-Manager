@@ -85,7 +85,11 @@ export function SectionCard({
   descriptionClassName = '',
   ...props
 }) {
-  const trailing = [meta, action, actions].filter(Boolean);
+  const trailing = [
+    meta && <React.Fragment key="meta">{meta}</React.Fragment>,
+    action && <React.Fragment key="action">{action}</React.Fragment>,
+    actions && <React.Fragment key="actions">{actions}</React.Fragment>,
+  ].filter(Boolean);
   return (
     <LayerCard
       {...props}
@@ -160,7 +164,7 @@ export function AppTable({
 
 export function ScrollableTable({
   widths,
-  wrapperClassName = 'overflow-x-auto scrollbar-thin',
+  wrapperClassName = 'min-w-0 max-w-full overflow-x-auto scrollbar-thin',
   ...props
 }) {
   return (

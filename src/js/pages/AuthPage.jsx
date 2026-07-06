@@ -36,11 +36,11 @@ const createAuthParticleOptions = () => {
   const isDarkMode =
     typeof document !== 'undefined' && document.documentElement.dataset.mode === 'dark';
   const particleNeutral = isDarkMode ? subtle : line;
-  const linkOpacity = isDarkMode ? 0.36 : 0.24;
+  const linkOpacity = isDarkMode ? 0.46 : 0.3;
   const particleOpacity = isDarkMode
-    ? { min: 0.34, max: 0.72 }
-    : { min: 0.24, max: 0.58 };
-  const particleSize = isDarkMode ? { min: 1, max: 2.9 } : { min: 0.9, max: 2.55 };
+    ? { min: 0.42, max: 0.84 }
+    : { min: 0.28, max: 0.64 };
+  const particleSize = isDarkMode ? { min: 1.15, max: 3.3 } : { min: 0.95, max: 2.75 };
 
   return {
     autoPlay: true,
@@ -112,7 +112,7 @@ const createAuthParticleOptions = () => {
           },
           enable: true,
         },
-        width: isDarkMode ? 1.15 : 1,
+        width: isDarkMode ? 1.25 : 1.05,
       },
       move: {
         direction: 'none',
@@ -184,14 +184,43 @@ const createAuthParticleOptions = () => {
 };
 
 const loadAuthParticlesEngine = async () => {
+  const globalState = typeof window !== 'undefined'
+    ? (window.__apiMonitorAuthParticles ||= {})
+    : null;
+
+  if (globalState?.enginePromise) {
+    return globalState.enginePromise;
+  }
+
   if (!authParticlesEnginePromise) {
     authParticlesEnginePromise = Promise.all([
       import('@tsparticles/engine'),
       import('@tsparticles/slim'),
     ]).then(async ([engineModule, slimModule]) => {
-      await slimModule.loadSlim(engineModule.tsParticles);
-      return engineModule.tsParticles;
+      const tsParticles = engineModule.tsParticles;
+      if (!globalState?.slimLoaded) {
+        try {
+          await slimModule.loadSlim(tsParticles);
+        } catch (error) {
+          const message = String(error?.message || '');
+          if (!message.includes('Register plugins can only be done before calling tsParticles.load')) {
+            throw error;
+          }
+        }
+        if (globalState) globalState.slimLoaded = true;
+      }
+      return tsParticles;
+    }).catch((error) => {
+      authParticlesEnginePromise = null;
+      if (globalState) {
+        delete globalState.enginePromise;
+      }
+      throw error;
     });
+  }
+
+  if (globalState) {
+    globalState.enginePromise = authParticlesEnginePromise;
   }
 
   return authParticlesEnginePromise;
@@ -502,7 +531,7 @@ function AuthPage() {
     ? '当前环境无需密码，确认后可直接进入控制台。'
     : loginRequire2FA
       ? '请输入 Authenticator App 中显示的 6 位动态验证码。'
-      : '输入管理员密码以访问监控面板';
+      : '输入管理员密码以访问面板';
 
   return (
     <AuthShell

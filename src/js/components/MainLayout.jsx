@@ -382,121 +382,126 @@ function MainLayout() {
       defaultOpen={!sidebarCollapsed}
       open={!sidebarCollapsed}
       onOpenChange={(open) => setSidebarCollapsed(!open)}
-      style={{ '--sidebar-width': '12.5rem', '--sidebar-width-icon': '54px' }}
-      className="flex h-screen w-screen overflow-hidden bg-kumo-canvas text-kumo-default"
+      style={{
+        '--sidebar-width': '12.5rem',
+        '--sidebar-width-icon': '54px',
+      }}
+      className="app-main-shell flex h-screen w-screen overflow-hidden text-kumo-default"
     >
-      {/* ==================== 1. 侧边栏 (Sidebar) ==================== */}
-      <Sidebar>
-        {/* 顶部 Logo */}
-        <Sidebar.Header className="h-14! px-2.5!">
-          <SidebarBrand />
-        </Sidebar.Header>
+      <>
+        {/* ==================== 1. 侧边栏 (Sidebar) ==================== */}
+        <Sidebar>
+          {/* 顶部 Logo */}
+          <Sidebar.Header className="h-14! px-2.5!">
+            <SidebarBrand />
+          </Sidebar.Header>
 
-        {/* 导航栏项 */}
-        <Sidebar.Content>
-          {visibleModuleGroups.map((group) => {
-            const groupLabel = group.id === 'overview' ? '总览' : group.name;
+          {/* 导航栏项 */}
+          <Sidebar.Content>
+            {visibleModuleGroups.map((group) => {
+              const groupLabel = group.id === 'overview' ? '总览' : group.name;
 
-            return (
-              <Sidebar.Group key={group.id}>
-                <Sidebar.GroupLabel>{groupLabel}</Sidebar.GroupLabel>
-                <Sidebar.Menu>
-                  {group.modules.map((module) => (
-                    <SidebarModuleButton
-                      key={module}
-                      module={module}
-                      active={mainActiveTab === module}
-                      icon={getModuleIconComponent(module, Server)}
-                      onNavigate={navigateToModule}
-                    />
-                  ))}
-                </Sidebar.Menu>
-              </Sidebar.Group>
-            );
-          })}
-          <Sidebar.Group>
-            <Sidebar.GroupLabel>系统</Sidebar.GroupLabel>
-            <Sidebar.Menu>
-              {moduleOrder.includes('apidocs') && moduleVisibility.apidocs !== false && (
+              return (
+                <Sidebar.Group key={group.id}>
+                  <Sidebar.GroupLabel>{groupLabel}</Sidebar.GroupLabel>
+                  <Sidebar.Menu>
+                    {group.modules.map((module) => (
+                      <SidebarModuleButton
+                        key={module}
+                        module={module}
+                        active={mainActiveTab === module}
+                        icon={getModuleIconComponent(module, Server)}
+                        onNavigate={navigateToModule}
+                      />
+                    ))}
+                  </Sidebar.Menu>
+                </Sidebar.Group>
+              );
+            })}
+            <Sidebar.Group>
+              <Sidebar.GroupLabel>系统</Sidebar.GroupLabel>
+              <Sidebar.Menu>
+                {moduleOrder.includes('apidocs') && moduleVisibility.apidocs !== false && (
+                  <SidebarModuleButton
+                    module="apidocs"
+                    active={mainActiveTab === 'apidocs'}
+                    icon={getModuleIconComponent('apidocs', Server)}
+                    onNavigate={navigateToModule}
+                  />
+                )}
+
+                {moduleOrder.includes('systemlogs') && moduleVisibility.systemlogs !== false && (
+                  <SidebarModuleButton
+                    module="systemlogs"
+                    active={mainActiveTab === 'systemlogs'}
+                    icon={getModuleIconComponent('systemlogs', Server)}
+                    onNavigate={navigateToModule}
+                  />
+                )}
+
                 <SidebarModuleButton
-                  module="apidocs"
-                  active={mainActiveTab === 'apidocs'}
-                  icon={getModuleIconComponent('apidocs', Server)}
+                  module="settings"
+                  active={mainActiveTab === 'settings'}
+                  icon={Settings}
                   onNavigate={navigateToModule}
                 />
-              )}
 
-              {moduleOrder.includes('systemlogs') && moduleVisibility.systemlogs !== false && (
-                <SidebarModuleButton
-                  module="systemlogs"
-                  active={mainActiveTab === 'systemlogs'}
-                  icon={getModuleIconComponent('systemlogs', Server)}
-                  onNavigate={navigateToModule}
-                />
-              )}
+                <SidebarLogoutButton onLogout={logout} />
+              </Sidebar.Menu>
+            </Sidebar.Group>
+            <SidebarStyleSwitches
+              pageWidthMode={pageWidthMode}
+              onPageWidthChange={setPageWidthMode}
+              themeMode={themeMode}
+              onThemeModeChange={setThemeMode}
+            />
+          </Sidebar.Content>
 
-              <SidebarModuleButton
-                module="settings"
-                active={mainActiveTab === 'settings'}
-                icon={Settings}
-                onNavigate={navigateToModule}
-              />
+          {/* 底部功能栏 */}
+          <Sidebar.Footer className="px-[11px]!">
+            <Sidebar.Trigger />
+          </Sidebar.Footer>
+        </Sidebar>
 
-              <SidebarLogoutButton onLogout={logout} />
-            </Sidebar.Menu>
-          </Sidebar.Group>
-          <SidebarStyleSwitches
-            pageWidthMode={pageWidthMode}
-            onPageWidthChange={setPageWidthMode}
-            themeMode={themeMode}
-            onThemeModeChange={setThemeMode}
-          />
-        </Sidebar.Content>
+        {/* ==================== 2. 主页面区 (Main Panel) ==================== */}
+        <div className="flex-1 flex flex-col h-full overflow-hidden">
+          {/* 顶部导航 */}
+          <header className="app-main-topbar flex h-14 flex-shrink-0 items-center border-b border-kumo-line px-3 min-[450px]:px-4 md:px-6">
+            <div className="flex h-full min-w-0 flex-1 items-center gap-3.5">
+              <Sidebar.Trigger className="md:hidden" />
 
-        {/* 底部功能栏 */}
-        <Sidebar.Footer className="px-[11px]!">
-          <Sidebar.Trigger />
-        </Sidebar.Footer>
-      </Sidebar>
+              <AppPageHeader
+                className="flex-row items-center justify-between"
+                spacing="compact"
+                breadcrumbs={(
+                  <AppBreadcrumbs size="sm" className="mr-0 min-w-0 overflow-hidden">
+                    <AppBreadcrumbs.Link href={MODULE_PATHS.dashboard}>首页</AppBreadcrumbs.Link>
+                    <AppBreadcrumbs.Separator />
+                    <AppBreadcrumbs.Current>{getModuleName(mainActiveTab)}</AppBreadcrumbs.Current>
+                  </AppBreadcrumbs>
+                )}
+              >
+                {/* <div className="flex h-6.5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-kumo-success/20 bg-kumo-success/10 px-2 text-[11px] text-kumo-success">
+                  <span className="w-1 h-1 rounded-full bg-current animate-pulse"></span>
+                  <span className="hidden min-[520px]:inline">健康</span>
+                  <span className="min-[520px]:hidden">正常</span>
+                </div> */}
+              </AppPageHeader>
+            </div>
+          </header>
 
-      {/* ==================== 2. 主页面区 (Main Panel) ==================== */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden">
-        {/* 顶部导航 */}
-        <header className="flex h-14 flex-shrink-0 items-center border-b border-kumo-line bg-kumo-base px-3 min-[450px]:px-4 md:px-6">
-          <div className="flex h-full min-w-0 flex-1 items-center gap-3.5">
-            <Sidebar.Trigger className="md:hidden" />
-
-            <AppPageHeader
-              className="flex-row items-center justify-between"
-              spacing="compact"
-              breadcrumbs={(
-                <AppBreadcrumbs size="sm" className="mr-0 min-w-0 overflow-hidden">
-                  <AppBreadcrumbs.Link href={MODULE_PATHS.dashboard}>首页</AppBreadcrumbs.Link>
-                  <AppBreadcrumbs.Separator />
-                  <AppBreadcrumbs.Current>{getModuleName(mainActiveTab)}</AppBreadcrumbs.Current>
-                </AppBreadcrumbs>
-              )}
-            >
-              {/* <div className="flex h-6.5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-kumo-success/20 bg-kumo-success/10 px-2 text-[11px] text-kumo-success">
-                <span className="w-1 h-1 rounded-full bg-current animate-pulse"></span>
-                <span className="hidden min-[520px]:inline">健康</span>
-                <span className="min-[520px]:hidden">正常</span>
-              </div> */}
-            </AppPageHeader>
-          </div>
-        </header>
-
-        {/* 主内容画布 */}
-        <main className="flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 lg:px-8 lg:pb-6 lg:pt-3 scrollbar-thin">
-          <div className={`mx-auto flex min-h-full w-full min-w-0 flex-col ${pageWidthClass}`}>
-            <ModuleErrorBoundary moduleId={mainActiveTab}>
-              <Suspense fallback={<PageLoadingFallback />}>
-                {renderActivePage()}
-              </Suspense>
-            </ModuleErrorBoundary>
-          </div>
-        </main>
-      </div>
+          {/* 主内容画布 */}
+          <main className="flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 lg:px-8 lg:pb-6 lg:pt-3 scrollbar-thin">
+            <div className={`mx-auto flex min-h-full w-full min-w-0 flex-col ${pageWidthClass}`}>
+              <ModuleErrorBoundary moduleId={mainActiveTab}>
+                <Suspense fallback={<PageLoadingFallback />}>
+                  {renderActivePage()}
+                </Suspense>
+              </ModuleErrorBoundary>
+            </div>
+          </main>
+        </div>
+      </>
     </Sidebar.Provider>
   );
 }

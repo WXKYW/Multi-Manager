@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import jsQR from 'jsqr';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
-import { Button } from '@cloudflare/kumo/components/button';
+import { Button, LinkButton } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
@@ -1148,21 +1148,21 @@ function TotpPage() {
 
       {/* ==================== 3. 选项设置 ==================== */}
       {totpCurrentTab === 'settings' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
           {/* Settings Options (Span 2) */}
           <SectionCard
             title="安全与显示配置"
             icon={<Shield className="h-4 w-4 text-kumo-brand" />}
             className="lg:col-span-2"
-            bodyPadding="lg"
-            bodyClassName="space-y-5"
+            bodyPadding="md"
+            bodyClassName="divide-y divide-kumo-line/80"
           >
 
             {/* Toggle 1: maskAccount */}
-            <div className="flex items-start justify-between">
-              <div className="space-y-0.5">
-                <h4 className="text-xs font-semibold text-kumo-strong">账号名称打码</h4>
-                <p className="text-[10px] text-kumo-subtle">
+            <div className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0">
+              <div className="min-w-0 pr-4">
+                <h4 className="text-xs font-semibold leading-5 text-kumo-strong">账号名称打码</h4>
+                <p className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
                   对邮箱或长账号名称进行脱敏隐藏保护，避免屏幕泄露。
                 </p>
               </div>
@@ -1174,10 +1174,10 @@ function TotpPage() {
             </div>
 
             {/* Toggle 2: hideCode */}
-            <div className="flex items-start justify-between border-t border-kumo-line pt-4">
-              <div className="space-y-0.5">
-                <h4 className="text-xs font-semibold text-kumo-strong">遮挡实时验证码</h4>
-                <p className="text-[10px] text-kumo-subtle">
+            <div className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0">
+              <div className="min-w-0 pr-4">
+                <h4 className="text-xs font-semibold leading-5 text-kumo-strong">遮挡实时验证码</h4>
+                <p className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
                   隐藏验证码数值，仅在悬浮或点击复制时显示，防止身旁窥屏。
                 </p>
               </div>
@@ -1188,10 +1188,10 @@ function TotpPage() {
               />
             </div>
 
-            <div className="flex items-start justify-between border-t border-kumo-line pt-4">
-              <div className="space-y-0.5">
-                <h4 className="text-xs font-semibold text-kumo-strong">允许悬浮显示验证码</h4>
-                <p className="text-[10px] text-kumo-subtle">
+            <div className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0">
+              <div className="min-w-0 pr-4">
+                <h4 className="text-xs font-semibold leading-5 text-kumo-strong">允许悬浮显示验证码</h4>
+                <p className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
                   开启后鼠标悬浮在验证码卡片上时临时显示被遮挡的验证码。
                 </p>
               </div>
@@ -1203,10 +1203,10 @@ function TotpPage() {
             </div>
 
             {/* Toggle 3: groupByPlatform */}
-            <div className="flex items-start justify-between border-t border-kumo-line pt-4">
-              <div className="space-y-0.5">
-                <h4 className="text-xs font-semibold text-kumo-strong">按站点分组</h4>
-                <p className="text-[10px] text-kumo-subtle">
+            <div className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0">
+              <div className="min-w-0 pr-4">
+                <h4 className="text-xs font-semibold leading-5 text-kumo-strong">按站点分组</h4>
+                <p className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
                   将相同站点或服务（如 Google, GitHub）下的账号汇聚在一起分组显示。
                 </p>
               </div>
@@ -1217,10 +1217,10 @@ function TotpPage() {
               />
             </div>
 
-            <div className="flex items-start justify-between border-t border-kumo-line pt-4">
-              <div className="space-y-0.5">
-                <h4 className="text-xs font-semibold text-kumo-strong">显示站点标题</h4>
-                <p className="text-[10px] text-kumo-subtle">
+            <div className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0">
+              <div className="min-w-0 pr-4">
+                <h4 className="text-xs font-semibold leading-5 text-kumo-strong">显示站点标题</h4>
+                <p className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
                   按站点分组时，在每组账号前显示站点名称和账号数量。
                 </p>
               </div>
@@ -1232,10 +1232,10 @@ function TotpPage() {
               />
             </div>
 
-            <div className="flex items-start justify-between border-t border-kumo-line pt-4">
-              <div className="space-y-0.5">
-                <h4 className="text-xs font-semibold text-kumo-strong">隐藏站点文字</h4>
-                <p className="text-[10px] text-kumo-subtle">
+            <div className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0">
+              <div className="min-w-0 pr-4">
+                <h4 className="text-xs font-semibold leading-5 text-kumo-strong">隐藏站点文字</h4>
+                <p className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
                   只保留颜色标识和账号数量，减少站点名称在共享屏幕中暴露。
                 </p>
               </div>
@@ -1248,10 +1248,10 @@ function TotpPage() {
             </div>
 
             {/* Toggle 4: autoSave */}
-            <div className="flex items-start justify-between border-t border-kumo-line pt-4">
-              <div className="space-y-0.5">
-                <h4 className="text-xs font-semibold text-kumo-strong">解析二维码后自动导入</h4>
-                <p className="text-[10px] text-kumo-subtle">
+            <div className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0">
+              <div className="min-w-0 pr-4">
+                <h4 className="text-xs font-semibold leading-5 text-kumo-strong">解析二维码后自动导入</h4>
+                <p className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
                   扫码或选取二维码图片后自动读取数据入库，不需要手动核对表单保存。
                 </p>
               </div>
@@ -1263,10 +1263,10 @@ function TotpPage() {
             </div>
 
             {/* Toggle 5: lockInputMode */}
-            <div className="flex items-start justify-between border-t border-kumo-line pt-4">
-              <div className="space-y-0.5">
-                <h4 className="text-xs font-semibold text-kumo-strong">锁定默认录入类型</h4>
-                <p className="text-[10px] text-kumo-subtle">
+            <div className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0">
+              <div className="min-w-0 pr-4">
+                <h4 className="text-xs font-semibold leading-5 text-kumo-strong">锁定默认录入类型</h4>
+                <p className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
                   开启后添加账号弹窗默认直接使用锁定的选项，不用每次手动选。
                 </p>
               </div>
@@ -1278,7 +1278,7 @@ function TotpPage() {
             </div>
 
             {totpSettings.lockInputMode && (
-              <div className="pl-4 pt-3 flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-3 py-3 pl-3 first:pt-0 last:pb-0">
                 <label className="text-xs font-medium text-kumo-subtle">默认录入模式</label>
                 <Select
                   aria-label="默认录入模式" size="sm"
@@ -1293,7 +1293,7 @@ function TotpPage() {
               </div>
             )}
 
-            <div className="border-t border-kumo-line pt-5 flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2 pt-3 first:pt-0 last:pb-0">
               <Button size="sm"
                 onClick={async () => {
                   const uris = await dialog.prompt({
@@ -1315,8 +1315,9 @@ function TotpPage() {
           <SectionCard
             title="浏览器插件助手"
             icon={<Bot className="h-4 w-4 text-kumo-brand" />}
-            bodyPadding="lg"
-            bodyClassName="flex flex-col justify-between"
+            className="lg:self-start"
+            bodyPadding="md"
+            bodyClassName="flex flex-col gap-3"
           >
             <div className="space-y-3.5">
               <p className="text-xs text-kumo-subtle leading-relaxed">
@@ -1334,14 +1335,16 @@ function TotpPage() {
               </div>
             </div>
 
-            <div className="space-y-2 mt-5">
-              <a
+            <div className="space-y-2">
+              <LinkButton
+                size="sm"
+                variant="secondary"
                 href="/api/totp/extension/download"
-                className="w-full flex items-center justify-center gap-2 h-9 border border-kumo-line rounded-lg text-xs font-semibold text-kumo-strong hover:bg-kumo-recessed no-underline transition-colors"
+                className="w-full justify-center"
+                icon={<Download className="w-3.5 h-3.5" />}
               >
-                <Download className="w-3.5 h-3.5" />
-                <span>下载插件 ZIP 包</span>
-              </a>
+                下载插件 ZIP 包
+              </LinkButton>
 
               <Button size="sm" variant="primary" className="w-full" onClick={syncConfigToExtension}>
                 一键同步密码与地址到插件

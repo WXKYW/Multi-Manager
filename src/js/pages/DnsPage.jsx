@@ -1748,7 +1748,7 @@ function DnsPage() {
 
   return (
     <div className={pageShellClassName}>
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-kumo-line pb-3">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-kumo-line pb-3 pr-1">
         <div className="min-w-0 max-w-full overflow-x-auto scrollbar-thin">
           <Tabs
             {...MODULE_TABS_PROPS}
