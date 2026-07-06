@@ -182,6 +182,24 @@ function formatBytes(bytes) {
   return `${value} B`;
 }
 
+function r2PreviewKind(key = '') {
+  const extension = String(key).split('?')[0].split('#')[0].split('.').pop()?.toLowerCase() || '';
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'svg'].includes(extension)) return 'image';
+  if (['mp4', 'webm', 'mov', 'm4v', 'ogg'].includes(extension)) return 'video';
+  if (['mp3', 'wav', 'm4a', 'aac', 'flac', 'oga'].includes(extension)) return 'audio';
+  if (extension === 'pdf') return 'frame';
+  if ([
+    'txt', 'log', 'json', 'xml', 'csv', 'md', 'yaml', 'yml', 'html', 'css', 'js', 'jsx', 'ts', 'tsx',
+    'go', 'py', 'sh', 'sql', 'ini', 'env', 'toml',
+  ].includes(extension)) return 'frame';
+  return 'unknown';
+}
+
+function objectFileName(value = '') {
+  const parts = String(value).split('/').filter(Boolean);
+  return parts[parts.length - 1] || 'object';
+}
+
 function formatNumber(value) {
   if (value === null || value === undefined || value === '') return '-';
   const number = Number(value || 0);
@@ -322,6 +340,8 @@ function DnsPage() {
   const [r2Objects, setR2Objects] = useState([]);
   const [r2Prefixes, setR2Prefixes] = useState([]);
   const [r2CurrentPrefix, setR2CurrentPrefix] = useState('');
+  const [r2BucketSearch, setR2BucketSearch] = useState('');
+  const [r2ObjectSearch, setR2ObjectSearch] = useState('');
   const [tunnels, setTunnels] = useState([]);
   const [sslInfo, setSslInfo] = useState(null);
   const [analytics, setAnalytics] = useState(null);
@@ -353,7 +373,7 @@ function DnsPage() {
   const [recordColWidths, startRecordResize] = useTableResize([34, 54, 82, 140, 48, 50, 106, 70]);
   const [workerColWidths, startWorkerResize] = useTableResize([260, 160, 180, 280]);
   const [pageColWidths, startPageResize] = useTableResize([240, 220, 150, 150, 220]);
-  const [r2ColWidths, startR2Resize] = useTableResize([48, 360, 120, 180, 150]);
+  const [r2ColWidths, startR2Resize] = useTableResize([44, 420, 128, 180, 128]);
   const [tunnelColWidths, startTunnelResize] = useTableResize([260, 120, 100, 180, 240]);
   const [templateColWidths, startTemplateResize] = useTableResize([220, 90, 260, 120, 180]);
   const [accountColWidths, startAccountResize] = useTableResize([220, 260, 240, 170, 190]);
@@ -674,6 +694,7 @@ function DnsPage() {
       );
       setR2Objects(data.objects || []);
       setR2Prefixes(data.delimited_prefixes || []);
+      if ((prefix || '') !== r2CurrentPrefix) setR2ObjectSearch('');
       setR2CurrentPrefix(prefix || '');
       setSelectedR2Objects([]);
     } catch (error) {
@@ -1510,6 +1531,22 @@ function DnsPage() {
     }
   };
 
+  const r2ObjectPreviewUrl = (objectKey) => (
+    `/api/cloudflare/accounts/${encodeURIComponent(selectedAccountId)}/r2/buckets/${encodeURIComponent(r2SelectedBucket.name)}/objects/${encodeURIComponent(objectKey)}/preview`
+  );
+
+  const previewR2Object = (objectKey) => {
+    setModal({
+      type: 'r2Preview',
+      data: {
+        key: objectKey,
+        name: objectFileName(objectKey),
+        kind: r2PreviewKind(objectKey),
+        url: r2ObjectPreviewUrl(objectKey),
+      },
+    });
+  };
+
   const createTunnel = async () => {
     if (!tunnelForm.name.trim()) {
       toast.warning('请填写 Tunnel 名称');
@@ -1647,15 +1684,46 @@ function DnsPage() {
     });
   };
 
-  const r2Rows = [
-    ...r2Prefixes.map((prefix) => ({ key: prefix, name: prefix.slice(r2CurrentPrefix.length).replace(/\/$/, ''), isFolder: true })),
+  const filteredR2Buckets = useMemo(() => {
+    const keyword = r2BucketSearch.trim().toLowerCase();
+    if (!keyword) return r2Buckets;
+    return r2Buckets.filter((bucket) => String(bucket.name || '').toLowerCase().includes(keyword));
+  }, [r2BucketSearch, r2Buckets]);
+
+  const r2Rows = useMemo(() => [
+    ...r2Prefixes.map((prefix) => ({
+      key: prefix,
+      name: prefix.slice(r2CurrentPrefix.length).replace(/\/$/, '') || prefix.replace(/\/$/, ''),
+      isFolder: true,
+    })),
     ...r2Objects.map((object) => ({
       ...object,
       key: object.key || object.name,
       name: (object.key || object.name || '').slice(r2CurrentPrefix.length) || object.key || object.name,
       isFolder: false,
     })),
-  ];
+  ], [r2CurrentPrefix, r2Objects, r2Prefixes]);
+
+  const filteredR2Rows = useMemo(() => {
+    const keyword = r2ObjectSearch.trim().toLowerCase();
+    if (!keyword) return r2Rows;
+    return r2Rows.filter((row) => String(row.name || row.key || '').toLowerCase().includes(keyword));
+  }, [r2ObjectSearch, r2Rows]);
+
+  const r2VisibleObjectKeys = useMemo(
+    () => filteredR2Rows.filter((row) => !row.isFolder).map((row) => row.key),
+    [filteredR2Rows]
+  );
+
+  const r2ObjectTotalBytes = useMemo(
+    () => r2Objects.reduce((total, object) => total + Number(object.size || 0), 0),
+    [r2Objects]
+  );
+
+  const r2PathSegments = useMemo(
+    () => r2CurrentPrefix.split('/').filter(Boolean),
+    [r2CurrentPrefix]
+  );
   const isDnsWorkspace = activeTab === 'dns' && selectedAccountId;
   const pageShellClassName = isDnsWorkspace
     ? 'dns-workspace flex w-full max-w-full flex-col gap-3 overflow-visible pb-4 md:h-[calc(100dvh-88px)] md:min-h-0 md:overflow-hidden md:pb-1 lg:h-[calc(100dvh-92px)]'
@@ -2272,125 +2340,247 @@ function DnsPage() {
           )}
 
           {activeTab === 'r2' && (
-            <div className="flex flex-col gap-4">
-              {!r2SelectedBucket ? (
-                <>
-                  <div className="flex justify-end">
-                    <Button size="sm" onClick={() => { setR2BucketForm({ name: '', location: 'auto' }); setModal({ type: 'r2Bucket', data: null }); }} icon={<Plus className="h-4 w-4" />}>
+            <div className="grid min-h-0 grid-cols-1 gap-3 lg:h-[calc(100dvh-11.5rem)] lg:min-h-[34rem] lg:grid-cols-[18rem_minmax(0,1fr)]">
+              <LayerCard className="flex min-h-0 flex-col gap-3 p-3 lg:h-full">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-kumo-strong">存储桶</div>
+                    <div className="text-xs text-kumo-subtle">{r2Buckets.length} 个 Bucket</div>
+                  </div>
+                  <Button
+                    size="sm"
+                    shape="square"
+                    onClick={() => { setR2BucketForm({ name: '', location: 'auto' }); setModal({ type: 'r2Bucket', data: null }); }}
+                    disabled={!selectedAccountId}
+                    aria-label="创建存储桶"
+                    title="创建存储桶"
+                    icon={<Plus className="h-4 w-4" />}
+                  />
+                </div>
+
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-kumo-subtle" />
+                  <Input
+                    size="sm"
+                    value={r2BucketSearch}
+                    onChange={(event) => setR2BucketSearch(event.target.value)}
+                    placeholder="搜索存储桶"
+                    className="pl-8"
+                  />
+                </div>
+
+                <div className="flex min-h-0 flex-col gap-2 overflow-y-auto pr-1">
+                  {loading.r2 ? Array.from({ length: 5 }).map((_, index) => (
+                    <div key={index} className="rounded-md border border-kumo-line p-3">
+                      <SkeletonLine className="h-4 w-36" />
+                    </div>
+                  )) : !selectedAccountId ? (
+                    <div className="rounded-md border border-dashed border-kumo-line p-4 text-sm text-kumo-subtle">先选择 Cloudflare 账号。</div>
+                  ) : r2Buckets.length === 0 ? (
+                    <div className="rounded-md border border-dashed border-kumo-line p-4 text-sm text-kumo-subtle">还没有 R2 存储桶。</div>
+                  ) : filteredR2Buckets.length === 0 ? (
+                    <div className="rounded-md border border-dashed border-kumo-line p-4 text-sm text-kumo-subtle">没有匹配的存储桶。</div>
+                  ) : filteredR2Buckets.map((bucket) => {
+                    const isSelected = r2SelectedBucket?.name === bucket.name;
+                    return (
+                      <div
+                        key={bucket.name}
+                        className={`rounded-md border p-2.5 transition ${isSelected ? 'border-kumo-brand/70 bg-kumo-brand/10' : 'border-kumo-line bg-kumo-base hover:border-kumo-brand/60'}`}
+                      >
+                        <button
+                          type="button"
+                          className="flex w-full min-w-0 items-start gap-2 text-left"
+                          onClick={() => selectR2Bucket(bucket)}
+                        >
+                          <Box className={`mt-0.5 h-4 w-4 shrink-0 ${isSelected ? 'text-kumo-brand' : 'text-kumo-subtle'}`} />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium text-kumo-strong">{bucket.name}</span>
+                            <span className="mt-1 block truncate text-xs text-kumo-subtle">{formatDate(bucket.creation_date || bucket.created_at)}</span>
+                          </span>
+                        </button>
+                        <div className="mt-2 flex items-center justify-between gap-2">
+                          <Badge variant={bucket.public_url_base ? 'success' : 'outline'} className="text-[10px] leading-4">
+                            {bucket.public_url_base ? '公开访问' : '私有'}
+                          </Badge>
+                          <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteR2Bucket(bucket)} aria-label={`删除 ${bucket.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </LayerCard>
+
+              <LayerCard className="flex min-w-0 flex-col overflow-hidden p-0 lg:h-full">
+                {!r2SelectedBucket ? (
+                  <div className="flex min-h-72 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+                    <Database className="h-8 w-8 text-kumo-subtle" />
+                    <div>
+                      <div className="font-medium text-kumo-strong">选择一个存储桶开始管理</div>
+                      <div className="mt-1 text-sm text-kumo-subtle">左侧可以创建、搜索并进入 Bucket。</div>
+                    </div>
+                    <Button size="sm" disabled={!selectedAccountId} onClick={() => { setR2BucketForm({ name: '', location: 'auto' }); setModal({ type: 'r2Bucket', data: null }); }} icon={<Plus className="h-4 w-4" />}>
                       创建存储桶
                     </Button>
                   </div>
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                    {loading.r2 ? Array.from({ length: 6 }).map((_, index) => (
-                      <LayerCard key={index} className="p-4"><SkeletonLine className="h-5 w-40" /></LayerCard>
-                    )) : r2Buckets.length === 0 ? (
-                      <LayerCard className="p-8 text-center text-kumo-subtle md:col-span-2 xl:col-span-3">没有 R2 存储桶。</LayerCard>
-                    ) : r2Buckets.map((bucket) => (
-                      <LayerCard key={bucket.name} className="p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 font-medium text-kumo-strong">
-                              <Box className="h-4 w-4" />
-                              <span className="truncate">{bucket.name}</span>
-                            </div>
-                            <div className="mt-2 text-xs text-kumo-subtle">创建时间：{formatDate(bucket.creation_date || bucket.created_at)}</div>
+                ) : (
+                  <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                    <div className="shrink-0 flex flex-col gap-3 border-b border-kumo-line p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <Database className="h-4 w-4 shrink-0 text-kumo-brand" />
+                            <span className="truncate text-base font-semibold text-kumo-strong">{r2SelectedBucket.name}</span>
                           </div>
-                          <div className="flex gap-2">
-                            <Button size="sm" variant="secondary" onClick={() => selectR2Bucket(bucket)}>浏览</Button>
-                            <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteR2Bucket(bucket)} aria-label={`删除 ${bucket.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-kumo-subtle">
+                            <button type="button" className="rounded px-1.5 py-0.5 hover:bg-kumo-recessed/60 hover:text-kumo-strong" onClick={() => loadR2Objects(r2SelectedBucket.name, '')}>
+                              根目录
+                            </button>
+                            {r2PathSegments.map((segment, index) => {
+                              const prefix = `${r2PathSegments.slice(0, index + 1).join('/')}/`;
+                              return (
+                                <React.Fragment key={prefix}>
+                                  <span>/</span>
+                                  <button type="button" className="max-w-40 truncate rounded px-1.5 py-0.5 hover:bg-kumo-recessed/60 hover:text-kumo-strong" onClick={() => loadR2Objects(r2SelectedBucket.name, prefix)}>
+                                    {segment}
+                                  </button>
+                                </React.Fragment>
+                              );
+                            })}
                           </div>
                         </div>
-                      </LayerCard>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button size="sm" variant="secondary" onClick={() => { setR2SelectedBucket(null); setR2Objects([]); setR2Prefixes([]); }} icon={<ArrowLeft className="h-4 w-4" />}>
-                        返回存储桶
-                      </Button>
-                      <span className="text-sm font-medium text-kumo-strong">{r2SelectedBucket.name}</span>
-                      <Button size="sm" variant="secondary" onClick={() => loadR2Objects(r2SelectedBucket.name, '')}>
-                        根目录
-                      </Button>
-                      {r2CurrentPrefix && (
-                        <Button size="sm"
-                          variant="secondary"
-                          onClick={() => {
-                            const parent = r2CurrentPrefix.split('/').filter(Boolean).slice(0, -1).join('/');
-                            loadR2Objects(r2SelectedBucket.name, parent ? `${parent}/` : '');
-                          }}
-                        >
-                          上一级
-                        </Button>
-                      )}
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          {r2CurrentPrefix && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => {
+                                const parent = r2CurrentPrefix.split('/').filter(Boolean).slice(0, -1).join('/');
+                                loadR2Objects(r2SelectedBucket.name, parent ? `${parent}/` : '');
+                              }}
+                              icon={<ArrowLeft className="h-4 w-4" />}
+                            >
+                              上一级
+                            </Button>
+                          )}
+                          <Button size="sm" shape="square" variant="secondary" onClick={() => loadR2Objects(r2SelectedBucket.name, r2CurrentPrefix)} aria-label="刷新对象" title="刷新" icon={<RefreshCw className="h-4 w-4" />} />
+                          {selectedR2Objects.length > 0 && (
+                            <Button size="sm" variant="secondary-destructive" onClick={batchDeleteR2Objects} disabled={loading.batchDeleteR2} icon={<Trash className="h-4 w-4" />}>
+                              删除 {selectedR2Objects.length}
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                        <div className="rounded-md border border-kumo-line px-3 py-2">
+                          <div className="text-xs text-kumo-subtle">文件夹</div>
+                          <div className="mt-1 text-sm font-semibold text-kumo-strong">{r2Prefixes.length}</div>
+                        </div>
+                        <div className="rounded-md border border-kumo-line px-3 py-2">
+                          <div className="text-xs text-kumo-subtle">对象</div>
+                          <div className="mt-1 text-sm font-semibold text-kumo-strong">{r2Objects.length}</div>
+                        </div>
+                        <div className="rounded-md border border-kumo-line px-3 py-2">
+                          <div className="text-xs text-kumo-subtle">当前大小</div>
+                          <div className="mt-1 text-sm font-semibold text-kumo-strong">{formatBytes(r2ObjectTotalBytes)}</div>
+                        </div>
+                        <div className="rounded-md border border-kumo-line px-3 py-2">
+                          <div className="text-xs text-kumo-subtle">已选择</div>
+                          <div className="mt-1 text-sm font-semibold text-kumo-strong">{selectedR2Objects.length}</div>
+                        </div>
+                      </div>
+
+                      <div className="relative max-w-md">
+                        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-kumo-subtle" />
+                        <Input
+                          size="sm"
+                          value={r2ObjectSearch}
+                          onChange={(event) => setR2ObjectSearch(event.target.value)}
+                          placeholder="搜索当前目录"
+                          className="pl-8"
+                        />
+                      </div>
                     </div>
-                    {selectedR2Objects.length > 0 && (
-                      <Button size="sm" variant="secondary-destructive" onClick={batchDeleteR2Objects} icon={<Trash className="h-4 w-4" />}>
-                        删除 {selectedR2Objects.length}
-                      </Button>
-                    )}
-                  </div>
-                  <LayerCard className="overflow-x-auto p-0">
-                    <Table layout="fixed">
-                      <colgroup>{r2ColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
-                      <Table.Header variant="compact">
-                        <Table.Row>
-                          <Table.CheckHead
-                            checked={r2Objects.length > 0 && selectedR2Objects.length === r2Objects.length}
-                            indeterminate={selectedR2Objects.length > 0 && selectedR2Objects.length < r2Objects.length}
-                            onCheckedChange={(checked) => setSelectedR2Objects(checked ? r2Objects.map((object) => object.key || object.name) : [])}
-                            aria-label="全选 R2 对象"
-                          />
-                          <Table.Head className="relative pr-6">名称<Table.ResizeHandle onMouseDown={(e) => startR2Resize(1, e)} onTouchStart={(e) => startR2Resize(1, e)} /></Table.Head>
-                          <Table.Head className="relative pr-6">大小<Table.ResizeHandle onMouseDown={(e) => startR2Resize(2, e)} onTouchStart={(e) => startR2Resize(2, e)} /></Table.Head>
-                          <Table.Head className="relative pr-6">修改时间<Table.ResizeHandle onMouseDown={(e) => startR2Resize(3, e)} onTouchStart={(e) => startR2Resize(3, e)} /></Table.Head>
-                          <Table.Head className="text-right">操作</Table.Head>
-                        </Table.Row>
-                      </Table.Header>
-                      <Table.Body>
-                        {loading.r2Objects ? (
-                          Array.from({ length: 5 }).map((_, index) => <Table.Row key={index}><Table.Cell colSpan={5}><SkeletonLine className="h-4 w-full" /></Table.Cell></Table.Row>)
-                        ) : r2Rows.length === 0 ? (
-                          <Table.Row><Table.Cell colSpan={5} className="py-10 text-center text-kumo-subtle">当前目录为空。</Table.Cell></Table.Row>
-                        ) : r2Rows.map((row) => (
-                          <Table.Row key={row.key}>
-                            {row.isFolder ? (
-                              <Table.Cell />
-                            ) : (
-                              <Table.CheckCell
-                                checked={selectedR2Objects.includes(row.key)}
-                                onCheckedChange={(checked) => toggleR2Selection(row.key, Boolean(checked))}
-                                aria-label={`选择 ${row.key}`}
-                              />
-                            )}
-                            <Table.Cell>
-                              <div className="flex items-center gap-2 font-medium text-kumo-strong">
-                                {row.isFolder ? <Folder className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
-                                <span className="truncate">{row.name || row.key}</span>
-                              </div>
-                            </Table.Cell>
-                            <Table.Cell>{row.isFolder ? '-' : formatBytes(row.size)}</Table.Cell>
-                            <Table.Cell>{row.isFolder ? '-' : formatDate(row.uploaded || row.last_modified)}</Table.Cell>
-                            <Table.Cell className="text-right">
-                              {row.isFolder ? (
-                                <Button size="sm" variant="secondary" onClick={() => loadR2Objects(r2SelectedBucket.name, row.key)}>进入</Button>
-                              ) : (
-                                <div className="inline-flex gap-2">
-                                  <Button size="sm" shape="square" variant="secondary" onClick={() => downloadR2Object(row.key)} aria-label={`下载 ${row.key}`} title="下载" icon={<Download className="h-4 w-4" />} />
-                                  <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteR2Object(row.key)} aria-label={`删除 ${row.key}`} title="删除" icon={<Trash className="h-4 w-4" />} />
-                                </div>
-                              )}
-                            </Table.Cell>
+
+                    <div className="min-h-0 flex-1 overflow-auto">
+                      <Table layout="fixed">
+                        <colgroup>{r2ColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
+                        <Table.Header variant="compact">
+                          <Table.Row>
+                            <Table.CheckHead
+                              checked={r2VisibleObjectKeys.length > 0 && r2VisibleObjectKeys.every((key) => selectedR2Objects.includes(key))}
+                              indeterminate={selectedR2Objects.length > 0 && !r2VisibleObjectKeys.every((key) => selectedR2Objects.includes(key))}
+                              onCheckedChange={(checked) => setSelectedR2Objects(checked ? r2VisibleObjectKeys : [])}
+                              aria-label="全选当前可见 R2 对象"
+                            />
+                            <Table.Head className="relative pr-6">名称<Table.ResizeHandle onMouseDown={(e) => startR2Resize(1, e)} onTouchStart={(e) => startR2Resize(1, e)} /></Table.Head>
+                            <Table.Head className="relative pr-6">大小<Table.ResizeHandle onMouseDown={(e) => startR2Resize(2, e)} onTouchStart={(e) => startR2Resize(2, e)} /></Table.Head>
+                            <Table.Head className="relative pr-6">修改时间<Table.ResizeHandle onMouseDown={(e) => startR2Resize(3, e)} onTouchStart={(e) => startR2Resize(3, e)} /></Table.Head>
+                            <Table.Head className="text-right">操作</Table.Head>
                           </Table.Row>
-                        ))}
-                      </Table.Body>
-                    </Table>
-                  </LayerCard>
-                </>
-              )}
+                        </Table.Header>
+                        <Table.Body>
+                          {loading.r2Objects ? (
+                            Array.from({ length: 7 }).map((_, index) => <Table.Row key={index}><Table.Cell colSpan={5}><SkeletonLine className="h-4 w-full" /></Table.Cell></Table.Row>)
+                          ) : r2Rows.length === 0 ? (
+                            <Table.Row><Table.Cell colSpan={5} className="py-12 text-center text-kumo-subtle">当前目录为空。</Table.Cell></Table.Row>
+                          ) : filteredR2Rows.length === 0 ? (
+                            <Table.Row><Table.Cell colSpan={5} className="py-12 text-center text-kumo-subtle">没有匹配的对象。</Table.Cell></Table.Row>
+                          ) : filteredR2Rows.map((row) => (
+                            <Table.Row
+                              key={row.key}
+                              className="cursor-pointer hover:bg-kumo-recessed/35"
+                              onClick={() => (row.isFolder ? loadR2Objects(r2SelectedBucket.name, row.key) : previewR2Object(row.key))}
+                              title={row.isFolder ? '打开目录' : '预览文件'}
+                            >
+                              {row.isFolder ? (
+                                <Table.Cell />
+                              ) : (
+                                <Table.CheckCell
+                                  checked={selectedR2Objects.includes(row.key)}
+                                  onClick={(event) => event.stopPropagation()}
+                                  onCheckedChange={(checked) => toggleR2Selection(row.key, Boolean(checked))}
+                                  aria-label={`选择 ${row.key}`}
+                                />
+                              )}
+                              <Table.Cell>
+                                <button
+                                  type="button"
+                                  className={`flex min-w-0 items-center gap-2 text-left ${row.isFolder ? 'font-medium text-kumo-strong hover:text-kumo-brand' : 'text-kumo-strong'}`}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    if (row.isFolder) loadR2Objects(r2SelectedBucket.name, row.key);
+                                    else previewR2Object(row.key);
+                                  }}
+                                  disabled={!row.isFolder}
+                                  title={row.key}
+                                >
+                                  {row.isFolder ? <Folder className="h-4 w-4 shrink-0 text-kumo-brand" /> : <FileText className="h-4 w-4 shrink-0 text-kumo-subtle" />}
+                                  <span className="truncate">{row.name || row.key}</span>
+                                </button>
+                              </Table.Cell>
+                              <Table.Cell>{row.isFolder ? '-' : formatBytes(row.size)}</Table.Cell>
+                              <Table.Cell>{row.isFolder ? '-' : formatDate(row.uploaded || row.last_modified)}</Table.Cell>
+                              <Table.Cell className="text-right">
+                                {row.isFolder ? (
+                                  <Button size="sm" variant="secondary" onClick={(event) => { event.stopPropagation(); loadR2Objects(r2SelectedBucket.name, row.key); }}>进入</Button>
+                                ) : (
+                                  <div className="inline-flex gap-2" onClick={(event) => event.stopPropagation()}>
+                                    <Button size="sm" shape="square" variant="secondary" onClick={() => previewR2Object(row.key)} aria-label={`预览 ${row.key}`} title="预览" icon={<Eye className="h-4 w-4" />} />
+                                    <Button size="sm" shape="square" variant="secondary" onClick={() => downloadR2Object(row.key)} aria-label={`下载 ${row.key}`} title="下载" icon={<Download className="h-4 w-4" />} />
+                                    <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteR2Object(row.key)} aria-label={`删除 ${row.key}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                                  </div>
+                                )}
+                              </Table.Cell>
+                            </Table.Row>
+                          ))}
+                        </Table.Body>
+                      </Table>
+                    </div>
+                  </div>
+                )}
+              </LayerCard>
             </div>
           )}
 
@@ -2872,6 +3062,56 @@ function DnsPage() {
               <div className="flex justify-end gap-2">
                 <Button size="sm" variant="secondary" onClick={closeModal}>取消</Button>
                 <Button size="sm" onClick={createR2Bucket} disabled={loading.saveR2Bucket}>创建</Button>
+              </div>
+            </div>
+          )}
+
+          {modal.type === 'r2Preview' && (
+            <div className="flex min-h-0 flex-col gap-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <Dialog.Title className="truncate text-base font-semibold text-kumo-strong">预览：{modal.data?.name}</Dialog.Title>
+                  <Dialog.Description className="mt-1 truncate text-xs text-kumo-subtle">{modal.data?.key}</Dialog.Description>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => window.open(modal.data?.url, '_blank', 'noopener,noreferrer')} icon={<ExternalLink className="h-4 w-4" />}>
+                    新窗口打开
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={closeModal}>关闭</Button>
+                </div>
+              </div>
+
+              <div className="min-h-[28rem] overflow-hidden rounded-md border border-kumo-line bg-kumo-recessed/25">
+                {modal.data?.kind === 'image' ? (
+                  <div className="flex h-[68vh] max-h-[42rem] min-h-[28rem] items-center justify-center overflow-auto p-3">
+                    <img src={modal.data.url} alt={modal.data.name} className="max-h-full max-w-full object-contain" />
+                  </div>
+                ) : modal.data?.kind === 'video' ? (
+                  <div className="flex h-[68vh] max-h-[42rem] min-h-[28rem] items-center justify-center p-3">
+                    <video src={modal.data.url} controls className="max-h-full max-w-full rounded-md bg-black" />
+                  </div>
+                ) : modal.data?.kind === 'audio' ? (
+                  <div className="flex h-44 items-center justify-center p-6">
+                    <audio src={modal.data.url} controls className="w-full max-w-xl" />
+                  </div>
+                ) : modal.data?.kind === 'frame' ? (
+                  <iframe
+                    title={`预览 ${modal.data.name}`}
+                    src={modal.data.url}
+                    className="h-[68vh] max-h-[42rem] min-h-[28rem] w-full bg-white"
+                  />
+                ) : (
+                  <div className="flex min-h-[28rem] flex-col items-center justify-center gap-3 p-8 text-center">
+                    <FileText className="h-8 w-8 text-kumo-subtle" />
+                    <div>
+                      <div className="font-medium text-kumo-strong">该类型暂不支持内嵌预览</div>
+                      <div className="mt-1 text-sm text-kumo-subtle">可以在新窗口打开，浏览器会按文件类型处理。</div>
+                    </div>
+                    <Button size="sm" onClick={() => window.open(modal.data?.url, '_blank', 'noopener,noreferrer')} icon={<ExternalLink className="h-4 w-4" />}>
+                      打开对象
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
           )}

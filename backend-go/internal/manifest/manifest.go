@@ -124,6 +124,7 @@ func Routes() []Route {
 		{Prefix: "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects", Module: "cloudflare-r2", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Cloudflare R2 object list", MatchMode: MatchPattern},
 		{Prefix: "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}", Module: "cloudflare-r2", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Cloudflare R2 object delete", MatchMode: MatchPattern},
 		{Prefix: "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}/download-info", Module: "cloudflare-r2", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Cloudflare R2 object download info", MatchMode: MatchPattern},
+		{Prefix: "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}/preview", Module: "cloudflare-r2", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseProxy, Description: "Cloudflare R2 object preview proxy", MatchMode: MatchPattern},
 
 		{Prefix: "/api/cloudflare/accounts/{id}/tunnels", Module: "cloudflare-tunnels", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Cloudflare Tunnel list/create", MatchMode: MatchPattern},
 		{Prefix: "/api/cloudflare/accounts/{accountId}/tunnels/{tunnelId}", Module: "cloudflare-tunnels", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Cloudflare Tunnel details/delete/update", MatchMode: MatchPattern},

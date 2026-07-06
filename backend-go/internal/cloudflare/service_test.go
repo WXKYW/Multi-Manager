@@ -669,7 +669,19 @@ func TestR2AndTunnelsLifecycle(t *testing.T) {
 		t.Fatalf("unexpected download info payload: %#v", downloadPayload)
 	}
 
-	// 5. R2 Object Delete
+	// 5. R2 Object Preview
+	res = perform(service, http.MethodGet, "/api/cloudflare/accounts/"+accountID+"/r2/buckets/test-bucket/objects/test%2Fkey.txt/preview", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("preview object status=%d body=%s", res.Code, res.Body.String())
+	}
+	if body := res.Body.String(); body != "hello from r2" {
+		t.Fatalf("unexpected preview body: %q", body)
+	}
+	if contentType := res.Header().Get("Content-Type"); !strings.Contains(contentType, "text/plain") {
+		t.Fatalf("unexpected preview content type: %s", contentType)
+	}
+
+	// 6. R2 Object Delete
 	res = perform(service, http.MethodDelete, "/api/cloudflare/accounts/"+accountID+"/r2/buckets/test-bucket/objects/test%2Fkey.txt", "")
 	if res.Code != http.StatusOK {
 		t.Fatalf("delete object status=%d body=%s", res.Code, res.Body.String())
@@ -680,7 +692,7 @@ func TestR2AndTunnelsLifecycle(t *testing.T) {
 		t.Fatalf("unexpected delete object payload: %#v", deleteObjPayload)
 	}
 
-	// 6. R2 Bucket delete
+	// 7. R2 Bucket delete
 	res = perform(service, http.MethodDelete, "/api/cloudflare/accounts/"+accountID+"/r2/buckets/test-bucket", "")
 	if res.Code != http.StatusOK {
 		t.Fatalf("delete bucket status=%d body=%s", res.Code, res.Body.String())
@@ -1428,7 +1440,7 @@ func handleFakeR2Path(t *testing.T, w http.ResponseWriter, r *http.Request) {
 					"success": true,
 					"result": map[string]interface{}{
 						"buckets": []map[string]interface{}{{
-							"name": "buckets-smoke",
+							"name":          "buckets-smoke",
 							"creation_date": "2026-01-01T00:00:00Z",
 						}},
 					},
@@ -1441,7 +1453,7 @@ func handleFakeR2Path(t *testing.T, w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusOK, map[string]interface{}{
 					"success": true,
 					"result": map[string]interface{}{
-						"name": body["name"],
+						"name":          body["name"],
 						"creation_date": "2026-01-01T00:00:00Z",
 					},
 				})
@@ -1454,7 +1466,7 @@ func handleFakeR2Path(t *testing.T, w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusOK, map[string]interface{}{
 					"success": true,
 					"result": map[string]interface{}{
-						"name": bucketName,
+						"name":            bucketName,
 						"public_url_base": "https://pub-r2.example.com",
 					},
 				})
@@ -1470,18 +1482,23 @@ func handleFakeR2Path(t *testing.T, w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusOK, map[string]interface{}{
 					"success": true,
 					"result": []map[string]interface{}{{
-						"key": "objects-smoke.txt",
+						"key":  "objects-smoke.txt",
 						"size": 100,
 					}},
 					"result_info": map[string]interface{}{
 						"delimited": []interface{}{},
-						"cursor": nil,
+						"cursor":    nil,
 					},
 				})
 				return
 			}
 		}
 		if len(parts) == 4 && parts[2] == "objects" {
+			if r.Method == http.MethodGet {
+				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+				_, _ = w.Write([]byte("hello from r2"))
+				return
+			}
 			if r.Method == http.MethodDelete {
 				writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
 				return
@@ -1503,9 +1520,9 @@ func handleFakeTunnelPath(t *testing.T, w http.ResponseWriter, r *http.Request) 
 			writeJSON(w, http.StatusOK, map[string]interface{}{
 				"success": true,
 				"result": []map[string]interface{}{{
-					"id": "t1",
-					"name": "t-smoke",
-					"status": "healthy",
+					"id":         "t1",
+					"name":       "t-smoke",
+					"status":     "healthy",
 					"created_at": "2026-01-01T00:00:00Z",
 				}},
 			})
@@ -1517,9 +1534,9 @@ func handleFakeTunnelPath(t *testing.T, w http.ResponseWriter, r *http.Request) 
 			writeJSON(w, http.StatusOK, map[string]interface{}{
 				"success": true,
 				"result": map[string]interface{}{
-					"id": "t-new",
-					"name": body["name"],
-					"status": "inactive",
+					"id":         "t-new",
+					"name":       body["name"],
+					"status":     "inactive",
 					"created_at": "2026-01-01T00:00:00Z",
 				},
 			})
@@ -1532,8 +1549,8 @@ func handleFakeTunnelPath(t *testing.T, w http.ResponseWriter, r *http.Request) 
 			writeJSON(w, http.StatusOK, map[string]interface{}{
 				"success": true,
 				"result": map[string]interface{}{
-					"id": tunnelId,
-					"name": "t-smoke",
+					"id":     tunnelId,
+					"name":   "t-smoke",
 					"status": "healthy",
 				},
 			})
@@ -1549,7 +1566,7 @@ func handleFakeTunnelPath(t *testing.T, w http.ResponseWriter, r *http.Request) 
 			writeJSON(w, http.StatusOK, map[string]interface{}{
 				"success": true,
 				"result": map[string]interface{}{
-					"id": tunnelId,
+					"id":   tunnelId,
 					"name": body["name"],
 				},
 			})
@@ -1578,7 +1595,7 @@ func handleFakeTunnelPath(t *testing.T, w http.ResponseWriter, r *http.Request) 
 				_ = json.NewDecoder(r.Body).Decode(&body)
 				writeJSON(w, http.StatusOK, map[string]interface{}{
 					"success": true,
-					"result": body,
+					"result":  body,
 				})
 				return
 			}
@@ -1586,7 +1603,7 @@ func handleFakeTunnelPath(t *testing.T, w http.ResponseWriter, r *http.Request) 
 		if parts[1] == "token" && r.Method == http.MethodGet {
 			writeJSON(w, http.StatusOK, map[string]interface{}{
 				"success": true,
-				"result": "token-smoke",
+				"result":  "token-smoke",
 			})
 			return
 		}
@@ -1595,7 +1612,7 @@ func handleFakeTunnelPath(t *testing.T, w http.ResponseWriter, r *http.Request) 
 				writeJSON(w, http.StatusOK, map[string]interface{}{
 					"success": true,
 					"result": []map[string]interface{}{{
-						"id": "conn1",
+						"id":             "conn1",
 						"client_version": "2026.1.0",
 					}},
 				})

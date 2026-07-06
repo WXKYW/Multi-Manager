@@ -78,6 +78,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.deleteR2Object(w, r, parts[1], parts[4], parts[6])
 	case len(parts) == 8 && parts[0] == "accounts" && parts[2] == "r2" && parts[3] == "buckets" && parts[5] == "objects" && parts[7] == "download-info":
 		s.r2ObjectDownloadInfo(w, r, parts[1], parts[4], parts[6])
+	case len(parts) == 8 && parts[0] == "accounts" && parts[2] == "r2" && parts[3] == "buckets" && parts[5] == "objects" && parts[7] == "preview":
+		s.r2ObjectPreview(w, r, parts[1], parts[4], parts[6])
 
 	case len(parts) == 3 && parts[0] == "accounts" && parts[2] == "tunnels":
 		s.tunnels(w, r, parts[1])
@@ -2790,6 +2792,65 @@ func (s *Service) r2ObjectDownloadInfo(w http.ResponseWriter, r *http.Request, a
 		"objectKey":  objectKey,
 		"bucketName": bucketName,
 	})
+}
+
+func (s *Service) r2ObjectPreview(w http.ResponseWriter, r *http.Request, accountID, bucketName, objectKey string) {
+	if r.Method != http.MethodGet {
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	auth, ok := s.authForAccount(w, r, accountID)
+	if !ok {
+		return
+	}
+	cfAccountID, err := s.cloudflareAccountID(r.Context(), auth)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	path := "/accounts/" + url.PathEscape(cfAccountID) + "/r2/buckets/" + url.PathEscape(bucketName) + "/objects/" + url.PathEscape(objectKey)
+	raw, contentType, err := s.cfRawRequest(r.Context(), http.MethodGet, path, auth, "*/*", "", nil)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	if contentType == "" || strings.HasPrefix(strings.ToLower(contentType), "application/octet-stream") {
+		if detected := mime.TypeByExtension(strings.ToLower(pathExt(objectKey))); detected != "" {
+			contentType = detected
+		} else if len(raw) > 0 {
+			contentType = http.DetectContentType(raw)
+		} else {
+			contentType = "application/octet-stream"
+		}
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": objectFileName(objectKey)}))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "private, max-age=60")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(raw)
+}
+
+func pathExt(value string) string {
+	name := objectFileName(value)
+	index := strings.LastIndex(name, ".")
+	if index < 0 {
+		return ""
+	}
+	return name[index:]
+}
+
+func objectFileName(value string) string {
+	trimmed := strings.Trim(value, "/")
+	if trimmed == "" {
+		return "object"
+	}
+	parts := strings.Split(trimmed, "/")
+	name := parts[len(parts)-1]
+	if name == "" {
+		return "object"
+	}
+	return name
 }
 
 // Tunnel Management

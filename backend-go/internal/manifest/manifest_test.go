@@ -1,6 +1,9 @@
 package manifest
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestMatchPrefersMostSpecificPrefix(t *testing.T) {
 	route, ok := Match("/api/server/agent/quick-install")
@@ -311,6 +314,7 @@ func TestCloudflareAccountDNSAndZoneResourceRoutesAreGoOwnedWithoutSwallowingOth
 		"/api/cloudflare/accounts/cf_123/r2/buckets/bucket_name/objects",
 		"/api/cloudflare/accounts/cf_123/r2/buckets/bucket_name/objects/key_123",
 		"/api/cloudflare/accounts/cf_123/r2/buckets/bucket_name/objects/key_123/download-info",
+		"/api/cloudflare/accounts/cf_123/r2/buckets/bucket_name/objects/key_123/preview",
 		"/api/cloudflare/accounts/cf_123/tunnels",
 		"/api/cloudflare/accounts/cf_123/tunnels/tunnel_123",
 		"/api/cloudflare/accounts/cf_123/tunnels/tunnel_123/configuration",
@@ -321,8 +325,12 @@ func TestCloudflareAccountDNSAndZoneResourceRoutesAreGoOwnedWithoutSwallowingOth
 		if !ok {
 			t.Fatalf("expected cloudflare go route match for %s", path)
 		}
-		if route.Owner != OwnerGo || route.Auth != AuthSession || route.ResponseMode != ResponseJSON {
-			t.Fatalf("expected session JSON go owner for %s, got owner=%s auth=%s response=%s", path, route.Owner, route.Auth, route.ResponseMode)
+		expectedResponse := ResponseJSON
+		if strings.HasSuffix(path, "/preview") {
+			expectedResponse = ResponseProxy
+		}
+		if route.Owner != OwnerGo || route.Auth != AuthSession || route.ResponseMode != expectedResponse {
+			t.Fatalf("expected session %s go owner for %s, got owner=%s auth=%s response=%s", expectedResponse, path, route.Owner, route.Auth, route.ResponseMode)
 		}
 	}
 

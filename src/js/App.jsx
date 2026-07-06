@@ -20,8 +20,7 @@ const getPublicStatusRouteMode = () => {
 
 function App() {
   const { isAuthenticated, checkAuth, isCheckingAuth, themeMode } = useStore();
-  const [domainStatusFallback, setDomainStatusFallback] = useState(false);
-  const [domainServerFallback, setDomainServerFallback] = useState(false);
+  const [domainStatusRoute, setDomainStatusRoute] = useState(null);
   const publicStatusRouteMode = getPublicStatusRouteMode();
 
   // 挂载时自动运行初始身份校验
@@ -71,24 +70,10 @@ function App() {
     return <Suspense fallback={null}><PublicServerStatusPage /></Suspense>;
   }
 
-  if (publicStatusRouteMode === 'slug' || (publicStatusRouteMode === 'domain' && !domainStatusFallback)) {
+  if (publicStatusRouteMode === 'slug') {
     return (
       <Suspense fallback={null}>
-        <PublicStatusPage
-          domainOnly={publicStatusRouteMode === 'domain'}
-          onDomainNotFound={() => setDomainStatusFallback(true)}
-        />
-      </Suspense>
-    );
-  }
-
-  if (publicStatusRouteMode === 'domain' && domainStatusFallback && !domainServerFallback) {
-    return (
-      <Suspense fallback={null}>
-        <PublicServerStatusPage
-          domainOnly
-          onDomainNotFound={() => setDomainServerFallback(true)}
-        />
+        <PublicStatusPage />
       </Suspense>
     );
   }
@@ -97,7 +82,82 @@ function App() {
     return null;
   }
 
-  return isAuthenticated ? <MainLayout /> : <AuthPage />;
+  if (isAuthenticated) {
+    return <MainLayout />;
+  }
+
+  if (publicStatusRouteMode === 'domain') {
+    return (
+      <DomainPublicStatusResolver
+        route={domainStatusRoute}
+        onRouteChange={setDomainStatusRoute}
+      />
+    );
+  }
+
+  return <AuthPage />;
+}
+
+function DomainPublicStatusResolver({ route, onRouteChange }) {
+  useEffect(() => {
+    let cancelled = false;
+
+    const resolve = async () => {
+      onRouteChange(null);
+      const domain = window.location.host;
+      const uptimeUrl = `/api/uptime/public/status-page-by-domain?domain=${encodeURIComponent(domain)}`;
+      const serverUrl = `/api/server/public/status-page-by-domain?domain=${encodeURIComponent(domain)}`;
+
+      try {
+        const uptimeResponse = await fetch(uptimeUrl, { cache: 'no-store' });
+        if (!cancelled && uptimeResponse.ok) {
+          onRouteChange('uptime');
+          return;
+        }
+      } catch {
+        // Fall through to server status page probing.
+      }
+
+      try {
+        const serverResponse = await fetch(serverUrl, { cache: 'no-store' });
+        if (!cancelled && serverResponse.ok) {
+          onRouteChange('server');
+          return;
+        }
+      } catch {
+        // Fall through to login.
+      }
+
+      if (!cancelled) onRouteChange('none');
+    };
+
+    resolve();
+    return () => {
+      cancelled = true;
+    };
+  }, [onRouteChange]);
+
+  if (route === 'uptime') {
+    return (
+      <Suspense fallback={null}>
+        <PublicStatusPage domainOnly />
+      </Suspense>
+    );
+  }
+
+  if (route === 'server') {
+    return (
+      <Suspense fallback={null}>
+        <PublicServerStatusPage domainOnly />
+      </Suspense>
+    );
+  }
+
+  if (route === null) {
+    return null;
+  }
+
+  return <AuthPage />;
 }
 
 export default App;
