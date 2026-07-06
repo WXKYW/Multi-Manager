@@ -436,7 +436,7 @@ const getFlowUnitClassName = (unit) => {
   if (normalized === 'K') return 'border-kumo-info/65 bg-kumo-info/25 text-kumo-info';
   if (normalized === 'M') return 'border-kumo-success/65 bg-kumo-success/25 text-kumo-success';
   if (normalized === 'G') return 'border-kumo-warning/65 bg-kumo-warning/25 text-kumo-warning';
-  if (normalized === 'T') return 'border-kumo-line bg-kumo-base text-kumo-strong';
+  if (normalized === 'T') return 'border-kumo-danger/65 bg-kumo-danger/15 text-kumo-danger';
   return 'border-kumo-interact/70 bg-kumo-recessed/70 text-kumo-default';
 };
 
