@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import jsQR from 'jsqr';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
-import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input, Textarea } from '@cloudflare/kumo/components/input';
@@ -45,6 +44,8 @@ const maskEmail = (email) => {
   if (local.length <= 3) return local[0] + '***@' + domain;
   return local.slice(0, 2) + '***' + local.slice(-1) + '@' + domain;
 };
+
+const GROUP_FILTER_ALL = '__all__';
 
 // ==================== TotpPage 组件 ====================
 function TotpPage() {
@@ -265,9 +266,13 @@ function TotpPage() {
     return counts;
   }, [totpAccounts]);
 
-  const groupById = useMemo(() => {
-    return Object.fromEntries(totpGroups.map((group) => [String(group.id), group]));
-  }, [totpGroups]);
+  const groupFilterTabs = useMemo(() => [
+    { value: GROUP_FILTER_ALL, label: '全部分组' },
+    ...totpGroups.map((group) => ({
+      value: String(group.id),
+      label: group.name,
+    })),
+  ], [totpGroups]);
 
   // ==================== 账号编辑与删除 ====================
   const handleOpenAddAccount = () => {
@@ -825,19 +830,20 @@ function TotpPage() {
         />
 
         {totpCurrentTab === 'accounts' && (
-          <div className="flex w-full min-w-0 flex-wrap items-center gap-2 md:w-auto md:justify-end">
-            <Select
-              aria-label="TOTP 分组筛选" size="sm"
-              value={totpFilterGroup}
-              onValueChange={(value) => setTotpFilterGroup(String(value))}
-              placeholder="全部分组"
-              items={[
-                { value: '', label: '全部分组' },
-                ...totpGroups.map((g) => ({ value: String(g.id), label: g.name })),
-              ]}
+          <div className="flex w-full min-w-0 flex-wrap items-center gap-2 md:w-auto md:flex-1 md:justify-end">
+            <Tabs
+              {...TOOL_TABS_PROPS}
+              value={totpFilterGroup || GROUP_FILTER_ALL}
+              onValueChange={(value) => {
+                const nextValue = String(value);
+                setTotpFilterGroup(nextValue === GROUP_FILTER_ALL ? '' : nextValue);
+              }}
+              tabs={groupFilterTabs}
+              className="min-w-0 max-w-full flex-1 md:flex-none"
+              listClassName="max-w-full overflow-x-auto"
             />
 
-            <div className="relative flex-1 md:w-48">
+            <div className="relative min-w-40 flex-1 md:max-w-48">
               <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-kumo-subtle">
                 <Search className="w-3.5 h-3.5" />
               </span>
@@ -911,7 +917,6 @@ function TotpPage() {
                 const period = account.period || 30;
                 const ratio = Math.max(0, Math.min(100, (remaining / period) * 100));
                 const codeParts = getTotpCodeParts(account, codeDetail.code);
-                const accountGroup = account.group_id ? groupById[String(account.group_id)] : null;
                 
                 // Show platform header if settings enable it
                 const showHeader =
@@ -968,15 +973,6 @@ function TotpPage() {
                             {totpSettings.maskAccount ? maskEmail(account.account) : account.account}
                           </div>
                         </div>
-                        {accountGroup && (
-                          <Badge
-                            variant="outline"
-                            className="max-w-20 shrink-0 truncate px-1.5 text-[10px] leading-4"
-                            title={`分组: ${accountGroup.name}`}
-                          >
-                            {accountGroup.name}
-                          </Badge>
-                        )}
                         <div className="flex shrink-0 items-center gap-0.5 opacity-65 transition-opacity group-hover/card:opacity-100">
                           <Button
                             shape="square" size="sm"
