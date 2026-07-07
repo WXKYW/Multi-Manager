@@ -25,6 +25,7 @@ import {
 } from '../components/ui/AppPrimitives.jsx';
 import useTableResize from '../composables/useTableResize.js';
 import { formatUptime, formatFileSize, formatDateTime, maskAddress, parseSpeed } from '../modules/utils.js';
+import { FLOW_UNIT_BADGE_CLASS, getFlowUnitClassName } from '../modules/flowUnits.js';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { canOpenTerminal, hasSshEndpoint, isAgentServer, resolveTerminalProtocol } from '../modules/serverTerminal.js';
 import { readSftpFile, writeSftpFile } from '../modules/server-sftp.js';
@@ -428,18 +429,9 @@ const DenseLifecycleMeter = React.memo(DenseLifecycleMeterComponent, (prev, next
   && prev.lifecycle?.indicatorClassName === next.lifecycle?.indicatorClassName
 ));
 
-const getFlowUnitClassName = (unit) => {
-  const normalized = String(unit || 'B').toUpperCase();
-  if (normalized === 'K') return 'border-kumo-info/65 bg-kumo-info/25 text-kumo-info';
-  if (normalized === 'M') return 'border-kumo-success/65 bg-kumo-success/25 text-kumo-success';
-  if (normalized === 'G') return 'border-kumo-warning/65 bg-kumo-warning/25 text-kumo-warning';
-  if (normalized === 'T') return 'border-kumo-danger/65 bg-kumo-danger/15 text-kumo-danger';
-  return 'border-kumo-interact/70 bg-kumo-recessed/70 text-kumo-default';
-};
-
 function FlowUnitBadge({ unit }) {
   return (
-    <span className={`inline-flex h-5 min-w-5 items-center justify-center rounded-[4px] px-1 font-mono text-[14px] font-bold leading-none ${getFlowUnitClassName(unit)} ${COMPACT_INLINE_SUBBOX_CLASS}`}>
+    <span className={`${FLOW_UNIT_BADGE_CLASS} ${getFlowUnitClassName(unit)}`}>
       {unit || 'B'}
     </span>
   );

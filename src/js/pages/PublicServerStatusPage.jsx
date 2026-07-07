@@ -4,6 +4,7 @@ import { Meter, Tabs } from '@cloudflare/kumo';
 import { Button } from '@cloudflare/kumo/components/button';
 import { AlertTriangle, RefreshCw, Server, Shield } from '../components/Icons.jsx';
 import CountryFlag from '../components/CountryFlag.jsx';
+import { FLOW_UNIT_BADGE_CLASS, getFlowUnitClassName } from '../modules/flowUnits.js';
 
 const COLUMN_TABS = [
   { value: '3', label: '3列' },
@@ -293,15 +294,6 @@ const getByteParts = (value) => {
 
 const formatFlowPart = (part, suffix = '') => `${part.num}${part.unit}${suffix}`;
 
-const getFlowUnitClassName = (unit) => {
-  const normalized = String(unit || 'B').toUpperCase();
-  if (normalized === 'K') return 'border-kumo-info/65 bg-kumo-info/25 text-kumo-info';
-  if (normalized === 'M') return 'border-kumo-success/65 bg-kumo-success/25 text-kumo-success';
-  if (normalized === 'G') return 'border-kumo-warning/65 bg-kumo-warning/25 text-kumo-warning';
-  if (normalized === 'T') return 'border-kumo-brand/65 bg-kumo-brand/20 text-kumo-brand';
-  return 'border-kumo-interact/70 bg-kumo-recessed/70 text-kumo-default';
-};
-
 const FLOW_KIND_CLASS = {
   speed: {
     label: 'text-kumo-success',
@@ -315,7 +307,7 @@ const FLOW_KIND_CLASS = {
 
 function FlowUnitBadge({ unit, suffix = '' }) {
   return (
-    <span className={`inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-[4px] border px-1 text-xs font-bold leading-none ${getFlowUnitClassName(unit)}`}>
+    <span className={`${FLOW_UNIT_BADGE_CLASS} ${getFlowUnitClassName(unit)}`}>
       {unit || 'B'}{suffix}
     </span>
   );
