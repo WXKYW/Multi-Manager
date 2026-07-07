@@ -649,7 +649,7 @@ function FileboxPage({ publicVoidOnly = false } = {}) {
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={(event) => { event.preventDefault(); selectFile(event.dataTransfer.files?.[0]); }}
                 >
-                  <input ref={fileInputRef} type="file" className="hidden" onChange={(event) => selectFile(event.target.files?.[0])} />
+                  <Input ref={fileInputRef} type="file" aria-label="选择分享文件" className="hidden" onChange={(event) => selectFile(event.target.files?.[0])} />
                   <Upload className="mx-auto h-9 w-9 text-kumo-subtle" />
                   <div className="mt-3 text-sm font-semibold text-kumo-strong">{selectedFile ? selectedFile.name : '拖入文件或点击选择'}</div>
                   <div className="mt-1 text-xs text-kumo-subtle">最大 {formatFileSize(maxFileSize)}</div>
@@ -822,7 +822,7 @@ function FileboxPage({ publicVoidOnly = false } = {}) {
                   }
                 }}
               >
-                <input ref={voidFileInputRef} type="file" className="hidden" onChange={(event) => { setVoidFile(event.target.files?.[0] || null); setVoidText(''); }} />
+                <Input ref={voidFileInputRef} type="file" aria-label="选择虚空传输文件" className="hidden" onChange={(event) => { setVoidFile(event.target.files?.[0] || null); setVoidText(''); }} />
                 <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-md border border-kumo-line bg-kumo-base text-kumo-brand"><Upload className="h-6 w-6" /></div>
                 <div className="mt-3 break-all text-sm font-semibold text-kumo-strong">{voidFile ? voidFile.name : '拖入文件或点击选择'}</div>
                 <div className="mt-1 text-xs text-kumo-subtle">{voidFile ? formatFileSize(voidFile.size) : '双方页面保持打开，连接建立后浏览器直传。'}</div>

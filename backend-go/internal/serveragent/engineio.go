@@ -51,6 +51,11 @@ type EngineIOSession struct {
 	Authenticated   bool
 	ServerID        string
 	Namespace       string // Socket.IO 命名空间，"" = 默认(Agent), "/metrics" = 前端
+	Capabilities    []string
+	Hostname        string
+	Version         string
+	Platform        string
+	Arch            string
 	PendingMessages []string
 	wsConn          *websocket.Conn
 	mu              sync.RWMutex
@@ -77,7 +82,7 @@ func NewEngineIOServer(registry *ConnectionRegistry) *EngineIOServer {
 	server := &EngineIOServer{
 		sessions:     make(map[string]*EngineIOSession),
 		pingInterval: 25 * time.Second,
-		pingTimeout:  20 * time.Second,
+		pingTimeout:  envDurationMs("API_MONITOR_AGENT_PING_TIMEOUT_MS", 75*time.Second),
 		pollTimeout:  20 * time.Second,
 		pollInterval: 50 * time.Millisecond,
 		registry:     registry,
@@ -635,10 +640,13 @@ func (s *EngineIOServer) handleSocketIOMessage(session *EngineIOSession, payload
 		// 处理认证事件
 		if eventName == "authenticate" || eventName == "agent:connect" {
 			var authData struct {
-				ServerID string `json:"server_id"`
-				Key      string `json:"key"`
-				Hostname string `json:"hostname"`
-				Version  string `json:"version"`
+				ServerID     string   `json:"server_id"`
+				Key          string   `json:"key"`
+				Hostname     string   `json:"hostname"`
+				Version      string   `json:"version"`
+				Platform     string   `json:"platform"`
+				Arch         string   `json:"arch"`
+				Capabilities []string `json:"capabilities"`
 			}
 			if err := json.Unmarshal(eventPayload, &authData); err == nil {
 				if s.service != nil {
@@ -666,6 +674,11 @@ func (s *EngineIOServer) handleSocketIOMessage(session *EngineIOSession, payload
 				session.mu.Lock()
 				session.ServerID = authData.ServerID
 				session.Authenticated = true
+				session.Capabilities = normalizeAgentCapabilities(authData.Capabilities)
+				session.Hostname = authData.Hostname
+				session.Version = authData.Version
+				session.Platform = authData.Platform
+				session.Arch = authData.Arch
 				session.mu.Unlock()
 				if s.metricsHub != nil {
 					s.metricsHub.UnregisterRoot(session.ID)
@@ -704,6 +717,26 @@ func (s *EngineIOServer) handleSocketIOMessage(session *EngineIOSession, payload
 			s.onMessage(session.ID, eventName, eventPayload)
 		}
 	}
+}
+
+func normalizeAgentCapabilities(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		capability := strings.TrimSpace(value)
+		if capability == "" {
+			continue
+		}
+		if _, exists := seen[capability]; exists {
+			continue
+		}
+		seen[capability] = struct{}{}
+		out = append(out, capability)
+	}
+	return out
 }
 
 // queueMessage 排队消息

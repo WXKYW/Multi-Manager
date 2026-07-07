@@ -272,7 +272,7 @@ func (s *Server) serveGoRoute(w http.ResponseWriter, r *http.Request, route mani
 		s.openai.ServeHTTP(w, r)
 	case "/v1":
 		s.serveV1Route(w, r)
-	case "/ws/ssh":
+	case "/ws/ssh", "/ws/agent-terminal":
 		s.server.ServeHTTP(w, r)
 	case "/socket.io/":
 		s.server.ServeHTTP(w, r)

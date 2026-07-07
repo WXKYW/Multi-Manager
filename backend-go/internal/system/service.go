@@ -601,7 +601,7 @@ func routeGroup(route manifest.Route) string {
 		return "系统"
 	case strings.HasPrefix(prefix, "/api/cloudflare"):
 		return "Cloudflare"
-	case strings.HasPrefix(prefix, "/api/server"), strings.HasPrefix(prefix, "/ws/ssh"), strings.HasPrefix(prefix, "/socket.io"):
+	case strings.HasPrefix(prefix, "/api/server"), strings.HasPrefix(prefix, "/ws/ssh"), strings.HasPrefix(prefix, "/ws/agent-terminal"), strings.HasPrefix(prefix, "/socket.io"):
 		return "主机实例"
 	case strings.HasPrefix(prefix, "/api/openai"), strings.HasPrefix(prefix, "/api/ai"), strings.HasPrefix(prefix, "/v1"), strings.HasPrefix(prefix, "/api/chat"):
 		return "AI 接入"
@@ -675,7 +675,7 @@ func routeDescription(route manifest.Route) string {
 		return "读取系统日志和实时日志流"
 	case strings.HasPrefix(prefix, "/api/cloudflare"):
 		return "管理 Cloudflare 账号、DNS、Tunnel 和相关资源"
-	case strings.HasPrefix(prefix, "/api/server"), strings.HasPrefix(prefix, "/ws/ssh"), strings.HasPrefix(prefix, "/socket.io"):
+	case strings.HasPrefix(prefix, "/api/server"), strings.HasPrefix(prefix, "/ws/ssh"), strings.HasPrefix(prefix, "/ws/agent-terminal"), strings.HasPrefix(prefix, "/socket.io"):
 		return "管理主机实例、SSH 终端和实时连接"
 	case strings.HasPrefix(prefix, "/api/openai"), strings.HasPrefix(prefix, "/v1"), strings.HasPrefix(prefix, "/api/chat"):
 		return "OpenAI 兼容模型代理、聊天和流式响应"

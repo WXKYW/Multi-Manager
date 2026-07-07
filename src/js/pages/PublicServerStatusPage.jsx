@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import io from 'socket.io-client';
-import { Tabs } from '@cloudflare/kumo';
+import { Meter, Tabs } from '@cloudflare/kumo';
 import { Button } from '@cloudflare/kumo/components/button';
 import { AlertTriangle, RefreshCw, Server, Shield } from '../components/Icons.jsx';
 import CountryFlag from '../components/CountryFlag.jsx';
@@ -236,9 +236,14 @@ function MetricBar({ label, value, subValue = '', offline = false }) {
         <span className="text-xs font-semibold text-kumo-strong">{label}</span>
         <span className="text-xs font-bold tabular-nums text-kumo-strong">{offline ? '--' : formatPercent(percent)}</span>
       </div>
-      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-kumo-line/70">
-        <div className={`h-full rounded-full ${offline ? 'bg-kumo-muted' : percentTone(percent)}`} style={{ width: offline ? '0%' : `${percent}%` }} />
-      </div>
+      <Meter
+        label={label}
+        value={offline ? 0 : percent}
+        showValue={false}
+        className="mt-1.5"
+        trackClassName="h-1.5 bg-kumo-line/70"
+        indicatorClassName={offline ? 'bg-kumo-muted' : percentTone(percent)}
+      />
       <div className="mt-auto overflow-hidden text-ellipsis whitespace-nowrap pt-1 text-[11px] leading-snug text-kumo-subtle" title={subValue}>
         {offline ? '无数据' : (subValue || '--')}
       </div>
@@ -370,7 +375,6 @@ function RemainingMini({ traffic }) {
   const unlimited = traffic.unlimited || !hasLimit;
   const displayPercent = unlimited ? '∞' : formatPercent(traffic.remainingPercent);
   const displayValue = unlimited ? '无限' : formatCompactBytes(traffic.remaining);
-  const progressWidth = unlimited ? '100%' : `${traffic.remainingPercent}%`;
   const progressTone = unlimited ? 'bg-kumo-brand' : remainingTone(traffic.remainingPercent);
   return (
     <div className="flex h-16 min-w-0 flex-col rounded-md border border-kumo-interact/80 bg-kumo-recessed/35 px-2 py-2">
@@ -378,12 +382,14 @@ function RemainingMini({ traffic }) {
         <span className="text-xs font-semibold text-kumo-strong">剩余流量</span>
         <span className="text-xs font-bold tabular-nums text-kumo-strong">{displayPercent}</span>
       </div>
-      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-kumo-line/70">
-        <div
-          className={`h-full rounded-full ${progressTone}`}
-          style={{ width: progressWidth }}
-        />
-      </div>
+      <Meter
+        label="剩余流量"
+        value={unlimited ? 100 : traffic.remainingPercent}
+        showValue={false}
+        className="mt-1.5"
+        trackClassName="h-1.5 bg-kumo-line/70"
+        indicatorClassName={progressTone}
+      />
       <div className="mt-auto truncate pt-1 text-[11px] font-bold leading-snug text-kumo-strong" title={unlimited ? '无限' : `${formatCompactBytes(traffic.remaining)} / ${formatCompactBytes(traffic.limit)}`}>
         {displayValue}
       </div>
@@ -409,19 +415,22 @@ function ServerCard({ server }) {
   ].filter(Boolean).join(' · ');
 
   return (
-    <article className={`flex h-full flex-col rounded-lg border p-2.5 shadow-sm ${server.online ? 'border-kumo-line bg-kumo-base' : 'border-kumo-danger/25 bg-kumo-danger/5'}`}>
+    <article className={`flex h-full flex-col rounded-lg border p-2.5 ${server.online ? 'border-kumo-line bg-kumo-base' : 'border-kumo-danger/25 bg-kumo-danger/5'}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2.5">
-            <button
+            <Button
               type="button"
-              className="inline-flex shrink-0 items-center justify-center rounded text-kumo-subtle transition-colors hover:text-kumo-strong focus:outline-none focus:ring-2 focus:ring-kumo-brand/30"
+              size="xs"
+              variant="ghost"
+              shape="square"
+              className="shrink-0 text-kumo-subtle hover:text-kumo-strong"
               title={platformText || '点击显示系统版本'}
               aria-label="显示系统版本"
               onClick={() => setShowPlatform((value) => !value)}
             >
               <i className={getOSIconClass(server.platform)} />
-            </button>
+            </Button>
             {country && <CountryFlag preferSvg countryCode={country} className="h-3.5 w-5 shrink-0 !rounded-[2px] text-sm" />}
             <h3 className="min-w-0 truncate text-sm font-bold leading-tight text-kumo-strong" title={server.name}>{server.name}</h3>
             <span className={`shrink-0 rounded-md border px-2 py-0.5 text-xs font-semibold ${server.online ? 'border-kumo-success/30 bg-kumo-success/10 text-kumo-success' : 'border-kumo-danger/30 bg-kumo-danger/10 text-kumo-danger'}`}>

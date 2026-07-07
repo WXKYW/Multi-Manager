@@ -21,11 +21,11 @@ function authHeaders() {
 }
 
 function levelClass(level) {
-  if (level === 'ERROR' || level === 'FATAL') return 'text-red-400';
-  if (level === 'WARN') return 'text-amber-300';
-  if (level === 'DEBUG') return 'text-cyan-300';
-  if (level === 'INFO') return 'text-emerald-300';
-  return 'text-zinc-300';
+  if (level === 'ERROR' || level === 'FATAL') return 'app-log-danger';
+  if (level === 'WARN') return 'app-log-warning';
+  if (level === 'DEBUG') return 'app-log-info';
+  if (level === 'INFO') return 'app-log-success';
+  return 'app-log-muted';
 }
 
 function formatLogTime(value) {
@@ -69,19 +69,19 @@ function formatDisplayMessage(message) {
 
 function durationTone(value) {
   const duration = Number(String(value).match(/\d+/)?.[0]);
-  if (!Number.isFinite(duration)) return 'text-zinc-200';
-  if (duration >= 3000) return 'text-red-400';
-  if (duration >= 1000) return 'text-amber-300';
-  return 'text-emerald-300';
+  if (!Number.isFinite(duration)) return 'app-log-muted';
+  if (duration >= 3000) return 'app-log-danger';
+  if (duration >= 1000) return 'app-log-warning';
+  return 'app-log-success';
 }
 
 function statusTone(value) {
   const status = Number(String(value).match(/\d{3}/)?.[0]);
-  if (!Number.isFinite(status)) return 'text-zinc-200';
-  if (status >= 500) return 'text-red-400';
-  if (status >= 400) return 'text-amber-300';
-  if (status >= 300) return 'text-cyan-300';
-  return 'text-emerald-300';
+  if (!Number.isFinite(status)) return 'app-log-muted';
+  if (status >= 500) return 'app-log-danger';
+  if (status >= 400) return 'app-log-warning';
+  if (status >= 300) return 'app-log-info';
+  return 'app-log-success';
 }
 
 function renderMessageParts(message) {
@@ -94,13 +94,13 @@ function renderMessageParts(message) {
   while ((match = tokenPattern.exec(text)) !== null) {
     if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
     const token = match[0];
-    let className = 'text-zinc-100';
-    if (/^(GET|HEAD|OPTIONS)$/.test(token)) className = 'text-sky-300 font-semibold';
-    else if (/^(POST|PUT|PATCH)$/.test(token)) className = 'text-emerald-300 font-semibold';
-    else if (/^DELETE$/.test(token)) className = 'text-rose-400 font-semibold';
+    let className = 'app-log-text';
+    if (/^(GET|HEAD|OPTIONS)$/.test(token)) className = 'app-log-info font-semibold';
+    else if (/^(POST|PUT|PATCH)$/.test(token)) className = 'app-log-success font-semibold';
+    else if (/^DELETE$/.test(token)) className = 'app-log-danger font-semibold';
     else if (/^(status=)?\d{3}$/.test(token)) className = `${statusTone(token)} font-semibold`;
     else if (/^(duration=|\()\d+ms\)?$/.test(token)) className = `${durationTone(token)} font-semibold`;
-    else if (/^(session_id|server_id)=/.test(token)) className = 'text-zinc-400';
+    else if (/^(session_id|server_id)=/.test(token)) className = 'app-log-muted';
 
     parts.push(
       <span key={`${token}-${match.index}`} className={className}>
@@ -208,27 +208,27 @@ export default function SystemLogsPage() {
         icon={<FileText className="h-4 w-4 text-kumo-brand" />}
         meta={<span className="text-[10px] font-mono text-kumo-subtle">{lines.length} lines</span>}
         bodyPadding="none"
-        bodyClassName="bg-[#08090b] text-zinc-100"
+        bodyClassName="app-terminal-surface app-log-surface"
       >
         {lines.length === 0 ? (
-          <div className="flex min-h-80 flex-col items-center justify-center gap-2 px-6 py-12 text-center text-zinc-500">
+          <div className="app-log-muted flex min-h-80 flex-col items-center justify-center gap-2 px-6 py-12 text-center">
             <FileText className="h-8 w-8" />
-            <div className="text-sm font-semibold text-zinc-300">暂无日志</div>
+            <div className="app-log-text text-sm font-semibold">暂无日志</div>
             <div className="text-xs">调整筛选条件或刷新后再查看。</div>
           </div>
         ) : (
-          <div ref={logViewportRef} className="max-h-[calc(100vh-19rem)] min-h-[26rem] overflow-auto px-3 py-2 font-mono text-xs leading-5">
+          <div ref={logViewportRef} className="app-log-viewport max-h-[calc(100vh-19rem)] min-h-[26rem] overflow-auto px-3 py-2 font-mono text-xs leading-5">
             {renderedLines.map((line, index) => (
               <div
                 key={`${line.time}-${index}`}
-                className="min-w-max whitespace-pre border-b border-white/[0.045] py-0.5 hover:bg-white/[0.06]"
+                className="app-log-row min-w-max whitespace-pre py-0.5"
                 title={lines[index]?.raw}
               >
-                <span className="mr-2 font-semibold text-blue-400">{line.source}</span>
-                <span className="mr-2 text-zinc-400">{line.time}</span>
+                <span className="app-log-source mr-2 font-semibold">{line.source}</span>
+                <span className="app-log-muted mr-2">{line.time}</span>
                 <span className={`mr-2 font-semibold ${levelClass(line.level)}`}>[{line.level}]</span>
-                <span className="mr-2 font-semibold text-sky-300">[{line.module}]</span>
-                <span className={lines[index]?.matched ? 'bg-yellow-500/20 text-yellow-100' : 'text-zinc-100'}>
+                <span className="app-log-module mr-2 font-semibold">[{line.module}]</span>
+                <span className={lines[index]?.matched ? 'app-log-match' : 'app-log-text'}>
                   {renderMessageParts(line.message)}
                 </span>
               </div>

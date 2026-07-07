@@ -127,6 +127,13 @@ func (s *Service) runAgentTerminalSession(r *http.Request, conn *websocket.Conn,
 	cols := intQuery(r, "cols", 120)
 	rows := intQuery(r, "rows", 32)
 	containerName := strings.TrimSpace(r.URL.Query().Get("container"))
+	if !attachOnly {
+		if capabilities := agentConn.GetCapabilities(); capabilities["terminal_stream_v2"] {
+			if s.runAgentTerminalSessionV2(r, conn, agentConn, serverID, writeJSON, closeDone, done) {
+				return
+			}
+		}
+	}
 	if s.ptyHub == nil {
 		s.ptyHub = newPtyDataHub()
 	}

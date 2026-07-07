@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +35,11 @@ const (
 	AgentBatchUpgrade AgentBatchKind = "upgrade"
 )
 
+const (
+	agentInstallVerifyTimeout = 180 * time.Second
+	agentUpgradeAckTimeout    = 20 * time.Second
+)
+
 type AgentBatchItem struct {
 	ServerID    string           `json:"serverId"`
 	ServerName  string           `json:"serverName"`
@@ -42,6 +48,7 @@ type AgentBatchItem struct {
 	Log         []string         `json:"log,omitempty"`
 	StartedAt   string           `json:"startedAt,omitempty"`
 	CompletedAt string           `json:"completedAt,omitempty"`
+	Order       int              `json:"-"`
 
 	mu sync.RWMutex
 }
@@ -118,11 +125,12 @@ func (m *AgentBatchManager) Create(kind AgentBatchKind, protocol string, forceSS
 		UpdatedAt:   now,
 		Items:       make(map[string]*AgentBatchItem, len(servers)),
 	}
-	for _, server := range servers {
+	for order, server := range servers {
 		batch.Items[server.ID] = &AgentBatchItem{
 			ServerID:   server.ID,
 			ServerName: server.Name,
 			Status:     AgentBatchQueued,
+			Order:      order,
 		}
 	}
 
@@ -160,10 +168,7 @@ func (b *AgentBatch) snapshot() AgentBatchSnapshot {
 		},
 		Items: make([]AgentBatchItemSnapshot, 0, len(b.Items)),
 	}
-	items := make([]*AgentBatchItem, 0, len(b.Items))
-	for _, item := range b.Items {
-		items = append(items, item)
-	}
+	items := b.orderedItemsLocked()
 	b.mu.RUnlock()
 
 	for _, item := range items {
@@ -185,6 +190,29 @@ func (b *AgentBatch) snapshot() AgentBatchSnapshot {
 	return snapshot
 }
 
+func (b *AgentBatch) orderedItems() []*AgentBatchItem {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.orderedItemsLocked()
+}
+
+func (b *AgentBatch) orderedItemsLocked() []*AgentBatchItem {
+	items := make([]*AgentBatchItem, 0, len(b.Items))
+	for _, item := range b.Items {
+		items = append(items, item)
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Order != items[j].Order {
+			return items[i].Order < items[j].Order
+		}
+		if items[i].ServerName != items[j].ServerName {
+			return items[i].ServerName < items[j].ServerName
+		}
+		return items[i].ServerID < items[j].ServerID
+	})
+	return items
+}
+
 type serverIdentity struct {
 	ID   string
 	Name string
@@ -195,6 +223,7 @@ type agentBatchRequest struct {
 	ForceSSH    bool     `json:"force_ssh"`
 	FallbackSSH bool     `json:"fallback_ssh"`
 	Concurrency int      `json:"concurrency"`
+	BaseURL     string   `json:"base_url"`
 }
 
 type agentInstallOrigin struct {
@@ -221,7 +250,7 @@ func (s *Service) handleAgentBatchStart(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	proto, host := resolveInstallOrigin(r)
+	proto, host := resolveInstallOriginWithBaseURL(r, req.BaseURL)
 	servers, err := loadServerIdentities(r.Context(), db, req.ServerIDs)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
@@ -294,7 +323,7 @@ func (s *Service) runAgentBatch(batch *AgentBatch, origin agentInstallOrigin) {
 		}()
 	}
 
-	for _, item := range batch.Items {
+	for _, item := range batch.orderedItems() {
 		jobs <- item
 	}
 	close(jobs)
@@ -332,26 +361,54 @@ func (s *Service) runAgentBatchItem(batch *AgentBatch, item *AgentBatchItem, ori
 	startedAt := time.Now()
 	startMs := startedAt.UnixNano() / int64(time.Millisecond)
 
+	verifyTimeout := agentBatchVerifyTimeout()
+
 	if conn, exists := s.registry.Get(item.ServerID); exists && !forceSSH {
 		item.appendLog("Agent 在线，发送自升级任务")
-		if !s.sendUpgradeTask(conn) {
+		downloadURL := s.agentUpgradeDownloadURL(context.Background(), db, conn, origin)
+		task := s.taskRegistry.Create(item.ServerID, "agent_upgrade", downloadURL)
+		if !s.sendUpgradeTaskWithID(conn, downloadURL, task.ID) {
 			item.fail("发送升级任务失败")
 			return
 		}
 		item.setStatus(AgentBatchVerifying, "")
-		if s.waitForAgentReconnect(item.ServerID, startMs, 90*time.Second) {
+		switch status, detail, ok := waitForTaskTerminal(task, agentBatchAckTimeout()); {
+		case ok && status == TaskCompleted:
+			if detail != "" {
+				item.appendLog("Agent 已确认后台更新: " + trimLog(detail))
+			} else {
+				item.appendLog("Agent 已确认后台更新")
+			}
+		case ok && status == TaskFailed:
+			if batch.Kind == AgentBatchUpgrade && batch.FallbackSSH {
+				item.appendLog("自升级调度失败，切换到 SSH 覆盖安装: " + detail)
+				forceSSH = true
+			} else {
+				item.fail("自升级调度失败: " + detail)
+				return
+			}
+		default:
+			item.appendLog("未收到自升级调度结果，继续等待 Agent 重连")
+		}
+		if !forceSSH && s.waitForAgentReconnectWithLog(item, item.ServerID, startMs, verifyTimeout) {
 			item.succeed("Agent 已重新上线")
 			return
 		}
-		if batch.Kind != AgentBatchUpgrade || !batch.FallbackSSH {
-			item.fail("验证超时: Agent 未能在 90 秒内重新上线")
+		if !forceSSH && (batch.Kind != AgentBatchUpgrade || !batch.FallbackSSH) {
+			item.fail("验证超时: Agent 未能在 " + formatBatchDuration(verifyTimeout) + " 内重新上线")
 			return
 		}
-		item.appendLog("自升级验证超时，切换到 SSH 覆盖安装")
-		forceSSH = true
+		if !forceSSH {
+			item.appendLog("自升级验证超时，切换到 SSH 覆盖安装")
+			forceSSH = true
+		}
 	}
 
 	if forceSSH {
+		if s.presence != nil {
+			s.presence.suppress(item.ServerID, 10*time.Minute)
+			s.presence.recordDisconnect(item.ServerID, "force_ssh_install")
+		}
 		s.registry.Disconnect(item.ServerID)
 		item.appendLog("使用 SSH 强制覆盖安装")
 	} else {
@@ -376,11 +433,11 @@ func (s *Service) runAgentBatchItem(batch *AgentBatch, item *AgentBatchItem, ori
 
 	item.setStatus(AgentBatchVerifying, "")
 	item.appendLog("安装脚本执行成功，等待 Agent 连接")
-	if s.waitForAgentReconnect(item.ServerID, startMs, 90*time.Second) {
+	if s.waitForAgentReconnectWithLog(item, item.ServerID, startMs, verifyTimeout) {
 		item.succeed("Agent 已上线")
 		return
 	}
-	item.fail("验证超时: Agent 未能在 90 秒内上线")
+	item.fail("验证超时: Agent 未能在 " + formatBatchDuration(verifyTimeout) + " 内上线")
 }
 
 func (s *Service) renderAgentInstallScript(ctx context.Context, db *sql.DB, serverID string, origin agentInstallOrigin) (string, error) {
@@ -404,17 +461,78 @@ func (s *Service) renderAgentInstallScript(ctx context.Context, db *sql.DB, serv
 }
 
 func (s *Service) waitForAgentReconnect(serverID string, afterConnectedAtMs int64, timeout time.Duration) bool {
+	return s.waitForAgentReconnectWithLog(nil, serverID, afterConnectedAtMs, timeout)
+}
+
+func (s *Service) waitForAgentReconnectWithLog(item *AgentBatchItem, serverID string, afterConnectedAtMs int64, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	lastLog := time.Time{}
+	for {
 		if conn, exists := s.registry.Get(serverID); exists {
 			connectedAt := conn.AuthenticatedAt.UnixNano() / int64(time.Millisecond)
 			if connectedAt > afterConnectedAtMs {
 				return true
 			}
 		}
-		time.Sleep(2 * time.Second)
+		if item != nil && (lastLog.IsZero() || time.Since(lastLog) >= 30*time.Second) {
+			remaining := time.Until(deadline)
+			if remaining > 0 {
+				item.appendLog("等待 Agent 重连，剩余约 " + formatBatchDuration(remaining))
+			}
+			lastLog = time.Now()
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return false
+		}
+		sleepFor := 2 * time.Second
+		if remaining < sleepFor {
+			sleepFor = remaining
+		}
+		time.Sleep(sleepFor)
 	}
-	return false
+}
+
+func agentBatchVerifyTimeout() time.Duration {
+	return envDurationMs("API_MONITOR_AGENT_UPGRADE_VERIFY_TIMEOUT_MS", agentInstallVerifyTimeout)
+}
+
+func agentBatchAckTimeout() time.Duration {
+	return envDurationMs("API_MONITOR_AGENT_UPGRADE_ACK_TIMEOUT_MS", agentUpgradeAckTimeout)
+}
+
+func waitForTaskTerminal(task *Task, timeout time.Duration) (TaskStatus, string, bool) {
+	deadline := time.Now().Add(timeout)
+	for {
+		task.mu.RLock()
+		status := task.Status
+		result := task.Result
+		errMsg := task.Error
+		task.mu.RUnlock()
+		if status == TaskCompleted {
+			return status, result, true
+		}
+		if status == TaskFailed {
+			return status, errMsg, true
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return status, "", false
+		}
+		sleepFor := 200 * time.Millisecond
+		if remaining < sleepFor {
+			sleepFor = remaining
+		}
+		time.Sleep(sleepFor)
+	}
+}
+
+func formatBatchDuration(value time.Duration) string {
+	if value < time.Second {
+		return value.String()
+	}
+	seconds := int(value.Round(time.Second) / time.Second)
+	return fmt.Sprintf("%d 秒", seconds)
 }
 
 func (b *AgentBatch) setStatus(status AgentBatchStatus) {

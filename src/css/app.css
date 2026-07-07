@@ -67,6 +67,77 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.auth-login-backdrop {
+  background:
+    radial-gradient(
+      closest-side at 34% 22%,
+      color-mix(in oklab, var(--color-kumo-warning) 7%, transparent) 0%,
+      transparent 100%
+    ),
+    radial-gradient(
+      closest-side at 72% 76%,
+      color-mix(in oklab, var(--color-kumo-line) 14%, transparent) 0%,
+      transparent 100%
+    ),
+    linear-gradient(
+      135deg,
+      color-mix(in oklab, var(--color-kumo-recessed) 38%, transparent) 0%,
+      color-mix(in oklab, var(--color-kumo-canvas) 92%, transparent) 100%
+    );
+}
+
+.auth-login-backdrop::before,
+.auth-login-backdrop::after {
+  position: absolute;
+  inset: 0;
+  content: '';
+}
+
+.auth-login-backdrop::before {
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in oklab, var(--color-kumo-line) 78%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--color-kumo-line) 78%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to right,
+      color-mix(in oklab, var(--color-kumo-line) 92%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--color-kumo-line) 92%, transparent) 1px,
+      transparent 1px
+    );
+  background-size:
+    56px 56px,
+    56px 56px,
+    224px 224px,
+    224px 224px;
+  mask-image: radial-gradient(
+    ellipse at 50% 45%,
+    var(--color-kumo-base) 0%,
+    var(--color-kumo-base) 50%,
+    transparent 86%
+  );
+  opacity: 0.34;
+}
+
+.auth-login-backdrop::after {
+  background: radial-gradient(
+    ellipse at 50% 48%,
+    transparent 0%,
+    transparent 48%,
+    color-mix(in oklab, var(--color-kumo-canvas) 76%, transparent) 100%
+  );
+}
+
 [data-sidebar='trigger'] svg path[d='M6.25 7.25v9.5'] {
   transform-box: view-box;
   transform-origin: center;
@@ -128,6 +199,31 @@ body {
   border: 1px dashed var(--color-kumo-line);
   border-radius: 0.75rem;
   background-color: color-mix(in oklab, var(--color-kumo-recessed) 10%, transparent);
+}
+
+.scheduler-workflow-canvas {
+  min-height: 14rem;
+  background:
+    linear-gradient(
+      to right,
+      color-mix(in oklab, var(--color-kumo-line) 46%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--color-kumo-line) 46%, transparent) 1px,
+      transparent 1px
+    ),
+    color-mix(in oklab, var(--color-kumo-recessed) 18%, transparent);
+  background-size:
+    32px 32px,
+    32px 32px,
+    auto;
+}
+
+.scheduler-workflow-canvas-editor {
+  height: clamp(24rem, 48dvh, 34rem);
+  min-height: 24rem;
 }
 
 [role='dialog'] {
@@ -224,7 +320,7 @@ th > button[aria-label='Resize column'] > span {
 }
 
 .app-os-windows {
-  color: #0078d4;
+  color: var(--color-kumo-info);
 }
 
 .app-main-shell {
@@ -239,349 +335,6 @@ th > button[aria-label='Resize column'] > span {
   background: var(--app-main-bg);
 }
 
-.auth-ambient-layer {
-  --auth-cursor-opacity: 0;
-  --auth-cursor-x: 50vw;
-  --auth-cursor-y: 50vh;
-
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: auto;
-}
-
-.auth-ambient-layer::before,
-.auth-ambient-layer::after {
-  position: absolute;
-  inset: -18%;
-  content: '';
-  pointer-events: none;
-}
-
-.auth-ambient-layer::before {
-  z-index: 0;
-  background:
-    radial-gradient(
-      circle 500px at 18% 18%,
-      color-mix(in oklab, var(--color-kumo-brand) 24%, transparent) 0%,
-      transparent 66%
-    ),
-    radial-gradient(
-      circle 560px at 88% 16%,
-      color-mix(in oklab, var(--color-kumo-info) 22%, transparent) 0%,
-      transparent 68%
-    ),
-    radial-gradient(
-      ellipse 760px 420px at 56% 92%,
-      color-mix(in oklab, var(--color-kumo-brand) 14%, transparent) 0%,
-      transparent 72%
-    );
-  filter: blur(4px) saturate(1.08);
-  opacity: 0.74;
-}
-
-.auth-ambient-layer::after {
-  z-index: 0;
-  background:
-    linear-gradient(
-      118deg,
-      transparent 8%,
-      color-mix(in oklab, var(--color-kumo-brand) 9%, transparent) 32%,
-      color-mix(in oklab, var(--color-kumo-info) 11%, transparent) 54%,
-      transparent 76%
-    );
-  mask-image: radial-gradient(ellipse at 66% 44%, black 0%, transparent 70%);
-  opacity: 0.62;
-  transform: rotate(-2deg);
-}
-
-.auth-ambient-grid {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  background-image:
-    linear-gradient(
-      to right,
-      color-mix(in oklab, var(--color-kumo-line) 78%, transparent) 1px,
-      transparent 1px
-    ),
-    linear-gradient(
-      to bottom,
-      color-mix(in oklab, var(--color-kumo-line) 78%, transparent) 1px,
-      transparent 1px
-    );
-  background-position: 0 0;
-  background-size: 44px 44px;
-  mask-image: radial-gradient(
-    ellipse at 62% 48%,
-    black 0%,
-    rgb(0 0 0 / 0.88) 58%,
-    transparent 86%
-  );
-  opacity: 0.4;
-  pointer-events: none;
-}
-
-.auth-ambient-grid::before,
-.auth-ambient-grid::after {
-  position: absolute;
-  inset: 0;
-  content: '';
-  pointer-events: none;
-}
-
-.auth-ambient-grid::before {
-  background-image:
-    linear-gradient(
-      to right,
-      color-mix(in oklab, var(--color-kumo-brand) 84%, white 18%) 1px,
-      transparent 1px
-    ),
-    linear-gradient(
-      to bottom,
-      color-mix(in oklab, var(--color-kumo-info) 78%, white 14%) 1px,
-      transparent 1px
-    );
-  background-position: 0 0;
-  background-size: inherit;
-  filter:
-    drop-shadow(0 0 3px color-mix(in oklab, var(--color-kumo-brand) 82%, transparent))
-    drop-shadow(0 0 9px color-mix(in oklab, var(--color-kumo-info) 64%, transparent));
-  mask-image: radial-gradient(
-    circle 220px at var(--auth-cursor-x) var(--auth-cursor-y),
-    black 0%,
-    rgb(0 0 0 / 0.9) 28%,
-    rgb(0 0 0 / 0.42) 62%,
-    transparent 100%
-  );
-  mix-blend-mode: screen;
-  opacity: calc(var(--auth-cursor-opacity) * 0.92);
-  transition: opacity 140ms ease-out;
-  will-change: opacity, mask-image;
-}
-
-.auth-ambient-grid::after {
-  background-image:
-    linear-gradient(
-      to right,
-      color-mix(in oklab, var(--color-kumo-brand) 46%, transparent) 1px,
-      transparent 1px
-    ),
-    linear-gradient(
-      to bottom,
-      color-mix(in oklab, var(--color-kumo-info) 40%, transparent) 1px,
-      transparent 1px
-    );
-  background-position: 0 0;
-  background-size: inherit;
-  filter:
-    blur(2.5px)
-    drop-shadow(0 0 14px color-mix(in oklab, var(--color-kumo-brand) 72%, transparent))
-    drop-shadow(0 0 28px color-mix(in oklab, var(--color-kumo-info) 56%, transparent));
-  mask-image: radial-gradient(
-    circle 280px at var(--auth-cursor-x) var(--auth-cursor-y),
-    black 0%,
-    rgb(0 0 0 / 0.68) 32%,
-    rgb(0 0 0 / 0.24) 66%,
-    transparent 100%
-  );
-  mix-blend-mode: screen;
-  opacity: calc(var(--auth-cursor-opacity) * 0.64);
-  transition: opacity 160ms ease-out;
-  will-change: opacity, mask-image;
-}
-
-.auth-particles-canvas {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  mask-image: radial-gradient(ellipse at 60% 48%, black 0%, transparent 78%);
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.auth-particles-canvas canvas {
-  filter: saturate(1.14) contrast(1.04);
-}
-
-.auth-cursor-light {
-  position: absolute;
-  top: 0;
-  left: 0;
-  z-index: 3;
-  width: 1px;
-  height: 1px;
-  pointer-events: none;
-  opacity: 0;
-  transform: translate3d(var(--auth-cursor-x), var(--auth-cursor-y), 0);
-  transition: opacity 220ms ease-out;
-  box-shadow:
-    0 0 0 0 transparent;
-  mix-blend-mode: screen;
-  will-change: transform, opacity;
-}
-
-:root[data-mode='dark'] .auth-ambient-grid {
-  opacity: 0.42;
-}
-
-:root:not([data-mode='dark']) .auth-ambient-grid {
-  background-image:
-    linear-gradient(
-      to right,
-      color-mix(in oklab, var(--color-kumo-line) 74%, var(--color-kumo-brand) 8%) 1px,
-      transparent 1px
-    ),
-    linear-gradient(
-      to bottom,
-      color-mix(in oklab, var(--color-kumo-line) 72%, var(--color-kumo-info) 10%) 1px,
-      transparent 1px
-    );
-  opacity: 0.32;
-}
-
-:root:not([data-mode='dark']) .auth-ambient-layer::before {
-  background:
-    radial-gradient(
-      circle 500px at 18% 18%,
-      color-mix(in oklab, var(--color-kumo-brand) 8%, transparent) 0%,
-      transparent 70%
-    ),
-    radial-gradient(
-      circle 560px at 88% 16%,
-      color-mix(in oklab, var(--color-kumo-info) 7%, transparent) 0%,
-      transparent 72%
-    ),
-    radial-gradient(
-      ellipse 760px 420px at 56% 92%,
-      color-mix(in oklab, var(--color-kumo-brand) 6%, transparent) 0%,
-      transparent 74%
-    );
-  filter: blur(5px) saturate(1.02);
-  opacity: 0.34;
-}
-
-:root:not([data-mode='dark']) .auth-ambient-layer::after {
-  background:
-    linear-gradient(
-      118deg,
-      transparent 10%,
-      color-mix(in oklab, var(--color-kumo-brand) 3%, transparent) 34%,
-      color-mix(in oklab, var(--color-kumo-info) 3%, transparent) 56%,
-      transparent 78%
-    );
-  opacity: 0.22;
-}
-
-:root:not([data-mode='dark']) .auth-ambient-grid::before {
-  filter:
-    drop-shadow(0 0 2px color-mix(in oklab, var(--color-kumo-brand) 42%, transparent))
-    drop-shadow(0 0 5px color-mix(in oklab, var(--color-kumo-info) 30%, transparent));
-  opacity: calc(var(--auth-cursor-opacity) * 0.46);
-}
-
-:root:not([data-mode='dark']) .auth-ambient-grid::after {
-  filter:
-    blur(2px)
-    drop-shadow(0 0 8px color-mix(in oklab, var(--color-kumo-brand) 34%, transparent))
-    drop-shadow(0 0 16px color-mix(in oklab, var(--color-kumo-info) 26%, transparent));
-  opacity: calc(var(--auth-cursor-opacity) * 0.24);
-}
-
-:root[data-mode='dark'] .auth-ambient-layer::before {
-  background:
-    radial-gradient(
-      circle 540px at 16% 18%,
-      color-mix(in oklab, var(--color-kumo-brand) 34%, transparent) 0%,
-      transparent 68%
-    ),
-    radial-gradient(
-      circle 600px at 88% 14%,
-      color-mix(in oklab, var(--color-kumo-info) 32%, transparent) 0%,
-      transparent 70%
-    ),
-    radial-gradient(
-      ellipse 860px 470px at 56% 94%,
-      color-mix(in oklab, var(--color-kumo-brand) 20%, transparent) 0%,
-      transparent 74%
-    );
-  opacity: 0.88;
-}
-
-:root[data-mode='dark'] .auth-ambient-layer::after {
-  opacity: 0.78;
-}
-
-:root[data-mode='dark'] .auth-ambient-grid::after {
-  background-image:
-    linear-gradient(
-      to right,
-      color-mix(in oklab, var(--color-kumo-brand) 68%, transparent) 1px,
-      transparent 1px
-    ),
-    linear-gradient(
-      to bottom,
-      color-mix(in oklab, var(--color-kumo-info) 54%, transparent) 1px,
-      transparent 1px
-    );
-  filter:
-    blur(3px)
-    drop-shadow(0 0 18px color-mix(in oklab, var(--color-kumo-brand) 82%, transparent))
-    drop-shadow(0 0 36px color-mix(in oklab, var(--color-kumo-info) 68%, transparent));
-  mask-image: radial-gradient(
-    circle 320px at var(--auth-cursor-x) var(--auth-cursor-y),
-    black 0%,
-    rgb(0 0 0 / 0.72) 34%,
-    rgb(0 0 0 / 0.28) 68%,
-    transparent 100%
-  );
-  opacity: calc(var(--auth-cursor-opacity) * 0.76);
-}
-
-:root[data-mode='dark'] .auth-ambient-grid::before {
-  background-image:
-    linear-gradient(
-      to right,
-      color-mix(in oklab, var(--color-kumo-brand) 82%, white 20%) 1px,
-      transparent 1px
-    ),
-    linear-gradient(
-      to bottom,
-      color-mix(in oklab, var(--color-kumo-info) 76%, white 18%) 1px,
-      transparent 1px
-    );
-  filter:
-    drop-shadow(0 0 4px color-mix(in oklab, var(--color-kumo-brand) 88%, transparent))
-    drop-shadow(0 0 12px color-mix(in oklab, var(--color-kumo-info) 76%, transparent));
-  mask-image: radial-gradient(
-    circle 250px at var(--auth-cursor-x) var(--auth-cursor-y),
-    black 0%,
-    rgb(0 0 0 / 0.94) 30%,
-    rgb(0 0 0 / 0.48) 64%,
-    transparent 100%
-  );
-  opacity: calc(var(--auth-cursor-opacity) * 0.98);
-}
-
-:root[data-mode='dark'] .auth-particles-canvas canvas {
-  filter: saturate(1.26) brightness(1.2) contrast(1.08);
-}
-
-:root[data-mode='dark'] .auth-cursor-light {
-  box-shadow:
-    0 0 0 0 transparent;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .auth-particles-canvas {
-    display: none;
-  }
-
-  .auth-cursor-light {
-    display: none;
-  }
-}
-
 .agent-command-textarea {
   width: 100%;
   min-width: 0;
@@ -591,6 +344,56 @@ th > button[aria-label='Resize column'] > span {
 .app-terminal-surface {
   background-color: var(--app-terminal-bg);
   color: var(--app-terminal-fg);
+}
+
+.app-log-surface {
+  --app-log-text: color-mix(in oklab, var(--app-terminal-fg) 92%, transparent);
+  --app-log-muted: color-mix(in oklab, var(--app-terminal-fg) 56%, transparent);
+  --app-log-row-border: color-mix(in oklab, var(--app-terminal-fg) 14%, transparent);
+  --app-log-row-hover: color-mix(in oklab, var(--app-terminal-fg) 12%, transparent);
+  --app-log-match-bg: color-mix(in oklab, var(--color-kumo-warning) 22%, transparent);
+}
+
+.app-log-text {
+  color: var(--app-log-text);
+}
+
+.app-log-muted {
+  color: var(--app-log-muted);
+}
+
+.app-log-source {
+  color: var(--color-kumo-warning);
+}
+
+.app-log-module,
+.app-log-info {
+  color: var(--color-kumo-info);
+}
+
+.app-log-success {
+  color: var(--color-kumo-success);
+}
+
+.app-log-warning {
+  color: var(--color-kumo-warning);
+}
+
+.app-log-danger {
+  color: var(--color-kumo-danger);
+}
+
+.app-log-row {
+  border-bottom: 1px solid var(--app-log-row-border);
+}
+
+.app-log-row:hover {
+  background-color: var(--app-log-row-hover);
+}
+
+.app-log-match {
+  color: var(--color-kumo-warning);
+  background-color: var(--app-log-match-bg);
 }
 
 .app-terminal-surface .xterm {

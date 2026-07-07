@@ -232,6 +232,7 @@ func Routes() []Route {
 
 		// Terminal and Socket.IO / Engine.IO routes
 		{Prefix: "/ws/ssh", Module: "server-terminal", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseWebSocket, Description: "SSH terminal WebSocket", MatchMode: MatchExact},
+		{Prefix: "/ws/agent-terminal", Module: "server-terminal-agent", Owner: OwnerGo, Auth: AuthPublic, ResponseMode: ResponseWebSocket, Description: "Agent terminal stream WebSocket", MatchMode: MatchExact},
 		{Prefix: "/socket.io/", Module: "server-websocket", Owner: OwnerGo, Auth: AuthPublic, ResponseMode: ResponseWebSocket, Description: "Agent WebSocket", MatchMode: MatchPrefix},
 		{Prefix: "/api/server/credentials/{id}", Module: "server-credentials", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Server credential delete", MatchMode: MatchPattern},
 		{Prefix: "/api/server/credentials", Module: "server-credentials", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Server credential list/create", MatchMode: MatchExact},

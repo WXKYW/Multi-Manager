@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { Banner } from '@cloudflare/kumo/components/banner';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Input } from '@cloudflare/kumo/components/input';
@@ -20,319 +20,12 @@ const AUTH_FEATURES = [
   '多目标支持',
 ];
 
-let authParticlesEnginePromise = null;
-
-const getCssColor = (name, fallback) => {
-  if (typeof window === 'undefined') return fallback;
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
-};
-
-const createAuthParticleOptions = () => {
-  const brand = getCssColor('--color-kumo-brand', '#dc7d40');
-  const info = getCssColor('--color-kumo-info', '#4d8df7');
-  const line = getCssColor('--color-kumo-line', '#6b7280');
-  const subtle = getCssColor('--text-color-kumo-subtle', '#9ca3af');
-  const isSmallViewport = typeof window !== 'undefined' && window.innerWidth < 640;
-  const isDarkMode =
-    typeof document !== 'undefined' && document.documentElement.dataset.mode === 'dark';
-  const particleNeutral = isDarkMode ? subtle : line;
-  const linkOpacity = isDarkMode ? 0.46 : 0.3;
-  const particleOpacity = isDarkMode
-    ? { min: 0.42, max: 0.84 }
-    : { min: 0.28, max: 0.64 };
-  const particleSize = isDarkMode ? { min: 1.15, max: 3.3 } : { min: 0.95, max: 2.75 };
-
-  return {
-    autoPlay: true,
-    background: { color: { value: 'transparent' } },
-    clear: true,
-    detectRetina: true,
-    fpsLimit: 30,
-    fullScreen: { enable: false },
-    pauseOnBlur: true,
-    pauseOnOutsideViewport: true,
-    smooth: true,
-    zLayers: 3,
-    interactivity: {
-      detectsOn: 'canvas',
-      events: {
-        onHover: {
-          enable: true,
-          mode: ['grab', 'repulse', 'bubble', 'parallax'],
-        },
-        resize: {
-          enable: true,
-        },
-      },
-      modes: {
-        bubble: {
-          distance: 95,
-          duration: 0.35,
-          opacity: 0.62,
-          size: 3.2,
-        },
-        grab: {
-          distance: isSmallViewport ? 92 : 150,
-          links: {
-            blink: false,
-            consent: false,
-            opacity: isDarkMode ? 0.58 : 0.48,
-          },
-        },
-        parallax: {
-          force: isSmallViewport ? 18 : 28,
-          smooth: 18,
-        },
-        repulse: {
-          distance: isSmallViewport ? 54 : 82,
-          duration: 0.35,
-          factor: 42,
-          speed: 0.72,
-        },
-      },
-    },
-    particles: {
-      color: {
-        value: [brand, info, particleNeutral],
-      },
-      links: {
-        blink: false,
-        color: {
-          value: brand,
-        },
-        consent: false,
-        distance: isSmallViewport ? 112 : 156,
-        enable: true,
-        frequency: 1,
-        opacity: linkOpacity,
-        shadow: {
-          blur: isDarkMode ? 14 : 10,
-          color: {
-            value: brand,
-          },
-          enable: true,
-        },
-        width: isDarkMode ? 1.25 : 1.05,
-      },
-      move: {
-        direction: 'none',
-        enable: true,
-        outModes: {
-          default: 'bounce',
-        },
-        random: true,
-        speed: {
-          min: 0.12,
-          max: 0.46,
-        },
-        straight: false,
-      },
-      number: {
-        density: {
-          enable: true,
-          height: 620,
-          width: 960,
-        },
-        limit: {
-          value: isSmallViewport ? 42 : 82,
-        },
-        value: isSmallViewport ? 40 : 78,
-      },
-      opacity: {
-        value: particleOpacity,
-        animation: {
-          enable: true,
-          speed: 0.32,
-          sync: false,
-        },
-      },
-      shape: {
-        type: 'circle',
-      },
-      size: {
-        value: particleSize,
-        animation: {
-          enable: true,
-          speed: 0.8,
-          sync: false,
-        },
-      },
-      twinkle: {
-        links: {
-          color: {
-            value: info,
-          },
-          enable: true,
-          frequency: isDarkMode ? 0.12 : 0.09,
-          opacity: {
-            min: isDarkMode ? 0.46 : 0.36,
-            max: isDarkMode ? 0.82 : 0.68,
-          },
-        },
-      },
-      zIndex: {
-        value: {
-          min: 0,
-          max: 100,
-        },
-        opacityRate: 0.42,
-        sizeRate: 0.78,
-        velocityRate: 0.55,
-      },
-    },
-  };
-};
-
-const loadAuthParticlesEngine = async () => {
-  const globalState = typeof window !== 'undefined'
-    ? (window.__apiMonitorAuthParticles ||= {})
-    : null;
-
-  if (globalState?.enginePromise) {
-    return globalState.enginePromise;
-  }
-
-  if (!authParticlesEnginePromise) {
-    authParticlesEnginePromise = Promise.all([
-      import('@tsparticles/engine'),
-      import('@tsparticles/slim'),
-    ]).then(async ([engineModule, slimModule]) => {
-      const tsParticles = engineModule.tsParticles;
-      if (!globalState?.slimLoaded) {
-        try {
-          await slimModule.loadSlim(tsParticles);
-        } catch (error) {
-          const message = String(error?.message || '');
-          if (!message.includes('Register plugins can only be done before calling tsParticles.load')) {
-            throw error;
-          }
-        }
-        if (globalState) globalState.slimLoaded = true;
-      }
-      return tsParticles;
-    }).catch((error) => {
-      authParticlesEnginePromise = null;
-      if (globalState) {
-        delete globalState.enginePromise;
-      }
-      throw error;
-    });
-  }
-
-  if (globalState) {
-    globalState.enginePromise = authParticlesEnginePromise;
-  }
-
-  return authParticlesEnginePromise;
-};
-
-function usePrefersReducedMotion() {
-  const [prefersReducedMotion, setPrefersReducedMotion] = useState(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) return false;
-    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  });
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) return undefined;
-
-    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const handleChange = () => setPrefersReducedMotion(mediaQuery.matches);
-    handleChange();
-    mediaQuery.addEventListener('change', handleChange);
-
-    return () => mediaQuery.removeEventListener('change', handleChange);
-  }, []);
-
-  return prefersReducedMotion;
-}
-
-function AuthAmbientBackground() {
-  const layerRef = useRef(null);
-  const containerRef = useRef(null);
-  const prefersReducedMotion = usePrefersReducedMotion();
-  const particlesId = useMemo(
-    () => `auth-particles-${Math.random().toString(36).slice(2, 10)}`,
-    []
-  );
-
-  useEffect(() => {
-    const layer = layerRef.current;
-    if (prefersReducedMotion || !layer || typeof window === 'undefined') return undefined;
-
-    let animationFrame = 0;
-    const setCursorLight = (clientX, clientY) => {
-      if (animationFrame) window.cancelAnimationFrame(animationFrame);
-
-      animationFrame = window.requestAnimationFrame(() => {
-        layer.style.setProperty('--auth-cursor-x', `${clientX}px`);
-        layer.style.setProperty('--auth-cursor-y', `${clientY}px`);
-        layer.style.setProperty('--auth-cursor-opacity', '1');
-        animationFrame = 0;
-      });
-    };
-    const hideCursorLight = () => {
-      layer.style.setProperty('--auth-cursor-opacity', '0');
-    };
-    const handlePointerMove = (event) => setCursorLight(event.clientX, event.clientY);
-
-    window.addEventListener('pointermove', handlePointerMove, { passive: true });
-    window.addEventListener('blur', hideCursorLight);
-    document.documentElement.addEventListener('pointerleave', hideCursorLight);
-
-    return () => {
-      if (animationFrame) window.cancelAnimationFrame(animationFrame);
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('blur', hideCursorLight);
-      document.documentElement.removeEventListener('pointerleave', hideCursorLight);
-    };
-  }, [prefersReducedMotion]);
-
-  useEffect(() => {
-    if (prefersReducedMotion || !containerRef.current) return undefined;
-
-    let cancelled = false;
-    let particlesContainer = null;
-
-    loadAuthParticlesEngine()
-      .then(async (tsParticles) => {
-        if (cancelled) return;
-
-        particlesContainer = await tsParticles.load({
-          id: particlesId,
-          options: createAuthParticleOptions(),
-        });
-
-        if (cancelled) {
-          particlesContainer?.destroy();
-        }
-      })
-      .catch((error) => {
-        console.error('Failed to load auth particles:', error);
-      });
-
-    return () => {
-      cancelled = true;
-      particlesContainer?.destroy();
-    };
-  }, [particlesId, prefersReducedMotion]);
-
-  return (
-    <div ref={layerRef} className="auth-ambient-layer" aria-hidden="true">
-      <div className="auth-ambient-grid" />
-      <div ref={containerRef} id={particlesId} className="auth-particles-canvas" />
-      <div className="auth-cursor-light" />
-    </div>
-  );
-}
-
 function AuthShell({ mode, title, description, children }) {
   const modeLabel = mode === 'setup' ? '初始化' : mode === '2fa' ? '二次验证' : '安全登录';
 
   return (
-    <main className="auth-ambient-root relative isolate flex min-h-dvh w-screen overflow-hidden bg-kumo-canvas text-kumo-default">
-      <AuthAmbientBackground />
-
-      <section className="relative z-10 hidden w-[380px] shrink-0 flex-col justify-between border-r border-kumo-line bg-kumo-base/95 px-8 py-7 backdrop-blur-sm lg:flex">
+    <main className="relative flex min-h-dvh w-screen overflow-hidden bg-kumo-canvas text-kumo-default">
+      <section className="hidden w-[380px] shrink-0 flex-col justify-between border-r border-kumo-line bg-kumo-base px-8 py-7 lg:flex">
         <div className="flex items-center gap-3">
           <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-kumo-line bg-kumo-recessed">
             <img src="/logo.svg" alt="" className="size-5 object-contain" />
@@ -365,10 +58,12 @@ function AuthShell({ mode, title, description, children }) {
         </div>
       </section>
 
-      <section className="relative z-10 flex min-w-0 flex-1 items-center justify-center px-4 py-8 sm:px-6">
-        <div className="w-full max-w-[400px]">
+      <section className="relative isolate flex min-w-0 flex-1 items-center justify-center overflow-hidden bg-kumo-recessed/30 px-4 py-8 sm:px-6">
+        <div aria-hidden="true" className="auth-login-backdrop pointer-events-none absolute inset-0" />
+
+        <div className="relative z-10 w-full max-w-[400px]">
           <div className="mb-5 flex items-center justify-start gap-3 lg:hidden">
-            <span className="flex size-10 shrink-0 items-center justify-center app-card">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-kumo-line bg-kumo-base">
               <img src="/logo.svg" alt="" className="size-6 object-contain" />
             </span>
             <div className="min-w-0">
@@ -382,7 +77,7 @@ function AuthShell({ mode, title, description, children }) {
             description={description}
             icon={mode === 'setup' ? <Rocket className="size-4 text-kumo-brand" /> : <Shield className="size-4 text-kumo-brand" />}
             meta={<span className="text-[11px] font-medium text-kumo-subtle">{modeLabel}</span>}
-            className="w-full app-card/95 backdrop-blur-sm"
+            className="w-full"
             bodyPadding="lg"
           >
             {children}
@@ -554,7 +249,7 @@ function AuthPage() {
           <Input
             size="base"
             type="password"
-            // label="管理员密码"
+            aria-label="管理员密码"
             placeholder="请输入管理员密码"
             value={loginPassword}
             onChange={(event) => setLoginPassword(event.target.value)}

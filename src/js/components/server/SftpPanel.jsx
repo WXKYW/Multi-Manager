@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Button, LinkButton } from '@cloudflare/kumo/components/button';
+import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { Table } from '@cloudflare/kumo/components/table';
-import { Popover } from '@cloudflare/kumo';
+import { DropdownMenu } from '@cloudflare/kumo';
 import { ContextMenu } from '@cloudflare/kumo/primitives/context-menu';
 import { toast } from '../../modules/toast.js';
 import { dialog } from '../../modules/dialog.js';
@@ -49,38 +49,25 @@ function buildBreadcrumbs(remotePath) {
 
 function FileActionMenu({ file, onOpen, onDownload, onRename, onChmod, onDelete }) {
   return (
-    <Popover>
-      <Popover.Trigger
-        render={(
+    <DropdownMenu>
+      <DropdownMenu.Trigger
+        render={
           <Button shape="square" size="sm" variant="ghost" icon={<Eye className="h-3 w-3" />} aria-label="文件操作" title="文件操作" />
-        )}
+        }
       />
-      <Popover.Content side="left" align="start" className="w-44 p-0">
-        <div className="overflow-hidden rounded-lg border border-kumo-line bg-kumo-control p-1.5">
-          <button className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-kumo-default hover:bg-kumo-recessed/60" type="button" onClick={onOpen}>
-            <Eye className="h-3.5 w-3.5" /> 打开
-          </button>
-          {!file.isDirectory && onDownload ? (
-            <LinkButton
-              href={onDownload}
-              className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-kumo-default hover:bg-kumo-recessed/60"
-            >
-              <Download className="h-3.5 w-3.5" /> 下载
-            </LinkButton>
-          ) : null}
-          <button className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-kumo-default hover:bg-kumo-recessed/60" type="button" onClick={onRename}>
-            <Edit className="h-3.5 w-3.5" /> 重命名
-          </button>
-          <button className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-kumo-default hover:bg-kumo-recessed/60" type="button" onClick={onChmod}>
-            <Key className="h-3.5 w-3.5" /> 权限
-          </button>
-          <div className="my-1 h-px bg-kumo-line" />
-          <button className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-kumo-danger hover:bg-kumo-danger/10" type="button" onClick={onDelete}>
-            <Trash className="h-3.5 w-3.5" /> 删除
-          </button>
-        </div>
-      </Popover.Content>
-    </Popover>
+      <DropdownMenu.Content side="left" align="start" className="w-44">
+        <DropdownMenu.Item icon={<Eye className="h-3.5 w-3.5" />} onClick={onOpen}>打开</DropdownMenu.Item>
+        {!file.isDirectory && onDownload ? (
+          <DropdownMenu.Item icon={<Download className="h-3.5 w-3.5" />} onClick={() => window.open(onDownload, '_blank', 'noopener')}>
+            下载
+          </DropdownMenu.Item>
+        ) : null}
+        <DropdownMenu.Item icon={<Edit className="h-3.5 w-3.5" />} onClick={onRename}>重命名</DropdownMenu.Item>
+        <DropdownMenu.Item icon={<Key className="h-3.5 w-3.5" />} onClick={onChmod}>权限</DropdownMenu.Item>
+        <DropdownMenu.Separator />
+        <DropdownMenu.Item icon={<Trash className="h-3.5 w-3.5" />} variant="danger" onClick={onDelete}>删除</DropdownMenu.Item>
+      </DropdownMenu.Content>
+    </DropdownMenu>
   );
 }
 
@@ -335,9 +322,9 @@ export default function SftpPanel({ serverId, serverName, initialPath = '.', onC
             <div className="flex items-center gap-1.5 border-b border-kumo-line px-3 py-2 text-[10px] text-kumo-subtle">
               {breadcrumbs.map((crumb, idx) => (
                 <React.Fragment key={`${crumb.path}-${idx}`}>
-                  <button type="button" className="truncate font-semibold text-kumo-default hover:text-kumo-strong" onClick={() => loadDirectory(crumb.path)}>
+                  <Button type="button" size="xs" variant="ghost" className="h-auto min-w-0 truncate px-0 py-0 font-semibold text-kumo-default hover:text-kumo-strong" onClick={() => loadDirectory(crumb.path)}>
                     {crumb.name}
-                  </button>
+                  </Button>
                   {idx < breadcrumbs.length - 1 ? <span>/</span> : null}
                 </React.Fragment>
               ))}
@@ -382,10 +369,10 @@ export default function SftpPanel({ serverId, serverName, initialPath = '.', onC
                         >
                           <Table.Row className="hover:bg-kumo-recessed/15">
                             <Table.Cell className="min-w-0">
-                              <button type="button" className="flex min-w-0 items-center gap-2 text-left" onClick={() => openFile(file)} title={file.path}>
+                              <Button type="button" size="xs" variant="ghost" className="h-auto min-w-0 justify-start gap-2 px-0 py-0 text-left" onClick={() => openFile(file)} title={file.path}>
                                 {file.isDirectory ? <Folder className="h-3.5 w-3.5 shrink-0 text-kumo-brand" /> : <FileText className="h-3.5 w-3.5 shrink-0 text-kumo-subtle" />}
                                 <span className="truncate font-medium text-kumo-strong">{file.name}</span>
-                              </button>
+                              </Button>
                             </Table.Cell>
                             <Table.Cell className="whitespace-nowrap font-mono text-[10px]">{file.isDirectory ? '-' : formatFileSize(file.size)}</Table.Cell>
                             <Table.Cell className="whitespace-nowrap text-[10px]">{file.mtime ? formatDateTime(file.mtime) : '-'}</Table.Cell>

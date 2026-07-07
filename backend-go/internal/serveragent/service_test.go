@@ -50,6 +50,18 @@ func decodePayload(t *testing.T, res *httptest.ResponseRecorder) map[string]inte
 	return payload
 }
 
+func TestResolveInstallOriginPrefersPublicBaseURL(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/server/agent/install/linux/id/key?protocol=http&base_url=https%3A%2F%2Fpanel.example.com%2Fnested", nil)
+	req.Host = "127.0.0.1:3000"
+	req.Header.Set("X-Forwarded-Host", "internal.local:8080")
+	req.Header.Set("X-Forwarded-Proto", "http")
+
+	proto, host := resolveInstallOrigin(req)
+	if proto != "https" || host != "panel.example.com" {
+		t.Fatalf("origin = %s://%s, want https://panel.example.com", proto, host)
+	}
+}
+
 type taskReplySocket struct {
 	t       *testing.T
 	service *Service
@@ -168,8 +180,12 @@ func (s *reconnectOnUpgradeSocket) WriteMessage(_ int, data []byte) error {
 	if !ok {
 		s.t.Fatalf("unexpected socket payload: %#v", frame[1])
 	}
+	taskID, _ := payload["id"].(string)
 	taskType, _ := payload["type"].(float64)
 	if int(taskType) == 5 {
+		if taskID != "" {
+			go s.service.taskRegistry.Complete(taskID, "scheduled")
+		}
 		go func() {
 			time.Sleep(20 * time.Millisecond)
 			s.service.registry.Register(s.serverID, s)
@@ -184,6 +200,26 @@ func (s *terminalCaptureSocket) Events() []capturedSocketEvent {
 	out := make([]capturedSocketEvent, len(s.events))
 	copy(out, s.events)
 	return out
+}
+
+func TestAgentBatchSnapshotPreservesRequestOrder(t *testing.T) {
+	manager := NewAgentBatchManager()
+	batch := manager.Create(AgentBatchUpgrade, "https", false, false, 4, []serverIdentity{
+		{ID: "server-b", Name: "Beta"},
+		{ID: "server-a", Name: "Alpha"},
+		{ID: "server-c", Name: "Gamma"},
+	})
+
+	for i := 0; i < 20; i++ {
+		snapshot := batch.snapshot()
+		got := make([]string, 0, len(snapshot.Items))
+		for _, item := range snapshot.Items {
+			got = append(got, item.ServerID)
+		}
+		if strings.Join(got, ",") != "server-b,server-a,server-c" {
+			t.Fatalf("snapshot order drifted: %v", got)
+		}
+	}
 }
 
 func TestAccountsLifecycleAndNullableUpdate(t *testing.T) {
@@ -1362,6 +1398,23 @@ func TestAgentQuickInstallCreatesHostFromName(t *testing.T) {
 		t.Fatalf("windows install script should not contain bell characters: %q", resWin.Body.String())
 	}
 
+	_, err = db.ExecContext(context.Background(), `UPDATE user_settings SET agent_download_url = 'https://cdn.example.com/custom-agent' WHERE id = 1`)
+	if err != nil {
+		t.Fatalf("set custom agent download url: %v", err)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/api/server/agent/install/linux/"+serverID+"/"+agentKey+"?protocol=http", nil)
+	req.Host = "189.1.217.109:3010"
+	resLinux = httptest.NewRecorder()
+	service.ServeHTTP(resLinux, req)
+	if resLinux.Code != http.StatusOK {
+		t.Fatalf("custom linux install status=%d body=%s", resLinux.Code, resLinux.Body.String())
+	}
+	if !strings.Contains(resLinux.Body.String(), `AGENT_DOWNLOAD_BASE_URL="https://cdn.example.com/custom-agent"`) ||
+		!strings.Contains(resLinux.Body.String(), `AGENT_URL="$AGENT_DOWNLOAD_BASE_URL/agent-linux-$AGENT_ARCH"`) ||
+		!strings.Contains(resLinux.Body.String(), "systemd-run") {
+		t.Fatalf("linux install script should use custom download base and detached systemd install: %s", resLinux.Body.String())
+	}
+
 	res = perform(service, http.MethodPost, "/api/server/agent/quick-install", `{"name":"edge-agent"}`)
 	if res.Code != http.StatusOK {
 		t.Fatalf("quick install reuse status=%d body=%s", res.Code, res.Body.String())
@@ -1370,6 +1423,43 @@ func TestAgentQuickInstallCreatesHostFromName(t *testing.T) {
 	data = payload["data"].(map[string]interface{})
 	if data["serverId"] != serverID || data["isNew"] != false {
 		t.Fatalf("expected existing host reuse, data=%#v", data)
+	}
+}
+
+func TestAgentUpgradeTaskUsesSelfUpdateDownloadURL(t *testing.T) {
+	service, db := testService(t)
+	_, err := db.ExecContext(context.Background(), `UPDATE user_settings SET agent_download_url = 'https://cdn.example.com/agent' WHERE id = 1`)
+	if err != nil {
+		t.Fatalf("set custom agent download url: %v", err)
+	}
+
+	socket := &terminalCaptureSocket{t: t, service: service}
+	conn := service.registry.Register("upgrade-agent", socket)
+	conn.SetMetadata("platform", "linux")
+	conn.SetMetadata("arch", "arm64")
+
+	downloadURL := service.agentUpgradeDownloadURL(context.Background(), db, conn, agentInstallOrigin{Proto: "https", Host: "panel.example.com"})
+	if downloadURL != "https://cdn.example.com/agent/agent-linux-arm64" {
+		t.Fatalf("downloadURL = %q", downloadURL)
+	}
+	if !service.sendUpgradeTask(conn, downloadURL) {
+		t.Fatal("sendUpgradeTask failed")
+	}
+
+	events := socket.Events()
+	if len(events) != 1 || events[0].Name != "dashboard:task" {
+		t.Fatalf("unexpected events: %#v", events)
+	}
+	if events[0].Data["type"] != float64(5) {
+		t.Fatalf("task type = %#v, want 5", events[0].Data["type"])
+	}
+	var data map[string]string
+	rawData, _ := events[0].Data["data"].(string)
+	if err := json.Unmarshal([]byte(rawData), &data); err != nil {
+		t.Fatalf("decode upgrade task data: %v raw=%q", err, rawData)
+	}
+	if data["download_url"] != downloadURL {
+		t.Fatalf("upgrade task download_url = %#v, want %q", data, downloadURL)
 	}
 }
 
@@ -1423,6 +1513,69 @@ func TestAgentBatchUpgradeUsesServerSideBatchAndVerifiesReconnect(t *testing.T) 
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatalf("batch did not complete in time, last payload=%#v", lastPayload)
+}
+
+func TestAgentBatchUpgradeVerificationTimeoutMarksItemFailed(t *testing.T) {
+	t.Setenv("API_MONITOR_AGENT_UPGRADE_VERIFY_TIMEOUT_MS", "40")
+	t.Setenv("API_MONITOR_AGENT_UPGRADE_ACK_TIMEOUT_MS", "40")
+
+	service, _ := testService(t)
+
+	res := perform(service, http.MethodPost, "/api/server/agent/quick-install", `{"name":"timeout-agent"}`)
+	if res.Code != http.StatusOK {
+		t.Fatalf("quick install status=%d body=%s", res.Code, res.Body.String())
+	}
+	payload := decodePayload(t, res)
+	serverID := payload["data"].(map[string]interface{})["serverId"].(string)
+
+	service.registry.Register(serverID, &taskReplySocket{
+		t:       t,
+		service: service,
+		reply: func(taskType int, data string) string {
+			if taskType != 5 {
+				t.Fatalf("task type = %d, want 5", taskType)
+			}
+			if !strings.Contains(data, "download_url") {
+				t.Fatalf("upgrade task should include download_url, got %s", data)
+			}
+			return "scheduled"
+		},
+	})
+
+	res = perform(service, http.MethodPost, "/api/server/agent/batch-upgrade?protocol=http", `{"serverIds":["`+serverID+`"],"concurrency":1}`)
+	if res.Code != http.StatusOK {
+		t.Fatalf("batch upgrade status=%d body=%s", res.Code, res.Body.String())
+	}
+	payload = decodePayload(t, res)
+	batchID := payload["data"].(map[string]interface{})["id"].(string)
+
+	deadline := time.Now().Add(2 * time.Second)
+	var lastPayload map[string]interface{}
+	for time.Now().Before(deadline) {
+		res = perform(service, http.MethodGet, "/api/server/agent/batch/"+batchID, "")
+		if res.Code != http.StatusOK {
+			t.Fatalf("batch status code=%d body=%s", res.Code, res.Body.String())
+		}
+		payload = decodePayload(t, res)
+		lastPayload = payload
+		data := payload["data"].(map[string]interface{})
+		if data["status"] == string(AgentBatchFailed) {
+			items := data["items"].([]interface{})
+			if len(items) != 1 {
+				t.Fatalf("unexpected items: %#v", items)
+			}
+			item := items[0].(map[string]interface{})
+			if item["status"] != string(AgentBatchFailed) {
+				t.Fatalf("item should fail after verify timeout: %#v", item)
+			}
+			if !strings.Contains(item["error"].(string), "验证超时") {
+				t.Fatalf("item error should mention verify timeout: %#v", item)
+			}
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("batch did not fail in time, last payload=%#v", lastPayload)
 }
 
 func TestSFTPRequiresValidServerConfig(t *testing.T) {

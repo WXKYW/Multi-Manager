@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"time"
 
@@ -142,6 +143,17 @@ func (s *Service) agentInstallURL(r *http.Request, serverID string) string {
 }
 
 func resolveInstallOrigin(r *http.Request) (string, string) {
+	return resolveInstallOriginWithBaseURL(r, r.URL.Query().Get("base_url"))
+}
+
+func resolveInstallOriginWithBaseURL(r *http.Request, baseURL string) (string, string) {
+	if strings.TrimSpace(baseURL) == "" {
+		baseURL = r.URL.Query().Get("base_url")
+	}
+	if proto, host, ok := parseInstallBaseURL(baseURL); ok {
+		return proto, host
+	}
+
 	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
 	if host == "" {
 		host = strings.TrimSpace(r.Host)
@@ -159,6 +171,40 @@ func resolveInstallOrigin(r *http.Request) (string, string) {
 	}
 
 	return proto, host
+}
+
+func parseInstallBaseURL(baseURL string) (string, string, bool) {
+	raw := strings.TrimSpace(baseURL)
+	if raw == "" {
+		return "", "", false
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed == nil {
+		return "", "", false
+	}
+	proto := strings.ToLower(parsed.Scheme)
+	if proto != "http" && proto != "https" {
+		return "", "", false
+	}
+	host := strings.TrimSpace(parsed.Host)
+	if host == "" {
+		return "", "", false
+	}
+	return proto, host, true
+}
+
+func (s *Service) resolveAgentDownloadBaseURL(ctx context.Context, db *sql.DB, serverBaseURL string) string {
+	var configured sql.NullString
+	err := db.QueryRowContext(ctx, `SELECT agent_download_url FROM user_settings WHERE id = 1`).Scan(&configured)
+	if err == nil && configured.Valid {
+		raw := strings.TrimRight(strings.TrimSpace(configured.String), "/")
+		if proto, host, ok := parseInstallBaseURL(raw); ok {
+			parsed, _ := url.Parse(raw)
+			path := strings.TrimRight(parsed.EscapedPath(), "/")
+			return proto + "://" + host + path
+		}
+	}
+	return strings.TrimRight(strings.TrimSpace(serverBaseURL), "/") + "/agent"
 }
 
 func appendInstallProtocol(rawURL, proto string) string {
@@ -206,6 +252,8 @@ func (s *Service) getAgentInstallScript(w http.ResponseWriter, r *http.Request, 
 	}
 
 	proto, serverURL := resolveInstallOrigin(r)
+	serverBaseURL := fmt.Sprintf("%s://%s", proto, serverURL)
+	agentDownloadBaseURL := s.resolveAgentDownloadBaseURL(r.Context(), db, serverBaseURL)
 
 	script := fmt.Sprintf(`#!/bin/bash
 # API Monitor Agent install script
@@ -217,6 +265,7 @@ set -e
 AGENT_VERSION="latest"
 INSTALL_DIR="/opt/api-monitor-agent"
 SERVER_URL="%s://%s"
+AGENT_DOWNLOAD_BASE_URL="%s"
 SERVER_ID="%s"
 AGENT_KEY="%s"
 
@@ -232,6 +281,14 @@ else
         exit 1
     fi
     SUDO="sudo"
+fi
+
+if [ "${API_MONITOR_AGENT_INSTALL_DETACHED:-0}" != "1" ] && command -v systemd-run >/dev/null 2>&1 && command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet api-monitor-agent.service; then
+    INSTALL_SCRIPT_URL="$SERVER_URL/api/server/agent/install/linux/$SERVER_ID/$AGENT_KEY?protocol=%s&base_url=%s"
+    echo "Detected running Agent service. Scheduling detached installer via systemd-run..."
+    $SUDO systemd-run --unit="api-monitor-agent-install-$(date +%%s)" --collect --quiet /bin/sh -c "export API_MONITOR_AGENT_INSTALL_DETACHED=1; curl -fsSL '$INSTALL_SCRIPT_URL' | bash"
+    echo "Detached installer scheduled. The current Agent terminal may disconnect; installation will continue in systemd."
+    exit 0
 fi
 
 $SUDO mkdir -p $INSTALL_DIR
@@ -251,7 +308,7 @@ case $ARCH in
         ;;
 esac
 
-AGENT_URL="$SERVER_URL/agent/agent-linux-$AGENT_ARCH"
+AGENT_URL="$AGENT_DOWNLOAD_BASE_URL/agent-linux-$AGENT_ARCH"
 echo "Downloading Agent..."
 TMP_AGENT="$(mktemp /tmp/api-monitor-agent.XXXXXX)"
 trap 'rm -f "$TMP_AGENT"' EXIT
@@ -338,8 +395,10 @@ echo ""
 		name, host, port,
 		time.Now().Format("2006-01-02 15:04:05"),
 		proto, serverURL,
+		agentDownloadBaseURL,
 		accountID,
 		agentKey,
+		proto, url.QueryEscape(serverBaseURL),
 		name,
 	)
 
@@ -408,6 +467,11 @@ func (s *Service) handleAgentHeartbeat(w http.ResponseWriter, r *http.Request, d
 	if err != nil || providedKey != expectedKey {
 		response.Error(w, http.StatusUnauthorized, "Invalid agent key")
 		return
+	}
+	if req.Metrics != nil && len(req.Metrics) > 0 {
+		s.recordAgentSignal(req.ServerID, "metrics", req.Metrics)
+	} else {
+		s.recordAgentSignal(req.ServerID, "heartbeat", req.Info)
 	}
 
 	// 更新账号状态
@@ -566,56 +630,114 @@ func (s *Service) getCurrentAgentKey(w http.ResponseWriter, r *http.Request, db 
 // handleAgentConnectionInfo 获取 Agent 连接详情 (用于精确判定上线状态)
 func (s *Service) handleAgentConnectionInfo(w http.ResponseWriter, r *http.Request, db *sql.DB, serverID string) {
 	conn, exists := s.registry.Get(serverID)
+	presenceSnapshot := map[string]interface{}{}
+	if s.presence != nil {
+		presenceSnapshot = s.presence.snapshot(serverID)
+	}
+	queueDepths := map[string]interface{}{}
+	droppedMessages := map[string]interface{}{}
+	ptyActiveCount := 0
+	if s.ptyHub != nil {
+		ptyStats := s.ptyHub.Stats()
+		queueDepths["pty"] = ptyStats["queue_depths"]
+		droppedMessages["pty"] = ptyStats["dropped"]
+		if active, ok := ptyStats["active_count"].(int); ok {
+			ptyActiveCount = active
+		}
+	}
+	if s.terminalBroker != nil {
+		terminalStats := s.terminalBroker.stats()
+		queueDepths["terminal_stream"] = terminalStats["queue_depths"]
+		droppedMessages["terminal_stream"] = terminalStats["dropped"]
+		if active, ok := terminalStats["active_count"].(int); ok {
+			ptyActiveCount += active
+		}
+	}
+
 	if exists {
 		connectedAt := conn.AuthenticatedAt.UnixNano() / int64(time.Millisecond)
 		metadata := conn.GetMetadata()
-		response.JSON(w, http.StatusOK, map[string]interface{}{
-			"success":     true,
-			"status":      "online",
-			"connectedAt": connectedAt,
-			"version":     metadata["version"],
-			"platform":    metadata["platform"],
-		})
+		conn.mu.RLock()
+		socket := conn.Socket
+		lastHeartbeat := conn.LastHeartbeat
+		conn.mu.RUnlock()
+		if session, ok := socket.(*EngineIOSession); ok {
+			session.mu.RLock()
+			queueDepths["agent_pending"] = len(session.PendingMessages)
+			if _, hasTransport := presenceSnapshot["transport"]; !hasTransport || presenceSnapshot["transport"] == "" {
+				presenceSnapshot["transport"] = session.Transport
+			}
+			session.mu.RUnlock()
+		}
+		resp := map[string]interface{}{
+			"success":           true,
+			"status":            "online",
+			"connectedAt":       connectedAt,
+			"version":           metadata["version"],
+			"platform":          metadata["platform"],
+			"last_heartbeat_at": timeToMillis(lastHeartbeat),
+			"queue_depths":      queueDepths,
+			"dropped_messages":  droppedMessages,
+			"pty_active_count":  ptyActiveCount,
+			"capabilities":      conn.GetCapabilities(),
+		}
+		for key, value := range presenceSnapshot {
+			resp[key] = value
+		}
+		response.JSON(w, http.StatusOK, resp)
 	} else {
-		response.JSON(w, http.StatusOK, map[string]interface{}{
-			"success": true,
-			"status":  "offline",
-		})
+		resp := map[string]interface{}{
+			"success":          true,
+			"status":           "offline",
+			"queue_depths":     queueDepths,
+			"dropped_messages": droppedMessages,
+			"pty_active_count": ptyActiveCount,
+		}
+		for key, value := range presenceSnapshot {
+			resp[key] = value
+		}
+		response.JSON(w, http.StatusOK, resp)
 	}
 }
 
 // handleAgentAutoInstall 自动安装 Agent (通过 SSH 或升级指令)
 func (s *Service) handleAgentAutoInstall(w http.ResponseWriter, r *http.Request, db *sql.DB, serverID string) {
 	var req struct {
-		ForceSSH bool `json:"force_ssh"`
+		ForceSSH bool   `json:"force_ssh"`
+		BaseURL  string `json:"base_url"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
 	// 1. 检测 Agent 是否在线
+	proto, host := resolveInstallOriginWithBaseURL(r, req.BaseURL)
+	origin := agentInstallOrigin{Proto: proto, Host: host}
+
 	if conn, exists := s.registry.Get(serverID); exists && !req.ForceSSH {
 		// 发送升级指令
-		if s.sendUpgradeTask(conn) {
+		downloadURL := s.agentUpgradeDownloadURL(r.Context(), db, conn, origin)
+		if s.sendUpgradeTask(conn, downloadURL) {
 			response.JSON(w, http.StatusOK, map[string]interface{}{
 				"success": true,
-				"message": "Agent 升级指令已下发（后台执行）",
-				"output":  "正在通过现有的 Agent 连接执行版本更新...",
+				"message": "Agent 自更新指令已下发（后台执行）",
+				"output":  "Agent 将在目标主机上启动独立后台 updater；控制连接和终端短暂断开不影响升级继续执行。",
 			})
 			return
 		}
 	}
 
 	// 2. 否则通过 SSH 连接执行远程安装
-	rec := httptest.NewRecorder()
-	s.getAgentInstallScript(rec, r, db, serverID)
-	if rec.Code != http.StatusOK {
-		response.JSON(w, rec.Code, map[string]interface{}{
+	if s.presence != nil {
+		s.presence.suppress(serverID, 10*time.Minute)
+	}
+	script, err := s.renderAgentInstallScript(r.Context(), db, serverID, origin)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{
 			"success": false,
 			"error":   "无法生成安装脚本",
-			"details": rec.Body.String(),
+			"details": err.Error(),
 		})
 		return
 	}
-	script := rec.Body.String()
 
 	cmd := fmt.Sprintf("cat << 'EOF' > /tmp/agent_install.sh\n%s\nEOF\nsudo bash /tmp/agent_install.sh", script)
 	output, err := s.executeSSHCommand(r.Context(), db, serverID, cmd, 120*time.Second)
@@ -640,13 +762,54 @@ func (s *Service) handleAgentAutoInstall(w http.ResponseWriter, r *http.Request,
 	})
 }
 
-// sendUpgradeTask 发送升级指令给 Agent
-func (s *Service) sendUpgradeTask(conn *AgentConnection) bool {
-	taskID := uuid.New().String()
+func (s *Service) agentUpgradeDownloadURL(ctx context.Context, db *sql.DB, conn *AgentConnection, origin agentInstallOrigin) string {
+	proto := origin.Proto
+	if proto != "http" && proto != "https" {
+		proto = "https"
+	}
+	host := strings.TrimSpace(origin.Host)
+	serverBaseURL := strings.TrimRight(fmt.Sprintf("%s://%s", proto, host), "/")
+	baseURL := s.resolveAgentDownloadBaseURL(ctx, db, serverBaseURL)
+
+	metadata := map[string]interface{}{}
+	if conn != nil {
+		metadata = conn.GetMetadata()
+	}
+	platform := strings.ToLower(strings.TrimSpace(fmt.Sprint(metadata["platform"])))
+	arch := strings.ToLower(strings.TrimSpace(fmt.Sprint(metadata["arch"])))
+	filename := agentBinaryFilenameFor(platform, arch)
+	return strings.TrimRight(baseURL, "/") + "/" + filename
+}
+
+func agentBinaryFilenameFor(platform, arch string) string {
+	if strings.Contains(platform, "windows") || strings.Contains(platform, "win") {
+		return "agent-windows-amd64.exe"
+	}
+	if strings.Contains(arch, "arm64") || strings.Contains(arch, "aarch64") {
+		return "agent-linux-arm64"
+	}
+	return "agent-linux-amd64"
+}
+
+// sendUpgradeTask 发送自更新指令给 Agent
+func (s *Service) sendUpgradeTask(conn *AgentConnection, downloadURL string) bool {
+	return s.sendUpgradeTaskWithID(conn, downloadURL, uuid.New().String())
+}
+
+func (s *Service) sendUpgradeTaskWithID(conn *AgentConnection, downloadURL string, taskID string) bool {
+	if s.presence != nil && conn != nil {
+		s.presence.suppress(conn.ServerID, 10*time.Minute)
+	}
+	if strings.TrimSpace(taskID) == "" {
+		taskID = uuid.New().String()
+	}
+	data, _ := json.Marshal(map[string]string{
+		"download_url": downloadURL,
+	})
 	payload := map[string]interface{}{
 		"id":      taskID,
 		"type":    5, // UPGRADE
-		"data":    "",
+		"data":    string(data),
 		"timeout": 60,
 	}
 	err := conn.SendEvent("dashboard:task", payload)

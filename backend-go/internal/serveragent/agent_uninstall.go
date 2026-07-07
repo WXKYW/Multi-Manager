@@ -3,12 +3,17 @@ package serveragent
 import (
 	"database/sql"
 	"net/http"
+	"time"
 
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
 )
 
 // handleAgentUninstall handles POST /api/server/agent/uninstall/{id}
 func (s *Service) handleAgentUninstall(w http.ResponseWriter, r *http.Request, db *sql.DB, accountID string) {
+	if s.presence != nil {
+		s.presence.suppress(accountID, 10*time.Minute)
+		s.presence.recordDisconnect(accountID, "uninstalled")
+	}
 	// 从数据库中删除 Agent 关联
 	_, err := db.ExecContext(r.Context(), `UPDATE server_accounts SET status = 'offline', last_check_status = 'uninstalled' WHERE id = ?`, accountID)
 	if err != nil {

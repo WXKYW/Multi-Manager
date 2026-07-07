@@ -41,6 +41,8 @@ type Service struct {
 	registry         *ConnectionRegistry
 	metricsHub       *MetricsHub
 	ptyHub           *ptyDataHub
+	presence         *agentPresenceManager
+	terminalBroker   *agentTerminalBroker
 	lastCollect      time.Time
 	lastCollectMu    sync.RWMutex
 	lastPersist      map[string]time.Time
@@ -103,17 +105,19 @@ func New(cfg config.Config) *Service {
 	engineIO.metricsHub = metricsHub
 
 	s := &Service{
-		cfg:          cfg,
-		store:        database.New(cfg),
-		taskRegistry: taskRegistry,
-		agentBatches: agentBatches,
-		engineIO:     engineIO,
-		registry:     registry,
-		metricsHub:   metricsHub,
-		ptyHub:       ptyHub,
-		lastPersist:  make(map[string]time.Time),
+		cfg:            cfg,
+		store:          database.New(cfg),
+		taskRegistry:   taskRegistry,
+		agentBatches:   agentBatches,
+		engineIO:       engineIO,
+		registry:       registry,
+		metricsHub:     metricsHub,
+		ptyHub:         ptyHub,
+		terminalBroker: newAgentTerminalBroker(),
+		lastPersist:    make(map[string]time.Time),
 	}
 	engineIO.service = s
+	s.presence = newAgentPresenceManager(s)
 
 	// 绑定 Engine.IO 事件处理器
 	engineIO.SetHandlers(
@@ -122,51 +126,42 @@ func New(cfg config.Config) *Service {
 			applog.Info(context.Background(), "serveragent", "agent connected", "session_id", sessionID, "server_id", serverID)
 			if serverID != "" {
 				var socket interface{}
+				transport := ""
+				capabilities := map[string]bool{}
 				if sess := engineIO.getSession(sessionID); sess != nil {
 					sess.mu.RLock()
 					socket = sess
+					transport = sess.Transport
+					for _, capability := range sess.Capabilities {
+						capabilities[capability] = true
+					}
 					sess.mu.RUnlock()
 				}
-				registry.Register(serverID, socket) // 注册到连接池
-
-				// 异步更新数据库状态为 online 并发送通知
-				go func() {
-					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-					defer cancel()
-					db, err := s.open(ctx)
-					if err == nil {
-						defer db.Close()
-						now := time.Now().Format("2006-01-02 15:04:05")
-						_, _ = db.ExecContext(ctx, `UPDATE server_accounts
-							SET status = 'online', last_check_time = ?, last_check_status = 'success', response_time = 0, updated_at = ?
-							WHERE id = ?`, now, now, serverID)
-
-						// 获取主机名称和真实主机地址用于通知
-						var serverName, serverHost string
-						_ = db.QueryRowContext(ctx, `SELECT name, host FROM server_accounts WHERE id = ?`, serverID).Scan(&serverName, &serverHost)
-						if serverName == "" {
-							serverName = serverID
-						}
-						if serverHost == "" {
-							serverHost = serverName
-						}
-
-						if s.notifier != nil {
-							eventData := map[string]interface{}{
-								"serverId":   serverID,
-								"serverName": serverName,
-								"host":       serverHost,
-								"hostname":   serverName,
-								"status":     "online",
-							}
-							_ = s.notifier.Trigger(ctx, "server", "online", eventData)
-						}
+				conn := registry.Register(serverID, socket) // 注册到连接池
+				if len(capabilities) > 0 {
+					conn.UpdateCapabilities(capabilities)
+				}
+				if sess := engineIO.getSession(sessionID); sess != nil {
+					sess.mu.RLock()
+					if sess.Hostname != "" {
+						conn.SetMetadata("hostname", sess.Hostname)
 					}
-				}()
-
-				// 广播服务器上线状态给前端
-				if metricsHub != nil {
-					metricsHub.BroadcastServerStatus(serverID, "online", true)
+					if sess.Version != "" {
+						conn.SetMetadata("version", sess.Version)
+						conn.SetMetadata("agent_version", sess.Version)
+					}
+					if sess.Platform != "" {
+						conn.SetMetadata("platform", sess.Platform)
+					}
+					if sess.Arch != "" {
+						conn.SetMetadata("arch", sess.Arch)
+					}
+					sess.mu.RUnlock()
+				}
+				if s.presence != nil && s.presence.legacyMode() {
+					s.markAgentOnlineLegacy(serverID)
+				} else if s.presence != nil {
+					s.presence.recordConnect(serverID, transport)
 				}
 			}
 		},
@@ -192,7 +187,7 @@ func New(cfg config.Config) *Service {
 						}
 					}
 					if serverID != "" {
-						registry.UpdateHeartbeat(serverID)
+						s.recordAgentSignal(serverID, "state", state)
 
 						// 提取并异步持久化 Agent 上报的网络波动质量指标
 						if nqData, hasNq := state["network_quality"]; hasNq && nqData != nil {
@@ -274,6 +269,7 @@ func New(cfg config.Config) *Service {
 						}
 					}
 					if serverID != "" {
+						s.recordAgentSignal(serverID, "host_info", hostInfo)
 						var fullCachedInfo map[string]interface{}
 						if conn, exists := registry.Get(serverID); exists {
 							if platform, ok := hostInfo["platform"].(string); ok {
@@ -323,6 +319,7 @@ func New(cfg config.Config) *Service {
 					Delay      int64  `json:"delay"`
 				}
 				if err := json.Unmarshal(data, &result); err == nil {
+					s.recordAgentSignal(serverID, "task_result", nil)
 					if result.Successful {
 						s.taskRegistry.Complete(result.ID, result.Data)
 					} else {
@@ -341,6 +338,7 @@ func New(cfg config.Config) *Service {
 					IsError    bool   `json:"is_error"`
 				}
 				if err := json.Unmarshal(data, &prog); err == nil {
+					s.recordAgentSignal(serverID, "task_result", nil)
 					s.taskRegistry.UpdateProgress(prog.TaskID, prog.Percentage, prog)
 				}
 			case "agent:pty_data":
@@ -349,7 +347,6 @@ func New(cfg config.Config) *Service {
 					Data string `json:"data"`
 				}
 				if err := json.Unmarshal(data, &ptyData); err == nil && ptyData.ID != "" {
-					registry.UpdateHeartbeat(serverID)
 					if s.ptyHub != nil {
 						s.ptyHub.Publish(ptyData.ID, ptyData.Data)
 					}
@@ -361,7 +358,7 @@ func New(cfg config.Config) *Service {
 					Error  string `json:"error"`
 				}
 				if err := json.Unmarshal(data, &ptyStatus); err == nil && ptyStatus.ID != "" {
-					registry.UpdateHeartbeat(serverID)
+					s.recordAgentSignal(serverID, "pty_status", nil)
 					if s.ptyHub != nil {
 						s.ptyHub.Publish("status:"+ptyStatus.ID, string(data))
 					}
@@ -377,7 +374,7 @@ func New(cfg config.Config) *Service {
 					}
 				}
 				if serverID != "" {
-					registry.UpdateHeartbeat(serverID)
+					s.recordAgentSignal(serverID, "heartbeat", nil)
 				}
 			case "metrics", "heartbeat":
 				// 兼容旧事件名称
@@ -389,7 +386,7 @@ func New(cfg config.Config) *Service {
 						}
 					}
 					if serverID != "" {
-						registry.UpdateHeartbeat(serverID)
+						s.recordAgentSignal(serverID, "metrics", state)
 					}
 				}
 			}
@@ -404,44 +401,13 @@ func New(cfg config.Config) *Service {
 				ns := sess.Namespace
 				sess.mu.RUnlock()
 				if ns != "/metrics" && sid != "" && registry.DisconnectIfSocket(sid, sess) {
-
-					go func(serverID string) {
-						ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-						defer cancel()
-						db, err := s.open(ctx)
-						if err != nil {
-							return
-						}
-						defer db.Close()
-						now := time.Now().Format("2006-01-02 15:04:05")
-						_, _ = db.ExecContext(ctx, `UPDATE server_accounts
-							SET status = 'offline', last_check_time = ?, last_check_status = 'disconnected', updated_at = ?
-							WHERE id = ?`, now, now, serverID)
-
-						// 获取主机名称和真实主机地址用于通知
-						var serverName, serverHost string
-						_ = db.QueryRowContext(ctx, `SELECT name, host FROM server_accounts WHERE id = ?`, serverID).Scan(&serverName, &serverHost)
-						if serverName == "" {
-							serverName = serverID
-						}
-						if serverHost == "" {
-							serverHost = serverName
-						}
-
-						if s.notifier != nil {
-							eventData := map[string]interface{}{
-								"serverId":   serverID,
-								"serverName": serverName,
-								"host":       serverHost,
-								"hostname":   serverName,
-								"status":     "offline",
-							}
-							_ = s.notifier.Trigger(ctx, "server", "offline", eventData)
-						}
-					}(sid)
-
-					if metricsHub != nil {
-						metricsHub.BroadcastServerStatus(sid, "offline", false)
+					if s.terminalBroker != nil {
+						s.terminalBroker.closeForServer(sid, "agent_control_disconnected")
+					}
+					if s.presence != nil && s.presence.legacyMode() {
+						s.markAgentOfflineLegacy(sid)
+					} else if s.presence != nil {
+						s.presence.recordDisconnect(sid, "socket_disconnected")
 					}
 				}
 			}
@@ -458,6 +424,9 @@ func New(cfg config.Config) *Service {
 	s.initTargetsCache()
 
 	// Start background telemetry metrics collection loop
+	if s.presence != nil {
+		s.presence.start()
+	}
 	go s.startMetricsCollectorLoop()
 
 	return s
@@ -465,6 +434,100 @@ func New(cfg config.Config) *Service {
 
 func (s *Service) open(ctx context.Context) (*sql.DB, error) {
 	return s.store.Open(ctx)
+}
+
+func (s *Service) recordAgentSignal(serverID, source string, payload map[string]interface{}) {
+	serverID = strings.TrimSpace(serverID)
+	if serverID == "" {
+		return
+	}
+	if s.registry != nil {
+		s.registry.UpdateHeartbeat(serverID)
+	}
+	sampleIntervalMs := int64(0)
+	if payload != nil {
+		sampleIntervalMs = getInt64Val(payload, "sample_interval_ms", 0)
+		if sampleIntervalMs <= 0 {
+			sampleIntervalMs = getInt64Val(payload, "metrics_sample_interval_ms", 0)
+		}
+	}
+	if s.presence != nil {
+		s.presence.recordHeartbeat(serverID, source, sampleIntervalMs)
+	}
+}
+
+func (s *Service) markAgentOnlineLegacy(serverID string) {
+	if serverID == "" {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		db, err := s.open(ctx)
+		if err != nil {
+			return
+		}
+		defer db.Close()
+		now := time.Now().Format("2006-01-02 15:04:05")
+		_, _ = db.ExecContext(ctx, `UPDATE server_accounts
+			SET status = 'online', last_check_time = ?, last_check_status = 'success', response_time = 0, updated_at = ?
+			WHERE id = ?`, now, now, serverID)
+		serverName, serverHost := s.serverIdentity(ctx, db, serverID)
+		s.triggerServerStatusNotification(ctx, serverID, serverName, serverHost, "online")
+	}()
+	if s.metricsHub != nil {
+		s.metricsHub.BroadcastServerStatus(serverID, "online", true)
+	}
+}
+
+func (s *Service) markAgentOfflineLegacy(serverID string) {
+	if serverID == "" {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		db, err := s.open(ctx)
+		if err != nil {
+			return
+		}
+		defer db.Close()
+		now := time.Now().Format("2006-01-02 15:04:05")
+		_, _ = db.ExecContext(ctx, `UPDATE server_accounts
+			SET status = 'offline', last_check_time = ?, last_check_status = 'disconnected', updated_at = ?
+			WHERE id = ?`, now, now, serverID)
+		serverName, serverHost := s.serverIdentity(ctx, db, serverID)
+		s.triggerServerStatusNotification(ctx, serverID, serverName, serverHost, "offline")
+	}()
+	if s.metricsHub != nil {
+		s.metricsHub.BroadcastServerStatus(serverID, "offline", false)
+	}
+}
+
+func (s *Service) serverIdentity(ctx context.Context, db *sql.DB, serverID string) (string, string) {
+	var serverName, serverHost string
+	_ = db.QueryRowContext(ctx, `SELECT name, host FROM server_accounts WHERE id = ?`, serverID).Scan(&serverName, &serverHost)
+	if serverName == "" {
+		serverName = serverID
+	}
+	if serverHost == "" {
+		serverHost = serverName
+	}
+	return serverName, serverHost
+}
+
+func (s *Service) triggerServerStatusNotification(ctx context.Context, serverID, serverName, serverHost, status string) {
+	if s.notifier == nil {
+		return
+	}
+	eventData := map[string]interface{}{
+		"serverId":   serverID,
+		"serverName": serverName,
+		"host":       serverHost,
+		"hostname":   serverName,
+		"status":     status,
+	}
+	_ = s.notifier.Trigger(ctx, "server", status, eventData)
 }
 
 func (s *Service) shouldPersistRealtimeMetrics(serverID string, now time.Time) bool {
@@ -748,6 +811,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/ws/ssh" {
 		s.handleSSHTerminal(w, r)
+		return
+	}
+	if r.URL.Path == "/ws/agent-terminal" {
+		s.handleAgentTerminalStream(w, r)
 		return
 	}
 

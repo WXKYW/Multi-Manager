@@ -9,7 +9,7 @@ import { Select } from '@cloudflare/kumo/components/select';
 import { Table } from '@cloudflare/kumo/components/table';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Autocomplete } from '@cloudflare/kumo/components/autocomplete';
-import { ChartPalette, Tabs, TimeseriesChart } from '@cloudflare/kumo';
+import { ChartPalette, Meter, Tabs, TimeseriesChart } from '@cloudflare/kumo';
 import * as echarts from 'echarts/core';
 import { LineChart } from 'echarts/charts';
 import {
@@ -2712,23 +2712,17 @@ function OpenAIPage() {
                     const totalTokens =
                       analyticsCharts.models.reduce((sum, m) => sum + m.tokens, 0) || 1;
                     return analyticsCharts.models.map(m => {
-                      const pct = ((m.tokens / totalTokens) * 100).toFixed(1);
+                      const percent = (m.tokens / totalTokens) * 100;
+                      const pct = percent.toFixed(1);
                       return (
                         <div key={m.model} className="space-y-1 text-xs">
-                          <div className="flex justify-between text-kumo-strong">
-                            <span className="font-mono font-semibold truncate max-w-[150px]">
-                              {m.model}
-                            </span>
-                            <span className="font-mono text-kumo-subtle">
-                              {m.tokens.toLocaleString()} ({pct}%)
-                            </span>
-                          </div>
-                          <div className="w-full bg-kumo-recessed rounded-full h-2 overflow-hidden">
-                            <div
-                              className="bg-gradient-to-r from-kumo-brand/80 to-kumo-brand h-full rounded-full"
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
+                          <Meter
+                            label={m.model}
+                            value={percent}
+                            customValue={`${m.tokens.toLocaleString()} (${pct}%)`}
+                            trackClassName="h-2 bg-kumo-recessed"
+                            indicatorClassName="bg-kumo-brand"
+                          />
                         </div>
                       );
                     });
@@ -2810,7 +2804,7 @@ function OpenAIPage() {
 
           {/* Table Pagination */}
           {analyticsTotal > 10 && (
-            <div className="flex justify-between items-center px-4 py-2 bg-kumo-base border border-kumo-line rounded-xl shadow-sm text-xs">
+            <div className="flex justify-between items-center px-4 py-2 bg-kumo-base border border-kumo-line rounded-xl text-xs">
               <span className="text-kumo-subtle">
                 共 {analyticsTotal} 条记录，第 {analyticsPage} / {Math.ceil(analyticsTotal / 10)} 页
               </span>

@@ -5,6 +5,7 @@ import {
   useSidebar
 } from '@cloudflare/kumo/components/sidebar';
 import { Tooltip } from '@cloudflare/kumo/components/tooltip';
+import { Button } from '@cloudflare/kumo/components/button';
 import { Tabs } from '@cloudflare/kumo';
 import AppPageHeader, { AppBreadcrumbs } from './AppPageHeader.jsx';
 import {
@@ -76,17 +77,19 @@ class ModuleErrorBoundary extends React.Component {
           <div className="mb-4 rounded-md border border-kumo-line bg-kumo-recessed/50 p-3 font-mono text-[11px] leading-relaxed text-kumo-subtle">
             {this.state.error?.message || '未知错误'}
           </div>
-          <button
+          <Button
             type="button"
+            size="sm"
+            variant="primary"
             onClick={() => {
               const url = new URL(window.location.href);
               url.searchParams.set('_reload', String(Date.now()));
               window.location.replace(url.toString());
             }}
-            className="h-8 rounded-md bg-kumo-brand px-3 text-xs font-bold text-white"
+            className="font-bold"
           >
             重新加载
-          </button>
+          </Button>
         </div>
       </div>
     );

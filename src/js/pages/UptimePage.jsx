@@ -19,7 +19,7 @@ import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
-import { ChartPalette, Tabs, TimeseriesChart } from '@cloudflare/kumo';
+import { ChartPalette, ClipboardText, Tabs, TimeseriesChart } from '@cloudflare/kumo';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { AnimatedCollapse, DeferredRender } from '../components/AnimatedCollapse.jsx';
 import { ChartCard, ChartWarmupSkeleton, DataTableFrame, SectionCard } from '../components/ui/AppPrimitives.jsx';
@@ -242,9 +242,12 @@ function SslCertificatePanel({ monitorId }) {
 
   return (
     <div className="rounded-lg border border-kumo-line bg-kumo-base overflow-hidden">
-      <button
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
         onClick={loadSslInfo}
-        className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-kumo-recessed/50 transition-colors"
+        className="h-auto w-full justify-between rounded-none px-3 py-2 text-left"
       >
         <span className="text-[11px] font-bold text-kumo-strong uppercase tracking-wider flex items-center gap-1.5 select-none">
           <Shield className="w-3.5 h-3.5" />
@@ -253,7 +256,7 @@ function SslCertificatePanel({ monitorId }) {
         <span className="text-[10px] text-kumo-subtle">
           {sslLoading ? '加载中...' : sslExpanded ? '收起' : '展开'}
         </span>
-      </button>
+      </Button>
       <AnimatedCollapse open={sslExpanded}>
         <div className="px-3 pb-3 space-y-2">
           {sslData && !sslData.ssl && (
@@ -1462,7 +1465,7 @@ function UptimePage() {
                   return (
                     <div
                       key={monitor.id}
-                      className={`overflow-hidden rounded-lg border bg-kumo-base shadow-sm ${statusClass}`}
+                      className={`overflow-hidden rounded-lg border bg-kumo-base ${statusClass}`}
                     >
                       {/* 卡片头部行 */}
                       <div
@@ -1774,16 +1777,10 @@ function UptimePage() {
                         </div>
                       </div>
                       <div className="mt-3 grid gap-2 text-xs">
-                        <button type="button" onClick={() => copyStatusUrl(statusUrl)} className="truncate rounded border border-kumo-line bg-kumo-recessed px-2 py-1 text-left font-mono text-kumo-subtle hover:text-kumo-brand">
-                          {statusUrl}
-                        </button>
-                        <button type="button" onClick={() => copyStatusUrl(compactUrl, '/u 地址')} className="truncate rounded border border-kumo-line bg-kumo-recessed px-2 py-1 text-left font-mono text-kumo-subtle hover:text-kumo-brand">
-                          {compactUrl}
-                        </button>
+                        <ClipboardText size="sm" text={statusUrl} className="min-w-0 w-full" tooltip={{ text: '复制状态页地址', copiedText: '地址已复制' }} />
+                        <ClipboardText size="sm" text={compactUrl} className="min-w-0 w-full" tooltip={{ text: '复制 /u 地址', copiedText: '地址已复制' }} />
                         {domainUrl && (
-                          <button type="button" onClick={() => copyStatusUrl(domainUrl, '自定义域名')} className="truncate rounded border border-kumo-line bg-kumo-recessed px-2 py-1 text-left font-mono text-kumo-subtle hover:text-kumo-brand">
-                            {domainUrl}
-                          </button>
+                          <ClipboardText size="sm" text={domainUrl} className="min-w-0 w-full" tooltip={{ text: '复制自定义域名', copiedText: '地址已复制' }} />
                         )}
                       </div>
                     </div>

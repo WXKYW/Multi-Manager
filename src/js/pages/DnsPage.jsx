@@ -2399,9 +2399,11 @@ function DnsPage() {
                         key={bucket.name}
                         className={`rounded-md border p-2.5 transition ${isSelected ? 'border-kumo-brand/70 bg-kumo-brand/10' : 'border-kumo-line bg-kumo-base hover:border-kumo-brand/60'}`}
                       >
-                        <button
+                        <Button
                           type="button"
-                          className="flex w-full min-w-0 items-start gap-2 text-left"
+                          size="sm"
+                          variant="ghost"
+                          className="h-auto w-full min-w-0 items-start justify-start gap-2 px-0 py-0 text-left"
                           onClick={() => selectR2Bucket(bucket)}
                         >
                           <Box className={`mt-0.5 h-4 w-4 shrink-0 ${isSelected ? 'text-kumo-brand' : 'text-kumo-subtle'}`} />
@@ -2409,7 +2411,7 @@ function DnsPage() {
                             <span className="block truncate text-sm font-medium text-kumo-strong">{bucket.name}</span>
                             <span className="mt-1 block truncate text-xs text-kumo-subtle">{formatDate(bucket.creation_date || bucket.created_at)}</span>
                           </span>
-                        </button>
+                        </Button>
                         <div className="mt-2 flex items-center justify-between gap-2">
                           <Badge variant={bucket.public_url_base ? 'success' : 'outline'} className="text-[10px] leading-4">
                             {bucket.public_url_base ? '公开访问' : '私有'}
@@ -2444,17 +2446,17 @@ function DnsPage() {
                             <span className="truncate text-base font-semibold text-kumo-strong">{r2SelectedBucket.name}</span>
                           </div>
                           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-kumo-subtle">
-                            <button type="button" className="rounded px-1.5 py-0.5 hover:bg-kumo-recessed/60 hover:text-kumo-strong" onClick={() => loadR2Objects(r2SelectedBucket.name, '')}>
+                            <Button type="button" size="xs" variant="ghost" className="h-auto px-1.5 py-0.5 text-kumo-subtle hover:text-kumo-strong" onClick={() => loadR2Objects(r2SelectedBucket.name, '')}>
                               根目录
-                            </button>
+                            </Button>
                             {r2PathSegments.map((segment, index) => {
                               const prefix = `${r2PathSegments.slice(0, index + 1).join('/')}/`;
                               return (
                                 <React.Fragment key={prefix}>
                                   <span>/</span>
-                                  <button type="button" className="max-w-40 truncate rounded px-1.5 py-0.5 hover:bg-kumo-recessed/60 hover:text-kumo-strong" onClick={() => loadR2Objects(r2SelectedBucket.name, prefix)}>
+                                  <Button type="button" size="xs" variant="ghost" className="h-auto max-w-40 truncate px-1.5 py-0.5 text-kumo-subtle hover:text-kumo-strong" onClick={() => loadR2Objects(r2SelectedBucket.name, prefix)}>
                                     {segment}
-                                  </button>
+                                  </Button>
                                 </React.Fragment>
                               );
                             })}
@@ -2557,9 +2559,11 @@ function DnsPage() {
                                 />
                               )}
                               <Table.Cell>
-                                <button
+                                <Button
                                   type="button"
-                                  className={`flex min-w-0 items-center gap-2 text-left ${row.isFolder ? 'font-medium text-kumo-strong hover:text-kumo-brand' : 'text-kumo-strong'}`}
+                                  size="xs"
+                                  variant="ghost"
+                                  className={`h-auto min-w-0 justify-start gap-2 px-0 py-0 text-left ${row.isFolder ? 'font-medium text-kumo-strong hover:text-kumo-brand' : 'text-kumo-strong'}`}
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     if (row.isFolder) loadR2Objects(r2SelectedBucket.name, row.key);
@@ -2570,7 +2574,7 @@ function DnsPage() {
                                 >
                                   {row.isFolder ? <Folder className="h-4 w-4 shrink-0 text-kumo-brand" /> : <FileText className="h-4 w-4 shrink-0 text-kumo-subtle" />}
                                   <span className="truncate">{row.name || row.key}</span>
-                                </button>
+                                </Button>
                               </Table.Cell>
                               <Table.Cell>{row.isFolder ? '-' : formatBytes(row.size)}</Table.Cell>
                               <Table.Cell>{row.isFolder ? '-' : formatDate(row.uploaded || row.last_modified)}</Table.Cell>

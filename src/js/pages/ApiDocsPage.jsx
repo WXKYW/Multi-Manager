@@ -3,7 +3,7 @@ import { Button } from '@cloudflare/kumo/components/button';
 import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
-import { Tabs } from '@cloudflare/kumo';
+import { ClipboardText, Tabs } from '@cloudflare/kumo';
 import { toast } from '../modules/toast.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import {
@@ -134,7 +134,7 @@ const routeGroup = (route) => {
   if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'settings'))) return '系统设置';
   if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'system')) || prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'logs')) || prefix.startsWith(routePrefixLiteral('ws', 'logs'))) return '系统';
   if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'cloudflare'))) return 'Cloudflare';
-  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'server')) || prefix.startsWith(routePrefixLiteral('ws', 'ssh')) || prefix.startsWith(routePrefixLiteral('socket.io'))) return '主机实例';
+  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'server')) || prefix.startsWith(routePrefixLiteral('ws', 'ssh')) || prefix.startsWith(routePrefixLiteral('ws', 'agent-terminal')) || prefix.startsWith(routePrefixLiteral('socket.io'))) return '主机实例';
   if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'openai')) || prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'ai')) || prefix.startsWith(routePrefixLiteral('v1')) || prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'chat'))) return 'AI 接入';
   if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'aliyun'))) return '阿里云';
   if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'tencent'))) return '腾讯云';
@@ -181,7 +181,7 @@ const routeDescription = (route) => {
   if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'server', 'sftp'))) return '通过 SFTP 浏览、读写、上传和下载文件';
   if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'server', 'tasks'))) return '管理服务器任务、任务日志和执行流';
   if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'server'))) return '管理主机实例、凭据、Docker、终端和监控能力';
-  if (prefix.startsWith(routePrefixLiteral('ws', 'ssh')) || prefix.startsWith(routePrefixLiteral('socket.io'))) return '主机终端和 Agent 实时连接';
+  if (prefix.startsWith(routePrefixLiteral('ws', 'ssh')) || prefix.startsWith(routePrefixLiteral('ws', 'agent-terminal')) || prefix.startsWith(routePrefixLiteral('socket.io'))) return '主机终端和 Agent 实时连接';
   if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'openai')) || prefix.startsWith(routePrefixLiteral('v1')) || prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'chat'))) return 'OpenAI 兼容模型代理、聊天和流式响应';
   if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'aliyun'))) return '管理阿里云 DNS、计算和云资源';
   if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'tencent'))) return '管理腾讯云 DNS、计算和云资源';
@@ -355,12 +355,14 @@ function RouteList({ routes, selectedRoute, onSelect }) {
         {routes.map((route) => {
           const active = selectedRoute && getRouteKey(selectedRoute) === getRouteKey(route);
           return (
-            <button
+            <Button
               key={getRouteKey(route)}
               type="button"
+              size="sm"
+              variant="ghost"
               onClick={() => onSelect(route)}
               className={cx(
-                'flex w-full min-w-0 flex-col gap-2 px-3 py-3 text-left transition-colors hover:bg-kumo-recessed/60',
+                'h-auto w-full min-w-0 flex-col items-stretch gap-2 rounded-none px-3 py-3 text-left',
                 active && 'bg-kumo-brand/10'
               )}
             >
@@ -384,7 +386,7 @@ function RouteList({ routes, selectedRoute, onSelect }) {
               <div className="line-clamp-2 text-xs leading-relaxed text-kumo-subtle">
                 {route.description}
               </div>
-            </button>
+            </Button>
           );
         })}
       </div>
@@ -602,7 +604,7 @@ function AIAccessConsole({
             <Button size="sm" variant="secondary" onClick={() => onCopy(agentKey.value, 'Agent Key 已复制')}>
               <Copy className="h-3.5 w-3.5" />
             </Button>
-            <Button size="sm" variant="danger" onClick={onRotateKey} className="gap-1.5">
+            <Button size="sm" variant="destructive" onClick={onRotateKey} className="gap-1.5">
               <Key className="h-3.5 w-3.5" />
               <span>轮换</span>
             </Button>
@@ -612,15 +614,10 @@ function AIAccessConsole({
         <SectionCard title="接入地址" icon={<Plug className="h-4 w-4 text-kumo-brand" />}>
           <div className="space-y-2">
             {Object.entries(endpoints).map(([key, value]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => onCopy(value, '地址已复制')}
-                className="flex w-full min-w-0 items-center justify-between gap-2 rounded-md border border-kumo-line bg-kumo-recessed/30 px-3 py-2 text-left hover:border-kumo-brand/60"
-              >
+              <div key={key} className="grid min-w-0 gap-1">
                 <span className="text-xs font-bold text-kumo-subtle">{key}</span>
-                <span className="min-w-0 truncate font-mono text-xs text-kumo-strong">{value}</span>
-              </button>
+                <ClipboardText size="sm" text={value} className="min-w-0 w-full" tooltip={{ text: '复制地址', copiedText: '地址已复制' }} />
+              </div>
             ))}
           </div>
         </SectionCard>

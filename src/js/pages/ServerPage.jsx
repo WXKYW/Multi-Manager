@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import useStore from '../store.js';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
@@ -558,14 +558,44 @@ const ExpandedProgressMetric = React.memo(ExpandedProgressMetricComponent, (prev
 ));
 
 function TrafficTotalSummary({ txTotal, rxTotal, quota, compact = false }) {
-  const itemClassName = compact
-    ? 'px-2 py-1.5'
-    : 'px-2.5 py-2';
-  const valueClassName = compact
-    ? 'text-[13px]'
-    : 'text-sm';
   const remainingPercent = quota ? clampPercent(100 - quota.percent) : 0;
   const unlimited = !!quota?.unlimited;
+
+  if (compact) {
+    return (
+      <div className="grid min-w-0 grid-cols-2 gap-1 sm:flex sm:h-full sm:flex-col sm:justify-between">
+        <div className="min-w-0 rounded-md border border-kumo-line/70 bg-kumo-recessed/20 px-2 py-1">
+          <div className="text-[10px] font-semibold leading-none text-kumo-subtle">累计上行</div>
+          <div className="mt-0.5 truncate text-xs font-bold tabular-nums text-kumo-info" title={txTotal?.text || '-'}>
+            {txTotal?.text || '-'}
+          </div>
+        </div>
+        <div className="min-w-0 rounded-md border border-kumo-line/70 bg-kumo-recessed/20 px-2 py-1">
+          <div className="text-[10px] font-semibold leading-none text-kumo-subtle">累计下行</div>
+          <div className="mt-0.5 truncate text-xs font-bold tabular-nums text-kumo-success" title={rxTotal?.text || '-'}>
+            {rxTotal?.text || '-'}
+          </div>
+        </div>
+        {quota && (
+          <div className="col-span-2 min-w-0 rounded-md border border-kumo-line/70 bg-kumo-recessed/20 px-2 py-1">
+            <Meter
+              label="剩余流量"
+              value={unlimited ? 100 : remainingPercent}
+              min={0}
+              max={100}
+              customValue={unlimited ? '∞' : `${remainingPercent.toFixed(remainingPercent >= 10 ? 0 : 1)}%`}
+              className="gap-0.5 text-[10px] font-semibold leading-none text-kumo-subtle"
+              trackClassName="!h-1 overflow-hidden rounded-full bg-kumo-base"
+              indicatorClassName={`!h-full !bg-none ${unlimited ? '!bg-kumo-info' : quota.overLimit ? '!bg-kumo-danger' : quota.nearAlert ? '!bg-kumo-warning' : '!bg-kumo-info'}`}
+            />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const itemClassName = 'px-2.5 py-2';
+  const valueClassName = 'text-sm';
 
   return (
     <div className="grid min-w-0 grid-cols-2 gap-1.5 sm:grid-cols-1">
@@ -653,6 +683,40 @@ const ExpandedStatTile = React.memo(ExpandedStatTileComponent, (prev, next) => (
   && prev.captionClassName === next.captionClassName
 ));
 
+function NetworkQualitySummaryStrip({ summary = [] }) {
+  if (!summary.length) return null;
+
+  return (
+    <div
+      className="grid min-w-0 gap-1"
+      style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(12rem, 100%), 1fr))' }}
+    >
+      {summary.map(item => {
+        const tone = getNetworkQualityTone(item);
+        const latestValue = item.latest?.success
+          ? formatLatencyValue(item.latest.latencyMs)
+          : '失败';
+        const caption = `抖动 ${formatLatencyValue(item.jitterMs)} · 丢包 ${toNumber(item.lossRate, 0).toFixed(1)}%`;
+
+        return (
+          <div
+            key={item.name}
+            className="grid min-h-6 min-w-0 grid-cols-[auto_auto_minmax(0,1fr)] items-baseline gap-x-1.5 rounded-md border border-kumo-line/70 bg-kumo-recessed/15 px-2 py-1 text-[10px] leading-none"
+          >
+            <span className="shrink-0 font-semibold text-kumo-subtle">{item.name}</span>
+            <span className={`shrink-0 text-xs font-bold tabular-nums ${getNetworkQualityToneClass(tone)}`} title={String(latestValue)}>
+              {latestValue}
+            </span>
+            <span className="min-w-0 truncate font-medium text-kumo-subtle" title={caption}>
+              {caption}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function TrendSeriesLabel({ name, color }) {
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5 text-[11px] font-medium leading-none text-kumo-subtle">
@@ -725,7 +789,7 @@ function NetworkQualityPanel({
   return (
     <ChartBoundaryBox className={`min-w-0 overflow-hidden app-card p-1.5 ${className}`}>
       {(tooltipBoundary) => (
-        <div className="flex min-w-0 flex-col gap-2">
+        <div className="flex min-w-0 flex-col gap-1.5">
           <div className={`flex min-w-0 flex-wrap items-center justify-between gap-2 ${compact ? 'min-h-2' : ''}`}>
             <h4 className="flex min-w-0 items-center gap-1.5 text-xs font-bold text-kumo-strong">
               <span className="h-3 w-1 shrink-0 rounded-full bg-kumo-brand"></span>
@@ -765,25 +829,7 @@ function NetworkQualityPanel({
           ) : (
             <>
               {summary.length > 0 && (
-                <div className="grid grid-cols-3 gap-1 sm:gap-1.5">
-                  {summary.map(item => {
-                    const tone = getNetworkQualityTone(item);
-                    const latestValue = item.latest?.success
-                      ? formatLatencyValue(item.latest.latencyMs)
-                      : '失败';
-                    return (
-                      <ExpandedStatTile
-                        key={item.name}
-                        label={item.name}
-                        value={latestValue}
-                        caption={`抖动 ${formatLatencyValue(item.jitterMs)} · 丢包 ${toNumber(item.lossRate, 0).toFixed(1)}%`}
-                        tone={tone}
-                        className={`px-1.5 py-1.5 sm:px-2.5 sm:py-2 ${getNetworkQualityToneClass(tone)}`}
-                        captionClassName="hidden sm:block"
-                      />
-                    );
-                  })}
-                </div>
+                <NetworkQualitySummaryStrip summary={summary} />
               )}
 
               {hasData ? (
@@ -2478,6 +2524,7 @@ function ServerPage() {
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [upgrading, setUpgrading] = useState(false);
   const [upgradeLog, setUpgradeLog] = useState('');
+  const [upgradeBatchSnapshot, setUpgradeBatchSnapshot] = useState(null);
   const [upgradeProgress, setUpgradeProgress] = useState(0);
   const [forceUpgrade, setForceUpgrade] = useState(false);
   const [upgradeFallbackSsh, setUpgradeFallbackSsh] = useState(true);
@@ -2523,6 +2570,8 @@ function ServerPage() {
   const dockerRefreshTimerRef = useRef(null);
   const dockerTaskMetaRef = useRef({});
   const terminalResizeTimers = useRef({});
+  const upgradeLogViewportRef = useRef(null);
+  const upgradeLogLineKeysRef = useRef(new Set());
   const socketRef = useRef(null);
   const pendingMetricUpdatesRef = useRef([]);
   const metricFlushTimerRef = useRef(null);
@@ -2535,6 +2584,7 @@ function ServerPage() {
   const expandedServersRef = useRef([]);
   const expandInteractionUntilRef = useRef(new Map());
   const visibleSessionIdsRef = useRef([]);
+  const activeTerminalStatusServerIdRef = useRef('');
   const sshSyncEnabledRef = useRef(false);
   const sftpPathByServerRef = useRef({});
 
@@ -2669,6 +2719,37 @@ function ServerPage() {
     return () => clearTimeout(timer);
   }, [visibleSessionIds, sshViewLayout, showServerStatusSidebar, showSftpSidebar]);
 
+  useLayoutEffect(() => {
+    if (serverCurrentTab !== 'terminal') return undefined;
+
+    visibleSessionIdsRef.current = visibleSessionIds;
+    const restore = () => restoreVisibleTerminalSurfaces({ focus: true });
+    restore();
+
+    if (typeof window === 'undefined') return undefined;
+    let frameOne = 0;
+    let frameTwo = 0;
+    const timerOne = window.setTimeout(restore, 50);
+    const timerTwo = window.setTimeout(restore, 180);
+    frameOne = window.requestAnimationFrame(() => {
+      restore();
+      frameTwo = window.requestAnimationFrame(restore);
+    });
+
+    return () => {
+      window.clearTimeout(timerOne);
+      window.clearTimeout(timerTwo);
+      if (frameOne) window.cancelAnimationFrame(frameOne);
+      if (frameTwo) window.cancelAnimationFrame(frameTwo);
+    };
+  }, [serverCurrentTab, visibleSessionIds, sshViewLayout, activeTerminalSidebar]);
+
+  useEffect(() => {
+    if (serverCurrentTab === 'terminal') return undefined;
+    const timer = setTimeout(() => saveTerminalsToWarehouse(), 0);
+    return () => clearTimeout(timer);
+  }, [serverCurrentTab]);
+
   useEffect(() => {
     if (showSftpSidebar && activeSSHSessionId) {
       syncSftpToSession(activeSSHSessionId);
@@ -2678,6 +2759,21 @@ function ServerPage() {
   useEffect(() => {
     sshSyncEnabledRef.current = sshSyncEnabled;
   }, [sshSyncEnabled]);
+
+  useEffect(() => {
+    const el = upgradeLogViewportRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [upgradeLog]);
+
+  useEffect(() => {
+    const activeSession = sshSessions.find(session => session.id === activeSSHSessionId);
+    activeTerminalStatusServerIdRef.current = (
+      serverCurrentTab === 'terminal' && showServerStatusSidebar && activeSession?.server?.id
+        ? String(activeSession.server.id)
+        : ''
+    );
+  }, [activeSSHSessionId, serverCurrentTab, showServerStatusSidebar, sshSessions]);
 
   // 终端持久化实例仓库与 WebSocket 连接引用
 
@@ -3225,12 +3321,13 @@ function ServerPage() {
 
 
         const lastUpdate = server.lastMetricUpdateTime || 0;
-        const isExpanded = expandedServersRef.current.includes(server.id);
+        const isTerminalStatusVisible = activeTerminalStatusServerIdRef.current === String(server.id);
+        const isExpanded = expandedServersRef.current.includes(server.id) || isTerminalStatusVisible;
         const interactionGuardUntil = expandInteractionUntilRef.current.get(String(server.id)) || 0;
         const inExpandInteractionGuard = interactionGuardUntil > now;
         if (lastUpdate > 0 && (now - lastUpdate) < SERVER_METRIC_MIN_RENDER_INTERVAL_MS) {
           if (!isExpanded) return server;
-          if ((now - lastUpdate) < SERVER_REALTIME_SAMPLE_INTERVAL_MS) return server;
+          if (!isTerminalStatusVisible && (now - lastUpdate) < SERVER_REALTIME_SAMPLE_INTERVAL_MS) return server;
         }
 
         const existingCache = server.metricsCache || getCachedServerMetricHistory(serverId) || [];
@@ -4013,9 +4110,26 @@ function ServerPage() {
     }
   };
 
-  const getAgentBaseApiUrl = () => {
-    if (!agentModalData) return '';
+  const normalizeAgentOrigin = (value) => {
+    const raw = String(value || '').trim().replace(/\/+$/, '');
+    if (!raw) return '';
 
+    try {
+      const url = new URL(raw.startsWith('http') ? raw : `${agentInstallProtocol}://${raw}`);
+      url.protocol = `${agentInstallProtocol}:`;
+      return url.origin;
+    } catch (e) {
+      return '';
+    }
+  };
+
+  const getAgentPublicBaseApiUrl = () => {
+    const configuredOrigin = normalizeAgentOrigin(publicApiUrl);
+    if (configuredOrigin) return configuredOrigin;
+    return normalizeAgentOrigin(`${agentInstallProtocol}://${window.location.host}`);
+  };
+
+  const getAgentBaseApiUrl = () => {
     const normalizeOrigin = (value) => {
       const raw = String(value || '').trim().replace(/\/+$/, '');
       if (!raw) return '';
@@ -4032,7 +4146,7 @@ function ServerPage() {
     const configuredOrigin = normalizeOrigin(publicApiUrl);
     if (configuredOrigin) return configuredOrigin;
 
-    const modalOrigin = normalizeOrigin(agentModalData.apiUrl);
+    const modalOrigin = normalizeOrigin(agentModalData?.apiUrl);
     if (modalOrigin) return modalOrigin;
 
     return normalizeOrigin(`${agentInstallProtocol}://${window.location.host}`);
@@ -4082,7 +4196,7 @@ function ServerPage() {
     }
   };
 
-  const waitForAgentRestart = async (serverId, initialConnectedAt, timeoutMs = 90000) => {
+  const waitForAgentRestart = async (serverId, initialConnectedAt, timeoutMs = 180000) => {
     const start = Date.now();
     await new Promise(resolve => setTimeout(resolve, 3000));
 
@@ -4122,7 +4236,7 @@ function ServerPage() {
       const response = await fetch(`/api/server/agent/auto-install/${serverId}?protocol=${encodeURIComponent(agentInstallProtocol)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ force_ssh: agentForceSsh }),
+        body: JSON.stringify({ force_ssh: agentForceSsh, base_url: getAgentPublicBaseApiUrl() }),
       });
       const data = await response.json();
       if (data.success) {
@@ -4134,7 +4248,7 @@ function ServerPage() {
           toast.success('Agent 已就绪');
           loadServerList();
         } else {
-          setAgentInstallLog(prev => `${prev}\nAgent 未能在 90 秒内重建连接，可能仍在启动中。`);
+          setAgentInstallLog(prev => `${prev}\nAgent 未能在 180 秒内重建连接，可能仍在启动中。`);
           setAgentInstallResult('warning');
         }
       } else {
@@ -4602,14 +4716,24 @@ function ServerPage() {
   };
 
   const openBatchAgentModal = () => {
-    setSelectedBatchServers([]);
+    setSelectedBatchServers(serverList.filter(canSshDeployAgent).map(server => server.id));
     setBatchInstallResults([]);
     setBatchAgentForceSsh(false);
     setShowBatchAgentModal(true);
   };
 
   const selectAllBatchServers = () => {
-    setSelectedBatchServers(serverList.map(server => server.id));
+    setSelectedBatchServers(serverList.filter(canSshDeployAgent).map(server => server.id));
+  };
+
+  const canSshDeployAgent = (server = {}) => {
+    if (server.capabilities?.ssh_configured || server.capabilities?.supports_ssh) return true;
+    const host = String(server.host || '').trim();
+    if (!host || host === '0.0.0.0') return false;
+    const username = String(server.username || '').trim();
+    if (!username) return false;
+    if (server.auth_type === 'key') return Boolean(server.private_key || server.capabilities?.has_private_key);
+    return Boolean(server.password || server.capabilities?.has_password);
   };
 
   const toggleBatchServerSelection = (serverId) => {
@@ -4678,6 +4802,7 @@ function ServerPage() {
         body: JSON.stringify({
           serverIds: selectedBatchServers,
           force_ssh: batchAgentForceSsh,
+          base_url: getAgentPublicBaseApiUrl(),
           concurrency: 4,
         }),
       });
@@ -4705,6 +4830,8 @@ function ServerPage() {
 
   const openUpgradeModal = () => {
     setUpgradeLog('');
+    upgradeLogLineKeysRef.current = new Set();
+    setUpgradeBatchSnapshot(null);
     setUpgradeProgress(0);
     setUpgrading(false);
     setForceUpgrade(false);
@@ -4716,24 +4843,112 @@ function ServerPage() {
 		isServerOnline(s) || s.monitor_mode === 'agent' || s.host === '0.0.0.0'
 	);
 
+  const getUpgradeBatchStatusLabel = (status) => {
+    switch (status) {
+      case 'queued':
+        return '排队中';
+      case 'running':
+        return '执行中';
+      case 'verifying':
+        return '验证中';
+      case 'succeeded':
+        return '已完成';
+      case 'failed':
+        return '部分失败';
+      default:
+        return status || '待执行';
+    }
+  };
+
+  const getUpgradeItemStatusLabel = (status) => {
+    switch (status) {
+      case 'queued':
+        return '等待';
+      case 'running':
+        return '执行中';
+      case 'verifying':
+        return '验证中';
+      case 'succeeded':
+        return '成功';
+      case 'failed':
+        return '失败';
+      default:
+        return status || '未知';
+    }
+  };
+
+  const resetUpgradeLog = (lines = []) => {
+    upgradeLogLineKeysRef.current = new Set();
+    const normalized = lines.map(line => String(line || '').trimEnd()).filter(Boolean);
+    normalized.forEach((line, index) => upgradeLogLineKeysRef.current.add(`initial:${index}:${line}`));
+    setUpgradeLog(normalized.length > 0 ? `${normalized.join('\n')}\n` : '');
+  };
+
+  const appendUpgradeLogEvents = (events = []) => {
+    const nextLines = [];
+    events.forEach(event => {
+      if (!event) return;
+      const key = String(event.key || event.line || '');
+      const line = String(event.line || '').trimEnd();
+      if (!key || !line || upgradeLogLineKeysRef.current.has(key)) return;
+      upgradeLogLineKeysRef.current.add(key);
+      nextLines.push(line);
+    });
+    if (nextLines.length === 0) return;
+    setUpgradeLog(prev => `${prev || ''}${nextLines.join('\n')}\n`);
+  };
+
+  const appendUpgradeBatchSnapshot = (batch) => {
+    if (!batch?.id) return;
+    const summary = batch.summary || {};
+    const total = batch.items?.length || 0;
+    const done = (summary.succeeded || 0) + (summary.failed || 0);
+    const events = [
+      {
+        key: `${batch.id}:status:${batch.status}:${done}:${total}:${summary.succeeded || 0}:${summary.failed || 0}`,
+        line: `批任务 ${batch.id} ${getUpgradeBatchStatusLabel(batch.status)}，进度 ${done}/${total}，成功 ${summary.succeeded || 0}，失败 ${summary.failed || 0}`,
+      },
+    ];
+
+    (batch.items || []).forEach(item => {
+      const serverLabel = item.serverName || item.serverId || '未知主机';
+      (item.log || []).forEach((line, index) => {
+        events.push({
+          key: `${batch.id}:${item.serverId}:log:${index}:${line}`,
+          line: `[${serverLabel}] ${line}`,
+        });
+      });
+      if (item.status === 'failed' || item.status === 'succeeded') {
+        events.push({
+          key: `${batch.id}:${item.serverId}:final:${item.status}:${item.error || ''}`,
+          line: `[${serverLabel}] ${getUpgradeItemStatusLabel(item.status)}${item.error ? `: ${item.error}` : ''}`,
+        });
+      }
+    });
+
+    appendUpgradeLogEvents(events);
+  };
+
   const performOneKeyUpgrade = async () => {
     if (upgrading) return;
 
     setUpgrading(true);
-    setUpgradeLog('开始批量升级任务...\n');
+    setUpgradeBatchSnapshot(null);
+    resetUpgradeLog(['开始批量升级任务...']);
     setUpgradeProgress(0);
 
-    const appendLog = (line) => setUpgradeLog(prev => prev + line);
     const targetServers = getAgentUpgradeTargets();
 
     if (targetServers.length === 0) {
-      appendLog('没有检测到在线的 Agent 主机。\n');
+      appendUpgradeLogEvents([{ key: 'no-targets', line: '没有检测到在线的 Agent 主机。' }]);
       setUpgrading(false);
       return;
     }
 
-    appendLog(`目标 Agent: ${targetServers.length} 台。\n`);
-    appendLog(`服务端批任务并发限制: 4。${upgradeFallbackSsh ? 'SSH 保底已开启。' : 'SSH 保底未开启。'}\n`);
+    appendUpgradeLogEvents([
+      { key: 'targets', line: `目标 Agent: ${targetServers.length} 台。` },
+      { key: `options:${upgradeFallbackSsh}`, line: `服务端批任务并发限制: 4。${upgradeFallbackSsh ? 'SSH 保底已开启。' : 'SSH 保底未开启。'}` },
+    ]);
 
     try {
       const response = await fetch(`/api/server/agent/batch-upgrade?protocol=${encodeURIComponent(agentInstallProtocol)}`, {
@@ -4743,6 +4958,7 @@ function ServerPage() {
           serverIds: targetServers.map(server => server.id),
           force_ssh: forceUpgrade,
           fallback_ssh: upgradeFallbackSsh,
+          base_url: getAgentPublicBaseApiUrl(),
           concurrency: 4,
         }),
       });
@@ -4750,34 +4966,25 @@ function ServerPage() {
       if (!payload.success) throw new Error(payload.error || '创建批量升级任务失败');
 
       const finalBatch = await pollAgentBatch(payload.data.id, batch => {
+        setUpgradeBatchSnapshot(batch);
         const summary = batch.summary || {};
         const total = batch.items?.length || targetServers.length;
         const done = (summary.succeeded || 0) + (summary.failed || 0);
         setUpgradeProgress(total > 0 ? Math.round((done / total) * 100) : 0);
-        const lines = [
-          `批任务 ${batch.id}`,
-          `状态: ${batch.status}`,
-          `进度: ${done}/${total}，成功 ${summary.succeeded || 0}，失败 ${summary.failed || 0}`,
-          '',
-          ...(batch.items || []).map(item => {
-            const lastLog = Array.isArray(item.log) && item.log.length > 0 ? ` - ${item.log[item.log.length - 1]}` : '';
-            return `[${item.serverName || item.serverId}] ${item.status}${item.error ? `: ${item.error}` : lastLog}`;
-          }),
-          '',
-        ];
-        setUpgradeLog(lines.join('\n'));
+        appendUpgradeBatchSnapshot(batch);
       });
+      setUpgradeBatchSnapshot(finalBatch || null);
       setUpgradeProgress(100);
       if (finalBatch?.status === 'succeeded') {
-        appendLog('\n所有目标 Agent 均已完成升级并重新上线。\n');
+        appendUpgradeLogEvents([{ key: 'final:succeeded', line: '所有目标 Agent 均已完成升级并重新上线。' }]);
         toast.success('Agent 批量升级完成');
       } else {
-        appendLog('\n批量升级完成，部分 Agent 失败。\n');
+        appendUpgradeLogEvents([{ key: 'final:failed', line: '批量升级完成，部分 Agent 失败。' }]);
         toast.warning('Agent 批量升级完成，部分失败');
       }
       loadServerList();
     } catch (e) {
-      appendLog(`批量升级失败: ${e.message}\n`);
+      appendUpgradeLogEvents([{ key: `error:${e.message}`, line: `批量升级失败: ${e.message}` }]);
       toast.error(`批量升级失败: ${e.message}`);
     } finally {
       setUpgrading(false);
@@ -6530,23 +6737,26 @@ function ServerPage() {
       }
       const ws = new WebSocket(`${protocol}//${window.location.host}/ws/ssh?${params.toString()}`);
 
-      ws.onopen = () => {
-        terminal.writeln('\r\n\x1b[1;32mConnecting SSH terminal...\x1b[0m');
-      };
       ws.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
           if (message.type === 'data') {
+            const inst = sshSessionRefs.current[sessionId];
+            if (inst) inst.hasTerminalData = true;
             terminal.write(message.data || '');
           } else if (message.type === 'status' && (message.data === 'connected' || message.data === 'connected_legacy' || message.data === 'attached')) {
             const connectedTransport = message.transport || sessionMeta.server.preferred_terminal_transport || sessionMeta.type || 'ssh';
+            const inst = sshSessionRefs.current[sessionId];
+            if (inst && !inst.connectionBannerCleared && !inst.hasTerminalData) {
+              terminal.clear();
+              inst.connectionBannerCleared = true;
+              scheduleTerminalFit(sessionId, 30);
+            }
+            if (inst) {
+              inst.connected = true;
+              inst.transport = connectedTransport;
+            }
             setSshSessions(prev => prev.map(s => s.id === sessionId ? { ...s, connected: true, transport: connectedTransport } : s));
-            const statusNote = message.data === 'connected_legacy'
-              ? ' (legacy agent, no PTY ack)'
-              : message.data === 'attached'
-                ? ' (attached)'
-                : '';
-            terminal.writeln(`\r\n\x1b[1;32m${connectedTransport === 'agent' ? 'Agent tunnel terminal' : 'SSH terminal'} connected${statusNote}.\x1b[0m`);
           } else if (message.type === 'error') {
             terminal.writeln(`\r\n\x1b[1;31m${message.data || 'SSH connection failed'}\x1b[0m`);
           }
@@ -6558,6 +6768,8 @@ function ServerPage() {
         terminal.writeln('\r\n\x1b[1;31mSSH terminal connection error.\x1b[0m');
       };
       ws.onclose = () => {
+        const inst = sshSessionRefs.current[sessionId];
+        if (inst) inst.connected = false;
         setSshSessions(prev => prev.map(s => s.id === sessionId ? { ...s, connected: false } : s));
         terminal.writeln('\r\n\x1b[1;33mSSH terminal connection closed.\x1b[0m');
       };
@@ -6622,7 +6834,9 @@ function ServerPage() {
       resizeObserver,
       lastResizeCols: 0,
       lastResizeRows: 0,
-      lastSeq: 0
+      lastSeq: 0,
+      connectionBannerCleared: false,
+      hasTerminalData: false
     };
 
     const ws = createSSHSocket(sessionId, sessionMeta, terminal);
@@ -6665,9 +6879,32 @@ function ServerPage() {
         slotDiv.appendChild(termEl);
       }
       if (slotDiv && termEl && termEl.parentElement === slotDiv) {
-        scheduleTerminalFit(id, 120);
+        const instance = sshSessionRefs.current[id];
+        try {
+          instance?.terminal?.refresh?.(0, Math.max(0, (instance.terminal?.rows || 1) - 1));
+        } catch (e) {
+          // xterm can throw while its viewport is between detached and attached states.
+        }
+        scheduleTerminalFit(id, 40);
       }
     });
+  };
+
+  const restoreVisibleTerminalSurfaces = ({ focus = false } = {}) => {
+    syncTerminalDOM();
+    visibleSessionIdsRef.current.forEach(id => {
+      const instance = sshSessionRefs.current[id];
+      if (!instance?.terminal) return;
+      fitTerminalSession(id, false);
+      try {
+        instance.terminal.refresh?.(0, Math.max(0, instance.terminal.rows - 1));
+      } catch (e) {
+        // Safe no-op while the terminal viewport is being reparented.
+      }
+    });
+    if (focus && activeSSHSessionId) {
+      sshSessionRefs.current[activeSSHSessionId]?.terminal?.focus();
+    }
   };
 
   // 关闭终端会话
@@ -7115,6 +7352,9 @@ function ServerPage() {
             {...MODULE_TABS_PROPS}
             value={serverCurrentTab}
             onValueChange={(value) => {
+              if (serverCurrentTab === 'terminal' && value !== 'terminal') {
+                saveTerminalsToWarehouse();
+              }
               setServerCurrentTab(value);
               if (value === 'status-pages') loadServerStatusPages();
             }}
@@ -9994,47 +10234,25 @@ function ServerPage() {
       {/* ==================== 5. SSH 终端 (多分屏支持) ==================== */}
       {serverCurrentTab === 'terminal' && (() => {
         const activeSession = sshSessions.find(s => s.id === activeSSHSessionId);
-        const activeServer = activeSession?.server;
+        const activeServer = serverList.find(server => String(server.id) === String(activeSession?.server?.id)) || activeSession?.server;
         const activeInfo = activeServer?.info || {};
-        const isTerminalDarkMode = theme === 'dark';
-        const terminalCpuColor = ChartPalette.semantic('Success', isTerminalDarkMode);
-        const terminalMemColor = ChartPalette.categorical(0, isTerminalDarkMode);
-        const terminalDiskColor = ChartPalette.semantic('Warning', isTerminalDarkMode);
-        const terminalGpuColor = ChartPalette.categorical(1, isTerminalDarkMode);
-        const resourceMetrics = [
-          {
-            label: 'CPU',
-            value: activeInfo.cpu?.Usage || '-',
-            width: activeInfo.cpu?.Usage || '0%',
-            valueClassName: 'text-kumo-success',
-            barClassName: 'bg-kumo-success',
-            color: terminalCpuColor,
-          },
-          {
-            label: '内存',
-            value: activeInfo.memory?.Usage || '-',
-            width: activeInfo.memory?.Usage || '0%',
-            valueClassName: 'text-kumo-info',
-            barClassName: 'bg-kumo-info',
-            color: terminalMemColor,
-          },
-          {
-            label: 'Disk',
-            value: activeInfo.disk?.[0]?.usage || '-',
-            width: activeInfo.disk?.[0]?.usage || '0%',
-            valueClassName: 'text-kumo-warning',
-            barClassName: 'bg-kumo-warning',
-            color: terminalDiskColor,
-          },
-          {
-            label: 'GPU',
-            value: activeInfo.gpu?.Usage || '-',
-            width: activeInfo.gpu?.Usage || '0%',
-            valueClassName: 'text-kumo-warning',
-            barClassName: 'bg-kumo-warning',
-            color: terminalGpuColor,
-          },
-        ];
+        const activePrimaryDisk = activeInfo.disk?.[0];
+        const terminalCpuUsage = clampPercent(toNumber(activeInfo.cpu?.Usage, 0));
+        const terminalMemUsage = clampPercent(toNumber(activeInfo.memory?.Usage, 0));
+        const terminalDiskUsage = clampPercent(toNumber(activePrimaryDisk?.usage, 0));
+        const terminalGpuUsage = clampPercent(toNumber(activeInfo.gpu?.Usage, 0));
+        const terminalCpuTemp = toNumber(activeInfo.cpu?.Temp, 0);
+        const terminalCpuPower = toNumber(activeInfo.cpu?.Power, 0);
+        const terminalGpuTemp = toNumber(activeInfo.gpu?.Temp, 0);
+        const terminalPhysicalCores = activeInfo.cpu?.PhysicalCores || activeInfo.cpu?.Cores;
+        const terminalLogicalCores = activeInfo.cpu?.LogicalCores;
+        const terminalCoreText = terminalPhysicalCores && terminalLogicalCores && terminalPhysicalCores !== terminalLogicalCores
+          ? `${terminalPhysicalCores}核 / ${terminalLogicalCores}线程`
+          : `${terminalPhysicalCores || '-'} 核`;
+        const terminalGpuModel = getGpuModelText(activeInfo.gpu);
+        const terminalHasGpu = !!terminalGpuModel || terminalGpuUsage > 0 || terminalGpuTemp > 0;
+        const terminalTxTotal = getByteParts(activeInfo.network?.tx_total);
+        const terminalRxTotal = getByteParts(activeInfo.network?.rx_total);
         return (
           <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden app-card">
             <div className="flex min-h-11 items-center justify-between gap-3 border-b border-kumo-line bg-kumo-base px-3 py-2 text-xs">
@@ -10203,38 +10421,80 @@ function ServerPage() {
                               onClick={() => setActiveTerminalSidebar(null)}
                             />
                           </div>
-                          <div className="mb-2.5 min-w-0 rounded-md border border-kumo-line bg-kumo-recessed/25 p-2">
-                            <div className="truncate text-[11px] font-semibold text-kumo-strong">{activeSession?.name || '-'}</div>
-                            <div className="mt-1 truncate font-mono text-[10px] text-kumo-subtle">{activeServer?.host || 'Agent'}</div>
-                          </div>
-                          <div className="flex flex-col gap-2.5">
-                            {resourceMetrics.map(metric => {
-                              const label = metric.label;
-                              return (
-                                <div key={metric.label} className="min-w-0">
-                                  <div className="mb-1 flex items-center justify-between gap-2 text-[10px]">
-                                    <span className="font-semibold text-kumo-subtle">{label}</span>
-                                    <span className={`font-mono font-bold ${metric.color ? '' : metric.valueClassName}`} style={metric.color ? { color: metric.color } : undefined}>{metric.value}</span>
-                                  </div>
-                                  <div className="h-1.5 overflow-hidden rounded-full border border-kumo-line bg-kumo-recessed">
-                                    <div className={`h-full ${metric.color ? '' : metric.barClassName}`} style={{ width: metric.width, backgroundColor: metric.color || undefined }} />
-                                  </div>
+                          <div className="min-h-0 space-y-2 overflow-y-auto pr-1">
+                            <div className="min-w-0 rounded-md border border-kumo-line/70 bg-kumo-recessed/20 p-2">
+                              <div className="flex min-w-0 items-center gap-2">
+                                <i className={getOSIconClass(activeInfo.platform)}></i>
+                                <div className="min-w-0">
+                                  <div className="truncate text-xs font-bold text-kumo-strong">{activeSession?.name || activeServer?.name || '-'}</div>
+                                  <div className="mt-1 truncate font-mono text-[10px] text-kumo-subtle">{getHostAddress(activeServer, serverIpDisplayMode) || activeServer?.host || 'Agent'}</div>
                                 </div>
-                              );
-                            })}
-                          </div>
-                          {activeInfo.network && (
-                            <div className="mt-3 flex flex-col gap-2 border-t border-kumo-line pt-3 text-[10px]">
-                              <div className="rounded-md border border-kumo-line bg-kumo-recessed/30 p-2">
-                                <div className="text-kumo-subtle">上行</div>
-                                <div className="mt-1 truncate font-mono font-semibold text-kumo-info">{activeInfo.network.tx_speed || '-'}</div>
-                              </div>
-                              <div className="rounded-md border border-kumo-line bg-kumo-recessed/30 p-2">
-                                <div className="text-kumo-subtle">下行</div>
-                                <div className="mt-1 truncate font-mono font-semibold text-kumo-success">{activeInfo.network.rx_speed || '-'}</div>
                               </div>
                             </div>
-                          )}
+
+                            <ExpandedSection title="资源状态" tone="success">
+                              <div className="grid grid-cols-2 gap-1.5">
+                                <ExpandedProgressMetric
+                                  label="CPU"
+                                  value={terminalCpuUsage}
+                                  detail={`${Math.round(terminalCpuUsage)}%`}
+                                  caption={`${terminalCoreText}${terminalCpuTemp > 0 ? ` · ${Math.round(terminalCpuTemp)}°C` : ''}${terminalCpuPower > 0 ? ` · ${terminalCpuPower.toFixed(1)}W` : ''}`}
+                                  indicatorClassName="!bg-none !bg-kumo-success"
+                                  valueClassName="text-kumo-success"
+                                />
+                                <ExpandedProgressMetric
+                                  label="内存"
+                                  value={terminalMemUsage}
+                                  detail={`${Math.round(terminalMemUsage)}%`}
+                                  caption={`${activeInfo.memory?.Used || '-'} / ${activeInfo.memory?.Total || '-'}`}
+                                  indicatorClassName="!bg-none !bg-kumo-info"
+                                  valueClassName="text-kumo-info"
+                                />
+                                {activePrimaryDisk && (
+                                  <ExpandedProgressMetric
+                                    label="磁盘"
+                                    value={terminalDiskUsage}
+                                    detail={`${Math.round(terminalDiskUsage)}%`}
+                                    caption={`${activePrimaryDisk.used || '-'} / ${activePrimaryDisk.total || '-'}`}
+                                    indicatorClassName="!bg-none !bg-kumo-warning"
+                                    valueClassName="text-kumo-warning"
+                                  />
+                                )}
+                                {terminalHasGpu && (
+                                  <ExpandedProgressMetric
+                                    label="GPU"
+                                    value={terminalGpuUsage}
+                                    detail={`${Math.round(terminalGpuUsage)}%`}
+                                    caption={`${terminalGpuModel || 'GPU'}${terminalGpuTemp > 0 ? ` · ${Math.round(terminalGpuTemp)}°C` : ''}`}
+                                    indicatorClassName="!bg-none !bg-kumo-warning"
+                                    valueClassName="text-kumo-warning"
+                                  />
+                                )}
+                              </div>
+                            </ExpandedSection>
+
+                            <ExpandedSection title="系统概览" tone="brand">
+                              <div className="grid grid-cols-1 gap-1.5">
+                                <ExpandedInfoChip label="系统" value={activeInfo.platform || activeInfo.platformVersion || activeInfo.system?.Kernel || '-'} />
+                                <ExpandedInfoChip label="CPU 型号" value={activeInfo.cpu?.Model || activeServer?.metadata?.cpu_model || activeServer?.metadata?.cpu_name || '-'} />
+                                <ExpandedInfoChip label="负载" value={activeInfo.cpu?.Load || '-'} valueClassName="font-mono text-kumo-strong" />
+                                <ExpandedInfoChip label="在线" value={formatUptimeDaysOnly(activeInfo.uptime || activeInfo.system?.Uptime)} />
+                                <ExpandedInfoChip label="Agent 版本" value={activeInfo.agentVersion || '-'} />
+                              </div>
+                            </ExpandedSection>
+
+                            {activeInfo.network && (
+                              <ExpandedSection title="网络" tone="info">
+                                <div className="grid grid-cols-2 gap-1.5">
+                                  <ExpandedStatTile label="上传" value={activeInfo.network.tx_speed || '0 B/s'} tone="info" />
+                                  <ExpandedStatTile label="下载" value={activeInfo.network.rx_speed || '0 B/s'} tone="success" />
+                                  <ExpandedInfoChip label="累计上行" value={terminalTxTotal.text} valueClassName="text-kumo-info" className="col-span-2" />
+                                  <ExpandedInfoChip label="累计下行" value={terminalRxTotal.text} valueClassName="text-kumo-success" className="col-span-2" />
+                                  <ExpandedInfoChip label="连接" value={activeInfo.network.connections || 0} className="col-span-2" />
+                                </div>
+                              </ExpandedSection>
+                            )}
+                          </div>
                         </div>
                       )}
                       {showSftpSidebar && (
@@ -11167,28 +11427,32 @@ function ServerPage() {
               </div>
 
               <div className="grid grid-cols-1 gap-2 rounded-md border border-kumo-line bg-kumo-recessed/25 p-3 sm:grid-cols-2 lg:grid-cols-3">
-                {serverList.map(server => (
-                  <div key={server.id} className="app-card app-card-md p-2">
-                    <Checkbox
-                      label={
-                        <span className="inline-flex min-w-0 items-center gap-1.5">
-                          {getFlagCountry(server) && (
-                            <CountryFlag countryCode={getFlagCountry(server)} className="h-3 w-4 text-xs" />
-                          )}
-                          <span className="truncate font-semibold text-kumo-strong">{server.name}</span>
-                        </span>
-                      }
-                      checked={selectedBatchServers.includes(server.id)}
-                      disabled={agentInstallLoading}
-                      onCheckedChange={(checked) => {
-                        setSelectedBatchServers(prev => {
-                          if (checked) return prev.includes(server.id) ? prev : [...prev, server.id];
-                          return prev.filter(id => id !== server.id);
-                        });
-                      }}
-                    />
-                  </div>
-                ))}
+                {serverList.map(server => {
+                  const deployable = canSshDeployAgent(server);
+                  return (
+                    <div key={server.id} className="app-card app-card-md p-2">
+                      <Checkbox
+                        label={
+                          <span className="inline-flex min-w-0 items-center gap-1.5">
+                            {getFlagCountry(server) && (
+                              <CountryFlag countryCode={getFlagCountry(server)} className="h-3 w-4 text-xs" />
+                            )}
+                            <span className="truncate font-semibold text-kumo-strong">{server.name}</span>
+                            {!deployable && <span className="shrink-0 text-[10px] font-medium text-kumo-subtle">无 SSH</span>}
+                          </span>
+                        }
+                        checked={selectedBatchServers.includes(server.id)}
+                        disabled={agentInstallLoading || !deployable}
+                        onCheckedChange={(checked) => {
+                          setSelectedBatchServers(prev => {
+                            if (checked) return prev.includes(server.id) ? prev : [...prev, server.id];
+                            return prev.filter(id => id !== server.id);
+                          });
+                        }}
+                      />
+                    </div>
+                  );
+                })}
               </div>
 
               {batchInstallResults.length > 0 && (
@@ -11298,11 +11562,19 @@ function ServerPage() {
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <div className="rounded-md border border-kumo-line bg-kumo-recessed/35 p-3">
                   <div className="text-[11px] font-medium text-kumo-subtle">目标 Agent</div>
-                  <div className="mt-1 text-lg font-bold text-kumo-strong">{getAgentUpgradeTargets().length}</div>
+                  <div className="mt-1 text-lg font-bold text-kumo-strong">{upgradeBatchSnapshot?.items?.length || getAgentUpgradeTargets().length}</div>
                 </div>
                 <div className="rounded-md border border-kumo-line bg-kumo-recessed/35 p-3">
                   <div className="text-[11px] font-medium text-kumo-subtle">状态</div>
-                  <div className="mt-1 font-semibold text-kumo-strong">{upgrading ? '执行中' : upgradeProgress >= 100 ? '已完成' : '待执行'}</div>
+                  <div className="mt-1 font-semibold text-kumo-strong">
+                    {upgrading
+                      ? getUpgradeBatchStatusLabel(upgradeBatchSnapshot?.status || 'running')
+                      : upgradeBatchSnapshot
+                        ? getUpgradeBatchStatusLabel(upgradeBatchSnapshot.status)
+                        : upgradeProgress >= 100
+                          ? '已完成'
+                          : '待执行'}
+                  </div>
                 </div>
               </div>
 
@@ -11316,13 +11588,44 @@ function ServerPage() {
                 />
               )}
 
+              {upgradeBatchSnapshot?.items?.length > 0 && (
+                <div className="overflow-hidden rounded-md border border-kumo-line">
+                  {upgradeBatchSnapshot.items.map(item => (
+                    <div key={item.serverId} className="flex min-w-0 items-center justify-between gap-3 border-b border-kumo-line bg-kumo-base px-3 py-2 last:border-b-0">
+                      <div className="min-w-0">
+                        <div className="truncate text-xs font-semibold text-kumo-strong">{item.serverName || item.serverId}</div>
+                        {(item.error || item.log?.at?.(-1)) && (
+                          <div className={`mt-0.5 truncate text-[11px] ${item.error ? 'text-kumo-danger' : 'text-kumo-subtle'}`} title={item.error || item.log.at(-1)}>
+                            {item.error || item.log.at(-1)}
+                          </div>
+                        )}
+                      </div>
+                      <Badge
+                        variant={item.status === 'succeeded'
+                          ? 'success'
+                          : item.status === 'failed'
+                            ? 'danger'
+                            : item.status === 'verifying'
+                              ? 'warning'
+                              : 'info'}
+                      >
+                        {getUpgradeItemStatusLabel(item.status)}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {upgradeLog ? (
-                <Textarea
-                  label="升级日志"
-                  value={upgradeLog}
-                  readOnly
-                  className="min-h-56 font-mono text-[11px]"
-                />
+                <div className="space-y-1.5">
+                  <div className="text-xs font-semibold text-kumo-strong">升级日志</div>
+                  <pre
+                    ref={upgradeLogViewportRef}
+                    className="min-h-56 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md border border-kumo-line bg-kumo-recessed/25 p-3 font-mono text-[11px] leading-5 text-kumo-strong"
+                  >
+                    {upgradeLog}
+                  </pre>
+                </div>
               ) : (
                 <div className="app-card app-card-md p-3 text-kumo-subtle">
                   将对在线 Agent 或 Agent 模式主机下发升级任务。
@@ -11360,7 +11663,7 @@ function ServerPage() {
                 variant="primary"
                 icon={<Upload className="h-3.5 w-3.5" />}
                 loading={upgrading}
-                disabled={getAgentUpgradeTargets().length === 0}
+                disabled={upgrading || getAgentUpgradeTargets().length === 0}
                 onClick={performOneKeyUpgrade}
                 className="w-full sm:w-auto"
               >

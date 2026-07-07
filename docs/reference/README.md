@@ -1,6 +1,6 @@
 # 参考快照
 
-本目录存放上游或生成型资料，不代表项目当前状态本身。项目状态请优先阅读 `docs/README.md` 和 `docs/Kumo UI 迁移规则.md`。
+本目录存放上游或生成型资料，不代表项目当前状态本身。项目状态请优先阅读 `docs/README.md` 和 `docs/Kumo UI 规则.md`。
 
 ## 文件
 
@@ -19,5 +19,5 @@
 
 升级 `@cloudflare/kumo` 后刷新本目录，并同步更新：
 
-- `docs/Kumo UI 迁移规则.md`
+- `docs/Kumo UI 规则.md`
 - `docs/前端开发最佳实践.md`

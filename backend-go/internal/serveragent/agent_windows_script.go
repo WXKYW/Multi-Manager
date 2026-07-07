@@ -34,6 +34,8 @@ func (s *Service) getWindowsAgentInstallScript(w http.ResponseWriter, r *http.Re
 	}
 
 	proto, serverURL := resolveInstallOrigin(r)
+	serverBaseURL := fmt.Sprintf("%s://%s", proto, serverURL)
+	agentDownloadBaseURL := s.resolveAgentDownloadBaseURL(r.Context(), db, serverBaseURL)
 
 	script := fmt.Sprintf(`# API Monitor Agent - Windows install script
 # Host: %s (%s:%d)
@@ -44,6 +46,7 @@ $ErrorActionPreference = "Stop"
 $AGENT_VERSION = "latest"
 $INSTALL_DIR = "$env:ProgramFiles\APIMonitorAgent"
 $SERVER_URL = "%s://%s"
+$AGENT_DOWNLOAD_BASE_URL = "%s"
 $SERVER_ID = "%s"
 $AGENT_KEY = "%s"
 
@@ -55,7 +58,7 @@ if (!(Test-Path $INSTALL_DIR)) {
     New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null
 }
 
-$AGENT_URL = "$SERVER_URL/agent/agent-windows-amd64.exe"
+$AGENT_URL = "$AGENT_DOWNLOAD_BASE_URL/agent-windows-amd64.exe"
 $AGENT_PATH = "$INSTALL_DIR\api-monitor-agent.exe"
 $TEMP_AGENT_PATH = "$INSTALL_DIR\api-monitor-agent.exe.download"
 
@@ -141,6 +144,7 @@ Write-Host ""
 		name, host, port,
 		time.Now().Format("2006-01-02 15:04:05"),
 		proto, serverURL,
+		agentDownloadBaseURL,
 		accountID,
 		agentKey,
 		name,
