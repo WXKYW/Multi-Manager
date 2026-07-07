@@ -162,7 +162,8 @@ jobs:
       - name: Install musl-tools (Linux amd64)
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: |
-          sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \( -name 'microsoft-prod.list' -o -name 'azure-cli.list' \) -exec mv {} {}.disabled \;
+          sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \( -iname '*microsoft*' -o -iname '*azure*' \) -delete
+          sudo sed -i.bak '/packages\.microsoft\.com/d' /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
           sudo apt-get update
           sudo apt-get install -y musl-tools
 
