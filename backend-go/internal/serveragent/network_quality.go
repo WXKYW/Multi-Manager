@@ -423,7 +423,15 @@ func (s *Service) PushNetworkTargetsToAllAgents(ctx context.Context) {
 }
 
 func (s *Service) processAgentNetworkQuality(ctx context.Context, db *sql.DB, serverID string, nqData interface{}) {
-	if !s.shouldPersistNetworkQuality(serverID, time.Now()) {
+	s.processAgentNetworkQualityWithOptions(ctx, db, serverID, nqData, false)
+}
+
+func (s *Service) processAgentNetworkQualityForced(ctx context.Context, db *sql.DB, serverID string, nqData interface{}) {
+	s.processAgentNetworkQualityWithOptions(ctx, db, serverID, nqData, true)
+}
+
+func (s *Service) processAgentNetworkQualityWithOptions(ctx context.Context, db *sql.DB, serverID string, nqData interface{}, force bool) {
+	if !force && !s.shouldPersistNetworkQuality(serverID, time.Now()) {
 		return
 	}
 

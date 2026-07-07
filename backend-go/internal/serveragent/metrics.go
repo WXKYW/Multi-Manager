@@ -216,7 +216,7 @@ func (s *Service) collectNetworkQualitySamples(w http.ResponseWriter, r *http.Re
 			if err == nil {
 				var nqData interface{}
 				if json.Unmarshal([]byte(resultStr), &nqData) == nil {
-					s.processAgentNetworkQuality(r.Context(), db, serverID, nqData)
+					s.processAgentNetworkQualityForced(r.Context(), db, serverID, nqData)
 				}
 			}
 		} else {

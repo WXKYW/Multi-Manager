@@ -61,7 +61,7 @@ type Service struct {
 
 const defaultRealtimeMetricsPersistInterval = 30 * time.Second
 const minRealtimeMetricsPersistInterval = 10 * time.Second
-const defaultNetworkQualityPersistInterval = 0
+const defaultNetworkQualityPersistInterval = time.Minute
 const minNetworkQualityPersistInterval = 30 * time.Second
 const agentMetricsStaleAfter = 45 * time.Second
 

@@ -68,10 +68,10 @@ func TestShouldPersistRealtimeMetricsUsesConfiguredInterval(t *testing.T) {
 	}
 }
 
-func TestResolveNetworkQualityPersistIntervalDefaultsToDisabled(t *testing.T) {
+func TestResolveNetworkQualityPersistIntervalDefaultsToOneMinute(t *testing.T) {
 	t.Setenv("API_MONITOR_AGENT_NETWORK_QUALITY_PERSIST_INTERVAL_MS", "")
-	if got := resolveNetworkQualityPersistInterval(); got != 0 {
-		t.Fatalf("default network quality interval = %v, want disabled", got)
+	if got := resolveNetworkQualityPersistInterval(); got != time.Minute {
+		t.Fatalf("default network quality interval = %v, want %v", got, time.Minute)
 	}
 
 	t.Setenv("API_MONITOR_AGENT_NETWORK_QUALITY_PERSIST_INTERVAL_MS", "0")
