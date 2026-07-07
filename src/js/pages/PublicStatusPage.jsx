@@ -313,7 +313,7 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
       : '全部服务运行正常';
 
   return (
-    <div className="min-h-screen bg-kumo-canvas text-kumo-default">
+    <div className="public-status-page min-h-screen text-kumo-default">
       <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-4 py-6 sm:px-6 lg:px-8">
         <div className="mb-6 flex items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
@@ -330,13 +330,13 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
         </div>
 
         {loading && (
-          <div className="flex flex-1 items-center justify-center rounded-lg border border-kumo-interact/80 bg-kumo-base p-10 text-sm text-kumo-subtle">
+          <div className="public-status-card flex flex-1 items-center justify-center rounded-lg border border-kumo-interact/80 bg-kumo-base p-10 text-sm text-kumo-subtle">
             正在加载状态页...
           </div>
         )}
 
         {!loading && error && (
-          <div className="flex flex-1 flex-col items-center justify-center rounded-lg border border-kumo-interact/80 bg-kumo-base p-10 text-center">
+          <div className="public-status-card flex flex-1 flex-col items-center justify-center rounded-lg border border-kumo-interact/80 bg-kumo-base p-10 text-center">
             <AlertTriangle className="mb-3 h-9 w-9 text-kumo-warning" />
             <h1 className="text-lg font-bold text-kumo-strong">无法显示状态页</h1>
             <p className="mt-2 max-w-md text-sm leading-relaxed text-kumo-subtle">{error}</p>
@@ -348,7 +348,7 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
 
         {!loading && page && (
           <div className="flex flex-col gap-4">
-            <section className={`rounded-lg border px-4 py-3.5 ${statusPanelClass[statusTone]}`}>
+            <section className={`public-status-card rounded-lg border px-4 py-3.5 ${statusPanelClass[statusTone]}`}>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <div className="flex items-center gap-2 text-base font-bold">
@@ -380,7 +380,7 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
               </div>
             </section>
 
-            <section className="overflow-hidden rounded-lg border border-kumo-interact/80 bg-kumo-base">
+            <section className="public-status-card overflow-hidden rounded-lg border border-kumo-interact/80 bg-kumo-base">
               <div className="flex items-center justify-between gap-3 border-b border-kumo-interact/70 px-4 py-3">
                 <h2 className="text-sm font-bold text-kumo-strong">服务状态</h2>
                 <span className="text-xs text-kumo-subtle">24h 可用率</span>
