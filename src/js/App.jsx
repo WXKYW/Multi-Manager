@@ -3,9 +3,10 @@ import useStore, { applyThemeMode } from './store.js';
 import AuthPage from './pages/AuthPage.jsx';
 import MainLayout from './components/MainLayout.jsx';
 
-const FileboxPage = lazy(() => import('./pages/FileboxPage.jsx'));
+const PublicSharePage = lazy(() => import('./pages/PublicSharePage.jsx'));
 const PublicStatusPage = lazy(() => import('./pages/PublicStatusPage.jsx'));
 const PublicServerStatusPage = lazy(() => import('./pages/PublicServerStatusPage.jsx'));
+const VoidRoomPage = lazy(() => import('./pages/VoidRoomPage.jsx'));
 
 const isLocalHost = (host) => /^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(host || '');
 
@@ -25,10 +26,19 @@ const getPublicStatusRouteMode = () => {
   return false;
 };
 
+const getPublicFileboxRouteMode = () => {
+  if (typeof window === 'undefined') return false;
+  const path = window.location.pathname.replace(/\/+$/, '') || '/';
+  if (/^\/share\/[^/]+$/.test(path)) return 'share';
+  if (/^\/void\/[^/]+$/.test(path)) return 'void';
+  return false;
+};
+
 function App() {
   const { isAuthenticated, checkAuth, isCheckingAuth, themeMode } = useStore();
   const [domainStatusRoute, setDomainStatusRoute] = useState(null);
   const publicStatusRouteMode = getPublicStatusRouteMode();
+  const publicFileboxRouteMode = getPublicFileboxRouteMode();
   const dockerMockPreview = isDockerMockPreviewRoute();
 
   // 挂载时自动运行初始身份校验
@@ -80,8 +90,18 @@ function App() {
     };
   }, []);
 
-  if (!isAuthenticated && window.location.pathname === '/filebox' && new URLSearchParams(window.location.search).has('void')) {
-    return <div className="min-h-screen bg-kumo-canvas p-4 sm:p-8"><Suspense fallback={null}><FileboxPage publicVoidOnly /></Suspense></div>;
+  if (window.location.pathname === '/filebox' && new URLSearchParams(window.location.search).has('void')) {
+    const room = new URLSearchParams(window.location.search).get('void');
+    window.location.replace(`/void/${encodeURIComponent(room || '')}`);
+    return null;
+  }
+
+  if (publicFileboxRouteMode === 'share') {
+    return <Suspense fallback={null}><PublicSharePage /></Suspense>;
+  }
+
+  if (publicFileboxRouteMode === 'void') {
+    return <Suspense fallback={null}><VoidRoomPage /></Suspense>;
   }
 
   if (publicStatusRouteMode === 'server-slug') {

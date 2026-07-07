@@ -92,6 +92,8 @@ import {
   X as PhX,
 } from '@phosphor-icons/react';
 
+import tencentCloudIcon from '../../assets/brand-icons/tencentcloud.svg';
+
 const createIcon = (Icon) => {
   const AppIcon = ({
     className = '',
@@ -113,6 +115,41 @@ const createIcon = (Icon) => {
 
   AppIcon.displayName = `AppIcon(${Icon.displayName || Icon.name || 'Phosphor'})`;
   return AppIcon;
+};
+
+const createFontIcon = (iconClass, label) => {
+  const FontIcon = ({ className = '', style, ...props }) => {
+    const fontSize = className.includes('size-3.5') ? '0.875rem' : '1rem';
+
+    return (
+      <i
+        {...props}
+        className={`app-icon app-font-icon ${iconClass} ${className}`.trim()}
+        aria-hidden={props['aria-label'] ? undefined : true}
+        style={{ fontSize, ...style }}
+      />
+    );
+  };
+
+  FontIcon.displayName = `AppIcon(${label})`;
+  return FontIcon;
+};
+
+const createAssetIcon = (asset, label) => {
+  const AssetIcon = ({ className = '', style, ...props }) => (
+    <span
+      {...props}
+      className={`app-icon app-brand-icon app-brand-icon--asset ${className}`.trim()}
+      aria-hidden={props['aria-label'] ? undefined : true}
+      style={{
+        '--app-brand-icon-url': `url("${asset}")`,
+        ...style,
+      }}
+    />
+  );
+
+  AssetIcon.displayName = `AppIcon(${label})`;
+  return AssetIcon;
 };
 
 export const LayoutDashboard = createIcon(SquaresFour);
@@ -206,15 +243,20 @@ export const Maximize2 = createIcon(ArrowsOutSimple);
 export const ExternalLink = createIcon(ArrowSquareOut);
 export const ArrowLeft = createIcon(PhArrowLeft);
 export const Undo = createIcon(ArrowCounterClockwise);
+export const CloudflareBrand = createFontIcon('si si-cloudflare', 'Cloudflare');
+export const AlibabaCloudBrand = createFontIcon('si si-alibabacloud', 'AlibabaCloud');
+export const TencentCloudBrand = createAssetIcon(tencentCloudIcon, 'TencentCloud');
+export const KoyebBrand = createFontIcon('si si-koyeb', 'Koyeb');
+export const FlyIoBrand = createFontIcon('si si-flydotio', 'Fly.io');
 
 export const MODULE_ICON_MAP = {
   dashboard: LayoutDashboard,
   settings: Settings,
   openai: Bot,
   paas: Cloud,
-  dns: Globe,
-  aliyun: Database,
-  tencent: Hexagon,
+  dns: CloudflareBrand,
+  aliyun: AlibabaCloudBrand,
+  tencent: TencentCloudBrand,
   server: Server,
   scheduler: Clock,
   totp: ShieldCheck,

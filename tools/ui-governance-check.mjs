@@ -86,6 +86,9 @@ function allowedColorReason(rel, line, value) {
   if (rel === 'src/js/pages/FileboxPage.jsx' && value === 'bg-white' && line.includes('二维码')) {
     return 'QR code image background';
   }
+  if (rel === 'src/js/pages/VoidRoomPage.jsx' && value === 'bg-white' && line.includes('二维码')) {
+    return 'QR code image background';
+  }
   if (rel === 'src/js/pages/TotpPage.jsx' && value === 'bg-black') {
     return 'camera/QR scanner surface';
   }

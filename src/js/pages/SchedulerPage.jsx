@@ -14,7 +14,7 @@ import { Flow } from '@cloudflare/kumo/components/flow';
 import { Tooltip, TooltipProvider } from '@cloudflare/kumo/components/tooltip';
 import { Tabs } from '@cloudflare/kumo';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
-import { AppCard, SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { SectionCard } from '../components/ui/AppPrimitives.jsx';
 import {
   Activity,
   ArrowRight,
@@ -968,12 +968,36 @@ function SchedulerPage() {
     enabledTasks: tasks.filter((task) => task.enabled).length,
     workflows: workflows.length,
     failedRuns: runs.filter((run) => run.status === 'failed').length,
-  }), [runs, tasks, workflows]);
+    totalNodes: nodes.length,
+    onlineNodes: nodes.filter((node) => node.status === 'online').length,
+    agentNodes: nodes.filter((node) => node.kind === 'agent').length,
+    totalNodeConcurrency: nodes.reduce((sum, node) => sum + (Number(node.max_concurrency) || 0), 0),
+  }), [nodes, runs, tasks, workflows]);
+
+  const summaryItems = activeTab === 'nodes'
+    ? [
+      ['节点总数', stats.totalNodes, <Server className="h-4 w-4" />],
+      ['在线节点', stats.onlineNodes, <Check className="h-4 w-4" />],
+      ['Agent 节点', stats.agentNodes, <GitBranch className="h-4 w-4" />],
+      ['总并发', stats.totalNodeConcurrency, <Activity className="h-4 w-4" />],
+    ]
+    : [
+      ['任务总数', stats.totalTasks, <Clock className="h-4 w-4" />],
+      ['启用任务', stats.enabledTasks, <Check className="h-4 w-4" />],
+      ['工作流', stats.workflows, <GitBranch className="h-4 w-4" />],
+      ['失败运行', stats.failedRuns, <Activity className="h-4 w-4" />],
+    ];
 
   const nodeItems = useMemo(() => nodes.map((node) => ({ value: node.id, label: `${node.name}（${node.kind === 'local' ? '本机' : 'Agent'}）` })), [nodes]);
   const taskItems = useMemo(() => [{ value: '0', label: '内联命令' }, ...tasks.map((task) => ({ value: String(task.id), label: `${task.name} #${task.id}` }))], [tasks]);
   const workflowNodeItems = useMemo(() => workflowForm.nodes.map((node) => ({ value: node.id, label: node.name || node.id })), [workflowForm.nodes]);
   const selectedWorkflowNode = workflowForm.nodes.find((node) => node.id === selectedWorkflowNodeId) || workflowForm.nodes[0] || null;
+  const taskCommandLabel = taskForm.type === 'http' ? 'URL' : taskForm.type === 'internal' ? '内部接口路径' : '命令';
+  const taskCommandPlaceholder = taskForm.type === 'http'
+    ? 'https://example.com/health'
+    : taskForm.type === 'internal'
+      ? 'GET /health'
+      : 'echo hello';
 
   return (
     <TooltipProvider>
@@ -1000,20 +1024,15 @@ function SchedulerPage() {
           </div>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {[
-            ['任务总数', stats.totalTasks, <Clock className="h-4 w-4" />],
-            ['启用任务', stats.enabledTasks, <Check className="h-4 w-4" />],
-            ['工作流', stats.workflows, <GitBranch className="h-4 w-4" />],
-            ['失败运行', stats.failedRuns, <Activity className="h-4 w-4" />],
-          ].map(([label, value, icon]) => (
-            <AppCard key={label} padding="sm">
-              <div className="flex items-center justify-between text-xs text-kumo-subtle">
-                <span>{label}</span>
-                {icon}
+        <div className="grid overflow-hidden rounded-md border border-kumo-line/80 bg-kumo-line/60 sm:grid-cols-2 xl:grid-cols-4">
+          {summaryItems.map(([label, value, icon]) => (
+            <div key={label} className="min-w-0 bg-kumo-base/90 px-4 py-3">
+              <div className="flex items-center justify-between gap-3 text-xs text-kumo-subtle">
+                <span className="truncate">{label}</span>
+                <span className="shrink-0 text-kumo-inactive">{icon}</span>
               </div>
-              <div className="mt-2 font-mono text-xl font-bold text-kumo-strong">{value}</div>
-            </AppCard>
+              <div className="mt-1 font-mono text-lg font-bold text-kumo-strong">{value}</div>
+            </div>
           ))}
         </div>
 
@@ -1065,7 +1084,8 @@ function SchedulerPage() {
             title="工作流编排"
             description="将多个任务连接成 DAG，并按成功、失败或完成条件自动执行。"
             icon={<GitBranch className="h-4 w-4 text-kumo-brand" />}
-            bodyClassName="space-y-3"
+            bodyClassName={workflows.length === 0 ? '' : 'space-y-3'}
+            bodyPadding={workflows.length === 0 ? 'none' : 'md'}
           >
             {workflows.length === 0 ? (
               <Empty size="sm" icon={<GitBranch className="h-8 w-8 text-kumo-inactive" />} title="暂无工作流" description="将多个任务连接成 DAG，按成功、失败或完成条件自动编排。" contents={<Button size="sm" variant="primary" onClick={openCreateWorkflow}><Plus className="h-3.5 w-3.5" />新建工作流</Button>} />
@@ -1139,19 +1159,42 @@ function SchedulerPage() {
             title="执行节点"
             description="本机与 Agent 节点的在线状态、并发和能力标签。"
             icon={<Server className="h-4 w-4 text-kumo-brand" />}
-            bodyClassName="grid gap-3 sm:grid-cols-2 xl:grid-cols-3"
+            bodyPadding="none"
           >
-            {nodes.map((node) => (
-              <AppCard key={node.id} padding="sm">
-                <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2"><Server className="h-4 w-4 text-kumo-brand" /><div className="font-semibold text-kumo-strong">{node.name}</div></div><Badge variant={statusBadgeVariant(node.status)} appearance="dot">{statusLabel(node.status)}</Badge></div>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                  <div><span className="text-kumo-subtle">类型</span><div className="mt-1 text-kumo-strong">{node.kind === 'local' ? '本机' : 'Agent'}</div></div>
-                  <div><span className="text-kumo-subtle">并发</span><div className="mt-1 font-mono text-kumo-strong">{node.active_runs}/{node.max_concurrency}</div></div>
-                  <div className="col-span-2"><span className="text-kumo-subtle">标签</span><div className="mt-1 flex flex-wrap gap-1">{(node.labels || []).length === 0 ? <span className="text-kumo-subtle">无</span> : node.labels.map((label) => <Badge key={label} variant="secondary">{label}</Badge>)}</div></div>
-                </div>
-                <div className="mt-3 text-xs text-kumo-subtle">{node.capability_note}</div>
-              </AppCard>
-            ))}
+            {nodes.length === 0 ? (
+              <Empty size="sm" icon={<Server className="h-8 w-8 text-kumo-inactive" />} title="暂无执行节点" description="本机会自动作为默认执行节点，Agent 连接后也会显示在这里。" />
+            ) : (
+              <div className="overflow-x-auto">
+                <Table layout="fixed" className="min-w-[920px]">
+                  <colgroup><col className="w-[240px]" /><col className="w-[110px]" /><col className="w-[110px]" /><col className="w-[110px]" /><col className="w-[220px]" /><col /></colgroup>
+                  <Table.Header><Table.Row><Table.Head>节点</Table.Head><Table.Head>状态</Table.Head><Table.Head>类型</Table.Head><Table.Head>并发</Table.Head><Table.Head>标签</Table.Head><Table.Head>说明</Table.Head></Table.Row></Table.Header>
+                  <Table.Body>
+                    {nodes.map((node) => (
+                      <Table.Row key={node.id}>
+                        <Table.Cell>
+                          <div className="flex min-w-0 items-center gap-2">
+                            <Server className="h-4 w-4 shrink-0 text-kumo-brand" />
+                            <div className="min-w-0">
+                              <div className="truncate font-semibold text-kumo-strong">{node.name}</div>
+                              <div className="truncate text-xs text-kumo-subtle">{node.id}</div>
+                            </div>
+                          </div>
+                        </Table.Cell>
+                        <Table.Cell><Badge variant={statusBadgeVariant(node.status)} appearance="dot">{statusLabel(node.status)}</Badge></Table.Cell>
+                        <Table.Cell className="text-xs text-kumo-default">{node.kind === 'local' ? '本机' : 'Agent'}</Table.Cell>
+                        <Table.Cell className="font-mono text-xs text-kumo-strong">{node.active_runs ?? 0}/{node.max_concurrency ?? 0}</Table.Cell>
+                        <Table.Cell>
+                          <div className="flex flex-wrap gap-1">
+                            {(node.labels || []).length === 0 ? <span className="text-xs text-kumo-subtle">无</span> : node.labels.map((label) => <Badge key={label} variant="secondary">{label}</Badge>)}
+                          </div>
+                        </Table.Cell>
+                        <Table.Cell className="truncate text-xs text-kumo-subtle">{node.capability_note || '-'}</Table.Cell>
+                      </Table.Row>
+                    ))}
+                  </Table.Body>
+                </Table>
+              </div>
+            )}
           </SectionCard>
         )}
 
@@ -1169,7 +1212,7 @@ function SchedulerPage() {
                 <Select size="sm" label="任务类型" className="w-full" value={taskForm.type} onValueChange={(value) => setTaskForm((prev) => ({ ...prev, type: value }))} items={TYPE_ITEMS} />
                 <Input size="sm" label="节点标签选择器" value={taskForm.node_selector} onChange={(event) => setTaskForm((prev) => ({ ...prev, node_selector: event.target.value }))} />
               </div>
-              <Textarea size="sm" label={taskForm.type === 'http' ? 'URL' : taskForm.type === 'internal' ? '内部路径 / METHOD 路径' : '命令'} value={taskForm.command} onChange={(event) => setTaskForm((prev) => ({ ...prev, command: event.target.value }))} rows={4} />
+              <Textarea size="sm" label={taskCommandLabel} placeholder={taskCommandPlaceholder} value={taskForm.command} onChange={(event) => setTaskForm((prev) => ({ ...prev, command: event.target.value }))} rows={4} />
               <div className="grid gap-3 sm:grid-cols-4">
                 <Input size="sm" type="number" label="超时秒数" min="1" value={taskForm.timeout_seconds} onChange={(event) => setTaskForm((prev) => ({ ...prev, timeout_seconds: Number(event.target.value) }))} />
                 <Input size="sm" type="number" label="重试次数" min="0" value={taskForm.retry_count} onChange={(event) => setTaskForm((prev) => ({ ...prev, retry_count: Number(event.target.value) }))} />

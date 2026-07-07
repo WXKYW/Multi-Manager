@@ -11,7 +11,6 @@ import AppPageHeader, { AppBreadcrumbs } from './AppPageHeader.jsx';
 import {
   Server,
   LogOut,
-  Settings,
   getModuleIconComponent,
 } from './Icons.jsx';
 
@@ -445,7 +444,7 @@ function MainLayout() {
                 <SidebarModuleButton
                   module="settings"
                   active={mainActiveTab === 'settings'}
-                  icon={Settings}
+                  icon={getModuleIconComponent('settings', Server)}
                   onNavigate={navigateToModule}
                 />
 

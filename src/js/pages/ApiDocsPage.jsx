@@ -462,7 +462,7 @@ function RouteDetail({ route, openapiRoute }) {
       )}
       className={cx(fixedPanelClass, 'min-h-0')}
       bodyPadding="lg"
-      bodyClassName="min-h-0 overflow-y-auto"
+      bodyClassName="flex min-h-0 flex-1 flex-col overflow-y-auto"
     >
 
       <div className="grid gap-3 py-4 sm:grid-cols-2">
@@ -474,7 +474,7 @@ function RouteDetail({ route, openapiRoute }) {
         <InfoRow label="响应类型" value={RESPONSE_LABEL[route.responseMode] || route.responseMode} />
       </div>
 
-      <div className="space-y-3 border-t border-kumo-line pt-4">
+      <div className="flex-1 space-y-3 border-t border-kumo-line pt-4">
         <div>
           <div className="mb-2 text-xs font-semibold text-kumo-subtle">请求方法</div>
           <RouteMethodPills methods={route.methods} />

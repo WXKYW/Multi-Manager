@@ -36,8 +36,9 @@ import {
   Save,
   Globe,
   Terminal,
-  Database,
-  Rocket
+  Rocket,
+  KoyebBrand,
+  FlyIoBrand
 } from '../components/Icons.jsx';
 
 const DEFAULT_PAAS_REFRESH_INTERVAL_SEC = 30;
@@ -1662,8 +1663,8 @@ function PaasPage() {
         value={activeTab}
         onValueChange={setActiveTab}
         tabs={[
-          { value: 'koyeb', label: <span className="inline-flex items-center gap-1.5"><Database className="w-4 h-4 text-kumo-info" />Koyeb</span> },
-          { value: 'fly', label: <span className="inline-flex items-center gap-1.5"><Rocket className="w-4 h-4 text-kumo-brand" />Fly.io</span> },
+          { value: 'koyeb', label: <span className="inline-flex items-center gap-1.5"><KoyebBrand className="w-4 h-4 text-kumo-info" />Koyeb</span> },
+          { value: 'fly', label: <span className="inline-flex items-center gap-1.5"><FlyIoBrand className="w-4 h-4 text-kumo-brand" />Fly.io</span> },
           { value: 'accounts', label: <span className="inline-flex items-center gap-1.5"><Users className="w-4 h-4 text-kumo-success" />账号管理</span> },
           { value: 'settings', label: <span className="inline-flex items-center gap-1.5"><Settings className="w-4 h-4" />模块配置</span> },
         ]}
@@ -1992,7 +1993,7 @@ function PaasPage() {
                                 {/* App Header */}
                                 <div className="flex justify-between items-center border-b border-kumo-line pb-1.5">
                                   <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                                    <Rocket className="h-3.5 w-3.5 shrink-0 text-kumo-brand" />
+                                    <FlyIoBrand className="h-3.5 w-3.5 shrink-0 text-kumo-brand" />
                                     {app.isEditing ? (
                                       <Input size="sm"
                                         aria-label="Fly 应用名称"
@@ -2189,7 +2190,7 @@ function PaasPage() {
           {/* Koyeb Panel */}
           <SectionCard
             title="Koyeb 账号管理"
-            icon={<Database className="h-4 w-4 text-kumo-info" />}
+            icon={<KoyebBrand className="h-4 w-4 text-kumo-info" />}
             actions={(
               <>
                 <Button size="sm" onClick={() => setShowAddKoyebModal(true)} className="text-xs flex items-center gap-1">
@@ -2282,7 +2283,7 @@ function PaasPage() {
                 disabled={koyebAddingAccount || !koyebBatchText.trim()}
                 className="w-full text-xs flex items-center justify-center gap-1.5"
               >
-                <Database className="w-3.5 h-3.5" />
+                <KoyebBrand className="w-3.5 h-3.5" />
                 <span>批量验证并添加 Koyeb 账号</span>
               </Button>
             </div>
@@ -2291,7 +2292,7 @@ function PaasPage() {
           {/* Fly.io Panel */}
           <SectionCard
             title="Fly.io 账号管理"
-            icon={<Rocket className="h-4 w-4 text-kumo-brand" />}
+            icon={<FlyIoBrand className="h-4 w-4 text-kumo-brand" />}
             actions={(
               <>
                 <Button size="sm" onClick={() => setShowAddFlyModal(true)} className="text-xs flex items-center gap-1">
@@ -2382,7 +2383,7 @@ function PaasPage() {
                 disabled={flyAddingAccount || !flyBatchText.trim()}
                 className="w-full text-xs flex items-center justify-center gap-1.5"
               >
-                <Rocket className="w-3.5 h-3.5" />
+                <FlyIoBrand className="w-3.5 h-3.5" />
                 <span>批量验证并添加 Fly.io 账号</span>
               </Button>
             </div>

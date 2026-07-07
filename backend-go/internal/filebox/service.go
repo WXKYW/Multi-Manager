@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,12 +28,14 @@ import (
 )
 
 const (
-	defaultMaxFileSize    = 100 * 1024 * 1024
-	defaultExpiryHours    = 24
-	defaultCodeLength     = 5
-	codeAlphabet          = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
-	maxAccessLogLimit     = 500
-	multipartMemoryBudget = 32 << 20
+	defaultMaxFileSize     = 100 * 1024 * 1024
+	defaultExpiryHours     = 24
+	defaultCodeLength      = 5
+	codeAlphabet           = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+	maxAccessLogLimit      = 500
+	multipartMemoryBudget  = 32 << 20
+	voidRoomModeTemporary  = "temporary"
+	voidRoomModePersistent = "persistent"
 )
 
 type Authenticator interface {
@@ -50,13 +54,67 @@ type Service struct {
 }
 
 type voidRoom struct {
-	ID                 string            `json:"id"`
-	CreatedAt          int64             `json:"created_at"`
-	ExpiresAt          int64             `json:"expires_at"`
-	Offer              json.RawMessage   `json:"offer,omitempty"`
-	Answer             json.RawMessage   `json:"answer,omitempty"`
-	SenderCandidates   []json.RawMessage `json:"-"`
-	ReceiverCandidates []json.RawMessage `json:"-"`
+	ID            string                      `json:"id"`
+	OwnerToken    string                      `json:"-"`
+	Mode          string                      `json:"mode"`
+	CreatedAt     int64                       `json:"createdAt"`
+	ExpiresAt     int64                       `json:"expiresAt"`
+	Participants  map[string]*voidParticipant `json:"-"`
+	Signals       []voidSignal                `json:"-"`
+	NextSignalID  int64                       `json:"-"`
+	Closed        bool                        `json:"closed"`
+	LastHeartbeat int64                       `json:"lastHeartbeat"`
+}
+
+type voidParticipant struct {
+	ID        string `json:"id"`
+	Token     string `json:"-"`
+	ClientID  string `json:"clientId,omitempty"`
+	Role      string `json:"role"`
+	Name      string `json:"name"`
+	CreatedAt int64  `json:"createdAt"`
+	LastSeen  int64  `json:"lastSeen"`
+}
+
+type publicVoidParticipant struct {
+	ID        string `json:"id"`
+	Role      string `json:"role"`
+	Name      string `json:"name"`
+	CreatedAt int64  `json:"createdAt"`
+	LastSeen  int64  `json:"lastSeen"`
+	Online    bool   `json:"online"`
+}
+
+type voidSignal struct {
+	ID        int64           `json:"id"`
+	From      string          `json:"from"`
+	To        string          `json:"to,omitempty"`
+	Type      string          `json:"type"`
+	Payload   json.RawMessage `json:"payload,omitempty"`
+	CreatedAt int64           `json:"createdAt"`
+}
+
+type voidSignalRequest struct {
+	ParticipantID    string          `json:"participantId"`
+	ParticipantToken string          `json:"participantToken"`
+	To               string          `json:"to"`
+	Type             string          `json:"type"`
+	Payload          json.RawMessage `json:"payload"`
+}
+
+type voidParticipantRequest struct {
+	Name     string `json:"name"`
+	ClientID string `json:"clientId"`
+}
+
+type voidRoomRequest struct {
+	Mode       string `json:"mode"`
+	Persistent bool   `json:"persistent"`
+}
+
+type voidNetworkCandidate struct {
+	Label  string `json:"label"`
+	Origin string `json:"origin"`
 }
 
 type Settings struct {
@@ -156,10 +214,26 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.createVoidRoom(w, r)
-	case len(parts) == 4 && parts[0] == "void" && parts[1] == "rooms" && r.Method == http.MethodPost:
-		s.postVoidSignal(w, r, parts[2], parts[3])
-	case len(parts) == 4 && parts[0] == "void" && parts[1] == "rooms" && r.Method == http.MethodGet:
-		s.getVoidSignal(w, r, parts[2], parts[3])
+	case len(parts) == 2 && parts[0] == "void" && parts[1] == "rooms" && r.Method == http.MethodGet:
+		if !s.requireAuth(w, r) {
+			return
+		}
+		s.listVoidRooms(w, r)
+	case len(parts) == 2 && parts[0] == "void" && parts[1] == "network-candidates" && r.Method == http.MethodGet:
+		if !s.requireAuth(w, r) {
+			return
+		}
+		s.voidNetworkCandidates(w, r)
+	case len(parts) == 3 && parts[0] == "void" && parts[1] == "rooms" && r.Method == http.MethodGet:
+		s.getVoidRoom(w, r, parts[2])
+	case len(parts) == 3 && parts[0] == "void" && parts[1] == "rooms" && r.Method == http.MethodDelete:
+		s.closeVoidRoom(w, r, parts[2])
+	case len(parts) == 4 && parts[0] == "void" && parts[1] == "rooms" && parts[3] == "participants" && r.Method == http.MethodPost:
+		s.joinVoidRoom(w, r, parts[2])
+	case len(parts) == 4 && parts[0] == "void" && parts[1] == "rooms" && parts[3] == "signals" && r.Method == http.MethodPost:
+		s.postVoidSignal(w, r, parts[2])
+	case len(parts) == 4 && parts[0] == "void" && parts[1] == "rooms" && parts[3] == "signals" && r.Method == http.MethodGet:
+		s.getVoidSignals(w, r, parts[2])
 	case len(parts) == 2 && parts[0] == "retrieve" && r.Method == http.MethodGet:
 		s.sendEntryMetadata(w, r, parts[1])
 	case len(parts) == 2 && parts[0] == "public" && r.Method == http.MethodGet:
@@ -238,77 +312,368 @@ func (s *Service) sendEntryMetadata(w http.ResponseWriter, r *http.Request, code
 
 func (s *Service) createVoidRoom(w http.ResponseWriter, r *http.Request) {
 	s.cleanupVoidRooms()
+	var payload voidRoomRequest
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil && !errors.Is(err, io.EOF) {
+		response.Error(w, http.StatusBadRequest, "invalid void room payload")
+		return
+	}
+	mode := normalizeVoidRoomMode(payload)
 	id, err := randomCode(8)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	ownerToken, err := randomToken(32)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	now := time.Now().UnixMilli()
-	room := &voidRoom{ID: id, CreatedAt: now, ExpiresAt: now + int64(30*time.Minute/time.Millisecond)}
+	room := &voidRoom{
+		ID:         id,
+		OwnerToken: ownerToken,
+		Mode:       mode,
+		CreatedAt:  now,
+		ExpiresAt:  voidRoomExpiry(now, mode),
+		Participants: map[string]*voidParticipant{
+			"owner": {
+				ID:        "owner",
+				Token:     ownerToken,
+				Role:      "owner",
+				Name:      "房主",
+				CreatedAt: now,
+				LastSeen:  now,
+			},
+		},
+		LastHeartbeat: now,
+	}
+	if mode == voidRoomModePersistent {
+		if err := s.savePersistentVoidRoom(r.Context(), room); err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
 	s.voidMu.Lock()
 	s.voidRooms[id] = room
 	s.voidMu.Unlock()
-	response.OK(w, map[string]interface{}{"id": id, "expires_at": room.ExpiresAt})
+	response.OK(w, map[string]interface{}{
+		"roomId":             id,
+		"id":                 id,
+		"ownerToken":         ownerToken,
+		"ownerParticipantId": "owner",
+		"mode":               room.Mode,
+		"expiresAt":          room.ExpiresAt,
+	})
 }
 
-func (s *Service) postVoidSignal(w http.ResponseWriter, r *http.Request, id, kind string) {
+func (s *Service) listVoidRooms(w http.ResponseWriter, r *http.Request) {
 	s.cleanupVoidRooms()
-	var payload json.RawMessage
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil || len(payload) == 0 {
+	if err := s.loadPersistentVoidRooms(r.Context()); err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	now := time.Now().UnixMilli()
+	s.voidMu.Lock()
+	rooms := make([]*voidRoom, 0, len(s.voidRooms))
+	for _, room := range s.voidRooms {
+		if room == nil || room.Closed || isVoidRoomExpired(room, now) {
+			continue
+		}
+		rooms = append(rooms, room)
+	}
+	sort.SliceStable(rooms, func(i, j int) bool {
+		if rooms[i].Mode != rooms[j].Mode {
+			return rooms[i].Mode == voidRoomModePersistent
+		}
+		if rooms[i].CreatedAt != rooms[j].CreatedAt {
+			return rooms[i].CreatedAt > rooms[j].CreatedAt
+		}
+		return rooms[i].ID < rooms[j].ID
+	})
+	result := make([]map[string]interface{}, 0, len(rooms))
+	for _, room := range rooms {
+		result = append(result, adminVoidRoom(room, now))
+	}
+	s.voidMu.Unlock()
+	response.OK(w, result)
+}
+
+func (s *Service) getVoidRoom(w http.ResponseWriter, r *http.Request, id string) {
+	s.cleanupVoidRooms()
+	if err := s.ensurePersistentVoidRoomLoaded(r.Context(), id); err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.voidMu.Lock()
+	room := s.activeVoidRoomLocked(id)
+	if room == nil {
+		s.voidMu.Unlock()
+		response.Error(w, http.StatusNotFound, "void room not found")
+		return
+	}
+	snapshot := publicVoidRoom(room, time.Now().UnixMilli())
+	s.voidMu.Unlock()
+	response.OK(w, snapshot)
+}
+
+func (s *Service) joinVoidRoom(w http.ResponseWriter, r *http.Request, id string) {
+	s.cleanupVoidRooms()
+	if err := s.ensurePersistentVoidRoomLoaded(r.Context(), id); err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var payload voidParticipantRequest
+	_ = json.NewDecoder(r.Body).Decode(&payload)
+	clientID := normalizeVoidClientID(payload.ClientID)
+	participantID, err := randomCode(8)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	participantToken, err := randomToken(32)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	now := time.Now().UnixMilli()
+	name := strings.TrimSpace(payload.Name)
+	if name == "" {
+		name = "访客"
+	}
+	participant := &voidParticipant{
+		ID:        participantID,
+		Token:     participantToken,
+		Role:      "guest",
+		Name:      name,
+		CreatedAt: now,
+		LastSeen:  now,
+	}
+
+	s.voidMu.Lock()
+	room := s.activeVoidRoomLocked(id)
+	if room == nil {
+		s.voidMu.Unlock()
+		response.Error(w, http.StatusNotFound, "void room not found")
+		return
+	}
+	if clientID != "" {
+		for _, existing := range room.Participants {
+			if existing == nil || existing.Role != "guest" || existing.ClientID != clientID {
+				continue
+			}
+			existing.Name = name
+			existing.LastSeen = now
+			readyPayload, _ := json.Marshal(publicVoidParticipantFrom(existing, now))
+			s.appendVoidSignalLocked(room, existing.ID, "owner", "participant.ready", readyPayload, now)
+			snapshot := publicVoidRoom(room, now)
+			s.voidMu.Unlock()
+			response.OK(w, map[string]interface{}{
+				"participantId":    existing.ID,
+				"participantToken": existing.Token,
+				"room":             snapshot,
+			})
+			return
+		}
+	}
+	participant.ClientID = clientID
+	room.Participants[participantID] = participant
+	joinedPayload, _ := json.Marshal(publicVoidParticipantFrom(participant, now))
+	s.appendVoidSignalLocked(room, participantID, "owner", "participant.joined", joinedPayload, now)
+	snapshot := publicVoidRoom(room, now)
+	s.voidMu.Unlock()
+
+	response.OK(w, map[string]interface{}{
+		"participantId":    participantID,
+		"participantToken": participantToken,
+		"room":             snapshot,
+	})
+}
+
+func (s *Service) postVoidSignal(w http.ResponseWriter, r *http.Request, id string) {
+	s.cleanupVoidRooms()
+	if err := s.ensurePersistentVoidRoomLoaded(r.Context(), id); err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var payload voidSignalRequest
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		response.Error(w, http.StatusBadRequest, "invalid signal payload")
 		return
 	}
+	payload.ParticipantID = normalizeVoidParticipantID(payload.ParticipantID)
+	payload.To = normalizeVoidParticipantID(payload.To)
+	payload.Type = strings.TrimSpace(payload.Type)
+	if payload.ParticipantID == "" || payload.ParticipantToken == "" || payload.Type == "" {
+		response.Error(w, http.StatusBadRequest, "participant and signal type required")
+		return
+	}
+	if !allowedVoidSignalType(payload.Type) {
+		response.Error(w, http.StatusBadRequest, "unsupported void signal type")
+		return
+	}
+
+	now := time.Now().UnixMilli()
 	s.voidMu.Lock()
-	room := s.voidRooms[strings.ToUpper(strings.TrimSpace(id))]
+	room := s.activeVoidRoomLocked(id)
 	if room == nil {
 		s.voidMu.Unlock()
 		response.Error(w, http.StatusNotFound, "void room not found")
 		return
 	}
-	switch kind {
-	case "offer":
-		room.Offer = payload
-	case "answer":
-		room.Answer = payload
-	case "sender-candidate":
-		room.SenderCandidates = append(room.SenderCandidates, payload)
-	case "receiver-candidate":
-		room.ReceiverCandidates = append(room.ReceiverCandidates, payload)
-	default:
+	participant := room.Participants[payload.ParticipantID]
+	if !validVoidParticipantToken(participant, payload.ParticipantToken) {
 		s.voidMu.Unlock()
-		response.Error(w, http.StatusNotFound, "signal route not found")
+		response.Error(w, http.StatusForbidden, "invalid void participant token")
 		return
 	}
+	if payload.To != "" {
+		if _, ok := room.Participants[payload.To]; !ok {
+			s.voidMu.Unlock()
+			response.Error(w, http.StatusNotFound, "void signal target not found")
+			return
+		}
+	}
+	participant.LastSeen = now
+	room.LastHeartbeat = now
+	signal := s.appendVoidSignalLocked(room, payload.ParticipantID, payload.To, payload.Type, payload.Payload, now)
 	s.voidMu.Unlock()
-	response.OK(w, map[string]string{"status": "ok"})
+	response.OK(w, signal)
 }
 
-func (s *Service) getVoidSignal(w http.ResponseWriter, r *http.Request, id, kind string) {
+func (s *Service) getVoidSignals(w http.ResponseWriter, r *http.Request, id string) {
 	s.cleanupVoidRooms()
+	if err := s.ensurePersistentVoidRoomLoaded(r.Context(), id); err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	participantID := normalizeVoidParticipantID(r.URL.Query().Get("participantId"))
+	participantToken := strings.TrimSpace(r.URL.Query().Get("participantToken"))
+	if participantToken == "" {
+		participantToken = strings.TrimSpace(r.Header.Get("X-Void-Participant-Token"))
+	}
+	since, _ := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("since")), 10, 64)
+	if participantID == "" || participantToken == "" {
+		response.Error(w, http.StatusBadRequest, "participant token required")
+		return
+	}
+
+	now := time.Now().UnixMilli()
 	s.voidMu.Lock()
-	room := s.voidRooms[strings.ToUpper(strings.TrimSpace(id))]
+	room := s.activeVoidRoomLocked(id)
 	if room == nil {
 		s.voidMu.Unlock()
 		response.Error(w, http.StatusNotFound, "void room not found")
 		return
 	}
-	var data interface{}
-	switch kind {
-	case "offer":
-		data = room.Offer
-	case "answer":
-		data = room.Answer
-	case "sender-candidates":
-		data = room.SenderCandidates
-	case "receiver-candidates":
-		data = room.ReceiverCandidates
-	default:
+	participant := room.Participants[participantID]
+	if !validVoidParticipantToken(participant, participantToken) {
 		s.voidMu.Unlock()
-		response.Error(w, http.StatusNotFound, "signal route not found")
+		response.Error(w, http.StatusForbidden, "invalid void participant token")
 		return
 	}
+	participant.LastSeen = now
+	room.LastHeartbeat = now
+	signals := make([]voidSignal, 0)
+	for _, signal := range room.Signals {
+		if signal.ID <= since || signal.From == participantID {
+			continue
+		}
+		if signal.To == "" || signal.To == participantID {
+			signals = append(signals, signal)
+		}
+	}
+	snapshot := publicVoidRoom(room, now)
 	s.voidMu.Unlock()
-	response.OK(w, data)
+	response.OK(w, map[string]interface{}{"signals": signals, "room": snapshot})
+}
+
+func (s *Service) closeVoidRoom(w http.ResponseWriter, r *http.Request, id string) {
+	s.cleanupVoidRooms()
+	if err := s.ensurePersistentVoidRoomLoaded(r.Context(), id); err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ownerToken := strings.TrimSpace(r.URL.Query().Get("ownerToken"))
+	if ownerToken == "" {
+		ownerToken = strings.TrimSpace(r.Header.Get("X-Void-Owner-Token"))
+	}
+	if ownerToken == "" {
+		var payload struct {
+			OwnerToken string `json:"ownerToken"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&payload)
+		ownerToken = strings.TrimSpace(payload.OwnerToken)
+	}
+	adminOK := false
+	if ownerToken == "" && s.auth != nil {
+		ok, err := s.auth.IsAuthenticated(r.Context(), r)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		adminOK = ok
+	}
+	s.voidMu.Lock()
+	room := s.activeVoidRoomLocked(id)
+	if room == nil {
+		s.voidMu.Unlock()
+		response.Error(w, http.StatusNotFound, "void room not found")
+		return
+	}
+	if !adminOK && (ownerToken == "" || ownerToken != room.OwnerToken) {
+		s.voidMu.Unlock()
+		response.Error(w, http.StatusForbidden, "invalid void owner token")
+		return
+	}
+	roomID := room.ID
+	persistent := room.Mode == voidRoomModePersistent
+	s.voidMu.Unlock()
+	if persistent {
+		if err := s.markPersistentVoidRoomDeleted(r.Context(), roomID); err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	s.voidMu.Lock()
+	delete(s.voidRooms, roomID)
+	s.voidMu.Unlock()
+	response.OK(w, map[string]string{"status": "closed"})
+}
+
+func (s *Service) voidNetworkCandidates(w http.ResponseWriter, r *http.Request) {
+	currentOrigin := requestOrigin(r)
+	publicOrigin := strings.TrimRight(s.loadPublicAPIURL(r.Context()), "/")
+	port := originPort(r.Host, s.cfg.Port)
+	scheme := requestScheme(r)
+	seen := map[string]bool{}
+	candidates := []voidNetworkCandidate{}
+	add := func(label, origin string) {
+		origin = strings.TrimRight(strings.TrimSpace(origin), "/")
+		if origin == "" || seen[origin] {
+			return
+		}
+		seen[origin] = true
+		candidates = append(candidates, voidNetworkCandidate{Label: label, Origin: origin})
+	}
+	add("当前访问地址", currentOrigin)
+	add("公网入口", publicOrigin)
+	for _, origin := range localNetworkOrigins(scheme, port) {
+		add("局域网地址", origin)
+	}
+	warnings := []string{}
+	if isLoopbackHost(r.Host) {
+		warnings = append(warnings, "当前链接包含 localhost 或 127.0.0.1，手机通常无法直接打开，请改用局域网地址。")
+	}
+	if s.cfg.Host == "127.0.0.1" || strings.EqualFold(s.cfg.Host, "localhost") {
+		warnings = append(warnings, "后端当前只监听本机地址，局域网设备可能无法连接。")
+	}
+	response.OK(w, map[string]interface{}{
+		"currentOrigin": currentOrigin,
+		"publicOrigin":  publicOrigin,
+		"listenHost":    s.cfg.Host,
+		"candidates":    candidates,
+		"warnings":      warnings,
+	})
 }
 
 func (s *Service) cleanupVoidRooms() {
@@ -320,6 +685,397 @@ func (s *Service) cleanupVoidRooms() {
 			delete(s.voidRooms, id)
 		}
 	}
+}
+
+func (s *Service) activeVoidRoomLocked(id string) *voidRoom {
+	room := s.voidRooms[strings.ToUpper(strings.TrimSpace(id))]
+	if room == nil || room.Closed {
+		return nil
+	}
+	if isVoidRoomExpired(room, time.Now().UnixMilli()) {
+		delete(s.voidRooms, room.ID)
+		return nil
+	}
+	if room.Participants == nil {
+		room.Participants = map[string]*voidParticipant{}
+	}
+	return room
+}
+
+func normalizeVoidRoomMode(payload voidRoomRequest) string {
+	if payload.Persistent || strings.EqualFold(strings.TrimSpace(payload.Mode), voidRoomModePersistent) {
+		return voidRoomModePersistent
+	}
+	return voidRoomModeTemporary
+}
+
+func voidRoomExpiry(now int64, mode string) int64 {
+	if mode == voidRoomModePersistent {
+		return 0
+	}
+	return now + int64(30*time.Minute/time.Millisecond)
+}
+
+func isVoidRoomExpired(room *voidRoom, now int64) bool {
+	return room != nil && room.ExpiresAt > 0 && now > room.ExpiresAt
+}
+
+func (s *Service) savePersistentVoidRoom(ctx context.Context, room *voidRoom) error {
+	db, err := s.open(ctx)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO filebox_void_rooms (id, owner_token, mode, created_at, expires_at, deleted_at)
+		VALUES (?, ?, ?, ?, ?, NULL)
+	`, room.ID, room.OwnerToken, room.Mode, room.CreatedAt, room.ExpiresAt)
+	if err != nil {
+		return fmt.Errorf("save persistent void room: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) markPersistentVoidRoomDeleted(ctx context.Context, id string) error {
+	db, err := s.open(ctx)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	_, err = db.ExecContext(ctx, `
+		UPDATE filebox_void_rooms
+		SET deleted_at = ?
+		WHERE id = ? AND deleted_at IS NULL
+	`, time.Now().UnixMilli(), normalizeCode(id))
+	if err != nil {
+		return fmt.Errorf("delete persistent void room: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) ensurePersistentVoidRoomLoaded(ctx context.Context, id string) error {
+	id = normalizeCode(id)
+	if id == "" {
+		return nil
+	}
+	s.voidMu.Lock()
+	_, exists := s.voidRooms[id]
+	s.voidMu.Unlock()
+	if exists {
+		return nil
+	}
+	room, err := s.loadPersistentVoidRoom(ctx, id)
+	if err != nil || room == nil {
+		return err
+	}
+	s.voidMu.Lock()
+	if _, exists := s.voidRooms[room.ID]; !exists {
+		s.voidRooms[room.ID] = room
+	}
+	s.voidMu.Unlock()
+	return nil
+}
+
+func (s *Service) loadPersistentVoidRooms(ctx context.Context) error {
+	db, err := s.open(ctx)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	rows, err := db.QueryContext(ctx, `
+		SELECT id, owner_token, mode, created_at, expires_at
+		FROM filebox_void_rooms
+		WHERE deleted_at IS NULL
+		ORDER BY created_at DESC
+	`)
+	if err != nil {
+		return fmt.Errorf("load persistent void rooms: %w", err)
+	}
+	defer rows.Close()
+	rooms := []*voidRoom{}
+	for rows.Next() {
+		room, err := scanPersistentVoidRoom(rows)
+		if err != nil {
+			return err
+		}
+		rooms = append(rooms, room)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	s.voidMu.Lock()
+	for _, room := range rooms {
+		if _, exists := s.voidRooms[room.ID]; !exists {
+			s.voidRooms[room.ID] = room
+		}
+	}
+	s.voidMu.Unlock()
+	return nil
+}
+
+func (s *Service) loadPersistentVoidRoom(ctx context.Context, id string) (*voidRoom, error) {
+	db, err := s.open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	row := db.QueryRowContext(ctx, `
+		SELECT id, owner_token, mode, created_at, expires_at
+		FROM filebox_void_rooms
+		WHERE id = ? AND deleted_at IS NULL
+	`, normalizeCode(id))
+	room, err := scanPersistentVoidRoom(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return room, err
+}
+
+type persistentVoidRoomScanner interface {
+	Scan(dest ...interface{}) error
+}
+
+func scanPersistentVoidRoom(scanner persistentVoidRoomScanner) (*voidRoom, error) {
+	var room voidRoom
+	if err := scanner.Scan(&room.ID, &room.OwnerToken, &room.Mode, &room.CreatedAt, &room.ExpiresAt); err != nil {
+		return nil, err
+	}
+	room.ID = normalizeCode(room.ID)
+	room.Mode = normalizeVoidRoomMode(voidRoomRequest{Mode: room.Mode})
+	now := time.Now().UnixMilli()
+	room.Participants = map[string]*voidParticipant{
+		"owner": {
+			ID:        "owner",
+			Token:     room.OwnerToken,
+			Role:      "owner",
+			Name:      "房主",
+			CreatedAt: room.CreatedAt,
+			LastSeen:  0,
+		},
+	}
+	room.LastHeartbeat = now
+	return &room, nil
+}
+
+func (s *Service) appendVoidSignalLocked(room *voidRoom, from, to, signalType string, payload json.RawMessage, now int64) voidSignal {
+	room.NextSignalID++
+	signal := voidSignal{
+		ID:        room.NextSignalID,
+		From:      from,
+		To:        to,
+		Type:      signalType,
+		Payload:   payload,
+		CreatedAt: now,
+	}
+	room.Signals = append(room.Signals, signal)
+	if len(room.Signals) > 1000 {
+		room.Signals = append([]voidSignal(nil), room.Signals[len(room.Signals)-1000:]...)
+	}
+	return signal
+}
+
+func publicVoidRoom(room *voidRoom, now int64) map[string]interface{} {
+	participants := make([]publicVoidParticipant, 0, len(room.Participants))
+	for _, participant := range room.Participants {
+		participants = append(participants, publicVoidParticipantFrom(participant, now))
+	}
+	sort.SliceStable(participants, func(i, j int) bool {
+		if participants[i].Role != participants[j].Role {
+			return participants[i].Role == "owner"
+		}
+		if participants[i].CreatedAt != participants[j].CreatedAt {
+			return participants[i].CreatedAt < participants[j].CreatedAt
+		}
+		return participants[i].ID < participants[j].ID
+	})
+	mode := normalizeVoidRoomMode(voidRoomRequest{Mode: room.Mode})
+	return map[string]interface{}{
+		"id":           room.ID,
+		"roomId":       room.ID,
+		"mode":         mode,
+		"persistent":   mode == voidRoomModePersistent,
+		"createdAt":    room.CreatedAt,
+		"expiresAt":    room.ExpiresAt,
+		"closed":       room.Closed,
+		"lastSignalId": room.NextSignalID,
+		"participants": participants,
+	}
+}
+
+func adminVoidRoom(room *voidRoom, now int64) map[string]interface{} {
+	snapshot := publicVoidRoom(room, now)
+	snapshot["ownerToken"] = room.OwnerToken
+	snapshot["ownerParticipantId"] = "owner"
+	return snapshot
+}
+
+func publicVoidParticipantFrom(participant *voidParticipant, now int64) publicVoidParticipant {
+	return publicVoidParticipant{
+		ID:        participant.ID,
+		Role:      participant.Role,
+		Name:      participant.Name,
+		CreatedAt: participant.CreatedAt,
+		LastSeen:  participant.LastSeen,
+		Online:    now-participant.LastSeen <= int64(45*time.Second/time.Millisecond),
+	}
+}
+
+func validVoidParticipantToken(participant *voidParticipant, token string) bool {
+	return participant != nil && participant.Token != "" && token == participant.Token
+}
+
+func normalizeVoidParticipantID(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.EqualFold(value, "owner") {
+		return "owner"
+	}
+	return strings.ToUpper(value)
+}
+
+func normalizeVoidClientID(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	var builder strings.Builder
+	builder.Grow(len(value))
+	for _, char := range value {
+		switch {
+		case char >= 'a' && char <= 'z':
+			builder.WriteRune(char)
+		case char >= 'A' && char <= 'Z':
+			builder.WriteRune(char)
+		case char >= '0' && char <= '9':
+			builder.WriteRune(char)
+		case char == '-' || char == '_':
+			builder.WriteRune(char)
+		}
+		if builder.Len() >= 96 {
+			break
+		}
+	}
+	return builder.String()
+}
+
+func allowedVoidSignalType(signalType string) bool {
+	switch signalType {
+	case "participant.ready", "webrtc.offer", "webrtc.answer", "webrtc.ice":
+		return true
+	default:
+		return false
+	}
+}
+
+func randomToken(length int) (string, error) {
+	if length < 16 {
+		length = 16
+	}
+	bytes := make([]byte, length)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", fmt.Errorf("generate void token: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(bytes), nil
+}
+
+func (s *Service) loadPublicAPIURL(ctx context.Context) string {
+	db, err := s.store.Open(ctx)
+	if err != nil {
+		return ""
+	}
+	defer db.Close()
+	var value sql.NullString
+	if err := db.QueryRowContext(ctx, `SELECT public_api_url FROM user_settings WHERE id = 1`).Scan(&value); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(value.String)
+}
+
+func requestOrigin(r *http.Request) string {
+	host := strings.TrimSpace(r.Host)
+	if host == "" {
+		host = "localhost"
+	}
+	return requestScheme(r) + "://" + host
+}
+
+func requestScheme(r *http.Request) string {
+	if proto := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); proto != "" {
+		if idx := strings.Index(proto, ","); idx >= 0 {
+			proto = strings.TrimSpace(proto[:idx])
+		}
+		if proto == "http" || proto == "https" {
+			return proto
+		}
+	}
+	if r.TLS != nil {
+		return "https"
+	}
+	return "http"
+}
+
+func originPort(host string, fallback int) int {
+	if _, portText, err := net.SplitHostPort(host); err == nil {
+		if port, parseErr := strconv.Atoi(portText); parseErr == nil {
+			return port
+		}
+	}
+	return fallback
+}
+
+func localNetworkOrigins(scheme string, port int) []string {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	origins := []string{}
+	seen := map[string]bool{}
+	for _, item := range interfaces {
+		if item.Flags&net.FlagUp == 0 {
+			continue
+		}
+		addrs, err := item.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			var ip net.IP
+			switch value := addr.(type) {
+			case *net.IPNet:
+				ip = value.IP
+			case *net.IPAddr:
+				ip = value.IP
+			default:
+				continue
+			}
+			ip = ip.To4()
+			if ip == nil || !ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsMulticast() {
+				continue
+			}
+			host := ip.String()
+			origin := scheme + "://" + host
+			if port > 0 {
+				origin = fmt.Sprintf("%s://%s:%d", scheme, host, port)
+			}
+			if !seen[origin] {
+				seen[origin] = true
+				origins = append(origins, origin)
+			}
+		}
+	}
+	return origins
+}
+
+func isLoopbackHost(host string) bool {
+	host = strings.TrimSpace(host)
+	if parsed, _, err := net.SplitHostPort(host); err == nil {
+		host = parsed
+	}
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (s *Service) downloadEntry(w http.ResponseWriter, r *http.Request, code string) {
@@ -925,9 +1681,18 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			public_upload_enabled INTEGER NOT NULL DEFAULT 0,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
+		`CREATE TABLE IF NOT EXISTS filebox_void_rooms (
+			id TEXT PRIMARY KEY,
+			owner_token TEXT NOT NULL,
+			mode TEXT NOT NULL DEFAULT 'persistent',
+			created_at INTEGER NOT NULL,
+			expires_at INTEGER NOT NULL DEFAULT 0,
+			deleted_at INTEGER
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_filebox_entries_expiry ON filebox_entries(expiry)`,
 		`CREATE INDEX IF NOT EXISTS idx_filebox_entries_created ON filebox_entries(created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_filebox_access_code ON filebox_access_logs(code, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_filebox_void_rooms_deleted ON filebox_void_rooms(deleted_at, created_at)`,
 		`INSERT OR IGNORE INTO filebox_settings (
 			id, max_file_size, allowed_mime_types, default_expiry_hours, public_upload_enabled
 		) VALUES (1, 104857600, '[]', 24, 0)`,

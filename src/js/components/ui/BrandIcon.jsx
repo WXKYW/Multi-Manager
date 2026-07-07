@@ -1,5 +1,7 @@
 import React from 'react';
 
+import tencentCloudIcon from '../../../assets/brand-icons/tencentcloud.svg';
+
 export const BRAND_COLOR_FALLBACK = '#8b5cf6';
 export const BRAND_ICON_FALLBACK = 'fas fa-shield-alt';
 
@@ -101,7 +103,6 @@ export const SIMPLE_ICONS = {
   trello: 'si si-trello',
   figma: 'si si-figma',
   notion: 'si si-notion',
-  tencent: 'fab fa-qq',
   huawei: 'si si-huawei',
   aliyun: 'si si-alibabacloud',
   alibaba: 'si si-alibaba',
@@ -132,6 +133,13 @@ export const SIMPLE_ICONS = {
   oracle: 'si si-oracle',
   sentry: 'si si-sentry',
   cloudways: 'si si-cloudways',
+};
+
+export const BRAND_ICON_ASSETS = {
+  tencent: tencentCloudIcon,
+  tencentcloud: tencentCloudIcon,
+  'tencent cloud': tencentCloudIcon,
+  '腾讯云': tencentCloudIcon,
 };
 
 export const FA_ICONS = {
@@ -208,12 +216,40 @@ export function getIssuerIcon(issuer) {
     || BRAND_ICON_FALLBACK;
 }
 
-export default function BrandIcon({ issuer, className = '', style, ...props }) {
+export function getIssuerIconAsset(issuer) {
+  return findIssuerMatch(issuer, BRAND_ICON_ASSETS);
+}
+
+export default function BrandIcon({
+  issuer,
+  className = '',
+  style,
+  color = 'brand',
+  ...props
+}) {
+  const asset = getIssuerIconAsset(issuer);
+  const iconColor = color === 'inherit' ? undefined : getIssuerColor(issuer);
+
+  if (asset) {
+    return (
+      <span
+        {...props}
+        aria-hidden={props['aria-label'] ? undefined : true}
+        className={`app-brand-icon app-brand-icon--asset ${className}`.trim()}
+        style={{
+          '--app-brand-icon-url': `url("${asset}")`,
+          color: iconColor,
+          ...style,
+        }}
+      />
+    );
+  }
+
   return (
     <i
       {...props}
       className={`${getIssuerIcon(issuer)} ${className}`.trim()}
-      style={{ color: getIssuerColor(issuer), ...style }}
+      style={{ color: iconColor, ...style }}
     />
   );
 }

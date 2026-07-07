@@ -15,7 +15,7 @@ import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
 import { buildTotpAccountPayload } from '../modules/totpPayload.js';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
-import { BRAND_COLOR_FALLBACK, getIssuerColor, getIssuerIcon } from '../components/ui/BrandIcon.jsx';
+import BrandIcon, { BRAND_COLOR_FALLBACK, getIssuerColor } from '../components/ui/BrandIcon.jsx';
 import { SectionCard } from '../components/ui/AppPrimitives.jsx';
 import {
   Key,
@@ -934,7 +934,7 @@ function TotpPage() {
                               className="flex h-4 w-4 items-center justify-center rounded border border-kumo-line bg-kumo-recessed text-[10px]"
                               style={{ color: getIssuerColor(account.issuer) }}
                             >
-                              <i className={getIssuerIcon(account.issuer)} />
+                              <BrandIcon issuer={account.issuer} color="inherit" />
                             </span>
                             <span className="text-[11px] font-semibold text-kumo-strong">
                               {account.issuer || '未知平台'}
@@ -965,7 +965,7 @@ function TotpPage() {
                           className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs text-kumo-inverse"
                           style={{ background: issuerColor }}
                         >
-                          <i className={getIssuerIcon(account.issuer)} />
+                          <BrandIcon issuer={account.issuer} color="inherit" />
                         </span>
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-[11px] font-semibold leading-none text-kumo-strong">{account.issuer || '未知平台'}</div>

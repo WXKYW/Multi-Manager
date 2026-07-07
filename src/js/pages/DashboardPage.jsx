@@ -25,9 +25,10 @@ import {
   RefreshCw,
   ArrowRight,
   Box,
-  Send,
   Shield,
-  FolderOpen
+  FolderOpen,
+  KoyebBrand,
+  FlyIoBrand
 } from '../components/Icons.jsx';
 
 const DEFAULT_DASHBOARD_STATS = {
@@ -991,7 +992,7 @@ function DashboardPage({ onNavigate } = {}) {
             >
               <div className="flex min-w-0 items-center gap-2 sm:gap-3">
                 <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-kumo-badge-purple/10 text-sm text-kumo-badge-purple">
-                  <Box className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  <KoyebBrand className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 </div>
                 <div className="min-w-0">
                   <h4 className="text-xs font-bold text-kumo-strong group-hover:text-kumo-brand transition-colors">Koyeb</h4>
@@ -1011,7 +1012,7 @@ function DashboardPage({ onNavigate } = {}) {
             >
               <div className="flex min-w-0 items-center gap-2 sm:gap-3">
                 <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-kumo-brand/10 text-sm text-kumo-brand">
-                  <Send className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  <FlyIoBrand className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 </div>
                 <div className="min-w-0">
                   <h4 className="text-xs font-bold text-kumo-strong group-hover:text-kumo-brand transition-colors">Fly.io</h4>
