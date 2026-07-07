@@ -47,6 +47,14 @@ func (s *Store) Open(ctx context.Context) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("configure sqlite journal_mode: %w", err)
 	}
+	if _, err := db.ExecContext(ctx, "PRAGMA wal_autocheckpoint = 256"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("configure sqlite wal_autocheckpoint: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, "PRAGMA journal_size_limit = 8388608"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("configure sqlite journal_size_limit: %w", err)
+	}
 	s.schemaOnce.Do(func() {
 		s.schemaErr = EnsureCoreSchema(ctx, db)
 	})

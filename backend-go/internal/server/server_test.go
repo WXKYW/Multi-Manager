@@ -769,13 +769,14 @@ func TestCoreSettingsRequireSessionAndAreServedByGo(t *testing.T) {
 	var statsPayload struct {
 		Success bool `json:"success"`
 		Data    struct {
-			Tables map[string]int64 `json:"tables"`
+			Tables      map[string]int64 `json:"tables"`
+			CountsExact bool             `json:"countsExact"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(res.Body.Bytes(), &statsPayload); err != nil {
 		t.Fatal(err)
 	}
-	if !statsPayload.Success || statsPayload.Data.Tables["user_settings"] != 1 {
+	if !statsPayload.Success || statsPayload.Data.CountsExact || statsPayload.Data.Tables["user_settings"] != -1 {
 		t.Fatalf("unexpected database stats payload: %#v", statsPayload)
 	}
 

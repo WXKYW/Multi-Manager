@@ -43,6 +43,15 @@ fn stamp_state(state: &mut State, sequence: u64, sample_interval_ms: u64) {
     state.sample_interval_ms = sample_interval_ms;
 }
 
+fn docker_summary(info: &DockerInfo) -> DockerInfo {
+    DockerInfo {
+        installed: info.installed,
+        running: info.running,
+        stopped: info.stopped,
+        containers: Vec::new(),
+    }
+}
+
 #[derive(Clone)]
 struct OutboundQueues {
     high: mpsc::Sender<String>,
@@ -414,7 +423,7 @@ async fn run_client(
                                 let docker_tx = auth_tx.clone();
                                 tokio::spawn(async move {
                                     let mut docker_timer =
-                                        tokio::time::interval(Duration::from_secs(5));
+                                        tokio::time::interval(Duration::from_secs(60));
                                     docker_timer.set_missed_tick_behavior(
                                         tokio::time::MissedTickBehavior::Delay,
                                     );
@@ -489,7 +498,10 @@ async fn run_client(
                             let mut state = collector_loop.lock().await.collect_state();
                             stamp_state(&mut state, state_sequence, cfg.report_interval);
                             state_sequence = state_sequence.wrapping_add(1);
-                            state.docker = docker_cache.lock().await.clone();
+                            state.docker = {
+                                let docker = docker_cache.lock().await;
+                                docker_summary(&*docker)
+                            };
                             state.network_quality =
                                 latest_network_quality_probe.lock().await.take();
                             auth_tx.send_normal_latest(format_event(EVENT_AGENT_STATE, &state));
@@ -517,7 +529,10 @@ async fn run_client(
                                         let mut state = collector_loop.lock().await.collect_state();
                                         stamp_state(&mut state, state_sequence, cfg.report_interval);
                                         state_sequence = state_sequence.wrapping_add(1);
-                                        state.docker = docker_cache.lock().await.clone();
+                                        state.docker = {
+                                            let docker = docker_cache.lock().await;
+                                            docker_summary(&*docker)
+                                        };
                                         state.network_quality = latest_network_quality_probe.lock().await.take();
                                         auth_tx.send_normal_latest(format_event(EVENT_AGENT_STATE, &state));
                                     }

@@ -14,6 +14,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,6 +38,9 @@ const (
 	stateMaintenance = "maintenance"
 	statePaused      = "paused"
 	stateUnknown     = "unknown"
+
+	defaultHeartbeatRetentionDays = 30
+	minHeartbeatRetentionDays     = 1
 )
 
 type Authenticator interface {
@@ -116,6 +120,7 @@ func New(cfg config.Config, auth Authenticator, notifier Notifier) *Service {
 		_ = service.migrateLegacyMonitors(ctx, db)
 		db.Close()
 	}
+	go service.startHeartbeatCleanupLoop()
 	_ = service.RestartAll(context.Background())
 	return service
 }
@@ -132,6 +137,56 @@ func (s *Service) Stop() {
 		timer.Stop()
 		delete(s.timers, id)
 	}
+}
+
+func (s *Service) startHeartbeatCleanupLoop() {
+	timer := time.NewTimer(30 * time.Second)
+	defer timer.Stop()
+
+	for {
+		<-timer.C
+		if s.isStopped() {
+			return
+		}
+		s.cleanupOldHeartbeats(context.Background())
+		timer.Reset(time.Hour)
+	}
+}
+
+func (s *Service) isStopped() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stopped
+}
+
+func (s *Service) cleanupOldHeartbeats(ctx context.Context) {
+	retentionDays := resolveHeartbeatRetentionDays()
+	if retentionDays <= 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	db, err := s.open(ctx)
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	_, _ = db.ExecContext(ctx, "DELETE FROM uptime_heartbeats WHERE created_at < datetime('now', '-' || ? || ' days')", retentionDays)
+}
+
+func resolveHeartbeatRetentionDays() int {
+	raw := strings.TrimSpace(os.Getenv("API_MONITOR_UPTIME_HEARTBEAT_RETENTION_DAYS"))
+	if raw == "" {
+		return defaultHeartbeatRetentionDays
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return defaultHeartbeatRetentionDays
+	}
+	if value < minHeartbeatRetentionDays {
+		return minHeartbeatRetentionDays
+	}
+	return value
 }
 
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {

@@ -33,6 +33,80 @@ func testService(t *testing.T) (*Service, *sql.DB) {
 	return service, db
 }
 
+func TestResolveRealtimeMetricsPersistInterval(t *testing.T) {
+	t.Setenv("API_MONITOR_AGENT_METRICS_PERSIST_INTERVAL_MS", "")
+	if got := resolveRealtimeMetricsPersistInterval(); got != defaultRealtimeMetricsPersistInterval {
+		t.Fatalf("default interval = %v, want %v", got, defaultRealtimeMetricsPersistInterval)
+	}
+
+	t.Setenv("API_MONITOR_AGENT_METRICS_PERSIST_INTERVAL_MS", "1500")
+	if got := resolveRealtimeMetricsPersistInterval(); got != minRealtimeMetricsPersistInterval {
+		t.Fatalf("minimum interval = %v, want %v", got, minRealtimeMetricsPersistInterval)
+	}
+
+	t.Setenv("API_MONITOR_AGENT_METRICS_PERSIST_INTERVAL_MS", "60000")
+	if got := resolveRealtimeMetricsPersistInterval(); got != time.Minute {
+		t.Fatalf("custom interval = %v, want %v", got, time.Minute)
+	}
+}
+
+func TestShouldPersistRealtimeMetricsUsesConfiguredInterval(t *testing.T) {
+	service := &Service{
+		lastPersist:             make(map[string]time.Time),
+		realtimePersistInterval: 30 * time.Second,
+	}
+	now := time.Date(2026, 7, 7, 8, 0, 0, 0, time.UTC)
+
+	if !service.shouldPersistRealtimeMetrics("server-1", now) {
+		t.Fatal("first sample should persist")
+	}
+	if service.shouldPersistRealtimeMetrics("server-1", now.Add(29*time.Second)) {
+		t.Fatal("sample inside configured interval should be skipped")
+	}
+	if !service.shouldPersistRealtimeMetrics("server-1", now.Add(30*time.Second)) {
+		t.Fatal("sample at configured interval should persist")
+	}
+}
+
+func TestResolveNetworkQualityPersistIntervalDefaultsToDisabled(t *testing.T) {
+	t.Setenv("API_MONITOR_AGENT_NETWORK_QUALITY_PERSIST_INTERVAL_MS", "")
+	if got := resolveNetworkQualityPersistInterval(); got != 0 {
+		t.Fatalf("default network quality interval = %v, want disabled", got)
+	}
+
+	t.Setenv("API_MONITOR_AGENT_NETWORK_QUALITY_PERSIST_INTERVAL_MS", "0")
+	if got := resolveNetworkQualityPersistInterval(); got != 0 {
+		t.Fatalf("zero network quality interval = %v, want disabled", got)
+	}
+
+	t.Setenv("API_MONITOR_AGENT_NETWORK_QUALITY_PERSIST_INTERVAL_MS", "10000")
+	if got := resolveNetworkQualityPersistInterval(); got != minNetworkQualityPersistInterval {
+		t.Fatalf("minimum network quality interval = %v, want %v", got, minNetworkQualityPersistInterval)
+	}
+}
+
+func TestShouldPersistNetworkQualityCanBeDisabled(t *testing.T) {
+	service := &Service{
+		lastNetworkQualityPersist:     make(map[string]time.Time),
+		networkQualityPersistInterval: 0,
+	}
+	now := time.Date(2026, 7, 7, 8, 0, 0, 0, time.UTC)
+	if service.shouldPersistNetworkQuality("server-1", now) {
+		t.Fatal("network quality samples should not persist when interval is disabled")
+	}
+
+	service.networkQualityPersistInterval = time.Minute
+	if !service.shouldPersistNetworkQuality("server-1", now) {
+		t.Fatal("first network quality sample should persist when enabled")
+	}
+	if service.shouldPersistNetworkQuality("server-1", now.Add(59*time.Second)) {
+		t.Fatal("network quality sample inside configured interval should be skipped")
+	}
+	if !service.shouldPersistNetworkQuality("server-1", now.Add(time.Minute)) {
+		t.Fatal("network quality sample at configured interval should persist")
+	}
+}
+
 func perform(service *Service, method, path, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

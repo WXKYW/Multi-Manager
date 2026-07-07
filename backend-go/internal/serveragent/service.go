@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -33,28 +34,35 @@ type alertState struct {
 }
 
 type Service struct {
-	cfg              config.Config
-	store            *database.Store
-	taskRegistry     *TaskRegistry
-	agentBatches     *AgentBatchManager
-	engineIO         *EngineIOServer
-	registry         *ConnectionRegistry
-	metricsHub       *MetricsHub
-	ptyHub           *ptyDataHub
-	presence         *agentPresenceManager
-	terminalBroker   *agentTerminalBroker
-	lastCollect      time.Time
-	lastCollectMu    sync.RWMutex
-	lastPersist      map[string]time.Time
-	lastPersistMu    sync.Mutex
-	agentTaskWaiters sync.Map
-	targetsCache     []networkQualityTarget
-	targetsCacheMu   sync.RWMutex
-	notifier         Notifier
-	alertStates      sync.Map // serverID -> *alertState
+	cfg                           config.Config
+	store                         *database.Store
+	taskRegistry                  *TaskRegistry
+	agentBatches                  *AgentBatchManager
+	engineIO                      *EngineIOServer
+	registry                      *ConnectionRegistry
+	metricsHub                    *MetricsHub
+	ptyHub                        *ptyDataHub
+	presence                      *agentPresenceManager
+	terminalBroker                *agentTerminalBroker
+	lastCollect                   time.Time
+	lastCollectMu                 sync.RWMutex
+	lastPersist                   map[string]time.Time
+	lastPersistMu                 sync.Mutex
+	lastNetworkQualityPersist     map[string]time.Time
+	lastNetworkQualityPersistMu   sync.Mutex
+	realtimePersistInterval       time.Duration
+	networkQualityPersistInterval time.Duration
+	agentTaskWaiters              sync.Map
+	targetsCache                  []networkQualityTarget
+	targetsCacheMu                sync.RWMutex
+	notifier                      Notifier
+	alertStates                   sync.Map // serverID -> *alertState
 }
 
-const realtimeMetricsPersistInterval = 1500 * time.Millisecond
+const defaultRealtimeMetricsPersistInterval = 30 * time.Second
+const minRealtimeMetricsPersistInterval = 10 * time.Second
+const defaultNetworkQualityPersistInterval = 0
+const minNetworkQualityPersistInterval = 30 * time.Second
 const agentMetricsStaleAfter = 45 * time.Second
 
 func (s *Service) SetNotifier(n Notifier) {
@@ -105,16 +113,19 @@ func New(cfg config.Config) *Service {
 	engineIO.metricsHub = metricsHub
 
 	s := &Service{
-		cfg:            cfg,
-		store:          database.New(cfg),
-		taskRegistry:   taskRegistry,
-		agentBatches:   agentBatches,
-		engineIO:       engineIO,
-		registry:       registry,
-		metricsHub:     metricsHub,
-		ptyHub:         ptyHub,
-		terminalBroker: newAgentTerminalBroker(),
-		lastPersist:    make(map[string]time.Time),
+		cfg:                           cfg,
+		store:                         database.New(cfg),
+		taskRegistry:                  taskRegistry,
+		agentBatches:                  agentBatches,
+		engineIO:                      engineIO,
+		registry:                      registry,
+		metricsHub:                    metricsHub,
+		ptyHub:                        ptyHub,
+		terminalBroker:                newAgentTerminalBroker(),
+		lastPersist:                   make(map[string]time.Time),
+		lastNetworkQualityPersist:     make(map[string]time.Time),
+		realtimePersistInterval:       resolveRealtimeMetricsPersistInterval(),
+		networkQualityPersistInterval: resolveNetworkQualityPersistInterval(),
 	}
 	engineIO.service = s
 	s.presence = newAgentPresenceManager(s)
@@ -534,14 +545,71 @@ func (s *Service) shouldPersistRealtimeMetrics(serverID string, now time.Time) b
 	if serverID == "" {
 		return false
 	}
+	interval := s.realtimePersistInterval
+	if interval <= 0 {
+		interval = defaultRealtimeMetricsPersistInterval
+	}
 	s.lastPersistMu.Lock()
 	defer s.lastPersistMu.Unlock()
 	last := s.lastPersist[serverID]
-	if !last.IsZero() && now.Sub(last) < realtimeMetricsPersistInterval {
+	if !last.IsZero() && now.Sub(last) < interval {
 		return false
 	}
 	s.lastPersist[serverID] = now
 	return true
+}
+
+func resolveRealtimeMetricsPersistInterval() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("API_MONITOR_AGENT_METRICS_PERSIST_INTERVAL_MS"))
+	if raw == "" {
+		return defaultRealtimeMetricsPersistInterval
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value <= 0 {
+		return defaultRealtimeMetricsPersistInterval
+	}
+	interval := time.Duration(value) * time.Millisecond
+	if interval < minRealtimeMetricsPersistInterval {
+		return minRealtimeMetricsPersistInterval
+	}
+	return interval
+}
+
+func (s *Service) shouldPersistNetworkQuality(serverID string, now time.Time) bool {
+	if serverID == "" {
+		return false
+	}
+	interval := s.networkQualityPersistInterval
+	if interval <= 0 {
+		return false
+	}
+	s.lastNetworkQualityPersistMu.Lock()
+	defer s.lastNetworkQualityPersistMu.Unlock()
+	last := s.lastNetworkQualityPersist[serverID]
+	if !last.IsZero() && now.Sub(last) < interval {
+		return false
+	}
+	s.lastNetworkQualityPersist[serverID] = now
+	return true
+}
+
+func resolveNetworkQualityPersistInterval() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("API_MONITOR_AGENT_NETWORK_QUALITY_PERSIST_INTERVAL_MS"))
+	if raw == "" {
+		return defaultNetworkQualityPersistInterval
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value < 0 {
+		return defaultNetworkQualityPersistInterval
+	}
+	if value == 0 {
+		return 0
+	}
+	interval := time.Duration(value) * time.Millisecond
+	if interval < minNetworkQualityPersistInterval {
+		return minNetworkQualityPersistInterval
+	}
+	return interval
 }
 
 func (s *Service) BroadcastUptimeHeartbeat(monitorID int64, beat map[string]interface{}) {
@@ -2412,6 +2480,7 @@ func (s *Service) startMetricsCollectorLoop() {
 			// Clean up old metrics
 			if retentionDays > 0 {
 				_, _ = db.ExecContext(ctx, "DELETE FROM server_metrics_history WHERE recorded_at < datetime('now', '-' || ? || ' days')", retentionDays)
+				_, _ = db.ExecContext(ctx, "DELETE FROM server_network_quality_samples WHERE checked_at < datetime('now', '-' || ? || ' days')", retentionDays)
 			}
 		}
 

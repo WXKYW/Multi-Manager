@@ -114,7 +114,7 @@ const moduleRows = DEFAULT_MODULE_ORDER.map((moduleId) => {
 
 function FieldRow({ title, description, children }) {
   return (
-    <div className="grid gap-3 border-b border-kumo-line px-5 py-4 last:border-b-0 md:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)] md:items-center">
+    <div className="grid gap-3 border-b border-kumo-line px-4 py-3 last:border-b-0 md:grid-cols-[minmax(0,1fr)_minmax(14rem,20rem)] md:items-center">
       <div className="min-w-0">
         <div className="text-sm font-semibold text-kumo-strong">{title}</div>
         {description && <div className="mt-1 text-xs leading-relaxed text-kumo-subtle">{description}</div>}
@@ -188,6 +188,7 @@ function SettingsPage() {
   const [dbAnalysis, setDbAnalysis] = useState(null);
   const [deprecatedTables, setDeprecatedTables] = useState(null);
   const [databaseBusy, setDatabaseBusy] = useState(false);
+  const [databaseLoaded, setDatabaseLoaded] = useState(false);
   const [dbImportPreview, setDbImportPreview] = useState(null);
 
   const [logSettings, setLogSettings] = useState({
@@ -199,6 +200,8 @@ function SettingsPage() {
   const [logFileInfo, setLogFileInfo] = useState(null);
   const [operationLogs, setOperationLogs] = useState([]);
   const [logsBusy, setLogsBusy] = useState(false);
+  const [logsLoaded, setLogsLoaded] = useState(false);
+  const [twoFALoaded, setTwoFALoaded] = useState(false);
 
   const currentOrigin = useMemo(() => {
     if (typeof window === 'undefined') return 'http://localhost';
@@ -209,6 +212,10 @@ function SettingsPage() {
     if (dbAnalysis?.tables?.length) return dbAnalysis.tables;
     return Object.entries(dbStats?.tables || {}).map(([table, rows]) => ({ table, rows }));
   }, [dbAnalysis, dbStats]);
+  const formatTableRows = useCallback((rows) => {
+    const value = Number(rows);
+    return Number.isFinite(value) && value >= 0 ? value : '-';
+  }, []);
 
   const patchSettings = useCallback((patch) => {
     setSettings((prev) => normalizeUserSettings({ ...prev, ...patch }));
@@ -239,37 +246,49 @@ function SettingsPage() {
   }, [applyUserSettings]);
 
   const fetchDbState = useCallback(async () => {
-    const [statsResponse, analysisResponse, deprecatedResponse] = await Promise.all([
-      fetch('/api/settings/database-stats', { headers: getAuthHeaders() }),
-      fetch('/api/settings/database-analysis', { headers: getAuthHeaders() }),
-      fetch('/api/settings/deprecated-tables', { headers: getAuthHeaders() }),
-    ]);
+    setDatabaseBusy(true);
+    try {
+      const [statsResponse, analysisResponse, deprecatedResponse] = await Promise.all([
+        fetch('/api/settings/database-stats', { headers: getAuthHeaders() }),
+        fetch('/api/settings/database-analysis', { headers: getAuthHeaders() }),
+        fetch('/api/settings/deprecated-tables', { headers: getAuthHeaders() }),
+      ]);
 
-    const statsResult = await statsResponse.json();
-    if (statsResult.success) setDbStats(statsResult.data);
+      const statsResult = await statsResponse.json();
+      if (statsResult.success) setDbStats(statsResult.data);
 
-    const analysisResult = await analysisResponse.json();
-    if (analysisResult.success) setDbAnalysis(analysisResult.data);
+      const analysisResult = await analysisResponse.json();
+      if (analysisResult.success) setDbAnalysis(analysisResult.data);
 
-    const deprecatedResult = await deprecatedResponse.json();
-    if (deprecatedResult.success) setDeprecatedTables(deprecatedResult.data);
+      const deprecatedResult = await deprecatedResponse.json();
+      if (deprecatedResult.success) setDeprecatedTables(deprecatedResult.data);
+      setDatabaseLoaded(true);
+    } finally {
+      setDatabaseBusy(false);
+    }
   }, []);
 
   const fetchLogState = useCallback(async () => {
-    const [logSettingsResponse, operationLogsResponse] = await Promise.all([
-      fetch('/api/settings/log-settings', { headers: getAuthHeaders() }),
-      fetch('/api/settings/operation-logs', { headers: getAuthHeaders() }),
-    ]);
+    setLogsBusy(true);
+    try {
+      const [logSettingsResponse, operationLogsResponse] = await Promise.all([
+        fetch('/api/settings/log-settings', { headers: getAuthHeaders() }),
+        fetch('/api/settings/operation-logs', { headers: getAuthHeaders() }),
+      ]);
 
-    const logSettingsResult = await logSettingsResponse.json();
-    if (logSettingsResult.success) {
-      setLogSettings(logSettingsResult.data);
-      setLogFileInfo(logSettingsResult.fileInfo || null);
-    }
+      const logSettingsResult = await logSettingsResponse.json();
+      if (logSettingsResult.success) {
+        setLogSettings(logSettingsResult.data);
+        setLogFileInfo(logSettingsResult.fileInfo || null);
+      }
 
-    const operationLogsResult = await operationLogsResponse.json();
-    if (operationLogsResult.success) {
-      setOperationLogs(operationLogsResult.data || []);
+      const operationLogsResult = await operationLogsResponse.json();
+      if (operationLogsResult.success) {
+        setOperationLogs(operationLogsResult.data || []);
+      }
+      setLogsLoaded(true);
+    } finally {
+      setLogsBusy(false);
     }
   }, []);
 
@@ -278,31 +297,59 @@ function SettingsPage() {
     const result = await response.json();
     if (result.success) {
       setTwoFA((prev) => ({ ...prev, enabled: !!result.enabled }));
+      setTwoFALoaded(true);
     }
   }, []);
 
 
 
-  const refreshAll = useCallback(async (showFeedback = false) => {
+  const refreshCurrent = useCallback(async (showFeedback = false) => {
     setSettingsLoading(true);
     try {
-      await Promise.all([
-        fetchSettings(),
-        fetchDbState(),
-        fetchLogState(),
-        fetchTwoFAStatus(),
-      ]);
+      await fetchSettings();
+      if (activeTab === 'database') await fetchDbState();
+      if (activeTab === 'logs') await fetchLogState();
+      if (activeTab === 'security') await fetchTwoFAStatus();
       if (showFeedback) toast.success('设置已刷新');
     } catch (error) {
       toast.error(error.message || '加载设置失败');
     } finally {
       setSettingsLoading(false);
     }
-  }, [fetchDbState, fetchLogState, fetchSettings, fetchTwoFAStatus]);
+  }, [activeTab, fetchDbState, fetchLogState, fetchSettings, fetchTwoFAStatus]);
 
   useEffect(() => {
-    refreshAll(false);
-  }, [refreshAll]);
+    let cancelled = false;
+    setSettingsLoading(true);
+    fetchSettings()
+      .catch((error) => {
+        if (!cancelled) toast.error(error.message || '加载设置失败');
+      })
+      .finally(() => {
+        if (!cancelled) setSettingsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchSettings]);
+
+  useEffect(() => {
+    if (activeTab === 'database' && !databaseLoaded && !databaseBusy) {
+      fetchDbState().catch((error) => toast.error(error.message || '加载数据库统计失败'));
+    }
+  }, [activeTab, databaseBusy, databaseLoaded, fetchDbState]);
+
+  useEffect(() => {
+    if (activeTab === 'logs' && !logsLoaded && !logsBusy) {
+      fetchLogState().catch((error) => toast.error(error.message || '加载审计日志失败'));
+    }
+  }, [activeTab, fetchLogState, logsBusy, logsLoaded]);
+
+  useEffect(() => {
+    if (activeTab === 'security' && !twoFALoaded) {
+      fetchTwoFAStatus().catch((error) => toast.error(error.message || '加载 2FA 状态失败'));
+    }
+  }, [activeTab, fetchTwoFAStatus, twoFALoaded]);
 
   const persistSettings = async (successMessage = '设置已保存') => {
     const patch = settingsPatch;
@@ -630,8 +677,8 @@ function SettingsPage() {
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center lg:justify-end">
           <Button size="sm"
-            onClick={() => refreshAll(true)}
-            loading={settingsLoading}
+            onClick={() => refreshCurrent(true)}
+            loading={settingsLoading || (activeTab === 'database' && databaseBusy) || (activeTab === 'logs' && logsBusy)}
             icon={<RefreshCw className="h-4 w-4" />}
           >
             刷新
@@ -864,19 +911,19 @@ function SettingsPage() {
       )}
 
       {activeTab === 'database' && (
-        <div className="grid items-start gap-4 xl:grid-cols-2">
+        <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(24rem,0.9fr)]">
           <SectionCard
             title="数据库统计"
             description={dbStats?.dbPath || 'SQLite 数据文件'}
             icon={<Database className="h-4 w-4 text-kumo-brand" />}
             actions={
-                <Button size="sm" onClick={fetchDbState} loading={databaseBusy} icon={<RefreshCw className="h-4 w-4" />}>刷新统计</Button>
+                <Button size="sm" onClick={() => fetchDbState().catch((error) => toast.error(error.message || '加载数据库统计失败'))} loading={databaseBusy} icon={<RefreshCw className="h-4 w-4" />}>刷新统计</Button>
             }
             bodyPadding="none"
-            bodyClassName="overflow-x-auto"
+            bodyClassName="min-h-0 overflow-hidden"
           >
             {databaseStorage && (
-              <div className="grid gap-3 border-b border-kumo-line px-5 py-3 text-xs text-kumo-subtle md:grid-cols-4">
+              <div className="grid gap-2 border-b border-kumo-line px-4 py-2.5 text-xs text-kumo-subtle md:grid-cols-4">
                 <div>
                   <div className="font-semibold text-kumo-strong">{formatFileSize(databaseStorage.totalSizeBytes)}</div>
                   <div>总占用</div>
@@ -895,39 +942,43 @@ function SettingsPage() {
                 </div>
               </div>
             )}
-            <Table layout="fixed">
-              <colgroup>
-                <col />
-                <col className="w-[120px]" />
-                <col className="w-[140px]" />
-                <col className="w-[120px]" />
-                <col className="w-[140px]" />
-              </colgroup>
-              <Table.Header>
-                <Table.Row>
-                  <Table.Head>表名</Table.Head>
-                  <Table.Head>记录数</Table.Head>
-                  <Table.Head>实际占用</Table.Head>
-                  <Table.Head>索引</Table.Head>
-                  <Table.Head>平均行大小</Table.Head>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {tableRows.length === 0 ? (
+            <div className="max-h-[calc(100dvh-17rem)] overflow-auto">
+              <Table layout="fixed">
+                <colgroup>
+                  <col />
+                  <col className="w-[96px]" />
+                  <col className="w-[112px]" />
+                  <col className="w-[96px]" />
+                  <col className="w-[112px]" />
+                </colgroup>
+                <Table.Header>
                   <Table.Row>
-                    <Table.Cell colSpan={5} className="p-8 text-center text-kumo-subtle">暂无统计数据</Table.Cell>
+                    <Table.Head>表名</Table.Head>
+                    <Table.Head>记录数</Table.Head>
+                    <Table.Head>占用</Table.Head>
+                    <Table.Head>索引</Table.Head>
+                    <Table.Head>行大小</Table.Head>
                   </Table.Row>
-                ) : tableRows.map((row) => (
-                  <Table.Row key={row.table}>
-                    <Table.Cell className="font-mono text-xs text-kumo-strong">{row.table}</Table.Cell>
-                    <Table.Cell className="font-mono text-xs">{row.rows ?? '-'}</Table.Cell>
-                    <Table.Cell className="font-mono text-xs">{row.estimatedSizeBytes ? formatFileSize(row.estimatedSizeBytes) : '-'}</Table.Cell>
-                    <Table.Cell className="font-mono text-xs">{row.indexSizeBytes ? formatFileSize(row.indexSizeBytes) : '-'}</Table.Cell>
-                    <Table.Cell className="font-mono text-xs">{row.avgRowSizeBytes ? formatFileSize(row.avgRowSizeBytes) : '-'}</Table.Cell>
-                  </Table.Row>
-                ))}
-              </Table.Body>
-            </Table>
+                </Table.Header>
+                <Table.Body>
+                  {tableRows.length === 0 ? (
+                    <Table.Row>
+                      <Table.Cell colSpan={5} className="p-8 text-center text-kumo-subtle">
+                        {databaseBusy ? '正在加载统计...' : '暂无统计数据'}
+                      </Table.Cell>
+                    </Table.Row>
+                  ) : tableRows.map((row) => (
+                    <Table.Row key={row.table}>
+                      <Table.Cell className="truncate font-mono text-xs text-kumo-strong" title={row.table}>{row.table}</Table.Cell>
+                      <Table.Cell className="font-mono text-xs">{formatTableRows(row.rows)}</Table.Cell>
+                      <Table.Cell className="font-mono text-xs">{row.estimatedSizeBytes ? formatFileSize(row.estimatedSizeBytes) : '-'}</Table.Cell>
+                      <Table.Cell className="font-mono text-xs">{row.indexSizeBytes ? formatFileSize(row.indexSizeBytes) : '-'}</Table.Cell>
+                      <Table.Cell className="font-mono text-xs">{row.avgRowSizeBytes ? formatFileSize(row.avgRowSizeBytes) : '-'}</Table.Cell>
+                    </Table.Row>
+                  ))}
+                </Table.Body>
+              </Table>
+            </div>
           </SectionCard>
 
           <div className="grid content-start gap-3">
@@ -935,6 +986,7 @@ function SettingsPage() {
               title="数据库导入导出"
               description="导出当前 SQLite 数据库，或先预检后替换当前数据库。"
               icon={<Download className="h-4 w-4 text-kumo-brand" />}
+              bodyPadding="sm"
               bodyClassName="space-y-3"
             >
               <Input
@@ -945,7 +997,7 @@ function SettingsPage() {
                 className="hidden"
                 onChange={previewDatabaseImport}
               />
-              <div className="grid gap-2">
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
                 <Button size="sm" className="justify-start" onClick={exportDatabase} icon={<Download className="h-4 w-4" />}>导出数据库</Button>
                 <Button size="sm" className="justify-start" onClick={importDatabase} loading={databaseBusy} icon={<Upload className="h-4 w-4" />}>上传并预检数据库</Button>
               </div>
@@ -1003,9 +1055,10 @@ function SettingsPage() {
             <SectionCard
               title="维护操作"
               icon={<HardDrive className="h-4 w-4 text-kumo-brand" />}
+              bodyPadding="sm"
               bodyClassName="space-y-3"
             >
-              <div className="grid gap-2">
+              <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
                 <Button size="sm" className="justify-start" onClick={() => postSettingsAction('/api/settings/vacuum-database', '数据库已压缩', fetchDbState)} loading={databaseBusy}>
                   压缩数据库
                 </Button>
@@ -1123,7 +1176,7 @@ function SettingsPage() {
       )}
 
       {activeTab === 'appearance' && (
-        <div className="grid items-start gap-4">
+        <div className="grid items-start gap-3 xl:grid-cols-[minmax(20rem,0.82fr)_minmax(0,1.18fr)]">
           <SectionCard
             title="界面外观"
             description={`当前生效主题: ${theme === 'dark' ? '深色' : '浅色'}`}
@@ -1145,6 +1198,7 @@ function SettingsPage() {
             title="自定义 CSS"
             description="应用会立即注入当前页面，保存后写入后端用户设置。"
             icon={<Terminal className="h-4 w-4 text-kumo-brand" />}
+            className="xl:min-h-[28rem]"
             actions={
                 <>
                   <Button size="sm" onClick={() => applyCustomCss(settings.customCss)}>预览</Button>
@@ -1156,13 +1210,13 @@ function SettingsPage() {
             }
             bodyPadding="none"
           >
-            <div className="p-5">
+            <div className="p-4">
               <Textarea
                 label="CSS"
                 value={settings.customCss}
                 onChange={(e) => patchSettings({ customCss: e.target.value })}
                 placeholder="/* 在此输入自定义 CSS */"
-                className="min-h-64 font-mono text-sm"
+                className="min-h-[22rem] font-mono text-sm"
               />
             </div>
           </SectionCard>
