@@ -237,10 +237,10 @@ function MetricBar({ label, value, subValue = '', offline = false }) {
         <span className="text-xs font-bold tabular-nums text-kumo-strong">{offline ? '--' : formatPercent(percent)}</span>
       </div>
       <Meter
-        label={label}
+        label={`${label} 使用率`}
         value={offline ? 0 : percent}
         showValue={false}
-        className="mt-1.5"
+        className="public-status-meter-compact mt-1.5"
         trackClassName="h-1.5 bg-kumo-line/70"
         indicatorClassName={offline ? 'bg-kumo-muted' : percentTone(percent)}
       />
@@ -386,7 +386,7 @@ function RemainingMini({ traffic }) {
         label="剩余流量"
         value={unlimited ? 100 : traffic.remainingPercent}
         showValue={false}
-        className="mt-1.5"
+        className="public-status-meter-compact mt-1.5"
         trackClassName="h-1.5 bg-kumo-line/70"
         indicatorClassName={progressTone}
       />
@@ -415,7 +415,7 @@ function ServerCard({ server }) {
   ].filter(Boolean).join(' · ');
 
   return (
-    <article className={`flex h-full flex-col rounded-lg border p-2.5 ${server.online ? 'border-kumo-line bg-kumo-base' : 'border-kumo-danger/25 bg-kumo-danger/5'}`}>
+    <article className={`public-server-status-card flex h-full flex-col rounded-lg border p-2.5 ${server.online ? 'border-kumo-line bg-kumo-base' : 'border-kumo-danger/25 bg-kumo-danger/5'}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2.5">
@@ -608,7 +608,7 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
     : 'grid gap-3 md:grid-cols-2 xl:grid-cols-3';
 
   return (
-    <div className="min-h-screen bg-kumo-canvas text-kumo-default">
+    <div className="public-server-status-page min-h-screen text-kumo-default">
       <main className={`mx-auto flex min-h-screen w-full ${pageMaxWidthClass} flex-col px-4 py-6 sm:px-6 lg:px-8`}>
         <header className="mb-6 flex items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">

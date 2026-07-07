@@ -335,6 +335,38 @@ th > button[aria-label='Resize column'] > span {
   background: var(--app-main-bg);
 }
 
+.public-server-status-page {
+  background: var(--app-main-bg);
+}
+
+.public-server-status-card {
+  box-shadow:
+    0 1px 2px color-mix(in oklab, var(--color-kumo-line) 38%, transparent),
+    0 10px 24px color-mix(in oklab, var(--color-kumo-canvas) 18%, transparent);
+}
+
+:root[data-mode='dark'] .public-server-status-card {
+  box-shadow:
+    0 1px 0 color-mix(in oklab, var(--color-kumo-line) 82%, transparent),
+    0 12px 28px color-mix(in oklab, var(--color-kumo-canvas) 34%, transparent);
+}
+
+.public-status-meter-compact {
+  gap: 0;
+}
+
+.public-status-meter-compact > div:first-child {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
 .agent-command-textarea {
   width: 100%;
   min-width: 0;
