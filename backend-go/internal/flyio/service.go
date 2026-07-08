@@ -639,11 +639,7 @@ func (s *Service) updateMachinesImage(ctx context.Context, token, appName string
 		if image == "latest" {
 			current := stringValue(config["image"], "")
 			if current != "" {
-				if strings.Contains(current, ":") {
-					targetImage = strings.Split(current, ":")[0] + ":latest"
-				} else {
-					targetImage = current + ":latest"
-				}
+				targetImage = withImageTag(current, "latest")
 			}
 		}
 		if targetImage == "" {
@@ -660,6 +656,23 @@ func (s *Service) updateMachinesImage(ctx context.Context, token, appName string
 		result.updated++
 	}
 	return result
+}
+
+func withImageTag(image, tag string) string {
+	image = strings.TrimSpace(image)
+	tag = strings.TrimSpace(tag)
+	if image == "" || tag == "" {
+		return image
+	}
+	if digestIndex := strings.Index(image, "@"); digestIndex >= 0 {
+		image = image[:digestIndex]
+	}
+	lastSlash := strings.LastIndex(image, "/")
+	lastColon := strings.LastIndex(image, ":")
+	if lastColon > lastSlash {
+		image = image[:lastColon]
+	}
+	return image + ":" + tag
 }
 
 func loadAccounts(ctx context.Context, db *sql.DB) ([]map[string]interface{}, error) {

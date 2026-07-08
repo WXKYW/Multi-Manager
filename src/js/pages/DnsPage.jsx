@@ -2661,8 +2661,8 @@ function DnsPage() {
               icon={<FileText className="h-4 w-4 text-kumo-brand" />}
               actions={(
                 <>
-                <Button size="sm" variant="secondary" onClick={() => openImportModal('templates')} icon={<Upload className="h-4 w-4" />}>导入模板</Button>
-                <Button size="sm" variant="secondary" onClick={() => downloadJson(`cloudflare-dns-templates-${Date.now()}.json`, { version: '1.0', templates })} icon={<Download className="h-4 w-4" />}>导出模板</Button>
+                <Button size="sm" variant="secondary" onClick={() => openImportModal('templates')} icon={<Download className="h-4 w-4" />}>导入模板</Button>
+                <Button size="sm" variant="secondary" onClick={() => downloadJson(`cloudflare-dns-templates-${Date.now()}.json`, { version: '1.0', templates })} icon={<Upload className="h-4 w-4" />}>导出模板</Button>
                 <Button size="sm" onClick={() => openTemplateModal()} icon={<Plus className="h-4 w-4" />}>添加模板</Button>
                 </>
               )}
@@ -2714,8 +2714,8 @@ function DnsPage() {
               icon={<Settings className="h-4 w-4 text-kumo-brand" />}
               actions={(
                 <>
-                <Button size="sm" variant="secondary" onClick={exportAccounts} icon={<Download className="h-4 w-4" />}>导出账号</Button>
-                <Button size="sm" variant="secondary" onClick={() => openImportModal('accounts')} icon={<Upload className="h-4 w-4" />}>导入账号</Button>
+                <Button size="sm" variant="secondary" onClick={exportAccounts} icon={<Upload className="h-4 w-4" />}>导出账号</Button>
+                <Button size="sm" variant="secondary" onClick={() => openImportModal('accounts')} icon={<Download className="h-4 w-4" />}>导入账号</Button>
                 <Button size="sm" onClick={() => openAccountModal()} icon={<Plus className="h-4 w-4" />}>添加账号</Button>
                 </>
               )}

@@ -1013,8 +1013,8 @@ function SchedulerPage() {
             <IconButton label="刷新" onClick={loadAll} icon={<RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />} />
             {activeTab === 'workflows' && (
               <>
-                <IconButton label="导入工作流" onClick={importWorkflows} icon={<Upload className="h-3.5 w-3.5" />} />
-                <IconButton label="导出工作流" onClick={exportWorkflows} icon={<Download className="h-3.5 w-3.5" />} />
+                <IconButton label="导入工作流" onClick={importWorkflows} icon={<Download className="h-3.5 w-3.5" />} />
+                <IconButton label="导出工作流" onClick={exportWorkflows} icon={<Upload className="h-3.5 w-3.5" />} />
               </>
             )}
             <Button size="sm" variant="primary" onClick={activeTab === 'workflows' ? openCreateWorkflow : openCreateTask}>

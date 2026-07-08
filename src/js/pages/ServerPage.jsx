@@ -11694,7 +11694,7 @@ function ServerPage() {
           </div>
 
           <div className="grid min-h-0 flex-1 gap-3 overflow-hidden p-4 text-xs lg:grid-cols-[18rem_minmax(0,1fr)]">
-            <LayerCard className="min-h-0 overflow-hidden p-0">
+            <LayerCard className="flex min-h-0 flex-col overflow-hidden p-0">
               <LayerCard.Secondary className="flex min-h-[52px] items-center justify-between gap-2 px-3 py-3.5">
                 <span className="inline-flex min-w-0 items-center gap-2 text-xs font-bold text-kumo-strong">
                   <Settings className="h-4 w-4 shrink-0 text-kumo-brand" />
@@ -11704,7 +11704,7 @@ function ServerPage() {
                   {dockerComposeEditor?.status || '-'}
                 </Badge>
               </LayerCard.Secondary>
-              <LayerCard.Primary className="space-y-2 p-3">
+              <LayerCard.Primary className="flex flex-1 flex-col space-y-2 p-3">
                 <div className="rounded-md border border-kumo-line/70 bg-kumo-recessed/20 px-2 py-1.5">
                   <div className="text-[10px] text-kumo-subtle">主机</div>
                   <div className="mt-0.5 truncate text-sm font-bold text-kumo-strong">{dockerComposeEditor?.serverName || '-'}</div>

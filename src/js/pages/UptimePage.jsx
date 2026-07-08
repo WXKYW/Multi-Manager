@@ -2168,10 +2168,10 @@ function UptimePage() {
                   className="hidden"
                   onChange={previewUptimeImportFile}
                 />
-                <Button size="sm" variant="secondary" onClick={exportUptimeConfig} loading={uptimeMetaLoading} icon={<Download className="w-3.5 h-3.5" />}>
+                <Button size="sm" variant="secondary" onClick={exportUptimeConfig} loading={uptimeMetaLoading} icon={<Upload className="w-3.5 h-3.5" />}>
                   导出配置
                 </Button>
-                <Button size="sm" variant="primary" onClick={() => uptimeImportInputRef.current?.click()} loading={uptimeMetaLoading} icon={<Upload className="w-3.5 h-3.5" />}>
+                <Button size="sm" variant="primary" onClick={() => uptimeImportInputRef.current?.click()} loading={uptimeMetaLoading} icon={<Download className="w-3.5 h-3.5" />}>
                   选择导入文件
                 </Button>
               </>

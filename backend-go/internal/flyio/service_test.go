@@ -195,6 +195,20 @@ func TestAppMachineLogsAndBatchOperations(t *testing.T) {
 	}
 }
 
+func TestWithImageTagPreservesRepository(t *testing.T) {
+	tests := map[string]string{
+		"registry.example/app:old":          "registry.example/app:latest",
+		"registry.example:5000/ns/app:main": "registry.example:5000/ns/app:latest",
+		"library/nginx":                     "library/nginx:latest",
+		"ghcr.io/acme/app@sha256:abcdef":    "ghcr.io/acme/app:latest",
+	}
+	for input, want := range tests {
+		if got := withImageTag(input, "latest"); got != want {
+			t.Fatalf("withImageTag(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func newTestService(t *testing.T, fake *httptest.Server) *Service {
 	t.Helper()
 	t.Setenv("FLY_GRAPHQL_URL", fake.URL+"/graphql")
