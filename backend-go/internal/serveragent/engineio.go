@@ -28,6 +28,8 @@ const (
 	PacketNoop    EngineIOPacketType = 6 // 无操作
 )
 
+const maxPendingMessagesPerSession = 128
+
 // SocketIOPacketType Socket.IO 包类型
 type SocketIOPacketType int
 
@@ -502,7 +504,7 @@ func drainPendingMessages(session *EngineIOSession) []string {
 		return nil
 	}
 	messages := session.PendingMessages
-	session.PendingMessages = []string{}
+	session.PendingMessages = nil
 	return messages
 }
 
@@ -741,8 +743,20 @@ func normalizeAgentCapabilities(values []string) []string {
 
 // queueMessage 排队消息
 func (s *EngineIOServer) queueMessage(session *EngineIOSession, message string) {
+	enqueuePendingMessage(session, message)
+}
+
+func enqueuePendingMessage(session *EngineIOSession, message string) {
+	if session == nil {
+		return
+	}
 	session.mu.Lock()
 	defer session.mu.Unlock()
+	if len(session.PendingMessages) >= maxPendingMessagesPerSession {
+		copy(session.PendingMessages, session.PendingMessages[1:])
+		session.PendingMessages[len(session.PendingMessages)-1] = message
+		return
+	}
 	session.PendingMessages = append(session.PendingMessages, message)
 }
 

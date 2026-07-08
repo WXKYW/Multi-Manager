@@ -225,6 +225,26 @@ func TestEngineIOPollingWaitsForQueuedMessages(t *testing.T) {
 	}
 }
 
+func TestEngineIOPendingMessagesAreBounded(t *testing.T) {
+	engine := NewEngineIOServer(NewConnectionRegistry())
+	session := &EngineIOSession{
+		ID:              "slow-client",
+		Transport:       "polling",
+		PendingMessages: []string{},
+		LastActivity:    time.Now(),
+	}
+
+	for i := 0; i < maxPendingMessagesPerSession+25; i++ {
+		engine.queueMessage(session, "msg-"+string(rune('a'+(i%26))))
+	}
+
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+	if len(session.PendingMessages) != maxPendingMessagesPerSession {
+		t.Fatalf("pending message count = %d, want %d", len(session.PendingMessages), maxPendingMessagesPerSession)
+	}
+}
+
 func TestMetricsHubQueuesPollingClientMessages(t *testing.T) {
 	hub := NewMetricsHub()
 	session := &EngineIOSession{
@@ -245,6 +265,31 @@ func TestMetricsHubQueuesPollingClientMessages(t *testing.T) {
 	}
 	if !strings.Contains(session.PendingMessages[0], "metrics:update") {
 		t.Fatalf("pending message = %q", session.PendingMessages[0])
+	}
+}
+
+func TestMetricsHubPollingClientQueueIsBounded(t *testing.T) {
+	hub := NewMetricsHub()
+	session := &EngineIOSession{
+		ID:              "slow-polling-client",
+		Transport:       "polling",
+		Namespace:       "/metrics",
+		PendingMessages: []string{},
+		LastActivity:    time.Now(),
+	}
+	hub.Register(session.ID, session)
+
+	for i := 0; i < maxPendingMessagesPerSession+25; i++ {
+		hub.BroadcastMetrics("srv-1", map[string]interface{}{"cpu": float64(i)})
+	}
+
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+	if len(session.PendingMessages) != maxPendingMessagesPerSession {
+		t.Fatalf("pending message count = %d, want %d", len(session.PendingMessages), maxPendingMessagesPerSession)
+	}
+	if !strings.Contains(session.PendingMessages[len(session.PendingMessages)-1], `"cpu":152`) {
+		t.Fatalf("latest pending message was not retained: %q", session.PendingMessages[len(session.PendingMessages)-1])
 	}
 }
 

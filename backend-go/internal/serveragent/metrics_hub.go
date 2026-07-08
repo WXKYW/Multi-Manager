@@ -169,9 +169,7 @@ func (h *MetricsHub) broadcastSocketIOEvent(clients []*MetricsHubClient, prefix 
 		session.mu.RUnlock()
 
 		if conn == nil {
-			session.mu.Lock()
-			session.PendingMessages = append(session.PendingMessages, message)
-			session.mu.Unlock()
+			enqueuePendingMessage(session, message)
 			continue
 		}
 

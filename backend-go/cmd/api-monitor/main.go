@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"os"
 
 	"github.com/iwvw/api-monitor/backend-go/internal/applog"
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
+	"github.com/iwvw/api-monitor/backend-go/internal/memguard"
 	"github.com/iwvw/api-monitor/backend-go/internal/server"
 )
 
@@ -17,6 +19,7 @@ func main() {
 		_, _ = os.Stderr.WriteString("failed to initialize logger: " + err.Error() + "\n")
 		os.Exit(1)
 	}
+	memguard.Start(context.Background())
 	handler := applog.Middleware(server.New(cfg))
 
 	applog.Info(nil, "startup", "api-monitor go shell listening", "address", cfg.ListenAddress())
