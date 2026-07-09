@@ -2870,6 +2870,11 @@ function OpenAIPage() {
               onChange={e => setEndpointForm({ ...endpointForm, apiKey: e.target.value })}
               placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
               autoComplete="off"
+              data-1p-ignore
+              data-lpignore="true"
+              data-bwignore="true"
+              data-form-type="other"
+              spellCheck={false}
               className="w-full text-kumo-strong text-xs font-mono"
             />
 

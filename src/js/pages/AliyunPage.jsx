@@ -750,6 +750,11 @@ function AliyunPage() {
               onChange={(e) => setAccountForm({ ...accountForm, accessKeySecret: e.target.value })}
               placeholder={editingAccount ? '(不修改请留空)' : '请输入 Secret'}
               autoComplete="off"
+              data-1p-ignore
+              data-lpignore="true"
+              data-bwignore="true"
+              data-form-type="other"
+              spellCheck={false}
               className="w-full font-mono"
             />
 

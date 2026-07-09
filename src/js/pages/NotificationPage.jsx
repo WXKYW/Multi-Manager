@@ -1342,6 +1342,11 @@ function NotificationPage() {
                     placeholder="your_smtp_app_password"
                     value={channelForm.config.auth.pass}
                     autoComplete="off"
+                    data-1p-ignore
+                    data-lpignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    spellCheck={false}
                     onChange={(e) => setChannelForm(prev => ({
                       ...prev,
                       config: {

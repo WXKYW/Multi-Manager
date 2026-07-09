@@ -10855,6 +10855,11 @@ function ServerPage() {
                           onChange={e => setServerForm(prev => ({ ...prev, password: e.target.value }))}
                           placeholder={serverModalMode === 'edit' ? '****** (留空不修改)' : '登录密码'}
                           autoComplete="off"
+                          data-1p-ignore
+                          data-lpignore="true"
+                          data-bwignore="true"
+                          data-form-type="other"
+                          spellCheck={false}
                           className="px-3 py-2 text-kumo-strong"
                         />
                       </div>
@@ -10879,6 +10884,11 @@ function ServerPage() {
                             onChange={e => setServerForm(prev => ({ ...prev, passphrase: e.target.value }))}
                             placeholder="Key Passphrase"
                             autoComplete="off"
+                            data-1p-ignore
+                            data-lpignore="true"
+                            data-bwignore="true"
+                            data-form-type="other"
+                            spellCheck={false}
                             className="px-3 py-2 text-kumo-strong"
                           />
                         </div>
@@ -11065,6 +11075,11 @@ function ServerPage() {
                     onChange={e => setCredForm(prev => ({ ...prev, password: e.target.value }))}
                     placeholder="输入密码"
                     autoComplete="off"
+                    data-1p-ignore
+                    data-lpignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    spellCheck={false}
                     className="px-3 py-2 text-kumo-strong"
                   />
                 </div>
@@ -11089,6 +11104,11 @@ function ServerPage() {
                       onChange={e => setCredForm(prev => ({ ...prev, passphrase: e.target.value }))}
                       placeholder="Passphrase"
                       autoComplete="off"
+                      data-1p-ignore
+                      data-lpignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
+                      spellCheck={false}
                       className="px-3 py-2 text-kumo-strong"
                     />
                   </div>

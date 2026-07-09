@@ -2800,10 +2800,16 @@ function DnsPage() {
               <Input size="sm"
                 label="API Token / 账户 API Token / 旧版全局 API 密钥"
                 type="text"
+                name="cf_credential_value"
                 value={accountForm.apiToken}
                 onChange={(event) => setAccountForm((prev) => ({ ...prev, apiToken: event.target.value }))}
                 placeholder={modal.data ? '不修改请留空' : 'cfat_... 或普通 API Token'}
                 autoComplete="off"
+                data-1p-ignore
+                data-lpignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                spellCheck={false}
                 className="font-mono"
               />
               <Checkbox

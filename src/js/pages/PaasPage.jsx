@@ -2371,6 +2371,11 @@ function PaasPage() {
                 onChange={(e) => setNewKoyebToken(e.target.value)}
                 placeholder="koyeb_api_token"
                 autoComplete="off"
+                data-1p-ignore
+                data-lpignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                spellCheck={false}
                 className="w-full text-kumo-strong p-2 text-xs"
               />
             </div>
@@ -2429,6 +2434,11 @@ function PaasPage() {
                 onChange={(e) => setNewFlyToken(e.target.value)}
                 placeholder="flyv1_xxxx"
                 autoComplete="off"
+                data-1p-ignore
+                data-lpignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                spellCheck={false}
                 className="w-full text-kumo-strong p-2 text-xs"
               />
             </div>

@@ -133,6 +133,11 @@ function PublicSharePage() {
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  spellCheck={false}
                 />
               )}
 

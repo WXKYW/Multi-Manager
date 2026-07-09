@@ -189,6 +189,11 @@ function AuthPage() {
             value={newPassword}
             onChange={(event) => setNewPassword(event.target.value)}
             autoComplete="off"
+            data-1p-ignore
+            data-lpignore="true"
+            data-bwignore="true"
+            data-form-type="other"
+            spellCheck={false}
             className="w-full"
             autoFocus
           />
@@ -201,6 +206,11 @@ function AuthPage() {
             value={confirmPassword}
             onChange={(event) => setConfirmPassword(event.target.value)}
             autoComplete="off"
+            data-1p-ignore
+            data-lpignore="true"
+            data-bwignore="true"
+            data-form-type="other"
+            spellCheck={false}
             className="w-full"
           />
 
@@ -254,6 +264,11 @@ function AuthPage() {
             value={loginPassword}
             onChange={(event) => setLoginPassword(event.target.value)}
             autoComplete="off"
+            data-1p-ignore
+            data-lpignore="true"
+            data-bwignore="true"
+            data-form-type="other"
+            spellCheck={false}
             className="w-full"
             autoFocus
           />

@@ -1547,6 +1547,11 @@ function TotpPage() {
                       value={accountForm.secret}
                       onChange={(e) => setAccountForm((prev) => ({ ...prev, secret: e.target.value }))}
                       autoComplete="off"
+                      data-1p-ignore
+                      data-lpignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
+                      spellCheck={false}
                       className="w-full pr-16 disabled:opacity-60"
                     />
                     <Button
