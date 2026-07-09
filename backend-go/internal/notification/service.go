@@ -281,7 +281,8 @@ func (s *Service) testChannel(w http.ResponseWriter, r *http.Request, id string)
 	}
 	config := decryptConfig(channel.ConfigRaw)
 	title := "Notification connectivity test"
-	message := fmt.Sprintf("Sent at: %s\nStatus: configuration accepted", time.Now().Format(time.RFC3339))
+	loc, _ := s.systemLocation(r.Context())
+	message := fmt.Sprintf("Sent at: %s\nStatus: configuration accepted", time.Now().In(loc).Format(time.RFC3339))
 	if err := s.sendToChannel(r.Context(), channel, config, title, message); err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -373,10 +374,12 @@ func (s *Service) previewTemplate(w http.ResponseWriter, r *http.Request) {
 		TitleTemplate:   stringValue(payload["title_template"]),
 		MessageTemplate: stringValue(payload["message_template"]),
 	}
+	loc, _ := s.systemLocation(r.Context())
+	templateData := notificationTemplateData(data, loc)
 	response.OK(w, map[string]interface{}{
 		"title":     formatTitle(rule, data),
-		"message":   formatMessage(rule, data),
-		"variables": sortedKeys(data),
+		"message":   formatMessage(rule, data, loc),
+		"variables": sortedKeys(templateData),
 	})
 }
 
@@ -896,7 +899,8 @@ func (s *Service) UpdateConfig(ctx context.Context, payload map[string]interface
 }
 
 func (s *Service) DryRun(ctx context.Context, rule Rule, eventData map[string]interface{}) (map[string]interface{}, error) {
-	timeAllowed := checkTimeWindow(rule.TimeWindow)
+	loc, timeZoneName := s.systemLocation(ctx)
+	timeAllowed := checkTimeWindow(rule.TimeWindow, loc)
 	conditions := evaluateConditions(rule.Conditions, eventData)
 	maintenance, err := s.matchMaintenance(ctx, eventData)
 	if err != nil {
@@ -930,9 +934,10 @@ func (s *Service) DryRun(ctx context.Context, rule Rule, eventData map[string]in
 		"matched":         true,
 		"wouldNotify":     wouldNotify,
 		"title":           formatTitle(rule, eventData),
-		"message":         formatMessage(rule, eventData),
+		"message":         formatMessage(rule, eventData, loc),
 		"fingerprint":     generateFingerprint(rule, eventData),
 		"timeAllowed":     timeAllowed,
+		"timeZone":        timeZoneName,
 		"conditionResult": conditions,
 		"maintenance":     maintenance,
 		"channels":        channels,
@@ -949,6 +954,7 @@ func (s *Service) Trigger(ctx context.Context, sourceModule, eventType string, e
 	if err != nil {
 		return err
 	}
+	loc, _ := s.systemLocation(ctx)
 	for _, rule := range rules {
 		dryRun, err := s.DryRun(ctx, rule, eventData)
 		if err != nil {
@@ -966,7 +972,7 @@ func (s *Service) Trigger(ctx context.Context, sourceModule, eventType string, e
 				continue
 			}
 			title := formatTitle(rule, eventData)
-			message := formatMessage(rule, eventData)
+			message := formatMessage(rule, eventData, loc)
 			logID, err := s.createHistory(ctx, rule.ID, channelID, "pending", title, message, eventData, nil)
 			if err != nil {
 				return err
@@ -975,7 +981,7 @@ func (s *Service) Trigger(ctx context.Context, sourceModule, eventType string, e
 			if sendErr != nil {
 				_ = s.updateHistoryStatus(ctx, logID, "failed", nil, ptr(sendErr.Error()))
 			} else {
-				now := time.Now().Format(time.RFC3339)
+				now := time.Now().In(loc).Format(time.RFC3339)
 				_ = s.updateHistoryStatus(ctx, logID, "sent", &now, nil)
 			}
 		}
@@ -1217,6 +1223,29 @@ func (s *Service) sendTelegram(ctx context.Context, cfg map[string]interface{}, 
 		return fmt.Errorf("telegram API error: %s", result.Description)
 	}
 	return nil
+}
+
+func (s *Service) systemLocation(ctx context.Context) (*time.Location, string) {
+	db, err := s.store.Open(ctx)
+	if err != nil {
+		return time.Local, "system"
+	}
+	defer db.Close()
+
+	var zone sql.NullString
+	err = db.QueryRowContext(ctx, `SELECT time_zone FROM user_settings WHERE id = 1`).Scan(&zone)
+	if err != nil || !zone.Valid {
+		return time.Local, "system"
+	}
+	name := strings.TrimSpace(zone.String)
+	if name == "" || name == "system" {
+		return time.Local, "system"
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return time.Local, "system"
+	}
+	return loc, name
 }
 
 func (s *Service) open(ctx context.Context) (*sql.DB, error) {
@@ -1500,9 +1529,12 @@ func formatTitle(rule Rule, data map[string]interface{}) string {
 	return fmt.Sprintf("%s %s", icon, rule.Name)
 }
 
-func formatMessage(rule Rule, data map[string]interface{}) string {
+func formatMessage(rule Rule, data map[string]interface{}, loc *time.Location) string {
+	if loc == nil {
+		loc = time.Local
+	}
 	if rule.MessageTemplate != "" {
-		return renderTemplate(rule.MessageTemplate, data)
+		return renderTemplate(rule.MessageTemplate, notificationTemplateData(data, loc))
 	}
 	lines := []string{}
 	add := func(label string, value interface{}) {
@@ -1534,7 +1566,7 @@ func formatMessage(rule Rule, data map[string]interface{}) string {
 
 	// 最后活跃时间
 	if lastActiveVal := data["lastActive"]; lastActiveVal != nil {
-		add("最后活跃", toLocalTimeStr(stringValue(lastActiveVal)))
+		add("最后活跃", toLocalTimeStr(stringValue(lastActiveVal), loc))
 	}
 
 	add("错误原因", data["error"])
@@ -1573,13 +1605,32 @@ func formatMessage(rule Rule, data map[string]interface{}) string {
 	if len(lines) == 0 {
 		return jsonString(data)
 	}
-	lines = append(lines, "", "时间: "+time.Now().Format("2006/01/02 15:04:05"))
+	lines = append(lines, "", "时间: "+time.Now().In(loc).Format("2006/01/02 15:04:05"))
 	return strings.Join(lines, "\n")
 }
 
-func toLocalTimeStr(utcStr string) string {
+func notificationTemplateData(data map[string]interface{}, loc *time.Location) map[string]interface{} {
+	if loc == nil {
+		loc = time.Local
+	}
+	result := make(map[string]interface{}, len(data)+3)
+	for key, value := range data {
+		result[key] = value
+	}
+	result["time"] = time.Now().In(loc).Format("2006/01/02 15:04:05")
+	result["timeZone"] = loc.String()
+	if lastActive := stringValue(data["lastActive"]); lastActive != "" {
+		result["lastActiveLocal"] = toLocalTimeStr(lastActive, loc)
+	}
+	return result
+}
+
+func toLocalTimeStr(utcStr string, loc *time.Location) string {
 	if utcStr == "" {
 		return ""
+	}
+	if loc == nil {
+		loc = time.Local
 	}
 	var t time.Time
 	var err error
@@ -1590,7 +1641,7 @@ func toLocalTimeStr(utcStr string) string {
 	if err != nil {
 		return utcStr
 	}
-	return t.Local().Format("2006/01/02 15:04:05")
+	return t.In(loc).Format("2006/01/02 15:04:05")
 }
 
 func formatNotificationBytes(bytes int64) string {
@@ -1721,9 +1772,12 @@ func compare(actual, expected interface{}, operator string) bool {
 	}
 }
 
-func checkTimeWindow(window map[string]interface{}) bool {
+func checkTimeWindow(window map[string]interface{}, loc *time.Location) bool {
 	if !boolValue(window["enabled"], false) {
 		return true
+	}
+	if loc == nil {
+		loc = time.Local
 	}
 	start := stringDefault(window["start"], "00:00")
 	end := stringDefault(window["end"], "23:59")
@@ -1732,7 +1786,7 @@ func checkTimeWindow(window map[string]interface{}) bool {
 	if !okStart || !okEnd {
 		return true
 	}
-	now := time.Now()
+	now := time.Now().In(loc)
 	current := now.Hour()*60 + now.Minute()
 	if endMinutes < startMinutes {
 		return current >= startMinutes || current <= endMinutes

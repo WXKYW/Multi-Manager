@@ -47,7 +47,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
         if (accountCountEl) accountCountEl.textContent = `(${filtered.length})`;
         if (filtered.length === 0) {
-            mainEl.innerHTML = `<div style="padding: 40px; text-align: center; opacity: 0.5;">📭 ${term ? '未找到结果' : '暂无账号'}</div>`;
+            mainEl.innerHTML = `<div class="state-panel">${term ? '未找到结果' : '暂无账号'}</div>`;
             return;
         }
 
@@ -98,10 +98,10 @@ window.addEventListener('DOMContentLoaded', () => {
 
     async function loadAccounts(showLoading = true) {
         if (!mainEl) return;
-        if (showLoading) mainEl.innerHTML = '<div style="padding: 40px; text-align: center;">同步中...</div>';
+        if (showLoading) mainEl.innerHTML = '<div class="state-panel">同步中...</div>';
         chrome.runtime.sendMessage({ type: 'GET_ACCOUNTS' }, (response) => {
             if (!response || !response.success) {
-                mainEl.innerHTML = `<div style="padding: 20px; text-align: center;"><p>${response?.error || '连接失败'}</p></div>`;
+                mainEl.innerHTML = `<div class="state-panel error">${response?.error || '连接失败'}</div>`;
                 return;
             }
             allAccounts = response.data || [];

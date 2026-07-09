@@ -1,122 +1,212 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
-
 <head>
     <meta charset="UTF-8">
     <title>API Monitor 2FA - 设置</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        :root {
+            color-scheme: light;
+            --bg-color: #f6f7f9;
+            --base-color: #ffffff;
+            --recessed-color: #f1f3f6;
+            --border-color: #d9dee7;
+            --border-muted: #e7ebf1;
+            --text-main: #111827;
+            --text-sub: #697386;
+            --accent-color: #2563eb;
+            --accent-soft: rgba(37, 99, 235, 0.1);
+            --success-color: #16a34a;
+            --error-color: #dc2626;
+            --shadow-color: rgba(15, 23, 42, 0.1);
         }
 
+        @media (prefers-color-scheme: dark) {
+            :root {
+                color-scheme: dark;
+                --bg-color: #101216;
+                --base-color: #171a21;
+                --recessed-color: #20242d;
+                --border-color: #323844;
+                --border-muted: #272c36;
+                --text-main: #f2f4f7;
+                --text-sub: #9aa4b2;
+                --accent-color: #60a5fa;
+                --accent-soft: rgba(96, 165, 250, 0.14);
+                --success-color: #22c55e;
+                --error-color: #f87171;
+                --shadow-color: rgba(0, 0, 0, 0.32);
+            }
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #111827;
-            color: #f9fafb;
             min-height: 100vh;
             display: flex;
-            justify-content: center;
             align-items: center;
+            justify-content: center;
             padding: 20px;
+            background: var(--bg-color);
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
 
         .container {
             width: 100%;
-            max-width: 400px;
-            background: #1f2937;
-            border-radius: 12px;
-            padding: 24px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+            max-width: 430px;
+            overflow: hidden;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--base-color);
+            box-shadow: 0 10px 30px var(--shadow-color);
         }
 
-        h1 {
-            font-size: 18px;
-            margin-bottom: 24px;
+        .header {
             display: flex;
             align-items: center;
             gap: 10px;
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--base-color);
         }
 
+        .header-icon {
+            display: inline-flex;
+            width: 30px;
+            height: 30px;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--border-color);
+            border-radius: 7px;
+            background: var(--recessed-color);
+            color: var(--accent-color);
+            font-size: 12px;
+            font-weight: 800;
+        }
+
+        h1 {
+            color: var(--text-main);
+            font-size: 15px;
+            font-weight: 800;
+        }
+
+        .subtitle {
+            margin-top: 2px;
+            color: var(--text-sub);
+            font-size: 12px;
+        }
+
+        form { padding: 16px; }
+
         .form-group {
-            margin-bottom: 20px;
+            margin-bottom: 14px;
         }
 
         label {
             display: block;
-            font-size: 13px;
-            color: #9ca3af;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
+            color: var(--text-main);
+            font-size: 12px;
+            font-weight: 700;
         }
 
         input {
             width: 100%;
-            padding: 12px;
-            background: #374151;
-            border: 1px solid #4b5563;
-            border-radius: 8px;
-            color: #f9fafb;
-            font-size: 14px;
-            transition: border-color 0.2s;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--recessed-color);
+            color: var(--text-main);
+            font-size: 13px;
+            outline: none;
+            padding: 9px 10px;
+            transition: border-color 0.2s, box-shadow 0.2s;
         }
 
         input:focus {
-            outline: none;
-            border-color: #8b5cf6;
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 2px var(--accent-soft);
         }
 
-        input::placeholder {
-            color: #6b7280;
-        }
+        input::placeholder { color: var(--text-sub); }
 
         .hint {
-            font-size: 11px;
-            color: #6b7280;
             margin-top: 6px;
+            color: var(--text-sub);
+            font-size: 11px;
+            line-height: 1.5;
+        }
+
+        .check-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 4px;
+            margin-bottom: 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 7px;
+            background: var(--recessed-color);
+            padding: 10px;
+        }
+
+        .check-row input {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+            accent-color: var(--accent-color);
+        }
+
+        .check-row label {
+            margin: 0;
+            cursor: pointer;
+            font-size: 12px;
         }
 
         .btn {
             width: 100%;
-            padding: 12px;
-            background: linear-gradient(135deg, #8b5cf6, #6366f1);
-            border: none;
-            border-radius: 8px;
-            color: white;
-            font-size: 14px;
-            font-weight: 600;
+            border: 1px solid var(--accent-color);
+            border-radius: 6px;
+            background: var(--accent-color);
+            color: #ffffff;
             cursor: pointer;
-            transition: all 0.2s;
+            font-size: 13px;
+            font-weight: 700;
+            padding: 9px 12px;
+            transition: filter 0.2s;
         }
 
-        .btn:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(139, 92, 246, 0.4);
-        }
+        .btn:hover { filter: brightness(1.05); }
 
         .message {
-            margin-top: 16px;
-            padding: 12px;
-            border-radius: 8px;
-            font-size: 13px;
+            margin: 0 16px 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 7px;
+            font-size: 12px;
+            padding: 10px;
             text-align: center;
         }
 
         .message.success {
-            background: rgba(16, 185, 129, 0.2);
-            color: #10b981;
+            border-color: color-mix(in srgb, var(--success-color) 34%, transparent);
+            background: color-mix(in srgb, var(--success-color) 12%, transparent);
+            color: var(--success-color);
         }
 
         .message.error {
-            background: rgba(239, 68, 68, 0.2);
-            color: #ef4444;
+            border-color: color-mix(in srgb, var(--error-color) 34%, transparent);
+            background: color-mix(in srgb, var(--error-color) 12%, transparent);
+            color: var(--error-color);
         }
     </style>
 </head>
-
 <body>
     <div class="container">
-        <h1>🔐 API Monitor 2FA 设置</h1>
+        <div class="header">
+            <span class="header-icon">2FA</span>
+            <div>
+                <h1>API Monitor 双因子认证设置</h1>
+                <div class="subtitle">配置插件连接主控端并启用页面填充入口</div>
+            </div>
+        </div>
         <form id="settingsForm">
             <div class="form-group">
                 <label for="serverUrl">服务器地址</label>
@@ -124,19 +214,18 @@
                 <div class="hint">API Monitor 后端地址，例如 https://your-server.com</div>
             </div>
             <div class="form-group">
-                <label for="password">管理密码 (Auth Password)</label>
+                <label for="password">管理密码</label>
                 <input type="password" id="password" placeholder="填写 x-admin-password" required>
-                <div class="hint">填写 server.js 中配置的访问密码</div>
+                <div class="hint">用于访问 API Monitor 后端接口的管理密码。</div>
             </div>
-            <div class="form-group" style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
-                <input type="checkbox" id="showFillButton" style="width: auto; cursor: pointer;">
-                <label for="showFillButton" style="margin-bottom: 0; cursor: pointer; color: #f9fafb;">开启输入框 2FA 填充按钮</label>
+            <div class="check-row">
+                <input type="checkbox" id="showFillButton">
+                <label for="showFillButton">开启输入框 2FA 填充按钮</label>
             </div>
-            <button type="submit" class="btn" style="margin-top: 10px;">保存设置</button>
+            <button type="submit" class="btn">保存设置</button>
         </form>
         <div id="message" class="message" style="display: none;"></div>
     </div>
     <script src="options.js"></script>
 </body>
-
 </html>

@@ -1055,7 +1055,7 @@ function DashboardPage({ onNavigate } = {}) {
                   <Shield className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 </div>
                 <div className="min-w-0">
-                  <h4 className="truncate text-xs font-bold text-kumo-strong group-hover:text-kumo-brand transition-colors">2FA 安全令牌</h4>
+                  <h4 className="truncate text-xs font-bold text-kumo-strong group-hover:text-kumo-brand transition-colors">双因子认证</h4>
                   <p className="mt-0.5 hidden truncate text-[10px] text-kumo-subtle sm:block">OTP 动态验证码账号</p>
                 </div>
               </div>

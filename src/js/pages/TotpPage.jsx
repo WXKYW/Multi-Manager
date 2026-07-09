@@ -874,9 +874,9 @@ function TotpPage() {
       {totpCurrentTab === 'accounts' && (
         <div>
           {totpLoading ? (
-            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-2.5 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
               {[...Array(6)].map((_, i) => (
-                <LayerCard key={i} className="space-y-3 p-3">
+                <LayerCard key={i} className="space-y-2 p-2 sm:space-y-3 sm:p-3">
                   <div className="flex items-center gap-2">
                     <SkeletonLine className="h-6 w-6 rounded-md" />
                     <div className="flex-1 space-y-1.5">
@@ -904,7 +904,7 @@ function TotpPage() {
               )}
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-2.5 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
               {filteredAccounts.map((account, index) => {
                 const isFirstOfPlatform =
                   index === 0 ||
@@ -958,18 +958,18 @@ function TotpPage() {
                       onMouseEnter={() => handleCardMouseEnter(account.id)}
                       onMouseLeave={() => handleCardMouseLeave(account.id)}
                       onClick={() => copyCodeToClipboard(account)}
-                      className="group/card relative grid min-h-[112px] cursor-pointer grid-rows-[auto_1fr_auto] overflow-hidden p-0 transition-colors hover:border-kumo-brand"
+                      className="group/card relative grid min-h-[96px] cursor-pointer grid-rows-[auto_1fr_auto] overflow-hidden p-0 transition-colors hover:border-kumo-brand sm:min-h-[112px]"
                     >
-                      <div className="flex items-center gap-2 border-b border-kumo-line bg-kumo-recessed/35 px-3 py-2">
+                      <div className="flex items-center gap-1.5 border-b border-kumo-line bg-kumo-recessed/35 px-2 py-1.5 sm:gap-2 sm:px-3 sm:py-2">
                         <span
-                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs text-kumo-inverse"
+                          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] text-kumo-inverse sm:h-6 sm:w-6 sm:text-xs"
                           style={{ background: issuerColor }}
                         >
                           <BrandIcon issuer={account.issuer} color="inherit" />
                         </span>
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-[11px] font-semibold leading-none text-kumo-strong">{account.issuer || '未知平台'}</div>
-                          <div className="mt-1 truncate text-[10px] leading-none text-kumo-subtle">
+                          <div className="truncate text-[10px] font-semibold leading-none text-kumo-strong sm:text-[11px]">{account.issuer || '未知平台'}</div>
+                          <div className="mt-0.5 truncate text-[9px] leading-none text-kumo-subtle sm:mt-1 sm:text-[10px]">
                             {totpSettings.maskAccount ? maskEmail(account.account) : account.account}
                           </div>
                         </div>
@@ -982,7 +982,7 @@ function TotpPage() {
                               e.stopPropagation();
                               handleOpenEditAccount(account);
                             }}
-                            className="flex h-6 w-6 items-center justify-center text-kumo-subtle hover:text-kumo-strong"
+                            className="flex h-5 w-5 items-center justify-center text-kumo-subtle hover:text-kumo-strong sm:h-6 sm:w-6"
                             title="编辑"
                           >
                             <Edit className="h-3 w-3" />
@@ -995,7 +995,7 @@ function TotpPage() {
                               e.stopPropagation();
                               handleDeleteAccount(account);
                             }}
-                            className="flex h-6 w-6 items-center justify-center text-kumo-subtle hover:text-kumo-danger"
+                            className="flex h-5 w-5 items-center justify-center text-kumo-subtle hover:text-kumo-danger sm:h-6 sm:w-6"
                             title="删除"
                           >
                             <Trash className="h-3 w-3" />
@@ -1004,21 +1004,21 @@ function TotpPage() {
                       </div>
 
                       <div
-                        className={`flex items-center justify-center gap-2 px-3 py-2.5 font-mono tabular-nums ${
+                        className={`flex items-center justify-center gap-1 px-2 py-2 font-mono tabular-nums sm:gap-2 sm:px-3 sm:py-2.5 ${
                           remaining <= 5 ? 'text-kumo-danger' : 'text-kumo-strong'
                         }`}
                       >
                         {codeParts.map((part, partIndex) => (
                           <span
                             key={`${account.id}-${partIndex}`}
-                            className="min-w-[4.25rem] rounded-md bg-kumo-recessed px-2 py-1 text-center text-[20px] font-semibold leading-none tracking-normal"
+                            className="min-w-0 flex-1 rounded-md bg-kumo-recessed px-1.5 py-1 text-center text-[16px] font-semibold leading-none tracking-normal sm:min-w-[4.25rem] sm:flex-none sm:px-2 sm:text-[20px]"
                           >
                             {part}
                           </span>
                         ))}
                       </div>
 
-                      <div className="border-t border-kumo-line px-3 py-2 font-mono text-[10px] text-kumo-subtle">
+                      <div className="border-t border-kumo-line px-2 py-1.5 font-mono text-[10px] text-kumo-subtle sm:px-3 sm:py-2">
                         {account.otp_type === 'hotp' ? (
                           <div className="flex items-center justify-between gap-2">
                             <span>counter #{codeDetail.counter || 0}</span>
@@ -1035,7 +1035,7 @@ function TotpPage() {
                             </Button>
                           </div>
                         ) : (
-                          <div className="grid grid-cols-[minmax(0,1fr)_2rem] items-center gap-2">
+                          <div className="grid grid-cols-[minmax(0,1fr)_1.75rem] items-center gap-1.5 sm:grid-cols-[minmax(0,1fr)_2rem] sm:gap-2">
                             <div className="h-1.5 overflow-hidden rounded-full bg-kumo-recessed">
                               <div
                                 className={`h-full rounded-full ${remaining === period ? '' : 'transition-all duration-1000 ease-linear'}`}

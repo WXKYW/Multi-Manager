@@ -51,6 +51,7 @@ type userSettingsRow struct {
 	TOTPSettings          sql.NullString
 	AgentDownloadURL      sql.NullString
 	PublicAPIURL          sql.NullString
+	TimeZone              sql.NullString
 }
 
 type tableAnalysis struct {
@@ -978,7 +979,8 @@ func loadUserSettings(ctx context.Context, db *sql.DB) (map[string]interface{}, 
 			main_tabs_layout,
 			totp_settings,
 			agent_download_url,
-			public_api_url
+			public_api_url,
+			time_zone
 		FROM user_settings
 		WHERE id = 1
 	`).Scan(
@@ -999,6 +1001,7 @@ func loadUserSettings(ctx context.Context, db *sql.DB) (map[string]interface{}, 
 		&row.TOTPSettings,
 		&row.AgentDownloadURL,
 		&row.PublicAPIURL,
+		&row.TimeZone,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		if _, insertErr := db.ExecContext(ctx, `
@@ -1067,6 +1070,7 @@ func loadUserSettings(ctx context.Context, db *sql.DB) (map[string]interface{}, 
 		"totpSettings":            parseObject(row.TOTPSettings, map[string]interface{}{}),
 		"agentDownloadUrl":        nullString(row.AgentDownloadURL, ""),
 		"publicApiUrl":            nullString(row.PublicAPIURL, ""),
+		"timezone":                nullString(row.TimeZone, "system"),
 	}
 	if value := nullString(row.ThemeMode, ""); value != "" {
 		settings["themeMode"] = value
@@ -1096,6 +1100,7 @@ func saveUserSettings(ctx context.Context, db *sql.DB, settings map[string]inter
 	assignJSON(updates, "totp_settings", settings, "totpSettings", "totp_settings")
 	assignString(updates, "agent_download_url", settings, "agentDownloadUrl", "agent_download_url")
 	assignString(updates, "public_api_url", settings, "publicApiUrl", "public_api_url")
+	assignString(updates, "time_zone", settings, "timezone", "timeZone", "time_zone")
 
 	if len(updates) == 0 {
 		return nil
@@ -1119,6 +1124,7 @@ func saveUserSettings(ctx context.Context, db *sql.DB, settings map[string]inter
 		"totp_settings",
 		"agent_download_url",
 		"public_api_url",
+		"time_zone",
 	}
 
 	setParts := make([]string, 0, len(updates)+1)
@@ -1472,7 +1478,7 @@ func estimateTableSize(ctx context.Context, db *sql.DB, table string) (int64, er
 
 func migrationRequiredTables() map[string][]string {
 	return map[string][]string{
-		"user_settings":         {"id", "theme_mode", "page_width_mode", "sidebar_collapsed", "module_visibility", "module_order"},
+		"user_settings":         {"id", "theme_mode", "page_width_mode", "sidebar_collapsed", "module_visibility", "module_order", "time_zone"},
 		"operation_logs":        {"id", "operation_type", "table_name", "trace_id"},
 		"totp_accounts":         {"id", "secret", "secret_encrypted_at", "last_revealed_at"},
 		"filebox_entries":       {"code", "type", "expiry", "downloads"},

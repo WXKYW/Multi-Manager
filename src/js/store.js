@@ -324,6 +324,7 @@ export const normalizeUserSettings = (settings = {}) => {
     },
     agentDownloadUrl: settings.agentDownloadUrl || '',
     publicApiUrl: settings.publicApiUrl || '',
+    timezone: settings.timezone || settings.time_zone || 'system',
   };
 };
 
@@ -425,6 +426,7 @@ const useStore = create((set, get) => ({
   totpSettings: DEFAULT_TOTP_SETTINGS,
   agentDownloadUrl: '',
   publicApiUrl: '',
+  timezone: 'system',
   koyebRefreshInterval: 30000,
   flyRefreshInterval: 30000,
 
@@ -522,6 +524,7 @@ const useStore = create((set, get) => ({
       totpSettings: normalized.totpSettings,
       agentDownloadUrl: normalized.agentDownloadUrl,
       publicApiUrl: normalized.publicApiUrl,
+      timezone: normalized.timezone,
       koyebRefreshInterval: normalized.koyebRefreshInterval,
       flyRefreshInterval: normalized.flyRefreshInterval,
     });

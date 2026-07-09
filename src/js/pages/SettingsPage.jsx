@@ -64,6 +64,18 @@ const PAGE_WIDTH_OPTIONS = [
   { value: 'full', label: '全宽' },
 ];
 
+const TIMEZONE_OPTIONS = [
+  { value: 'system', label: '跟随服务器' },
+  { value: 'UTC', label: 'UTC' },
+  { value: 'Asia/Shanghai', label: '中国标准时间 (Asia/Shanghai)' },
+  { value: 'Asia/Tokyo', label: '日本时间 (Asia/Tokyo)' },
+  { value: 'Asia/Singapore', label: '新加坡时间 (Asia/Singapore)' },
+  { value: 'Europe/London', label: '伦敦时间 (Europe/London)' },
+  { value: 'Europe/Berlin', label: '柏林时间 (Europe/Berlin)' },
+  { value: 'America/New_York', label: '纽约时间 (America/New_York)' },
+  { value: 'America/Los_Angeles', label: '洛杉矶时间 (America/Los_Angeles)' },
+];
+
 
 
 const GROUP_LABELS = {
@@ -716,6 +728,15 @@ function SettingsPage() {
                 value={settings.publicApiUrl}
                 onChange={(e) => patchSettings({ publicApiUrl: e.target.value })}
                 placeholder="https://monitor.example.com"
+              />
+            </FieldRow>
+            <FieldRow title="系统时区" description="用于后续展示本地化时间；跟随服务器时使用后端运行环境默认时区。">
+              <Select
+                size="sm"
+                label="系统时区"
+                value={settings.timezone}
+                onValueChange={(value) => patchSettings({ timezone: value })}
+                items={TIMEZONE_OPTIONS}
               />
             </FieldRow>
           </SectionCard>
