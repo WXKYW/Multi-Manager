@@ -515,6 +515,69 @@ func TestPublicSubscriptionIncludesClientProfileNameHeaders(t *testing.T) {
 	}
 }
 
+func TestMihomoRenderFallsBackWhenBoundTemplateIsEmpty(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatalf("ensure schema: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO subscription_templates (id, name, format, content) VALUES ('empty_tpl', '空模板', 'clash', '')`); err != nil {
+		t.Fatalf("insert template: %v", err)
+	}
+	sub := Subscription{ID: "link_one", Name: "DSUK", TemplateID: "empty_tpl", Enabled: true}
+	nodes := []Node{{Name: "HK 节点一", Type: "trojan", Server: "example.com", Port: 443, Raw: "trojan://password@example.com:443#node-one", Enabled: true}}
+
+	body, contentType, err := renderOutput(ctx, db, sub, nodes, "clash", false)
+	if err != nil {
+		t.Fatalf("render output: %v", err)
+	}
+	if contentType != "text/yaml; charset=utf-8" {
+		t.Fatalf("contentType = %q", contentType)
+	}
+	if !strings.Contains(body, "proxies:") || !strings.Contains(body, "HK 节点一") {
+		t.Fatalf("rendered body did not fall back to default template:\n%s", body)
+	}
+}
+
+func TestMihomoRenderUsesEmptyProxyListWhenNoNodes(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatalf("ensure schema: %v", err)
+	}
+	sub := Subscription{ID: "link_one", Name: "DSUK", TemplateID: defaultTemplateID, Enabled: true}
+
+	body, _, err := renderOutput(ctx, db, sub, nil, "clash", false)
+	if err != nil {
+		t.Fatalf("render output: %v", err)
+	}
+	var parsed map[string]interface{}
+	if err := yaml.Unmarshal([]byte(body), &parsed); err != nil {
+		t.Fatalf("rendered invalid yaml: %v\n%s", err, body)
+	}
+	proxies, ok := parsed["proxies"].([]interface{})
+	if !ok {
+		t.Fatalf("proxies = %#v, want empty list", parsed["proxies"])
+	}
+	if len(proxies) != 0 {
+		t.Fatalf("len(proxies) = %d, want 0", len(proxies))
+	}
+}
+
 func TestLoadProfilesReturnsLibrariesWithCountsAndUpstream(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()

@@ -109,6 +109,13 @@ const TRAFFIC_UNITS = [
 
 const trafficUnitBytes = (unit) => TRAFFIC_UNITS.find((item) => item.value === unit)?.bytes || TRAFFIC_UNITS[0].bytes;
 
+const preferredTrafficUnit = (bytes) => {
+  const value = Number(bytes) || 0;
+  const tbBytes = trafficUnitBytes('TB');
+  if (value >= tbBytes) return 'TB';
+  return 'GB';
+};
+
 const trafficDisplayValue = (bytes, unit) => {
   const value = Number(bytes) || 0;
   if (value <= 0) return '0';
@@ -282,7 +289,7 @@ function LinkCopyButton({ label, text, onCopy, variant = 'secondary' }) {
 }
 
 function TrafficSizeInput({ label, value, onChange }) {
-  const [unit, setUnit] = useState('GB');
+  const [unit, setUnit] = useState(() => preferredTrafficUnit(value));
 
   return (
     <div className="min-w-0 space-y-1.5">
@@ -1595,24 +1602,27 @@ function SubscriptionPage() {
 
                 <section className="space-y-3 border-t border-kumo-line pt-4">
                   <div className="text-[11px] font-bold uppercase tracking-wide text-kumo-subtle">流量额度</div>
-                  <div className="grid min-w-0 gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(12rem,100%),1fr))]">
-                    <Select
-                      size="sm"
-                      label="流量来源"
-                      value={subscriptionForm.traffic_source || 'manual'}
-                      onValueChange={(value) => setSubscriptionForm((prev) => ({
-                        ...prev,
-                        traffic_source: String(value),
-                        traffic_server_id: String(value) === 'server' ? prev.traffic_server_id : '',
-                      }))}
-                      items={[
-                        { value: 'manual', label: '手动记录' },
-                        { value: 'node_servers', label: '节点绑定主机' },
-                        { value: 'server', label: '指定主机' },
-                        { value: 'upstream', label: '上游订阅' },
-                      ]}
-                      className="w-full min-w-0"
-                    />
+                  <div className="grid min-w-0 items-end gap-3 lg:grid-cols-[minmax(15rem,0.9fr)_minmax(0,3fr)]">
+                    <div className="min-w-0">
+                      <Select
+                        size="sm"
+                        label="流量来源"
+                        value={subscriptionForm.traffic_source || 'manual'}
+                        onValueChange={(value) => setSubscriptionForm((prev) => ({
+                          ...prev,
+                          traffic_source: String(value),
+                          traffic_server_id: String(value) === 'server' ? prev.traffic_server_id : '',
+                        }))}
+                        items={[
+                          { value: 'manual', label: '手动记录' },
+                          { value: 'node_servers', label: '节点绑定主机' },
+                          { value: 'server', label: '指定主机' },
+                          { value: 'upstream', label: '上游订阅' },
+                        ]}
+                        className="w-full min-w-0"
+                      />
+                    </div>
+                    <div className="grid min-w-0 items-end gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(13.5rem,100%),1fr))]">
                     {subscriptionForm.traffic_source === 'server' && (
                       <Select size="sm" label="统计主机" value={subscriptionForm.traffic_server_id || ''} onValueChange={(value) => setSubscriptionForm((prev) => ({ ...prev, traffic_server_id: String(value) }))} items={serverItems} className="w-full min-w-0" />
                     )}
@@ -1625,6 +1635,7 @@ function SubscriptionPage() {
                         <TrafficSizeInput label="手动下载" value={subscriptionForm.manual_download_bytes || 0} onChange={(bytes) => setSubscriptionForm((prev) => ({ ...prev, manual_download_bytes: bytes }))} />
                       </>
                     )}
+                    </div>
                   </div>
                 </section>
 

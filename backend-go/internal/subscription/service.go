@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	_ "embed"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -38,6 +39,9 @@ const (
 )
 
 var nodeLinkPattern = regexp.MustCompile(`(?im)(vmess|vless|trojan|ss|hysteria2|hy2|tuic|socks|http)://[^\s'"<>]+`)
+
+//go:embed templates/default-mihomo.yaml
+var defaultMihomoTemplateEmbedded string
 
 type Service struct {
 	cfg        config.Config
@@ -2055,7 +2059,11 @@ func renderOutput(ctx context.Context, db *sql.DB, sub Subscription, nodes []Nod
 	if format == "" || format == "clash" || format == "mihomo" {
 		tpl := loadDefaultMihomoTemplate()
 		if sub.TemplateID != "" {
-			_ = db.QueryRowContext(ctx, `SELECT content FROM subscription_templates WHERE id = ?`, sub.TemplateID).Scan(&tpl)
+			var customTemplate string
+			_ = db.QueryRowContext(ctx, `SELECT content FROM subscription_templates WHERE id = ?`, sub.TemplateID).Scan(&customTemplate)
+			if strings.TrimSpace(customTemplate) != "" {
+				tpl = customTemplate
+			}
 		}
 		body := renderTemplate(tpl, sub, nodes)
 		if blocked {
@@ -2109,7 +2117,7 @@ func proxiesYAML(nodes []Node, indent int) string {
 		}
 	}
 	if len(lines) == 0 {
-		return pad + "# no enabled nodes"
+		return pad + "[]"
 	}
 	return strings.Join(lines, "\n")
 }
@@ -2947,6 +2955,9 @@ func absFloat(value float64) float64 {
 }
 
 func loadDefaultMihomoTemplate() string {
+	if strings.TrimSpace(defaultMihomoTemplateEmbedded) != "" {
+		return defaultMihomoTemplateEmbedded
+	}
 	for _, candidate := range []string{
 		filepath.Join("backend-go", "internal", "subscription", "templates", "default-mihomo.yaml"),
 		filepath.Join("internal", "subscription", "templates", "default-mihomo.yaml"),
