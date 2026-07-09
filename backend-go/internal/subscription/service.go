@@ -1779,7 +1779,6 @@ func loadNodes(ctx context.Context, db *sql.DB, subscriptionID string, decrypt b
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	nodes := []Node{}
 	for rows.Next() {
 		var node Node
@@ -1796,12 +1795,20 @@ func loadNodes(ctx context.Context, db *sql.DB, subscriptionID string, decrypt b
 			node.Raw = ""
 			node.ConfigJSON = ""
 		}
-		if node.TrafficServerID != "" {
-			node.Quality = loadQuality(ctx, db, node.TrafficServerID)
-		}
 		nodes = append(nodes, node)
 	}
-	return nodes, rows.Err()
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range nodes {
+		if nodes[i].TrafficServerID != "" {
+			nodes[i].Quality = loadQuality(ctx, db, nodes[i].TrafficServerID)
+		}
+	}
+	return nodes, nil
 }
 
 func insertNode(ctx context.Context, tx *sql.Tx, node Node) error {

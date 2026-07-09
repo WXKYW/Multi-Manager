@@ -60,6 +60,44 @@ func TestLoadSubscriptionsDoesNotQueryWhileRowsOpen(t *testing.T) {
 	}
 }
 
+func TestLoadNodesDoesNotQueryQualityWhileRowsOpen(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatalf("ensure schema: %v", err)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	if err := insertNode(ctx, tx, Node{ID: "node_bound", SubscriptionID: "profile_one", ProfileID: "profile_one", Name: "绑定主机节点", Enabled: true, TrafficServerID: "server_one"}); err != nil {
+		t.Fatalf("insert node: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit tx: %v", err)
+	}
+
+	started := time.Now()
+	nodes, err := loadNodes(ctx, db, "profile_one", true)
+	if err != nil {
+		t.Fatalf("load nodes: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 250*time.Millisecond {
+		t.Fatalf("load nodes took %s, likely blocked on nested sqlite queries", elapsed)
+	}
+	if len(nodes) != 1 || nodes[0].TrafficServerID != "server_one" {
+		t.Fatalf("nodes = %#v, want bound server id preserved", nodes)
+	}
+}
+
 func TestParseImportTextDecodesBase64Subscription(t *testing.T) {
 	raw := "vmess://example-one#节点一\ntrojan://password@example.com:443#节点二\n"
 	encoded := base64.StdEncoding.EncodeToString([]byte(raw))
