@@ -129,9 +129,10 @@ function PublicSharePage() {
                 <Input
                   size="sm"
                   label="访问密码"
-                  type="password"
+                  type="text"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
+                  autoComplete="off"
                 />
               )}
 

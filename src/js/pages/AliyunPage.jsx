@@ -706,7 +706,7 @@ function AliyunPage() {
 
       {/* Add/Edit Account Modal */}
       <Dialog.Root open={showAddAccountModal} onOpenChange={setShowAddAccountModal}>
-        <Dialog className="p-6 sm:max-w-md">
+        <Dialog className="!w-[min(32rem,calc(100vw-2rem))] !max-w-[min(32rem,calc(100vw-2rem))] p-6">
           <Dialog.Title className="text-sm font-bold text-kumo-strong mb-1">
             {editingAccount ? '编辑阿里云账号' : '添加阿里云账号'}
           </Dialog.Title>
@@ -745,10 +745,11 @@ function AliyunPage() {
 
             <Input
               label="AccessKey Secret"
-              type="password" size="sm"
+              type="text" size="sm"
               value={accountForm.accessKeySecret}
               onChange={(e) => setAccountForm({ ...accountForm, accessKeySecret: e.target.value })}
               placeholder={editingAccount ? '(不修改请留空)' : '请输入 Secret'}
+              autoComplete="off"
               className="w-full font-mono"
             />
 

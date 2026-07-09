@@ -830,27 +830,27 @@ function SettingsPage() {
             <div className="grid max-w-xl gap-4 p-5">
               <Input size="sm"
                 label="当前密码"
-                type="password"
+                type="text"
                 value={passwordForm.oldPassword}
                 onChange={(e) => setPasswordForm((prev) => ({ ...prev, oldPassword: e.target.value }))}
                 disabled={isDemoMode}
-                autoComplete="current-password"
+                autoComplete="off"
               />
               <Input size="sm"
                 label="新密码"
-                type="password"
+                type="text"
                 value={passwordForm.newPassword}
                 onChange={(e) => setPasswordForm((prev) => ({ ...prev, newPassword: e.target.value }))}
                 disabled={isDemoMode}
-                autoComplete="new-password"
+                autoComplete="off"
               />
               <Input size="sm"
                 label="确认新密码"
-                type="password"
+                type="text"
                 value={passwordForm.confirmPassword}
                 onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))}
                 disabled={isDemoMode}
-                autoComplete="new-password"
+                autoComplete="off"
               />
               <div>
                 <Button size="sm" variant="primary" onClick={changePassword} loading={passwordSaving} disabled={isDemoMode}>
@@ -916,10 +916,10 @@ function SettingsPage() {
               <div className="mt-5 grid gap-4">
                 <Input size="sm"
                   label="当前密码"
-                  type="password"
+                  type="text"
                   value={twoFA.disablePassword}
                   onChange={(e) => setTwoFA((prev) => ({ ...prev, disablePassword: e.target.value }))}
-                  autoComplete="current-password"
+                  autoComplete="off"
                 />
                 <div className="flex gap-2">
                   <Button size="sm" onClick={() => setTwoFA((prev) => ({ ...prev, disableMode: false, disablePassword: '', error: '' }))}>取消</Button>

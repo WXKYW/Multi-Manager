@@ -2833,7 +2833,7 @@ function OpenAIPage() {
 
       {/* 1. Endpoint Add/Edit Dialog */}
       <Dialog.Root open={endpointFormOpen} onOpenChange={setEndpointFormOpen}>
-        <Dialog className="p-6 sm:max-w-md">
+        <Dialog className="!w-[min(32rem,calc(100vw-2rem))] !max-w-[min(32rem,calc(100vw-2rem))] p-6">
           <Dialog.Title className="text-sm font-bold text-kumo-strong mb-1">
             {editingEndpoint ? '编辑端点' : '添加 API 端点'}
           </Dialog.Title>
@@ -2865,10 +2865,11 @@ function OpenAIPage() {
             <Input
               size="sm"
               label="API Key"
-              type="password"
+              type="text"
               value={endpointForm.apiKey}
               onChange={e => setEndpointForm({ ...endpointForm, apiKey: e.target.value })}
               placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+              autoComplete="off"
               className="w-full text-kumo-strong text-xs font-mono"
             />
 
@@ -2904,7 +2905,7 @@ function OpenAIPage() {
 
       {/* 2. Health Check Config Dialog */}
       <Dialog.Root open={healthCheckModal} onOpenChange={setHealthCheckModal}>
-        <Dialog className="p-6 sm:max-w-md">
+        <Dialog className="!w-[min(32rem,calc(100vw-2rem))] !max-w-[min(32rem,calc(100vw-2rem))] p-6">
           <Dialog.Title className="text-sm font-bold text-kumo-strong mb-1">
             模型健康检测
           </Dialog.Title>

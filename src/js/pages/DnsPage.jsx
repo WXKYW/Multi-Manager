@@ -116,6 +116,7 @@ const CLOUDFLARE_TABS = [
 const EMPTY_ACCOUNT_FORM = {
   name: '',
   email: '',
+  cfAccountId: '',
   apiToken: '',
   skipVerify: false,
 };
@@ -377,7 +378,7 @@ function DnsPage() {
   const [r2ColWidths, startR2Resize] = useTableResize([44, 420, 128, 180, 128]);
   const [tunnelColWidths, startTunnelResize] = useTableResize([260, 120, 100, 180, 240]);
   const [templateColWidths, startTemplateResize] = useTableResize([220, 90, 260, 120, 180]);
-  const [accountColWidths, startAccountResize] = useTableResize([220, 260, 240, 170, 190]);
+  const [accountColWidths, startAccountResize] = useTableResize([220, 220, 260, 240, 170, 190]);
 
   const selectedAccount = useMemo(
     () => accounts.find((account) => String(account.id) === String(selectedAccountId)) || null,
@@ -773,7 +774,7 @@ function DnsPage() {
   const openAccountModal = (account = null) => {
     setModal({ type: 'account', data: account });
     setAccountForm(account
-      ? { name: account.name || '', email: account.email || '', apiToken: '', skipVerify: false }
+      ? { name: account.name || '', email: account.email || '', cfAccountId: account.cfAccountId || '', apiToken: '', skipVerify: false }
       : EMPTY_ACCOUNT_FORM);
   };
 
@@ -2716,7 +2717,7 @@ function DnsPage() {
                 <>
                 <Button size="sm" variant="secondary" onClick={exportAccounts} icon={<Upload className="h-4 w-4" />}>导出账号</Button>
                 <Button size="sm" variant="secondary" onClick={() => openImportModal('accounts')} icon={<Download className="h-4 w-4" />}>导入账号</Button>
-                <Button size="sm" onClick={() => openAccountModal()} icon={<Plus className="h-4 w-4" />}>添加账号</Button>
+                <Button size="sm" variant="primary" onClick={() => openAccountModal()} icon={<Plus className="h-4 w-4" />}>添加账号</Button>
                 </>
               )}
               bodyPadding="none"
@@ -2728,14 +2729,15 @@ function DnsPage() {
                     <Table.Row>
                       <Table.Head className="relative pr-6">备注名称<Table.ResizeHandle onMouseDown={(e) => startAccountResize(0, e)} onTouchStart={(e) => startAccountResize(0, e)} /></Table.Head>
                       <Table.Head className="relative pr-6">邮箱<Table.ResizeHandle onMouseDown={(e) => startAccountResize(1, e)} onTouchStart={(e) => startAccountResize(1, e)} /></Table.Head>
-                      <Table.Head className="relative pr-6">令牌<Table.ResizeHandle onMouseDown={(e) => startAccountResize(2, e)} onTouchStart={(e) => startAccountResize(2, e)} /></Table.Head>
-                      <Table.Head className="relative pr-6">最后使用<Table.ResizeHandle onMouseDown={(e) => startAccountResize(3, e)} onTouchStart={(e) => startAccountResize(3, e)} /></Table.Head>
+                      <Table.Head className="relative pr-6">Account ID<Table.ResizeHandle onMouseDown={(e) => startAccountResize(2, e)} onTouchStart={(e) => startAccountResize(2, e)} /></Table.Head>
+                      <Table.Head className="relative pr-6">令牌<Table.ResizeHandle onMouseDown={(e) => startAccountResize(3, e)} onTouchStart={(e) => startAccountResize(3, e)} /></Table.Head>
+                      <Table.Head className="relative pr-6">最后使用<Table.ResizeHandle onMouseDown={(e) => startAccountResize(4, e)} onTouchStart={(e) => startAccountResize(4, e)} /></Table.Head>
                       <Table.Head className="text-right">操作</Table.Head>
                     </Table.Row>
                   </Table.Header>
                   <Table.Body>
                     {accounts.length === 0 ? (
-                      <Table.Row><Table.Cell colSpan={5} className="py-10 text-center text-kumo-subtle">尚未配置 Cloudflare 账号。</Table.Cell></Table.Row>
+                      <Table.Row><Table.Cell colSpan={6} className="py-10 text-center text-kumo-subtle">尚未配置 Cloudflare 账号。</Table.Cell></Table.Row>
                     ) : accounts.map((account) => (
                       <Table.Row
                         key={account.id}
@@ -2744,7 +2746,8 @@ function DnsPage() {
                         onDoubleClick={(event) => handleEditableRowDoubleClick(event, () => openAccountModal(account))}
                       >
                         <Table.Cell className="font-medium text-kumo-strong">{account.name}</Table.Cell>
-                        <Table.Cell>{account.email || '-'}</Table.Cell>
+                        <Table.Cell>{account.userEmail || account.email || '-'}</Table.Cell>
+                        <Table.Cell><code className="block truncate text-xs">{account.cfAccountId || '-'}</code></Table.Cell>
                         <Table.Cell>
                           <div className="flex items-center gap-2">
                             <code className="truncate text-xs">{accountTokens[account.id] || (account.hasToken ? '••••••••••••••••' : '-')}</code>
@@ -2774,25 +2777,33 @@ function DnsPage() {
 
       <Dialog.Root open={Boolean(modal.type)} onOpenChange={(open) => { if (!open) closeModal(); }}>
         {modal.type && (
-        <Dialog className="max-h-[85vh] w-[min(920px,calc(100vw-2rem))] overflow-y-auto p-6">
+        <Dialog className="max-h-[85vh] !w-[min(760px,calc(100vw-2rem))] !max-w-[min(760px,calc(100vw-2rem))] overflow-y-auto p-6">
           {modal.type === 'account' && (
             <div className="flex flex-col gap-4">
               <Dialog.Title className="text-base font-semibold text-kumo-strong">
                 {modal.data ? '编辑 Cloudflare 账号' : '添加 Cloudflare 账号'}
               </Dialog.Title>
               <Dialog.Description className="text-sm text-kumo-subtle">
-                API 令牌可使用受限令牌；全局 API 密钥需要填写邮箱。
+                推荐使用 Cloudflare API Token，邮箱留空；账户 API Token（cfat_）需要额外填写 Account ID。Origin CA Key（v1.0-）已弃用且不可用于这里。
               </Dialog.Description>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <Input size="sm" label="备注名称" value={accountForm.name} onChange={(event) => setAccountForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="生产账号" />
                 <Input size="sm" label="邮箱" type="email" value={accountForm.email} onChange={(event) => setAccountForm((prev) => ({ ...prev, email: event.target.value }))} placeholder="name@example.com" />
               </div>
               <Input size="sm"
-                label="API 令牌 / 全局 API 密钥"
-                type="password"
+                label="Cloudflare Account ID"
+                value={accountForm.cfAccountId}
+                onChange={(event) => setAccountForm((prev) => ({ ...prev, cfAccountId: event.target.value }))}
+                placeholder="请输入 Cloudflare Account ID"
+                className="font-mono"
+              />
+              <Input size="sm"
+                label="API Token / 账户 API Token / 旧版全局 API 密钥"
+                type="text"
                 value={accountForm.apiToken}
                 onChange={(event) => setAccountForm((prev) => ({ ...prev, apiToken: event.target.value }))}
-                placeholder={modal.data ? '不修改请留空' : '请输入令牌或密钥'}
+                placeholder={modal.data ? '不修改请留空' : 'cfat_... 或普通 API Token'}
+                autoComplete="off"
                 className="font-mono"
               />
               <Checkbox
@@ -2802,8 +2813,8 @@ function DnsPage() {
               />
               <div className="flex justify-end gap-2">
                 <Button size="sm" variant="secondary" onClick={closeModal}>取消</Button>
-                <Button size="sm" onClick={saveAccount} disabled={loading.saveAccount} icon={<Save className="h-4 w-4" />}>
-                  保存账号
+                <Button size="sm" variant="primary" onClick={saveAccount} disabled={loading.saveAccount} icon={<Save className="h-4 w-4" />}>
+                  保存
                 </Button>
               </div>
             </div>

@@ -213,7 +213,7 @@ export function BackupPanel({ embedded = false } = {}) {
                 <Input size="sm" label="服务端点" value={config.endpoint || ''} onChange={(event) => setConfig((prev) => ({ ...prev, endpoint: event.target.value }))} />
                 <Input size="sm" label="存储桶" value={config.bucket || ''} onChange={(event) => setConfig((prev) => ({ ...prev, bucket: event.target.value }))} />
                 <Input size="sm" label="访问密钥 ID" value={config.access_key_id || ''} onChange={(event) => setConfig((prev) => ({ ...prev, access_key_id: event.target.value }))} />
-                <Input size="sm" type="password" label="访问密钥 Secret" value={config.access_key_secret || ''} onChange={(event) => setConfig((prev) => ({ ...prev, access_key_secret: event.target.value }))} />
+                <Input size="sm" type="text" label="访问密钥 Secret" value={config.access_key_secret || ''} onChange={(event) => setConfig((prev) => ({ ...prev, access_key_secret: event.target.value }))} autoComplete="off" />
               </>
             )}
             <Button size="sm" variant="primary" onClick={save}><Save className="h-3.5 w-3.5" />保存配置</Button>

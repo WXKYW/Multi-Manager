@@ -370,7 +370,7 @@ export default function QuickCommandBar({
       </div>
 
       <Dialog.Root open={managerOpen} onOpenChange={setManagerOpen}>
-        <Dialog size="lg" className="flex max-h-[calc(100dvh-1rem)] w-[min(48rem,calc(100vw-1rem))] flex-col overflow-hidden p-0">
+        <Dialog size="lg" className="flex max-h-[calc(100dvh-1rem)] !w-[min(48rem,calc(100vw-2rem))] !max-w-[min(48rem,calc(100vw-2rem))] flex-col overflow-hidden p-0">
           <div className="flex items-center justify-between gap-3 border-b border-kumo-line px-4 py-3">
             <Dialog.Title className="text-sm font-bold text-kumo-strong">{editing ? '编辑命令片段' : '新增命令片段'}</Dialog.Title>
             <Dialog.Close />
@@ -415,7 +415,7 @@ export default function QuickCommandBar({
       </Dialog.Root>
 
       <Dialog.Root open={previewOpen} onOpenChange={setPreviewOpen}>
-        <Dialog size="md" className="flex max-h-[calc(100dvh-1rem)] flex-col overflow-hidden p-0">
+        <Dialog size="lg" className="flex max-h-[calc(100dvh-1rem)] !w-[min(40rem,calc(100vw-2rem))] !max-w-[min(40rem,calc(100vw-2rem))] flex-col overflow-hidden p-0">
           <div className="flex items-center justify-between gap-3 border-b border-kumo-line px-4 py-3">
             <Dialog.Title className="text-sm font-bold text-kumo-strong">命令预览</Dialog.Title>
             <Dialog.Close />
@@ -450,7 +450,7 @@ export default function QuickCommandBar({
       </Dialog.Root>
 
       <Dialog.Root open={historyOpen} onOpenChange={setHistoryOpen}>
-        <Dialog size="lg" className="flex max-h-[calc(100dvh-1rem)] flex-col overflow-hidden p-0">
+        <Dialog size="lg" className="flex max-h-[calc(100dvh-1rem)] !w-[min(48rem,calc(100vw-2rem))] !max-w-[min(48rem,calc(100vw-2rem))] flex-col overflow-hidden p-0">
           <div className="flex items-center justify-between gap-3 border-b border-kumo-line px-4 py-3">
             <Dialog.Title className="text-sm font-bold text-kumo-strong">命令执行历史</Dialog.Title>
             <Dialog.Close />

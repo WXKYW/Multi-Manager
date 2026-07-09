@@ -182,25 +182,25 @@ function AuthPage() {
         <form onSubmit={handleSetupPassword} className="space-y-4">
           <Input
             size="base"
-            type="password"
+            type="text"
             label="新密码"
             description="至少 6 位，建议使用更长的短语。"
             placeholder="设置管理员密码"
             value={newPassword}
             onChange={(event) => setNewPassword(event.target.value)}
-            autoComplete="new-password"
+            autoComplete="off"
             className="w-full"
             autoFocus
           />
 
           <Input
             size="base"
-            type="password"
+            type="text"
             label="确认密码"
             placeholder="再次输入密码"
             value={confirmPassword}
             onChange={(event) => setConfirmPassword(event.target.value)}
-            autoComplete="new-password"
+            autoComplete="off"
             className="w-full"
           />
 
@@ -248,12 +248,12 @@ function AuthPage() {
         {!isDemoMode && !loginRequire2FA && (
           <Input
             size="base"
-            type="password"
+            type="text"
             aria-label="管理员密码"
             placeholder="请输入管理员密码"
             value={loginPassword}
             onChange={(event) => setLoginPassword(event.target.value)}
-            autoComplete="current-password"
+            autoComplete="off"
             className="w-full"
             autoFocus
           />

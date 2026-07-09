@@ -1047,7 +1047,7 @@ function SchedulerPage() {
             {loading ? (
               <div className="p-4"><SkeletonLine className="h-28" /></div>
             ) : tasks.length === 0 ? (
-              <Empty size="sm" icon={<Clock className="h-8 w-8 text-kumo-inactive" />} title="暂无任务" description="创建 Shell、HTTP、内部接口或 Agent 任务后，可作为定时任务或工作流节点运行。" contents={<Button size="sm" variant="primary" onClick={openCreateTask}><Plus className="h-3.5 w-3.5" />新建任务</Button>} />
+              <Empty size="sm" className="rounded-none border-0 bg-transparent" icon={<Clock className="h-8 w-8 text-kumo-inactive" />} title="暂无任务" description="创建 Shell、HTTP、内部接口或 Agent 任务后，可作为定时任务或工作流节点运行。" contents={<Button size="sm" variant="primary" onClick={openCreateTask}><Plus className="h-3.5 w-3.5" />新建任务</Button>} />
             ) : (
               <div className="overflow-x-auto">
                 <Table layout="fixed" className="min-w-[1080px]">
@@ -1088,7 +1088,7 @@ function SchedulerPage() {
             bodyPadding={workflows.length === 0 ? 'none' : 'md'}
           >
             {workflows.length === 0 ? (
-              <Empty size="sm" icon={<GitBranch className="h-8 w-8 text-kumo-inactive" />} title="暂无工作流" description="将多个任务连接成 DAG，按成功、失败或完成条件自动编排。" contents={<Button size="sm" variant="primary" onClick={openCreateWorkflow}><Plus className="h-3.5 w-3.5" />新建工作流</Button>} />
+              <Empty size="sm" className="rounded-none border-0 bg-transparent" icon={<GitBranch className="h-8 w-8 text-kumo-inactive" />} title="暂无工作流" description="将多个任务连接成 DAG，按成功、失败或完成条件自动编排。" contents={<Button size="sm" variant="primary" onClick={openCreateWorkflow}><Plus className="h-3.5 w-3.5" />新建工作流</Button>} />
             ) : (
               <div className="grid gap-3">
                 {workflows.map((workflow) => (
@@ -1126,7 +1126,7 @@ function SchedulerPage() {
             bodyPadding="none"
           >
             {runs.length === 0 ? (
-              <Empty size="sm" icon={<Activity className="h-8 w-8 text-kumo-inactive" />} title="暂无运行记录" description="手动运行任务或工作流后，会在这里看到状态、耗时和节点输出。" />
+              <Empty size="sm" className="rounded-none border-0 bg-transparent" icon={<Activity className="h-8 w-8 text-kumo-inactive" />} title="暂无运行记录" description="手动运行任务或工作流后，会在这里看到状态、耗时和节点输出。" />
             ) : (
               <div className="overflow-x-auto">
                 <Table layout="fixed" className="min-w-[920px]">
@@ -1162,7 +1162,7 @@ function SchedulerPage() {
             bodyPadding="none"
           >
             {nodes.length === 0 ? (
-              <Empty size="sm" icon={<Server className="h-8 w-8 text-kumo-inactive" />} title="暂无执行节点" description="本机会自动作为默认执行节点，Agent 连接后也会显示在这里。" />
+              <Empty size="sm" className="rounded-none border-0 bg-transparent" icon={<Server className="h-8 w-8 text-kumo-inactive" />} title="暂无执行节点" description="本机会自动作为默认执行节点，Agent 连接后也会显示在这里。" />
             ) : (
               <div className="overflow-x-auto">
                 <Table layout="fixed" className="min-w-[920px]">

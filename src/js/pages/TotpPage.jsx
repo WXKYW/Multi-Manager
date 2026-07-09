@@ -1383,7 +1383,7 @@ function TotpPage() {
 
       {/* ==================== 模态框 1: 账号添加/修改 ==================== */}
       <Dialog.Root open={showAccountModal} onOpenChange={setShowAccountModal}>
-        <Dialog className="p-6 sm:max-w-lg">
+        <Dialog className="!w-[min(40rem,calc(100vw-2rem))] !max-w-[min(40rem,calc(100vw-2rem))] p-6">
           <Dialog.Title className="text-base font-bold text-kumo-strong mb-1">
             {accountModalMode === 'add' ? '添加 / 导入 2FA 账号' : '编辑 2FA 账号'}
           </Dialog.Title>
@@ -1541,11 +1541,12 @@ function TotpPage() {
                   <div className="relative">
                     <Input size="sm"
                       aria-label="TOTP 密钥"
-                      type={totpShowSecret ? 'text' : 'password'}
+                      type="text"
                       placeholder="JBSWY3DPEHPK3PXP"
                       disabled={accountModalMode === 'edit'}
                       value={accountForm.secret}
                       onChange={(e) => setAccountForm((prev) => ({ ...prev, secret: e.target.value }))}
+                      autoComplete="off"
                       className="w-full pr-16 disabled:opacity-60"
                     />
                     <Button
@@ -1697,7 +1698,7 @@ function TotpPage() {
 
       {/* ==================== 模态框 2: 新建/编辑分组 ==================== */}
       <Dialog.Root open={showGroupModal} onOpenChange={setShowGroupModal}>
-        <Dialog className="p-6 sm:max-w-md">
+        <Dialog className="!w-[min(32rem,calc(100vw-2rem))] !max-w-[min(32rem,calc(100vw-2rem))] p-6">
           <Dialog.Title className="text-base font-bold text-kumo-strong mb-1">
             {groupModalMode === 'add' ? '创建新分组' : '编辑分组属性'}
           </Dialog.Title>
@@ -1750,7 +1751,7 @@ function TotpPage() {
 
       {/* ==================== 模态框 3: 备份导出账号 ==================== */}
       <Dialog.Root open={showExportModal} onOpenChange={setShowExportModal}>
-        <Dialog className="p-6 sm:max-w-lg">
+        <Dialog className="!w-[min(40rem,calc(100vw-2rem))] !max-w-[min(40rem,calc(100vw-2rem))] p-6">
           <Dialog.Title className="text-base font-bold text-kumo-strong mb-1">
             备份与导出
           </Dialog.Title>

@@ -1229,7 +1229,7 @@ function NotificationPage() {
 
       {/* ==================== 6. 弹窗 1: 添加/编辑通道 ==================== */}
       <Dialog.Root open={showChannelModal} onOpenChange={setShowChannelModal}>
-        <Dialog className="p-6 sm:max-w-lg">
+        <Dialog className="!w-[min(40rem,calc(100vw-2rem))] !max-w-[min(40rem,calc(100vw-2rem))] p-6">
           <Dialog.Title className="text-base font-bold text-kumo-strong mb-1 select-none">
             {channelForm.id ? '编辑通知渠道' : '新建通知渠道'}
           </Dialog.Title>
@@ -1338,9 +1338,10 @@ function NotificationPage() {
                   <label className="text-xs font-semibold text-kumo-subtle">SMTP 授权口令 / 应用密码 *</label>
                   <Input size="sm"
                     aria-label="SMTP 授权口令"
-                    type="password"
+                    type="text"
                     placeholder="your_smtp_app_password"
                     value={channelForm.config.auth.pass}
+                    autoComplete="off"
                     onChange={(e) => setChannelForm(prev => ({
                       ...prev,
                       config: {
@@ -1447,7 +1448,7 @@ function NotificationPage() {
 
       {/* ==================== 7. 弹窗 2: 添加/编辑规则 ==================== */}
       <Dialog.Root open={showRuleModal} onOpenChange={setShowRuleModal}>
-        <Dialog className="p-6 sm:max-w-xl">
+        <Dialog className="!w-[min(48rem,calc(100vw-2rem))] !max-w-[min(48rem,calc(100vw-2rem))] p-6">
           <Dialog.Title className="text-base font-bold text-kumo-strong mb-1 select-none">
             {ruleForm.id ? '编辑告警规则' : '添加告警规则'}
           </Dialog.Title>

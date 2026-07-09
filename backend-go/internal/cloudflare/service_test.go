@@ -58,6 +58,9 @@ func TestAccountLifecycleAndTokenCompatibility(t *testing.T) {
 	if len(accounts) != 1 || accounts[0]["hasToken"] != true {
 		t.Fatalf("unexpected accounts payload: %#v", accounts)
 	}
+	if accounts[0]["userEmail"] != "user-smoke@example.com" || accounts[0]["email"] != "" {
+		t.Fatalf("expected inferred user email without auth email, got %#v", accounts[0])
+	}
 	if _, ok := accounts[0]["apiToken"]; ok {
 		t.Fatalf("safe account leaked token: %#v", accounts[0])
 	}
@@ -124,6 +127,56 @@ func TestCreateAccountRejectsInvalidToken(t *testing.T) {
 	mustDecode(t, res, &payload)
 	if !strings.Contains(stringValue(payload["error"], ""), "Token") {
 		t.Fatalf("unexpected invalid token payload: %#v", payload)
+	}
+}
+
+func TestCreateAccountRejectsOriginCAServiceKey(t *testing.T) {
+	service := testService(t)
+	res := perform(service, http.MethodPost, "/api/cloudflare/accounts", `{"name":"origin","apiToken":"v1.0-origin-ca-service-key","skipVerify":true}`)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("origin ca key status=%d body=%s", res.Code, res.Body.String())
+	}
+	var payload map[string]interface{}
+	mustDecode(t, res, &payload)
+	if !strings.Contains(stringValue(payload["error"], ""), "Origin CA Key") {
+		t.Fatalf("unexpected origin ca key payload: %#v", payload)
+	}
+}
+
+func TestCreateAccountSupportsAccountAPIToken(t *testing.T) {
+	fake := fakeCloudflareAPI(t)
+	defer fake.Close()
+	t.Setenv("CLOUDFLARE_API_BASE_URL", fake.URL)
+
+	service := testService(t)
+	res := perform(service, http.MethodPost, "/api/cloudflare/accounts", `{"name":"r2","apiToken":"cfat_account_token","cfAccountId":"cf-account-1"}`)
+	if res.Code != http.StatusOK {
+		t.Fatalf("create account api token status=%d body=%s", res.Code, res.Body.String())
+	}
+	var createPayload map[string]interface{}
+	mustDecode(t, res, &createPayload)
+	account := objectValue(createPayload["account"])
+	if createPayload["success"] != true || account["cfAccountId"] != "cf-account-1" {
+		t.Fatalf("unexpected account api token payload: %#v", createPayload)
+	}
+
+	id := stringValue(account["id"], "")
+	res = perform(service, http.MethodGet, "/api/cloudflare/accounts/"+id+"/r2/buckets", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("r2 buckets with account api token status=%d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestCreateAccountAPITokenRequiresAccountID(t *testing.T) {
+	service := testService(t)
+	res := perform(service, http.MethodPost, "/api/cloudflare/accounts", `{"name":"r2","apiToken":"cfat_account_token","skipVerify":true}`)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("missing account id status=%d body=%s", res.Code, res.Body.String())
+	}
+	var payload map[string]interface{}
+	mustDecode(t, res, &payload)
+	if !strings.Contains(stringValue(payload["error"], ""), "Account ID") {
+		t.Fatalf("unexpected missing account id payload: %#v", payload)
 	}
 }
 
@@ -915,10 +968,10 @@ func fakeCloudflareAPI(t *testing.T) *httptest.Server {
 	nextPagesDomain := 2
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if r.URL.Path == "/client/v4/user" {
+		if r.URL.Path == "/client/v4/user" && r.Header.Get("X-Auth-Email") != "" {
 			token = r.Header.Get("X-Auth-Key")
 		}
-		if token != "smoke-cf-token" && token != "smoke-cf-token-2" {
+		if token != "smoke-cf-token" && token != "smoke-cf-token-2" && token != "cfat_account_token" {
 			writeJSON(w, http.StatusUnauthorized, map[string]interface{}{
 				"success": false,
 				"errors":  []map[string]interface{}{{"message": "bad token"}},
@@ -931,10 +984,15 @@ func fakeCloudflareAPI(t *testing.T) *httptest.Server {
 				"success": true,
 				"result":  map[string]interface{}{"status": "active", "expires_on": "2030-01-01T00:00:00Z"},
 			})
+		case "/client/v4/accounts/cf-account-1/tokens/verify":
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"success": true,
+				"result":  map[string]interface{}{"status": "active", "expires_on": "2030-01-01T00:00:00Z"},
+			})
 		case "/client/v4/user":
 			writeJSON(w, http.StatusOK, map[string]interface{}{
 				"success": true,
-				"result":  map[string]interface{}{"id": "user-smoke"},
+				"result":  map[string]interface{}{"id": "user-smoke", "email": "user-smoke@example.com"},
 			})
 		case "/client/v4/accounts":
 			writeJSON(w, http.StatusOK, map[string]interface{}{

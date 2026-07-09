@@ -2343,7 +2343,7 @@ function PaasPage() {
 
       {/* Add Koyeb Dialog */}
       <Dialog.Root open={showAddKoyebModal} onOpenChange={setShowAddKoyebModal}>
-        <Dialog className="p-6 sm:max-w-md">
+        <Dialog className="!w-[min(32rem,calc(100vw-2rem))] !max-w-[min(32rem,calc(100vw-2rem))] p-6">
           <Dialog.Title className="text-sm font-bold text-kumo-strong mb-1">
             添加 Koyeb 账号
           </Dialog.Title>
@@ -2366,10 +2366,11 @@ function PaasPage() {
               <label className="text-[11px] font-bold text-kumo-subtle">API 令牌</label>
               <Input size="sm"
                 aria-label="Koyeb API 令牌"
-                type="password"
+                type="text"
                 value={newKoyebToken}
                 onChange={(e) => setNewKoyebToken(e.target.value)}
                 placeholder="koyeb_api_token"
+                autoComplete="off"
                 className="w-full text-kumo-strong p-2 text-xs"
               />
             </div>
@@ -2400,7 +2401,7 @@ function PaasPage() {
 
       {/* Add Fly Dialog */}
       <Dialog.Root open={showAddFlyModal} onOpenChange={setShowAddFlyModal}>
-        <Dialog className="p-6 sm:max-w-md">
+        <Dialog className="!w-[min(32rem,calc(100vw-2rem))] !max-w-[min(32rem,calc(100vw-2rem))] p-6">
           <Dialog.Title className="text-sm font-bold text-kumo-strong mb-1">
             添加 Fly.io 账号
           </Dialog.Title>
@@ -2423,10 +2424,11 @@ function PaasPage() {
               <label className="text-[11px] font-bold text-kumo-subtle">API 令牌</label>
               <Input size="sm"
                 aria-label="Fly.io API 令牌"
-                type="password"
+                type="text"
                 value={newFlyToken}
                 onChange={(e) => setNewFlyToken(e.target.value)}
                 placeholder="flyv1_xxxx"
+                autoComplete="off"
                 className="w-full text-kumo-strong p-2 text-xs"
               />
             </div>
@@ -2457,7 +2459,7 @@ function PaasPage() {
 
       {/* Global Self-Contained Log Viewer Dialog */}
       <Dialog.Root open={logViewerOpen} onOpenChange={setLogViewerOpen}>
-        <Dialog className="p-0 sm:max-w-4xl overflow-hidden flex flex-col h-[80vh]">
+        <Dialog className="flex h-[80vh] !w-[min(56rem,calc(100vw-2rem))] !max-w-[min(56rem,calc(100vw-2rem))] flex-col overflow-hidden p-0">
           {/* Header */}
           <div className="p-4 border-b border-kumo-line bg-kumo-recessed/40 flex justify-between items-center">
             <div>

@@ -725,7 +725,7 @@ function TencentPage() {
 
       {/* Add/Edit Account Modal */}
       <Dialog.Root open={showAddAccountModal} onOpenChange={setShowAddAccountModal}>
-        <Dialog className="p-6 sm:max-w-md">
+        <Dialog className="!w-[min(32rem,calc(100vw-2rem))] !max-w-[min(32rem,calc(100vw-2rem))] p-6">
           <Dialog.Title className="text-sm font-bold text-kumo-strong mb-1">
             {editingAccount ? '编辑腾讯云账号' : '添加腾讯云账号'}
           </Dialog.Title>
@@ -764,10 +764,11 @@ function TencentPage() {
 
             <Input
               label="Secret Key"
-              type="password" size="sm"
+              type="text" size="sm"
               value={accountForm.secretKey}
               onChange={(e) => setAccountForm({ ...accountForm, secretKey: e.target.value })}
               placeholder={editingAccount ? '(不修改请留空)' : '请输入 SecretKey'}
+              autoComplete="off"
               className="w-full font-mono"
             />
 

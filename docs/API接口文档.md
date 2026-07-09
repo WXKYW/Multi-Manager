@@ -373,10 +373,13 @@ Content-Type: application/json
 
 {
   "name": "New Account",
-  "email": "user@example.com",
+  "email": "",
+  "cfAccountId": "0123456789abcdef0123456789abcdef",
   "apiToken": "<CLOUDFLARE_API_TOKEN>"
 }
 ```
+
+`email` 仅在使用旧版 Global API Key 时填写。推荐使用 Cloudflare API Token 并留空 `email`；如果使用以 `cfat_` 开头的账户 API 令牌，需要填写 `cfAccountId`，系统会使用 `/accounts/{account_id}/tokens/verify` 验证。不要使用以 `v1.0-` 开头的 Origin CA Key / Service Key，该密钥已被 Cloudflare 弃用。
 
 **响应**:
 ```json
@@ -398,6 +401,8 @@ Content-Type: application/json
 
 {
   "name": "Updated Name",
+  "email": "",
+  "cfAccountId": "0123456789abcdef0123456789abcdef",
   "apiToken": "<CLOUDFLARE_API_TOKEN>"
 }
 ```

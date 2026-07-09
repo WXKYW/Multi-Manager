@@ -10850,10 +10850,11 @@ function ServerPage() {
                         <label className="font-semibold text-kumo-subtle">连接密码</label>
                         <Input size="sm"
                           aria-label="连接密码"
-                          type="password"
+                          type="text"
                           value={serverForm.password}
                           onChange={e => setServerForm(prev => ({ ...prev, password: e.target.value }))}
                           placeholder={serverModalMode === 'edit' ? '****** (留空不修改)' : '登录密码'}
+                          autoComplete="off"
                           className="px-3 py-2 text-kumo-strong"
                         />
                       </div>
@@ -10873,10 +10874,11 @@ function ServerPage() {
                           <label className="font-semibold text-kumo-subtle">密钥口令 (密码保护短语，若有)</label>
                           <Input size="sm"
                             aria-label="密钥口令"
-                            type="password"
+                            type="text"
                             value={serverForm.passphrase}
                             onChange={e => setServerForm(prev => ({ ...prev, passphrase: e.target.value }))}
                             placeholder="Key Passphrase"
+                            autoComplete="off"
                             className="px-3 py-2 text-kumo-strong"
                           />
                         </div>
@@ -11058,10 +11060,11 @@ function ServerPage() {
                   <label className="font-semibold text-kumo-subtle">默认登录密码</label>
                   <Input size="sm"
                     aria-label="默认登录密码"
-                    type="password"
+                    type="text"
                     value={credForm.password}
                     onChange={e => setCredForm(prev => ({ ...prev, password: e.target.value }))}
                     placeholder="输入密码"
+                    autoComplete="off"
                     className="px-3 py-2 text-kumo-strong"
                   />
                 </div>
@@ -11081,10 +11084,11 @@ function ServerPage() {
                     <label className="font-semibold text-kumo-subtle">证书保护密码短语 (口令)</label>
                     <Input size="sm"
                       aria-label="证书保护密码短语"
-                      type="password"
+                      type="text"
                       value={credForm.passphrase}
                       onChange={e => setCredForm(prev => ({ ...prev, passphrase: e.target.value }))}
                       placeholder="Passphrase"
+                      autoComplete="off"
                       className="px-3 py-2 text-kumo-strong"
                     />
                   </div>

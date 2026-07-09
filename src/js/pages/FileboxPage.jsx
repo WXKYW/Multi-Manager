@@ -441,7 +441,7 @@ function FileboxPage() {
               <div className="grid gap-3 md:grid-cols-2">
                 <Select size="sm" label="有效期" value={expiry} onValueChange={setExpiry} items={EXPIRY_OPTIONS} />
                 <Input size="sm" label="最大下载次数" type="number" min="0" value={maxDownloads} onChange={(event) => setMaxDownloads(event.target.value)} placeholder="0 或留空为不限" />
-                <Input size="sm" label="访问密码" type="password" value={accessPassword} onChange={(event) => setAccessPassword(event.target.value)} placeholder="可选" />
+                <Input size="sm" label="访问密码" type="text" value={accessPassword} onChange={(event) => setAccessPassword(event.target.value)} placeholder="可选" autoComplete="off" />
                 <div className="flex items-center justify-between rounded-md border border-kumo-line bg-kumo-recessed/30 px-3 py-2">
                   <div>
                     <div className="text-xs font-semibold text-kumo-strong">阅后即焚</div>

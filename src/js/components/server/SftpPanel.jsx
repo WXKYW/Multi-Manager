@@ -426,7 +426,7 @@ export default function SftpPanel({ serverId, serverName, initialPath = '.', onC
       </Dialog.Root>
 
       <Dialog.Root open={mkdirOpen} onOpenChange={setMkdirOpen}>
-        <Dialog size="sm" className="flex max-h-[calc(100dvh-1rem)] flex-col overflow-hidden p-0">
+        <Dialog size="sm" className="flex max-h-[calc(100dvh-1rem)] !w-[min(32rem,calc(100vw-2rem))] !max-w-[min(32rem,calc(100vw-2rem))] flex-col overflow-hidden p-0">
           <div className="flex items-center justify-between gap-3 border-b border-kumo-line px-4 py-3"><Dialog.Title className="text-sm font-bold text-kumo-strong">新建目录</Dialog.Title><Dialog.Close /></div>
           <div className="p-4">
             <Input size="sm" label="目录名" value={mkdirName} onChange={event => setMkdirName(event.target.value)} />
@@ -439,7 +439,7 @@ export default function SftpPanel({ serverId, serverName, initialPath = '.', onC
       </Dialog.Root>
 
       <Dialog.Root open={Boolean(renameFile)} onOpenChange={open => !open && setRenameFile(null)}>
-        <Dialog size="sm" className="flex max-h-[calc(100dvh-1rem)] flex-col overflow-hidden p-0">
+        <Dialog size="sm" className="flex max-h-[calc(100dvh-1rem)] !w-[min(32rem,calc(100vw-2rem))] !max-w-[min(32rem,calc(100vw-2rem))] flex-col overflow-hidden p-0">
           <div className="flex items-center justify-between gap-3 border-b border-kumo-line px-4 py-3"><Dialog.Title className="text-sm font-bold text-kumo-strong">重命名</Dialog.Title><Dialog.Close /></div>
           <div className="p-4">
             <Input size="sm" label="新名称" value={renameValue} onChange={event => setRenameValue(event.target.value)} />
@@ -452,7 +452,7 @@ export default function SftpPanel({ serverId, serverName, initialPath = '.', onC
       </Dialog.Root>
 
       <Dialog.Root open={Boolean(chmodFile)} onOpenChange={open => !open && setChmodFile(null)}>
-        <Dialog size="sm" className="flex max-h-[calc(100dvh-1rem)] flex-col overflow-hidden p-0">
+        <Dialog size="sm" className="flex max-h-[calc(100dvh-1rem)] !w-[min(32rem,calc(100vw-2rem))] !max-w-[min(32rem,calc(100vw-2rem))] flex-col overflow-hidden p-0">
           <div className="flex items-center justify-between gap-3 border-b border-kumo-line px-4 py-3"><Dialog.Title className="text-sm font-bold text-kumo-strong">修改权限</Dialog.Title><Dialog.Close /></div>
           <div className="p-4">
             <Input size="sm" label="权限值" value={chmodValue} onChange={event => setChmodValue(event.target.value)} className="font-mono" />

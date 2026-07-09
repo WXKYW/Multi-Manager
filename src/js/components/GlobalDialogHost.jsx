@@ -69,6 +69,9 @@ const getDeleteDescription = (options, resourceName, resourceType) => {
   return `此操作无法撤销。删除后，将永久移除 ${resourceType}“${resourceName}”。`;
 };
 
+const dialogWidthClass = '!w-[min(34rem,calc(100vw-2rem))] !max-w-[min(34rem,calc(100vw-2rem))]';
+const deleteDialogWidthClass = '!w-[min(42rem,calc(100vw-2rem))] !max-w-[min(42rem,calc(100vw-2rem))]';
+
 function DeleteResourceDialog({ options, promptValue, setPromptValue, onCancel }) {
   const resourceName = getDeleteResourceName(options);
   const resourceType = getDeleteResourceType(options);
@@ -83,7 +86,7 @@ function DeleteResourceDialog({ options, promptValue, setPromptValue, onCancel }
         if (!open) onCancel();
       }}
     >
-      <Dialog size={options.size || 'sm'} className="p-0">
+      <Dialog size={options.size || 'sm'} className={`${deleteDialogWidthClass} p-0`}>
         <form
           className="flex flex-col"
           onSubmit={(event) => {
@@ -224,7 +227,7 @@ function GlobalDialogHost() {
         if (!open) handleCancel();
       }}
     >
-      <Dialog size={options.size || 'sm'} className="p-5">
+      <Dialog size={options.size || 'sm'} className={`${dialogWidthClass} p-5`}>
         <form
           className="flex flex-col gap-4"
           onSubmit={(event) => {

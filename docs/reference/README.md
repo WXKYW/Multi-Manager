@@ -10,7 +10,7 @@
 
 ## 当前重要结论
 
-- 当前 Kumo 包版本：`@cloudflare/kumo` 2.6.0。
+- 当前 Kumo 包版本：`@cloudflare/kumo` 2.7.0。
 - `DeleteResource` 可从 `@cloudflare/kumo` 导出。
 - `PageHeader` 和 `ResourceListPage` 当前是 block source；使用前需要通过 Kumo CLI 安装或复制 block source，不要直接从 barrel 导入。
 - Chart 相关能力包括 `TimeseriesChart`、`Meter`、`ChartPalette`，图表应使用 Kumo palette、`loading` 和必要的 `tooltipBoundary`。
