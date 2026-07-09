@@ -719,6 +719,81 @@ func TestComputeTrafficReadsUpstreamInfoFromProfile(t *testing.T) {
 	}
 }
 
+func TestRefreshUpstreamPreservesBoundNodeProperties(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	upstreamRaw := "vless://0119068b-0148-47bf-875b-2145040b8174@saas.sin.fan:443?security=tls&type=ws&path=/group/live/intro&encryption=none#%F0%9F%87%AD%F0%9F%87%B0%20%E9%A6%99%E6%B8%AF"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Subscription-Userinfo", "upload=1; download=2; total=3; expire=4")
+		_, _ = w.Write([]byte(upstreamRaw))
+	}))
+	defer server.Close()
+
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatalf("ensure schema: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO subscription_profiles (id, name, enabled) VALUES ('profile_one', '节点库', 1)`); err != nil {
+		t.Fatalf("insert profile: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO subscription_subscriptions (id, profile_id, name, public_token, enabled) VALUES ('link_one', 'profile_one', '公开链接', 'token_one', 1)`); err != nil {
+		t.Fatalf("insert subscription: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO subscription_upstreams (id, profile_id, name, url, enabled) VALUES ('up_one', 'profile_one', '默认上游', ?, 1)`, server.URL); err != nil {
+		t.Fatalf("insert upstream: %v", err)
+	}
+
+	nodes := parseImportText(upstreamRaw)
+	if len(nodes) != 1 {
+		t.Fatalf("parsed nodes = %d, want 1", len(nodes))
+	}
+	nodes[0].ID = "node_existing"
+	nodes[0].SubscriptionID = "profile_one"
+	nodes[0].ProfileID = "profile_one"
+	nodes[0].Source = "managed"
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	if err := insertNode(ctx, tx, nodes[0]); err != nil {
+		t.Fatalf("insert node: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit tx: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE subscription_nodes SET name = '自定义香港', country_code = 'SG', location = '自定义地区', tags = 'stable,premium', traffic_server_id = 'server_one', enabled = 0, stable = 1, sort_order = 7 WHERE id = 'node_existing'`); err != nil {
+		t.Fatalf("customize node: %v", err)
+	}
+
+	if err := New(config.Config{}).refreshUpstreamNow(ctx, db, "link_one"); err != nil {
+		t.Fatalf("refresh upstream: %v", err)
+	}
+
+	loaded, err := loadNodes(ctx, db, "profile_one", true)
+	if err != nil {
+		t.Fatalf("load nodes: %v", err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("len(nodes) = %d, want 1", len(loaded))
+	}
+	node := loaded[0]
+	if node.ID != "node_existing" || node.Name != "自定义香港" || node.TrafficServerID != "server_one" || node.Enabled || !node.Stable || node.SortOrder != 7 {
+		t.Fatalf("node local fields not preserved: %#v", node)
+	}
+	if node.CountryCode != "SG" || node.Location != "自定义地区" || node.Tags != "stable,premium" {
+		t.Fatalf("node custom labels not preserved: %#v", node)
+	}
+	if node.Type != "vless" || node.Server != "saas.sin.fan" || node.Port != 443 || !strings.Contains(node.Raw, "vless://") {
+		t.Fatalf("node upstream fields not refreshed: %#v", node)
+	}
+}
+
 func TestComputeTrafficFromNodeBoundServers(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()

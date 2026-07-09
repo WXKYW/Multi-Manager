@@ -1188,17 +1188,8 @@ func (s *Service) refreshUpstreamNow(ctx context.Context, db *sql.DB, id string)
 		return err
 	}
 	defer tx.Rollback()
-	_, _ = tx.ExecContext(ctx, `DELETE FROM subscription_nodes WHERE COALESCE(profile_id, subscription_id) = ? AND source IN ('managed', 'upstream')`, profileID)
-	for i := range nodes {
-		nodes[i].SubscriptionID = profileID
-		nodes[i].ProfileID = profileID
-		nodes[i].Source = "managed"
-		if nodes[i].SortOrder == 0 {
-			nodes[i].SortOrder = i + 1
-		}
-		if err := insertNode(ctx, tx, nodes[i]); err != nil {
-			return err
-		}
+	if err := mergeManagedNodes(ctx, tx, profileID, nodes); err != nil {
+		return err
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE subscription_subscriptions SET upstream_status = 'ok', upstream_last_error = '', upstream_last_refresh_at = datetime('now'), upstream_userinfo = ?, updated_at = datetime('now') WHERE id = ?`, userinfo, id)
 	if err != nil {
@@ -1835,6 +1826,95 @@ func insertNode(ctx context.Context, tx *sql.Tx, node Node) error {
 	_, err = tx.ExecContext(ctx, `INSERT INTO subscription_nodes (id, subscription_id, profile_id, name, type, server, port, country_code, location, tags, traffic_server_id, enabled, stable, sort_order, raw_encrypted, config_encrypted, fingerprint, source, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
 		node.ID, node.SubscriptionID, node.ProfileID, node.Name, node.Type, node.Server, node.Port, node.CountryCode, node.Location, node.Tags, nullString(node.TrafficServerID), boolToInt(node.Enabled || !strings.EqualFold(node.Name, "__disabled__")), boolToInt(node.Stable), node.SortOrder, rawEnc, cfgEnc, fingerprint, firstNonEmpty(node.Source, "manual"))
+	return err
+}
+
+func mergeManagedNodes(ctx context.Context, tx *sql.Tx, profileID string, incoming []Node) error {
+	existing, err := loadManagedNodeFingerprints(ctx, tx, profileID)
+	if err != nil {
+		return err
+	}
+	seenIDs := map[string]bool{}
+	for i := range incoming {
+		node := incoming[i]
+		node.SubscriptionID = profileID
+		node.ProfileID = profileID
+		node.Source = "managed"
+		if node.SortOrder == 0 {
+			node.SortOrder = i + 1
+		}
+		fingerprint := nodeFingerprint(node)
+		if current, ok := existing[fingerprint]; ok {
+			node.ID = current.ID
+			node.Name = firstNonEmpty(current.Name, node.Name)
+			node.CountryCode = firstNonEmpty(current.CountryCode, node.CountryCode)
+			node.Location = firstNonEmpty(current.Location, node.Location)
+			node.Tags = firstNonEmpty(current.Tags, node.Tags)
+			node.TrafficServerID = current.TrafficServerID
+			node.Enabled = current.Enabled
+			node.Stable = current.Stable
+			node.SortOrder = current.SortOrder
+			if err := updateManagedNode(ctx, tx, node, fingerprint); err != nil {
+				return err
+			}
+			seenIDs[node.ID] = true
+			continue
+		}
+		if err := insertNode(ctx, tx, node); err != nil {
+			return err
+		}
+		seenIDs[node.ID] = true
+	}
+	for _, node := range existing {
+		if !seenIDs[node.ID] {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM subscription_nodes WHERE id = ?`, node.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func loadManagedNodeFingerprints(ctx context.Context, tx *sql.Tx, profileID string) (map[string]Node, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT id, subscription_id, COALESCE(profile_id, subscription_id), name, COALESCE(type, ''), COALESCE(server, ''), COALESCE(port, 0), COALESCE(country_code, ''), COALESCE(location, ''), COALESCE(tags, ''), COALESCE(traffic_server_id, ''), enabled, stable, sort_order, COALESCE(fingerprint, '')
+		FROM subscription_nodes
+		WHERE COALESCE(profile_id, subscription_id) = ? AND source IN ('managed', 'upstream')`, profileID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	nodes := map[string]Node{}
+	for rows.Next() {
+		var node Node
+		var enabled, stable int
+		var fingerprint string
+		if err := rows.Scan(&node.ID, &node.SubscriptionID, &node.ProfileID, &node.Name, &node.Type, &node.Server, &node.Port, &node.CountryCode, &node.Location, &node.Tags, &node.TrafficServerID, &enabled, &stable, &node.SortOrder, &fingerprint); err != nil {
+			return nil, err
+		}
+		node.Enabled = enabled == 1
+		node.Stable = stable == 1
+		fingerprint = firstNonEmpty(fingerprint, nodeFingerprint(node))
+		if fingerprint != "" {
+			nodes[fingerprint] = node
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return nodes, nil
+}
+
+func updateManagedNode(ctx context.Context, tx *sql.Tx, node Node, fingerprint string) error {
+	rawEnc, err := secure.SecureEncrypt(node.Raw)
+	if err != nil {
+		return err
+	}
+	cfgEnc, err := secure.SecureEncrypt(node.ConfigJSON)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE subscription_nodes SET subscription_id = ?, profile_id = ?, name = ?, type = ?, server = ?, port = ?, country_code = ?, location = ?, tags = ?, traffic_server_id = ?, enabled = ?, stable = ?, sort_order = ?, raw_encrypted = ?, config_encrypted = ?, fingerprint = ?, source = 'managed', updated_at = datetime('now') WHERE id = ?`,
+		node.SubscriptionID, node.ProfileID, node.Name, node.Type, node.Server, node.Port, node.CountryCode, node.Location, node.Tags, nullString(node.TrafficServerID), boolToInt(node.Enabled), boolToInt(node.Stable), node.SortOrder, rawEnc, cfgEnc, fingerprint, node.ID)
 	return err
 }
 

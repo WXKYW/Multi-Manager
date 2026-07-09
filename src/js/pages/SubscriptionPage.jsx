@@ -207,13 +207,47 @@ function NodeFlag({ node }) {
   return <CountryFlag preferSvg countryCode={code} className="h-3.5 w-5 shrink-0 !rounded-[2px] text-sm" />;
 }
 
-const nodeQualityLabel = (node) => {
-  const samples = Array.isArray(node?.quality) ? node.quality.slice(0, 3) : [];
-  if (samples.length === 0) return '';
-  return samples
-    .map((item) => `${item.name} ${Math.round(item.latency_ms || 0)}ms`)
-    .join(' / ');
+const latencyChipClass = (latency) => {
+  const value = Number(latency) || 0;
+  if (value <= 0) return 'border-kumo-line bg-kumo-recessed/50 text-kumo-subtle';
+  if (value <= 120) return 'border-kumo-success/25 bg-kumo-success/10 text-kumo-success';
+  if (value <= 260) return 'border-kumo-warning/30 bg-kumo-warning/10 text-kumo-warning';
+  return 'border-kumo-danger/25 bg-kumo-danger/10 text-kumo-danger';
 };
+
+function NodeHostQuality({ node, serverNameById }) {
+  const hostName = node.traffic_server_id ? serverNameById.get(String(node.traffic_server_id)) || node.traffic_server_id : '';
+  const samples = Array.isArray(node?.quality) ? node.quality.slice(0, 3) : [];
+  return (
+    <div className="flex min-w-0 flex-col items-center gap-1">
+      <span
+        className={`inline-flex max-w-full items-center rounded-[3px] border px-1.5 py-0.5 text-[10px] font-semibold leading-4 ${hostName ? 'border-kumo-info/25 bg-kumo-info/10 text-kumo-info' : 'border-kumo-line bg-kumo-recessed/45 text-kumo-subtle'}`}
+        title={hostName || '未绑定主机'}
+      >
+        <span className="truncate">{hostName || '未绑定'}</span>
+      </span>
+      <div className="flex max-w-full flex-wrap justify-center gap-1">
+        {samples.length > 0 ? samples.map((item) => {
+          const latency = Math.round(Number(item.latency_ms) || 0);
+          return (
+            <span
+              key={`${item.name}-${item.sampled_at || latency}`}
+              className={`inline-flex items-center gap-1 rounded-[3px] border px-1.5 py-0.5 text-[10px] font-semibold leading-4 tabular-nums ${latencyChipClass(latency)}`}
+              title={`${item.name || '线路'} ${latency > 0 ? `${latency}ms` : '暂无延迟'}`}
+            >
+              <span className="max-w-8 truncate">{item.name || '-'}</span>
+              <span>{latency > 0 ? `${latency}ms` : '-'}</span>
+            </span>
+          );
+        }) : (
+          <span className="inline-flex rounded-[3px] border border-kumo-line bg-kumo-recessed/45 px-1.5 py-0.5 text-[10px] font-semibold leading-4 text-kumo-subtle">
+            暂无延迟
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 const nodeTypeBadgeVariant = (type) => {
   switch (String(type || '').toLowerCase()) {
@@ -1180,14 +1214,14 @@ function SubscriptionPage() {
       </div>
 
       <DataTableFrame className="min-h-0 flex-1 overflow-auto scrollbar-thin">
-        <AppTable layout="fixed" widths={[90, 210, 100, 300, 150, 110]}>
+        <AppTable layout="fixed" widths={[90, 210, 100, 280, 190, 110]}>
           <Table.Header sticky variant="compact">
             <Table.Row>
               <Table.Head className="w-[9%] text-center">状态</Table.Head>
               <Table.Head className="w-[22%] text-center">节点名称</Table.Head>
               <Table.Head className="w-[10%] text-center">类型</Table.Head>
-              <Table.Head className="w-[31%] text-center">连接</Table.Head>
-              <Table.Head className="w-[16%] text-center">主机 / 延迟</Table.Head>
+              <Table.Head className="w-[29%] text-center">连接</Table.Head>
+              <Table.Head className="w-[18%] text-center">主机 / 延迟</Table.Head>
               <Table.Head className="w-[12%] text-center">操作</Table.Head>
             </Table.Row>
           </Table.Header>
@@ -1233,12 +1267,7 @@ function SubscriptionPage() {
                     </div>
                   </Table.Cell>
                   <Table.Cell className="text-center">
-                    <div className="truncate text-xs text-kumo-strong">
-                      {node.traffic_server_id ? serverNameById.get(String(node.traffic_server_id)) || node.traffic_server_id : '-'}
-                    </div>
-                    <div className="mt-1 truncate text-[11px] text-kumo-subtle">
-                      {nodeQualityLabel(node) || `${node.source || 'manual'} · #${node.sort_order || '-'}`}
-                    </div>
+                    <NodeHostQuality node={node} serverNameById={serverNameById} />
                   </Table.Cell>
                   <Table.Cell className="text-center">
                     <div className="flex justify-center gap-1">
