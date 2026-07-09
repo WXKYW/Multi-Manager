@@ -253,6 +253,7 @@ export const MODULE_ICON_MAP = {
   dashboard: LayoutDashboard,
   settings: Settings,
   openai: Bot,
+  subscription: Plug,
   paas: Cloud,
   dns: CloudflareBrand,
   aliyun: AlibabaCloudBrand,

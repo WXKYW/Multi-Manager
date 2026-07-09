@@ -127,6 +127,10 @@ export default defineConfig(({ mode }) => {
           target: `http://127.0.0.1:${env.PORT || 3000}`,
           changeOrigin: true,
         },
+        '^/sub(?:/|$)': {
+          target: `http://127.0.0.1:${env.PORT || 3000}`,
+          changeOrigin: true,
+        },
         '/v1': {
           target: `http://127.0.0.1:${env.PORT || 3000}`,
           changeOrigin: true,

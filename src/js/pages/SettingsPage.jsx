@@ -1039,8 +1039,8 @@ function SettingsPage() {
                 onChange={previewDatabaseImport}
               />
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-                <Button size="sm" className="justify-start" onClick={exportDatabase} icon={<Download className="h-4 w-4" />}>导出数据库</Button>
-                <Button size="sm" className="justify-start" onClick={importDatabase} loading={databaseBusy} icon={<Upload className="h-4 w-4" />}>上传并预检数据库</Button>
+                <Button size="sm" className="justify-start" onClick={exportDatabase} icon={<Upload className="h-4 w-4" />}>导出数据库</Button>
+                <Button size="sm" className="justify-start" onClick={importDatabase} loading={databaseBusy} icon={<Download className="h-4 w-4" />}>导入并预检数据库</Button>
               </div>
               {dbImportPreview && (
                 <div className="mt-4 app-subcard p-3 text-xs">

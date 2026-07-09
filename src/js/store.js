@@ -27,6 +27,12 @@ export const MODULE_CONFIG = {
     icon: 'fa-robot',
     description: '模型网关与 OpenAI 兼容 API 管理',
   },
+  subscription: {
+    name: '订阅分发',
+    shortName: '订阅',
+    icon: 'fa-link',
+    description: 'Clash / v2ray 订阅链接、节点、模板与流量分发',
+  },
 
   paas: {
     name: 'PaaS',
@@ -125,9 +131,9 @@ export const MODULE_GROUPS = [
   },
   {
     id: 'api-gateway',
-    name: 'API 网关',
+    name: 'API 服务',
     icon: 'fa-bolt',
-    modules: ['openai'],
+    modules: ['openai', 'subscription'],
   },
   {
     id: 'system',

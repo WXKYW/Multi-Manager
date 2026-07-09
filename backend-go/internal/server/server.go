@@ -26,6 +26,7 @@ import (
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
 	"github.com/iwvw/api-monitor/backend-go/internal/serveragent"
 	"github.com/iwvw/api-monitor/backend-go/internal/settings"
+	"github.com/iwvw/api-monitor/backend-go/internal/subscription"
 	systemmetrics "github.com/iwvw/api-monitor/backend-go/internal/system"
 	"github.com/iwvw/api-monitor/backend-go/internal/systemlogs"
 	"github.com/iwvw/api-monitor/backend-go/internal/tencent"
@@ -52,6 +53,7 @@ type Server struct {
 	server   *serveragent.Service
 	backup   *backup.Service
 	logs     *systemlogs.Service
+	sub      *subscription.Service
 }
 
 func New(cfg config.Config) http.Handler {
@@ -90,6 +92,7 @@ func NewServer(cfg config.Config) *Server {
 		server:   serverAgentService,
 		backup:   backupService,
 		logs:     systemlogs.New(cfg),
+		sub:      subscription.New(cfg),
 	}
 	systemService.SetAICaller(server.callAPIFromAI)
 	return server
@@ -123,6 +126,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.serveSystemControlRoute(w, r) {
+		return
+	}
+
+	if strings.HasPrefix(r.URL.Path, "/sub/") {
+		s.system.RecordAPICall(r.Method, r.URL.Path)
+		s.sub.ServeHTTP(w, r)
 		return
 	}
 
@@ -270,6 +279,10 @@ func (s *Server) serveGoRoute(w http.ResponseWriter, r *http.Request, route mani
 		s.cf.ServeHTTP(w, r)
 	case "/api/openai":
 		s.openai.ServeHTTP(w, r)
+	case "/api/subscription":
+		s.sub.ServeHTTP(w, r)
+	case "/sub/{token}":
+		s.sub.ServeHTTP(w, r)
 	case "/v1":
 		s.serveV1Route(w, r)
 	case "/ws/ssh", "/ws/agent-terminal":
@@ -277,6 +290,10 @@ func (s *Server) serveGoRoute(w http.ResponseWriter, r *http.Request, route mani
 	case "/socket.io/":
 		s.server.ServeHTTP(w, r)
 	default:
+		if strings.HasPrefix(route.Prefix, "/sub/") || strings.HasPrefix(r.URL.Path, "/sub/") {
+			s.sub.ServeHTTP(w, r)
+			return
+		}
 		if strings.HasPrefix(route.Prefix, "/api/server/") {
 			s.server.ServeHTTP(w, r)
 			return

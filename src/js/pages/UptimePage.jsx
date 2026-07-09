@@ -2240,7 +2240,7 @@ function UptimePage() {
 
           <SectionCard
             title="导入确认"
-            icon={<Upload className="h-4 w-4 text-kumo-brand" />}
+            icon={<Download className="h-4 w-4 text-kumo-brand" />}
             bodyPadding="lg"
             bodyClassName="space-y-4"
           >

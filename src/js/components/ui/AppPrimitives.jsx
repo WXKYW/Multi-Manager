@@ -93,7 +93,7 @@ export function SectionCard({
   return (
     <LayerCard
       {...props}
-      className={cx('flex flex-col overflow-hidden p-0 shadow-none', className)}
+      className={cx('flex flex-col overflow-hidden rounded-lg border border-kumo-line/90 bg-kumo-elevated p-0 shadow-none', className)}
     >
       <LayerCard.Secondary className={cx(sectionCardHeaderClass, headerClassName)}>
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">

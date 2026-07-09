@@ -24,7 +24,7 @@ import useStore from '../store.js';
 import useTableResize from '../composables/useTableResize.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
-import { SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { DataTableFrame, PageStack, PageToolbar, SectionCard } from '../components/ui/AppPrimitives.jsx';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
 import {
@@ -1729,7 +1729,7 @@ function DnsPage() {
   const isDnsWorkspace = activeTab === 'dns' && selectedAccountId;
   const pageShellClassName = isDnsWorkspace
     ? 'dns-workspace flex w-full max-w-full flex-col gap-3 overflow-visible pb-4 md:h-[calc(100dvh-88px)] md:min-h-0 md:overflow-hidden md:pb-1 lg:h-[calc(100dvh-92px)]'
-    : 'flex w-full min-w-0 flex-col gap-3 sm:gap-4';
+    : '';
   const renderResizeHead = (label, index, startResize, align = 'left') => {
     const alignClassName = {
       left: 'justify-start text-left',
@@ -1748,8 +1748,8 @@ function DnsPage() {
   };
 
   return (
-    <div className={pageShellClassName}>
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-kumo-line pb-3 pr-1">
+    <PageStack className={pageShellClassName}>
+      <PageToolbar className="shrink-0">
         <div className="min-w-0 max-w-full overflow-x-auto scrollbar-thin">
           <Tabs
             {...MODULE_TABS_PROPS}
@@ -1782,7 +1782,7 @@ function DnsPage() {
             icon={<RefreshCw className={`h-4 w-4 ${Object.values(loading).some(Boolean) ? 'animate-spin' : ''}`} />}
           />
         </div>
-      </div>
+      </PageToolbar>
 
       {!selectedAccountId && !['accounts', 'templates'].includes(activeTab) ? (
         <SectionCard
@@ -2254,9 +2254,9 @@ function DnsPage() {
                   新建 Worker
                 </Button>
               )}
-              bodyPadding="none"
-              bodyClassName="overflow-x-auto"
+              bodyClassName="space-y-3"
             >
+              <DataTableFrame>
                 <Table layout="fixed">
                   <colgroup>{workerColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
                   <Table.Header variant="compact">
@@ -2296,6 +2296,7 @@ function DnsPage() {
                     ))}
                   </Table.Body>
                 </Table>
+              </DataTableFrame>
             </SectionCard>
           )}
 
@@ -2303,9 +2304,9 @@ function DnsPage() {
             <SectionCard
               title="Pages 项目"
               icon={<Layers className="h-4 w-4 text-kumo-brand" />}
-              bodyPadding="none"
-              bodyClassName="overflow-x-auto"
+              bodyClassName="space-y-3"
             >
+              <DataTableFrame>
               <Table layout="fixed">
                 <colgroup>{pageColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
                 <Table.Header variant="compact">
@@ -2349,6 +2350,7 @@ function DnsPage() {
                   ))}
                 </Table.Body>
               </Table>
+              </DataTableFrame>
             </SectionCard>
           )}
 
@@ -2610,9 +2612,9 @@ function DnsPage() {
                   创建 Tunnel
                 </Button>
               )}
-              bodyPadding="none"
-              bodyClassName="overflow-x-auto"
+              bodyClassName="space-y-3"
             >
+              <DataTableFrame>
                 <Table layout="fixed">
                   <colgroup>{tunnelColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
                   <Table.Header variant="compact">
@@ -2653,6 +2655,7 @@ function DnsPage() {
                     ))}
                   </Table.Body>
                 </Table>
+              </DataTableFrame>
             </SectionCard>
           )}
 
@@ -2667,9 +2670,9 @@ function DnsPage() {
                 <Button size="sm" onClick={() => openTemplateModal()} icon={<Plus className="h-4 w-4" />}>添加模板</Button>
                 </>
               )}
-              bodyPadding="none"
-              bodyClassName="overflow-x-auto"
+              bodyClassName="space-y-3"
             >
+              <DataTableFrame>
                 <Table layout="fixed">
                   <colgroup>{templateColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
                   <Table.Header variant="compact">
@@ -2706,6 +2709,7 @@ function DnsPage() {
                     ))}
                   </Table.Body>
                 </Table>
+              </DataTableFrame>
             </SectionCard>
           )}
 
@@ -2777,7 +2781,8 @@ function DnsPage() {
 
       <Dialog.Root open={Boolean(modal.type)} onOpenChange={(open) => { if (!open) closeModal(); }}>
         {modal.type && (
-        <Dialog className="max-h-[85vh] !w-[min(760px,calc(100vw-2rem))] !max-w-[min(760px,calc(100vw-2rem))] overflow-y-auto p-6">
+        <Dialog className="flex max-h-[min(calc(100dvh-2rem),48rem)] !w-[min(760px,calc(100vw-2rem))] !max-w-[min(760px,calc(100vw-2rem))] flex-col overflow-hidden p-0">
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 scrollbar-thin">
           {modal.type === 'account' && (
             <div className="flex flex-col gap-4">
               <Dialog.Title className="text-base font-semibold text-kumo-strong">
@@ -3144,7 +3149,7 @@ function DnsPage() {
                   <iframe
                     title={`预览 ${modal.data.name}`}
                     src={modal.data.url}
-                    className="h-[68vh] max-h-[42rem] min-h-[28rem] w-full bg-white"
+                    className="h-[68vh] max-h-[42rem] min-h-[28rem] w-full bg-kumo-base"
                   />
                 ) : (
                   <div className="flex min-h-[28rem] flex-col items-center justify-center gap-3 p-8 text-center">
@@ -3282,10 +3287,11 @@ function DnsPage() {
               </LayerCard>
             </div>
           )}
+          </div>
         </Dialog>
         )}
       </Dialog.Root>
-    </div>
+    </PageStack>
   );
 }
 

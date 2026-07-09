@@ -21,6 +21,7 @@ const FileboxPage = lazy(() => import('../pages/FileboxPage.jsx'));
 const UptimePage = lazy(() => import('../pages/UptimePage.jsx'));
 const NotificationPage = lazy(() => import('../pages/NotificationPage.jsx'));
 const OpenAIPage = lazy(() => import('../pages/OpenAIPage.jsx'));
+const SubscriptionPage = lazy(() => import('../pages/SubscriptionPage.jsx'));
 
 
 const PaasPage = lazy(() => import('../pages/PaasPage.jsx'));
@@ -333,6 +334,8 @@ function MainLayout() {
         return <DashboardPage onNavigate={navigateToModule} />;
       case 'openai':
         return <OpenAIPage />;
+      case 'subscription':
+        return <SubscriptionPage />;
 
 
       case 'paas':

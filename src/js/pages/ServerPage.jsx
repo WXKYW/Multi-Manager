@@ -10013,7 +10013,7 @@ function ServerPage() {
                   size="sm"
                   variant="secondary"
                   onClick={exportServers}
-                  icon={<Download className="h-3.5 w-3.5" />}
+                  icon={<Upload className="h-3.5 w-3.5" />}
                 >
                   导出备份
                 </Button>
@@ -10021,7 +10021,7 @@ function ServerPage() {
                   size="sm"
                   variant="secondary"
                   onClick={openImportServerModal}
-                  icon={<Upload className="h-3.5 w-3.5" />}
+                  icon={<Download className="h-3.5 w-3.5" />}
                 >
                   导入配置
                 </Button>

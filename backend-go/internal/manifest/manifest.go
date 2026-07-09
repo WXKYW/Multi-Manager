@@ -153,6 +153,8 @@ func Routes() []Route {
 		{Prefix: "/api/flyio", Module: "flyio", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Fly.io accounts, apps, and machines"},
 
 		{Prefix: "/api/openai", Module: "openai", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "OpenAI endpoint manager and proxy"},
+		{Prefix: "/api/subscription", Module: "subscription", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Subscription distribution, nodes, templates, logs, and settings"},
+		{Prefix: "/sub/{token}", Module: "subscription-public", Owner: OwnerGo, Auth: AuthPublic, ResponseMode: ResponseStream, Description: "Public Clash/v2ray subscription endpoint", MatchMode: MatchPattern},
 		{Prefix: "/v1", Module: "openai-compatible", Owner: OwnerGo, Auth: AuthAPIKey, ResponseMode: ResponseStream, Description: "OpenAI-compatible API"},
 
 		// Server Agent routes (Wave 5b)
