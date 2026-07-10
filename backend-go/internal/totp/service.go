@@ -35,6 +35,48 @@ import (
 const backupVersion = 1
 
 var base32SecretPattern = regexp.MustCompile(`^[A-Z2-7]+=*$`)
+var safeBrandIconKeyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,95}$`)
+var svgRepoIconRefPattern = regexp.MustCompile(`(?i)(?:svgrepo:)?(?:https?://(?:www\.)?svgrepo\.com/(?:show|download|svg)/)?([0-9]{3,9})[-/:]([a-z0-9][a-z0-9-]{0,80})(?:\.svg)?`)
+
+type brandIconEntry struct {
+	Key     string   `json:"key"`
+	Name    string   `json:"name"`
+	Aliases []string `json:"aliases"`
+	Color   string   `json:"color"`
+	Source  string   `json:"source"`
+	URL     string   `json:"url"`
+	License string   `json:"license"`
+}
+
+var svgRepoBrandIcons = []brandIconEntry{
+	{
+		Key:     "microsoft",
+		Name:    "Microsoft",
+		Aliases: []string{"microsoft", "microsoft office", "microsoft windows", "outlook", "hotmail", "live", "office365", "azure", "onmicrosoft"},
+		Color:   "#3aa7e0",
+		Source:  "svgrepo",
+		URL:     "https://www.svgrepo.com/show/448239/microsoft.svg",
+		License: "Logo License",
+	},
+	{
+		Key:     "parsec",
+		Name:    "Parsec",
+		Aliases: []string{"parsec"},
+		Color:   "#f50049",
+		Source:  "svgrepo",
+		URL:     "https://www.svgrepo.com/show/518470/parsec.svg",
+		License: "CC0",
+	},
+	{
+		Key:     "oracle",
+		Name:    "Oracle",
+		Aliases: []string{"oracle", "oracle cloud", "oci"},
+		Color:   "#ea1b22",
+		Source:  "svgrepo",
+		URL:     "https://www.svgrepo.com/show/448245/oracle.svg",
+		License: "SVG Repo",
+	},
+}
 
 type Service struct {
 	cfg   config.Config
@@ -214,6 +256,18 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		response.OK(w, map[string]string{"secret": generateSecret()})
+	case len(parts) == 2 && parts[0] == "icons" && parts[1] == "detect":
+		if r.Method != http.MethodPost {
+			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		s.detectBrandIcon(w, r)
+	case len(parts) == 2 && parts[0] == "icons":
+		if r.Method != http.MethodGet {
+			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		s.serveBrandIcon(w, r, parts[1])
 	case len(parts) == 2 && parts[0] == "extension" && parts[1] == "download":
 		if r.Method != http.MethodGet {
 			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -360,6 +414,31 @@ func (s *Service) updateAccount(w http.ResponseWriter, r *http.Request, id strin
 	if err := updateAccountFields(r.Context(), db, id, payload); err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if _, iconChanged := payload["icon"]; iconChanged {
+		updated, ok, err := findAccount(r.Context(), db, id)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if ok {
+			if err := syncIssuerBrandFields(r.Context(), db, updated.Issuer, updated.Icon, updated.Color); err != nil {
+				response.Error(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+	} else if _, colorChanged := payload["color"]; colorChanged {
+		updated, ok, err := findAccount(r.Context(), db, id)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if ok {
+			if err := syncIssuerBrandFields(r.Context(), db, updated.Issuer, updated.Icon, updated.Color); err != nil {
+				response.Error(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
 	}
 	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true})
 }
@@ -841,6 +920,244 @@ func (s *Service) downloadExtension(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(buf.Bytes())
 }
 
+func (s *Service) detectBrandIcon(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Issuer  string `json:"issuer"`
+		Account string `json:"account"`
+		Query   string `json:"query"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil && err != io.EOF {
+		response.Error(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+	entry, ok := parseSVGRepoIconRef(input.Query)
+	if !ok {
+		entry, ok = matchSVGRepoBrandIcon(input.Issuer, input.Account, input.Query)
+	}
+	if !ok {
+		response.OK(w, map[string]interface{}{
+			"matched": false,
+			"message": "未检测到匹配图标，可粘贴 SVG Repo 图标链接或使用 svgrepo:448239-microsoft",
+		})
+		return
+	}
+	if _, err := s.ensureBrandIconCached(r.Context(), entry); err != nil {
+		response.Error(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	options := svgRepoBrandIconOptions(entry)
+	response.OK(w, map[string]interface{}{
+		"matched": true,
+		"icon":    "svgrepo:" + entry.Key,
+		"name":    entry.Name,
+		"color":   entry.Color,
+		"source":  entry.Source,
+		"license": entry.License,
+		"url":     "/api/totp/icons/" + entry.Key + ".svg",
+		"options": iconEntriesResponse(options),
+	})
+}
+
+func (s *Service) serveBrandIcon(w http.ResponseWriter, r *http.Request, fileName string) {
+	key := strings.TrimSuffix(fileName, ".svg")
+	if !safeBrandIconKeyPattern.MatchString(key) {
+		response.Error(w, http.StatusBadRequest, "invalid icon key")
+		return
+	}
+	entry, ok := findSVGRepoBrandIconByKey(key)
+	if !ok {
+		entry, ok = parseSVGRepoIconRef("svgrepo:" + key)
+	}
+	if !ok {
+		response.Error(w, http.StatusNotFound, "icon not found")
+		return
+	}
+	path, err := s.ensureBrandIconCached(r.Context(), entry)
+	if err != nil {
+		response.Error(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=604800")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	http.ServeFile(w, r, path)
+}
+
+func (s *Service) ensureBrandIconCached(ctx context.Context, entry brandIconEntry) (string, error) {
+	if !safeBrandIconKeyPattern.MatchString(entry.Key) {
+		return "", fmt.Errorf("invalid icon key")
+	}
+	dir := filepath.Join(s.cfg.DataDir, "totp-icons")
+	path := filepath.Join(dir, entry.Key+".svg")
+	if _, err := os.Stat(path); err == nil {
+		return path, nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("prepare icon cache: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, entry.URL, nil)
+	if err != nil {
+		return "", fmt.Errorf("build icon request: %w", err)
+	}
+	req.Header.Set("User-Agent", "API-Monitor/2FA icon cache")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("download icon: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return "", fmt.Errorf("download icon: svg repo returned %d", res.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(res.Body, 256*1024))
+	if err != nil {
+		return "", fmt.Errorf("read icon: %w", err)
+	}
+	if !isSafeSVG(data) {
+		return "", fmt.Errorf("downloaded icon is not a supported SVG")
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return "", fmt.Errorf("write icon cache: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return "", fmt.Errorf("commit icon cache: %w", err)
+	}
+	return path, nil
+}
+
+func matchSVGRepoBrandIcon(values ...string) (brandIconEntry, bool) {
+	for _, value := range values {
+		if entry, ok := parseSVGRepoIconRef(value); ok {
+			return entry, true
+		}
+	}
+	text := strings.ToLower(strings.Join(values, " "))
+	text = strings.ReplaceAll(text, ".", " ")
+	text = strings.ReplaceAll(text, "_", " ")
+	text = strings.ReplaceAll(text, "-", " ")
+	for _, entry := range svgRepoBrandIcons {
+		needles := append([]string{entry.Key, entry.Name}, entry.Aliases...)
+		for _, needle := range needles {
+			needle = strings.ToLower(strings.ReplaceAll(needle, "-", " "))
+			if needle != "" && strings.Contains(text, needle) {
+				return entry, true
+			}
+		}
+	}
+	return brandIconEntry{}, false
+}
+
+func svgRepoBrandIconOptions(entry brandIconEntry) []brandIconEntry {
+	if entry.Key == "parsec" {
+		return []brandIconEntry{
+			{
+				Key:     "518470-parsec",
+				Name:    "Parsec",
+				Aliases: []string{"parsec"},
+				Color:   "#f50049",
+				Source:  "svgrepo",
+				URL:     "https://www.svgrepo.com/show/518470/parsec.svg",
+				License: "CC0",
+			},
+			{
+				Key:     "504721-parsec",
+				Name:    "Parsec",
+				Aliases: []string{"parsec"},
+				Color:   "#f50049",
+				Source:  "svgrepo",
+				URL:     "https://www.svgrepo.com/show/504721/parsec.svg",
+				License: "CC0",
+			},
+			{
+				Key:     "331528-parsec",
+				Name:    "Parsec",
+				Aliases: []string{"parsec"},
+				Color:   "#f50049",
+				Source:  "svgrepo",
+				URL:     "https://www.svgrepo.com/show/331528/parsec.svg",
+				License: "CC0",
+			},
+		}
+	}
+	return []brandIconEntry{entry}
+}
+
+func iconEntriesResponse(entries []brandIconEntry) []map[string]string {
+	options := make([]map[string]string, 0, len(entries))
+	for _, entry := range entries {
+		options = append(options, map[string]string{
+			"icon":    "svgrepo:" + entry.Key,
+			"name":    entry.Name,
+			"color":   entry.Color,
+			"source":  entry.Source,
+			"license": entry.License,
+			"url":     "/api/totp/icons/" + entry.Key + ".svg",
+		})
+	}
+	return options
+}
+
+func parseSVGRepoIconRef(value string) (brandIconEntry, bool) {
+	text := strings.TrimSpace(strings.ToLower(value))
+	if text == "" {
+		return brandIconEntry{}, false
+	}
+	match := svgRepoIconRefPattern.FindStringSubmatch(text)
+	if len(match) != 3 {
+		return brandIconEntry{}, false
+	}
+	id := match[1]
+	slug := strings.Trim(match[2], "-")
+	if id == "" || slug == "" || !safeBrandIconKeyPattern.MatchString(slug) {
+		return brandIconEntry{}, false
+	}
+	key := id + "-" + slug
+	return brandIconEntry{
+		Key:     key,
+		Name:    titleBrandName(slug),
+		Aliases: []string{slug},
+		Color:   "",
+		Source:  "svgrepo",
+		URL:     "https://www.svgrepo.com/show/" + id + "/" + slug + ".svg",
+		License: "SVG Repo",
+	}, true
+}
+
+func titleBrandName(slug string) string {
+	parts := strings.Fields(strings.ReplaceAll(slug, "-", " "))
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(part[:1]) + part[1:]
+	}
+	return strings.Join(parts, " ")
+}
+
+func findSVGRepoBrandIconByKey(key string) (brandIconEntry, bool) {
+	for _, entry := range svgRepoBrandIcons {
+		if entry.Key == key {
+			return entry, true
+		}
+	}
+	return brandIconEntry{}, false
+}
+
+func isSafeSVG(data []byte) bool {
+	text := strings.ToLower(strings.TrimSpace(string(data)))
+	if !strings.Contains(text, "<svg") || !strings.Contains(text, "</svg>") {
+		return false
+	}
+	blocked := []string{"<script", "<foreignobject", " onload=", " onclick=", "javascript:", "data:text/html"}
+	for _, item := range blocked {
+		if strings.Contains(text, item) {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Service) open(ctx context.Context) (*sql.DB, error) {
 	db, err := s.store.Open(ctx)
 	if err != nil {
@@ -1076,6 +1393,10 @@ func insertAccount(ctx context.Context, db *sql.DB, input accountInput) (Account
 	groupID := optionalString(input.GroupID)
 	icon := optionalString(input.Icon)
 	color := optionalString(input.Color)
+	icon, color, err = inheritIssuerBrandFields(ctx, db, issuer, icon, color)
+	if err != nil {
+		return Account{}, err
+	}
 	createdAt := input.CreatedAt
 	if createdAt == "" {
 		createdAt = now
@@ -1095,6 +1416,15 @@ func insertAccount(ctx context.Context, db *sql.DB, input accountInput) (Account
 		return Account{}, fmt.Errorf("create totp account: %w", err)
 	}
 	account, _, err := findAccount(ctx, db, id)
+	if err != nil {
+		return Account{}, err
+	}
+	if account.Icon != nil || account.Color != nil {
+		if err := syncIssuerBrandFields(ctx, db, account.Issuer, account.Icon, account.Color); err != nil {
+			return Account{}, err
+		}
+		account, _, err = findAccount(ctx, db, id)
+	}
 	return account, err
 }
 
@@ -1146,6 +1476,49 @@ func updateAccountFields(ctx context.Context, db *sql.DB, id string, payload map
 	_, err := db.ExecContext(ctx, `UPDATE totp_accounts SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...)
 	if err != nil {
 		return fmt.Errorf("update totp account: %w", err)
+	}
+	return nil
+}
+
+func inheritIssuerBrandFields(ctx context.Context, db *sql.DB, issuer string, icon, color interface{}) (interface{}, interface{}, error) {
+	if icon != nil && color != nil {
+		return icon, color, nil
+	}
+	var existingIcon, existingColor sql.NullString
+	err := db.QueryRowContext(ctx, `
+		SELECT icon, color
+		FROM totp_accounts
+		WHERE lower(trim(issuer)) = lower(trim(?))
+			AND (icon IS NOT NULL OR color IS NOT NULL)
+		ORDER BY updated_at DESC
+		LIMIT 1
+	`, issuer).Scan(&existingIcon, &existingColor)
+	if err == sql.ErrNoRows {
+		return icon, color, nil
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("load issuer brand fields: %w", err)
+	}
+	if icon == nil && existingIcon.Valid {
+		icon = existingIcon.String
+	}
+	if color == nil && existingColor.Valid {
+		color = existingColor.String
+	}
+	return icon, color, nil
+}
+
+func syncIssuerBrandFields(ctx context.Context, db *sql.DB, issuer string, icon, color interface{}) error {
+	if strings.TrimSpace(issuer) == "" {
+		return nil
+	}
+	_, err := db.ExecContext(ctx, `
+		UPDATE totp_accounts
+		SET icon = ?, color = ?, updated_at = ?
+		WHERE lower(trim(issuer)) = lower(trim(?))
+	`, optionalString(icon), optionalString(color), nowISO(), issuer)
+	if err != nil {
+		return fmt.Errorf("sync issuer brand fields: %w", err)
 	}
 	return nil
 }

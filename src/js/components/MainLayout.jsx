@@ -201,9 +201,9 @@ const SidebarLogoutButton = ({ onLogout }) => {
 };
 
 const SidebarBrand = () => (
-  <div className="flex h-full w-full min-w-0 items-center gap-2">
-    <span className="flex size-8.5 shrink-0 items-center justify-center">
-      <img src="/logo.svg" className="size-5 shrink-0 object-contain" alt="" />
+  <div className="flex h-full w-full min-w-0 items-center gap-2.5">
+    <span className="flex size-9 shrink-0 items-center justify-center">
+      <img src="/logo.svg" className="size-6.5 shrink-0 object-contain" alt="" />
     </span>
     <span className="min-w-0 truncate text-sm font-semibold text-kumo-strong">
       API Monitor

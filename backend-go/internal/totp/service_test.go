@@ -182,6 +182,172 @@ func TestTOTPAccountGroupCodeImportAndExportFlow(t *testing.T) {
 	}
 }
 
+func TestTOTPBrandFieldsSyncAcrossSameIssuer(t *testing.T) {
+	service := New(config.Config{
+		Version: "test",
+		Host:    "127.0.0.1",
+		Port:    0,
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+	secret := "JBSWY3DPEHPK3PXP"
+	first := createTOTPAccountForTest(t, service, `{"issuer":"Microsoft","account":"one@example.com","secret":"`+secret+`"}`)
+	second := createTOTPAccountForTest(t, service, `{"issuer":"microsoft","account":"two@example.com","secret":"`+secret+`"}`)
+
+	updateRes := performTOTPRequest(service, http.MethodPut, "/api/totp/accounts/"+first.ID, `{"icon":"svgrepo:448239-microsoft","color":"#3aa7e0"}`)
+	if updateRes.Code != http.StatusOK {
+		t.Fatalf("update status = %d body=%s", updateRes.Code, updateRes.Body.String())
+	}
+
+	accounts := listTOTPAccountsForTest(t, service)
+	for _, account := range []Account{
+		findTOTPAccountForTest(t, accounts, first.ID),
+		findTOTPAccountForTest(t, accounts, second.ID),
+	} {
+		if account.Icon == nil || *account.Icon != "svgrepo:448239-microsoft" {
+			t.Fatalf("account %s icon = %#v, want synced svg repo icon", account.ID, account.Icon)
+		}
+		if account.Color == nil || *account.Color != "#3aa7e0" {
+			t.Fatalf("account %s color = %#v, want synced color", account.ID, account.Color)
+		}
+	}
+
+	third := createTOTPAccountForTest(t, service, `{"issuer":"Microsoft","account":"three@example.com","secret":"`+secret+`"}`)
+	if third.Icon == nil || *third.Icon != "svgrepo:448239-microsoft" {
+		t.Fatalf("new same-issuer account icon = %#v, want inherited icon", third.Icon)
+	}
+	if third.Color == nil || *third.Color != "#3aa7e0" {
+		t.Fatalf("new same-issuer account color = %#v, want inherited color", third.Color)
+	}
+}
+
+func TestParseSVGRepoIconRef(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		key   string
+		url   string
+	}{
+		{
+			name:  "shorthand",
+			input: "svgrepo:448239-microsoft",
+			key:   "448239-microsoft",
+			url:   "https://www.svgrepo.com/show/448239/microsoft.svg",
+		},
+		{
+			name:  "svg page url",
+			input: "https://www.svgrepo.com/svg/448239/microsoft",
+			key:   "448239-microsoft",
+			url:   "https://www.svgrepo.com/show/448239/microsoft.svg",
+		},
+		{
+			name:  "download svg url",
+			input: "https://www.svgrepo.com/download/452062/microsoft.svg",
+			key:   "452062-microsoft",
+			url:   "https://www.svgrepo.com/show/452062/microsoft.svg",
+		},
+		{
+			name:  "show svg url",
+			input: "https://www.svgrepo.com/show/331528/parsec.svg",
+			key:   "331528-parsec",
+			url:   "https://www.svgrepo.com/show/331528/parsec.svg",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			entry, ok := parseSVGRepoIconRef(tc.input)
+			if !ok {
+				t.Fatalf("parseSVGRepoIconRef(%q) did not match", tc.input)
+			}
+			if entry.Key != tc.key || entry.URL != tc.url || entry.Source != "svgrepo" {
+				t.Fatalf("entry = %#v, want key=%q url=%q source=svgrepo", entry, tc.key, tc.url)
+			}
+		})
+	}
+}
+
+func TestMatchSVGRepoBrandIconAlias(t *testing.T) {
+	entry, ok := matchSVGRepoBrandIcon("Microsoft", "user@example.com", "")
+	if !ok {
+		t.Fatal("matchSVGRepoBrandIcon did not match Microsoft alias")
+	}
+	if entry.Key != "microsoft" || entry.URL == "" {
+		t.Fatalf("entry = %#v, want microsoft alias", entry)
+	}
+}
+
+func TestSVGRepoBrandIconOptionsAreCurated(t *testing.T) {
+	parsec, ok := matchSVGRepoBrandIcon("Parsec", "", "")
+	if !ok {
+		t.Fatal("matchSVGRepoBrandIcon did not match Parsec")
+	}
+	parsecOptions := svgRepoBrandIconOptions(parsec)
+	if len(parsecOptions) != 3 {
+		t.Fatalf("parsec options len = %d, want 3", len(parsecOptions))
+	}
+	wantParsecKeys := []string{"518470-parsec", "504721-parsec", "331528-parsec"}
+	for i, key := range wantParsecKeys {
+		if parsecOptions[i].Key != key {
+			t.Fatalf("parsecOptions[%d].Key = %q, want %q", i, parsecOptions[i].Key, key)
+		}
+	}
+
+	microsoft, ok := matchSVGRepoBrandIcon("Microsoft", "", "")
+	if !ok {
+		t.Fatal("matchSVGRepoBrandIcon did not match Microsoft")
+	}
+	microsoftOptions := svgRepoBrandIconOptions(microsoft)
+	if len(microsoftOptions) != 1 || microsoftOptions[0].Key != "microsoft" {
+		t.Fatalf("microsoft options = %#v, want only the issuer brand icon", microsoftOptions)
+	}
+}
+
+func createTOTPAccountForTest(t *testing.T, service *Service, body string) Account {
+	t.Helper()
+	res := performTOTPRequest(service, http.MethodPost, "/api/totp/accounts", body)
+	if res.Code != http.StatusOK {
+		t.Fatalf("create account status = %d body=%s", res.Code, res.Body.String())
+	}
+	var payload struct {
+		Success bool    `json:"success"`
+		Data    Account `json:"data"`
+	}
+	mustDecodeTOTP(t, res, &payload)
+	if !payload.Success {
+		t.Fatalf("create account payload = %#v", payload)
+	}
+	return payload.Data
+}
+
+func listTOTPAccountsForTest(t *testing.T, service *Service) []Account {
+	t.Helper()
+	res := performTOTPRequest(service, http.MethodGet, "/api/totp/accounts", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("list accounts status = %d body=%s", res.Code, res.Body.String())
+	}
+	var payload struct {
+		Success bool      `json:"success"`
+		Data    []Account `json:"data"`
+	}
+	mustDecodeTOTP(t, res, &payload)
+	if !payload.Success {
+		t.Fatalf("list accounts payload = %#v", payload)
+	}
+	return payload.Data
+}
+
+func findTOTPAccountForTest(t *testing.T, accounts []Account, id string) Account {
+	t.Helper()
+	for _, account := range accounts {
+		if account.ID == id {
+			return account
+		}
+	}
+	t.Fatalf("account %q not found in %#v", id, accounts)
+	return Account{}
+}
+
 func performTOTPRequest(service *Service, method, path, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	if body != "" {

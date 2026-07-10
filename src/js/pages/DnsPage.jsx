@@ -25,12 +25,15 @@ import useTableResize from '../composables/useTableResize.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
 import { DataTableFrame, PageStack, PageToolbar, SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
 import {
   ArrowLeft,
   Box,
   Check,
+  ChevronDown,
+  ChevronUp,
   Cloud,
   Copy,
   Database,
@@ -348,6 +351,7 @@ function DnsPage() {
   const [sslInfo, setSslInfo] = useState(null);
   const [analytics, setAnalytics] = useState(null);
   const [analyticsRange, setAnalyticsRange] = useState('24h');
+  const [showAnalyticsCharts, setShowAnalyticsCharts] = useState(false);
   const [selectedRecordIds, setSelectedRecordIds] = useState([]);
   const [selectedR2Objects, setSelectedR2Objects] = useState([]);
   const [accountTokens, setAccountTokens] = useState({});
@@ -455,6 +459,10 @@ function DnsPage() {
       },
     ];
   }, [analyticsPoints, analyticsSummary.bandwidth, analyticsSummary.cacheHitRate, analyticsSummary.requests, isDarkMode]);
+
+  useEffect(() => {
+    setShowAnalyticsCharts(false);
+  }, [selectedZoneId]);
 
   const setLoadingKey = useCallback((key, value) => {
     setLoading((prev) => ({ ...prev, [key]: value }));
@@ -1749,7 +1757,7 @@ function DnsPage() {
 
   return (
     <PageStack className={pageShellClassName}>
-      <PageToolbar className="shrink-0">
+      <PageToolbar className="shrink-0 pr-2">
         <div className="min-w-0 max-w-full overflow-x-auto scrollbar-thin">
           <Tabs
             {...MODULE_TABS_PROPS}
@@ -1990,15 +1998,38 @@ function DnsPage() {
                   </span>
                 </div>
                 {selectedZone && (
-                  <div className="shrink-0 text-xs text-kumo-subtle">
-                    {records.length} 条记录
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Select size="sm"
+                      value={analyticsRange}
+                      onValueChange={(value) => loadAnalytics(String(value))}
+                      className="w-20 shrink-0"
+                      items={[
+                        { value: '24h', label: '24 小时' },
+                        { value: '7d', label: '7 天' },
+                        { value: '30d', label: '30 天' },
+                      ]}
+                    />
+                    {(analyticsPoints.length > 0 || loading.analytics) && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => setShowAnalyticsCharts((value) => !value)}
+                        icon={showAnalyticsCharts ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                        className="shrink-0 px-2"
+                      >
+                        {showAnalyticsCharts ? '收起趋势' : '展开趋势'}
+                      </Button>
+                    )}
+                    <div className="shrink-0 text-xs text-kumo-subtle">
+                      {records.length} 条记录
+                    </div>
                   </div>
                 )}
               </div>
               {selectedZone ? (
                 <>
                   <div className="dns-summary-grid order-3 grid shrink-0 gap-2 md:order-none">
-                    <DnsPanelCard className="flex min-h-11 items-center justify-between gap-3 p-2.5">
+                    <DnsPanelCard className="flex min-h-9 items-center justify-between gap-2 p-2">
                       <div className="shrink-0 whitespace-nowrap text-xs text-kumo-subtle">SSL 模式</div>
                       <Select size="sm"
                         value={sslInfo?.mode || null}
@@ -2010,67 +2041,57 @@ function DnsPage() {
                         items={SSL_MODES}
                       />
                     </DnsPanelCard>
-                    <DnsPanelCard className="flex min-h-11 items-center justify-between gap-3 p-2.5">
+                    <DnsPanelCard className="flex min-h-9 items-center justify-between gap-2 p-2">
                       <div className="shrink-0 whitespace-nowrap text-xs text-kumo-subtle">唯一访问者</div>
-                      <div className="shrink-0 whitespace-nowrap text-base font-semibold leading-6 text-kumo-strong">{loading.analytics ? '加载中' : formatNumber(analyticsSummary.uniques)}</div>
+                      <div className="shrink-0 whitespace-nowrap text-base font-semibold leading-5 text-kumo-strong">{loading.analytics ? '加载中' : formatNumber(analyticsSummary.uniques)}</div>
                     </DnsPanelCard>
-                    <DnsPanelCard className="flex min-h-11 items-center justify-between gap-3 p-2.5">
+                    <DnsPanelCard className="flex min-h-9 items-center justify-between gap-2 p-2">
                       <div className="shrink-0 whitespace-nowrap text-xs text-kumo-subtle">请求量</div>
-                      <div className="shrink-0 whitespace-nowrap text-base font-semibold leading-6 text-kumo-strong">{loading.analytics ? '加载中' : formatNumber(analyticsSummary.requests)}</div>
+                      <div className="shrink-0 whitespace-nowrap text-base font-semibold leading-5 text-kumo-strong">{loading.analytics ? '加载中' : formatNumber(analyticsSummary.requests)}</div>
                     </DnsPanelCard>
-                    <DnsPanelCard className="flex min-h-11 items-center justify-between gap-3 p-2.5">
+                    <DnsPanelCard className="flex min-h-9 items-center justify-between gap-2 p-2">
                       <div className="shrink-0 whitespace-nowrap text-xs text-kumo-subtle">带宽</div>
-                      <div className="shrink-0 whitespace-nowrap text-base font-semibold leading-6 text-kumo-strong">{loading.analytics ? '加载中' : formatBytes(analyticsSummary.bandwidth)}</div>
+                      <div className="shrink-0 whitespace-nowrap text-base font-semibold leading-5 text-kumo-strong">{loading.analytics ? '加载中' : formatBytes(analyticsSummary.bandwidth)}</div>
                     </DnsPanelCard>
-                    <DnsPanelCard className="flex min-h-11 items-center justify-between gap-3 p-2.5">
+                    <DnsPanelCard className="flex min-h-9 items-center justify-between gap-2 p-2">
                       <div className="flex min-w-0 items-center gap-2">
                           <div className="shrink-0 whitespace-nowrap text-xs text-kumo-subtle">缓存命中率</div>
-                          <div className="shrink-0 whitespace-nowrap text-base font-semibold leading-6 text-kumo-strong">
+                          <div className="shrink-0 whitespace-nowrap text-base font-semibold leading-5 text-kumo-strong">
                             {loading.analytics ? '加载中' : formatPercent(analyticsSummary.cacheHitRate)}
                           </div>
                         </div>
-                        <Select size="sm"
-                          value={analyticsRange}
-                          onValueChange={(value) => loadAnalytics(String(value))}
-                          className="w-20 shrink-0"
-                          items={[
-                            { value: '24h', label: '24 小时' },
-                            { value: '7d', label: '7 天' },
-                            { value: '30d', label: '30 天' },
-                          ]}
-                        />
                     </DnsPanelCard>
                   </div>
 
-                  {(analyticsPoints.length > 0 || loading.analytics) && (
-                    <div className="dns-chart-grid order-4 grid shrink-0 gap-2 md:order-none">
-                      {analyticsChartCards.map((card) => (
-                        <DnsPanelCard key={card.key} className="min-w-0 overflow-hidden p-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="truncate text-xs font-medium text-kumo-strong">{card.label}</div>
-                            <div className="shrink-0 text-xs font-semibold text-kumo-subtle">{loading.analytics ? '加载中' : card.value}</div>
-                          </div>
-                          <div className="mt-2 min-w-0 overflow-hidden" style={{ height: 108 }}>
-                            <TimeseriesChart
-                              echarts={echarts}
-                              data={card.data}
-                              height={108}
-                              isDarkMode={isDarkMode}
-                              gradient
-                              loading={loading.analytics && analyticsPoints.length === 0}
-                              xAxisTickCount={3}
-                              yAxisTickCount={2}
-                              xAxisTickFormat={(timestamp) => formatAnalyticsAxisTime(timestamp, analyticsRange)}
-                              yAxisTickFormat={card.yAxisTickFormat}
-                              tooltipValueFormat={card.tooltipValueFormat}
-                              tooltipFollowCursor="x"
-                              ariaDescription={`Cloudflare ${card.label}`}
-                            />
-                          </div>
-                        </DnsPanelCard>
-                      ))}
+                  <AnimatedCollapse open={showAnalyticsCharts && (analyticsPoints.length > 0 || loading.analytics)} className="order-5 shrink-0 md:order-none">
+                    <div className="dns-chart-grid grid gap-2 pt-1">
+                    {analyticsChartCards.map((card) => (
+                      <DnsPanelCard key={card.key} className="min-w-0 overflow-hidden p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="truncate text-xs font-medium text-kumo-strong">{card.label}</div>
+                          <div className="shrink-0 text-xs font-semibold text-kumo-subtle">{loading.analytics ? '加载中' : card.value}</div>
+                        </div>
+                        <div className="mt-2 min-w-0 overflow-hidden" style={{ height: 108 }}>
+                          <TimeseriesChart
+                            echarts={echarts}
+                            data={card.data}
+                            height={108}
+                            isDarkMode={isDarkMode}
+                            gradient
+                            loading={loading.analytics && analyticsPoints.length === 0}
+                            xAxisTickCount={3}
+                            yAxisTickCount={2}
+                            xAxisTickFormat={(timestamp) => formatAnalyticsAxisTime(timestamp, analyticsRange)}
+                            yAxisTickFormat={card.yAxisTickFormat}
+                            tooltipValueFormat={card.tooltipValueFormat}
+                            tooltipFollowCursor="x"
+                            ariaDescription={`Cloudflare ${card.label}`}
+                          />
+                        </div>
+                      </DnsPanelCard>
+                    ))}
                     </div>
-                  )}
+                  </AnimatedCollapse>
 
                   <div className="dns-toolbar-frame order-1 flex shrink-0 flex-wrap items-center justify-between gap-2 p-2 md:order-none">
                     <div className="grid w-full grid-cols-[minmax(0,1fr)_8rem_auto] gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
@@ -3296,3 +3317,4 @@ function DnsPage() {
 }
 
 export default DnsPage;
+

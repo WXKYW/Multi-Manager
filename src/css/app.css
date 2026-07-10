@@ -209,6 +209,33 @@ body {
   mask: var(--app-brand-icon-url) center / contain no-repeat;
 }
 
+.app-brand-icon--font {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1em;
+}
+
+.app-brand-icon--image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.app-totp-brand-mark {
+  overflow: hidden;
+}
+
+.app-totp-brand-mark--remote {
+  background: transparent;
+}
+
+.app-totp-brand-mark--remote .app-brand-icon--image {
+  width: 100%;
+  height: 100%;
+  transform: none;
+}
+
 .app-font-icon {
   display: inline-flex;
   align-items: center;

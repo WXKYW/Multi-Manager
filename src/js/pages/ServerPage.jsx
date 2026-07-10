@@ -685,8 +685,9 @@ function NetworkQualitySummaryStrip({ summary = [] }) {
     >
       {summary.map(item => {
         const tone = getNetworkQualityTone(item);
-        const latestValue = item.latest?.success
-          ? formatLatencyValue(item.latest.latencyMs)
+        const avgLatency = toNumber(item.avgLatency, 0);
+        const latestValue = avgLatency > 0
+          ? formatLatencyValue(avgLatency)
           : '失败';
         const caption = `抖动 ${formatLatencyValue(item.jitterMs)} · 丢包 ${toNumber(item.lossRate, 0).toFixed(1)}%`;
 
@@ -696,7 +697,7 @@ function NetworkQualitySummaryStrip({ summary = [] }) {
             className="grid min-h-6 min-w-0 grid-cols-[auto_auto_minmax(0,1fr)] items-baseline gap-x-1.5 rounded-md border border-kumo-line/70 bg-kumo-recessed/15 px-2 py-1 text-[10px] leading-none"
           >
             <span className="shrink-0 font-semibold text-kumo-subtle">{item.name}</span>
-            <span className={`shrink-0 text-xs font-bold tabular-nums ${getNetworkQualityToneClass(tone)}`} title={String(latestValue)}>
+            <span className={`shrink-0 text-xs font-bold tabular-nums ${getNetworkQualityToneClass(tone)}`} title={`24h 平均 ${latestValue}`}>
               {latestValue}
             </span>
             <span className="min-w-0 truncate font-medium text-kumo-subtle" title={caption}>
@@ -1745,9 +1746,9 @@ const formatNetworkQualityChartTime = (timestamp) => {
 const getNetworkQualityTone = (summary = {}) => {
   const lossRate = toNumber(summary.lossRate, 0);
   const jitterMs = toNumber(summary.jitterMs, 0);
-  const latestLatency = toNumber(summary.latest?.latencyMs ?? summary.avgLatency, 0);
-  if (!summary.latest || summary.latest.success === false || lossRate >= 5 || latestLatency >= 600) return 'danger';
-  if (lossRate >= 1 || jitterMs >= 120 || latestLatency >= 250) return 'warning';
+  const avgLatency = toNumber(summary.avgLatency, 0);
+  if (!summary.latest || summary.latest.success === false || lossRate >= 5 || avgLatency >= 600) return 'danger';
+  if (lossRate >= 1 || jitterMs >= 120 || avgLatency >= 250) return 'warning';
   return 'success';
 };
 

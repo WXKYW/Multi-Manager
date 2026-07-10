@@ -228,12 +228,12 @@ function NodeHostQuality({ node, serverNameById }) {
       </span>
       <div className="flex max-w-full flex-wrap justify-center gap-1">
         {samples.length > 0 ? samples.map((item) => {
-          const latency = Math.round(Number(item.latency_ms) || 0);
+          const latency = Math.round(Number(item.avg_latency_ms ?? item.latency_ms) || 0);
           return (
             <span
               key={`${item.name}-${item.sampled_at || latency}`}
               className={`inline-flex items-center gap-1 rounded-[3px] border px-1.5 py-0.5 text-[10px] font-semibold leading-4 tabular-nums ${latencyChipClass(latency)}`}
-              title={`${item.name || '线路'} ${latency > 0 ? `${latency}ms` : '暂无延迟'}`}
+              title={`${item.name || '线路'} 24h 平均 ${latency > 0 ? `${latency}ms` : '暂无延迟'}`}
             >
               <span className="max-w-8 truncate">{item.name || '-'}</span>
               <span>{latency > 0 ? `${latency}ms` : '-'}</span>

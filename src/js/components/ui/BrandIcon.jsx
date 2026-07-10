@@ -201,32 +201,93 @@ export const FA_ICONS = {
   dev: 'fas fa-laptop-code',
 };
 
+export const BRAND_ALIASES = {
+  gmail: 'google',
+  googlemail: 'google',
+  outlook: 'microsoft',
+  hotmail: 'microsoft',
+  live: 'microsoft',
+  office: 'microsoft',
+  office365: 'microsoft',
+  azure: 'microsoft',
+  onmicrosoft: 'microsoft',
+  microsoftonline: 'microsoft',
+  foxmail: 'tencent',
+  qqmail: 'tencent',
+  qcloud: 'tencent',
+  tencentcloud: 'tencent',
+  aliyun: 'aliyun',
+  alibabacloud: 'aliyun',
+};
+
 function findIssuerMatch(issuer, source) {
   const key = issuer?.toLowerCase() || '';
   return Object.entries(source).find(([name]) => key.includes(name))?.[1];
 }
 
+export function normalizeIssuerBrand(issuer) {
+  const key = issuer?.toLowerCase() || '';
+  const alias = Object.entries(BRAND_ALIASES).find(([name]) => key.includes(name))?.[1];
+  return alias || issuer;
+}
+
 export function getIssuerColor(issuer) {
-  return findIssuerMatch(issuer, ISSUER_COLORS) || BRAND_COLOR_FALLBACK;
+  const normalized = normalizeIssuerBrand(issuer);
+  return findIssuerMatch(normalized, ISSUER_COLORS) || findIssuerMatch(issuer, ISSUER_COLORS) || BRAND_COLOR_FALLBACK;
 }
 
 export function getIssuerIcon(issuer) {
-  return findIssuerMatch(issuer, SIMPLE_ICONS)
+  const normalized = normalizeIssuerBrand(issuer);
+  return findIssuerMatch(normalized, SIMPLE_ICONS)
+    || findIssuerMatch(issuer, SIMPLE_ICONS)
+    || findIssuerMatch(normalized, FA_ICONS)
     || findIssuerMatch(issuer, FA_ICONS)
     || BRAND_ICON_FALLBACK;
 }
 
 export function getIssuerIconAsset(issuer) {
-  return findIssuerMatch(issuer, BRAND_ICON_ASSETS);
+  const normalized = normalizeIssuerBrand(issuer);
+  return findIssuerMatch(normalized, BRAND_ICON_ASSETS) || findIssuerMatch(issuer, BRAND_ICON_ASSETS);
 }
 
 export default function BrandIcon({
   issuer,
+  icon,
   className = '',
   style,
   color = 'brand',
   ...props
 }) {
+  if (typeof icon === 'string' && icon.startsWith('letter:')) {
+    const letter = icon.slice('letter:'.length).trim().slice(0, 2).toUpperCase() || '?';
+    return (
+      <span
+        {...props}
+        aria-hidden={props['aria-label'] ? undefined : true}
+        className={`app-brand-icon app-brand-icon--font ${className}`.trim()}
+        style={style}
+      >
+        {letter}
+      </span>
+    );
+  }
+
+  if (typeof icon === 'string' && icon.startsWith('svgrepo:')) {
+    const key = icon.slice('svgrepo:'.length).replace(/[^a-z0-9-]/gi, '').toLowerCase();
+    if (key) {
+      return (
+        <img
+          {...props}
+          src={`/api/totp/icons/${key}.svg`}
+          alt=""
+          aria-hidden={props['aria-label'] ? undefined : true}
+          className={`app-brand-icon app-brand-icon--image ${className}`.trim()}
+          style={style}
+        />
+      );
+    }
+  }
+
   const asset = getIssuerIconAsset(issuer);
   const iconColor = color === 'inherit' ? undefined : getIssuerColor(issuer);
 
@@ -248,7 +309,7 @@ export default function BrandIcon({
   return (
     <i
       {...props}
-      className={`${getIssuerIcon(issuer)} ${className}`.trim()}
+      className={`app-brand-icon app-brand-icon--font ${getIssuerIcon(issuer)} ${className}`.trim()}
       style={{ color: iconColor, ...style }}
     />
   );

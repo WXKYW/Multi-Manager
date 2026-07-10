@@ -98,6 +98,49 @@ func TestLoadNodesDoesNotQueryQualityWhileRowsOpen(t *testing.T) {
 	}
 }
 
+func TestLoadQualityUsesDailyAverageLatency(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.ExecContext(ctx, `CREATE TABLE server_network_quality_samples (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		server_id TEXT NOT NULL,
+		target_name TEXT NOT NULL,
+		success INTEGER DEFAULT 0,
+		latency_ms REAL,
+		checked_at TEXT DEFAULT (datetime('now'))
+	)`); err != nil {
+		t.Fatalf("create quality samples: %v", err)
+	}
+	statements := []string{
+		`INSERT INTO server_network_quality_samples (server_id, target_name, success, latency_ms, checked_at) VALUES ('server_one', '联通', 1, 100, datetime('now', '-5 minutes'))`,
+		`INSERT INTO server_network_quality_samples (server_id, target_name, success, latency_ms, checked_at) VALUES ('server_one', '联通', 1, 200, datetime('now', '-10 minutes'))`,
+		`INSERT INTO server_network_quality_samples (server_id, target_name, success, latency_ms, checked_at) VALUES ('server_one', '联通', 0, 900, datetime('now', '-15 minutes'))`,
+	}
+	for _, statement := range statements {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("insert quality sample: %v", err)
+		}
+	}
+
+	quality := loadQuality(ctx, db, "server_one")
+	if len(quality) != 1 {
+		t.Fatalf("quality = %#v, want one target", quality)
+	}
+	if quality[0].LatencyMS != 150 || quality[0].AvgLatencyMS != 150 {
+		t.Fatalf("latency = %.1f avg = %.1f, want daily average 150", quality[0].LatencyMS, quality[0].AvgLatencyMS)
+	}
+	if quality[0].LossRate < 33 || quality[0].LossRate > 34 {
+		t.Fatalf("loss rate = %.1f, want about 33.3", quality[0].LossRate)
+	}
+}
+
 func TestParseImportTextDecodesBase64Subscription(t *testing.T) {
 	raw := "vmess://example-one#节点一\ntrojan://password@example.com:443#节点二\n"
 	encoded := base64.StdEncoding.EncodeToString([]byte(raw))

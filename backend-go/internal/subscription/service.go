@@ -172,11 +172,12 @@ type TrafficInfo struct {
 }
 
 type QualitySummary struct {
-	Name      string  `json:"name"`
-	LatencyMS float64 `json:"latency_ms"`
-	JitterMS  float64 `json:"jitter_ms"`
-	LossRate  float64 `json:"loss_rate"`
-	SampledAt string  `json:"sampled_at"`
+	Name         string  `json:"name"`
+	LatencyMS    float64 `json:"latency_ms"`
+	AvgLatencyMS float64 `json:"avg_latency_ms"`
+	JitterMS     float64 `json:"jitter_ms"`
+	LossRate     float64 `json:"loss_rate"`
+	SampledAt    string  `json:"sampled_at"`
 }
 
 type Settings struct {
@@ -2130,7 +2131,7 @@ func loadQuality(ctx context.Context, db *sql.DB, serverID string) []QualitySumm
 		if a.count > 0 {
 			loss = (1 - float64(a.success)/float64(a.count)) * 100
 		}
-		out = append(out, QualitySummary{Name: a.name, LatencyMS: avg, JitterMS: jitter, LossRate: loss, SampledAt: a.sampledAt})
+		out = append(out, QualitySummary{Name: a.name, LatencyMS: avg, AvgLatencyMS: avg, JitterMS: jitter, LossRate: loss, SampledAt: a.sampledAt})
 	}
 	return out
 }

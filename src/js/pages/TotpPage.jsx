@@ -47,6 +47,80 @@ const maskEmail = (email) => {
 
 const GROUP_FILTER_ALL = '__all__';
 
+const isSVGRepoIcon = (icon) => typeof icon === 'string' && icon.startsWith('svgrepo:');
+const SVG_REPO_ICON_REF_PATTERN = /(?:svgrepo:)?(?:https?:\/\/(?:www\.)?svgrepo\.com\/(?:show|download|svg)\/)?([0-9]{3,9})[-/:]([a-z0-9][a-z0-9-]{0,80})(?:\.svg)?/i;
+const HEX_COLOR_PATTERN = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+
+const normalizeHexColor = (value) => {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const withHash = text.startsWith('#') ? text : `#${text}`;
+  return HEX_COLOR_PATTERN.test(withHash) ? withHash.toLowerCase() : text;
+};
+
+const resolveFormColor = (form) => {
+  const color = normalizeHexColor(form.color);
+  return HEX_COLOR_PATTERN.test(color) ? color : getIssuerColor(form.issuer);
+};
+
+const normalizeSVGRepoIconRef = (value) => {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const match = text.match(SVG_REPO_ICON_REF_PATTERN);
+  if (!match) return text;
+  return `svgrepo:${match[1]}-${match[2].replace(/^-+|-+$/g, '').toLowerCase()}`;
+};
+
+const TotpBrandMark = ({ issuer, icon, color, size = 'card' }) => {
+  const isHeader = size === 'header';
+  const markColor = color || getIssuerColor(issuer);
+  const remoteIcon = isSVGRepoIcon(icon);
+  return (
+    <span
+      className={`app-totp-brand-mark ${remoteIcon ? 'app-totp-brand-mark--remote' : 'border border-kumo-line'} ${isHeader ? 'size-7 rounded-md text-[17px]' : 'size-7 rounded-md text-[18px]'} flex shrink-0 items-center justify-center`}
+      style={{ background: remoteIcon ? 'transparent' : markColor, color: '#fff' }}
+    >
+      <BrandIcon issuer={issuer} icon={icon} color="inherit" />
+    </span>
+  );
+};
+
+const buildBrandStyleOptions = ({ issuer, icon, color, name, options: detectedOptions = [] } = {}) => {
+  const displayName = name || issuer || '品牌';
+  const baseColor = color || getIssuerColor(issuer);
+  const firstLetter = String(displayName || issuer || '?').trim().slice(0, 1).toUpperCase() || '?';
+  const options = [];
+  const repoOptions = Array.isArray(detectedOptions) && detectedOptions.length > 0
+    ? detectedOptions
+    : (icon ? [{ icon, color, name }] : []);
+  repoOptions.forEach((item, index) => {
+    options.push({
+      id: `svgrepo-${index}-${item.icon || icon}`,
+      label: `SVG Repo ${repoOptions.length > 1 ? index + 1 : ''}`.trim(),
+      caption: item.name || displayName,
+      icon: item.icon || icon,
+      color: item.color || baseColor,
+    });
+  });
+  options.push(
+    {
+      id: 'badge',
+      label: '品牌徽标',
+      caption: '系统图标',
+      icon: '',
+      color: baseColor,
+    },
+    {
+      id: 'letter',
+      label: '首字母',
+      caption: firstLetter,
+      icon: `letter:${firstLetter}`,
+      color: baseColor,
+    },
+  );
+  return options;
+};
+
 // ==================== TotpPage 组件 ====================
 function TotpPage() {
   const [totpCurrentTab, setTotpCurrentTab] = useState('accounts');
@@ -77,12 +151,16 @@ function TotpPage() {
     period: 30,
     counter: 0,
     group_id: '',
+    icon: '',
     color: '',
   });
   const [accountModalError, setAccountModalError] = useState('');
   const [totpShowSecret, setTotpShowSecret] = useState(false);
   const [importUris, setImportUris] = useState('');
   const [accountModalSaving, setAccountModalSaving] = useState(false);
+  const [brandDetecting, setBrandDetecting] = useState(false);
+  const [brandStyleOptions, setBrandStyleOptions] = useState([]);
+  const [showBrandStyleModal, setShowBrandStyleModal] = useState(false);
   const [accountAddTab, setAccountAddTab] = useState('scan');
 
   // QR 扫码状态
@@ -291,6 +369,7 @@ function TotpPage() {
       period: 30,
       counter: 0,
       group_id: '',
+      icon: '',
       color: '',
     });
     setAccountModalMode('add');
@@ -315,11 +394,57 @@ function TotpPage() {
       period: account.period || 30,
       counter: account.counter || 0,
       group_id: account.group_id || '',
+      icon: account.icon || '',
       color: account.color || '',
     });
     setAccountModalError('');
     setTotpShowSecret(false);
     setShowAccountModal(true);
+  };
+
+  const detectAccountBrandIcon = async () => {
+    setBrandDetecting(true);
+    try {
+      const res = await fetch('/api/totp/icons/detect', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          issuer: accountForm.issuer,
+          account: accountForm.account,
+          query: accountForm.icon,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || '检测失败');
+      }
+      if (!data.data?.matched) {
+        toast.info(data.data?.message || '未检测到匹配图标');
+        return;
+      }
+      setBrandStyleOptions(buildBrandStyleOptions({
+        issuer: accountForm.issuer,
+        icon: data.data.icon,
+        color: data.data.color,
+        name: data.data.name,
+        options: data.data.options,
+      }));
+      setShowBrandStyleModal(true);
+    } catch (error) {
+      toast.error(error.message || '检测图标失败');
+    } finally {
+      setBrandDetecting(false);
+    }
+  };
+
+  const applyBrandStyleOption = (option) => {
+    setAccountForm((prev) => ({
+      ...prev,
+      icon: option.icon || '',
+      color: option.color || prev.color,
+    }));
+    setShowBrandStyleModal(false);
+    toast.success(`已选择${option.label}`);
   };
 
   const toggleSecretVisibility = async () => {
@@ -927,16 +1052,11 @@ function TotpPage() {
                 return (
                   <React.Fragment key={account.id}>
                     {showHeader && (
-                      <div className="col-span-full mt-2 flex items-center justify-between border-b border-kumo-line pb-1">
+                      <div className="col-span-full mt-2 flex items-center justify-between border-b border-kumo-line pb-1.5">
                         {!totpSettings.hidePlatformText ? (
-                          <div className="flex items-center gap-1.5">
-                            <span
-                              className="flex h-4 w-4 items-center justify-center rounded border border-kumo-line bg-kumo-recessed text-[10px]"
-                              style={{ color: getIssuerColor(account.issuer) }}
-                            >
-                              <BrandIcon issuer={account.issuer} color="inherit" />
-                            </span>
-                            <span className="text-[11px] font-semibold text-kumo-strong">
+                          <div className="flex items-center gap-2">
+                            <TotpBrandMark issuer={account.issuer} icon={account.icon} size="header" />
+                            <span className="text-xs font-semibold text-kumo-strong">
                               {account.issuer || '未知平台'}
                             </span>
                             <span className="ml-1 rounded border border-kumo-line bg-kumo-recessed px-1 py-0.5 text-[9px] font-medium leading-none text-kumo-subtle">
@@ -945,7 +1065,7 @@ function TotpPage() {
                           </div>
                         ) : (
                           <div className="flex items-center gap-1.5">
-                            <span className="w-2 h-2 rounded-full" style={{ background: getIssuerColor(account.issuer) }} />
+                            <span className="size-2.5 rounded-full" style={{ background: getIssuerColor(account.issuer) }} />
                             <span className="text-[10px] text-kumo-subtle font-medium">
                               {platformCounts[(account.issuer || '').toLowerCase()]} 个账号
                             </span>
@@ -961,15 +1081,10 @@ function TotpPage() {
                       className="group/card relative grid min-h-[96px] cursor-pointer grid-rows-[auto_1fr_auto] overflow-hidden p-0 transition-colors hover:border-kumo-brand sm:min-h-[112px]"
                     >
                       <div className="flex items-center gap-1.5 border-b border-kumo-line bg-kumo-recessed/35 px-2 py-1.5 sm:gap-2 sm:px-3 sm:py-2">
-                        <span
-                          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] text-kumo-inverse sm:h-6 sm:w-6 sm:text-xs"
-                          style={{ background: issuerColor }}
-                        >
-                          <BrandIcon issuer={account.issuer} color="inherit" />
-                        </span>
+                        <TotpBrandMark issuer={account.issuer} icon={account.icon} color={issuerColor} />
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-[10px] font-semibold leading-none text-kumo-strong sm:text-[11px]">{account.issuer || '未知平台'}</div>
-                          <div className="mt-0.5 truncate text-[9px] leading-none text-kumo-subtle sm:mt-1 sm:text-[10px]">
+                          <div className="truncate text-[10px] font-semibold leading-tight text-kumo-strong sm:text-[11px]">{account.issuer || '未知平台'}</div>
+                          <div className="mt-0.5 truncate pb-px text-[9px] leading-tight text-kumo-subtle sm:mt-0.5 sm:text-[10px]">
                             {totpSettings.maskAccount ? maskEmail(account.account) : account.account}
                           </div>
                         </div>
@@ -1537,6 +1652,43 @@ function TotpPage() {
                 </div>
 
                 <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-kumo-subtle">品牌标识</label>
+                  <div className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto_minmax(0,8rem)] items-center gap-2">
+                    <TotpBrandMark issuer={accountForm.issuer} icon={accountForm.icon} color={resolveFormColor(accountForm)} />
+                    <Input size="sm"
+                      aria-label="图标关键字"
+                      type="text"
+                      placeholder="品牌名、SVG Repo 链接或 svgrepo:448239-microsoft"
+                      value={accountForm.icon}
+                      onChange={(e) => setAccountForm((prev) => ({ ...prev, icon: normalizeSVGRepoIconRef(e.target.value) }))}
+                      onBlur={(e) => setAccountForm((prev) => ({ ...prev, icon: normalizeSVGRepoIconRef(e.target.value) }))}
+                      className="w-full"
+                    />
+                    <Button size="sm" variant="secondary" onClick={detectAccountBrandIcon} loading={brandDetecting}>
+                      检测
+                    </Button>
+                    <Button size="sm" variant="ghost" className="px-2 text-[11px]" onClick={() => setAccountForm((prev) => ({ ...prev, icon: '', color: '' }))}>
+                      重置
+                    </Button>
+                    <span
+                      className="h-7 w-7 rounded-md border border-kumo-line"
+                      style={{ background: resolveFormColor(accountForm) }}
+                      aria-hidden="true"
+                    />
+                    <Input size="sm"
+                      aria-label="品牌色值"
+                      type="text"
+                      inputMode="text"
+                      placeholder="#f50049"
+                      value={accountForm.color}
+                      onChange={(e) => setAccountForm((prev) => ({ ...prev, color: e.target.value }))}
+                      onBlur={(e) => setAccountForm((prev) => ({ ...prev, color: normalizeHexColor(e.target.value) }))}
+                      className="w-full font-mono text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-kumo-subtle">密钥 (Base32)</label>
                   <div className="relative">
                     <Input size="sm"
@@ -1643,19 +1795,6 @@ function TotpPage() {
                       </div>
                     )}
 
-                    <div className="col-span-full pt-2 flex items-center gap-2">
-                      <label className="font-semibold whitespace-nowrap">自定义色值:</label>
-                      <Input size="sm"
-                        aria-label="自定义色值"
-                        type="color"
-                        value={accountForm.color || BRAND_COLOR_FALLBACK}
-                        onChange={(e) => setAccountForm((prev) => ({ ...prev, color: e.target.value }))}
-                        className="w-8 h-8"
-                      />
-                      <Button size="sm" onClick={() => setAccountForm((prev) => ({ ...prev, color: '' }))}>
-                        使用平台默认
-                      </Button>
-                    </div>
                   </div>
                 </details>
               </div>
@@ -1701,6 +1840,49 @@ function TotpPage() {
         </Dialog>
       </Dialog.Root>
 
+      {/* ==================== 模态框: 品牌图标样式选择 ==================== */}
+      <Dialog.Root open={showBrandStyleModal} onOpenChange={setShowBrandStyleModal}>
+        <Dialog className="!w-[min(42rem,calc(100vw-2rem))] !max-w-[min(42rem,calc(100vw-2rem))] p-5">
+          <Dialog.Title className="text-base font-bold text-kumo-strong mb-1">
+            选择品牌标识样式
+          </Dialog.Title>
+          <Dialog.Description className="text-xs text-kumo-subtle mb-3">
+            选择后会写入当前账号，保存账号后生效。
+          </Dialog.Description>
+
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {brandStyleOptions.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => applyBrandStyleOption(option)}
+                className="app-subcard grid min-w-[7.5rem] grid-cols-[auto_minmax(0,1fr)] items-center gap-2 px-3 py-2 text-left transition-colors hover:border-kumo-brand hover:bg-kumo-brand/5"
+              >
+                <TotpBrandMark
+                  issuer={accountForm.issuer}
+                  icon={option.icon}
+                  color={option.color || resolveFormColor(accountForm)}
+                />
+                <span className="min-w-0">
+                  <span className="block truncate text-xs font-semibold text-kumo-strong">{option.label}</span>
+                  <span className="block truncate text-[11px] text-kumo-subtle">{option.caption}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <div className="flex justify-end gap-3 mt-4">
+            <Dialog.Close
+              render={(props) => (
+                <Button size="sm" {...props} variant="secondary">
+                  取消
+                </Button>
+              )}
+            />
+          </div>
+        </Dialog>
+      </Dialog.Root>
+
       {/* ==================== 模态框 2: 新建/编辑分组 ==================== */}
       <Dialog.Root open={showGroupModal} onOpenChange={setShowGroupModal}>
         <Dialog className="!w-[min(32rem,calc(100vw-2rem))] !max-w-[min(32rem,calc(100vw-2rem))] p-6">
@@ -1726,15 +1908,22 @@ function TotpPage() {
 
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-kumo-subtle">卡片标识色值</label>
-              <div className="flex items-center gap-3">
+              <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2">
+                <span
+                  className="h-7 w-7 rounded-md border border-kumo-line"
+                  style={{ background: HEX_COLOR_PATTERN.test(normalizeHexColor(groupForm.color)) ? normalizeHexColor(groupForm.color) : BRAND_COLOR_FALLBACK }}
+                  aria-hidden="true"
+                />
                 <Input size="sm"
                   aria-label="卡片标识色值"
-                  type="color"
+                  type="text"
+                  inputMode="text"
+                  placeholder="#4285f4"
                   value={groupForm.color}
                   onChange={(e) => setGroupForm((prev) => ({ ...prev, color: e.target.value }))}
-                  className="w-10 h-10"
+                  onBlur={(e) => setGroupForm((prev) => ({ ...prev, color: normalizeHexColor(e.target.value) || BRAND_COLOR_FALLBACK }))}
+                  className="w-full font-mono text-xs"
                 />
-                <span className="text-xs font-mono text-kumo-subtle">{groupForm.color}</span>
               </div>
             </div>
           </div>
