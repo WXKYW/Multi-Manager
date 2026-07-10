@@ -275,6 +275,83 @@ func TestMatchSVGRepoBrandIconAlias(t *testing.T) {
 	if entry.Key != "microsoft" || entry.URL == "" {
 		t.Fatalf("entry = %#v, want microsoft alias", entry)
 	}
+
+	entry, ok = matchSVGRepoBrandIcon("Aliyun", "user@example.com", "")
+	if !ok {
+		t.Fatal("matchSVGRepoBrandIcon did not match Aliyun alias")
+	}
+	if entry.Key != "332219-aliyun" || entry.URL != "https://www.svgrepo.com/show/332219/aliyun.svg" {
+		t.Fatalf("entry = %#v, want aliyun alias", entry)
+	}
+}
+
+func TestDetectSVGRepoBrandIconDoesNotRequireRemoteDownload(t *testing.T) {
+	service := New(config.Config{
+		Version: "test",
+		Host:    "127.0.0.1",
+		Port:    0,
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+	res := performTOTPRequest(service, http.MethodPost, "/api/totp/icons/detect", `{"query":"svgrepo:331511-nvidia"}`)
+	if res.Code != http.StatusOK {
+		t.Fatalf("detect status = %d body=%s", res.Code, res.Body.String())
+	}
+	var payload struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Matched bool   `json:"matched"`
+			Icon    string `json:"icon"`
+			URL     string `json:"url"`
+		} `json:"data"`
+	}
+	mustDecodeTOTP(t, res, &payload)
+	if !payload.Success || !payload.Data.Matched || payload.Data.Icon != "svgrepo:331511-nvidia" {
+		t.Fatalf("detect payload = %#v", payload)
+	}
+	if payload.Data.URL != "/api/totp/icons/331511-nvidia.svg" {
+		t.Fatalf("detect url = %q", payload.Data.URL)
+	}
+}
+
+func TestFallbackBrandIconIsSafeSVG(t *testing.T) {
+	res := httptest.NewRecorder()
+	serveFallbackBrandIcon(res, brandIconEntry{
+		Key:   "331511-nvidia",
+		Name:  `NVIDIA<script>`,
+		Color: "not-a-color",
+	})
+	if res.Code != http.StatusOK {
+		t.Fatalf("fallback status = %d body=%s", res.Code, res.Body.String())
+	}
+	if got := res.Header().Get("Content-Type"); !strings.Contains(got, "image/svg+xml") {
+		t.Fatalf("content type = %q", got)
+	}
+	body := res.Body.String()
+	if strings.Contains(body, "<script>") || !strings.Contains(body, "#8b5cf6") {
+		t.Fatalf("unsafe or missing fallback svg: %s", body)
+	}
+}
+
+func TestCacheBrandIconStoresBrowserFetchedSVG(t *testing.T) {
+	service := New(config.Config{
+		Version: "test",
+		Host:    "127.0.0.1",
+		Port:    0,
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+	res := performTOTPRequest(service, http.MethodPost, "/api/totp/icons/cache", `{"icon":"svgrepo:331511-nvidia","svg":"<svg xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M1 1\"/></svg>"}`)
+	if res.Code != http.StatusOK {
+		t.Fatalf("cache status = %d body=%s", res.Code, res.Body.String())
+	}
+	serveRes := performTOTPRequest(service, http.MethodGet, "/api/totp/icons/331511-nvidia.svg", "")
+	if serveRes.Code != http.StatusOK {
+		t.Fatalf("serve cached status = %d body=%s", serveRes.Code, serveRes.Body.String())
+	}
+	if !strings.Contains(serveRes.Body.String(), "<path") {
+		t.Fatalf("cached svg was not served: %s", serveRes.Body.String())
+	}
 }
 
 func TestSVGRepoBrandIconOptionsAreCurated(t *testing.T) {

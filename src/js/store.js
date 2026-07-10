@@ -121,7 +121,15 @@ export const MODULE_GROUPS = [
     id: 'infrastructure',
     name: '云服务',
     icon: 'fa-cubes',
-    modules: ['paas', 'dns', 'aliyun', 'tencent', 'server'],
+    modules: ['paas', 'dns'],
+    subgroups: [
+      {
+        id: 'cloud-vendors',
+        name: '云厂商',
+        modules: ['aliyun', 'tencent'],
+      },
+    ],
+    trailingModules: ['server'],
   },
   {
     id: 'toolbox',
@@ -191,7 +199,13 @@ export const DEFAULT_TOTP_SETTINGS = {
   defaultInputMode: 'scan',
 };
 
-export const DEFAULT_MODULE_ORDER = MODULE_GROUPS.flatMap((group) => group.modules);
+export const getGroupModuleIds = (group) => [
+  ...(group.modules || []),
+  ...(group.subgroups || []).flatMap((subgroup) => subgroup.modules || []),
+  ...(group.trailingModules || []),
+];
+
+export const DEFAULT_MODULE_ORDER = MODULE_GROUPS.flatMap(getGroupModuleIds);
 
 export const DEFAULT_MODULE_VISIBILITY = DEFAULT_MODULE_ORDER.reduce((acc, moduleId) => {
   acc[moduleId] = true;

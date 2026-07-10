@@ -13,6 +13,7 @@ import useStore, {
   MODULE_CONFIG,
   MODULE_GROUPS,
   applyCustomCss,
+  getGroupModuleIds,
   normalizeUserSettings,
 } from '../store.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
@@ -115,7 +116,7 @@ const moveItem = (items, fromIndex, toIndex) => {
 };
 
 const moduleRows = DEFAULT_MODULE_ORDER.map((moduleId) => {
-  const group = MODULE_GROUPS.find((item) => item.modules.includes(moduleId));
+  const group = MODULE_GROUPS.find((item) => getGroupModuleIds(item).includes(moduleId));
   return {
     id: moduleId,
     groupId: group?.id || 'other',

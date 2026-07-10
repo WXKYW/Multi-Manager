@@ -1,5 +1,5 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import useStore, { MODULE_GROUPS, MODULE_CONFIG, getModuleName } from '../store.js';
+import useStore, { MODULE_GROUPS, MODULE_CONFIG, getGroupModuleIds, getModuleName } from '../store.js';
 import {
   Sidebar,
   useSidebar
@@ -9,6 +9,7 @@ import { Button } from '@cloudflare/kumo/components/button';
 import { Tabs } from '@cloudflare/kumo';
 import AppPageHeader, { AppBreadcrumbs } from './AppPageHeader.jsx';
 import {
+  Globe,
   Server,
   LogOut,
   getModuleIconComponent,
@@ -187,6 +188,70 @@ const SidebarModuleButton = ({ module, active, icon: IconComponent, onNavigate }
   );
 };
 
+const SidebarModuleSubButton = ({ module, active, onNavigate }) => {
+  const navigateAndClose = useMobileClosingNavigation(onNavigate);
+  const config = MODULE_CONFIG[module];
+  if (!config) return null;
+
+  return (
+    <Sidebar.MenuSubButton
+      active={active}
+      aria-current={active ? 'page' : undefined}
+      onClick={() => navigateAndClose(module)}
+    >
+      {config.name}
+    </Sidebar.MenuSubButton>
+  );
+};
+
+const SidebarModuleSubgroup = ({ subgroup, activeModule, onNavigate }) => {
+  const subgroupModules = subgroup.modules || [];
+  const active = subgroupModules.includes(activeModule);
+  const ParentIcon = subgroup.icon || Globe;
+  const quietTriggerClassName = [
+    '!bg-transparent',
+    '!shadow-none',
+    '!text-inherit',
+    'active:!bg-transparent',
+    'hover:!bg-transparent',
+    'hover:!text-inherit',
+    'focus-visible:!bg-transparent',
+    'focus-visible:!shadow-none',
+    'data-[active=true]:!bg-transparent',
+    'data-[selected=true]:!bg-transparent',
+    'data-[state=open]:!bg-transparent',
+    'data-[state=open]:!text-inherit',
+    '[&_[data-slot=sidebar-menu-button-label]]:!font-normal',
+  ].join(' ');
+
+  return (
+    <Sidebar.MenuItem>
+      <Sidebar.Collapsible key={`${subgroup.id}-${active ? 'active' : 'idle'}`} defaultOpen={active} autoScrollOnOpen>
+        <Sidebar.CollapsibleTrigger
+          render={(
+            <Sidebar.MenuButton icon={ParentIcon} className={quietTriggerClassName}>
+              {subgroup.name}
+              <Sidebar.MenuChevron />
+            </Sidebar.MenuButton>
+          )}
+        />
+        <Sidebar.CollapsibleContent>
+          <Sidebar.MenuSub>
+            {subgroupModules.map((module) => (
+              <SidebarModuleSubButton
+                key={module}
+                module={module}
+                active={activeModule === module}
+                onNavigate={onNavigate}
+              />
+            ))}
+          </Sidebar.MenuSub>
+        </Sidebar.CollapsibleContent>
+      </Sidebar.Collapsible>
+    </Sidebar.MenuItem>
+  );
+};
+
 const SidebarLogoutButton = ({ onLogout }) => {
   return (
     <SidebarTooltipMenuButton
@@ -272,12 +337,30 @@ function MainLayout() {
   const pageWidthClass = PAGE_WIDTH_CLASSES[pageWidthMode] || PAGE_WIDTH_CLASSES.standard;
 
   const visibleModuleGroups = useMemo(() => {
-    return MODULE_GROUPS.map((group) => ({
-      ...group,
-      modules: moduleOrder.filter(
-        (moduleId) => group.modules.includes(moduleId) && moduleVisibility[moduleId] !== false
-      ),
-    })).filter((group) => group.modules.length > 0 && group.id !== 'system');
+    return MODULE_GROUPS.map((group) => {
+      const directModules = moduleOrder.filter(
+        (moduleId) => (group.modules || []).includes(moduleId) && moduleVisibility[moduleId] !== false
+      );
+      const subgroups = (group.subgroups || []).map((subgroup) => ({
+        ...subgroup,
+        modules: moduleOrder.filter(
+          (moduleId) => (subgroup.modules || []).includes(moduleId) && moduleVisibility[moduleId] !== false
+        ),
+      })).filter((subgroup) => subgroup.modules.length > 0);
+      const trailingModules = moduleOrder.filter(
+        (moduleId) => (group.trailingModules || []).includes(moduleId) && moduleVisibility[moduleId] !== false
+      );
+
+      return {
+        ...group,
+        modules: directModules,
+        subgroups,
+        trailingModules,
+      };
+    }).filter((group) => {
+      if (group.id === 'system') return false;
+      return getGroupModuleIds(group).some((moduleId) => moduleVisibility[moduleId] !== false);
+    });
   }, [moduleOrder, moduleVisibility]);
 
   useEffect(() => {
@@ -423,6 +506,23 @@ function MainLayout() {
                   <Sidebar.GroupLabel>{groupLabel}</Sidebar.GroupLabel>
                   <Sidebar.Menu>
                     {group.modules.map((module) => (
+                      <SidebarModuleButton
+                        key={module}
+                        module={module}
+                        active={mainActiveTab === module}
+                        icon={getModuleIconComponent(module, Server)}
+                        onNavigate={navigateToModule}
+                      />
+                    ))}
+                    {(group.subgroups || []).map((subgroup) => (
+                      <SidebarModuleSubgroup
+                        key={subgroup.id}
+                        subgroup={subgroup}
+                        activeModule={mainActiveTab}
+                        onNavigate={navigateToModule}
+                      />
+                    ))}
+                    {(group.trailingModules || []).map((module) => (
                       <SidebarModuleButton
                         key={module}
                         module={module}

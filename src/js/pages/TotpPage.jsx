@@ -193,6 +193,25 @@ function TotpPage() {
     };
   };
 
+  const cacheDetectedBrandIcon = async (item) => {
+    const sourceUrl = item?.sourceUrl;
+    const icon = item?.icon;
+    if (!sourceUrl || !isSVGRepoIcon(icon)) return;
+    try {
+      const remoteRes = await fetch(sourceUrl, { mode: 'cors', credentials: 'omit' });
+      if (!remoteRes.ok) return;
+      const svg = await remoteRes.text();
+      if (!svg || !svg.toLowerCase().includes('<svg')) return;
+      await fetch('/api/totp/icons/cache', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ icon, svg }),
+      });
+    } catch (_) {
+      // Browser-side caching is best-effort because many icon hosts block CORS.
+    }
+  };
+
   // ==================== 数据接口交互 ====================
   const loadData = async () => {
     setTotpLoading(true);
@@ -419,7 +438,15 @@ function TotpPage() {
         throw new Error(data.error || '检测失败');
       }
       if (!data.data?.matched) {
-        toast.info(data.data?.message || '未检测到匹配图标');
+        const localOptions = buildBrandStyleOptions({
+          issuer: accountForm.issuer,
+          icon: accountForm.icon,
+          color: resolveFormColor(accountForm),
+          name: accountForm.issuer || accountForm.account || '品牌',
+        });
+        setBrandStyleOptions(localOptions);
+        setShowBrandStyleModal(true);
+        toast.info(data.data?.message || '未检测到远程图标，已提供系统图标样式');
         return;
       }
       setBrandStyleOptions(buildBrandStyleOptions({
@@ -429,6 +456,10 @@ function TotpPage() {
         name: data.data.name,
         options: data.data.options,
       }));
+      const detectedItems = [data.data, ...(Array.isArray(data.data.options) ? data.data.options : [])];
+      detectedItems.forEach((item) => {
+        cacheDetectedBrandIcon(item);
+      });
       setShowBrandStyleModal(true);
     } catch (error) {
       toast.error(error.message || '检测图标失败');
