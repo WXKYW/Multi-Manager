@@ -34,7 +34,7 @@ func testPresenceManager(t *testing.T, service *Service) *agentPresenceManager {
 	return p
 }
 
-func TestPresenceShortDisconnectDoesNotNotifyOffline(t *testing.T) {
+func TestPresenceShortDisconnectNotifiesInterruptedButNotOffline(t *testing.T) {
 	service, _ := testService(t)
 	notifier := &recordingNotifier{}
 	service.SetNotifier(notifier)
@@ -56,8 +56,8 @@ func TestPresenceShortDisconnectDoesNotNotifyOffline(t *testing.T) {
 	p.check()
 
 	events, _ := notifier.snapshot()
-	if len(events) != 0 {
-		t.Fatalf("events = %#v, want none", events)
+	if len(events) != 1 || events[0] != "interrupted" {
+		t.Fatalf("events = %#v, want one interrupted", events)
 	}
 	snapshot := p.snapshot("presence-short")
 	if snapshot["presence_status"] != string(agentPresenceSuspect) {

@@ -1495,7 +1495,7 @@ func decryptConfig(raw string) map[string]interface{} {
 func eventCatalog() []map[string]interface{} {
 	return []map[string]interface{}{
 		{"module": "uptime", "events": []string{"down", "up", "pending", "resource.created", "resource.deleted", "ssl_expiry"}},
-		{"module": "server", "events": []string{"offline", "online", "cpu_high", "memory_high", "disk_high", "traffic_high", "traffic_normal"}},
+		{"module": "server", "events": []string{"offline", "online", "interrupted", "degraded", "cpu_high", "memory_high", "disk_high", "traffic_high", "traffic_normal"}},
 		{"module": "system", "events": []string{"database.backup", "database.import", "log.cleanup", "migration.failed", "cpu_high", "memory_high", "disk_high"}},
 		{"module": "filebox", "events": []string{"resource.created", "resource.deleted", "cleanup"}},
 		{"module": "totp", "events": []string{"resource.created", "resource.updated", "resource.deleted", "security.revealed", "backup.imported", "backup.exported"}},
@@ -1546,7 +1546,15 @@ func formatMessage(rule Rule, data map[string]interface{}, loc *time.Location) s
 	// 状态汉化
 	if statusVal := data["status"]; statusVal != nil {
 		statusStr := stringValue(statusVal)
-		if statusStr == "success" {
+		if statusStr == "online" {
+			statusStr = "在线"
+		} else if statusStr == "offline" {
+			statusStr = "离线"
+		} else if statusStr == "interrupted" {
+			statusStr = "中断"
+		} else if statusStr == "degraded" {
+			statusStr = "采集异常"
+		} else if statusStr == "success" {
 			statusStr = "成功"
 		} else if statusStr == "failed" {
 			statusStr = "失败"

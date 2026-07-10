@@ -39,6 +39,7 @@ import {
 import {
   areRealtimeValuesEqual,
   mergePolledServerAccount,
+  resolveServerDisplayStatus,
   mergeRealtimeDiskInfo,
   resolveServerMetricsHealth,
   resolveRealtimeMetricsCache,
@@ -3187,7 +3188,8 @@ function ServerPage() {
         const item = statusMap.get(String(server.id));
         if (!item) return server;
 
-        const status = item.status || (item.agent_online === true ? 'online' : 'offline');
+        const rawStatus = item.status || (item.agent_online === true ? 'online' : 'offline');
+        const status = rawStatus === 'suspect' ? 'interrupted' : rawStatus;
         const agentOnline = typeof item.agent_online === 'boolean'
           ? item.agent_online
           : status === 'online';
@@ -7192,13 +7194,8 @@ function ServerPage() {
   const filteredServers = useMemo(() => {
     let list = serverList;
     if (serverStatusFilter !== 'all') {
-      if (serverStatusFilter === 'warning') {
-        list = list.filter(s => resolveServerMetricsHealth(s).stale);
-      } else {
-				list = list.filter(s => (
-					serverStatusFilter === 'online' ? isServerOnline(s) : !isServerOnline(s)
-				));
-      }
+      const normalizedFilter = serverStatusFilter === 'warning' ? 'interrupted' : serverStatusFilter;
+      list = list.filter(s => resolveServerDisplayStatus(s).state === normalizedFilter);
     }
     if (serverSearchText.trim()) {
       const query = serverSearchText.toLowerCase();
@@ -7214,10 +7211,16 @@ function ServerPage() {
 
   const statsSummary = useMemo(() => {
     const total = serverList.length;
-		const online = serverList.filter(s => isServerOnline(s)).length;
-    const offline = total - online;
-    const warning = serverList.filter(s => resolveServerMetricsHealth(s).stale).length;
-    return { total, online, offline, warning };
+    const counts = serverList.reduce((acc, server) => {
+      const state = resolveServerDisplayStatus(server).state;
+      acc[state] = (acc[state] || 0) + 1;
+      return acc;
+    }, {});
+		const online = counts.online || 0;
+    const interrupted = counts.interrupted || 0;
+    const degraded = counts.degraded || 0;
+    const offline = counts.offline || 0;
+    return { total, online, interrupted, degraded, offline, warning: interrupted + degraded };
   }, [serverList]);
 
   const visibleCompactColumnDefs = useMemo(() => (
@@ -7599,13 +7602,14 @@ function ServerPage() {
                 className={HOST_FILTER_TABS_CLASS}
                 listClassName={HOST_FILTER_TABS_LIST_CLASS}
                 indicatorClassName={HOST_FILTER_TABS_INDICATOR_CLASS}
-                value={serverStatusFilter}
+                value={serverStatusFilter === 'warning' ? 'interrupted' : serverStatusFilter}
                 onValueChange={setServerStatusFilter}
                 tabs={[
                   { value: 'all', label: `全部 (${statsSummary.total})` },
                   { value: 'online', label: `在线 (${statsSummary.online})` },
-                  { value: 'warning', label: `异常 (${statsSummary.warning})` },
+                  { value: 'interrupted', label: `中断 (${statsSummary.interrupted})` },
                   { value: 'offline', label: `离线 (${statsSummary.offline})` },
+                  { value: 'degraded', label: `采集异常 (${statsSummary.degraded})` },
                 ]}
               />
               <Tabs

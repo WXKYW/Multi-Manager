@@ -200,15 +200,20 @@ const SidebarLogoutButton = ({ onLogout }) => {
   );
 };
 
-const SidebarBrand = () => (
-  <div className="flex h-full w-full min-w-0 items-center gap-2.5">
+const SidebarBrand = ({ onHome }) => (
+  <button
+    type="button"
+    onClick={onHome}
+    className="flex h-full w-full min-w-0 items-center gap-2.5 rounded-md text-left outline-none transition-colors hover:bg-kumo-recessed/45 focus-visible:ring-2 focus-visible:ring-kumo-brand/45"
+    aria-label="返回首页"
+  >
     <span className="flex size-9 shrink-0 items-center justify-center">
       <img src="/logo.svg" className="size-6.5 shrink-0 object-contain" alt="" />
     </span>
     <span className="min-w-0 truncate text-sm font-semibold text-kumo-strong">
       API Monitor
     </span>
-  </div>
+  </button>
 );
 
 const SidebarStyleSwitches = ({
@@ -315,6 +320,13 @@ function MainLayout() {
     }
   };
 
+  const navigateHome = () => {
+    setMainActiveTab('dashboard');
+    if (window.location.pathname !== '/' || window.location.search || window.location.hash) {
+      window.history.pushState({ module: 'dashboard' }, '', '/');
+    }
+  };
+
   useEffect(() => {
     if (!userSettingsLoaded || mainActiveTab === 'settings') return;
     if (moduleVisibility[mainActiveTab] !== false) return;
@@ -398,7 +410,7 @@ function MainLayout() {
         <Sidebar>
           {/* 顶部 Logo */}
           <Sidebar.Header className="h-14! px-2.5!">
-            <SidebarBrand />
+            <SidebarBrand onHome={navigateHome} />
           </Sidebar.Header>
 
           {/* 导航栏项 */}

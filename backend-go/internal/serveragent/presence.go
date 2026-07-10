@@ -124,8 +124,10 @@ func (p *agentPresenceManager) recordDisconnect(serverID, reason string) {
 		return
 	}
 	now := time.Now()
+	var changed bool
 	p.mu.Lock()
 	rec := p.ensureLocked(serverID)
+	previous := rec.Status
 	rec.ConnectionActive = false
 	rec.LastDisconnect = now
 	rec.LastDisconnectReason = strings.TrimSpace(reason)
@@ -135,8 +137,13 @@ func (p *agentPresenceManager) recordDisconnect(serverID, reason string) {
 	rec.RecoverySamples = 0
 	if rec.Status == agentPresenceOnline || rec.Status == "" {
 		rec.Status = agentPresenceSuspect
+		changed = previous != agentPresenceSuspect
 	}
 	p.mu.Unlock()
+
+	if changed {
+		p.applyInterrupted(serverID)
+	}
 }
 
 func (p *agentPresenceManager) recordHeartbeat(serverID, source string, sampleIntervalMs int64) {
@@ -270,9 +277,7 @@ func (p *agentPresenceManager) check() {
 	p.mu.Unlock()
 
 	for _, serverID := range suspectIDs {
-		if p.service.metricsHub != nil {
-			p.service.metricsHub.BroadcastServerStatus(serverID, "suspect", false)
-		}
+		p.applyInterrupted(serverID)
 	}
 	for _, serverID := range offlineIDs {
 		p.applyOffline(serverID)
@@ -322,6 +327,15 @@ func (p *agentPresenceManager) ensureOnlineRows() {
 				}
 			}
 		}
+	}
+}
+
+func (p *agentPresenceManager) applyInterrupted(serverID string) {
+	if p.service.metricsHub != nil {
+		p.service.metricsHub.BroadcastServerStatus(serverID, "interrupted", false)
+	}
+	if !p.notificationsSuppressed(serverID, time.Now()) {
+		p.triggerNotification(context.Background(), serverID, "interrupted")
 	}
 }
 

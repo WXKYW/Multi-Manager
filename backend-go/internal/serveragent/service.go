@@ -3430,6 +3430,10 @@ func (s *Service) markRealtimeMetricsPersistResult(serverID string, ok bool, err
 	if !exists {
 		return
 	}
+	previousStatus := ""
+	if metadata := conn.GetMetadata(); metadata != nil {
+		previousStatus, _ = metadata["metrics_persist_status"].(string)
+	}
 	status := "ok"
 	errorText := ""
 	if !ok {
@@ -3441,6 +3445,19 @@ func (s *Service) markRealtimeMetricsPersistResult(serverID string, ok bool, err
 	conn.SetMetadata("metrics_persist_status", status)
 	conn.SetMetadata("metrics_persist_error", errorText)
 	conn.SetMetadata("metrics_persist_at", now.UTC().Format(time.RFC3339Nano))
+	if !ok && previousStatus != "error" {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			db, openErr := s.open(ctx)
+			if openErr != nil {
+				return
+			}
+			defer db.Close()
+			serverName, serverHost := s.serverIdentity(ctx, db, serverID)
+			s.triggerServerStatusNotification(ctx, serverID, serverName, serverHost, "degraded")
+		}()
+	}
 }
 
 func (s *Service) resolveAgentMetricsHealth(serverID string, cachedInfo sql.NullString, agentOnline bool, now time.Time) map[string]interface{} {

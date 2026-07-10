@@ -269,6 +269,18 @@ func TestHistoryConfigEventCatalogAndPreview(t *testing.T) {
 			t.Fatalf("retired module leaked into event catalog: %#v", item)
 		}
 	}
+	serverEvents := map[string]bool{}
+	for _, item := range eventCatalog() {
+		if item["module"] != "server" {
+			continue
+		}
+		for _, event := range item["events"].([]string) {
+			serverEvents[event] = true
+		}
+	}
+	if !serverEvents["interrupted"] || !serverEvents["degraded"] {
+		t.Fatalf("server event catalog missing interrupted/degraded: %#v", serverEvents)
+	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/notification/templates/preview", strings.NewReader(`{
 		"title_template":"[{{severity}}] {{monitorName}}",
