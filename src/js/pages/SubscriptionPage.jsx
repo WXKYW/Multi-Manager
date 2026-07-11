@@ -84,6 +84,327 @@ const emptyNodeForm = {
   config_json: '',
 };
 
+const safeBtoa = (str) => {
+  try {
+    return btoa(unescape(encodeURIComponent(str)));
+  } catch (e) {
+    return btoa(str);
+  }
+};
+
+const safeAtob = (str) => {
+  try {
+    return decodeURIComponent(escape(atob(str)));
+  } catch (e) {
+    return atob(str);
+  }
+};
+
+const parseNodeUrlToConfig = (urlStr) => {
+  try {
+    const raw = String(urlStr).trim();
+    if (!raw) return null;
+
+    if (raw.toLowerCase().startsWith('vmess://')) {
+      const b64Part = raw.substring(8).trim();
+      try {
+        const decoded = safeAtob(b64Part);
+        const obj = JSON.parse(decoded);
+        const name = obj.ps || 'vmess-node';
+        const server = obj.add || '';
+        const port = Number(obj.port) || 0;
+        const type = 'vmess';
+        
+        const config = {
+          name,
+          type,
+          server,
+          port,
+          uuid: obj.id,
+          alterId: Number(obj.aid) || 0,
+          cipher: obj.scy || 'auto',
+        };
+        if (obj.net) config.network = obj.net;
+        if (obj.tls === 'tls') {
+          config.tls = true;
+          if (obj.sni) {
+            config.sni = obj.sni;
+            config.servername = obj.sni;
+          }
+        }
+        if (obj.net === 'ws') {
+          config['ws-opts'] = {
+            path: obj.path || '/',
+          };
+          if (obj.host) {
+            config['ws-opts'].headers = { Host: obj.host };
+          }
+        }
+        return { name, type, server, port, config };
+      } catch (e) {}
+    }
+
+    const match = raw.match(/^([^:]+):\/\/([^@]+@)?([^:\/?#]+)(?::(\d+))?([^#]*)(?:#(.*))?$/);
+    if (!match) return null;
+
+    let type = match[1].toLowerCase();
+    if (type === 'hy2') type = 'hysteria2';
+
+    const userInfo = match[2] ? match[2].slice(0, -1) : '';
+    const server = match[3];
+    const port = match[4] ? Number(match[4]) : 0;
+    const rest = match[5] || '';
+    const hash = match[6] ? decodeURIComponent(match[6]) : '';
+    const name = hash || `${type}-node`;
+
+    const config = {
+      name,
+      type,
+      server,
+      port,
+    };
+
+    const query = {};
+    if (rest.startsWith('?')) {
+      const parts = rest.substring(1).split('&');
+      for (const part of parts) {
+        const [k, v] = part.split('=');
+        if (k) {
+          query[decodeURIComponent(k)] = decodeURIComponent(v || '');
+        }
+      }
+    }
+
+    if (type === 'vless') {
+      config.uuid = userInfo;
+      if (query.encryption && query.encryption !== 'none') {
+        config.encryption = query.encryption;
+      }
+      const network = query.type || query.network;
+      if (network && network !== 'tcp') {
+        config.network = network;
+      }
+      if (query.security === 'tls') {
+        config.tls = true;
+      }
+      const sni = query.sni || query.servername;
+      if (sni) {
+        config.servername = sni;
+        config.sni = sni;
+      }
+      if (query.fp) {
+        config['client-fingerprint'] = query.fp;
+      }
+      if (query.allowInsecure === '1' || query.allowInsecure === 'true' || query.insecure === '1' || query.insecure === 'true' || query['skip-cert-verify'] === 'true') {
+        config['skip-cert-verify'] = true;
+      }
+      if (network === 'ws') {
+        config['ws-opts'] = {};
+        if (query.path) config['ws-opts'].path = query.path;
+        const host = query.host || query.Host || sni;
+        if (host) {
+          config['ws-opts'].headers = { Host: host };
+        }
+        if (Object.keys(config['ws-opts']).length === 0) delete config['ws-opts'];
+      }
+    } else if (type === 'trojan') {
+      config.password = userInfo;
+      config.tls = true;
+      const sni = query.sni || query.peer || query.servername;
+      if (sni) {
+        config.sni = sni;
+      }
+      if (query.allowInsecure === '1' || query.allowInsecure === 'true' || query.insecure === '1' || query.insecure === 'true' || query['skip-cert-verify'] === 'true') {
+        config['skip-cert-verify'] = true;
+      }
+      if (query.alpn) {
+        config.alpn = query.alpn.split(',');
+      }
+      const network = query.type || query.network;
+      if (network) {
+        config.network = network;
+      }
+      if (query.fp) {
+        config['client-fingerprint'] = query.fp;
+      }
+    } else if (type === 'hysteria2') {
+      config.password = userInfo;
+      const sni = query.sni || query.peer || query.servername;
+      if (sni) {
+        config.sni = sni;
+      }
+      if (query.insecure === '1' || query.insecure === 'true' || query.allowInsecure === '1' || query.allowInsecure === 'true' || query['skip-cert-verify'] === 'true') {
+        config['skip-cert-verify'] = true;
+      }
+      if (query.alpn) {
+        config.alpn = query.alpn.split(',');
+      }
+    } else if (type === 'ss') {
+      if (userInfo) {
+        try {
+          const decoded = safeAtob(userInfo);
+          const parts = decoded.split(':');
+          if (parts.length === 2) {
+            config.cipher = parts[0];
+            config.password = parts[1];
+          }
+        } catch (e) {
+          const parts = userInfo.split(':');
+          if (parts.length === 2) {
+            config.cipher = parts[0];
+            config.password = parts[1];
+          }
+        }
+      }
+    }
+
+    return { name, type, server, port, config };
+  } catch (err) {
+    return null;
+  }
+};
+
+const buildNodeUrl = (config) => {
+  try {
+    if (!config || !config.type || !config.server || !config.port) return '';
+    const type = config.type.toLowerCase();
+    const server = config.server;
+    const port = config.port;
+    const name = config.name || '';
+
+    if (type === 'vmess') {
+      const obj = {
+        v: '2',
+        ps: name,
+        add: server,
+        port: String(port),
+        id: config.uuid || '',
+        aid: String(config.alterId || 0),
+        net: config.network || 'tcp',
+        type: 'none',
+        host: config['ws-opts']?.headers?.Host || '',
+        path: config['ws-opts']?.path || '',
+        tls: config.tls ? 'tls' : '',
+        sni: config.sni || config.servername || '',
+      };
+      return 'vmess://' + safeBtoa(JSON.stringify(obj));
+    }
+
+    let userInfo = '';
+    const query = [];
+
+    if (type === 'vless') {
+      userInfo = config.uuid || '';
+      if (config.encryption) query.push(`encryption=${encodeURIComponent(config.encryption)}`);
+      if (config.network) query.push(`type=${encodeURIComponent(config.network)}`);
+      if (config.tls) query.push(`security=tls`);
+      const sni = config.sni || config.servername;
+      if (sni) query.push(`sni=${encodeURIComponent(sni)}`);
+      if (config['client-fingerprint']) query.push(`fp=${encodeURIComponent(config['client-fingerprint'])}`);
+      if (config['skip-cert-verify']) query.push(`skip-cert-verify=true`);
+      if (config.network === 'ws' && config['ws-opts']?.path) {
+        query.push(`path=${encodeURIComponent(config['ws-opts'].path)}`);
+      }
+    } else if (type === 'trojan') {
+      userInfo = config.password || '';
+      const sni = config.sni;
+      if (sni) query.push(`sni=${encodeURIComponent(sni)}`);
+      if (config['skip-cert-verify']) query.push(`skip-cert-verify=true`);
+      if (config.alpn) query.push(`alpn=${encodeURIComponent(config.alpn.join(','))}`);
+      if (config.network) query.push(`type=${encodeURIComponent(config.network)}`);
+      if (config['client-fingerprint']) query.push(`fp=${encodeURIComponent(config['client-fingerprint'])}`);
+    } else if (type === 'hysteria2') {
+      userInfo = config.password || '';
+      const sni = config.sni;
+      if (sni) query.push(`sni=${encodeURIComponent(sni)}`);
+      if (config['skip-cert-verify']) query.push(`skip-cert-verify=true`);
+      if (config.alpn) query.push(`alpn=${encodeURIComponent(config.alpn.join(','))}`);
+    } else if (type === 'ss') {
+      if (config.cipher && config.password) {
+        userInfo = safeBtoa(`${config.cipher}:${config.password}`);
+      }
+    }
+
+    const userPart = userInfo ? `${userInfo}@` : '';
+    const queryPart = query.length > 0 ? `?${query.join('&')}` : '';
+    const hashPart = name ? `#${name}` : '';
+
+    return `${type}://${userPart}${server}:${port}${queryPart}${hashPart}`;
+  } catch (e) {
+    return '';
+  }
+};
+
+const syncNodeForm = (prev, changedField, value) => {
+  const next = { ...prev, [changedField]: value };
+
+  if (['name', 'type', 'server', 'port'].includes(changedField)) {
+    if (changedField === 'type') {
+      next.type = value.toLowerCase();
+    }
+
+    let parsedConfig = null;
+    try {
+      parsedConfig = JSON.parse(prev.config_json || '{}');
+    } catch (e) {}
+
+    if (!parsedConfig || typeof parsedConfig !== 'object') {
+      parsedConfig = {};
+    }
+
+    parsedConfig.name = next.name;
+    parsedConfig.type = next.type;
+    parsedConfig.server = next.server;
+    parsedConfig.port = next.port ? Number(next.port) : 0;
+
+    next.config_json = JSON.stringify(parsedConfig);
+
+    if (next.raw) {
+      try {
+        const match = next.raw.match(/^([^:]+):\/\/([^@]+@)?([^:\/?#]+)(?::(\d+))?([^#]*)(?:#(.*))?$/);
+        if (match) {
+          const proto = changedField === 'type' ? value.toLowerCase() : match[1];
+          const userInfo = match[2] || '';
+          const host = changedField === 'server' ? value : match[3];
+          const port = changedField === 'port' ? (value ? `:${value}` : '') : (match[4] ? `:${match[4]}` : '');
+          const rest = match[5] || '';
+          const hash = changedField === 'name' ? `#${value}` : (match[6] ? `#${match[6]}` : '');
+          next.raw = `${proto}://${userInfo}${host}${port}${rest}${hash}`;
+        }
+      } catch (e) {}
+    } else {
+      next.raw = buildNodeUrl(parsedConfig);
+    }
+  }
+
+  if (changedField === 'config_json') {
+    try {
+      const parsedConfig = JSON.parse(value);
+      if (parsedConfig && typeof parsedConfig === 'object') {
+        if (parsedConfig.name !== undefined) next.name = String(parsedConfig.name);
+        if (parsedConfig.type !== undefined) next.type = String(parsedConfig.type).toLowerCase();
+        if (parsedConfig.server !== undefined) next.server = String(parsedConfig.server);
+        if (parsedConfig.port !== undefined) next.port = Number(parsedConfig.port) || 0;
+
+        next.raw = buildNodeUrl(parsedConfig);
+      }
+    } catch (e) {}
+  }
+
+  if (changedField === 'raw') {
+    const parsed = parseNodeUrlToConfig(value);
+    if (parsed) {
+      next.name = parsed.name;
+      next.type = parsed.type;
+      next.server = parsed.server;
+      next.port = parsed.port;
+      next.config_json = JSON.stringify(parsed.config);
+    }
+  }
+
+  return next;
+};
+
 const getAuthHeaders = () => ({
   'Content-Type': 'application/json',
   'x-admin-password': localStorage.getItem('admin_password') || '',
@@ -217,7 +538,14 @@ const latencyChipClass = (latency) => {
 
 function NodeHostQuality({ node, serverNameById }) {
   const hostName = node.traffic_server_id ? serverNameById.get(String(node.traffic_server_id)) || node.traffic_server_id : '';
-  const samples = Array.isArray(node?.quality) ? node.quality.slice(0, 3) : [];
+  const orderMap = { '移动': 1, '联通': 2, '电信': 3 };
+  const samples = Array.isArray(node?.quality)
+    ? [...node.quality].sort((a, b) => {
+        const orderA = orderMap[a.name] ?? 99;
+        const orderB = orderMap[b.name] ?? 99;
+        return orderA - orderB;
+      }).slice(0, 3)
+    : [];
   return (
     <div className="flex min-w-0 flex-col items-center gap-1">
       <span
@@ -1748,10 +2076,10 @@ function SubscriptionPage() {
                 <section className="min-w-0 space-y-3">
                   <div className="text-[11px] font-bold uppercase tracking-wide text-kumo-subtle">连接信息</div>
                   <div className="grid min-w-0 gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(14rem,100%),1fr))]">
-                    <Input size="sm" label="节点名称" value={nodeForm.name} onChange={(e) => setNodeForm((prev) => ({ ...prev, name: e.target.value }))} className="w-full min-w-0" />
-                    <Input size="sm" label="协议类型" value={nodeForm.type} onChange={(e) => setNodeForm((prev) => ({ ...prev, type: e.target.value }))} className="w-full min-w-0" />
-                    <Input size="sm" label="服务器地址" value={nodeForm.server} onChange={(e) => setNodeForm((prev) => ({ ...prev, server: e.target.value }))} className="w-full min-w-0" />
-                    <Input size="sm" label="端口" type="number" value={nodeForm.port || 0} onChange={(e) => setNodeForm((prev) => ({ ...prev, port: Number(e.target.value) || 0 }))} className="w-full min-w-0" />
+                    <Input size="sm" label="节点名称" value={nodeForm.name} onChange={(e) => setNodeForm((prev) => syncNodeForm(prev, 'name', e.target.value))} className="w-full min-w-0" />
+                    <Input size="sm" label="协议类型" value={nodeForm.type} onChange={(e) => setNodeForm((prev) => syncNodeForm(prev, 'type', e.target.value))} className="w-full min-w-0" />
+                    <Input size="sm" label="服务器地址" value={nodeForm.server} onChange={(e) => setNodeForm((prev) => syncNodeForm(prev, 'server', e.target.value))} className="w-full min-w-0" />
+                    <Input size="sm" label="端口" type="number" value={nodeForm.port || 0} onChange={(e) => setNodeForm((prev) => syncNodeForm(prev, 'port', Number(e.target.value) || 0))} className="w-full min-w-0" />
                     <Input size="sm" label="国家 / 地区代码" value={nodeForm.country_code || ''} onChange={(e) => setNodeForm((prev) => ({ ...prev, country_code: e.target.value }))} className="w-full min-w-0" />
                     <Input size="sm" label="位置" value={nodeForm.location || ''} onChange={(e) => setNodeForm((prev) => ({ ...prev, location: e.target.value }))} className="w-full min-w-0" />
                     <Input size="sm" label="标签" value={nodeForm.tags || ''} onChange={(e) => setNodeForm((prev) => ({ ...prev, tags: e.target.value }))} className="w-full min-w-0" />
@@ -1773,8 +2101,8 @@ function SubscriptionPage() {
                 <section className="min-w-0 space-y-3 border-t border-kumo-line pt-4">
                   <div className="text-[11px] font-bold uppercase tracking-wide text-kumo-subtle">原始配置</div>
                   <div className="grid min-w-0 gap-3">
-                    <InputArea label="原始节点链接" className="min-h-36 w-full min-w-0 font-mono text-xs" value={nodeForm.raw || ''} onChange={(e) => setNodeForm((prev) => ({ ...prev, raw: e.target.value }))} />
-                    <InputArea label="节点配置 JSON" className="min-h-36 w-full min-w-0 font-mono text-xs" value={nodeForm.config_json || ''} onChange={(e) => setNodeForm((prev) => ({ ...prev, config_json: e.target.value }))} />
+                    <InputArea label="原始节点链接" className="min-h-36 w-full min-w-0 font-mono text-xs" value={nodeForm.raw || ''} onChange={(e) => setNodeForm((prev) => syncNodeForm(prev, 'raw', e.target.value))} />
+                    <InputArea label="节点配置 JSON" className="min-h-36 w-full min-w-0 font-mono text-xs" value={nodeForm.config_json || ''} onChange={(e) => setNodeForm((prev) => syncNodeForm(prev, 'config_json', e.target.value))} />
                   </div>
                 </section>
               </div>
