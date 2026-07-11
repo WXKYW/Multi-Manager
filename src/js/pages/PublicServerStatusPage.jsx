@@ -2,9 +2,21 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import io from 'socket.io-client';
 import { Meter, Tabs } from '@cloudflare/kumo';
 import { Button } from '@cloudflare/kumo/components/button';
-import { AlertTriangle, RefreshCw, Server, Shield } from '../components/Icons.jsx';
+import { AlertTriangle, Globe, RefreshCw, Server, Shield } from '../components/Icons.jsx';
 import CountryFlag from '../components/CountryFlag.jsx';
+import ServerLocationMap from '../components/server/ServerLocationMap.jsx';
 import { FLOW_UNIT_BADGE_CLASS, getFlowUnitClassName } from '../modules/flowUnits.js';
+import * as echarts from 'echarts/core';
+import { MapChart, ScatterChart } from 'echarts/charts';
+import { TooltipComponent } from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
+
+echarts.use([
+  MapChart,
+  ScatterChart,
+  TooltipComponent,
+  CanvasRenderer,
+]);
 
 const COLUMN_TABS = [
   { value: '3', label: '3列' },
@@ -477,6 +489,7 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
     const stored = window.localStorage?.getItem('publicServerStatusColumns');
     return stored === '4' ? 4 : 3;
   });
+  const [mapOpen, setMapOpen] = useState(false);
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (silent) {
@@ -625,6 +638,16 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
               size="sm"
               variant="secondary"
               shape="square"
+              className={mapOpen ? 'border-kumo-brand/50 text-kumo-brand' : ''}
+              onClick={() => setMapOpen(prev => !prev)}
+              icon={<Globe className="h-3.5 w-3.5" />}
+              aria-label={mapOpen ? '切回主机卡片' : '切换到主机地图'}
+              title={mapOpen ? '切回主机卡片' : '切换到主机地图'}
+            />
+            <Button
+              size="sm"
+              variant="secondary"
+              shape="square"
               onClick={() => load({ silent: true })}
               loading={refreshing}
               icon={<RefreshCw className="h-3.5 w-3.5" />}
@@ -648,15 +671,26 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
 
         {!initialLoading && page && (
           <div className="flex flex-col gap-4">
-            <section>
-              {servers.length === 0 ? (
-                <div className="rounded-lg border border-kumo-line bg-kumo-base p-8 text-center text-sm text-kumo-subtle">这个状态页还没有绑定主机。</div>
-              ) : (
-                <div className={serverGridClass}>
-                  {servers.map((server) => <ServerCard key={server.id} server={server} />)}
-                </div>
-              )}
-            </section>
+            {mapOpen ? (
+              <ServerLocationMap
+                echarts={echarts}
+                servers={servers}
+                resolveStatus={(server) => (server?.online ? 'online' : 'offline')}
+                title="主机地图"
+                subtitle="状态页主机地理分布"
+                height="calc(100vh - 160px)"
+              />
+            ) : (
+              <section>
+                {servers.length === 0 ? (
+                  <div className="rounded-lg border border-kumo-line bg-kumo-base p-8 text-center text-sm text-kumo-subtle">这个状态页还没有绑定主机。</div>
+                ) : (
+                  <div className={serverGridClass}>
+                    {servers.map((server) => <ServerCard key={server.id} server={server} />)}
+                  </div>
+                )}
+              </section>
+            )}
 
             <footer className="flex flex-col gap-2 py-4 text-xs text-kumo-subtle sm:flex-row sm:items-center sm:justify-between">
               <span className="inline-flex items-center gap-1"><Shield className="h-3.5 w-3.5" />由 API Monitor 提供</span>

@@ -898,7 +898,6 @@ function SubscriptionPage() {
   };
 
   const deleteNode = async (node) => {
-    if (!(await dialog.deleteResource({ resourceType: '节点', resourceName: node.name }))) return;
     const res = await fetch(`${API}/nodes/${node.id}`, { method: 'DELETE', headers: getAuthHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.success === false) {
@@ -1272,7 +1271,21 @@ function SubscriptionPage() {
                   <Table.Cell className="text-center">
                     <div className="flex justify-center gap-1">
                       <Button size="sm" variant="ghost" shape="square" aria-label="编辑节点" title="编辑节点" className="text-kumo-subtle hover:text-kumo-brand" onClick={() => openEditNode(node)}><Edit className="h-3.5 w-3.5" /></Button>
-                      <Button size="sm" variant="ghost" shape="square" aria-label="删除节点" title="删除节点" className="text-kumo-subtle hover:text-kumo-danger" onClick={() => deleteNode(node)}><Trash className="h-3.5 w-3.5" /></Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        shape="square"
+                        aria-label="双击删除节点"
+                        title="双击删除节点"
+                        className="text-kumo-subtle hover:text-kumo-danger"
+                        onClick={(event) => event.stopPropagation()}
+                        onDoubleClick={(event) => {
+                          event.stopPropagation();
+                          deleteNode(node);
+                        }}
+                      >
+                        <Trash className="h-3.5 w-3.5" />
+                      </Button>
                     </div>
                   </Table.Cell>
                 </Table.Row>

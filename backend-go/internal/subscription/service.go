@@ -1245,8 +1245,8 @@ func (s *Service) updateNode(w http.ResponseWriter, r *http.Request, db *sql.DB,
 	}
 	rawEnc, _ := secure.SecureEncrypt(node.Raw)
 	cfgEnc, _ := secure.SecureEncrypt(node.ConfigJSON)
-	_, err := db.ExecContext(r.Context(), `UPDATE subscription_nodes SET name = ?, type = ?, server = ?, port = ?, country_code = ?, location = ?, tags = ?, traffic_server_id = ?, enabled = ?, stable = ?, sort_order = ?, raw_encrypted = ?, config_encrypted = ?, updated_at = datetime('now') WHERE id = ?`,
-		node.Name, node.Type, node.Server, node.Port, node.CountryCode, node.Location, node.Tags, nullString(node.TrafficServerID), boolToInt(node.Enabled), boolToInt(node.Stable), node.SortOrder, rawEnc, cfgEnc, id)
+	_, err := db.ExecContext(r.Context(), `UPDATE subscription_nodes SET name = ?, type = ?, server = ?, port = ?, country_code = ?, location = ?, tags = ?, traffic_server_id = ?, enabled = ?, stable = ?, sort_order = ?, raw_encrypted = CASE WHEN ? = '' THEN raw_encrypted ELSE ? END, config_encrypted = CASE WHEN ? = '' THEN config_encrypted ELSE ? END, updated_at = datetime('now') WHERE id = ?`,
+		node.Name, node.Type, node.Server, node.Port, node.CountryCode, node.Location, node.Tags, nullString(node.TrafficServerID), boolToInt(node.Enabled), boolToInt(node.Stable), node.SortOrder, node.Raw, rawEnc, node.ConfigJSON, cfgEnc, id)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1894,9 +1894,13 @@ func loadManagedNodeFingerprints(ctx context.Context, tx *sql.Tx, profileID stri
 		}
 		node.Enabled = enabled == 1
 		node.Stable = stable == 1
-		fingerprint = firstNonEmpty(fingerprint, nodeFingerprint(node))
+		stableFingerprint := nodeFingerprint(node)
 		if fingerprint != "" {
 			nodes[fingerprint] = node
+		}
+		if stableFingerprint != "" {
+			// Keep compatibility with rows created before fingerprints stopped including the name.
+			nodes[stableFingerprint] = node
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -1914,8 +1918,8 @@ func updateManagedNode(ctx context.Context, tx *sql.Tx, node Node, fingerprint s
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE subscription_nodes SET subscription_id = ?, profile_id = ?, name = ?, type = ?, server = ?, port = ?, country_code = ?, location = ?, tags = ?, traffic_server_id = ?, enabled = ?, stable = ?, sort_order = ?, raw_encrypted = ?, config_encrypted = ?, fingerprint = ?, source = 'managed', updated_at = datetime('now') WHERE id = ?`,
-		node.SubscriptionID, node.ProfileID, node.Name, node.Type, node.Server, node.Port, node.CountryCode, node.Location, node.Tags, nullString(node.TrafficServerID), boolToInt(node.Enabled), boolToInt(node.Stable), node.SortOrder, rawEnc, cfgEnc, fingerprint, node.ID)
+	_, err = tx.ExecContext(ctx, `UPDATE subscription_nodes SET subscription_id = ?, profile_id = ?, name = ?, type = ?, server = ?, port = ?, country_code = ?, location = ?, tags = ?, traffic_server_id = ?, enabled = ?, stable = ?, sort_order = ?, raw_encrypted = CASE WHEN ? = '' THEN raw_encrypted ELSE ? END, config_encrypted = CASE WHEN ? = '' THEN config_encrypted ELSE ? END, fingerprint = ?, source = 'managed', updated_at = datetime('now') WHERE id = ?`,
+		node.SubscriptionID, node.ProfileID, node.Name, node.Type, node.Server, node.Port, node.CountryCode, node.Location, node.Tags, nullString(node.TrafficServerID), boolToInt(node.Enabled), boolToInt(node.Stable), node.SortOrder, node.Raw, rawEnc, node.ConfigJSON, cfgEnc, fingerprint, node.ID)
 	return err
 }
 
@@ -3008,7 +3012,7 @@ func floatVal(value interface{}) float64 {
 }
 
 func nodeFingerprint(node Node) string {
-	return strings.ToLower(fmt.Sprintf("%s|%s|%d|%s", node.Type, node.Server, node.Port, node.Name))
+	return strings.ToLower(fmt.Sprintf("%s|%s|%d", strings.TrimSpace(node.Type), strings.TrimSpace(node.Server), node.Port))
 }
 
 func maxInt64(a, b int64) int64 {

@@ -17,6 +17,7 @@ import { AnimatedCollapse, DeferredRender } from '../components/AnimatedCollapse
 import CountryFlag from '../components/CountryFlag.jsx';
 import QuickCommandBar from '../components/server/QuickCommandBar.jsx';
 import SftpPanel from '../components/server/SftpPanel.jsx';
+import ServerLocationMap from '../components/server/ServerLocationMap.jsx';
 import {
   ChartBoundaryBox,
   ChartWarmupSkeleton,
@@ -56,7 +57,7 @@ import {
   toTimestamp,
 } from '../modules/serverChartMetrics.js';
 import * as echarts from 'echarts/core';
-import { LineChart } from 'echarts/charts';
+import { LineChart, MapChart, ScatterChart } from 'echarts/charts';
 import {
   AriaComponent,
   AxisPointerComponent,
@@ -113,6 +114,8 @@ import {
 
 echarts.use([
   LineChart,
+  MapChart,
+  ScatterChart,
   AxisPointerComponent,
   BrushComponent,
   GridComponent,
@@ -140,7 +143,8 @@ const HOST_COMPACT_COLUMNS = [
   { id: 'cpu', label: 'CPU' },
   { id: 'memory', label: '内存' },
   { id: 'disk', label: '硬盘' },
-  { id: 'remaining', label: '剩余' },
+  { id: 'remaining', label: '到期' },
+  { id: 'quotaRemaining', label: '余量' },
   { id: 'actions', label: '操作', required: true },
 ];
 const HOST_COMPACT_COLUMN_IDS = HOST_COMPACT_COLUMNS.map(column => column.id);
@@ -155,10 +159,11 @@ const HOST_COMPACT_COLUMN_WIDTHS = {
   cpu: 112,
   memory: 112,
   disk: 112,
+  quotaRemaining: 112,
   remaining: 112,
   actions: 76,
 };
-const HOST_COMPACT_ADAPTIVE_COLUMNS = new Set(['cpu', 'memory', 'disk', 'remaining']);
+const HOST_COMPACT_ADAPTIVE_COLUMNS = new Set(['cpu', 'memory', 'disk', 'remaining', 'quotaRemaining']);
 const HOST_COMPACT_HEADER_BOX_CLASS = {
   status: 'w-[58px] justify-center',
   name: 'w-[96px] justify-center',
@@ -170,6 +175,7 @@ const HOST_COMPACT_HEADER_BOX_CLASS = {
   cpu: 'w-full min-w-[96px] justify-center',
   memory: 'w-full min-w-[96px] justify-center',
   disk: 'w-full min-w-[96px] justify-center',
+  quotaRemaining: 'w-full min-w-[96px] justify-center',
   remaining: 'w-full min-w-[96px] justify-center',
   actions: 'w-[64px] justify-center',
 };
@@ -391,17 +397,17 @@ const CompactMetricBar = React.memo(CompactMetricBarComponent, (prev, next) => (
 function DenseUsageMeterComponent({ label, value, detail, indicatorClassName = '!bg-none !bg-kumo-brand' }) {
   const percent = clampPercent(toNumber(value, 0));
   return (
-    <div className={`flex h-8 min-w-[96px] w-full items-center rounded-md bg-kumo-recessed/45 px-1.5 ${COMPACT_INLINE_BOX_CLASS}`}>
-      <Meter
-        label={label}
-        value={percent}
-        min={0}
-        max={100}
-        customValue={detail || `${Math.round(percent)}%`}
-        className="gap-0.5 text-[10px] leading-none text-kumo-default"
-        trackClassName="!h-1.5 overflow-hidden rounded-full border border-kumo-interact/60 bg-kumo-base"
-        indicatorClassName={`!h-full rounded-full ${indicatorClassName}`}
-      />
+    <div className={`relative h-8 min-w-[96px] w-full rounded-md bg-kumo-recessed/45 ${COMPACT_INLINE_BOX_CLASS}`}>
+      <div className="absolute left-1.5 right-1.5 top-[3px] grid h-4 grid-cols-[minmax(0,1fr)_auto] items-center gap-1 text-[10px] leading-4 text-kumo-default">
+        <span className="min-w-0 truncate text-kumo-subtle">{label}</span>
+        <span className="min-w-0 truncate text-right text-[10px] font-medium leading-4 text-kumo-default">{detail || `${Math.round(percent)}%`}</span>
+      </div>
+      <div className="absolute bottom-1 left-1.5 right-1.5 h-1.5 overflow-hidden rounded-full bg-kumo-fill">
+        <div
+          className={`absolute inset-y-0 left-0 rounded-full ${indicatorClassName}`}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
     </div>
   );
 }
@@ -991,20 +997,7 @@ const normalizeLocationDisplayText = (value) => {
 };
 
 const getServerLocationText = (server) => {
-  if (server.country && server.country !== 'auto') {
-    return String(server.country).toUpperCase();
-  }
-  return normalizeLocationDisplayText(
-    server.location ||
-    server.region ||
-    server.resolved_country ||
-    server.info?.location ||
-    server.info?.region ||
-    server.info?.resolved_country ||
-    server.info?.country_code ||
-    server.country_code ||
-    ''
-  );
+  return String(getFlagCountry(server) || '').trim().toUpperCase().slice(0, 2);
 };
 
 const getKumoToken = (tokenName, fallback) => {
@@ -2368,6 +2361,7 @@ function ServerPage() {
   const [serverSearchText, setServerSearchText] = useState('');
   const [serverStatusFilter, setServerStatusFilter] = useState('all');
   const [serverListViewMode, setServerListViewMode] = useState(getInitialServerListViewMode);
+  const [serverMapOpen, setServerMapOpen] = useState(false);
   const [compactVisibleColumns, setCompactVisibleColumns] = useState(getInitialCompactVisibleColumns);
   const [compactColumnMenu, setCompactColumnMenu] = useState({ open: false, x: 0, y: 0 });
   const [expandedServers, setExpandedServers] = useState([]);
@@ -2413,6 +2407,7 @@ function ServerPage() {
     expiresAt: '',
     trafficLimitValue: '',
     trafficLimitUnit: 'TB',
+    trafficLimitMode: 'total',
     trafficAlertEnabled: false,
     trafficAlertPercent: 100,
     trafficCycleType: 'none',
@@ -3807,6 +3802,7 @@ function ServerPage() {
       expiresAt: formatDateInputValue(server.expires_at),
       trafficLimitValue: trafficQuotaForm.value,
       trafficLimitUnit: trafficQuotaForm.unit,
+      trafficLimitMode: server.traffic_limit_mode || 'total',
       trafficAlertEnabled: Boolean(server.traffic_alert_enabled),
       trafficAlertPercent: normalizeTrafficAlertPercentInput(server.traffic_alert_percent),
       trafficCycleType: server.traffic_cycle_type || 'none',
@@ -3992,6 +3988,7 @@ function ServerPage() {
         starts_at: normalizeStartInputValue(serverForm.startsAt),
         expires_at: normalizeExpiryInputValue(serverForm.expiresAt),
         traffic_limit_bytes: trafficLimitBytes,
+        traffic_limit_mode: serverForm.trafficLimitMode || 'total',
         traffic_alert_enabled: trafficAlertEnabled,
         traffic_alert_percent: normalizeTrafficAlertPercentInput(serverForm.trafficAlertPercent),
         traffic_cycle_type: serverForm.trafficCycleType || 'none',
@@ -7193,8 +7190,8 @@ function ServerPage() {
 
   const filteredServers = useMemo(() => {
     let list = serverList;
-    if (serverStatusFilter !== 'all') {
-      const normalizedFilter = serverStatusFilter === 'warning' ? 'interrupted' : serverStatusFilter;
+    const normalizedFilter = serverStatusFilter === 'offline' ? 'offline' : 'all';
+    if (normalizedFilter !== 'all') {
       list = list.filter(s => resolveServerDisplayStatus(s).state === normalizedFilter);
     }
     if (serverSearchText.trim()) {
@@ -7602,14 +7599,11 @@ function ServerPage() {
                 className={HOST_FILTER_TABS_CLASS}
                 listClassName={HOST_FILTER_TABS_LIST_CLASS}
                 indicatorClassName={HOST_FILTER_TABS_INDICATOR_CLASS}
-                value={serverStatusFilter === 'warning' ? 'interrupted' : serverStatusFilter}
+                value={serverStatusFilter === 'offline' ? 'offline' : 'all'}
                 onValueChange={setServerStatusFilter}
                 tabs={[
                   { value: 'all', label: `全部 (${statsSummary.total})` },
-                  { value: 'online', label: `在线 (${statsSummary.online})` },
-                  { value: 'interrupted', label: `中断 (${statsSummary.interrupted})` },
                   { value: 'offline', label: `离线 (${statsSummary.offline})` },
-                  { value: 'degraded', label: `采集异常 (${statsSummary.degraded})` },
                 ]}
               />
               <Tabs
@@ -7623,6 +7617,16 @@ function ServerPage() {
                   { value: 'cards', label: <span title="卡片视图" aria-label="卡片视图"><LayoutDashboard className="h-3.5 w-3.5" /></span> },
                   { value: 'compact', label: <span title="表格视图" aria-label="表格视图"><Menu className="h-3.5 w-3.5" /></span> },
                 ]}
+              />
+              <Button
+                size="sm"
+                shape="square"
+                variant="secondary"
+                className={serverMapOpen ? 'border-kumo-brand/50 text-kumo-brand' : ''}
+                icon={<Globe className="h-3.5 w-3.5" />}
+                aria-label={serverMapOpen ? '切回主机列表' : '切换到主机地图'}
+                title={serverMapOpen ? '切回主机列表' : '切换到主机地图'}
+                onClick={() => setServerMapOpen(prev => !prev)}
               />
             </div>
 
@@ -7640,7 +7644,16 @@ function ServerPage() {
           </div>
 
           {/* 列表渲染 */}
-          {serverLoading && serverList.length === 0 ? (
+          {serverMapOpen ? (
+            <ServerLocationMap
+              echarts={echarts}
+              servers={filteredServers}
+              resolveStatus={(server) => resolveServerDisplayStatus(server).state}
+              title="主机地图"
+              subtitle="当前筛选中的主机地理分布"
+              height="calc(100vh - 260px)"
+            />
+          ) : serverLoading && serverList.length === 0 ? (
             <div className="flex flex-col items-center justify-center p-12 app-card app-card-md text-kumo-subtle gap-2">
               <div className="w-6 h-6 border-2 border-kumo-brand border-t-transparent rounded-full animate-spin"></div>
               <p className="text-xs">正在连接并加载主机结构中...</p>
@@ -7870,6 +7883,16 @@ function ServerPage() {
                                         <div title={lifecycle.expiresAt ? `${formatDateTime(lifecycle.startsAt)} - ${formatDateTime(lifecycle.expiresAt)}，剩余 ${Math.round(lifecycle.remainingPercent)}%` : '永久'}>
                                           <DenseLifecycleMeter lifecycle={lifecycle} />
                                         </div>
+                                      </Table.Cell>
+                                    )}
+                                    {isCompactColumnVisible('quotaRemaining') && (
+                                      <Table.Cell className="!px-2 !py-1.5 whitespace-nowrap">
+                                        <DenseUsageMeter
+                                          label="余量"
+                                          value={trafficQuota.unlimited ? 100 : Math.max(0, 100 - trafficQuota.percent)}
+                                          detail={trafficQuota.unlimited ? '无限' : trafficQuota.remainingText}
+                                          indicatorClassName={trafficQuota.overLimit ? '!bg-none !bg-kumo-danger' : '!bg-none !bg-kumo-info'}
+                                        />
                                       </Table.Cell>
                                     )}
                                     {isCompactColumnVisible('actions') && (
@@ -10617,7 +10640,7 @@ function ServerPage() {
                       />
                     </div>
                     <div className="flex flex-col gap-1.5">
-                      <label className="font-semibold text-kumo-subtle">地区 / 归属国家 (Flags)</label>
+                      <label className="font-semibold text-kumo-subtle">地区</label>
                       <Select size="sm"
                         aria-label="地区归属国家"
                         value={serverForm.country}
@@ -10657,7 +10680,7 @@ function ServerPage() {
 
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(18rem,auto)] sm:items-end">
                     <div className="flex flex-col gap-1.5">
-                      <label className="font-semibold text-kumo-subtle">总流量配额</label>
+                      <label className="font-semibold text-kumo-subtle">流量配额</label>
                       <div className="grid grid-cols-[minmax(0,1fr)_6.5rem] gap-2">
                         <Input size="sm"
                           aria-label="总流量配额"
@@ -10679,6 +10702,13 @@ function ServerPage() {
                             { value: 'TB', label: 'TB' },
                             { value: 'PB', label: 'PB' },
                           ]}
+                        />
+                        <Select size="sm"
+                          aria-label="配额方向"
+                          value={serverForm.trafficLimitMode}
+                          onValueChange={(value) => setServerForm(prev => ({ ...prev, trafficLimitMode: String(value) }))}
+                          className="col-span-2 px-3 py-2"
+                          items={[{ value: 'total', label: '总流量（上行+下行）' }, { value: 'upload', label: '上行' }, { value: 'download', label: '下行' }]}
                         />
                       </div>
                     </div>

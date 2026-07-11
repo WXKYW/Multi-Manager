@@ -44,6 +44,8 @@
     "react-dom": "^19.2.7",
     "simple-icons-font": "^16.4.0",
     "socket.io-client": "^4.8.3",
+    "topojson-client": "^3.1.0",
+    "world-atlas": "^2.0.2",
     "zustand": "^5.0.14"
   },
   "devDependencies": {

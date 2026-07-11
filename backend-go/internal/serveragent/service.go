@@ -647,6 +647,7 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			starts_at DATETIME,
 			expires_at DATETIME,
 			traffic_limit_bytes INTEGER DEFAULT 0,
+			traffic_limit_mode TEXT DEFAULT 'total',
 			traffic_alert_enabled INTEGER DEFAULT 0,
 			traffic_alert_percent REAL DEFAULT 100,
 			traffic_cycle_type TEXT DEFAULT 'none',
@@ -838,6 +839,7 @@ func migrateColumns(ctx context.Context, db *sql.DB) error {
 	}
 	accountFields := []struct{ Name, SQL string }{
 		{"traffic_limit_bytes", "ALTER TABLE server_accounts ADD COLUMN traffic_limit_bytes INTEGER DEFAULT 0"},
+		{"traffic_limit_mode", "ALTER TABLE server_accounts ADD COLUMN traffic_limit_mode TEXT DEFAULT 'total'"},
 		{"traffic_alert_enabled", "ALTER TABLE server_accounts ADD COLUMN traffic_alert_enabled INTEGER DEFAULT 0"},
 		{"traffic_alert_percent", "ALTER TABLE server_accounts ADD COLUMN traffic_alert_percent REAL DEFAULT 100"},
 		{"traffic_cycle_type", "ALTER TABLE server_accounts ADD COLUMN traffic_cycle_type TEXT DEFAULT 'none'"},
@@ -1240,7 +1242,7 @@ func (s *Service) getPublicServerStatusItems(ctx context.Context, db *sql.DB, id
 		args = append(args, id)
 	}
 	where := "WHERE id IN (" + strings.Join(holders, ",") + ")"
-	rows, err := db.QueryContext(ctx, `SELECT id, name, host, status, COALESCE(cached_info, '{}'), COALESCE(description, ''), COALESCE(resolved_country, ''), traffic_limit_bytes, COALESCE(response_time, 0), updated_at FROM server_accounts `+where+` ORDER BY order_index ASC, created_at DESC`, args...)
+	rows, err := db.QueryContext(ctx, `SELECT id, name, host, status, COALESCE(cached_info, '{}'), COALESCE(description, ''), COALESCE(resolved_country, ''), traffic_limit_bytes, COALESCE(traffic_limit_mode, 'total'), COALESCE(response_time, 0), updated_at FROM server_accounts `+where+` ORDER BY order_index ASC, created_at DESC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1248,9 +1250,9 @@ func (s *Service) getPublicServerStatusItems(ctx context.Context, db *sql.DB, id
 	historyServerIDs := []string{}
 	latencyServerIDs := []string{}
 	for rows.Next() {
-		var id, name, host, status, cachedInfo, description, location, updatedAt string
+		var id, name, host, status, cachedInfo, description, location, trafficLimitMode, updatedAt string
 		var trafficLimit, responseTime int64
-		if err := rows.Scan(&id, &name, &host, &status, &cachedInfo, &description, &location, &trafficLimit, &responseTime, &updatedAt); err != nil {
+		if err := rows.Scan(&id, &name, &host, &status, &cachedInfo, &description, &location, &trafficLimit, &trafficLimitMode, &responseTime, &updatedAt); err != nil {
 			return nil, err
 		}
 		cached := map[string]interface{}{}
@@ -1272,13 +1274,6 @@ func (s *Service) getPublicServerStatusItems(ctx context.Context, db *sql.DB, id
 			status = "offline"
 		}
 		network := mapValue(cached["network"])
-		trafficUsed := int64(firstFloatValue(cached, "traffic_used_bytes"))
-		if trafficUsed == 0 {
-			trafficUsed = int64(firstFloatValue(cached, "net_in_transfer", "net_rx_total", "rx_total_bytes") + firstFloatValue(cached, "net_out_transfer", "net_tx_total", "tx_total_bytes"))
-		}
-		if networkUsed := getFloatFromMap(network, "traffic_used_bytes"); networkUsed > 0 {
-			trafficUsed = int64(networkUsed)
-		}
 		trafficRxBytes := firstFloatValue(cached, "net_in_transfer", "net_rx_total", "rx_total_bytes")
 		trafficTxBytes := firstFloatValue(cached, "net_out_transfer", "net_tx_total", "tx_total_bytes")
 		if networkRx := getFloatFromMap(network, "rx_total_bytes"); networkRx > 0 {
@@ -1287,6 +1282,7 @@ func (s *Service) getPublicServerStatusItems(ctx context.Context, db *sql.DB, id
 		if networkTx := getFloatFromMap(network, "tx_total_bytes"); networkTx > 0 {
 			trafficTxBytes = networkTx
 		}
+		trafficUsed := trafficUsedBytesForMode(trafficRxBytes, trafficTxBytes, trafficLimitMode)
 		uptimeSeconds := firstFloatValue(cached, "uptime_seconds", "uptime_raw")
 		if uptimeSeconds == 0 {
 			uptimeSeconds = getFloatValue(cached, "uptime")
@@ -1344,6 +1340,7 @@ func (s *Service) getPublicServerStatusItems(ctx context.Context, db *sql.DB, id
 			item["trafficRxBytes"] = trafficRxBytes
 			item["trafficTxBytes"] = trafficTxBytes
 			item["trafficLimitBytes"] = trafficLimit
+			item["trafficLimitMode"] = normalizeTrafficLimitMode(trafficLimitMode)
 		}
 		if showCharts {
 			historyServerIDs = append(historyServerIDs, id)
@@ -2690,7 +2687,7 @@ func (s *Service) listAccounts(w http.ResponseWriter, r *http.Request, db *sql.D
 		applog.Warn(r.Context(), "serveragent", "failed to refresh server locations", "error", err.Error())
 	}
 
-	rows, err := db.QueryContext(r.Context(), "SELECT id, name, host, port, username, auth_type, password, private_key, passphrase, status, monitor_mode, last_check_time, last_check_status, response_time, cached_info, tags, description, country, resolved_country, starts_at, expires_at, order_index, created_at, traffic_limit_bytes, traffic_alert_enabled, traffic_alert_percent, traffic_cycle_type, traffic_cycle_day, traffic_cycle_start, traffic_cycle_end, updated_at FROM server_accounts ORDER BY order_index ASC, created_at DESC")
+	rows, err := db.QueryContext(r.Context(), "SELECT id, name, host, port, username, auth_type, password, private_key, passphrase, status, monitor_mode, last_check_time, last_check_status, response_time, cached_info, tags, description, country, resolved_country, starts_at, expires_at, order_index, created_at, traffic_limit_bytes, COALESCE(traffic_limit_mode, 'total'), traffic_alert_enabled, traffic_alert_percent, traffic_cycle_type, traffic_cycle_day, traffic_cycle_start, traffic_cycle_end, updated_at FROM server_accounts ORDER BY order_index ASC, created_at DESC")
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2761,7 +2758,7 @@ func (s *Service) refreshMissingAccountLocations(ctx context.Context, db *sql.DB
 }
 
 func (s *Service) getAccount(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {
-	rows, err := db.QueryContext(r.Context(), "SELECT id, name, host, port, username, auth_type, password, private_key, passphrase, status, monitor_mode, last_check_time, last_check_status, response_time, cached_info, tags, description, country, resolved_country, starts_at, expires_at, order_index, created_at, traffic_limit_bytes, traffic_alert_enabled, traffic_alert_percent, traffic_cycle_type, traffic_cycle_day, traffic_cycle_start, traffic_cycle_end, updated_at FROM server_accounts WHERE id = ?", id)
+	rows, err := db.QueryContext(r.Context(), "SELECT id, name, host, port, username, auth_type, password, private_key, passphrase, status, monitor_mode, last_check_time, last_check_status, response_time, cached_info, tags, description, country, resolved_country, starts_at, expires_at, order_index, created_at, traffic_limit_bytes, COALESCE(traffic_limit_mode, 'total'), traffic_alert_enabled, traffic_alert_percent, traffic_cycle_type, traffic_cycle_day, traffic_cycle_start, traffic_cycle_end, updated_at FROM server_accounts WHERE id = ?", id)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2798,6 +2795,7 @@ func (s *Service) createAccount(w http.ResponseWriter, r *http.Request, db *sql.
 		ExpiresAt           string      `json:"expires_at"`
 		MonitorMode         string      `json:"monitor_mode"`
 		TrafficLimitBytes   int64       `json:"traffic_limit_bytes"`
+		TrafficLimitMode    string      `json:"traffic_limit_mode"`
 		TrafficAlertEnabled bool        `json:"traffic_alert_enabled"`
 		TrafficAlertPercent float64     `json:"traffic_alert_percent"`
 		TrafficCycleType    string      `json:"traffic_cycle_type"`
@@ -2836,16 +2834,17 @@ func (s *Service) createAccount(w http.ResponseWriter, r *http.Request, db *sql.
 		}
 	}
 	trafficLimitBytes := normalizeTrafficLimitBytes(req.TrafficLimitBytes)
+	trafficLimitMode := normalizeTrafficLimitMode(req.TrafficLimitMode)
 	trafficAlertPercent := normalizeTrafficAlertPercent(req.TrafficAlertPercent)
 	trafficCycleType := normalizeTrafficCycleType(req.TrafficCycleType)
 	trafficCycleDay := normalizeTrafficCycleDay(req.TrafficCycleDay)
 
 	_, err := db.ExecContext(r.Context(), `
 		INSERT INTO server_accounts (
-			id, name, host, port, username, auth_type, password, private_key, passphrase, status, tags, description, monitor_mode, country, resolved_country, starts_at, expires_at, traffic_limit_bytes, traffic_alert_enabled, traffic_alert_percent, traffic_cycle_type, traffic_cycle_day, traffic_cycle_start, traffic_cycle_end, order_index, created_at, updated_at, cached_info
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, name, host, port, username, auth_type, password, private_key, passphrase, status, tags, description, monitor_mode, country, resolved_country, starts_at, expires_at, traffic_limit_bytes, traffic_limit_mode, traffic_alert_enabled, traffic_alert_percent, traffic_cycle_type, traffic_cycle_day, traffic_cycle_start, traffic_cycle_end, order_index, created_at, updated_at, cached_info
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, req.Name, req.Host, coalesceInt(req.Port, 22), coalesceStr(req.Username, "agent"), coalesceStr(req.AuthType, "password"),
-		encPassword, encPrivateKey, encPassphrase, "unknown", SerializeList(req.Tags), req.Description, coalesceStr(req.MonitorMode, "agent"), req.Country, nullStr(resolvedCountry), nullStr(req.StartsAt), nullStr(req.ExpiresAt), trafficLimitBytes, boolToInt(req.TrafficAlertEnabled), trafficAlertPercent, trafficCycleType, trafficCycleDay, nullStr(req.TrafficCycleStart), nullStr(req.TrafficCycleEnd), orderIndex, now, now, nullStr(cachedInfo.String),
+		encPassword, encPrivateKey, encPassphrase, "unknown", SerializeList(req.Tags), req.Description, coalesceStr(req.MonitorMode, "agent"), req.Country, nullStr(resolvedCountry), nullStr(req.StartsAt), nullStr(req.ExpiresAt), trafficLimitBytes, trafficLimitMode, boolToInt(req.TrafficAlertEnabled), trafficAlertPercent, trafficCycleType, trafficCycleDay, nullStr(req.TrafficCycleStart), nullStr(req.TrafficCycleEnd), orderIndex, now, now, nullStr(cachedInfo.String),
 	)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
@@ -2880,14 +2879,15 @@ func (s *Service) updateAccount(w http.ResponseWriter, r *http.Request, db *sql.
 		trafficCycleType, trafficCycleStart, trafficCycleEnd                 sql.NullString
 		port, orderIndex                                                     int
 		trafficLimitBytes                                                    int64
+		trafficLimitMode                                                     string
 		trafficAlertEnabled                                                  int
 		trafficAlertPercent                                                  float64
 		trafficCycleDay                                                      int
 		responseTime                                                         sql.NullInt64
 		lastCheckTime, lastCheckStatus, cachedInfo                           sql.NullString
 	}
-	err := db.QueryRowContext(r.Context(), "SELECT name, host, port, username, auth_type, password, private_key, passphrase, status, monitor_mode, tags, description, country, resolved_country, starts_at, expires_at, traffic_limit_bytes, traffic_alert_enabled, traffic_alert_percent, traffic_cycle_type, traffic_cycle_day, traffic_cycle_start, traffic_cycle_end, order_index, created_at, response_time, last_check_time, last_check_status, cached_info FROM server_accounts WHERE id = ?", id).
-		Scan(&raw.name, &raw.host, &raw.port, &raw.username, &raw.authType, &raw.password, &raw.privateKey, &raw.passphrase, &raw.status, &raw.monitorMode, &raw.tags, &raw.description, &raw.country, &raw.resolvedCountry, &raw.startsAt, &raw.expiresAt, &raw.trafficLimitBytes, &raw.trafficAlertEnabled, &raw.trafficAlertPercent, &raw.trafficCycleType, &raw.trafficCycleDay, &raw.trafficCycleStart, &raw.trafficCycleEnd, &raw.orderIndex, &raw.createdAt, &raw.responseTime, &raw.lastCheckTime, &raw.lastCheckStatus, &raw.cachedInfo)
+	err := db.QueryRowContext(r.Context(), "SELECT name, host, port, username, auth_type, password, private_key, passphrase, status, monitor_mode, tags, description, country, resolved_country, starts_at, expires_at, traffic_limit_bytes, COALESCE(traffic_limit_mode, 'total'), traffic_alert_enabled, traffic_alert_percent, traffic_cycle_type, traffic_cycle_day, traffic_cycle_start, traffic_cycle_end, order_index, created_at, response_time, last_check_time, last_check_status, cached_info FROM server_accounts WHERE id = ?", id).
+		Scan(&raw.name, &raw.host, &raw.port, &raw.username, &raw.authType, &raw.password, &raw.privateKey, &raw.passphrase, &raw.status, &raw.monitorMode, &raw.tags, &raw.description, &raw.country, &raw.resolvedCountry, &raw.startsAt, &raw.expiresAt, &raw.trafficLimitBytes, &raw.trafficLimitMode, &raw.trafficAlertEnabled, &raw.trafficAlertPercent, &raw.trafficCycleType, &raw.trafficCycleDay, &raw.trafficCycleStart, &raw.trafficCycleEnd, &raw.orderIndex, &raw.createdAt, &raw.responseTime, &raw.lastCheckTime, &raw.lastCheckStatus, &raw.cachedInfo)
 	if err == sql.ErrNoRows {
 		response.Error(w, http.StatusNotFound, "服务器不存在")
 		return
@@ -2919,6 +2919,7 @@ func (s *Service) updateAccount(w http.ResponseWriter, r *http.Request, db *sql.
 	expiresAt := getStringVal(req, "expires_at", raw.expiresAt.String)
 	orderIndex := getIntVal(req, "order_index", raw.orderIndex)
 	trafficLimitBytes := normalizeTrafficLimitBytes(getInt64Val(req, "traffic_limit_bytes", raw.trafficLimitBytes))
+	trafficLimitMode := normalizeTrafficLimitMode(getStringVal(req, "traffic_limit_mode", raw.trafficLimitMode))
 	trafficAlertEnabled := getBoolVal(req, "traffic_alert_enabled", raw.trafficAlertEnabled != 0)
 	trafficAlertPercent := normalizeTrafficAlertPercent(getFloatVal(req, "traffic_alert_percent", raw.trafficAlertPercent))
 	trafficCycleType := normalizeTrafficCycleType(getStringVal(req, "traffic_cycle_type", raw.trafficCycleType.String))
@@ -2948,9 +2949,9 @@ func (s *Service) updateAccount(w http.ResponseWriter, r *http.Request, db *sql.
 
 	_, err = db.ExecContext(r.Context(), `
 		UPDATE server_accounts
-		SET name = ?, host = ?, port = ?, username = ?, auth_type = ?, password = ?, private_key = ?, passphrase = ?, tags = ?, description = ?, monitor_mode = ?, country = ?, resolved_country = ?, starts_at = ?, expires_at = ?, traffic_limit_bytes = ?, traffic_alert_enabled = ?, traffic_alert_percent = ?, traffic_cycle_type = ?, traffic_cycle_day = ?, traffic_cycle_start = ?, traffic_cycle_end = ?, order_index = ?, cached_info = ?, updated_at = ?
+		SET name = ?, host = ?, port = ?, username = ?, auth_type = ?, password = ?, private_key = ?, passphrase = ?, tags = ?, description = ?, monitor_mode = ?, country = ?, resolved_country = ?, starts_at = ?, expires_at = ?, traffic_limit_bytes = ?, traffic_limit_mode = ?, traffic_alert_enabled = ?, traffic_alert_percent = ?, traffic_cycle_type = ?, traffic_cycle_day = ?, traffic_cycle_start = ?, traffic_cycle_end = ?, order_index = ?, cached_info = ?, updated_at = ?
 		WHERE id = ?`,
-		name, host, port, username, authType, password, privateKey, passphrase, tags, description, monitorMode, nullStr(country), nullStr(resolvedCountry), nullStr(startsAt), nullStr(expiresAt), trafficLimitBytes, boolToInt(trafficAlertEnabled), trafficAlertPercent, trafficCycleType, trafficCycleDay, nullStr(trafficCycleStart), nullStr(trafficCycleEnd), orderIndex, nullStr(cachedInfo.String), now, id,
+		name, host, port, username, authType, password, privateKey, passphrase, tags, description, monitorMode, nullStr(country), nullStr(resolvedCountry), nullStr(startsAt), nullStr(expiresAt), trafficLimitBytes, trafficLimitMode, boolToInt(trafficAlertEnabled), trafficAlertPercent, trafficCycleType, trafficCycleDay, nullStr(trafficCycleStart), nullStr(trafficCycleEnd), orderIndex, nullStr(cachedInfo.String), now, id,
 	)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
@@ -2982,13 +2983,14 @@ func (s *Service) testTrafficAlert(w http.ResponseWriter, r *http.Request, db *s
 
 	var serverName, serverHost string
 	var trafficLimitBytes int64
+	var trafficLimitMode string
 	var trafficAlertPercent float64
 	var cachedInfo sql.NullString
 	err := db.QueryRowContext(r.Context(), `
-		SELECT name, host, traffic_limit_bytes, traffic_alert_percent, cached_info
+		SELECT name, host, traffic_limit_bytes, COALESCE(traffic_limit_mode, 'total'), traffic_alert_percent, cached_info
 		FROM server_accounts
 		WHERE id = ?`, id).
-		Scan(&serverName, &serverHost, &trafficLimitBytes, &trafficAlertPercent, &cachedInfo)
+		Scan(&serverName, &serverHost, &trafficLimitBytes, &trafficLimitMode, &trafficAlertPercent, &cachedInfo)
 	if err == sql.ErrNoRows {
 		response.Error(w, http.StatusNotFound, "服务器不存在")
 		return
@@ -3012,10 +3014,7 @@ func (s *Service) testTrafficAlert(w http.ResponseWriter, r *http.Request, db *s
 	if cachedInfo.Valid && cachedInfo.String != "" {
 		var cached map[string]interface{}
 		if err := json.Unmarshal([]byte(cachedInfo.String), &cached); err == nil {
-			trafficUsedBytes = int64(getFloatValue(cached, "net_in_transfer") + getFloatValue(cached, "net_out_transfer"))
-			if trafficUsedBytes < 0 {
-				trafficUsedBytes = 0
-			}
+			trafficUsedBytes = trafficUsedBytesFromMetrics(cached, trafficLimitMode)
 		}
 	}
 	if trafficLimitBytes <= 0 {
@@ -3037,6 +3036,7 @@ func (s *Service) testTrafficAlert(w http.ResponseWriter, r *http.Request, db *s
 		"eventType":           "traffic_high",
 		"traffic_used_bytes":  trafficUsedBytes,
 		"traffic_limit_bytes": trafficLimitBytes,
+		"traffic_limit_mode":  normalizeTrafficLimitMode(trafficLimitMode),
 		"traffic_percent":     fmt.Sprintf("%.2f", trafficPercent),
 		"traffic_used":        formatBytes(trafficUsedBytes),
 		"traffic_limit":       formatBytes(trafficLimitBytes),
@@ -3070,7 +3070,7 @@ func (s *Service) deleteAccount(w http.ResponseWriter, r *http.Request, db *sql.
 }
 
 func (s *Service) exportAccounts(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	rows, err := db.QueryContext(r.Context(), "SELECT name, host, port, username, auth_type, password, private_key, passphrase, tags, description, country, resolved_country, starts_at, expires_at, traffic_limit_bytes, traffic_alert_enabled, traffic_alert_percent, traffic_cycle_type, traffic_cycle_day, traffic_cycle_start, traffic_cycle_end FROM server_accounts ORDER BY order_index ASC")
+	rows, err := db.QueryContext(r.Context(), "SELECT name, host, port, username, auth_type, password, private_key, passphrase, tags, description, country, resolved_country, starts_at, expires_at, traffic_limit_bytes, COALESCE(traffic_limit_mode, 'total'), traffic_alert_enabled, traffic_alert_percent, traffic_cycle_type, traffic_cycle_day, traffic_cycle_start, traffic_cycle_end FROM server_accounts ORDER BY order_index ASC")
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -3084,10 +3084,11 @@ func (s *Service) exportAccounts(w http.ResponseWriter, r *http.Request, db *sql
 		var trafficCycleType, trafficCycleStart, trafficCycleEnd sql.NullString
 		var port int
 		var trafficLimitBytes int64
+		var trafficLimitMode string
 		var trafficAlertEnabled int
 		var trafficAlertPercent float64
 		var trafficCycleDay int
-		err := rows.Scan(&name, &host, &port, &username, &authType, &password, &privateKey, &passphrase, &tagsStr, &description, &country, &resolvedCountry, &startsAt, &expiresAt, &trafficLimitBytes, &trafficAlertEnabled, &trafficAlertPercent, &trafficCycleType, &trafficCycleDay, &trafficCycleStart, &trafficCycleEnd)
+		err := rows.Scan(&name, &host, &port, &username, &authType, &password, &privateKey, &passphrase, &tagsStr, &description, &country, &resolvedCountry, &startsAt, &expiresAt, &trafficLimitBytes, &trafficLimitMode, &trafficAlertEnabled, &trafficAlertPercent, &trafficCycleType, &trafficCycleDay, &trafficCycleStart, &trafficCycleEnd)
 		if err != nil {
 			response.Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -3109,6 +3110,7 @@ func (s *Service) exportAccounts(w http.ResponseWriter, r *http.Request, db *sql
 			"starts_at":             nullStringVal(startsAt),
 			"expires_at":            nullStringVal(expiresAt),
 			"traffic_limit_bytes":   trafficLimitBytes,
+			"traffic_limit_mode":    normalizeTrafficLimitMode(trafficLimitMode),
 			"traffic_alert_enabled": trafficAlertEnabled != 0,
 			"traffic_alert_percent": normalizeTrafficAlertPercent(trafficAlertPercent),
 			"traffic_cycle_type":    normalizeTrafficCycleType(trafficCycleType.String),
@@ -3151,6 +3153,7 @@ func (s *Service) importAccounts(w http.ResponseWriter, r *http.Request, db *sql
 		startsAt, _ := item["starts_at"].(string)
 		expiresAt, _ := item["expires_at"].(string)
 		trafficLimitBytes := normalizeTrafficLimitBytes(getInt64Val(item, "traffic_limit_bytes", 0))
+		trafficLimitMode := normalizeTrafficLimitMode(getStringVal(item, "traffic_limit_mode", "total"))
 		trafficAlertEnabled := getBoolVal(item, "traffic_alert_enabled", false)
 		trafficAlertPercent := normalizeTrafficAlertPercent(getFloatVal(item, "traffic_alert_percent", 100))
 		trafficCycleType := normalizeTrafficCycleType(getStringVal(item, "traffic_cycle_type", "none"))
@@ -3184,10 +3187,10 @@ func (s *Service) importAccounts(w http.ResponseWriter, r *http.Request, db *sql
 
 		_, err := db.ExecContext(r.Context(), `
 			INSERT INTO server_accounts (
-				id, name, host, port, username, auth_type, password, private_key, passphrase, status, tags, description, monitor_mode, country, resolved_country, starts_at, expires_at, traffic_limit_bytes, traffic_alert_enabled, traffic_alert_percent, traffic_cycle_type, traffic_cycle_day, traffic_cycle_start, traffic_cycle_end, order_index, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				id, name, host, port, username, auth_type, password, private_key, passphrase, status, tags, description, monitor_mode, country, resolved_country, starts_at, expires_at, traffic_limit_bytes, traffic_limit_mode, traffic_alert_enabled, traffic_alert_percent, traffic_cycle_type, traffic_cycle_day, traffic_cycle_start, traffic_cycle_end, order_index, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, name, host, port, coalesceStr(username, "agent"), coalesceStr(authType, "password"),
-			encPassword, encPrivateKey, encPassphrase, "unknown", SerializeList(tags), description, "agent", country, nil, nullStr(startsAt), nullStr(expiresAt), trafficLimitBytes, boolToInt(trafficAlertEnabled), trafficAlertPercent, trafficCycleType, trafficCycleDay, nullStr(trafficCycleStart), nullStr(trafficCycleEnd), orderIndex, now, now,
+			encPassword, encPrivateKey, encPassphrase, "unknown", SerializeList(tags), description, "agent", country, nil, nullStr(startsAt), nullStr(expiresAt), trafficLimitBytes, trafficLimitMode, boolToInt(trafficAlertEnabled), trafficAlertPercent, trafficCycleType, trafficCycleDay, nullStr(trafficCycleStart), nullStr(trafficCycleEnd), orderIndex, now, now,
 		)
 
 		if err != nil {
@@ -3262,13 +3265,14 @@ func (s *Service) scanAccount(row *sql.Rows) (map[string]interface{}, error) {
 	var responseTime sql.NullInt64
 	var port, orderIndex int
 	var trafficLimitBytes int64
+	var trafficLimitMode string
 	var trafficAlertEnabled int
 	var trafficAlertPercent float64
 	var trafficCycleType, trafficCycleStart, trafficCycleEnd sql.NullString
 	var trafficCycleDay int
 	var tagsStr string
 
-	err := row.Scan(&id, &name, &host, &port, &username, &authType, &password, &privateKey, &passphrase, &status, &monitorMode, &lastCheckTime, &lastCheckStatus, &responseTime, &cachedInfo, &tagsStr, &description, &country, &resolvedCountry, &startsAt, &expiresAt, &orderIndex, &createdAt, &trafficLimitBytes, &trafficAlertEnabled, &trafficAlertPercent, &trafficCycleType, &trafficCycleDay, &trafficCycleStart, &trafficCycleEnd, &updatedAt)
+	err := row.Scan(&id, &name, &host, &port, &username, &authType, &password, &privateKey, &passphrase, &status, &monitorMode, &lastCheckTime, &lastCheckStatus, &responseTime, &cachedInfo, &tagsStr, &description, &country, &resolvedCountry, &startsAt, &expiresAt, &orderIndex, &createdAt, &trafficLimitBytes, &trafficLimitMode, &trafficAlertEnabled, &trafficAlertPercent, &trafficCycleType, &trafficCycleDay, &trafficCycleStart, &trafficCycleEnd, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -3279,7 +3283,7 @@ func (s *Service) scanAccount(row *sql.Rows) (map[string]interface{}, error) {
 		status, monitorMode, lastCheckTime, lastCheckStatus, responseTime, cachedInfo,
 		tagsStr,
 		description, country, resolvedCountry, startsAt, expiresAt, orderIndex, createdAt, updatedAt,
-		trafficLimitBytes, trafficAlertEnabled != 0, trafficAlertPercent,
+		trafficLimitBytes, trafficLimitMode, trafficAlertEnabled != 0, trafficAlertPercent,
 		trafficCycleType, trafficCycleDay, trafficCycleStart, trafficCycleEnd,
 	), nil
 }
@@ -3291,14 +3295,15 @@ func (s *Service) queryAccountByID(ctx context.Context, db *sql.DB, id string) (
 	var responseTime sql.NullInt64
 	var port, orderIndex int
 	var trafficLimitBytes int64
+	var trafficLimitMode string
 	var trafficAlertEnabled int
 	var trafficAlertPercent float64
 	var trafficCycleType, trafficCycleStart, trafficCycleEnd sql.NullString
 	var trafficCycleDay int
 	var tagsStr string
 
-	err := db.QueryRowContext(ctx, "SELECT id, name, host, port, username, auth_type, password, private_key, passphrase, status, monitor_mode, last_check_time, last_check_status, response_time, cached_info, tags, description, country, resolved_country, starts_at, expires_at, order_index, created_at, traffic_limit_bytes, traffic_alert_enabled, traffic_alert_percent, traffic_cycle_type, traffic_cycle_day, traffic_cycle_start, traffic_cycle_end, updated_at FROM server_accounts WHERE id = ?", id).
-		Scan(&id, &name, &host, &port, &username, &authType, &password, &privateKey, &passphrase, &status, &monitorMode, &lastCheckTime, &lastCheckStatus, &responseTime, &cachedInfo, &tagsStr, &description, &country, &resolvedCountry, &startsAt, &expiresAt, &orderIndex, &createdAt, &trafficLimitBytes, &trafficAlertEnabled, &trafficAlertPercent, &trafficCycleType, &trafficCycleDay, &trafficCycleStart, &trafficCycleEnd, &updatedAt)
+	err := db.QueryRowContext(ctx, "SELECT id, name, host, port, username, auth_type, password, private_key, passphrase, status, monitor_mode, last_check_time, last_check_status, response_time, cached_info, tags, description, country, resolved_country, starts_at, expires_at, order_index, created_at, traffic_limit_bytes, COALESCE(traffic_limit_mode, 'total'), traffic_alert_enabled, traffic_alert_percent, traffic_cycle_type, traffic_cycle_day, traffic_cycle_start, traffic_cycle_end, updated_at FROM server_accounts WHERE id = ?", id).
+		Scan(&id, &name, &host, &port, &username, &authType, &password, &privateKey, &passphrase, &status, &monitorMode, &lastCheckTime, &lastCheckStatus, &responseTime, &cachedInfo, &tagsStr, &description, &country, &resolvedCountry, &startsAt, &expiresAt, &orderIndex, &createdAt, &trafficLimitBytes, &trafficLimitMode, &trafficAlertEnabled, &trafficAlertPercent, &trafficCycleType, &trafficCycleDay, &trafficCycleStart, &trafficCycleEnd, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -3309,7 +3314,7 @@ func (s *Service) queryAccountByID(ctx context.Context, db *sql.DB, id string) (
 		status, monitorMode, lastCheckTime, lastCheckStatus, responseTime, cachedInfo,
 		tagsStr,
 		description, country, resolvedCountry, startsAt, expiresAt, orderIndex, createdAt, updatedAt,
-		trafficLimitBytes, trafficAlertEnabled != 0, trafficAlertPercent,
+		trafficLimitBytes, trafficLimitMode, trafficAlertEnabled != 0, trafficAlertPercent,
 		trafficCycleType, trafficCycleDay, trafficCycleStart, trafficCycleEnd,
 	), nil
 }
@@ -3326,6 +3331,7 @@ func (s *Service) buildAccountResponse(
 	orderIndex int,
 	createdAt, updatedAt string,
 	trafficLimitBytes int64,
+	trafficLimitMode string,
 	trafficAlertEnabled bool,
 	trafficAlertPercent float64,
 	trafficCycleType sql.NullString,
@@ -3368,6 +3374,7 @@ func (s *Service) buildAccountResponse(
 		"starts_at":             nullStringVal(startsAt),
 		"expires_at":            nullStringVal(expiresAt),
 		"traffic_limit_bytes":   trafficLimitBytes,
+		"traffic_limit_mode":    normalizeTrafficLimitMode(trafficLimitMode),
 		"traffic_alert_enabled": trafficAlertEnabled,
 		"traffic_alert_percent": normalizeTrafficAlertPercent(trafficAlertPercent),
 		"traffic_cycle_type":    normalizeTrafficCycleType(trafficCycleType.String),
@@ -3396,7 +3403,7 @@ func (s *Service) buildAccountResponse(
 		var cachedMetrics map[string]interface{}
 		if err := json.Unmarshal([]byte(cachedInfo.String), &cachedMetrics); err == nil {
 			info := s.buildInfoField(cachedMetrics)
-			enrichTrafficQuota(info, cachedMetrics, trafficLimitBytes, trafficAlertEnabled, trafficAlertPercent)
+			enrichTrafficQuota(info, cachedMetrics, trafficLimitBytes, trafficLimitMode, trafficAlertEnabled, trafficAlertPercent)
 			res["info"] = info
 		}
 	}
@@ -3878,6 +3885,47 @@ func normalizeTrafficLimitBytes(value int64) int64 {
 	return value
 }
 
+func normalizeTrafficLimitMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "upload", "download":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "total"
+	}
+}
+
+func trafficUsedBytesForMode(rxTotal, txTotal float64, mode string) int64 {
+	var used float64
+	switch normalizeTrafficLimitMode(mode) {
+	case "upload":
+		used = txTotal
+	case "download":
+		used = rxTotal
+	default:
+		used = rxTotal + txTotal
+	}
+	if used < 0 {
+		return 0
+	}
+	return int64(used)
+}
+
+func trafficUsedBytesFromMetrics(metrics map[string]interface{}, mode string) int64 {
+	if metrics == nil {
+		return 0
+	}
+	network := mapValue(metrics["network"])
+	rxTotal := firstFloatValue(metrics, "net_in_transfer", "net_rx_total", "rx_total_bytes")
+	txTotal := firstFloatValue(metrics, "net_out_transfer", "net_tx_total", "tx_total_bytes")
+	if networkRx := getFloatFromMap(network, "rx_total_bytes"); networkRx > 0 {
+		rxTotal = networkRx
+	}
+	if networkTx := getFloatFromMap(network, "tx_total_bytes"); networkTx > 0 {
+		txTotal = networkTx
+	}
+	return trafficUsedBytesForMode(rxTotal, txTotal, mode)
+}
+
 func normalizeTrafficAlertPercent(value float64) float64 {
 	if value <= 0 {
 		return 100
@@ -3908,7 +3956,7 @@ func normalizeTrafficCycleDay(value int) int {
 	return value
 }
 
-func enrichTrafficQuota(info map[string]interface{}, metrics map[string]interface{}, limitBytes int64, alertEnabled bool, alertPercent float64) {
+func enrichTrafficQuota(info map[string]interface{}, metrics map[string]interface{}, limitBytes int64, limitMode string, alertEnabled bool, alertPercent float64) {
 	if info == nil || limitBytes <= 0 {
 		return
 	}
@@ -3926,10 +3974,7 @@ func enrichTrafficQuota(info map[string]interface{}, metrics map[string]interfac
 	if txTotal == 0 {
 		txTotal = getFloatValue(metrics, "net_out_transfer")
 	}
-	usedBytes := int64(rxTotal + txTotal)
-	if usedBytes < 0 {
-		usedBytes = 0
-	}
+	usedBytes := trafficUsedBytesForMode(rxTotal, txTotal, limitMode)
 	percent := 0.0
 	if limitBytes > 0 {
 		percent = (float64(usedBytes) / float64(limitBytes)) * 100
@@ -3937,6 +3982,7 @@ func enrichTrafficQuota(info map[string]interface{}, metrics map[string]interfac
 
 	network["traffic_used_bytes"] = usedBytes
 	network["traffic_limit_bytes"] = limitBytes
+	network["traffic_limit_mode"] = normalizeTrafficLimitMode(limitMode)
 	network["traffic_percent"] = percent
 	network["traffic_alert_enabled"] = alertEnabled
 	network["traffic_alert_percent"] = normalizeTrafficAlertPercent(alertPercent)
@@ -4431,10 +4477,11 @@ func (s *Service) checkMetricAlerts(ctx context.Context, db *sql.DB, serverID st
 
 	var serverName, serverHost string
 	var trafficLimitBytes int64
+	var trafficLimitMode string
 	var trafficAlertEnabled int
 	var trafficAlertPercent float64
 	var cachedInfo sql.NullString
-	_ = db.QueryRowContext(ctx, `SELECT name, host, traffic_limit_bytes, traffic_alert_enabled, traffic_alert_percent, cached_info FROM server_accounts WHERE id = ?`, serverID).Scan(&serverName, &serverHost, &trafficLimitBytes, &trafficAlertEnabled, &trafficAlertPercent, &cachedInfo)
+	_ = db.QueryRowContext(ctx, `SELECT name, host, traffic_limit_bytes, COALESCE(traffic_limit_mode, 'total'), traffic_alert_enabled, traffic_alert_percent, cached_info FROM server_accounts WHERE id = ?`, serverID).Scan(&serverName, &serverHost, &trafficLimitBytes, &trafficLimitMode, &trafficAlertEnabled, &trafficAlertPercent, &cachedInfo)
 	if serverName == "" {
 		serverName = serverID
 	}
@@ -4447,10 +4494,7 @@ func (s *Service) checkMetricAlerts(ctx context.Context, db *sql.DB, serverID st
 	if trafficLimitBytes > 0 && cachedInfo.Valid && cachedInfo.String != "" {
 		var cached map[string]interface{}
 		if err := json.Unmarshal([]byte(cachedInfo.String), &cached); err == nil {
-			trafficUsedBytes = int64(getFloatValue(cached, "net_in_transfer") + getFloatValue(cached, "net_out_transfer"))
-			if trafficUsedBytes < 0 {
-				trafficUsedBytes = 0
-			}
+			trafficUsedBytes = trafficUsedBytesFromMetrics(cached, trafficLimitMode)
 			trafficPercent = (float64(trafficUsedBytes) / float64(trafficLimitBytes)) * 100
 		}
 	}
@@ -4465,6 +4509,7 @@ func (s *Service) checkMetricAlerts(ctx context.Context, db *sql.DB, serverID st
 		"disk_usage":          disk,
 		"traffic_used_bytes":  trafficUsedBytes,
 		"traffic_limit_bytes": trafficLimitBytes,
+		"traffic_limit_mode":  normalizeTrafficLimitMode(trafficLimitMode),
 		"traffic_percent":     trafficPercent,
 		"traffic_used":        formatBytes(trafficUsedBytes),
 		"traffic_limit":       formatBytes(trafficLimitBytes),
