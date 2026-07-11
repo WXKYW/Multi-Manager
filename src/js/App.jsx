@@ -4,6 +4,7 @@ import AuthPage from './pages/AuthPage.jsx';
 import MainLayout from './components/MainLayout.jsx';
 
 const PublicSharePage = lazy(() => import('./pages/PublicSharePage.jsx'));
+const PublicM365RegisterPage = lazy(() => import('./pages/PublicM365RegisterPage.jsx'));
 const PublicStatusPage = lazy(() => import('./pages/PublicStatusPage.jsx'));
 const PublicServerStatusPage = lazy(() => import('./pages/PublicServerStatusPage.jsx'));
 const VoidRoomPage = lazy(() => import('./pages/VoidRoomPage.jsx'));
@@ -34,11 +35,18 @@ const getPublicFileboxRouteMode = () => {
   return false;
 };
 
+const isPublicM365RegisterRoute = () => {
+  if (typeof window === 'undefined') return false;
+  const path = window.location.pathname.replace(/\/+$/, '') || '/';
+  return path === '/m365/register';
+};
+
 function App() {
   const { isAuthenticated, checkAuth, isCheckingAuth, themeMode } = useStore();
   const [domainStatusRoute, setDomainStatusRoute] = useState(null);
   const publicStatusRouteMode = getPublicStatusRouteMode();
   const publicFileboxRouteMode = getPublicFileboxRouteMode();
+  const publicM365RegisterRoute = isPublicM365RegisterRoute();
   const dockerMockPreview = isDockerMockPreviewRoute();
 
   // 挂载时自动运行初始身份校验
@@ -102,6 +110,10 @@ function App() {
 
   if (publicFileboxRouteMode === 'void') {
     return <Suspense fallback={null}><VoidRoomPage /></Suspense>;
+  }
+
+  if (publicM365RegisterRoute) {
+    return <Suspense fallback={null}><PublicM365RegisterPage /></Suspense>;
   }
 
   if (publicStatusRouteMode === 'server-slug') {

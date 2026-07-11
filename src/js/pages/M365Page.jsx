@@ -1,16 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '@cloudflare/kumo/components/button';
+import { Checkbox } from '@cloudflare/kumo/components/checkbox';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
+import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
-import { Loader, SkeletonLine } from '@cloudflare/kumo/components/loader';
+import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Tabs } from '@cloudflare/kumo';
 import { dialog } from '../modules/dialog.js';
 import { toast } from '../modules/toast.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import {
   AppCard,
+  cx,
   EmptyState,
   PageStack,
   PageToolbar,
@@ -18,8 +21,9 @@ import {
   StatusBadge,
 } from '../components/ui/AppPrimitives.jsx';
 import {
-  Activity,
+  ChevronDown,
   Cloud,
+  Copy,
   Database,
   Folder,
   Globe,
@@ -27,24 +31,21 @@ import {
   RefreshCw,
   Search,
   Settings,
+  Shield,
   Trash,
   User,
   Users,
 } from '../components/Icons.jsx';
-import { formatDateTime, formatFileSize } from '../modules/utils.js';
+import { formatDateTime } from '../modules/utils.js';
 
-const REPORT_TABS = [
-  { value: 'office-activity', label: 'Office 活跃' },
-  { value: 'm365-apps', label: 'M365 Apps' },
-  { value: 'onedrive-usage', label: 'OneDrive' },
-  { value: 'mailbox-usage', label: '邮箱' },
-];
-
-const REPORT_PERIODS = [
-  { value: 'D7', label: '7 天' },
-  { value: 'D30', label: '30 天' },
-  { value: 'D90', label: '90 天' },
-  { value: 'D180', label: '180 天' },
+const M365_REQUIRED_PERMISSIONS = [
+  { name: 'User.Read.All', note: '读取用户列表与详情' },
+  { name: 'User.ReadWrite.All', note: '创建、编辑、删除用户' },
+  { name: 'Organization.Read.All', note: '读取租户订阅与许可证到期时间' },
+  { name: 'LicenseAssignment.Read.All', note: '读取用户和组的许可证信息' },
+  { name: 'LicenseAssignment.ReadWrite.All', note: '分配或回收许可证' },
+  { name: 'Group.Create', note: '创建组' },
+  { name: 'GroupMember.ReadWrite.All', note: '添加或移除组成员' },
 ];
 
 const defaultAccountForm = {
@@ -60,6 +61,7 @@ const defaultUserForm = {
   displayName: '',
   mailNickname: '',
   userPrincipalName: '',
+  emailDomain: '',
   password: '',
   department: '',
   jobTitle: '',
@@ -76,6 +78,288 @@ const defaultGroupForm = {
   mailEnabled: false,
 };
 
+const defaultPublicPageForm = {
+  id: null,
+  name: '',
+  accountIds: [],
+  domains: [],
+  usageLocation: '',
+  skuIds: [],
+  enabled: true,
+  forceChangePasswordNextSignIn: true,
+  expiresAt: '',
+};
+
+const defaultInviteCodeGeneratorForm = {
+  publicPageId: '',
+  quantity: 1,
+};
+
+const workspaceHeightClass = 'min-h-0 flex-1 overflow-hidden';
+const panelBodyClass = 'flex min-h-0 flex-1 flex-col';
+const scrollViewportClass = 'min-h-0 flex-1 overflow-auto scrollbar-thin';
+const tableFrameClass = 'h-0 min-h-0 flex-1 overflow-hidden';
+const userTableViewportClass = 'max-h-[calc(100dvh-26rem)] min-h-[18rem] overscroll-contain';
+const DEFAULT_NEW_USER_PASSWORD = 'Mjj@1234';
+const USER_TABLE_COLUMN_WIDTHS = [96, 180, 220, 220, 260, 220];
+const tenantGridStyle = { gridTemplateColumns: 'repeat(auto-fill, minmax(18rem, 21rem))' };
+const tenantCardFrameClass = 'min-h-[13.25rem] rounded-xl px-4 py-3.5';
+
+function SkuGridSkeleton() {
+  return (
+    <div
+      className={cx(scrollViewportClass, 'grid auto-rows-max content-start gap-2.5 pr-1')}
+      style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}
+    >
+      {Array.from({ length: 6 }).map((_, index) => (
+        <div key={index} className="rounded-lg border border-kumo-line/70 bg-kumo-base/95 px-3 py-2.5">
+          <SkeletonLine className="h-5 w-3/5" />
+          <div className="mt-2 flex flex-wrap gap-2">
+            <SkeletonLine className="h-3 w-20" />
+            <SkeletonLine className="h-3 w-16" />
+            <SkeletonLine className="h-3 w-14" />
+          </div>
+          <SkeletonLine className="mt-3 h-1.5 w-full rounded-full" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TenantGridSkeleton() {
+  return (
+    <div
+      className={cx(scrollViewportClass, 'grid auto-rows-max content-start items-start gap-3 p-1')}
+      style={tenantGridStyle}
+    >
+      {Array.from({ length: 4 }).map((_, index) => (
+        <div key={index} className="rounded-xl border border-kumo-line/80 bg-kumo-base/95 p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <SkeletonLine className="h-9 w-9 rounded-lg" />
+              <div className="min-w-0 space-y-2">
+                <SkeletonLine className="h-4 w-32" />
+                <SkeletonLine className="h-3 w-24" />
+              </div>
+            </div>
+            <SkeletonLine className="h-6 w-14 rounded-full" />
+          </div>
+          <div className="mt-3 space-y-2 rounded-lg border border-kumo-line/60 bg-kumo-recessed/20 p-2">
+            <SkeletonLine className="h-3 w-full" />
+            <SkeletonLine className="h-3 w-5/6" />
+            <SkeletonLine className="h-3 w-4/5" />
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <SkeletonLine className="h-3 w-16" />
+            <div className="flex gap-2">
+              <SkeletonLine className="h-8 w-8 rounded-md" />
+              <SkeletonLine className="h-8 w-12 rounded-md" />
+              <SkeletonLine className="h-8 w-8 rounded-md" />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CardTableSkeleton({ rows = 6, showToolbar = false }) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+      {showToolbar ? (
+        <div className="flex items-center gap-2">
+          <SkeletonLine className="h-8 w-44" />
+          <SkeletonLine className="h-8 w-24" />
+        </div>
+      ) : null}
+      <div className={cx(tableFrameClass, 'rounded-lg border border-kumo-line/80')}>
+        <div className="space-y-3 p-3">
+          <SkeletonLine className="h-9 w-full" />
+          {Array.from({ length: rows }).map((_, index) => (
+            <SkeletonLine key={index} className="h-10 w-full" />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GroupsTabSkeleton() {
+  return (
+    <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+      <AppCard padding="none" className="flex min-h-0 flex-col overflow-hidden">
+        <div className="space-y-3 p-3">
+          <SkeletonLine className="h-9 w-full" />
+          {Array.from({ length: 6 }).map((_, index) => (
+            <SkeletonLine key={index} className="h-12 w-full" />
+          ))}
+        </div>
+      </AppCard>
+
+      <SectionCard
+        className="flex min-h-0 flex-col"
+        bodyClassName={panelBodyClass}
+        title="组成员"
+        description="输入成员对象 ID 即可添加；移除成员会实时调用 Graph。"
+        icon={<Users className="h-4 w-4" />}
+        bodyPadding="sm"
+        action={(
+          <div className="flex items-center gap-2">
+            <SkeletonLine className="h-8 w-44" />
+            <SkeletonLine className="h-8 w-24" />
+          </div>
+        )}
+      >
+        <CardTableSkeleton rows={5} showToolbar />
+      </SectionCard>
+    </div>
+  );
+}
+
+const SKU_DISPLAY_NAMES = {
+  STANDARDWOFFPACK_STUDENT: 'A1 学生版',
+  STANDARDWOFFPACK_FACULTY: 'A1 教师版',
+  OFFICE_365_A1_PLUS_FOR_STUDENT: 'A1 Plus 学生版',
+  OFFICE_365_A1_PLUS_FOR_FACULTY: 'A1 Plus 教师版',
+  M365EDU_A3_STUUSEBNFT_RPA1: 'A3 无人值守版',
+  Office_365_E3Y: 'E3Y',
+  DEVELOPERPACK: 'E3 开发者订阅',
+  DEVELOPERPACK_E5: 'E5 开发者订阅',
+  FLOW_FREE: 'Power Automate 免费版',
+  ENTERPRISEPACK: 'Office 365 E3',
+};
+const SKU_ID_DISPLAY_NAMES = {
+  '314c4481-f395-4525-be8b-2ec4bb1e9d91': 'A1 学生版',
+  '94763226-9b3c-4e75-a931-5c89701abe66': 'A1 教师版',
+  'e82ae690-a2d5-4d76-8d30-7c6e01e6022e': 'A1 Plus 学生版',
+  '78e66a63-337a-4a9a-8959-41c6654dfb56': 'A1 Plus 教师版',
+  '1aa94593-ca12-4254-a738-81a5972958e8': 'A3 无人值守版',
+  '189a915c-fe4f-4ffa-bde4-85b9628d07a0': 'E3 开发者订阅',
+  '6fd2c87f-b296-42f0-b197-1e91e994b900': 'E3Y',
+  'c42b9cae-ea4f-4ab7-9717-81576235ccac': 'E5 开发者订阅',
+};
+
+function getDisplayText(value) {
+  if (value === null || value === undefined || value === '') return '-';
+  return String(value);
+}
+
+function getSkuDisplayName(skuPartNumber, skuId) {
+  const skuName = skuPartNumber || skuId || '';
+  if (!skuName) return '-';
+  return SKU_DISPLAY_NAMES[skuName] || SKU_ID_DISPLAY_NAMES[skuId] || skuName;
+}
+
+function getSkuDisplayLabel(skuPartNumber, skuId) {
+  return getSkuDisplayName(skuPartNumber, skuId);
+}
+
+function getAssignedSkuLabels(assignedLicenses, skuLabelLookup = new Map()) {
+  if (!Array.isArray(assignedLicenses) || assignedLicenses.length === 0) return [];
+  const labels = [];
+  const seen = new Set();
+  assignedLicenses.forEach((item) => {
+    const skuId = String(item?.skuId || '').trim();
+    const label = skuLabelLookup.get(skuId) || getSkuDisplayName(item?.skuPartNumber, skuId);
+    const normalized = String(label || '').trim();
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    labels.push(normalized);
+  });
+  return labels;
+}
+
+function clampPercent(value) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, value));
+}
+
+function formatMetricNumber(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return '0';
+  return numericValue.toLocaleString('en-US');
+}
+
+function formatDateOnly(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+}
+
+function getSkuLifecycleText(sku) {
+  const nextLifecycleDateTime = sku?.nextLifecycleDateTime;
+  if (!nextLifecycleDateTime) return '';
+  const status = String(sku?.subscriptionStatus || '').toLowerCase();
+  const label = ['enabled', 'warning'].includes(status) ? '到期' : '生命周期';
+  const dateText = formatDateOnly(nextLifecycleDateTime);
+  return dateText ? `${label} ${dateText}` : '';
+}
+
+function getDomainFromPrincipalName(value) {
+  const text = String(value || '').trim();
+  const atIndex = text.indexOf('@');
+  if (atIndex < 0 || atIndex === text.length - 1) return '';
+  return text.slice(atIndex + 1).trim();
+}
+
+function normalizeDomainValue(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function getAccountDomainList(account) {
+  const domains = new Set();
+  if (Array.isArray(account?.verifiedDomains)) {
+    account.verifiedDomains.forEach((domain) => {
+      const normalized = normalizeDomainValue(domain);
+      if (normalized) domains.add(normalized);
+    });
+  }
+  const defaultDomain = normalizeDomainValue(account?.defaultDomain);
+  if (defaultDomain) {
+    domains.add(defaultDomain);
+  }
+  return Array.from(domains).sort((a, b) => a.localeCompare(b));
+}
+
+function extractOrganizationDomains(organization) {
+  if (!organization || !Array.isArray(organization.verifiedDomains)) return [];
+  const defaults = [];
+  const others = [];
+  organization.verifiedDomains.forEach((item) => {
+    const normalized = normalizeDomainValue(item?.name);
+    if (!normalized) return;
+    if (item?.isDefault) {
+      defaults.push(normalized);
+    } else {
+      others.push(normalized);
+    }
+  });
+  return Array.from(new Set([...defaults, ...others]));
+}
+
+function getPrincipalLocalPart(value) {
+  const text = String(value || '').trim();
+  const atIndex = text.indexOf('@');
+  if (atIndex <= 0) return text;
+  return text.slice(0, atIndex).trim();
+}
+
+function getFriendlyErrorMessage(message, fallback) {
+  if (!message) return fallback;
+  if (message.includes('Authorization_RequestDenied')) {
+    return `${fallback}：当前租户权限不足`;
+  }
+  if (message.includes('ResourceNotFound')) {
+    return `${fallback}：目标资源不存在`;
+  }
+  return message;
+}
+
 const getAuthHeaders = () => ({
   'Content-Type': 'application/json',
   'x-admin-password': localStorage.getItem('admin_password') || '',
@@ -91,6 +375,9 @@ async function parseResponse(response) {
 
 function M365Page() {
   const [activeTab, setActiveTab] = useState('tenants');
+  const [showPermissionDialog, setShowPermissionDialog] = useState(false);
+  const [permissionCheckLoading, setPermissionCheckLoading] = useState(false);
+  const [permissionCheckError, setPermissionCheckError] = useState('');
   const [accounts, setAccounts] = useState([]);
   const [selectedAccountId, setSelectedAccountId] = useState('');
   const [loadingAccounts, setLoadingAccounts] = useState(false);
@@ -106,15 +393,16 @@ function M365Page() {
   const [showUserDialog, setShowUserDialog] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [userForm, setUserForm] = useState(defaultUserForm);
+  const [loadingUserDialog, setLoadingUserDialog] = useState(false);
   const [submittingUser, setSubmittingUser] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState('');
-  const [selectedUserDetails, setSelectedUserDetails] = useState(null);
-  const [showUserDetails, setShowUserDetails] = useState(false);
+  const [togglingUserId, setTogglingUserId] = useState('');
+  const [pendingUserDeleteId, setPendingUserDeleteId] = useState('');
 
   const [skuLoading, setSkuLoading] = useState(false);
   const [skus, setSkus] = useState([]);
-  const [selectedSkuId, setSelectedSkuId] = useState('');
-  const [selectedUserLicenses, setSelectedUserLicenses] = useState([]);
+  const [userDialogSkuIds, setUserDialogSkuIds] = useState([]);
+  const [initialUserSkuIds, setInitialUserSkuIds] = useState([]);
   const [assigningLicense, setAssigningLicense] = useState(false);
 
   const [groupsLoading, setGroupsLoading] = useState(false);
@@ -128,18 +416,47 @@ function M365Page() {
   const [memberInput, setMemberInput] = useState('');
   const [groupLicenseSkuId, setGroupLicenseSkuId] = useState('');
   const [assigningGroupLicense, setAssigningGroupLicense] = useState(false);
-
-  const [reportType, setReportType] = useState('office-activity');
-  const [reportPeriod, setReportPeriod] = useState('D7');
-  const [reportsLoading, setReportsLoading] = useState(false);
-  const [reportData, setReportData] = useState({ summary: {}, rows: [], cachedAt: null });
-  const [quotaLoadingId, setQuotaLoadingId] = useState('');
-  const [quotaDetail, setQuotaDetail] = useState(null);
+  const [publicTab, setPublicTab] = useState('pages');
+  const [publicPagesLoading, setPublicPagesLoading] = useState(false);
+  const [publicPages, setPublicPages] = useState([]);
+  const [inviteCodesLoading, setInviteCodesLoading] = useState(false);
+  const [inviteCodes, setInviteCodes] = useState([]);
+  const [registrationsLoading, setRegistrationsLoading] = useState(false);
+  const [registrations, setRegistrations] = useState([]);
+  const [showPublicPageDialog, setShowPublicPageDialog] = useState(false);
+  const [publicPageForm, setPublicPageForm] = useState(defaultPublicPageForm);
+  const [publicAccountDomains, setPublicAccountDomains] = useState({});
+  const [submittingPublicPage, setSubmittingPublicPage] = useState(false);
+  const [showInviteCodeDialog, setShowInviteCodeDialog] = useState(false);
+  const [inviteCodeGeneratorForm, setInviteCodeGeneratorForm] = useState(defaultInviteCodeGeneratorForm);
+  const [generatingInviteCodes, setGeneratingInviteCodes] = useState(false);
+  const [pendingInviteBatchDeleteKey, setPendingInviteBatchDeleteKey] = useState('');
+  const [permissionItems, setPermissionItems] = useState(M365_REQUIRED_PERMISSIONS.map((permission) => ({
+    ...permission,
+    granted: null,
+  })));
 
   const selectedAccount = useMemo(
     () => accounts.find((account) => String(account.id) === String(selectedAccountId)) || null,
     [accounts, selectedAccountId]
   );
+
+  const accountLookup = useMemo(
+    () => new Map(accounts.map((account) => [String(account.id), account])),
+    [accounts]
+  );
+
+  const getPublicAccountDomainList = useCallback((account) => {
+    const liveDomains = publicAccountDomains[String(account?.id || '')];
+    const fallbackDomains = getAccountDomainList(account);
+    const selectedAccountUserDomains = String(account?.id || '') === String(selectedAccountId)
+      ? users
+        .map((user) => normalizeDomainValue(getDomainFromPrincipalName(user.userPrincipalName || user.mail)))
+        .filter(Boolean)
+      : [];
+    return Array.from(new Set([...(liveDomains || []), ...fallbackDomains, ...selectedAccountUserDomains]))
+      .sort((a, b) => a.localeCompare(b));
+  }, [publicAccountDomains, selectedAccountId, users]);
 
   const accountSelectItems = useMemo(
     () => accounts.map((account) => ({ value: String(account.id), label: account.name })),
@@ -147,14 +464,93 @@ function M365Page() {
   );
 
   const skuItems = useMemo(
-    () => skus.map((sku) => ({ value: sku.skuId, label: sku.skuPartNumber || sku.skuId })),
+    () => skus.map((sku) => ({ value: sku.skuId, label: getSkuDisplayLabel(sku.skuPartNumber, sku.skuId) })),
     [skus]
   );
+
+  const skuLabelLookup = useMemo(
+    () => new Map(skus.map((sku) => [String(sku.skuId), getSkuDisplayLabel(sku.skuPartNumber, sku.skuId)])),
+    [skus]
+  );
+
+  const userEmailDomainItems = useMemo(() => {
+    const domains = new Set();
+    getAccountDomainList(selectedAccount).forEach((domain) => domains.add(domain));
+    users.forEach((user) => {
+      const domain = getDomainFromPrincipalName(user.userPrincipalName || user.mail);
+      if (domain) domains.add(domain);
+    });
+    return Array.from(domains)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b))
+      .map((domain) => ({ value: domain, label: `@${domain}` }));
+  }, [selectedAccount, users]);
 
   const selectedGroup = useMemo(
     () => groups.find((group) => String(group.id) === String(selectedGroupId)) || null,
     [groups, selectedGroupId]
   );
+
+  const filteredPublicPages = useMemo(() => {
+    return publicPages;
+  }, [publicPages]);
+
+  const filteredInviteCodes = useMemo(() => {
+    return inviteCodes;
+  }, [inviteCodes]);
+
+  const filteredRegistrations = useMemo(() => {
+    return registrations;
+  }, [registrations]);
+
+  const groupedInviteCodeBatches = useMemo(() => {
+    const grouped = new Map();
+    filteredInviteCodes.forEach((codeItem) => {
+      const batchLabel = String(codeItem.batchId || `single-${codeItem.id}`);
+      const key = `${codeItem.publicPageId || 'none'}::${batchLabel}`;
+      const createdAtValue = codeItem.createdAt ? new Date(codeItem.createdAt).getTime() : 0;
+      const lastUsedAtValue = codeItem.lastUsedAt ? new Date(codeItem.lastUsedAt).getTime() : 0;
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          key,
+          publicPageId: codeItem.publicPageId,
+          publicPageName: codeItem.publicPageName || '未命名公开页',
+          batchId: codeItem.batchId || '',
+          codes: [],
+          createdAt: codeItem.createdAt || '',
+          createdAtValue,
+          lastUsedAt: codeItem.lastUsedAt || '',
+          lastUsedAtValue,
+          usedCount: 0,
+          availableCount: 0,
+          domains: new Set(),
+        });
+      }
+      const group = grouped.get(key);
+      group.codes.push(codeItem);
+      if (createdAtValue > group.createdAtValue) {
+        group.createdAt = codeItem.createdAt || group.createdAt;
+        group.createdAtValue = createdAtValue;
+      }
+      if (lastUsedAtValue > group.lastUsedAtValue) {
+        group.lastUsedAt = codeItem.lastUsedAt || group.lastUsedAt;
+        group.lastUsedAtValue = lastUsedAtValue;
+      }
+      if (codeItem.used) group.usedCount += 1;
+      if (codeItem.available) group.availableCount += 1;
+      (codeItem.domains || []).forEach((domain) => {
+        const normalized = normalizeDomainValue(domain);
+        if (normalized) group.domains.add(normalized);
+      });
+    });
+    return Array.from(grouped.values())
+      .map((group) => ({
+        ...group,
+        domains: Array.from(group.domains).sort((a, b) => a.localeCompare(b)),
+        codes: [...group.codes].sort((a, b) => Number(b.id || 0) - Number(a.id || 0)),
+      }))
+      .sort((a, b) => b.createdAtValue - a.createdAtValue || Number(b.publicPageId || 0) - Number(a.publicPageId || 0));
+  }, [filteredInviteCodes]);
 
   const requestJSON = useCallback(async (path, options = {}) => {
     const response = await fetch(path, {
@@ -193,35 +589,49 @@ function M365Page() {
     }
     setUsersLoading(true);
     try {
-      const query = new URLSearchParams({ top: '50' });
+      const query = new URLSearchParams({ top: '200' });
       if (userSearch.trim()) query.set('search', userSearch.trim());
       const data = await requestJSON(`/api/m365/accounts/${selectedAccountId}/users?${query.toString()}`);
-      setUsers(Array.isArray(data.items) ? data.items : []);
+      const items = Array.isArray(data.items) ? data.items : [];
+      setUsers(items);
+      setSelectedUserId((current) => {
+        if (current && items.some((item) => String(item.id) === String(current))) {
+          return current;
+        }
+        return '';
+      });
     } catch (error) {
       toast.error(error.message || '加载用户失败');
     } finally {
       setUsersLoading(false);
     }
-  }, [requestJSON, selectedAccountId, userSearch]);
+  }, [activeTab, requestJSON, selectedAccountId, userSearch]);
 
-  const loadSkus = useCallback(async () => {
-    if (!selectedAccountId) {
+  const loadSkusForAccount = useCallback(async (accountId) => {
+    if (!accountId) {
       setSkus([]);
       return;
     }
     setSkuLoading(true);
     try {
-      const data = await requestJSON(`/api/m365/accounts/${selectedAccountId}/licenses/skus`);
+      const data = await requestJSON(`/api/m365/accounts/${accountId}/licenses/skus`);
       const items = Array.isArray(data.items) ? data.items : [];
       setSkus(items);
-      setSelectedSkuId((current) => current || items[0]?.skuId || '');
       setGroupLicenseSkuId((current) => current || items[0]?.skuId || '');
     } catch (error) {
       toast.error(error.message || '加载许可证失败');
     } finally {
       setSkuLoading(false);
     }
-  }, [requestJSON, selectedAccountId]);
+  }, [requestJSON]);
+
+  const loadSkus = useCallback(async () => {
+    await loadSkusForAccount(selectedAccountId);
+  }, [loadSkusForAccount, selectedAccountId]);
+
+  const refreshUsersAndSkus = useCallback(async () => {
+    await Promise.all([loadUsers(), loadSkus()]);
+  }, [loadSkus, loadUsers]);
 
   const loadGroups = useCallback(async () => {
     if (!selectedAccountId) {
@@ -246,6 +656,52 @@ function M365Page() {
     }
   }, [requestJSON, selectedAccountId]);
 
+  const loadPublicPages = useCallback(async () => {
+    setPublicPagesLoading(true);
+    try {
+      const data = await requestJSON('/api/m365/public-pages');
+      const items = Array.isArray(data.items) ? data.items : [];
+      setPublicPages(items);
+      setInviteCodeGeneratorForm((current) => {
+        if (current.publicPageId && items.some((item) => String(item.id) === String(current.publicPageId))) {
+          return current;
+        }
+        return {
+          ...current,
+          publicPageId: items[0] ? String(items[0].id) : '',
+        };
+      });
+    } catch (error) {
+      toast.error(error.message || '加载公开页配置失败');
+    } finally {
+      setPublicPagesLoading(false);
+    }
+  }, [requestJSON]);
+
+  const loadInviteCodes = useCallback(async () => {
+    setInviteCodesLoading(true);
+    try {
+      const data = await requestJSON('/api/m365/invite-codes');
+      setInviteCodes(Array.isArray(data.items) ? data.items : []);
+    } catch (error) {
+      toast.error(error.message || '加载邀请码失败');
+    } finally {
+      setInviteCodesLoading(false);
+    }
+  }, [requestJSON]);
+
+  const loadRegistrations = useCallback(async () => {
+    setRegistrationsLoading(true);
+    try {
+      const data = await requestJSON('/api/m365/registrations');
+      setRegistrations(Array.isArray(data.items) ? data.items : []);
+    } catch (error) {
+      toast.error(error.message || '加载注册记录失败');
+    } finally {
+      setRegistrationsLoading(false);
+    }
+  }, [requestJSON]);
+
   const loadGroupMembers = useCallback(async () => {
     if (!selectedAccountId || !selectedGroupId) {
       setGroupMembers([]);
@@ -264,61 +720,23 @@ function M365Page() {
 
   const loadUserLicenseDetails = useCallback(async (userId) => {
     if (!selectedAccountId || !userId) {
-      setSelectedUserLicenses([]);
-      return;
+      return [];
     }
     try {
       const data = await requestJSON(`/api/m365/accounts/${selectedAccountId}/users/${userId}/license-details`);
-      setSelectedUserLicenses(Array.isArray(data.items) ? data.items : []);
+      return Array.isArray(data.items) ? data.items : [];
     } catch (error) {
       toast.error(error.message || '加载用户许可证失败');
+      return [];
     }
   }, [requestJSON, selectedAccountId]);
-
-  const loadUserDetails = useCallback(async (userId) => {
-    if (!selectedAccountId || !userId) return;
-    try {
-      const [details] = await Promise.all([
-        requestJSON(`/api/m365/accounts/${selectedAccountId}/users/${userId}`),
-        loadUserLicenseDetails(userId),
-      ]);
-      setSelectedUserId(userId);
-      setSelectedUserDetails(details);
-      setShowUserDetails(true);
-    } catch (error) {
-      toast.error(error.message || '加载用户详情失败');
-    }
-  }, [loadUserLicenseDetails, requestJSON, selectedAccountId]);
-
-  const loadReports = useCallback(async (refresh = false) => {
-    if (!selectedAccountId) {
-      setReportData({ summary: {}, rows: [], cachedAt: null });
-      return;
-    }
-    setReportsLoading(true);
-    try {
-      const query = new URLSearchParams({ period: reportPeriod });
-      if (refresh) query.set('refresh', '1');
-      const data = await requestJSON(`/api/m365/accounts/${selectedAccountId}/reports/${reportType}?${query.toString()}`);
-      setReportData({
-        summary: data.summary || {},
-        rows: Array.isArray(data.rows) ? data.rows : [],
-        cachedAt: data.cachedAt || null,
-      });
-    } catch (error) {
-      toast.error(error.message || '加载报表失败');
-    } finally {
-      setReportsLoading(false);
-    }
-  }, [reportPeriod, reportType, requestJSON, selectedAccountId]);
 
   useEffect(() => {
     loadAccounts();
   }, [loadAccounts]);
 
   useEffect(() => {
-    if (activeTab === 'users') loadUsers();
-    if (activeTab === 'licenses') {
+    if (activeTab === 'users') {
       loadUsers();
       loadSkus();
     }
@@ -326,8 +744,13 @@ function M365Page() {
       loadGroups();
       loadSkus();
     }
-    if (activeTab === 'reports') loadReports();
-  }, [activeTab, loadGroups, loadReports, loadSkus, loadUsers]);
+    if (activeTab === 'public') {
+      loadSkus();
+      loadPublicPages();
+      loadInviteCodes();
+      loadRegistrations();
+    }
+  }, [activeTab, loadGroups, loadInviteCodes, loadPublicPages, loadRegistrations, loadSkus, loadUsers]);
 
   useEffect(() => {
     if (activeTab === 'groups') {
@@ -336,10 +759,82 @@ function M365Page() {
   }, [activeTab, loadGroupMembers, selectedGroupId]);
 
   useEffect(() => {
-    if (activeTab === 'licenses' && selectedUserId) {
-      loadUserLicenseDetails(selectedUserId);
+    if (!showPublicPageDialog) return;
+    const primaryAccountId = String(publicPageForm.accountIds[0] || '');
+    if (!primaryAccountId) {
+      setSkus([]);
+      return;
     }
-  }, [activeTab, loadUserLicenseDetails, selectedUserId]);
+    loadSkusForAccount(primaryAccountId);
+  }, [loadSkusForAccount, publicPageForm.accountIds, showPublicPageDialog]);
+
+  useEffect(() => {
+    if (!showPublicPageDialog || accounts.length === 0) return;
+    let cancelled = false;
+    const loadOrganizationDomains = async () => {
+      const nextMap = {};
+      await Promise.all(accounts.map(async (account) => {
+        try {
+          const organization = await requestJSON(`/api/m365/accounts/${account.id}/organization`);
+          const liveDomains = extractOrganizationDomains(organization);
+          nextMap[String(account.id)] = liveDomains.length > 0 ? liveDomains : getAccountDomainList(account);
+        } catch {
+          nextMap[String(account.id)] = getAccountDomainList(account);
+        }
+      }));
+      if (!cancelled) {
+        setPublicAccountDomains(nextMap);
+        setPublicPageForm((current) => {
+          const domainSet = new Set(current.domains);
+          accounts.forEach((account) => {
+            const accountId = String(account.id);
+            if (!current.accountIds.includes(accountId)) return;
+            const previousDomains = getAccountDomainList(account);
+            const alreadyContainedAllPrevious = previousDomains.every((domain) => domainSet.has(domain));
+            if (!alreadyContainedAllPrevious) return;
+            (nextMap[accountId] || []).forEach((domain) => domainSet.add(domain));
+          });
+          return {
+            ...current,
+            domains: Array.from(domainSet).sort((a, b) => a.localeCompare(b)),
+          };
+        });
+      }
+    };
+    loadOrganizationDomains();
+    return () => {
+      cancelled = true;
+    };
+  }, [accounts, requestJSON, showPublicPageDialog]);
+
+  useEffect(() => {
+    setSelectedUserId('');
+    setUserDialogSkuIds([]);
+    setInitialUserSkuIds([]);
+    setSelectedGroupId('');
+    setGroupMembers([]);
+    setPermissionCheckError('');
+    setPermissionItems(M365_REQUIRED_PERMISSIONS.map((permission) => ({
+      ...permission,
+      granted: null,
+    })));
+  }, [selectedAccountId]);
+
+  useEffect(() => {
+    if (!pendingInviteBatchDeleteKey) return undefined;
+    const timer = window.setTimeout(() => {
+      setPendingInviteBatchDeleteKey((current) => (current === pendingInviteBatchDeleteKey ? '' : current));
+    }, 1600);
+    return () => window.clearTimeout(timer);
+  }, [pendingInviteBatchDeleteKey]);
+
+  useEffect(() => {
+    if (!pendingUserDeleteId) return undefined;
+    const timer = window.setTimeout(() => {
+      setPendingUserDeleteId((current) => (current === pendingUserDeleteId ? '' : current));
+    }, 1400);
+    return () => window.clearTimeout(timer);
+  }, [pendingUserDeleteId]);
 
   const openCreateAccount = () => {
     setEditingAccount(null);
@@ -414,25 +909,132 @@ function M365Page() {
 
   const openCreateUser = () => {
     setEditingUser(null);
-    setUserForm(defaultUserForm);
+    setUserForm({
+      ...defaultUserForm,
+      password: DEFAULT_NEW_USER_PASSWORD,
+    });
+    setUserDialogSkuIds([]);
+    setInitialUserSkuIds([]);
+    setLoadingUserDialog(false);
     setShowUserDialog(true);
   };
 
-  const openEditUser = (user) => {
+  const openCreatePublicPage = () => {
+    setPublicPageForm({
+      ...defaultPublicPageForm,
+      accountIds: [],
+      domains: [],
+    });
+    setShowPublicPageDialog(true);
+  };
+
+  const openEditPublicPage = (page) => {
+    setPublicPageForm({
+      id: page.id,
+      name: page.name || '',
+      accountIds: Array.isArray(page.accountIds) ? page.accountIds.map((item) => String(item)) : (page.accountId ? [String(page.accountId)] : []),
+      domains: Array.isArray(page.domains) ? page.domains.map((item) => String(item).trim().toLowerCase()) : (page.domain ? [String(page.domain).trim().toLowerCase()] : []),
+      usageLocation: '',
+      skuIds: Array.isArray(page.skuIds) ? page.skuIds.map((item) => String(item)) : [],
+      enabled: page.enabled !== false,
+      forceChangePasswordNextSignIn: page.forceChangePasswordNextSignIn !== false,
+      expiresAt: '',
+    });
+    setShowPublicPageDialog(true);
+  };
+
+  const openInviteCodeGenerator = (pageId = '') => {
+    const nextPageId = String(pageId || publicPages[0]?.id || '');
+    setInviteCodeGeneratorForm({
+      publicPageId: nextPageId,
+      quantity: 1,
+    });
+    setShowInviteCodeDialog(true);
+  };
+
+  const openEditUser = async (user) => {
+    if (!selectedAccountId || !user?.id) return;
+    setSelectedUserId(String(user.id));
     setEditingUser(user);
     setUserForm({
+      ...defaultUserForm,
       displayName: user.displayName || '',
-      mailNickname: user.mailNickname || '',
+      mailNickname: getPrincipalLocalPart(user.userPrincipalName || user.mailNickname || ''),
       userPrincipalName: user.userPrincipalName || '',
+      emailDomain: getDomainFromPrincipalName(user.userPrincipalName || user.mail),
       password: '',
       department: user.department || '',
       jobTitle: user.jobTitle || '',
       officeLocation: user.officeLocation || '',
       usageLocation: user.usageLocation || '',
       accountEnabled: user.accountEnabled !== false,
-      forceChangePasswordNextSignIn: true,
+      forceChangePasswordNextSignIn: false,
     });
+    setUserDialogSkuIds([]);
+    setInitialUserSkuIds([]);
+    setLoadingUserDialog(true);
     setShowUserDialog(true);
+    try {
+      const [details, licenseItems] = await Promise.all([
+        requestJSON(`/api/m365/accounts/${selectedAccountId}/users/${user.id}`),
+        loadUserLicenseDetails(user.id),
+      ]);
+      const assignedSkuIds = licenseItems
+        .map((item) => String(item?.skuId || ''))
+        .filter(Boolean);
+      const principalName = details.userPrincipalName || user.userPrincipalName || '';
+      const mailNickname = details.mailNickname || getPrincipalLocalPart(principalName);
+      setUserForm({
+        displayName: details.displayName || '',
+        mailNickname,
+        userPrincipalName: principalName,
+        emailDomain: getDomainFromPrincipalName(principalName || details.mail),
+        password: '',
+        department: details.department || '',
+        jobTitle: details.jobTitle || '',
+        officeLocation: details.officeLocation || '',
+        usageLocation: details.usageLocation || '',
+        accountEnabled: details.accountEnabled !== false,
+        forceChangePasswordNextSignIn: false,
+      });
+      setUserDialogSkuIds(assignedSkuIds);
+      setInitialUserSkuIds(assignedSkuIds);
+    } catch (error) {
+      setShowUserDialog(false);
+      toast.error(error.message || '加载用户详情失败');
+    } finally {
+      setLoadingUserDialog(false);
+    }
+  };
+
+  const toggleUserEnabled = async (user, checked) => {
+    if (!selectedAccountId || !user?.id) return;
+    const nextEnabled = !!checked;
+    const previousEnabled = user.accountEnabled !== false;
+    if (nextEnabled === previousEnabled) return;
+    const targetId = String(user.id);
+    setTogglingUserId(targetId);
+    setUsers((current) => current.map((item) => (
+      String(item.id) === targetId
+        ? { ...item, accountEnabled: nextEnabled }
+        : item
+    )));
+    try {
+      await requestJSON(`/api/m365/accounts/${selectedAccountId}/users/${targetId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ accountEnabled: nextEnabled }),
+      });
+      toast.success(nextEnabled ? '用户已启用' : '用户已禁用');
+    } catch (error) {
+      setUsers((current) => current.map((item) => (
+        String(item.id) === targetId
+          ? { ...item, accountEnabled: previousEnabled }
+          : item
+      )));
+      toast.error(error.message || '更新用户状态失败');
+    } finally {
+      setTogglingUserId('');
+    }
   };
 
   const submitUser = async () => {
@@ -440,90 +1042,94 @@ function M365Page() {
     setSubmittingUser(true);
     try {
       if (editingUser) {
+        const mailNickname = String(userForm.mailNickname || '').trim();
+        const emailDomain = String(userForm.emailDomain || '').trim();
+        const userPrincipalName = mailNickname && emailDomain ? `${mailNickname}@${emailDomain}` : '';
+        if (!mailNickname || !emailDomain) {
+          toast.warning('请填写登录账号前缀和邮箱后缀');
+          return;
+        }
         await requestJSON(`/api/m365/accounts/${selectedAccountId}/users/${editingUser.id}`, {
           method: 'PATCH',
           body: JSON.stringify({
-            displayName: userForm.displayName,
+            displayName: String(userForm.displayName || '').trim() || mailNickname,
+            mailNickname,
+            userPrincipalName,
             department: userForm.department,
             jobTitle: userForm.jobTitle,
             officeLocation: userForm.officeLocation,
             usageLocation: userForm.usageLocation,
             accountEnabled: userForm.accountEnabled,
+            password: String(userForm.password || '').trim(),
+            forceChangePasswordNextSignIn: userForm.forceChangePasswordNextSignIn,
           }),
         });
+        const nextSkuIds = userDialogSkuIds.map((skuId) => String(skuId || '')).filter(Boolean);
+        const previousSkuIds = initialUserSkuIds.map((skuId) => String(skuId || '')).filter(Boolean);
+        const addLicenses = nextSkuIds.filter((skuId) => !previousSkuIds.includes(skuId));
+        const removeLicenses = previousSkuIds.filter((skuId) => !nextSkuIds.includes(skuId));
+        if (addLicenses.length > 0 || removeLicenses.length > 0) {
+          setAssigningLicense(true);
+          await requestJSON(`/api/m365/accounts/${selectedAccountId}/users/${editingUser.id}/assign-license`, {
+            method: 'POST',
+            body: JSON.stringify({
+              addLicenses: addLicenses.map((skuId) => ({ skuId })),
+              removeLicenses,
+            }),
+          });
+        }
         toast.success('用户已更新');
       } else {
-        await requestJSON(`/api/m365/accounts/${selectedAccountId}/users`, {
+        const mailNickname = String(userForm.mailNickname || '').trim();
+        const emailDomain = String(userForm.emailDomain || '').trim();
+        const displayName = String(userForm.displayName || '').trim() || mailNickname;
+        if (!mailNickname || !emailDomain || !userForm.password.trim()) {
+          toast.warning('请填写邮箱前缀、邮箱后缀和密码');
+          return;
+        }
+        const createdUser = await requestJSON(`/api/m365/accounts/${selectedAccountId}/users`, {
           method: 'POST',
-          body: JSON.stringify(userForm),
+          body: JSON.stringify({
+            ...userForm,
+            displayName,
+            mailNickname,
+            userPrincipalName: `${mailNickname}@${emailDomain}`,
+          }),
         });
+        if (userDialogSkuIds.length > 0 && createdUser?.id) {
+          setAssigningLicense(true);
+          await requestJSON(`/api/m365/accounts/${selectedAccountId}/users/${createdUser.id}/assign-license`, {
+            method: 'POST',
+            body: JSON.stringify({
+              addLicenses: userDialogSkuIds.map((skuId) => ({ skuId })),
+              removeLicenses: [],
+            }),
+          });
+        }
+        setUserDialogSkuIds([]);
         toast.success('用户已创建');
       }
       setShowUserDialog(false);
-      await loadUsers();
+      await refreshUsersAndSkus();
     } catch (error) {
       toast.error(error.message || '保存用户失败');
     } finally {
+      setAssigningLicense(false);
       setSubmittingUser(false);
     }
   };
 
   const deleteUser = async (user) => {
-    const confirmed = await dialog.deleteResource({
-      resourceType: '用户',
-      resourceName: user.userPrincipalName || user.displayName,
-      message: `删除用户“${user.displayName || user.userPrincipalName}”将调用 Microsoft Graph 删除该用户。`,
-    });
-    if (!confirmed) return;
     try {
       await requestJSON(`/api/m365/accounts/${selectedAccountId}/users/${user.id}`, { method: 'DELETE' });
+      setPendingUserDeleteId('');
       toast.success('用户已删除');
-      if (selectedUserId === user.id) {
+      if (String(selectedUserId) === String(user.id)) {
         setSelectedUserId('');
-        setSelectedUserDetails(null);
       }
-      await loadUsers();
+      await refreshUsersAndSkus();
     } catch (error) {
       toast.error(error.message || '删除用户失败');
-    }
-  };
-
-  const assignLicense = async () => {
-    if (!selectedAccountId || !selectedUserId || !selectedSkuId) {
-      toast.warning('请选择用户和 SKU');
-      return;
-    }
-    setAssigningLicense(true);
-    try {
-      await requestJSON(`/api/m365/accounts/${selectedAccountId}/users/${selectedUserId}/assign-license`, {
-        method: 'POST',
-        body: JSON.stringify({ addLicenses: [{ skuId: selectedSkuId }], removeLicenses: [] }),
-      });
-      toast.success('许可证已分配');
-      await loadUserLicenseDetails(selectedUserId);
-      await loadSkus();
-    } catch (error) {
-      toast.error(error.message || '分配许可证失败');
-    } finally {
-      setAssigningLicense(false);
-    }
-  };
-
-  const removeLicense = async (skuId) => {
-    if (!selectedAccountId || !selectedUserId || !skuId) return;
-    setAssigningLicense(true);
-    try {
-      await requestJSON(`/api/m365/accounts/${selectedAccountId}/users/${selectedUserId}/assign-license`, {
-        method: 'POST',
-        body: JSON.stringify({ addLicenses: [], removeLicenses: [skuId] }),
-      });
-      toast.success('许可证已回收');
-      await loadUserLicenseDetails(selectedUserId);
-      await loadSkus();
-    } catch (error) {
-      toast.error(error.message || '回收许可证失败');
-    } finally {
-      setAssigningLicense(false);
     }
   };
 
@@ -604,20 +1210,154 @@ function M365Page() {
     }
   };
 
-  const loadQuota = async (userId) => {
-    if (!selectedAccountId || !userId) return;
-    setQuotaLoadingId(userId);
+  const submitPublicPage = async () => {
+    if (!publicPageForm.name.trim()) {
+      toast.warning('请填写公开页名称');
+      return;
+    }
+    if (publicPageForm.accountIds.length === 0) {
+      toast.warning('请至少选择一个目标租户');
+      return;
+    }
+    setSubmittingPublicPage(true);
     try {
-      const data = await requestJSON(`/api/m365/accounts/${selectedAccountId}/reports/onedrive/users/${encodeURIComponent(userId)}/quota`);
-      setQuotaDetail(data);
+      const payload = {
+        name: publicPageForm.name.trim(),
+        accountIds: publicPageForm.accountIds.map((item) => Number(item)).filter(Boolean),
+        domains: publicPageForm.domains.map((item) => String(item).trim().toLowerCase()).filter(Boolean),
+        usageLocation: '',
+        skuIds: publicPageForm.skuIds,
+        enabled: publicPageForm.enabled,
+        forceChangePasswordNextSignIn: publicPageForm.forceChangePasswordNextSignIn,
+        expiresAt: '',
+      };
+      if (publicPageForm.id) {
+        await requestJSON(`/api/m365/public-pages/${publicPageForm.id}`, {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        });
+        toast.success('公开页配置已更新');
+      } else {
+        await requestJSON('/api/m365/public-pages', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        toast.success('公开页已创建');
+      }
+      setShowPublicPageDialog(false);
+      setPublicPageForm(defaultPublicPageForm);
+      await loadPublicPages();
     } catch (error) {
-      toast.error(error.message || '加载 OneDrive 配额失败');
+      toast.error(error.message || '保存公开页配置失败');
     } finally {
-      setQuotaLoadingId('');
+      setSubmittingPublicPage(false);
     }
   };
 
-  const renderToolbarSelector = activeTab !== 'tenants' ? (
+  const generateInviteCodes = async () => {
+    if (!inviteCodeGeneratorForm.publicPageId) {
+      toast.warning('请先选择公开页');
+      return;
+    }
+    setGeneratingInviteCodes(true);
+    try {
+      const result = await requestJSON('/api/m365/invite-codes', {
+        method: 'POST',
+        body: JSON.stringify({
+          publicPageId: Number(inviteCodeGeneratorForm.publicPageId),
+          quantity: Math.max(1, Math.min(5, Number(inviteCodeGeneratorForm.quantity) || 1)),
+        }),
+      });
+      toast.success(`已生成 ${result.createdCount || 1} 个邀请码`);
+      setShowInviteCodeDialog(false);
+      setInviteCodeGeneratorForm(defaultInviteCodeGeneratorForm);
+      setPublicTab('codes');
+      await Promise.all([loadPublicPages(), loadInviteCodes(), loadRegistrations()]);
+    } catch (error) {
+      toast.error(error.message || '生成邀请码失败');
+    } finally {
+      setGeneratingInviteCodes(false);
+    }
+  };
+
+  const deletePublicPage = async (page) => {
+    const confirmed = await dialog.deleteResource({
+      resourceType: '公开页',
+      resourceName: page.name,
+      message: `删除公开页“${page.name}”后，关联邀请码将立即失效。`,
+    });
+    if (!confirmed) return;
+    try {
+      await requestJSON(`/api/m365/public-pages/${page.id}`, { method: 'DELETE' });
+      toast.success('公开页配置已删除');
+      await Promise.all([loadPublicPages(), loadInviteCodes(), loadRegistrations()]);
+    } catch (error) {
+      toast.error(error.message || '删除公开页配置失败');
+    }
+  };
+
+  const deleteInviteBatch = async (group) => {
+    const ids = (group.codes || []).map((codeItem) => Number(codeItem.id)).filter(Boolean);
+    if (ids.length === 0) {
+      toast.warning('当前批次没有可删除的邀请码');
+      return;
+    }
+    try {
+      const payload = group.batchId
+        ? { publicPageId: Number(group.publicPageId) || undefined, batchId: group.batchId }
+        : { ids };
+      const result = await requestJSON('/api/m365/invite-codes', {
+        method: 'DELETE',
+        body: JSON.stringify(payload),
+      });
+      setPendingInviteBatchDeleteKey('');
+      toast.success(`已删除 ${result.deletedCount || ids.length} 个邀请码`);
+      await Promise.all([loadPublicPages(), loadInviteCodes(), loadRegistrations()]);
+    } catch (error) {
+      toast.error(error.message || '删除邀请码批次失败');
+    }
+  };
+
+  const copyText = useCallback(async (text, message) => {
+    try {
+      await navigator.clipboard.writeText(String(text || ''));
+      toast.success(message || '已复制');
+    } catch (error) {
+      console.error('copy failed:', error);
+      toast.error('复制失败');
+    }
+  }, []);
+
+  const detectPermissions = useCallback(async () => {
+    if (!selectedAccountId) {
+      toast.warning('请先选择租户');
+      return;
+    }
+    setPermissionCheckLoading(true);
+    setPermissionCheckError('');
+    try {
+      const data = await requestJSON(`/api/m365/accounts/${selectedAccountId}/permissions`);
+      const items = Array.isArray(data.items) ? data.items : [];
+      setPermissionItems(
+        M365_REQUIRED_PERMISSIONS.map((permission) => {
+          const matched = items.find((item) => item.name === permission.name);
+          return {
+            ...permission,
+            granted: typeof matched?.granted === 'boolean' ? matched.granted : null,
+          };
+        })
+      );
+      toast.success('权限检测完成');
+    } catch (error) {
+      const message = getFriendlyErrorMessage(error.message, '权限检测失败');
+      setPermissionCheckError(message);
+      toast.error(message);
+    } finally {
+      setPermissionCheckLoading(false);
+    }
+  }, [requestJSON, selectedAccountId]);
+
+  const renderToolbarSelector = ['users', 'groups'].includes(activeTab) ? (
     <div className="flex items-center gap-2">
       <span className="text-xs font-medium text-kumo-subtle">租户</span>
       <Select
@@ -632,6 +1372,8 @@ function M365Page() {
 
   const renderTenants = () => (
     <SectionCard
+      className="flex min-h-0 flex-1 flex-col"
+      bodyClassName={panelBodyClass}
       title="租户管理"
       description="管理多个 Microsoft 365 / Entra 租户的应用凭据与连通性。"
       icon={<Cloud className="h-4 w-4" />}
@@ -642,167 +1384,429 @@ function M365Page() {
       )}
     >
       {loadingAccounts ? (
-        <div className="space-y-3">
-          <SkeletonLine className="h-10 w-full" />
-          <SkeletonLine className="h-10 w-full" />
-          <SkeletonLine className="h-10 w-full" />
-        </div>
-      ) : accounts.length === 0 ? (
-        <EmptyState
-          icon={Cloud}
-          title="还没有租户"
-          description="先添加 tenant_id、client_id 和 client_secret，后续功能都会基于租户展开。"
-          action={<Button size="sm" variant="primary" onClick={openCreateAccount}>添加租户</Button>}
-        />
+        <TenantGridSkeleton />
       ) : (
-        <div className="overflow-x-auto">
-          <Table layout="fixed">
-            <Table.Header>
-              <Table.Row>
-                <Table.Head>名称</Table.Head>
-                <Table.Head>租户 ID</Table.Head>
-                <Table.Head>客户端 ID</Table.Head>
-                <Table.Head>默认域</Table.Head>
-                <Table.Head>状态</Table.Head>
-                <Table.Head className="text-right">操作</Table.Head>
-              </Table.Row>
-            </Table.Header>
-            <Table.Body>
-              {accounts.map((account) => (
-                <Table.Row key={account.id}>
-                  <Table.Cell>
-                    <div className="font-medium text-kumo-strong">{account.name}</div>
-                    <div className="text-xs text-kumo-subtle">{account.organization || '未校验组织'}</div>
-                  </Table.Cell>
-                  <Table.Cell className="text-xs text-kumo-subtle">{account.tenantId}</Table.Cell>
-                  <Table.Cell className="text-xs text-kumo-subtle">{account.clientId}</Table.Cell>
-                  <Table.Cell>{account.defaultDomain || '-'}</Table.Cell>
-                  <Table.Cell>
-                    <StatusBadge tone={account.lastVerifiedErr ? 'danger' : 'success'}>
-                      {account.lastVerifiedErr ? '待修复' : '已连通'}
-                    </StatusBadge>
-                  </Table.Cell>
-                  <Table.Cell>
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        shape="square"
-                        title="校验"
-                        aria-label="校验"
-                        icon={<RefreshCw className={`h-3.5 w-3.5 ${verifyingAccountId === String(account.id) ? 'animate-spin' : ''}`} />}
-                        onClick={() => verifyAccount(account)}
-                      />
-                      <Button size="sm" variant="secondary" onClick={() => openEditAccount(account)}>编辑</Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        shape="square"
-                        title="删除"
-                        aria-label="删除"
-                        icon={<Trash className="h-3.5 w-3.5" />}
-                        onClick={() => deleteAccount(account)}
-                      />
+        <div className={cx(scrollViewportClass, 'grid content-start gap-3 p-1')} style={tenantGridStyle}>
+          {accounts.map((account) => {
+            const active = String(account.id) === String(selectedAccountId);
+            const verifying = String(account.id) === String(verifyingAccountId);
+            const accountDomains = getAccountDomainList(account);
+            return (
+              <div
+                key={account.id}
+                role="button"
+                tabIndex={0}
+                className={cx(
+                  tenantCardFrameClass,
+                  'group flex h-full cursor-pointer flex-col justify-between border bg-kumo-base/95 text-left transition hover:border-kumo-brand/40 hover:bg-kumo-base focus:outline-none focus-visible:border-kumo-brand/70',
+                  active ? 'border-kumo-brand/70 bg-kumo-brand/5' : 'border-kumo-line/80'
+                )}
+                onClick={() => setSelectedAccountId(String(account.id))}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    setSelectedAccountId(String(account.id));
+                  }
+                }}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-kumo-recessed/60 text-kumo-brand">
+                        <Cloud className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-kumo-strong" title={getDisplayText(account.name)}>
+                          {getDisplayText(account.name)}
+                        </div>
+                        <div className="truncate text-xs text-kumo-subtle" title={getDisplayText(account.organization || '未校验')}>
+                          {getDisplayText(account.organization || '未校验')}
+                        </div>
+                      </div>
                     </div>
-                  </Table.Cell>
-                </Table.Row>
-              ))}
-            </Table.Body>
-          </Table>
+                  </div>
+                  <StatusBadge tone={account.lastVerifiedErr ? 'danger' : 'success'} className="shrink-0">
+                    {account.lastVerifiedErr ? '待修复' : '已连通'}
+                  </StatusBadge>
+                </div>
+
+                <div className="mt-2.5 grid gap-2 rounded-lg border border-kumo-line/60 bg-kumo-recessed/20 p-2 text-xs">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="shrink-0 text-kumo-subtle">默认域</span>
+                    <span className="min-w-0 truncate font-medium text-kumo-strong" title={getDisplayText(account.defaultDomain)}>
+                      {getDisplayText(account.defaultDomain)}
+                    </span>
+                  </div>
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="shrink-0 pt-0.5 text-kumo-subtle">全部域名</span>
+                    <span className="min-w-0 text-right font-medium text-kumo-strong" title={accountDomains.join('、') || '-'}>
+                      {accountDomains.length > 0 ? accountDomains.join('、') : '-'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="shrink-0 text-kumo-subtle">租户 ID</span>
+                    <span className="min-w-0 truncate font-mono text-[11px] text-kumo-subtle" title={getDisplayText(account.tenantId)}>
+                      {getDisplayText(account.tenantId)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="shrink-0 text-kumo-subtle">客户端 ID</span>
+                    <span className="min-w-0 truncate font-mono text-[11px] text-kumo-subtle" title={getDisplayText(account.clientId)}>
+                      {getDisplayText(account.clientId)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mt-2.5 flex items-center justify-between gap-2">
+                  <span className={cx('text-[11px] font-medium', active ? 'text-kumo-brand' : 'text-kumo-subtle')}>
+                    {active ? '当前选中' : '点击选择'}
+                  </span>
+                  <div className="flex gap-2" onClick={(event) => event.stopPropagation()}>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      shape="square"
+                      title="校验"
+                      aria-label="校验"
+                      icon={<RefreshCw className={cx('h-3.5 w-3.5', verifying && 'animate-spin')} />}
+                      onClick={() => verifyAccount(account)}
+                    />
+                    <Button size="sm" variant="secondary" onClick={() => openEditAccount(account)}>编辑</Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      shape="square"
+                      title="删除"
+                      aria-label="删除"
+                      icon={<Trash className="h-3.5 w-3.5" />}
+                      onClick={() => deleteAccount(account)}
+                    />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          <button
+            key="tenant-placeholder"
+            type="button"
+            className={cx(
+              tenantCardFrameClass,
+              'group flex h-full w-full items-center justify-center border border-dashed border-kumo-line/80 bg-kumo-base/35 text-kumo-subtle transition hover:border-kumo-brand/45 hover:bg-kumo-brand/5 hover:text-kumo-brand focus:outline-none focus-visible:border-kumo-brand/70'
+            )}
+            onClick={openCreateAccount}
+            aria-label="添加新租户"
+          >
+            <div className="flex flex-col items-center gap-2">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full border border-dashed border-kumo-line/90 text-kumo-subtle transition group-hover:border-kumo-brand/50 group-hover:text-kumo-brand">
+                <Plus className="h-5 w-5" />
+              </div>
+              <span className="text-xs font-medium opacity-0 transition group-hover:opacity-100">添加新租户</span>
+            </div>
+          </button>
         </div>
       )}
     </SectionCard>
+  );
+
+  const renderPublicPages = () => (
+    <PageStack className="min-h-0 flex-1 overflow-hidden">
+      <SectionCard
+        className="flex min-h-0 flex-1 flex-col"
+        bodyClassName={panelBodyClass}
+        title="公开页"
+        description="按模板管理公开注册链接，再按批次生成邀请码并查看使用记录。"
+        icon={<Globe className="h-4 w-4" />}
+        action={(
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<RefreshCw className="h-3.5 w-3.5" />}
+              onClick={() => { loadPublicPages(); loadInviteCodes(); loadRegistrations(); }}
+            >
+              刷新
+            </Button>
+            {publicTab === 'pages' ? (
+              <Button size="sm" variant="primary" icon={<Plus className="h-3.5 w-3.5" />} onClick={openCreatePublicPage}>
+                新建公开页
+              </Button>
+            ) : null}
+            {publicTab === 'codes' ? (
+              <Button size="sm" variant="primary" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => openInviteCodeGenerator()}>
+                生成邀请码
+              </Button>
+            ) : null}
+          </div>
+        )}
+      >
+        <div className="flex min-h-0 flex-1 flex-col gap-4">
+          <div className="shrink-0">
+            <Tabs
+              {...MODULE_TABS_PROPS}
+              value={publicTab}
+              onValueChange={setPublicTab}
+              tabs={[
+                { value: 'pages', label: '公开页配置' },
+                { value: 'codes', label: '邀请码批次' },
+                { value: 'registrations', label: '注册记录' },
+              ]}
+            />
+          </div>
+
+          {publicTab === 'pages' ? (
+            <AppCard padding="none" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <div className="flex items-center justify-between border-b border-kumo-line/60 px-4 py-3">
+                <div>
+                  <div className="text-sm font-semibold text-kumo-strong">公开页配置</div>
+                  <div className="text-xs text-kumo-subtle">共 {filteredPublicPages.length} 个模板，外部访问不再按租户分栏。</div>
+                </div>
+              </div>
+              {publicPagesLoading ? (
+                <div className="space-y-3 p-4">
+                  {Array.from({ length: 4 }).map((_, index) => <SkeletonLine key={index} className="h-20 w-full" />)}
+                </div>
+              ) : filteredPublicPages.length === 0 ? (
+                <EmptyState icon={Globe} title="还没有公开页" description="先创建模板，再去邀请码页生成带 code 的注册链接。" card={false} />
+              ) : (
+                <div className={cx(scrollViewportClass, 'space-y-2.5 p-3')}>
+                  {filteredPublicPages.map((page) => {
+                    const pageAccounts = (page.accountIds || [])
+                      .map((accountId) => accountLookup.get(String(accountId)))
+                      .filter(Boolean);
+                    const accountNames = pageAccounts.map((account) => account.name).filter(Boolean);
+                    const domainList = Array.isArray(page.domains) ? page.domains : [];
+                    const skuLabels = (page.skuIds || []).map((skuId) => getSkuDisplayLabel('', skuId)).filter(Boolean);
+                    return (
+                      <AppCard key={page.id} className="border-kumo-line/70 bg-kumo-base/95 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="truncate text-sm font-semibold text-kumo-strong">{page.name}</div>
+                              <StatusBadge tone={page.available ? 'success' : 'warning'}>
+                                {page.available ? '可用' : '停用'}
+                              </StatusBadge>
+                              <span className="text-[11px] text-kumo-subtle">
+                                邀请码 {page.inviteCodeCount || 0} / 已用 {page.usedInviteCodeCount || 0}
+                              </span>
+                            </div>
+                            <div className="mt-2 grid gap-2 text-xs text-kumo-subtle lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+                              <div className="rounded-lg border border-kumo-line/60 bg-kumo-recessed/15 px-3 py-2">
+                                <div className="text-[11px] uppercase tracking-wide">目标租户</div>
+                                <div className="mt-1 font-medium text-kumo-strong" title={accountNames.join('、') || '-'}>
+                                  {accountNames.join('、') || '-'}
+                                </div>
+                              </div>
+                              <div className="rounded-lg border border-kumo-line/60 bg-kumo-recessed/15 px-3 py-2">
+                                <div className="text-[11px] uppercase tracking-wide">域名</div>
+                                <div className="mt-1 font-medium text-kumo-strong" title={domainList.join('、') || '-'}>
+                                  {domainList.join('、') || '-'}
+                                </div>
+                              </div>
+                              <div className="rounded-lg border border-kumo-line/60 bg-kumo-recessed/15 px-3 py-2">
+                                <div className="text-[11px] uppercase tracking-wide">配置</div>
+                                <div className="mt-1 font-medium text-kumo-strong">
+                                  {page.forceChangePasswordNextSignIn ? '首次改密' : '不强制改密'}
+                                </div>
+                              </div>
+                              <div className="rounded-lg border border-kumo-line/60 bg-kumo-recessed/15 px-3 py-2">
+                                <div className="text-[11px] uppercase tracking-wide">许可证</div>
+                                <div className="mt-1 font-medium text-kumo-strong" title={skuLabels.join('、') || '-'}>
+                                  {skuLabels.join('、') || '-'}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 gap-2">
+                            <Button size="sm" variant="secondary" onClick={() => openInviteCodeGenerator(page.id)}>生成邀请码</Button>
+                            <Button size="sm" variant="secondary" onClick={() => openEditPublicPage(page)}>编辑</Button>
+                            <Button size="sm" variant="destructive" shape="square" icon={<Trash className="h-3.5 w-3.5" />} onClick={() => deletePublicPage(page)} />
+                          </div>
+                        </div>
+                      </AppCard>
+                    );
+                  })}
+                </div>
+              )}
+            </AppCard>
+          ) : null}
+
+          {publicTab === 'codes' ? (
+            <AppCard padding="none" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <div className="flex items-center justify-between border-b border-kumo-line/60 px-4 py-3">
+                <div>
+                  <div className="text-sm font-semibold text-kumo-strong">邀请码批次</div>
+                  <div className="text-xs text-kumo-subtle">按批次管理，生成后直接使用带 `code` 的注册链接即可，单次最多生成 5 个。</div>
+                </div>
+              </div>
+              {inviteCodesLoading ? (
+                <div className="space-y-3 p-4">
+                  {Array.from({ length: 4 }).map((_, index) => <SkeletonLine key={index} className="h-24 w-full" />)}
+                </div>
+              ) : groupedInviteCodeBatches.length === 0 ? (
+                <EmptyState icon={Globe} title="还没有邀请码" description="先创建公开页模板，再生成邀请码。" card={false} />
+              ) : (
+                <div className={cx(scrollViewportClass, 'space-y-3 p-3')}>
+                  {groupedInviteCodeBatches.map((group) => (
+                    <AppCard key={group.key} className="border-kumo-line/70 bg-kumo-base/95 p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className="truncate text-sm font-semibold text-kumo-strong">{group.publicPageName}</div>
+                            <StatusBadge tone={group.availableCount > 0 ? 'success' : 'warning'}>
+                              可用 {group.availableCount} / {group.codes.length}
+                            </StatusBadge>
+                            <span className="text-[11px] text-kumo-subtle">已用 {group.usedCount}</span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-kumo-subtle">
+                            <span>批次 {group.batchId || '单个生成'}</span>
+                            <span title={group.domains.join('、') || '-'}>域名 {group.domains.join('、') || '-'}</span>
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 gap-2">
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => {
+                              if (pendingInviteBatchDeleteKey === group.key) {
+                                void deleteInviteBatch(group);
+                                return;
+                              }
+                              setPendingInviteBatchDeleteKey(group.key);
+                              toast.warning('再次点击即可删除整个批次');
+                            }}
+                          >
+                            {pendingInviteBatchDeleteKey === group.key ? '再次删除' : '删除批次'}
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 overflow-hidden rounded-lg border border-kumo-line/60 bg-kumo-recessed/10">
+                        {group.codes.map((codeItem, index) => {
+                          const publicRegisterUrl = `${window.location.origin}/m365/register?code=${encodeURIComponent(codeItem.code)}`;
+                          return (
+                            <div
+                              key={codeItem.id}
+                              className={cx(
+                                'grid gap-2 px-3 py-2.5 lg:grid-cols-[minmax(0,1fr)_13rem_auto]',
+                                index > 0 && 'border-t border-kumo-line/60'
+                              )}
+                            >
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-mono text-xs font-semibold text-kumo-strong">{codeItem.code}</span>
+                                  <StatusBadge tone={codeItem.used ? 'warning' : codeItem.available ? 'success' : 'danger'}>
+                                    {codeItem.used ? '已使用' : codeItem.available ? '可用' : '失效'}
+                                  </StatusBadge>
+                                </div>
+                                <div className="mt-1 truncate font-mono text-[11px] text-kumo-subtle">{publicRegisterUrl}</div>
+                              </div>
+                              <div className="text-[11px] text-kumo-subtle lg:text-right">
+                                <div>使用 {codeItem.usedCount || 0} / {codeItem.maxUses || 1}</div>
+                                <div className="mt-1">{codeItem.lastUsedAt ? `最后使用 ${formatDateTime(codeItem.lastUsedAt)}` : '未使用'}</div>
+                              </div>
+                              <div className="flex shrink-0 justify-start gap-2 lg:justify-end">
+                                <Button size="sm" variant="secondary" shape="square" icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copyText(publicRegisterUrl, '公开注册链接已复制')} />
+                                <Button
+                                  size="sm"
+                                  variant={codeItem.enabled ? 'secondary' : 'primary'}
+                                  onClick={async () => {
+                                    try {
+                                      await requestJSON(`/api/m365/invite-codes/${codeItem.id}`, {
+                                        method: 'PUT',
+                                        body: JSON.stringify({ enabled: !codeItem.enabled }),
+                                      });
+                                      toast.success(codeItem.enabled ? '邀请码已停用' : '邀请码已启用');
+                                      await loadInviteCodes();
+                                    } catch (error) {
+                                      toast.error(error.message || '更新邀请码状态失败');
+                                    }
+                                  }}
+                                >
+                                  {codeItem.enabled ? '停用' : '启用'}
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </AppCard>
+                  ))}
+                </div>
+              )}
+            </AppCard>
+          ) : null}
+
+          {publicTab === 'registrations' ? (
+            <AppCard padding="none" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <div className="flex items-center justify-between border-b border-kumo-line/60 px-4 py-3">
+                <div>
+                  <div className="text-sm font-semibold text-kumo-strong">注册记录</div>
+                  <div className="text-xs text-kumo-subtle">展示通过公开页成功或失败创建的账号记录</div>
+                </div>
+              </div>
+              {registrationsLoading ? (
+                <div className="space-y-3 p-4">
+                  {Array.from({ length: 5 }).map((_, index) => <SkeletonLine key={index} className="h-16 w-full" />)}
+                </div>
+              ) : filteredRegistrations.length === 0 ? (
+                <EmptyState icon={Users} title="暂无注册记录" description="当公开注册发生后，这里会记录状态和错误信息。" card={false} />
+              ) : (
+                <div className={cx(scrollViewportClass, 'space-y-3 p-4')}>
+                  {filteredRegistrations.map((record) => (
+                    <AppCard key={record.id} className="border-kumo-line/70 bg-kumo-base/95 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-kumo-strong">{record.displayName || record.userPrincipalName}</div>
+                          <div className="mt-1 truncate text-xs text-kumo-subtle">{record.userPrincipalName}</div>
+                        </div>
+                        <StatusBadge tone={record.status === 'success' ? 'success' : record.status === 'partial' ? 'warning' : 'danger'}>
+                          {record.status === 'success' ? '成功' : record.status === 'partial' ? '部分成功' : '失败'}
+                        </StatusBadge>
+                      </div>
+                      <div className="mt-3 grid gap-2 text-xs">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-kumo-subtle">来源公开页</span>
+                          <span className="font-medium text-kumo-strong">{record.publicPageName || '-'}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-kumo-subtle">邀请码</span>
+                          <span className="font-mono text-kumo-strong">{record.inviteCode || '-'}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-kumo-subtle">目标租户</span>
+                          <span className="font-medium text-kumo-strong">{record.accountName || '-'}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-kumo-subtle">创建时间</span>
+                          <span className="font-medium text-kumo-strong">{record.createdAt ? formatDateTime(record.createdAt) : '-'}</span>
+                        </div>
+                        {record.errorMessage ? (
+                          <div className="rounded-lg border border-kumo-danger/20 bg-kumo-danger/5 px-3 py-2 text-kumo-danger">
+                            {record.errorMessage}
+                          </div>
+                        ) : null}
+                      </div>
+                    </AppCard>
+                  ))}
+                </div>
+              )}
+            </AppCard>
+          ) : null}
+        </div>
+      </SectionCard>
+    </PageStack>
   );
 
   const renderUsers = () => (
-    <SectionCard
-      title="用户管理"
-      description="查看、创建、编辑并删除租户中的工作账号。"
-      icon={<Users className="h-4 w-4" />}
-      action={(
-        <div className="flex items-center gap-2">
-          <Input
-            aria-label="搜索用户"
-            size="sm"
-            value={userSearch}
-            onChange={(event) => setUserSearch(event.target.value)}
-            placeholder="搜索显示名或 UPN"
-          />
-          <Button size="sm" variant="secondary" shape="square" icon={<Search className="h-3.5 w-3.5" />} onClick={loadUsers} aria-label="搜索" />
-          <Button size="sm" variant="primary" icon={<Plus className="h-3.5 w-3.5" />} onClick={openCreateUser}>新增用户</Button>
-        </div>
-      )}
-    >
-      {!selectedAccountId ? (
-        <EmptyState icon={Users} title="请先选择租户" description="用户管理依赖租户凭据与 Graph 连接。" />
-      ) : usersLoading ? (
-        <div className="space-y-3">
-          <SkeletonLine className="h-10 w-full" />
-          <SkeletonLine className="h-10 w-full" />
-          <SkeletonLine className="h-10 w-full" />
-        </div>
-      ) : users.length === 0 ? (
-        <EmptyState icon={User} title="暂无用户" description="当前筛选条件下没有可展示的用户。" />
-      ) : (
-        <div className="overflow-x-auto">
-          <Table layout="fixed">
-            <Table.Header>
-              <Table.Row>
-                <Table.Head>用户</Table.Head>
-                <Table.Head>邮箱</Table.Head>
-                <Table.Head>部门</Table.Head>
-                <Table.Head>位置</Table.Head>
-                <Table.Head>状态</Table.Head>
-                <Table.Head className="text-right">操作</Table.Head>
-              </Table.Row>
-            </Table.Header>
-            <Table.Body>
-              {users.map((user) => (
-                <Table.Row key={user.id}>
-                  <Table.Cell>
-                    <div className="font-medium text-kumo-strong">{user.displayName || '-'}</div>
-                    <div className="text-xs text-kumo-subtle">{user.userPrincipalName || '-'}</div>
-                  </Table.Cell>
-                  <Table.Cell>{user.mail || '-'}</Table.Cell>
-                  <Table.Cell>{user.department || '-'}</Table.Cell>
-                  <Table.Cell>{user.officeLocation || user.usageLocation || '-'}</Table.Cell>
-                  <Table.Cell>
-                    <StatusBadge tone={user.accountEnabled === false ? 'danger' : 'success'}>
-                      {user.accountEnabled === false ? '禁用' : '启用'}
-                    </StatusBadge>
-                  </Table.Cell>
-                  <Table.Cell>
-                    <div className="flex justify-end gap-2">
-                      <Button size="sm" variant="secondary" onClick={() => loadUserDetails(user.id)}>详情</Button>
-                      <Button size="sm" variant="secondary" onClick={() => openEditUser(user)}>编辑</Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        shape="square"
-                        title="删除"
-                        aria-label="删除"
-                        icon={<Trash className="h-3.5 w-3.5" />}
-                        onClick={() => deleteUser(user)}
-                      />
-                    </div>
-                  </Table.Cell>
-                </Table.Row>
-              ))}
-            </Table.Body>
-          </Table>
-        </div>
-      )}
-    </SectionCard>
-  );
-
-  const renderLicenses = () => (
-    <PageStack>
+    <PageStack className="min-h-0 flex-1 overflow-hidden">
       <SectionCard
+        className="shrink-0"
+        bodyClassName={panelBodyClass}
         title="SKU 库存"
         description="查看租户可分配的许可证 SKU 及其消耗情况。"
         icon={<Database className="h-4 w-4" />}
         action={(
-          <Button size="sm" variant="secondary" icon={<RefreshCw className={`h-3.5 w-3.5 ${skuLoading ? 'animate-spin' : ''}`} />} onClick={loadSkus}>
+          <Button size="sm" variant="secondary" icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={loadSkus}>
             刷新
           </Button>
         )}
@@ -810,89 +1814,194 @@ function M365Page() {
         {!selectedAccountId ? (
           <EmptyState icon={Database} title="请先选择租户" description="许可证列表依赖租户范围。" />
         ) : skuLoading ? (
-          <Loader />
+          <SkuGridSkeleton />
+        ) : skus.length === 0 ? (
+          <EmptyState icon={Database} title="暂无 SKU 数据" description="当前租户还没有可展示的许可证库存。" />
         ) : (
-          <div className="overflow-x-auto">
-            <Table layout="fixed">
-              <Table.Header>
-                <Table.Row>
-                  <Table.Head>SKU</Table.Head>
-                  <Table.Head>已用</Table.Head>
-                  <Table.Head>预付总量</Table.Head>
-                  <Table.Head>警告量</Table.Head>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {skus.map((sku) => (
-                  <Table.Row key={sku.skuId}>
-                    <Table.Cell>{sku.skuPartNumber || sku.skuId}</Table.Cell>
-                    <Table.Cell>{sku.consumedUnits ?? 0}</Table.Cell>
-                    <Table.Cell>{sku.prepaidUnits?.enabled ?? 0}</Table.Cell>
-                    <Table.Cell>{sku.prepaidUnits?.warning ?? 0}</Table.Cell>
-                  </Table.Row>
-                ))}
-              </Table.Body>
-            </Table>
+          <div
+            className={cx(scrollViewportClass, 'grid auto-rows-max content-start gap-2.5 pr-1')}
+            style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}
+          >
+            {skus.map((sku) => {
+              const totalUnits = Number(sku.prepaidUnits?.enabled ?? 0);
+              const warningUnits = Number(sku.prepaidUnits?.warning ?? 0);
+              const consumedUnits = Number(sku.consumedUnits ?? 0);
+              const availableUnits = Math.max(0, totalUnits - consumedUnits);
+              const usagePct = totalUnits > 0 ? clampPercent((consumedUnits / totalUnits) * 100) : 0;
+              const progressTone = usagePct >= 90 ? 'bg-kumo-danger' : usagePct >= 70 ? 'bg-kumo-warning' : 'bg-kumo-brand';
+              const lifecycleText = getSkuLifecycleText(sku);
+              return (
+                <div
+                  key={sku.skuId}
+                  className="rounded-lg border border-kumo-line/70 bg-kumo-base/95 px-3 py-2.5"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[15px] font-semibold text-kumo-strong" title={getSkuDisplayLabel(sku.skuPartNumber, sku.skuId)}>
+                        {getSkuDisplayLabel(sku.skuPartNumber, sku.skuId)}
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[11px]">
+                        <span className="font-semibold text-kumo-strong">
+                          {formatMetricNumber(consumedUnits)} / {formatMetricNumber(totalUnits)}
+                        </span>
+                        <span className="text-kumo-subtle">剩余 {formatMetricNumber(availableUnits)}</span>
+                        {warningUnits > 0 ? <span className="text-kumo-subtle">警告 {formatMetricNumber(warningUnits)}</span> : null}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+                      {lifecycleText ? (
+                        <span
+                          className="rounded-full border border-kumo-line/70 bg-kumo-recessed/30 px-2 py-0.5 text-[11px] font-medium leading-5 text-kumo-subtle"
+                          title={lifecycleText}
+                        >
+                          {lifecycleText}
+                        </span>
+                      ) : null}
+                      <StatusBadge tone={usagePct >= 90 ? 'danger' : usagePct >= 70 ? 'warning' : 'success'}>
+                        {usagePct.toFixed(0)}%
+                      </StatusBadge>
+                    </div>
+                  </div>
+
+                  <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-kumo-recessed/80">
+                    <div
+                      className={cx('h-full rounded-full transition-[width] duration-300', progressTone)}
+                      style={{ width: `${usagePct}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </SectionCard>
 
       <SectionCard
-        title="用户许可证"
-        description="给当前选中用户分配或回收直绑许可证。"
-        icon={<User className="h-4 w-4" />}
+        className="flex min-h-0 flex-1 flex-col overflow-hidden"
+        bodyClassName={panelBodyClass}
+        title="用户与许可证"
+        description="查看、创建、编辑、删除用户，并在列表中直接管理许可证。"
+        icon={<Users className="h-4 w-4" />}
         action={(
           <div className="flex items-center gap-2">
-            <Select
-              aria-label="选择用户"
+            <Input
+              aria-label="搜索用户"
               size="sm"
-              value={selectedUserId}
-              onValueChange={setSelectedUserId}
-              items={users.map((user) => ({ value: user.id, label: user.displayName || user.userPrincipalName || user.id }))}
+              value={userSearch}
+              onChange={(event) => setUserSearch(event.target.value)}
+              placeholder="搜索显示名或 UPN"
             />
-            <Select
-              aria-label="选择 SKU"
-              size="sm"
-              value={selectedSkuId}
-              onValueChange={setSelectedSkuId}
-              items={skuItems}
-            />
-            <Button size="sm" variant="primary" onClick={assignLicense} disabled={assigningLicense}>
-              分配
-            </Button>
+            <Button size="sm" variant="secondary" shape="square" icon={<Search className="h-3.5 w-3.5" />} onClick={loadUsers} aria-label="搜索" />
+            <Button size="sm" variant="primary" icon={<Plus className="h-3.5 w-3.5" />} onClick={openCreateUser}>新增用户</Button>
           </div>
         )}
       >
-        {!selectedUserId ? (
-          <EmptyState icon={User} title="请选择用户" description="先在右上角选择要管理许可证的用户。" />
-        ) : selectedUserLicenses.length === 0 ? (
-          <EmptyState icon={Database} title="暂无直绑许可证" description="该用户当前没有直绑许可证，或尚未加载详情。" card={false} />
+        {!selectedAccountId ? (
+          <EmptyState icon={Users} title="请先选择租户" description="用户管理依赖租户凭据与 Graph 连接。" />
+        ) : usersLoading ? (
+          <CardTableSkeleton rows={7} />
+        ) : users.length === 0 ? (
+          <EmptyState icon={User} title="暂无用户" description="当前筛选条件下没有可展示的用户。" />
         ) : (
-          <div className="overflow-x-auto">
-            <Table layout="fixed">
-              <Table.Header>
-                <Table.Row>
-                  <Table.Head>SKU</Table.Head>
-                  <Table.Head>服务计划数</Table.Head>
-                  <Table.Head className="text-right">操作</Table.Head>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {selectedUserLicenses.map((license) => (
-                  <Table.Row key={license.skuId}>
-                    <Table.Cell>{license.skuPartNumber || license.skuId}</Table.Cell>
-                    <Table.Cell>{Array.isArray(license.servicePlans) ? license.servicePlans.length : 0}</Table.Cell>
-                    <Table.Cell>
-                      <div className="flex justify-end">
-                        <Button size="sm" variant="destructive" onClick={() => removeLicense(license.skuId)} disabled={assigningLicense}>
-                          回收
-                        </Button>
-                      </div>
-                    </Table.Cell>
+          <div className="dns-table-frame min-h-0">
+            <div className={cx('dns-table-scroll scrollbar-thin', userTableViewportClass)}>
+              <Table
+                layout="fixed"
+                className="w-full text-xs [&_td]:align-middle"
+                style={{ minWidth: USER_TABLE_COLUMN_WIDTHS.reduce((sum, width) => sum + width, 0) }}
+              >
+                <colgroup>
+                  {USER_TABLE_COLUMN_WIDTHS.map((width, index) => <col key={index} style={{ width }} />)}
+                </colgroup>
+                <Table.Header sticky variant="compact">
+                  <Table.Row>
+                    <Table.Head className="!px-3 !py-2 text-center">状态</Table.Head>
+                    <Table.Head className="!px-3 !py-2">显示名</Table.Head>
+                    <Table.Head className="!px-3 !py-2">登录账号</Table.Head>
+                    <Table.Head className="!px-3 !py-2">邮箱</Table.Head>
+                    <Table.Head className="!px-3 !py-2">许可证</Table.Head>
+                    <Table.Head className="!px-3 !py-2 text-right">操作</Table.Head>
                   </Table.Row>
-                ))}
-              </Table.Body>
-            </Table>
+                </Table.Header>
+                <Table.Body>
+                  {users.map((user) => {
+                    const assignedSkuLabels = getAssignedSkuLabels(user.assignedLicenses, skuLabelLookup);
+                    const assignedSkuSummary = assignedSkuLabels.length <= 2
+                      ? (assignedSkuLabels.join('、') || '-')
+                      : `${assignedSkuLabels.slice(0, 2).join('、')} +${assignedSkuLabels.length - 2}`;
+                    const deleteArmed = String(pendingUserDeleteId) === String(user.id);
+                    return (
+                      <Table.Row
+                        key={user.id}
+                        variant={String(user.id) === String(selectedUserId) ? 'selected' : 'default'}
+                        className="h-10 cursor-pointer"
+                        onClick={() => setSelectedUserId(String(user.id))}
+                      >
+                        <Table.Cell className="!px-3 !py-1.5 text-center">
+                          <div className="flex justify-center" onClick={(event) => event.stopPropagation()}>
+                            <Switch
+                              size="sm"
+                              aria-label={`${getDisplayText(user.displayName)}状态开关`}
+                              checked={user.accountEnabled !== false}
+                              disabled={togglingUserId === String(user.id)}
+                              onCheckedChange={(checked) => toggleUserEnabled(user, checked)}
+                            />
+                          </div>
+                        </Table.Cell>
+                        <Table.Cell className="!px-3 !py-1.5">
+                          <div className="truncate font-medium text-kumo-strong" title={getDisplayText(user.displayName)}>
+                            {getDisplayText(user.displayName)}
+                          </div>
+                        </Table.Cell>
+                        <Table.Cell className="!px-3 !py-1.5">
+                          <div className="truncate" title={getDisplayText(user.userPrincipalName)}>
+                            {getDisplayText(user.userPrincipalName)}
+                          </div>
+                        </Table.Cell>
+                        <Table.Cell className="!px-3 !py-1.5">
+                          <div className="truncate" title={getDisplayText(user.mail)}>
+                            {getDisplayText(user.mail)}
+                          </div>
+                        </Table.Cell>
+                        <Table.Cell className="!px-3 !py-1.5">
+                          <div className="flex min-w-0 items-center gap-2" title={assignedSkuLabels.join('、') || '-'}>
+                            <span className="min-w-0 flex-1 truncate">{assignedSkuSummary}</span>
+                            {assignedSkuLabels.length > 1 ? (
+                              <span className="shrink-0 rounded-full border border-kumo-line/70 bg-kumo-recessed/20 px-2 py-0.5 text-[10px] text-kumo-subtle">
+                                {assignedSkuLabels.length} 项
+                              </span>
+                            ) : null}
+                          </div>
+                        </Table.Cell>
+                        <Table.Cell className="!px-3 !py-1.5">
+                          <div className="flex items-center justify-end gap-2 whitespace-nowrap" onClick={(event) => event.stopPropagation()}>
+                            <Button size="sm" variant="secondary" onClick={() => openEditUser(user)}>编辑</Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              shape="square"
+                              title={deleteArmed ? '双击删除用户' : '双击删除'}
+                              aria-label="删除"
+                              icon={<Trash className="h-3.5 w-3.5" />}
+                              className={deleteArmed ? 'ring-1 ring-kumo-danger/50' : ''}
+                              onClick={() => {
+                                if (!deleteArmed) {
+                                  setPendingUserDeleteId(String(user.id));
+                                  toast.warning('双击删除按钮即可删除该用户');
+                                }
+                              }}
+                              onDoubleClick={() => {
+                                void deleteUser(user);
+                              }}
+                            />
+                          </div>
+                        </Table.Cell>
+                      </Table.Row>
+                    );
+                  })}
+                </Table.Body>
+              </Table>
+            </div>
           </div>
         )}
       </SectionCard>
@@ -900,14 +2009,16 @@ function M365Page() {
   );
 
   const renderGroups = () => (
-    <PageStack>
+    <PageStack className="min-h-0 flex-1 overflow-hidden">
       <SectionCard
+        className="flex min-h-0 flex-1 flex-col"
+        bodyClassName={panelBodyClass}
         title="组管理"
         description="创建组、查看成员，并为组分配许可证。"
         icon={<Folder className="h-4 w-4" />}
         action={(
           <div className="flex items-center gap-2">
-            <Button size="sm" variant="secondary" icon={<RefreshCw className={`h-3.5 w-3.5 ${groupsLoading ? 'animate-spin' : ''}`} />} onClick={loadGroups}>
+            <Button size="sm" variant="secondary" icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={loadGroups}>
               刷新
             </Button>
             <Button size="sm" variant="primary" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => setShowGroupDialog(true)}>
@@ -919,13 +2030,14 @@ function M365Page() {
         {!selectedAccountId ? (
           <EmptyState icon={Folder} title="请先选择租户" description="组管理依赖租户上下文。" />
         ) : groupsLoading ? (
-          <Loader />
+          <GroupsTabSkeleton />
         ) : groups.length === 0 ? (
           <EmptyState icon={Folder} title="暂无组" description="可以先创建安全组或 Microsoft 365 组。" />
         ) : (
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-            <AppCard padding="none" className="overflow-hidden">
-              <Table layout="fixed">
+          <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+            <AppCard padding="none" className="flex min-h-0 flex-col overflow-hidden">
+              <div className={scrollViewportClass}>
+                <Table layout="auto" className="[&_td]:py-3 [&_th]:py-3">
                 <Table.Header>
                   <Table.Row>
                     <Table.Head>组</Table.Head>
@@ -949,10 +2061,13 @@ function M365Page() {
                     </Table.Row>
                   ))}
                 </Table.Body>
-              </Table>
+                </Table>
+              </div>
             </AppCard>
 
             <SectionCard
+              className="flex min-h-0 flex-col"
+              bodyClassName={panelBodyClass}
               title={selectedGroup ? selectedGroup.displayName : '组成员'}
               description="输入成员对象 ID 即可添加；移除成员会实时调用 Graph。"
               icon={<Users className="h-4 w-4" />}
@@ -973,9 +2088,9 @@ function M365Page() {
               {!selectedGroup ? (
                 <EmptyState icon={Users} title="请选择一个组" description="选中左侧组后即可查看并管理成员。" card={false} />
               ) : groupMembersLoading ? (
-                <Loader />
+                <CardTableSkeleton rows={5} showToolbar />
               ) : (
-                <div className="space-y-4">
+                <div className="flex min-h-0 flex-1 flex-col gap-4">
                   <div className="flex items-center gap-2">
                     <Select
                       aria-label="组许可证 SKU"
@@ -988,8 +2103,9 @@ function M365Page() {
                       分配组许可证
                     </Button>
                   </div>
-                  <div className="overflow-x-auto">
-                    <Table layout="fixed">
+                  <div className={cx(tableFrameClass, 'rounded-lg border border-kumo-line/80')}>
+                    <div className={scrollViewportClass}>
+                      <Table layout="auto" className="[&_td]:py-3 [&_th]:py-3">
                       <Table.Header>
                         <Table.Row>
                           <Table.Head>成员</Table.Head>
@@ -1015,7 +2131,8 @@ function M365Page() {
                           </Table.Row>
                         ))}
                       </Table.Body>
-                    </Table>
+                      </Table>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1026,129 +2143,8 @@ function M365Page() {
     </PageStack>
   );
 
-  const renderReports = () => (
-    <PageStack>
-      <SectionCard
-        title="使用情况"
-        description="查看 Office、M365 Apps、OneDrive 和邮箱维度的用户使用报表。"
-        icon={<Activity className="h-4 w-4" />}
-        action={(
-          <div className="flex items-center gap-2">
-            <Select aria-label="报表周期" size="sm" value={reportPeriod} onValueChange={setReportPeriod} items={REPORT_PERIODS} />
-            <Button size="sm" variant="secondary" icon={<RefreshCw className={`h-3.5 w-3.5 ${reportsLoading ? 'animate-spin' : ''}`} />} onClick={() => loadReports(true)}>
-              刷新
-            </Button>
-          </div>
-        )}
-      >
-        {!selectedAccountId ? (
-          <EmptyState icon={Activity} title="请先选择租户" description="报表依赖租户与 Reports.Read.All 权限。" />
-        ) : (
-          <div className="space-y-4">
-            <Tabs {...MODULE_TABS_PROPS} value={reportType} onValueChange={setReportType} tabs={REPORT_TABS} />
-            <div className="grid gap-4 md:grid-cols-3">
-              <AppCard>
-                <div className="text-xs text-kumo-subtle">行数</div>
-                <div className="mt-1 text-xl font-semibold text-kumo-strong">{reportData.summary?.count ?? 0}</div>
-              </AppCard>
-              <AppCard>
-                <div className="text-xs text-kumo-subtle">报表周期</div>
-                <div className="mt-1 text-xl font-semibold text-kumo-strong">{reportData.summary?.period || reportPeriod}</div>
-              </AppCard>
-              <AppCard>
-                <div className="text-xs text-kumo-subtle">缓存时间</div>
-                <div className="mt-1 text-sm font-medium text-kumo-strong">{reportData.cachedAt ? formatDateTime(reportData.cachedAt) : '-'}</div>
-              </AppCard>
-            </div>
-            {reportsLoading ? (
-              <Loader />
-            ) : reportData.rows.length === 0 ? (
-              <EmptyState icon={Activity} title="暂无报表数据" description="可能是租户暂无活跃数据，或者 Graph 权限尚未完整授权。" />
-            ) : (
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
-                <AppCard padding="none" className="overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <Table layout="fixed">
-                      <Table.Header>
-                        <Table.Row>
-                          {Object.keys(reportData.rows[0] || {}).slice(0, 5).map((column) => (
-                            <Table.Head key={column}>{column}</Table.Head>
-                          ))}
-                          {reportType === 'onedrive-usage' && <Table.Head className="text-right">配额</Table.Head>}
-                        </Table.Row>
-                      </Table.Header>
-                      <Table.Body>
-                        {reportData.rows.map((row, index) => {
-                          const columns = Object.keys(row).slice(0, 5);
-                          const userId = row['Owner Principal Name'] || row['User Principal Name'] || row['用户名'];
-                          return (
-                            <Table.Row key={`${userId || 'row'}-${index}`}>
-                              {columns.map((column) => (
-                                <Table.Cell key={column}>{row[column] || '-'}</Table.Cell>
-                              ))}
-                              {reportType === 'onedrive-usage' && (
-                                <Table.Cell>
-                                  <div className="flex justify-end">
-                                    <Button
-                                      size="sm"
-                                      variant="secondary"
-                                      onClick={() => loadQuota(userId)}
-                                      disabled={!userId || quotaLoadingId === userId}
-                                    >
-                                      {quotaLoadingId === userId ? '加载中' : '查看'}
-                                    </Button>
-                                  </div>
-                                </Table.Cell>
-                              )}
-                            </Table.Row>
-                          );
-                        })}
-                      </Table.Body>
-                    </Table>
-                  </div>
-                </AppCard>
-
-                <SectionCard
-                  title="OneDrive 配额"
-                  description="仅在 OneDrive 报表中提供实时空间使用率。"
-                  icon={<Folder className="h-4 w-4" />}
-                  bodyPadding="sm"
-                >
-                  {!quotaDetail ? (
-                    <EmptyState icon={Folder} title="选择一行 OneDrive 用户" description="点击左侧“查看”后，这里会展示总量、已用、剩余和使用率。" card={false} />
-                  ) : (
-                    <div className="space-y-3 text-sm">
-                      <div className="flex items-center justify-between">
-                        <span className="text-kumo-subtle">总空间</span>
-                        <span className="font-medium text-kumo-strong">{formatFileSize(quotaDetail.total || 0)}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-kumo-subtle">已用空间</span>
-                        <span className="font-medium text-kumo-strong">{formatFileSize(quotaDetail.used || 0)}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-kumo-subtle">剩余空间</span>
-                        <span className="font-medium text-kumo-strong">{formatFileSize(quotaDetail.remaining || 0)}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-kumo-subtle">使用率</span>
-                        <StatusBadge tone={(quotaDetail.usagePct || 0) >= 80 ? 'warning' : 'info'}>
-                          {Number(quotaDetail.usagePct || 0).toFixed(2)}%
-                        </StatusBadge>
-                      </div>
-                    </div>
-                  )}
-                </SectionCard>
-              </div>
-            )}
-          </div>
-        )}
-      </SectionCard>
-    </PageStack>
-  );
-
   return (
-    <PageStack>
+    <PageStack className={workspaceHeightClass}>
       <PageToolbar>
         <div className="min-w-0">
           <Tabs
@@ -1157,24 +2153,32 @@ function M365Page() {
             onValueChange={setActiveTab}
             tabs={[
               { value: 'tenants', label: <span className="inline-flex items-center gap-1.5"><Cloud className="h-4 w-4" />租户</span> },
-              { value: 'users', label: <span className="inline-flex items-center gap-1.5"><Users className="h-4 w-4" />用户</span> },
-              { value: 'licenses', label: <span className="inline-flex items-center gap-1.5"><Database className="h-4 w-4" />许可证</span> },
+              { value: 'users', label: <span className="inline-flex items-center gap-1.5"><Users className="h-4 w-4" />用户与许可证</span> },
               { value: 'groups', label: <span className="inline-flex items-center gap-1.5"><Folder className="h-4 w-4" />组</span> },
-              { value: 'reports', label: <span className="inline-flex items-center gap-1.5"><Activity className="h-4 w-4" />使用情况</span> },
+              { value: 'public', label: <span className="inline-flex items-center gap-1.5"><Globe className="h-4 w-4" />公开页</span> },
             ]}
           />
         </div>
-        {renderToolbarSelector}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<Shield className="h-3.5 w-3.5" />}
+            onClick={() => setShowPermissionDialog(true)}
+          >
+            权限说明
+          </Button>
+          {renderToolbarSelector}
+        </div>
       </PageToolbar>
 
       {activeTab === 'tenants' && renderTenants()}
       {activeTab === 'users' && renderUsers()}
-      {activeTab === 'licenses' && renderLicenses()}
       {activeTab === 'groups' && renderGroups()}
-      {activeTab === 'reports' && renderReports()}
+      {activeTab === 'public' && renderPublicPages()}
 
       <Dialog.Root open={showAccountDialog} onOpenChange={setShowAccountDialog}>
-        <Dialog size="sm" className="p-5">
+        <Dialog className="w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] p-5 sm:w-full sm:max-w-xl">
           <div className="space-y-4">
             <Dialog.Title>{editingAccount ? '编辑租户' : '新增租户'}</Dialog.Title>
             <div className="grid gap-3">
@@ -1195,23 +2199,129 @@ function M365Page() {
       </Dialog.Root>
 
       <Dialog.Root open={showUserDialog} onOpenChange={setShowUserDialog}>
-        <Dialog size="sm" className="p-5">
+        <Dialog className="w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] p-5 sm:w-full sm:max-w-3xl">
           <div className="space-y-4">
             <Dialog.Title>{editingUser ? '编辑用户' : '新增用户'}</Dialog.Title>
-            <div className="grid gap-3">
-              <Input size="sm" aria-label="显示名称" value={userForm.displayName} onChange={(event) => setUserForm((current) => ({ ...current, displayName: event.target.value }))} placeholder="显示名称" />
-              {!editingUser && <Input size="sm" aria-label="邮箱别名" value={userForm.mailNickname} onChange={(event) => setUserForm((current) => ({ ...current, mailNickname: event.target.value }))} placeholder="mailNickname" />}
-              {!editingUser && <Input size="sm" aria-label="用户主体名" value={userForm.userPrincipalName} onChange={(event) => setUserForm((current) => ({ ...current, userPrincipalName: event.target.value }))} placeholder="user@domain.com" />}
-              {!editingUser && <Input size="sm" aria-label="初始密码" value={userForm.password} onChange={(event) => setUserForm((current) => ({ ...current, password: event.target.value }))} placeholder="初始密码" />}
-              <Input size="sm" aria-label="部门" value={userForm.department} onChange={(event) => setUserForm((current) => ({ ...current, department: event.target.value }))} placeholder="部门" />
-              <Input size="sm" aria-label="职位" value={userForm.jobTitle} onChange={(event) => setUserForm((current) => ({ ...current, jobTitle: event.target.value }))} placeholder="职位" />
-              <Input size="sm" aria-label="办公地点" value={userForm.officeLocation} onChange={(event) => setUserForm((current) => ({ ...current, officeLocation: event.target.value }))} placeholder="办公地点" />
-              <Input size="sm" aria-label="使用地区" value={userForm.usageLocation} onChange={(event) => setUserForm((current) => ({ ...current, usageLocation: event.target.value }))} placeholder="CN / US / HK" />
-            </div>
+            {loadingUserDialog ? (
+              <div className="space-y-3">
+                <SkeletonLine className="h-10 w-full" />
+                <SkeletonLine className="h-10 w-full" />
+                <SkeletonLine className="h-10 w-full" />
+                <SkeletonLine className="h-40 w-full" />
+              </div>
+            ) : (
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,24rem)]">
+                <div className="grid gap-3">
+                  <Input size="sm" aria-label="显示名称" value={userForm.displayName} onChange={(event) => setUserForm((current) => ({ ...current, displayName: event.target.value }))} placeholder="显示名称" />
+                  <div className="grid grid-cols-[minmax(0,1fr)_12rem] gap-2">
+                    <Input
+                      size="sm"
+                      aria-label={editingUser ? '登录账号前缀' : '邮箱前缀'}
+                      value={userForm.mailNickname}
+                      onChange={(event) => setUserForm((current) => ({ ...current, mailNickname: event.target.value }))}
+                      placeholder={editingUser ? '登录账号前缀' : '邮箱前缀'}
+                    />
+                    <Select
+                      aria-label="邮箱后缀"
+                      size="sm"
+                      value={userForm.emailDomain}
+                      onValueChange={(value) => setUserForm((current) => ({ ...current, emailDomain: value }))}
+                      items={userEmailDomainItems}
+                    />
+                  </div>
+                  <div className="text-xs text-kumo-subtle">
+                    {!userForm.mailNickname.trim()
+                      ? '显示名称留空时会自动使用邮箱前缀。'
+                      : `登录账号预览：${userForm.mailNickname}${userForm.emailDomain ? `@${userForm.emailDomain}` : ''}`}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      size="sm"
+                      aria-label={editingUser ? '重置密码' : '初始密码'}
+                      value={userForm.password}
+                      onChange={(event) => setUserForm((current) => ({ ...current, password: event.target.value }))}
+                      placeholder={editingUser ? '留空则不修改密码' : '初始密码'}
+                    />
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      icon={<RefreshCw className="h-3.5 w-3.5" />}
+                      onClick={() => setUserForm((current) => ({ ...current, password: DEFAULT_NEW_USER_PASSWORD }))}
+                    >
+                      预设
+                    </Button>
+                  </div>
+                  {!editingUser ? (
+                    <label className="flex items-center gap-2 text-xs text-kumo-subtle">
+                      <Checkbox
+                        checked={userForm.forceChangePasswordNextSignIn}
+                        onCheckedChange={(checked) => setUserForm((current) => ({ ...current, forceChangePasswordNextSignIn: !!checked }))}
+                      />
+                      下次登录时强制修改密码
+                    </label>
+                  ) : null}
+                  <label className="flex items-center gap-2 text-xs text-kumo-subtle">
+                    <Checkbox
+                      checked={userForm.accountEnabled}
+                      onCheckedChange={(checked) => setUserForm((current) => ({ ...current, accountEnabled: !!checked }))}
+                    />
+                    启用账号
+                  </label>
+                  {!editingUser ? (
+                    <>
+                      <Input size="sm" aria-label="部门" value={userForm.department} onChange={(event) => setUserForm((current) => ({ ...current, department: event.target.value }))} placeholder="部门" />
+                      <Input size="sm" aria-label="职位" value={userForm.jobTitle} onChange={(event) => setUserForm((current) => ({ ...current, jobTitle: event.target.value }))} placeholder="职位" />
+                      <Input size="sm" aria-label="办公地点" value={userForm.officeLocation} onChange={(event) => setUserForm((current) => ({ ...current, officeLocation: event.target.value }))} placeholder="办公地点" />
+                      <Input size="sm" aria-label="使用地区" value={userForm.usageLocation} onChange={(event) => setUserForm((current) => ({ ...current, usageLocation: event.target.value }))} placeholder="CN / US / HK" />
+                    </>
+                  ) : null}
+                </div>
+
+                <div className="space-y-2 rounded-lg border border-kumo-line/80 bg-kumo-recessed/10 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-medium text-kumo-strong">许可证</div>
+                    <div className="text-xs text-kumo-subtle">已选 {userDialogSkuIds.length} 项</div>
+                  </div>
+                  <div className="text-xs text-kumo-subtle">
+                    {editingUser ? '直接在这里勾选或取消勾选，保存时会一并更新许可证。' : '新增用户后会自动分配这里勾选的许可证。'}
+                  </div>
+                  {skus.length === 0 ? (
+                    <div className="text-xs text-kumo-subtle">当前没有可选订阅，或还未加载完成。</div>
+                  ) : (
+                    <div className="max-h-80 overflow-auto pr-1 scrollbar-thin">
+                      <div className="grid gap-1">
+                        {skus.map((sku) => {
+                          const normalizedId = String(sku.skuId);
+                          const checked = userDialogSkuIds.includes(normalizedId);
+                          return (
+                            <label key={sku.skuId} className="flex min-w-0 items-center gap-2 rounded border border-transparent px-2 py-1.5 hover:border-kumo-line hover:bg-kumo-base/60">
+                              <Checkbox
+                                checked={checked}
+                                onCheckedChange={(value) => {
+                                  setUserDialogSkuIds((current) => (
+                                    value
+                                      ? (current.includes(normalizedId) ? current : [...current, normalizedId])
+                                      : current.filter((item) => item !== normalizedId)
+                                  ));
+                                }}
+                                aria-label={`选择 ${getSkuDisplayLabel(sku.skuPartNumber, sku.skuId)}`}
+                              />
+                              <span className="min-w-0 flex-1 truncate text-xs text-kumo-strong">
+                                {getSkuDisplayLabel(sku.skuPartNumber, sku.skuId)}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
             <div className="flex justify-end gap-2">
               <Button size="sm" variant="secondary" onClick={() => setShowUserDialog(false)}>取消</Button>
-              <Button size="sm" variant="primary" onClick={submitUser} disabled={submittingUser}>
-                {submittingUser ? '保存中...' : '保存'}
+              <Button size="sm" variant="primary" onClick={submitUser} disabled={submittingUser || loadingUserDialog || assigningLicense}>
+                {submittingUser || assigningLicense ? '保存中...' : '保存'}
               </Button>
             </div>
           </div>
@@ -1236,22 +2346,252 @@ function M365Page() {
         </Dialog>
       </Dialog.Root>
 
-      <Dialog.Root open={showUserDetails} onOpenChange={setShowUserDetails}>
+      <Dialog.Root open={showPublicPageDialog} onOpenChange={setShowPublicPageDialog}>
+        <Dialog className="w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] p-5 sm:w-full sm:max-w-3xl">
+          <div className="space-y-4">
+            <Dialog.Title>{publicPageForm.id ? '编辑公开页' : '新建公开页'}</Dialog.Title>
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)]">
+              <div className="grid gap-3">
+                <Input size="sm" aria-label="公开页名称" value={publicPageForm.name} onChange={(event) => setPublicPageForm((current) => ({ ...current, name: event.target.value }))} placeholder="例如：学生自助开通" />
+                <div className="rounded-lg border border-kumo-line/80 bg-kumo-recessed/10 p-3">
+                  <div className="text-sm font-medium text-kumo-strong">目标租户与域名</div>
+                  <div className="mt-1 text-xs text-kumo-subtle">先勾选租户，再在下方展开该租户的全部域名做收缩选择。未取消的域名都会被允许注册。</div>
+                  <div className="mt-3 grid gap-2">
+                    {accounts.map((account) => {
+                      const normalizedId = String(account.id);
+                      const checked = publicPageForm.accountIds.includes(normalizedId);
+                      const accountDomains = getPublicAccountDomainList(account);
+                      const selectedCount = accountDomains.filter((domain) => publicPageForm.domains.includes(domain)).length;
+                      return (
+                        <div key={account.id} className="rounded-lg border border-kumo-line/70 bg-kumo-base/50 px-3 py-2.5">
+                          <label className="flex min-w-0 items-center gap-2">
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={(value) => {
+                                setPublicPageForm((current) => {
+                                  const nextAccountIds = value
+                                    ? (current.accountIds.includes(normalizedId) ? current.accountIds : [...current.accountIds, normalizedId])
+                                    : current.accountIds.filter((item) => item !== normalizedId);
+                                  const domainSet = new Set(current.domains);
+                                  if (value) {
+                                    accountDomains.forEach((domain) => domainSet.add(domain));
+                                  } else {
+                                    accountDomains.forEach((domain) => domainSet.delete(domain));
+                                  }
+                                  return {
+                                    ...current,
+                                    accountIds: nextAccountIds,
+                                    domains: Array.from(domainSet).sort((a, b) => a.localeCompare(b)),
+                                  };
+                                });
+                              }}
+                            />
+                            <ChevronDown className={cx('h-3.5 w-3.5 text-kumo-subtle transition', checked ? 'rotate-0' : '-rotate-90')} />
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-xs font-medium text-kumo-strong">{account.name}</div>
+                              <div className="mt-0.5 truncate text-[11px] text-kumo-subtle">
+                                默认 @{account.defaultDomain || '-'}{accountDomains.length > 0 ? `，共 ${accountDomains.length} 个域名` : ''}
+                              </div>
+                            </div>
+                            <span className="shrink-0 text-[11px] text-kumo-subtle">
+                              {checked ? `已选 ${selectedCount}/${accountDomains.length || 0}` : '未启用'}
+                            </span>
+                          </label>
+
+                          {checked ? (
+                            <div className="mt-2 border-t border-kumo-line/60 pt-2">
+                              {accountDomains.length === 0 ? (
+                                <div className="text-[11px] text-kumo-subtle">当前租户还没有读取到可选域名，请先校验租户连接。</div>
+                              ) : (
+                                <div className="grid gap-1">
+                                  {accountDomains.map((domain) => {
+                                    const domainChecked = publicPageForm.domains.includes(domain);
+                                    return (
+                                      <label key={domain} className="flex min-w-0 items-center gap-2 rounded px-2 py-1 hover:bg-kumo-recessed/20">
+                                        <Checkbox
+                                          checked={domainChecked}
+                                          onCheckedChange={(value) => {
+                                            setPublicPageForm((current) => ({
+                                              ...current,
+                                              domains: value
+                                                ? Array.from(new Set([...current.domains, domain])).sort((a, b) => a.localeCompare(b))
+                                                : current.domains.filter((item) => item !== domain),
+                                            }));
+                                          }}
+                                        />
+                                        <span className="min-w-0 flex-1 truncate text-xs text-kumo-strong">@{domain}</span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 text-xs text-kumo-subtle">
+                  <Checkbox
+                    checked={publicPageForm.enabled}
+                    onCheckedChange={(checked) => setPublicPageForm((current) => ({ ...current, enabled: !!checked }))}
+                  />
+                  启用这个公开页
+                </label>
+                <label className="flex items-center gap-2 text-xs text-kumo-subtle">
+                  <Checkbox
+                    checked={publicPageForm.forceChangePasswordNextSignIn}
+                    onCheckedChange={(checked) => setPublicPageForm((current) => ({ ...current, forceChangePasswordNextSignIn: !!checked }))}
+                  />
+                  首次登录强制修改密码
+                </label>
+              </div>
+
+              <div className="space-y-2 rounded-lg border border-kumo-line/80 bg-kumo-recessed/10 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-medium text-kumo-strong">许可证模板</div>
+                  <div className="text-xs text-kumo-subtle">已选 {publicPageForm.skuIds.length} 项</div>
+                </div>
+                <div className="text-xs text-kumo-subtle">通过这个公开页注册的新账号会自动分配这里勾选的许可证。</div>
+                <div className="rounded-lg border border-kumo-line/70 bg-kumo-base/60 px-3 py-2 text-xs text-kumo-subtle">
+                  保存后请到“邀请码”页面单独生成注册链接，每次最多生成 5 个一次性邀请码。
+                </div>
+                {publicPageForm.accountIds.length === 0 ? (
+                  <div className="text-xs text-kumo-subtle">先勾选一个租户，再读取该租户的许可证模板。</div>
+                ) : skus.length === 0 ? (
+                  <div className="text-xs text-kumo-subtle">当前没有可选订阅，或还未加载完成。</div>
+                ) : (
+                  <div className="max-h-80 overflow-auto pr-1 scrollbar-thin">
+                    <div className="grid gap-1">
+                      {skus.map((sku) => {
+                        const normalizedId = String(sku.skuId);
+                        const checked = publicPageForm.skuIds.includes(normalizedId);
+                        return (
+                          <label key={sku.skuId} className="flex min-w-0 items-center gap-2 rounded border border-transparent px-2 py-1.5 hover:border-kumo-line hover:bg-kumo-base/60">
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={(value) => {
+                                setPublicPageForm((current) => ({
+                                  ...current,
+                                  skuIds: value
+                                    ? (current.skuIds.includes(normalizedId) ? current.skuIds : [...current.skuIds, normalizedId])
+                                    : current.skuIds.filter((item) => item !== normalizedId),
+                                }));
+                              }}
+                            />
+                            <span className="min-w-0 flex-1 truncate text-xs text-kumo-strong">{getSkuDisplayLabel(sku.skuPartNumber, sku.skuId)}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="secondary" onClick={() => setShowPublicPageDialog(false)}>取消</Button>
+              <Button size="sm" variant="primary" onClick={submitPublicPage} disabled={submittingPublicPage}>
+                {submittingPublicPage ? '保存中...' : '保存'}
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      </Dialog.Root>
+
+      <Dialog.Root open={showInviteCodeDialog} onOpenChange={setShowInviteCodeDialog}>
         <Dialog size="sm" className="p-5">
           <div className="space-y-4">
-            <Dialog.Title>用户详情</Dialog.Title>
-            {!selectedUserDetails ? (
-              <Loader />
-            ) : (
-              <div className="space-y-3 text-sm">
-                <div className="flex items-center justify-between"><span className="text-kumo-subtle">显示名称</span><span className="font-medium text-kumo-strong">{selectedUserDetails.displayName || '-'}</span></div>
-                <div className="flex items-center justify-between"><span className="text-kumo-subtle">UPN</span><span className="font-medium text-kumo-strong">{selectedUserDetails.userPrincipalName || '-'}</span></div>
-                <div className="flex items-center justify-between"><span className="text-kumo-subtle">部门</span><span className="font-medium text-kumo-strong">{selectedUserDetails.department || '-'}</span></div>
-                <div className="flex items-center justify-between"><span className="text-kumo-subtle">职位</span><span className="font-medium text-kumo-strong">{selectedUserDetails.jobTitle || '-'}</span></div>
-                <div className="flex items-center justify-between"><span className="text-kumo-subtle">创建时间</span><span className="font-medium text-kumo-strong">{selectedUserDetails.createdDateTime ? formatDateTime(selectedUserDetails.createdDateTime) : '-'}</span></div>
-                <div className="flex items-center justify-between"><span className="text-kumo-subtle">许可证数</span><span className="font-medium text-kumo-strong">{selectedUserLicenses.length}</span></div>
+            <Dialog.Title>生成邀请码</Dialog.Title>
+            <div className="grid gap-3">
+              <Select
+                aria-label="公开页"
+                size="sm"
+                value={inviteCodeGeneratorForm.publicPageId}
+                onValueChange={(value) => setInviteCodeGeneratorForm((current) => ({ ...current, publicPageId: value }))}
+                items={publicPages.map((page) => ({ value: String(page.id), label: page.name }))}
+              />
+              <Input
+                size="sm"
+                type="number"
+                min="1"
+                max="5"
+                aria-label="生成数量"
+                value={inviteCodeGeneratorForm.quantity}
+                onChange={(event) => setInviteCodeGeneratorForm((current) => ({ ...current, quantity: event.target.value }))}
+                placeholder="1-5"
+              />
+              <div className="rounded-lg border border-kumo-line/70 bg-kumo-base/60 px-3 py-2 text-xs text-kumo-subtle">
+                生成后直接使用带 `code` 的注册链接即可。每个邀请码默认只能使用 1 次。
               </div>
-            )}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="secondary" onClick={() => setShowInviteCodeDialog(false)}>取消</Button>
+              <Button size="sm" variant="primary" onClick={generateInviteCodes} disabled={generatingInviteCodes}>
+                {generatingInviteCodes ? '生成中...' : '生成'}
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      </Dialog.Root>
+
+      <Dialog.Root open={showPermissionDialog} onOpenChange={setShowPermissionDialog}>
+        <Dialog className="w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] p-5 sm:w-full sm:max-w-3xl">
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <Dialog.Title>Graph 权限说明</Dialog.Title>
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs text-kumo-subtle">
+                {selectedAccount ? `当前租户：${selectedAccount.name}` : '请先选择租户'}
+              </div>
+              <Button
+                size="sm"
+                variant="secondary"
+                icon={<Shield className={`h-3.5 w-3.5 ${permissionCheckLoading ? 'animate-pulse' : ''}`} />}
+                onClick={detectPermissions}
+                disabled={!selectedAccountId || permissionCheckLoading}
+              >
+                {permissionCheckLoading ? '检测中...' : '一键检测'}
+              </Button>
+            </div>
+
+            {permissionCheckError ? (
+              <AppCard className="border-kumo-danger/20 bg-kumo-danger/5">
+                <div className="text-xs text-kumo-danger">{permissionCheckError}</div>
+              </AppCard>
+            ) : null}
+
+            <div className="grid gap-3">
+              {permissionItems.map((permission) => (
+                <AppCard key={permission.name} className="p-0">
+                  <div className="flex items-center justify-between gap-3 px-4 py-3">
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <div className="font-mono text-sm font-semibold text-kumo-strong">{permission.name}</div>
+                        {permission.granted === true ? <StatusBadge tone="success">已具备</StatusBadge> : null}
+                        {permission.granted === false ? <StatusBadge tone="danger">缺失</StatusBadge> : null}
+                      </div>
+                      <div className="mt-1 text-xs text-kumo-subtle">{permission.note}</div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      shape="square"
+                      aria-label={`复制 ${permission.name}`}
+                      title="复制权限名"
+                      icon={<Copy className="h-3.5 w-3.5" />}
+                      onClick={() => copyText(permission.name, `${permission.name} 已复制`)}
+                    />
+                  </div>
+                </AppCard>
+              ))}
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="secondary" onClick={() => setShowPermissionDialog(false)}>关闭</Button>
+            </div>
           </div>
         </Dialog>
       </Dialog.Root>

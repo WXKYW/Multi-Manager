@@ -2,39 +2,45 @@ package m365
 
 import (
 	"context"
+	"database/sql"
+	"encoding/base64"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
+	_ "modernc.org/sqlite"
 )
 
-func TestM365LifecycleAndReports(t *testing.T) {
+func TestM365Lifecycle(t *testing.T) {
 	t.Setenv("ENCRYPTION_KEY", "test-encryption-key")
+	testToken := fakeJWT(`{"roles":["User.Read.All","User.ReadWrite.All","Organization.Read.All","LicenseAssignment.Read.All","LicenseAssignment.ReadWrite.All","Group.Create","GroupMember.ReadWrite.All"]}`)
 
-	var reportHits int
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/oauth2/v2.0/token"):
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"access_token":"test-token"}`))
+			_, _ = w.Write([]byte(`{"access_token":"` + testToken + `"}`))
 		case r.URL.Path == "/organization":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"value":[{"displayName":"Contoso","verifiedDomains":[{"name":"contoso.com","isDefault":true}]}]}`))
-		case strings.HasSuffix(r.URL.Path, "/drive"):
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"id":"drive-1","quota":{"total":1073741824,"used":536870912,"remaining":536870912}}`))
+			_, _ = w.Write([]byte(`{"value":[{"displayName":"Contoso","verifiedDomains":[{"name":"contoso.com","isDefault":true},{"name":"campus.contoso.com","isDefault":false}]}]}`))
 		case strings.HasPrefix(r.URL.Path, "/users") && r.Method == http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"@odata.count":1,"value":[{"id":"user-1","displayName":"Alice","userPrincipalName":"alice@contoso.com","accountEnabled":true}]}`))
+			_, _ = w.Write([]byte(`{"@odata.count":1,"value":[{"id":"user-1","displayName":"Alice","userPrincipalName":"alice@contoso.com","accountEnabled":true,"assignedLicenses":[{"skuId":"c42b9cae-ea4f-4ab7-9717-81576235ccac"}]}]}`))
 		case strings.HasPrefix(r.URL.Path, "/users") && r.Method == http.MethodPost:
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":"new-user","displayName":"New User"}`))
 		case r.URL.Path == "/subscribedSkus":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"value":[{"skuId":"sku-1","skuPartNumber":"ENTERPRISEPACK","consumedUnits":2} ]}`))
+			_, _ = w.Write([]byte(`{"value":[{"skuId":"sku-1","skuPartNumber":"ENTERPRISEPACK","consumedUnits":2,"subscriptionIds":["sub-1"]} ]}`))
+		case r.URL.Path == "/directory/subscriptions":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"value":[{"id":"sub-1","skuId":"sku-1","skuPartNumber":"ENTERPRISEPACK","status":"Enabled","isTrial":false,"nextLifecycleDateTime":"2027-01-15T00:00:00Z"}]}`))
 		case strings.HasPrefix(r.URL.Path, "/groups") && r.Method == http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"value":[{"id":"group-1","displayName":"Engineering","securityEnabled":true}]}`))
@@ -44,13 +50,6 @@ func TestM365LifecycleAndReports(t *testing.T) {
 		case strings.Contains(r.URL.Path, "/assignLicense"):
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"id":"updated-object"}`))
-		case strings.HasPrefix(r.URL.Path, "/reports/getOffice365ActiveUserDetail"):
-			w.Header().Set("Location", "http://"+r.Host+"/download/office")
-			w.WriteHeader(http.StatusFound)
-		case r.URL.Path == "/download/office":
-			reportHits++
-			w.Header().Set("Content-Type", "text/csv")
-			_, _ = w.Write([]byte("Report Refresh Date,User Principal Name,Last Activity Date\n2026-07-11,alice@contoso.com,2026-07-10\n"))
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
 		}
@@ -79,9 +78,18 @@ func TestM365LifecycleAndReports(t *testing.T) {
 	if verifyRes.Code != http.StatusOK || !strings.Contains(verifyRes.Body.String(), `"displayName":"Contoso"`) {
 		t.Fatalf("verify status=%d body=%s", verifyRes.Code, verifyRes.Body.String())
 	}
+	verifiedListRes := performM365(service, http.MethodGet, "/api/m365/accounts", "")
+	if verifiedListRes.Code != http.StatusOK || !strings.Contains(verifiedListRes.Body.String(), `"verifiedDomains":["contoso.com","campus.contoso.com"]`) {
+		t.Fatalf("verified account list status=%d body=%s", verifiedListRes.Code, verifiedListRes.Body.String())
+	}
+
+	permissionsRes := performM365(service, http.MethodGet, "/api/m365/accounts/1/permissions", "")
+	if permissionsRes.Code != http.StatusOK || !strings.Contains(permissionsRes.Body.String(), `"grantedCount":7`) || strings.Contains(permissionsRes.Body.String(), `"Reports.Read.All"`) {
+		t.Fatalf("permissions status=%d body=%s", permissionsRes.Code, permissionsRes.Body.String())
+	}
 
 	usersRes := performM365(service, http.MethodGet, "/api/m365/accounts/1/users?top=10", "")
-	if usersRes.Code != http.StatusOK || !strings.Contains(usersRes.Body.String(), `"Alice"`) {
+	if usersRes.Code != http.StatusOK || !strings.Contains(usersRes.Body.String(), `"Alice"`) || !strings.Contains(usersRes.Body.String(), `"assignedLicenses"`) {
 		t.Fatalf("users status=%d body=%s", usersRes.Code, usersRes.Body.String())
 	}
 
@@ -91,31 +99,13 @@ func TestM365LifecycleAndReports(t *testing.T) {
 	}
 
 	skuRes := performM365(service, http.MethodGet, "/api/m365/accounts/1/licenses/skus", "")
-	if skuRes.Code != http.StatusOK || !strings.Contains(skuRes.Body.String(), `"ENTERPRISEPACK"`) {
+	if skuRes.Code != http.StatusOK || !strings.Contains(skuRes.Body.String(), `"ENTERPRISEPACK"`) || !strings.Contains(skuRes.Body.String(), `"nextLifecycleDateTime":"2027-01-15T00:00:00Z"`) {
 		t.Fatalf("sku status=%d body=%s", skuRes.Code, skuRes.Body.String())
 	}
 
 	groupRes := performM365(service, http.MethodGet, "/api/m365/accounts/1/groups", "")
 	if groupRes.Code != http.StatusOK || !strings.Contains(groupRes.Body.String(), `"Engineering"`) {
 		t.Fatalf("groups status=%d body=%s", groupRes.Code, groupRes.Body.String())
-	}
-
-	reportRes := performM365(service, http.MethodGet, "/api/m365/accounts/1/reports/office-activity", "")
-	if reportRes.Code != http.StatusOK || !strings.Contains(reportRes.Body.String(), `"alice@contoso.com"`) {
-		t.Fatalf("report status=%d body=%s", reportRes.Code, reportRes.Body.String())
-	}
-
-	reportResCached := performM365(service, http.MethodGet, "/api/m365/accounts/1/reports/office-activity", "")
-	if reportResCached.Code != http.StatusOK {
-		t.Fatalf("report cached status=%d body=%s", reportResCached.Code, reportResCached.Body.String())
-	}
-	if reportHits != 1 {
-		t.Fatalf("expected cached report after one download, got report hits=%d", reportHits)
-	}
-
-	quotaRes := performM365(service, http.MethodGet, "/api/m365/accounts/1/reports/onedrive/users/user-1/quota", "")
-	if quotaRes.Code != http.StatusOK || !strings.Contains(quotaRes.Body.String(), `"usagePct":50`) {
-		t.Fatalf("quota status=%d body=%s", quotaRes.Code, quotaRes.Body.String())
 	}
 }
 
@@ -146,6 +136,314 @@ func TestAccountSecretStoredEncrypted(t *testing.T) {
 	}
 }
 
+func TestUserPatchSupportsPasswordReset(t *testing.T) {
+	t.Setenv("ENCRYPTION_KEY", "test-encryption-key")
+	testToken := fakeJWT(`{"roles":["User.ReadWrite.All"]}`)
+
+	var patchBody string
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/oauth2/v2.0/token"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"` + testToken + `"}`))
+		case r.URL.Path == "/users/user-1" && r.Method == http.MethodPatch:
+			body, _ := io.ReadAll(r.Body)
+			patchBody = string(body)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer mock.Close()
+
+	t.Setenv("M365_GRAPH_BASE_URL", mock.URL)
+	t.Setenv("M365_LOGIN_BASE_URL", mock.URL)
+
+	service := New(config.Config{
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	createRes := performM365(service, http.MethodPost, "/api/m365/accounts", `{"name":"Contoso","tenantId":"tenant-1","clientId":"client-1","clientSecret":"secret-1"}`)
+	if createRes.Code != http.StatusOK {
+		t.Fatalf("create account status=%d body=%s", createRes.Code, createRes.Body.String())
+	}
+
+	patchRes := performM365(service, http.MethodPatch, "/api/m365/accounts/1/users/user-1", `{"displayName":"Alice Updated","password":"TempPassw0rd!","forceChangePasswordNextSignIn":false}`)
+	if patchRes.Code != http.StatusOK {
+		t.Fatalf("patch user status=%d body=%s", patchRes.Code, patchRes.Body.String())
+	}
+	if !strings.Contains(patchBody, `"passwordProfile"`) || !strings.Contains(patchBody, `"password":"TempPassw0rd!"`) {
+		t.Fatalf("expected passwordProfile in graph patch body, got %s", patchBody)
+	}
+	if !strings.Contains(patchBody, `"forceChangePasswordNextSignIn":false`) {
+		t.Fatalf("expected forceChangePasswordNextSignIn in graph patch body, got %s", patchBody)
+	}
+}
+
+func TestInviteRegistrationLifecycle(t *testing.T) {
+	t.Setenv("ENCRYPTION_KEY", "test-encryption-key")
+	testToken := fakeJWT(`{"roles":["User.ReadWrite.All","LicenseAssignment.ReadWrite.All"]}`)
+
+	var createUserBody string
+	var assignLicenseBody string
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/oauth2/v2.0/token"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"` + testToken + `"}`))
+		case r.URL.Path == "/users" && r.Method == http.MethodPost:
+			body, _ := io.ReadAll(r.Body)
+			createUserBody = string(body)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"registered-user","displayName":"Student One"}`))
+		case r.URL.Path == "/users/registered-user/assignLicense" && r.Method == http.MethodPost:
+			body, _ := io.ReadAll(r.Body)
+			assignLicenseBody = string(body)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer mock.Close()
+
+	t.Setenv("M365_GRAPH_BASE_URL", mock.URL)
+	t.Setenv("M365_LOGIN_BASE_URL", mock.URL)
+
+	service := New(config.Config{
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	createAccountRes := performM365(service, http.MethodPost, "/api/m365/accounts", `{"name":"Contoso","tenantId":"tenant-1","clientId":"client-1","clientSecret":"secret-1","defaultDomain":"contoso.com"}`)
+	if createAccountRes.Code != http.StatusOK {
+		t.Fatalf("create account status=%d body=%s", createAccountRes.Code, createAccountRes.Body.String())
+	}
+	createSecondAccountRes := performM365(service, http.MethodPost, "/api/m365/accounts", `{"name":"Fabrikam","tenantId":"tenant-2","clientId":"client-2","clientSecret":"secret-2","defaultDomain":"fabrikam.com"}`)
+	if createSecondAccountRes.Code != http.StatusOK {
+		t.Fatalf("create second account status=%d body=%s", createSecondAccountRes.Code, createSecondAccountRes.Body.String())
+	}
+
+	createPageRes := performM365(service, http.MethodPost, "/api/m365/public-pages", `{"name":"2026 新生批次","accountIds":[1,2],"domains":["contoso.com","fabrikam.com"],"skuIds":["sku-1"],"forceChangePasswordNextSignIn":true}`)
+	if createPageRes.Code != http.StatusOK {
+		t.Fatalf("create public page status=%d body=%s", createPageRes.Code, createPageRes.Body.String())
+	}
+
+	createInviteRes := performM365(service, http.MethodPost, "/api/m365/invite-codes", `{"publicPageId":1,"quantity":2}`)
+	if createInviteRes.Code != http.StatusOK {
+		t.Fatalf("create invite codes status=%d body=%s", createInviteRes.Code, createInviteRes.Body.String())
+	}
+	createInviteData := decodeEnvelopeData(t, createInviteRes)
+	codes := stringArray(createInviteData["codes"])
+	batchID := strings.TrimSpace(stringValue(createInviteData["batchId"], ""))
+	if len(codes) != 2 {
+		t.Fatalf("expected 2 generated invite codes, body=%s", createInviteRes.Body.String())
+	}
+	if batchID == "" {
+		t.Fatalf("expected generated batchId, body=%s", createInviteRes.Body.String())
+	}
+	code := strings.TrimSpace(codes[0])
+	if code == "" || strings.TrimSpace(codes[1]) == "" {
+		t.Fatalf("expected generated invite code, body=%s", createInviteRes.Body.String())
+	}
+	if numberValue(createInviteData["createdCount"]) != 2 {
+		t.Fatalf("expected createdCount=2 body=%s", createInviteRes.Body.String())
+	}
+
+	listPageRes := performM365(service, http.MethodGet, "/api/m365/public-pages", "")
+	if listPageRes.Code != http.StatusOK || !strings.Contains(listPageRes.Body.String(), `"2026 新生批次"`) || !strings.Contains(listPageRes.Body.String(), `"inviteCodeCount":2`) {
+		t.Fatalf("list public pages status=%d body=%s", listPageRes.Code, listPageRes.Body.String())
+	}
+
+	listCodeRes := performM365(service, http.MethodGet, "/api/m365/invite-codes", "")
+	if listCodeRes.Code != http.StatusOK || !strings.Contains(listCodeRes.Body.String(), `"code":"`+code+`"`) || !strings.Contains(listCodeRes.Body.String(), `"used":false`) {
+		t.Fatalf("list invite codes status=%d body=%s", listCodeRes.Code, listCodeRes.Body.String())
+	}
+
+	publicInviteRes := performM365(service, http.MethodGet, "/api/m365/public/invites/"+code, "")
+	if publicInviteRes.Code != http.StatusOK || !strings.Contains(publicInviteRes.Body.String(), `"domains":["contoso.com","fabrikam.com"]`) || !strings.Contains(publicInviteRes.Body.String(), `"targetCount":2`) {
+		t.Fatalf("public invite status=%d body=%s", publicInviteRes.Code, publicInviteRes.Body.String())
+	}
+
+	registerDescriptorRes := performM365(service, http.MethodGet, "/api/m365/public/register?code="+code, "")
+	if registerDescriptorRes.Code != http.StatusOK || !strings.Contains(registerDescriptorRes.Body.String(), `"method":"POST"`) || !strings.Contains(registerDescriptorRes.Body.String(), `"targetCount":2`) {
+		t.Fatalf("register descriptor status=%d body=%s", registerDescriptorRes.Code, registerDescriptorRes.Body.String())
+	}
+
+	registerRes := performM365(service, http.MethodPost, "/api/m365/public/register", `{"code":"`+code+`","domain":"fabrikam.com","mailNickname":"student1","displayName":"Student One","password":"TempPassw0rd!"}`)
+	if registerRes.Code != http.StatusOK || !strings.Contains(registerRes.Body.String(), `"status":"success"`) || !strings.Contains(registerRes.Body.String(), `"userPrincipalName":"student1@fabrikam.com"`) {
+		t.Fatalf("register status=%d body=%s", registerRes.Code, registerRes.Body.String())
+	}
+	if !strings.Contains(createUserBody, `"userPrincipalName":"student1@fabrikam.com"`) || !strings.Contains(createUserBody, `"usageLocation":"CN"`) {
+		t.Fatalf("unexpected create user body: %s", createUserBody)
+	}
+	if !strings.Contains(createUserBody, `"forceChangePasswordNextSignIn":true`) {
+		t.Fatalf("expected forceChangePasswordNextSignIn in body: %s", createUserBody)
+	}
+	if !strings.Contains(assignLicenseBody, `"skuId":"sku-1"`) {
+		t.Fatalf("unexpected assign license body: %s", assignLicenseBody)
+	}
+
+	registrationRes := performM365(service, http.MethodGet, "/api/m365/registrations", "")
+	if registrationRes.Code != http.StatusOK || !strings.Contains(registrationRes.Body.String(), `"status":"success"`) || !strings.Contains(registrationRes.Body.String(), `"Student One"`) || !strings.Contains(registrationRes.Body.String(), `"accountId":2`) || !strings.Contains(registrationRes.Body.String(), `"publicPageName":"2026 新生批次"`) || !strings.Contains(registrationRes.Body.String(), `"inviteCode":"`+code+`"`) {
+		t.Fatalf("registrations status=%d body=%s", registrationRes.Code, registrationRes.Body.String())
+	}
+
+	usedInviteRes := performM365(service, http.MethodGet, "/api/m365/public/invites/"+code, "")
+	if usedInviteRes.Code != http.StatusOK || !strings.Contains(usedInviteRes.Body.String(), `"available":false`) || !strings.Contains(usedInviteRes.Body.String(), `"availabilityReason":"used"`) {
+		t.Fatalf("used invite status=%d body=%s", usedInviteRes.Code, usedInviteRes.Body.String())
+	}
+
+	updatePageRes := performM365(service, http.MethodPut, "/api/m365/public-pages/1", `{"name":"已关闭批次","enabled":false,"accountIds":[1,2],"domains":["contoso.com","fabrikam.com"]}`)
+	if updatePageRes.Code != http.StatusOK {
+		t.Fatalf("update public page status=%d body=%s", updatePageRes.Code, updatePageRes.Body.String())
+	}
+
+	updatedPublicInviteRes := performM365(service, http.MethodGet, "/api/m365/public/invites/"+code, "")
+	if updatedPublicInviteRes.Code != http.StatusOK || !strings.Contains(updatedPublicInviteRes.Body.String(), `"publicPageEnabled":false`) {
+		t.Fatalf("updated public invite status=%d body=%s", updatedPublicInviteRes.Code, updatedPublicInviteRes.Body.String())
+	}
+
+	deleteInviteRes := performM365(service, http.MethodDelete, "/api/m365/invite-codes", `{"publicPageId":1,"batchId":"`+batchID+`"}`)
+	if deleteInviteRes.Code != http.StatusOK || !strings.Contains(deleteInviteRes.Body.String(), `"deletedCount":2`) {
+		t.Fatalf("delete invite batch status=%d body=%s", deleteInviteRes.Code, deleteInviteRes.Body.String())
+	}
+
+	listInviteAfterDeleteRes := performM365(service, http.MethodGet, "/api/m365/invite-codes", "")
+	if listInviteAfterDeleteRes.Code != http.StatusOK || strings.Contains(listInviteAfterDeleteRes.Body.String(), `"batchId":"`+batchID+`"`) {
+		t.Fatalf("list invite codes after batch delete status=%d body=%s", listInviteAfterDeleteRes.Code, listInviteAfterDeleteRes.Body.String())
+	}
+}
+
+func TestResolveInviteTargetsUsesVerifiedDomains(t *testing.T) {
+	accounts := []accountRecord{
+		{
+			ID:              1,
+			Name:            "Contoso",
+			DefaultDomain:   "contoso.com",
+			VerifiedDomains: []string{"contoso.com", "campus.contoso.com"},
+		},
+	}
+
+	targets := resolveInviteTargetsFromAccounts(inviteRecord{
+		AccountIDs: []int64{1},
+	}, accounts)
+	if len(targets) != 2 {
+		t.Fatalf("expected 2 targets for verified domains, got %#v", targets)
+	}
+
+	filteredTargets := resolveInviteTargetsFromAccounts(inviteRecord{
+		AccountIDs: []int64{1},
+		Domains:    []string{"campus.contoso.com"},
+	}, accounts)
+	if len(filteredTargets) != 1 || filteredTargets[0].Domain != "campus.contoso.com" {
+		t.Fatalf("expected campus.contoso.com target, got %#v", filteredTargets)
+	}
+}
+
+func TestResolveInviteTargetsPreservesExplicitDomainsForSingleAccount(t *testing.T) {
+	accounts := []accountRecord{
+		{
+			ID:              1,
+			Name:            "Contoso",
+			DefaultDomain:   "contoso.com",
+			VerifiedDomains: []string{"contoso.com"},
+		},
+	}
+
+	targets := resolveInviteTargetsFromAccounts(inviteRecord{
+		AccountIDs: []int64{1},
+		Domains:    []string{"085014.xyz", "dsukme.onmicrosoft.com", "dsuk.top"},
+	}, accounts)
+
+	if len(targets) != 3 {
+		t.Fatalf("expected explicit domains to be preserved for single account, got %#v", targets)
+	}
+
+	domainSet := map[string]bool{}
+	for _, target := range targets {
+		domainSet[target.Domain] = true
+	}
+	for _, expected := range []string{"085014.xyz", "dsukme.onmicrosoft.com", "dsuk.top"} {
+		if !domainSet[expected] {
+			t.Fatalf("expected domain %s in targets %#v", expected, targets)
+		}
+	}
+}
+
+func TestEnsureSchemaAddsVerifiedDomainsToLegacyAccountsTable(t *testing.T) {
+	t.Setenv("ENCRYPTION_KEY", "test-encryption-key")
+	dataDir := t.TempDir()
+	dbPath := filepath.Join(dataDir, "data.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	if _, err := db.ExecContext(context.Background(), `CREATE TABLE m365_accounts (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL,
+		tenant_id TEXT NOT NULL,
+		client_id TEXT NOT NULL,
+		client_secret TEXT NOT NULL,
+		description TEXT,
+		default_domain TEXT,
+		organization_name TEXT,
+		enabled INTEGER DEFAULT 1,
+		last_verified_at DATETIME,
+		last_verified_error TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		t.Fatal(err)
+	}
+
+	service := New(config.Config{
+		DataDir: dataDir,
+		DBName:  "data.db",
+	})
+
+	opened, err := service.open(context.Background())
+	if err != nil {
+		t.Fatalf("open legacy db: %v", err)
+	}
+	defer opened.Close()
+
+	res := performM365(service, http.MethodGet, "/api/m365/accounts", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("list legacy accounts status=%d body=%s", res.Code, res.Body.String())
+	}
+
+	rows, err := opened.QueryContext(context.Background(), `PRAGMA table_info(m365_accounts)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	found := false
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			columnType string
+			notNull    int
+			defaultVal interface{}
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultVal, &pk); err != nil {
+			t.Fatal(err)
+		}
+		if name == "verified_domains" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected verified_domains column to be added to legacy m365_accounts table")
+	}
+}
+
 func performM365(service *Service, method, path, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	if body != "" {
@@ -154,6 +452,28 @@ func performM365(service *Service, method, path, body string) *httptest.Response
 	rec := httptest.NewRecorder()
 	service.ServeHTTP(rec, req)
 	return rec
+}
+
+func fakeJWT(payload string) string {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+	body := base64.RawURLEncoding.EncodeToString([]byte(payload))
+	return header + "." + body + ".signature"
+}
+
+func decodeEnvelopeData(t *testing.T, rec *httptest.ResponseRecorder) map[string]interface{} {
+	t.Helper()
+	var envelope struct {
+		Success bool                   `json:"success"`
+		Data    map[string]interface{} `json:"data"`
+		Error   string                 `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode envelope: %v body=%s", err, rec.Body.String())
+	}
+	if !envelope.Success {
+		t.Fatalf("expected success envelope, got error=%s body=%s", envelope.Error, rec.Body.String())
+	}
+	return envelope.Data
 }
 
 func TestMain(m *testing.M) {

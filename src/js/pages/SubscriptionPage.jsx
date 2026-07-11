@@ -1799,7 +1799,7 @@ function SubscriptionPage() {
   );
 
   return (
-    <PageStack className="h-[calc(100dvh-7rem)] min-h-[32rem] overflow-hidden">
+    <PageStack className="min-h-0 flex-1 overflow-hidden">
       <PageToolbar className="shrink-0">
         <div className="min-w-0 max-w-full overflow-x-auto scrollbar-thin">
           <Tabs
