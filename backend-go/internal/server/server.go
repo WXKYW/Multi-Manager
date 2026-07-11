@@ -21,6 +21,7 @@ import (
 	"github.com/iwvw/api-monitor/backend-go/internal/flyio"
 	"github.com/iwvw/api-monitor/backend-go/internal/koyeb"
 	"github.com/iwvw/api-monitor/backend-go/internal/manifest"
+	"github.com/iwvw/api-monitor/backend-go/internal/m365"
 	"github.com/iwvw/api-monitor/backend-go/internal/notification"
 	"github.com/iwvw/api-monitor/backend-go/internal/openai"
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
@@ -49,6 +50,7 @@ type Server struct {
 	aliyun   *aliyun.Service
 	tencent  *tencent.Service
 	cf       *cloudflare.Service
+	m365     *m365.Service
 	openai   *openai.Service
 	server   *serveragent.Service
 	backup   *backup.Service
@@ -88,6 +90,7 @@ func NewServer(cfg config.Config) *Server {
 		aliyun:   aliyun.New(cfg),
 		tencent:  tencent.New(cfg),
 		cf:       cloudflare.New(cfg),
+		m365:     m365.New(cfg),
 		openai:   openai.New(cfg),
 		server:   serverAgentService,
 		backup:   backupService,
@@ -275,6 +278,8 @@ func (s *Server) serveGoRoute(w http.ResponseWriter, r *http.Request, route mani
 		s.aliyun.ServeHTTP(w, r)
 	case "/api/tencent":
 		s.tencent.ServeHTTP(w, r)
+	case "/api/m365":
+		s.m365.ServeHTTP(w, r)
 	case "/api/cloudflare/accounts", "/api/cloudflare/accounts/export", "/api/cloudflare/export/accounts", "/api/cloudflare/import/accounts", "/api/cloudflare/templates", "/api/cloudflare/templates/{id}", "/api/cloudflare/templates/{templateId}/apply", "/api/cloudflare/import/templates", "/api/cloudflare/accounts/{id}", "/api/cloudflare/accounts/{id}/verify", "/api/cloudflare/accounts/{id}/token", "/api/cloudflare/accounts/{id}/cf-account-id", "/api/cloudflare/accounts/{id}/pages", "/api/cloudflare/accounts/{id}/pages/{projectName}", "/api/cloudflare/accounts/{id}/pages/{projectName}/deployments", "/api/cloudflare/accounts/{id}/pages/{projectName}/deployments/{deploymentId}", "/api/cloudflare/accounts/{id}/pages/{projectName}/domains", "/api/cloudflare/accounts/{id}/pages/{projectName}/domains/{domain}", "/api/cloudflare/accounts/{id}/workers", "/api/cloudflare/accounts/{id}/workers/{scriptName}", "/api/cloudflare/accounts/{id}/workers/{scriptName}/toggle", "/api/cloudflare/accounts/{id}/workers/{scriptName}/analytics", "/api/cloudflare/accounts/{id}/workers/{scriptName}/domains", "/api/cloudflare/accounts/{id}/workers/{scriptName}/domains/{domainId}", "/api/cloudflare/accounts/{accountId}/r2/buckets", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}/download-info", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}/preview", "/api/cloudflare/accounts/{id}/tunnels", "/api/cloudflare/accounts/{accountId}/tunnels/{tunnelId}", "/api/cloudflare/accounts/{accountId}/tunnels/{tunnelId}/configuration", "/api/cloudflare/accounts/{accountId}/tunnels/{tunnelId}/token", "/api/cloudflare/accounts/{accountId}/tunnels/{tunnelId}/connections", "/api/cloudflare/record-types", "/api/cloudflare/zones", "/api/cloudflare/accounts/{id}/zones", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/workers/routes", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/workers/routes/{routeId}", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/records", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/records/{recordId}", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/purge", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/ssl", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/analytics", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/switch", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/batch":
 		s.cf.ServeHTTP(w, r)
 	case "/api/openai":

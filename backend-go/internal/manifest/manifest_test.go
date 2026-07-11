@@ -200,6 +200,16 @@ func TestTOTPRoutesAreGoOwned(t *testing.T) {
 	}
 }
 
+func TestM365RoutesAreGoOwned(t *testing.T) {
+	route, ok := Match("/api/m365/accounts")
+	if !ok {
+		t.Fatal("expected m365 route match")
+	}
+	if route.Owner != OwnerGo || route.Auth != AuthSession || route.ResponseMode != ResponseJSON {
+		t.Fatalf("expected session JSON go owner for m365 route, got owner=%s auth=%s response=%s", route.Owner, route.Auth, route.ResponseMode)
+	}
+}
+
 func TestCronRoutesAreGoOwned(t *testing.T) {
 	route, ok := Match("/api/cron/tasks")
 	if !ok {

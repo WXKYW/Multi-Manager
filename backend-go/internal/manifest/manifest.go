@@ -149,6 +149,7 @@ func Routes() []Route {
 		{Prefix: "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/batch", Module: "cloudflare-dns", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Cloudflare DNS batch create", MatchMode: MatchPattern},
 		{Prefix: "/api/aliyun", Module: "aliyun", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Aliyun DNS and compute"},
 		{Prefix: "/api/tencent", Module: "tencent", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Tencent DNS and compute"},
+		{Prefix: "/api/m365", Module: "m365", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Microsoft 365 tenant, users, groups, licenses, and usage reports"},
 		{Prefix: "/api/koyeb", Module: "koyeb", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Koyeb accounts and services"},
 		{Prefix: "/api/flyio", Module: "flyio", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Fly.io accounts, apps, and machines"},
 

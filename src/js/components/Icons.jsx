@@ -258,6 +258,7 @@ export const MODULE_ICON_MAP = {
   dns: CloudflareBrand,
   aliyun: AlibabaCloudBrand,
   tencent: TencentCloudBrand,
+  m365: Cloud,
   server: Server,
   scheduler: Clock,
   totp: ShieldCheck,

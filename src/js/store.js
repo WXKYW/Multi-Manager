@@ -52,6 +52,12 @@ export const MODULE_CONFIG = {
     icon: 'fa-cloud',
     description: '阿里云 DNS / ECS 管理',
   },
+  m365: {
+    name: 'Microsoft 365',
+    shortName: 'M365',
+    icon: 'fa-cloud',
+    description: 'Microsoft 365 租户、用户、许可证与使用情况管理',
+  },
   scheduler: {
     name: '定时任务',
     shortName: '任务',
@@ -126,7 +132,7 @@ export const MODULE_GROUPS = [
       {
         id: 'cloud-vendors',
         name: '云厂商',
-        modules: ['aliyun', 'tencent'],
+        modules: ['aliyun', 'tencent', 'm365'],
       },
     ],
     trailingModules: ['server'],
