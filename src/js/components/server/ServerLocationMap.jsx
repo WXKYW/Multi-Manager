@@ -3,7 +3,32 @@ import { BubbleMap } from '@cloudflare/kumo';
 import { feature } from 'topojson-client';
 import worldCountries from 'world-atlas/countries-110m.json';
 
-const WORLD_GEO_JSON = feature(worldCountries, worldCountries.objects.countries);
+const rawWorldGeoJson = feature(worldCountries, worldCountries.objects.countries);
+const WORLD_GEO_JSON = {
+  ...rawWorldGeoJson,
+  features: rawWorldGeoJson.features
+    .filter((f) => f.properties?.name !== 'Antarctica')
+    .map((f) => {
+      if (f.properties?.name === 'Russia' || f.properties?.name === 'Fiji') {
+        const cleanCoords = (coords) => {
+          if (typeof coords[0] === 'number') {
+            const lon = coords[0] < 0 ? 180 : coords[0];
+            const lat = coords[1];
+            return [lon, lat];
+          }
+          return coords.map(cleanCoords);
+        };
+        return {
+          ...f,
+          geometry: {
+            ...f.geometry,
+            coordinates: cleanCoords(f.geometry.coordinates),
+          },
+        };
+      }
+      return f;
+    }),
+};
 
 const STATUS_COLORS = {
   online: '#00A63E',
@@ -108,8 +133,8 @@ function ServerLocationMap({
   subtitle = '按经纬度展示已定位主机',
   height = 190,
 }) {
-  const points = useMemo(() => (
-    (Array.isArray(servers) ? servers : [])
+  const points = useMemo(() => {
+    const rawPoints = (Array.isArray(servers) ? servers : [])
       .map((server) => {
         const coordinates = getServerCoordinates(server);
         if (!coordinates) return null;
@@ -123,8 +148,38 @@ function ServerLocationMap({
           ...coordinates,
         };
       })
-      .filter(Boolean)
-  ), [servers, resolveStatus]);
+      .filter(Boolean);
+
+    // Group by coordinates to identify overlapping points
+    const groups = {};
+    rawPoints.forEach((point) => {
+      const key = `${point.lat.toFixed(4)}_${point.lon.toFixed(4)}`;
+      if (!groups[key]) {
+        groups[key] = [];
+      }
+      groups[key].push(point);
+    });
+
+    const result = [];
+    Object.values(groups).forEach((group) => {
+      if (group.length === 1) {
+        result.push(group[0]);
+      } else {
+        // Spreading overlapping points in a small circle around the center coordinate
+        const radius = 0.35;
+        group.forEach((point, idx) => {
+          const angle = (idx * 2 * Math.PI) / group.length;
+          result.push({
+            ...point,
+            lat: point.lat + radius * Math.sin(angle),
+            lon: point.lon + radius * Math.cos(angle),
+          });
+        });
+      }
+    });
+
+    return result;
+  }, [servers, resolveStatus]);
 
   return (
     <section className="overflow-hidden rounded-md border border-kumo-line bg-kumo-base">

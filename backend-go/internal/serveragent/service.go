@@ -1242,7 +1242,7 @@ func (s *Service) getPublicServerStatusItems(ctx context.Context, db *sql.DB, id
 		args = append(args, id)
 	}
 	where := "WHERE id IN (" + strings.Join(holders, ",") + ")"
-	rows, err := db.QueryContext(ctx, `SELECT id, name, host, status, COALESCE(cached_info, '{}'), COALESCE(description, ''), COALESCE(resolved_country, ''), traffic_limit_bytes, COALESCE(traffic_limit_mode, 'total'), COALESCE(response_time, 0), updated_at FROM server_accounts `+where+` ORDER BY order_index ASC, created_at DESC`, args...)
+	rows, err := db.QueryContext(ctx, `SELECT id, name, host, status, COALESCE(cached_info, '{}'), COALESCE(description, ''), COALESCE(resolved_country, ''), COALESCE(country, ''), traffic_limit_bytes, COALESCE(traffic_limit_mode, 'total'), COALESCE(response_time, 0), updated_at FROM server_accounts `+where+` ORDER BY order_index ASC, created_at DESC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1250,9 +1250,9 @@ func (s *Service) getPublicServerStatusItems(ctx context.Context, db *sql.DB, id
 	historyServerIDs := []string{}
 	latencyServerIDs := []string{}
 	for rows.Next() {
-		var id, name, host, status, cachedInfo, description, location, trafficLimitMode, updatedAt string
+		var id, name, host, status, cachedInfo, description, location, country, trafficLimitMode, updatedAt string
 		var trafficLimit, responseTime int64
-		if err := rows.Scan(&id, &name, &host, &status, &cachedInfo, &description, &location, &trafficLimit, &trafficLimitMode, &responseTime, &updatedAt); err != nil {
+		if err := rows.Scan(&id, &name, &host, &status, &cachedInfo, &description, &location, &country, &trafficLimit, &trafficLimitMode, &responseTime, &updatedAt); err != nil {
 			return nil, err
 		}
 		cached := map[string]interface{}{}
@@ -1291,6 +1291,8 @@ func (s *Service) getPublicServerStatusItems(ctx context.Context, db *sql.DB, id
 		if uptimeSeconds > 0 {
 			uptimeLabel = formatUptime(int64(uptimeSeconds))
 		}
+		lat := firstFloatValue(cached, "lat", "latitude")
+		lon := firstFloatValue(cached, "lon", "longitude")
 		item := map[string]interface{}{
 			"id":               id,
 			"name":             name,
@@ -1299,9 +1301,7 @@ func (s *Service) getPublicServerStatusItems(ctx context.Context, db *sql.DB, id
 			"description":      description,
 			"location":         firstNonEmpty(location, getString(cached, "location"), getString(cached, "resolved_country"), getString(cached, "country_code"), getString(cached, "country")),
 			"region":           getString(cached, "region"),
-			"countryCode":      firstNonEmpty(getString(cached, "country_code"), getString(cached, "country")),
-			"latitude":         firstFloatValue(cached, "lat", "latitude"),
-			"longitude":        firstFloatValue(cached, "lon", "longitude"),
+			"countryCode":      firstNonEmpty(getString(cached, "country_code"), getString(cached, "country"), country),
 			"platform":         firstNonEmpty(getString(cached, "platform"), getString(cached, "os")),
 			"platformVersion":  getString(cached, "platform_version"),
 			"agentVersion":     getString(cached, "agent_version"),
@@ -1331,6 +1331,12 @@ func (s *Service) getPublicServerStatusItems(ctx context.Context, db *sql.DB, id
 			"gpuModel":         getString(cached, "gpu_model"),
 			"responseTime":     responseTime,
 			"updatedAt":        firstNonEmpty(lastHeartbeat, getString(cached, "metrics_last_seen"), updatedAt),
+		}
+		if lat != 0.0 {
+			item["latitude"] = lat
+		}
+		if lon != 0.0 {
+			item["longitude"] = lon
 		}
 		if !hideHosts {
 			item["host"] = host

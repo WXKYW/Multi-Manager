@@ -14,6 +14,7 @@ This file records allowed exceptions so future AI audits do not repeatedly flag 
 | Terminal colors | `src/css/app.css`, `src/js/pages/ServerPage.jsx` | xterm fallback colors are readability fallbacks when Kumo CSS variables are unavailable. | Prefer Kumo variables first; raw fallback values stay behind `getKumoToken` or CSS variable fallbacks. |
 | Media preview surfaces | `src/js/pages/DnsPage.jsx` | Video previews and embedded document previews need black/white content backgrounds. | Keep these colors on media surfaces only. |
 | Legacy ECharts colors | `src/js/pages/UptimePage.jsx` | Existing ECharts options contain raw theme colors. This is an accepted legacy exception for now. | When touching uptime charts, migrate toward Kumo `TimeseriesChart`, `Meter`, or `ChartPalette`. |
+| Map status/bubble colors | `src/js/components/server/ServerLocationMap.jsx` | ECharts maps require hardcoded hex values for data points/bubbles representing statuses. | Keep colors localized to map rendering or legend. |
 | Native file picker | Any page | Browser file selection can require a native hidden file input. | Keep the input hidden or screen-reader-only and trigger it from Kumo `Button` / `Input` UI. |
 
 ## Verification Checklist

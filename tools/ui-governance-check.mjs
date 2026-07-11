@@ -95,6 +95,9 @@ function allowedColorReason(rel, line, value) {
   if (rel === 'src/js/pages/DnsPage.jsx' && (value === 'bg-black' || value === 'bg-white')) {
     return 'media preview surface';
   }
+  if (rel === 'src/js/components/server/ServerLocationMap.jsx') {
+    return 'map status and bubble styling colors';
+  }
   return null;
 }
 

@@ -60,6 +60,7 @@ func (s *Service) lookupHostLocation(ctx context.Context, host string) (map[stri
 	}
 
 	providers := []func(context.Context, string) (map[string]interface{}, bool){
+		s.lookupHostLocationFromIping,
 		s.lookupHostLocationFromIPSB,
 		s.lookupHostLocationFromUapis,
 		s.lookupHostLocationFromIPAPI,
@@ -71,6 +72,91 @@ func (s *Service) lookupHostLocation(ctx context.Context, host string) (map[stri
 		}
 	}
 	return nil, false
+}
+
+func (s *Service) lookupHostLocationFromIping(ctx context.Context, lookupHost string) (map[string]interface{}, bool) {
+	reqCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+
+	params := url.Values{}
+	params.Set("ip", lookupHost)
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, "https://api.iping.cc/v1/query?"+params.Encode(), nil)
+	if err != nil {
+		return nil, false
+	}
+	req.Header.Set("User-Agent", "API-Monitor/1.0")
+
+	resp, err := geoHTTPClient.Do(req)
+	if err != nil {
+		return nil, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, false
+	}
+
+	var result struct {
+		Code int                    `json:"code"`
+		Data map[string]interface{} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || result.Code != 200 || result.Data == nil {
+		return nil, false
+	}
+
+	raw := result.Data
+	region := strings.Join(compactStrings(
+		geoString(raw, "country"),
+		geoString(raw, "region"),
+		geoString(raw, "city"),
+	), " ")
+
+	countryCode := getCountryCodeByName(geoString(raw, "country"))
+	if countryCode == "" {
+		countryCode = strings.ToLower(geoString(raw, "as_country"))
+	}
+
+	latVal, _ := strconv.ParseFloat(geoString(raw, "latitude"), 64)
+	lonVal, _ := strconv.ParseFloat(geoString(raw, "longitude"), 64)
+
+	return buildGeoInfo(firstNonEmpty(geoString(raw, "ip"), lookupHost), region, countryCode, map[string]interface{}{
+		"isp":       geoString(raw, "isp"),
+		"asn":       geoString(raw, "asn"),
+		"latitude":  latVal,
+		"longitude": lonVal,
+	})
+}
+
+func getCountryCodeByName(name string) string {
+	name = strings.ToLower(name)
+	switch {
+	case strings.Contains(name, "china"):
+		return "cn"
+	case strings.Contains(name, "hong kong"):
+		return "hk"
+	case strings.Contains(name, "japan"):
+		return "jp"
+	case strings.Contains(name, "united states") || strings.Contains(name, "america"):
+		return "us"
+	case strings.Contains(name, "germany"):
+		return "de"
+	case strings.Contains(name, "united kingdom") || strings.Contains(name, "england") || strings.Contains(name, "great britain"):
+		return "gb"
+	case strings.Contains(name, "singapore"):
+		return "sg"
+	case strings.Contains(name, "korea"):
+		return "kr"
+	case strings.Contains(name, "taiwan"):
+		return "tw"
+	case strings.Contains(name, "canada"):
+		return "ca"
+	case strings.Contains(name, "france"):
+		return "fr"
+	case strings.Contains(name, "netherlands"):
+		return "nl"
+	case strings.Contains(name, "australia"):
+		return "au"
+	}
+	return ""
 }
 
 func (s *Service) lookupHostLocationFromUapis(ctx context.Context, lookupHost string) (map[string]interface{}, bool) {
@@ -275,21 +361,14 @@ func mergeCachedInfo(raw sql.NullString, updates map[string]interface{}) string 
 }
 
 func accountNeedsLocation(country, resolvedCountry sql.NullString, cachedInfo sql.NullString) bool {
-	if country.Valid && country.String != "" && country.String != "auto" {
-		return false
-	}
-	if resolvedCountry.Valid && resolvedCountry.String != "" {
-		return false
-	}
 	if cachedInfo.Valid && cachedInfo.String != "" {
 		var cached map[string]interface{}
 		if err := json.Unmarshal([]byte(cachedInfo.String), &cached); err == nil {
-			return firstNonEmpty(
-				getString(cached, "resolved_country"),
-				getString(cached, "country_code"),
-				getString(cached, "location"),
-				getString(cached, "region"),
-			) == ""
+			hasLat := getString(cached, "latitude") != ""
+			hasLon := getString(cached, "longitude") != ""
+			if hasLat && hasLon {
+				return false
+			}
 		}
 	}
 	return true

@@ -8676,7 +8676,7 @@ function ServerPage() {
                   { value: 'images', label: <span className="inline-flex items-center gap-1.5"><HardDrive className="w-3.5 h-3.5" />镜像</span> },
                   { value: 'networks', label: <span className="inline-flex items-center gap-1.5"><Globe className="w-3.5 h-3.5" />网络</span> },
                   { value: 'volumes', label: <span className="inline-flex items-center gap-1.5"><HardDrive className="w-3.5 h-3.5" />存储卷</span> },
-                  { value: 'stats', label: <span className="inline-flex items-center gap-1.5"><Activity className="w-3.5 h-3.5" />实时统计</span> },
+
                 ]}
               />
             </div>

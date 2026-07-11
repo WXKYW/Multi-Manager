@@ -490,17 +490,21 @@ func (s *Service) handleAgentHeartbeat(w http.ResponseWriter, r *http.Request, d
 		}
 	}
 
-	// 序列化 info 为 cached_info
-	if firstNonEmpty(
-		getString(req.Info, "resolved_country"),
-		getString(req.Info, "country_code"),
-		getString(req.Info, "location"),
-		getString(req.Info, "region"),
-	) == "" {
+	hasLat := getString(req.Info, "latitude") != ""
+	hasLon := getString(req.Info, "longitude") != ""
+	if !hasLat || !hasLon {
 		if ip := getString(req.Info, "ip"); ip != "" {
 			if geo, ok := s.lookupHostLocation(r.Context(), ip); ok {
 				for key, value := range geo {
-					req.Info[key] = value
+					if getString(req.Info, key) == "" {
+						req.Info[key] = value
+					}
+				}
+				if !hasLat && geo["latitude"] != nil {
+					req.Info["latitude"] = geo["latitude"]
+				}
+				if !hasLon && geo["longitude"] != nil {
+					req.Info["longitude"] = geo["longitude"]
 				}
 			}
 		}

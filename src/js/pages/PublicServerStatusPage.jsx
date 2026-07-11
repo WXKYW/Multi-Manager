@@ -5,6 +5,7 @@ import { Button } from '@cloudflare/kumo/components/button';
 import { AlertTriangle, Globe, RefreshCw, Server, Shield } from '../components/Icons.jsx';
 import CountryFlag from '../components/CountryFlag.jsx';
 import ServerLocationMap from '../components/server/ServerLocationMap.jsx';
+import { resolveServerDisplayStatus } from '../modules/serverRealtime.js';
 import { FLOW_UNIT_BADGE_CLASS, getFlowUnitClassName } from '../modules/flowUnits.js';
 import * as echarts from 'echarts/core';
 import { MapChart, ScatterChart } from 'echarts/charts';
@@ -675,7 +676,7 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
               <ServerLocationMap
                 echarts={echarts}
                 servers={servers}
-                resolveStatus={(server) => (server?.online ? 'online' : 'offline')}
+                resolveStatus={(server) => resolveServerDisplayStatus(server).state}
                 title="主机地图"
                 subtitle="状态页主机地理分布"
                 height="calc(100vh - 160px)"
