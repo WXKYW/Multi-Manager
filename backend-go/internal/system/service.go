@@ -482,20 +482,35 @@ type apiDocRoute struct {
 	Auth         manifest.AuthMode     `json:"auth"`
 	ResponseMode manifest.ResponseMode `json:"responseMode"`
 	Description  string                `json:"description"`
+	Detail       string                `json:"detail,omitempty"`
 	MatchMode    manifest.MatchMode    `json:"matchMode"`
 	Methods      []string              `json:"methods"`
 	Status       string                `json:"status"`
+	PathParams   []apiDocParameter     `json:"pathParams,omitempty"`
+	QueryParams  []apiDocParameter     `json:"queryParams,omitempty"`
+	Headers      []apiDocParameter     `json:"headers,omitempty"`
+	RequestType  string                `json:"requestContentType,omitempty"`
+	RequestBody  interface{}           `json:"requestExample,omitempty"`
+	ResponseBody interface{}           `json:"responseExample,omitempty"`
+	Notes        []string              `json:"notes,omitempty"`
 }
 
 func (s *Service) apiDocs() map[string]interface{} {
-	routes := manifest.Routes()
+	routes := append([]manifest.Route{}, manifest.Routes()...)
+	routes = append(routes, supplementalRoutes()...)
+	seen := map[string]bool{}
 	items := make([]apiDocRoute, 0, len(routes))
 	for _, route := range routes {
+		if seen[route.Prefix] {
+			continue
+		}
+		seen[route.Prefix] = true
 		matchMode := route.MatchMode
 		if matchMode == "" {
 			matchMode = manifest.MatchPrefix
 		}
 		description := routeDescription(route)
+		docs := routeDocs(route)
 		items = append(items, apiDocRoute{
 			Prefix:       route.Prefix,
 			Module:       route.Module,
@@ -504,9 +519,17 @@ func (s *Service) apiDocs() map[string]interface{} {
 			Auth:         route.Auth,
 			ResponseMode: route.ResponseMode,
 			Description:  description,
+			Detail:       docs.Detail,
 			MatchMode:    matchMode,
-			Methods:      inferRouteMethods(route),
+			Methods:      docs.Methods,
 			Status:       routeStatus(route),
+			PathParams:   docs.PathParams,
+			QueryParams:  docs.QueryParams,
+			Headers:      docs.Headers,
+			RequestType:  docs.RequestContentType,
+			RequestBody:  docs.RequestExample,
+			ResponseBody: docs.ResponseExample,
+			Notes:        docs.Notes,
 		})
 	}
 
@@ -515,7 +538,7 @@ func (s *Service) apiDocs() map[string]interface{} {
 		"generatedAt": time.Now().UTC().Format(time.RFC3339),
 		"summary": map[string]interface{}{
 			"total":        len(items),
-			"byOwner":      manifest.Summary(),
+			"byOwner":      countRoutesBy(items, func(route apiDocRoute) string { return string(route.Owner) }),
 			"byAuth":       countRoutesBy(items, func(route apiDocRoute) string { return string(route.Auth) }),
 			"byGroup":      countRoutesBy(items, func(route apiDocRoute) string { return route.Group }),
 			"byStatus":     countRoutesBy(items, func(route apiDocRoute) string { return route.Status }),
@@ -546,10 +569,10 @@ func (s *Service) openapiDocument(r *http.Request) map[string]interface{} {
 		}
 		operations := map[string]interface{}{}
 		for _, method := range methods {
-			operations[strings.ToLower(method)] = map[string]interface{}{
+			operation := map[string]interface{}{
 				"tags":        []string{route.Group},
 				"summary":     route.Description,
-				"description": fmt.Sprintf("模块: %s；认证: %s；响应: %s；匹配: %s", route.Module, route.Auth, route.ResponseMode, route.MatchMode),
+				"description": buildOpenAPIDescription(route),
 				"deprecated":  route.Owner == manifest.OwnerRetired,
 				"responses": map[string]interface{}{
 					"200": map[string]interface{}{"description": "请求成功"},
@@ -557,6 +580,38 @@ func (s *Service) openapiDocument(r *http.Request) map[string]interface{} {
 					"404": map[string]interface{}{"description": "接口不存在"},
 				},
 			}
+			if len(route.PathParams) > 0 || len(route.QueryParams) > 0 || len(route.Headers) > 0 {
+				operation["parameters"] = openAPIParameters(route)
+			}
+			if security := openAPISecurity(route.Auth); len(security) > 0 {
+				operation["security"] = security
+			}
+			if route.RequestBody != nil {
+				contentType := route.RequestType
+				if strings.TrimSpace(contentType) == "" {
+					contentType = "application/json"
+				}
+				operation["requestBody"] = map[string]interface{}{
+					"required": method != http.MethodGet && method != http.MethodDelete,
+					"content": map[string]interface{}{
+						contentType: map[string]interface{}{
+							"example": route.RequestBody,
+						},
+					},
+				}
+			}
+			if route.ResponseBody != nil {
+				responses := operation["responses"].(map[string]interface{})
+				responses["200"] = map[string]interface{}{
+					"description": "请求成功",
+					"content": map[string]interface{}{
+						"application/json": map[string]interface{}{
+							"example": route.ResponseBody,
+						},
+					},
+				}
+			}
+			operations[strings.ToLower(method)] = operation
 		}
 		paths[route.Prefix] = operations
 	}
@@ -578,8 +633,96 @@ func (s *Service) openapiDocument(r *http.Request) map[string]interface{} {
 			"description": "由系统路由清单自动生成的接口索引。请求/响应 Schema 会在后续元数据补齐后逐步增强。",
 		},
 		"servers": []map[string]string{{"url": serverURL}},
-		"paths":   paths,
+		"components": map[string]interface{}{
+			"securitySchemes": map[string]interface{}{
+				"sessionCookie": map[string]interface{}{
+					"type": "apiKey",
+					"in":   "cookie",
+					"name": "session_id",
+				},
+				"adminPasswordHeader": map[string]interface{}{
+					"type": "apiKey",
+					"in":   "header",
+					"name": "x-admin-password",
+				},
+				"bearerAuth": map[string]interface{}{
+					"type":         "http",
+					"scheme":       "bearer",
+					"bearerFormat": "API Key",
+				},
+				"agentBearer": map[string]interface{}{
+					"type":         "http",
+					"scheme":       "bearer",
+					"bearerFormat": "Agent Key",
+				},
+			},
+		},
+		"paths": paths,
 	}
+}
+
+func buildOpenAPIDescription(route apiDocRoute) string {
+	parts := []string{
+		route.Detail,
+		fmt.Sprintf("模块: %s；认证: %s；响应: %s；匹配: %s", route.Module, route.Auth, route.ResponseMode, route.MatchMode),
+	}
+	if len(route.Notes) > 0 {
+		parts = append(parts, "备注: "+strings.Join(route.Notes, "；"))
+	}
+	return strings.Join(filterNonEmpty(parts), "\n\n")
+}
+
+func openAPIParameters(route apiDocRoute) []map[string]interface{} {
+	params := make([]map[string]interface{}, 0, len(route.PathParams)+len(route.QueryParams)+len(route.Headers))
+	appendParam := func(param apiDocParameter) {
+		params = append(params, map[string]interface{}{
+			"name":        param.Name,
+			"in":          param.In,
+			"required":    param.Required,
+			"description": param.Description,
+			"schema": map[string]interface{}{
+				"type":    "string",
+				"example": param.Example,
+			},
+		})
+	}
+	for _, param := range route.PathParams {
+		appendParam(param)
+	}
+	for _, param := range route.QueryParams {
+		appendParam(param)
+	}
+	for _, param := range route.Headers {
+		appendParam(param)
+	}
+	return params
+}
+
+func openAPISecurity(mode manifest.AuthMode) []map[string][]string {
+	switch mode {
+	case manifest.AuthSession:
+		return []map[string][]string{
+			{"sessionCookie": {}},
+			{"adminPasswordHeader": {}},
+		}
+	case manifest.AuthAPIKey:
+		return []map[string][]string{{"bearerAuth": {}}}
+	case manifest.AuthAgent:
+		return []map[string][]string{{"agentBearer": {}}}
+	default:
+		return nil
+	}
+}
+
+func filterNonEmpty(parts []string) []string {
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if strings.TrimSpace(part) == "" {
+			continue
+		}
+		filtered = append(filtered, part)
+	}
+	return filtered
 }
 
 func countRoutesBy(routes []apiDocRoute, keyFn func(apiDocRoute) string) map[string]int {
@@ -721,8 +864,38 @@ func inferRouteMethods(route manifest.Route) []string {
 	}
 	if route.ResponseMode == manifest.ResponseStream {
 		if strings.HasPrefix(route.Prefix, "/v1") {
-			return []string{"GET", "POST"}
+			return []string{"POST", "GET"}
 		}
+		return []string{"GET"}
+	}
+	switch route.Prefix {
+	case "/api/settings":
+		return []string{"GET", "POST", "PATCH"}
+	case "/api/auth/login", "/api/auth/logout", "/api/auth/set-password", "/api/auth/verify-password", "/api/auth/change-password", "/api/auth/2fa/setup", "/api/auth/2fa/enable", "/api/auth/2fa/disable", "/api/system/ai-access/key/rotate", "/api/ai-access/key/rotate", "/api/backup/run", "/api/backup/restore":
+		return []string{"POST"}
+	case "/api/auth/check-password", "/api/auth/session", "/api/auth/2fa/status", "/api/system/api-docs", "/api/system/openapi.json", "/api/openapi.json":
+		return []string{"GET"}
+	}
+	description := strings.ToLower(route.Description)
+	switch {
+	case strings.Contains(description, "list/create"), strings.Contains(description, "list/create/clear"):
+		if strings.Contains(description, "clear") {
+			return []string{"GET", "POST", "DELETE"}
+		}
+		return []string{"GET", "POST"}
+	case strings.Contains(description, "update/delete"):
+		return []string{"PUT", "DELETE"}
+	case strings.Contains(description, "read/update/delete"), strings.Contains(description, "get/update/delete"):
+		return []string{"GET", "PUT", "DELETE"}
+	case strings.Contains(description, "list/update"):
+		return []string{"GET", "PUT"}
+	case strings.Contains(description, "read/update"), strings.Contains(description, "config"), strings.Contains(description, "configuration"):
+		return []string{"GET", "PUT"}
+	case strings.Contains(description, "status update"), strings.Contains(description, "toggle"), strings.Contains(description, "action"), strings.Contains(description, "run"), strings.Contains(description, "retry"), strings.Contains(description, "cancel"), strings.Contains(description, "import"), strings.Contains(description, "preview"), strings.Contains(description, "verify"), strings.Contains(description, "refresh"), strings.Contains(description, "restore"), strings.Contains(description, "health check"), strings.Contains(description, "health-check"):
+		return []string{"POST"}
+	case strings.Contains(description, "delete"), strings.Contains(description, "cleanup"):
+		return []string{"DELETE"}
+	case strings.Contains(description, "list"), strings.Contains(description, "status"), strings.Contains(description, "summary"), strings.Contains(description, "logs"), strings.Contains(description, "metrics"), strings.Contains(description, "history"), strings.Contains(description, "models"), strings.Contains(description, "analytics"), strings.Contains(description, "export"):
 		return []string{"GET"}
 	}
 	switch route.MatchMode {

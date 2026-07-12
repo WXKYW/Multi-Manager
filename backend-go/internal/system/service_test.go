@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -204,5 +205,96 @@ func TestAPICallStats(t *testing.T) {
 	}
 	if !foundToday {
 		t.Error("expected today to be present in trend data")
+	}
+}
+
+func TestAPIDocsIncludeSupplementalRouteMetadata(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "api_monitor_docs_test_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	service := New(config.Config{
+		DataDir: tempDir,
+		DBName:  "data.db",
+		Version: "test",
+	})
+	defer service.Shutdown()
+
+	payload := service.apiDocs()
+	routes, ok := payload["routes"].([]apiDocRoute)
+	if !ok {
+		t.Fatalf("expected []apiDocRoute, got %#v", payload["routes"])
+	}
+
+	var loginRoute *apiDocRoute
+	for i := range routes {
+		if routes[i].Prefix == "/api/auth/login" {
+			loginRoute = &routes[i]
+			break
+		}
+	}
+	if loginRoute == nil {
+		t.Fatal("expected /api/auth/login in api docs")
+	}
+	if len(loginRoute.Methods) != 1 || loginRoute.Methods[0] != http.MethodPost {
+		t.Fatalf("unexpected methods: %#v", loginRoute.Methods)
+	}
+	if loginRoute.RequestBody == nil {
+		t.Fatal("expected login request example")
+	}
+	if len(loginRoute.Headers) != 0 {
+		t.Fatalf("login route should not require auth headers, got %#v", loginRoute.Headers)
+	}
+}
+
+func TestOpenAPIDocumentIncludesParametersAndSecurity(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "api_monitor_openapi_test_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	service := New(config.Config{
+		DataDir: tempDir,
+		DBName:  "data.db",
+		Version: "test",
+	})
+	defer service.Shutdown()
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/api/openapi.json", nil)
+	doc := service.openapiDocument(req)
+
+	components := doc["components"].(map[string]interface{})
+	securitySchemes := components["securitySchemes"].(map[string]interface{})
+	if _, ok := securitySchemes["sessionCookie"]; !ok {
+		t.Fatalf("expected sessionCookie security scheme, got %#v", securitySchemes)
+	}
+
+	paths := doc["paths"].(map[string]interface{})
+	settingsPath := paths["/api/settings"].(map[string]interface{})
+	getOp := settingsPath["get"].(map[string]interface{})
+	security := getOp["security"].([]map[string][]string)
+	if len(security) == 0 {
+		t.Fatal("expected /api/settings GET security")
+	}
+
+	aliyunPath := paths["/api/aliyun/accounts/{id}/domains/{domainName}/records"].(map[string]interface{})
+	getAliyun := aliyunPath["get"].(map[string]interface{})
+	parameters := getAliyun["parameters"].([]map[string]interface{})
+	if len(parameters) < 2 {
+		t.Fatalf("expected path parameters for aliyun records route, got %#v", parameters)
+	}
+
+	loginPath := paths["/api/auth/login"].(map[string]interface{})
+	postLogin := loginPath["post"].(map[string]interface{})
+	requestBody := postLogin["requestBody"].(map[string]interface{})
+	content := requestBody["content"].(map[string]interface{})
+	if _, ok := content["application/json"]; !ok {
+		t.Fatalf("expected application/json request body, got %#v", content)
+	}
+	if !strings.Contains(postLogin["description"].(string), "管理员密码登录") && !strings.Contains(postLogin["description"].(string), "登录") {
+		t.Fatalf("expected enriched description, got %q", postLogin["description"])
 	}
 }
