@@ -1896,7 +1896,7 @@ function M365Page() {
                 { value: 'registrations', label: '注册记录' },
               ]}
               className="w-fit max-w-full"
-              listClassName="w-fit max-w-full overflow-x-auto"
+              listClassName="w-fit max-w-full"
             />
           </div>
 

@@ -103,11 +103,11 @@ export function SectionCard({
     actions && <React.Fragment key="actions">{actions}</React.Fragment>,
   ].filter(Boolean);
   return (
-    <LayerCard
+    <div
       {...props}
       className={cx('flex flex-col overflow-hidden rounded-lg border border-kumo-line/90 bg-kumo-base p-0 shadow-none', className)}
     >
-      <LayerCard.Secondary className={cx(sectionCardHeaderClass, headerClassName)}>
+      <div className={cx(sectionCardHeaderClass, headerClassName)}>
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
           <div className={cx(sectionCardTitleClass, titleClassName)}>
             {icon}
@@ -128,11 +128,11 @@ export function SectionCard({
             {trailing}
           </div>
         )}
-      </LayerCard.Secondary>
-      <LayerCard.Primary className={cx(cardPaddingClass[bodyPadding] || cardPaddingClass.md, bodyClassName)}>
+      </div>
+      <div className={cx(cardPaddingClass[bodyPadding] || cardPaddingClass.md, bodyClassName)}>
         {children}
-      </LayerCard.Primary>
-    </LayerCard>
+      </div>
+    </div>
   );
 }
 

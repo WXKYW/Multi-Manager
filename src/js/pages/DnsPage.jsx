@@ -24,7 +24,7 @@ import useStore from '../store.js';
 import useTableResize from '../composables/useTableResize.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
-import { PageStack, PageToolbar, SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { AppCard, PageStack, PageToolbar, SectionCard } from '../components/ui/AppPrimitives.jsx';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
@@ -1736,9 +1736,10 @@ function DnsPage() {
     [r2CurrentPrefix]
   );
   const isViewportWorkspaceTab = ['dns', 'r2'].includes(activeTab);
-  const pageShellClassName = isViewportWorkspaceTab
-    ? 'dns-workspace h-full min-h-0 flex-1 max-w-full'
-    : 'dns-workspace h-full min-h-0 flex-1 max-w-full overflow-y-auto scrollbar-thin';
+  const pageShellClassName = 'dns-workspace h-full min-h-0 flex-1 max-w-full';
+  const contentAreaClassName = isViewportWorkspaceTab
+    ? 'flex min-h-0 min-w-0 flex-1 flex-col'
+    : 'min-h-0 min-w-0 flex-1 overflow-y-auto scrollbar-thin';
   const renderResizeHead = (label, index, startResize, align = 'left') => {
     const alignClassName = {
       left: 'justify-start text-left',
@@ -1791,23 +1792,24 @@ function DnsPage() {
         </div>
       </PageToolbar>
 
-      {!selectedAccountId && !['accounts', 'templates'].includes(activeTab) ? (
-        <SectionCard
-          title="Cloudflare 账号"
-          description="添加 API 令牌后即可管理 DNS、Workers、Pages、R2 和 Tunnel。"
-          icon={<Cloud className="h-4 w-4 text-kumo-brand" />}
-          bodyPadding="xl"
-        >
-          <div className="flex flex-col items-center gap-3 text-center text-sm text-kumo-subtle">
-            <Cloud className="h-10 w-10 text-kumo-subtle" />
-            <div>尚未配置 Cloudflare 账号，请先在“账号”中添加 API 令牌。</div>
-            <Button size="sm" onClick={() => setActiveTab('accounts')}>
-              去添加账号
-            </Button>
-          </div>
-        </SectionCard>
-      ) : (
-        <>
+      <div className={contentAreaClassName}>
+        {!selectedAccountId && !['accounts', 'templates'].includes(activeTab) ? (
+          <SectionCard
+            title="Cloudflare 账号"
+            description="添加 API 令牌后即可管理 DNS、Workers、Pages、R2 和 Tunnel。"
+            icon={<Cloud className="h-4 w-4 text-kumo-brand" />}
+            bodyPadding="xl"
+          >
+            <div className="flex flex-col items-center gap-3 text-center text-sm text-kumo-subtle">
+              <Cloud className="h-10 w-10 text-kumo-subtle" />
+              <div>尚未配置 Cloudflare 账号，请先在“账号”中添加 API 令牌。</div>
+              <Button size="sm" onClick={() => setActiveTab('accounts')}>
+                去添加账号
+              </Button>
+            </div>
+          </SectionCard>
+        ) : (
+          <>
           {activeTab === 'dns' && (
             <div className="dns-split grid min-h-0 min-w-0 flex-1 gap-3">
               <section className="flex min-h-0 min-w-0 flex-col gap-2">
@@ -2377,7 +2379,7 @@ function DnsPage() {
 
           {activeTab === 'r2' && (
             <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[18rem_minmax(0,1fr)]">
-              <LayerCard className="flex min-h-0 flex-col gap-3 p-3 lg:h-full">
+              <AppCard padding="sm" className="flex min-h-0 flex-col gap-3 lg:h-full">
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-kumo-strong">存储桶</div>
@@ -2446,9 +2448,9 @@ function DnsPage() {
                     );
                   })}
                 </div>
-              </LayerCard>
+              </AppCard>
 
-              <LayerCard className="flex min-h-0 min-w-0 flex-col overflow-hidden p-0 lg:h-full">
+              <AppCard padding="none" className="flex min-h-0 min-w-0 flex-col overflow-hidden lg:h-full">
                 {!r2SelectedBucket ? (
                   <div className="flex min-h-72 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
                     <Database className="h-8 w-8 text-kumo-subtle" />
@@ -2620,7 +2622,7 @@ function DnsPage() {
                     </div>
                   </div>
                 )}
-              </LayerCard>
+              </AppCard>
             </div>
           )}
 
@@ -2795,8 +2797,9 @@ function DnsPage() {
                 </Table>
             </SectionCard>
           )}
-        </>
-      )}
+          </>
+        )}
+      </div>
 
       <Dialog.Root open={Boolean(modal.type)} onOpenChange={(open) => { if (!open) closeModal(); }}>
         {modal.type && (

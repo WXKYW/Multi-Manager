@@ -1,7 +1,7 @@
 export const MODULE_TABS_PROPS = {
   variant: 'segmented',
   className: 'w-fit max-w-full',
-  listClassName: 'w-fit max-w-full overflow-x-auto',
+  listClassName: 'w-fit max-w-full',
 };
 
 export const TOOL_TABS_PROPS = {

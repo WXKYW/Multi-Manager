@@ -1511,7 +1511,7 @@ function SubscriptionPage() {
             onValueChange={(value) => setProtocolFilter(String(value))}
             tabs={protocolItems}
             className="min-w-0 max-w-full flex-1 sm:flex-none"
-            listClassName="max-w-full overflow-x-auto"
+            listClassName="max-w-full"
           />
           {tagItems.length > 1 && (
             <Select
