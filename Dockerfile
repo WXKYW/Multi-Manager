@@ -36,7 +36,7 @@ ENV PATH=/app/node_modules/.bin:$PATH \
 RUN npm run build
 
 # 阶段 2: 构建 Go 后端 (Go Backend Builder)
-FROM --platform=$BUILDPLATFORM golang:1.23-alpine AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS go-builder
 
 # 安装必要的构建工具
 RUN apk add --no-cache gcc musl-dev
