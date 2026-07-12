@@ -230,6 +230,60 @@ func TestUserPatchSupportsPasswordReset(t *testing.T) {
 	}
 }
 
+func TestUserPatchOmitsBlankOptionalProfileFields(t *testing.T) {
+	t.Setenv("ENCRYPTION_KEY", "test-encryption-key")
+	testToken := fakeJWT(`{"roles":["User.ReadWrite.All"]}`)
+
+	var patchBody string
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/oauth2/v2.0/token"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"` + testToken + `"}`))
+		case r.URL.Path == "/users/user-1" && r.Method == http.MethodPatch:
+			body, _ := io.ReadAll(r.Body)
+			patchBody = string(body)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer mock.Close()
+
+	t.Setenv("M365_GRAPH_BASE_URL", mock.URL)
+	t.Setenv("M365_LOGIN_BASE_URL", mock.URL)
+
+	service := New(config.Config{
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	createRes := performM365(service, http.MethodPost, "/api/m365/accounts", `{"name":"Contoso","tenantId":"tenant-1","clientId":"client-1","clientSecret":"secret-1"}`)
+	if createRes.Code != http.StatusOK {
+		t.Fatalf("create account status=%d body=%s", createRes.Code, createRes.Body.String())
+	}
+
+	patchRes := performM365(service, http.MethodPatch, "/api/m365/accounts/1/users/user-1", `{"displayName":"Alice Updated","department":"","jobTitle":" ","officeLocation":"","usageLocation":" ","accountEnabled":true}`)
+	if patchRes.Code != http.StatusOK {
+		t.Fatalf("patch user status=%d body=%s", patchRes.Code, patchRes.Body.String())
+	}
+	if strings.Contains(patchBody, `"department"`) {
+		t.Fatalf("expected blank department to be omitted from graph patch body, got %s", patchBody)
+	}
+	if strings.Contains(patchBody, `"jobTitle"`) {
+		t.Fatalf("expected blank jobTitle to be omitted from graph patch body, got %s", patchBody)
+	}
+	if strings.Contains(patchBody, `"officeLocation"`) {
+		t.Fatalf("expected blank officeLocation to be omitted from graph patch body, got %s", patchBody)
+	}
+	if strings.Contains(patchBody, `"usageLocation"`) {
+		t.Fatalf("expected blank usageLocation to be omitted from graph patch body, got %s", patchBody)
+	}
+	if !strings.Contains(patchBody, `"displayName":"Alice Updated"`) || !strings.Contains(patchBody, `"accountEnabled":true`) {
+		t.Fatalf("expected non-blank fields to remain in graph patch body, got %s", patchBody)
+	}
+}
+
 func TestInviteRegistrationLifecycle(t *testing.T) {
 	t.Setenv("ENCRYPTION_KEY", "test-encryption-key")
 	testToken := fakeJWT(`{"roles":["User.ReadWrite.All","LicenseAssignment.ReadWrite.All"]}`)

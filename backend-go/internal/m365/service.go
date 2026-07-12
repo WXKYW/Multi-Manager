@@ -737,12 +737,7 @@ func (s *Service) userMutation(w http.ResponseWriter, r *http.Request, idText, u
 			response.Error(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		body := map[string]interface{}{}
-		for _, key := range []string{"displayName", "jobTitle", "department", "officeLocation", "usageLocation", "mailNickname", "userPrincipalName"} {
-			if value, ok := payload[key]; ok {
-				body[key] = value
-			}
-		}
+		body := normalizeUserPatchPayload(payload)
 		if value, ok := payload["accountEnabled"]; ok {
 			body["accountEnabled"] = boolValue(value, true)
 		}
@@ -1590,6 +1585,27 @@ func normalizeCreateUserPayload(payload map[string]interface{}) (map[string]inte
 		}
 	}
 	return body, nil
+}
+
+func normalizeUserPatchPayload(payload map[string]interface{}) map[string]interface{} {
+	body := map[string]interface{}{}
+	for _, key := range []string{"displayName", "mailNickname", "userPrincipalName"} {
+		if value, ok := payload[key]; ok {
+			trimmed := strings.TrimSpace(stringValue(value, ""))
+			if trimmed != "" {
+				body[key] = trimmed
+			}
+		}
+	}
+	for _, key := range []string{"department", "jobTitle", "officeLocation", "usageLocation"} {
+		if value, ok := payload[key]; ok {
+			trimmed := strings.TrimSpace(stringValue(value, ""))
+			if trimmed != "" {
+				body[key] = trimmed
+			}
+		}
+	}
+	return body
 }
 
 func normalizeLicenseAssignments(value interface{}) []map[string]interface{} {
