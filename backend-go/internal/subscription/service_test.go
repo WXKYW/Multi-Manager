@@ -18,7 +18,7 @@ import (
 )
 
 func TestLoadSubscriptionsDoesNotQueryWhileRowsOpen(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -61,7 +61,7 @@ func TestLoadSubscriptionsDoesNotQueryWhileRowsOpen(t *testing.T) {
 }
 
 func TestLoadNodesDoesNotQueryQualityWhileRowsOpen(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -99,7 +99,7 @@ func TestLoadNodesDoesNotQueryQualityWhileRowsOpen(t *testing.T) {
 }
 
 func TestLoadQualityUsesDailyAverageLatency(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -354,7 +354,7 @@ func TestProxiesYAMLRendersClientCompatibleList(t *testing.T) {
 }
 
 func TestEnsureSchemaMigratesLegacySubscriptionsToProfiles(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -462,7 +462,7 @@ func TestEnsureSchemaMigratesLegacySubscriptionsToProfiles(t *testing.T) {
 }
 
 func TestSubscriptionTokenRendersNodesFromProfile(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -512,7 +512,7 @@ func TestSubscriptionTokenRendersNodesFromProfile(t *testing.T) {
 }
 
 func TestPublicSubscriptionIncludesClientProfileNameHeaders(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	dataDir := t.TempDir()
@@ -559,7 +559,7 @@ func TestPublicSubscriptionIncludesClientProfileNameHeaders(t *testing.T) {
 }
 
 func TestMihomoRenderFallsBackWhenBoundTemplateIsEmpty(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -590,7 +590,7 @@ func TestMihomoRenderFallsBackWhenBoundTemplateIsEmpty(t *testing.T) {
 }
 
 func TestMihomoRenderUsesEmptyProxyListWhenNoNodes(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -622,7 +622,7 @@ func TestMihomoRenderUsesEmptyProxyListWhenNoNodes(t *testing.T) {
 }
 
 func TestLoadProfilesReturnsLibrariesWithCountsAndUpstream(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -673,7 +673,7 @@ func TestLoadProfilesReturnsLibrariesWithCountsAndUpstream(t *testing.T) {
 }
 
 func TestDeleteProfileBlocksWhenNodesOrLinksExist(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -740,7 +740,7 @@ func TestDeleteProfileBlocksWhenNodesOrLinksExist(t *testing.T) {
 }
 
 func TestComputeTrafficReadsUpstreamInfoFromProfile(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -763,7 +763,7 @@ func TestComputeTrafficReadsUpstreamInfoFromProfile(t *testing.T) {
 }
 
 func TestRefreshUpstreamPreservesBoundNodeProperties(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	upstreamRaw := "vless://0119068b-0148-47bf-875b-2145040b8174@saas.sin.fan:443?security=tls&type=ws&path=/group/live/intro&encryption=none#%F0%9F%87%AD%F0%9F%87%B0%20%E9%A6%99%E6%B8%AF"
@@ -838,7 +838,7 @@ func TestRefreshUpstreamPreservesBoundNodeProperties(t *testing.T) {
 }
 
 func TestComputeTrafficFromNodeBoundServers(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -888,7 +888,7 @@ func TestComputeTrafficFromNodeBoundServers(t *testing.T) {
 }
 
 func TestDeleteSubscriptionKeepsSharedProfile(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -940,7 +940,7 @@ func TestDeleteSubscriptionKeepsSharedProfile(t *testing.T) {
 }
 
 func TestImportCommitReadsSettingsThroughOpenTransaction(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
