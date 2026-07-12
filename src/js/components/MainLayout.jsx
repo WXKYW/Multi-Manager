@@ -29,6 +29,7 @@ const PaasPage = lazy(() => import('../pages/PaasPage.jsx'));
 const DnsPage = lazy(() => import('../pages/DnsPage.jsx'));
 const AliyunPage = lazy(() => import('../pages/AliyunPage.jsx'));
 const TencentPage = lazy(() => import('../pages/TencentPage.jsx'));
+const OraclePage = lazy(() => import('../pages/OraclePage.jsx'));
 const M365Page = lazy(() => import('../pages/M365Page.jsx'));
 const SettingsPage = lazy(() => import('../pages/SettingsPage.jsx'));
 const SchedulerPage = lazy(() => import('../pages/SchedulerPage.jsx'));
@@ -442,6 +443,8 @@ function MainLayout() {
         return <AliyunPage />;
       case 'tencent':
         return <TencentPage />;
+      case 'oracle':
+        return <OraclePage />;
       case 'm365':
         return <M365Page />;
       case 'server':

@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -511,7 +512,7 @@ func (s *Service) executeSchedulerTaskCommand(ctx context.Context, task Schedule
 		}
 	}
 	if len(history) > 0 {
-		return "", fmt.Errorf(strings.Join(history, "\n\n"))
+		return "", errors.New(strings.Join(history, "\n\n"))
 	}
 	return "", lastErr
 }

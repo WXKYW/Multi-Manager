@@ -104,6 +104,7 @@ type registrationRecord struct {
 	ID                int64
 	InviteID          int64
 	InviteName        string
+	InviteCode        string
 	AccountID         int64
 	AccountName       string
 	DisplayName       string
@@ -146,6 +147,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case len(parts) == 1 && parts[0] == "accounts":
 		s.accounts(w, r)
+	case len(parts) == 2 && parts[0] == "export" && parts[1] == "accounts" && r.Method == http.MethodGet:
+		s.exportAccounts(w, r)
+	case len(parts) == 2 && parts[0] == "import" && parts[1] == "accounts" && r.Method == http.MethodPost:
+		s.importAccounts(w, r)
 	case len(parts) == 1 && parts[0] == "public-pages":
 		s.publicPages(w, r)
 	case len(parts) == 2 && parts[0] == "public-pages" && (r.Method == http.MethodPut || r.Method == http.MethodDelete):
@@ -154,7 +159,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.inviteCodes(w, r)
 	case len(parts) == 2 && parts[0] == "invite-codes" && (r.Method == http.MethodPut || r.Method == http.MethodDelete):
 		s.inviteCodeMutation(w, r, parts[1])
-	case len(parts) == 1 && parts[0] == "registrations" && r.Method == http.MethodGet:
+	case len(parts) == 1 && parts[0] == "registrations" && (r.Method == http.MethodGet || r.Method == http.MethodDelete):
 		s.publicPageRegistrations(w, r)
 	case len(parts) == 3 && parts[0] == "public" && parts[1] == "invites" && r.Method == http.MethodGet:
 		s.newPublicInvite(w, r, parts[2])
@@ -358,6 +363,130 @@ func (s *Service) accounts(w http.ResponseWriter, r *http.Request) {
 	default:
 		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+func (s *Service) exportAccounts(w http.ResponseWriter, r *http.Request) {
+	exported, err := s.exportedAccounts(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.OK(w, map[string]interface{}{"accounts": exported})
+}
+
+func (s *Service) exportedAccounts(ctx context.Context) ([]map[string]interface{}, error) {
+	db, err := s.open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	accounts, err := loadAccounts(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]map[string]interface{}, 0, len(accounts))
+	for _, account := range accounts {
+		items = append(items, map[string]interface{}{
+			"name":            account.Name,
+			"tenantId":        account.TenantID,
+			"clientId":        account.ClientID,
+			"clientSecret":    secure.SecureDecrypt(account.ClientSecret),
+			"description":     account.Description,
+			"defaultDomain":   account.DefaultDomain,
+			"verifiedDomains": account.VerifiedDomains,
+			"organization":    account.Organization,
+			"enabled":         account.Enabled,
+		})
+	}
+	return items, nil
+}
+
+func (s *Service) importAccounts(w http.ResponseWriter, r *http.Request) {
+	payload, err := readObject(r)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	items := interfaceArray(payload["accounts"])
+	if len(items) == 0 {
+		response.Error(w, http.StatusBadRequest, "需要提供 accounts 数组")
+		return
+	}
+
+	db, err := s.open(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer db.Close()
+
+	tx, err := db.BeginTx(r.Context(), nil)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if boolValue(payload["overwrite"], false) {
+		if _, err := tx.ExecContext(r.Context(), `DELETE FROM m365_accounts`); err != nil {
+			_ = tx.Rollback()
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
+	for _, item := range items {
+		record, err := payloadToAccount(objectValue(item), accountRecord{})
+		if err != nil {
+			_ = tx.Rollback()
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		encryptedSecret, err := secure.SecureEncrypt(record.ClientSecret)
+		if err != nil {
+			_ = tx.Rollback()
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		if _, err := tx.ExecContext(
+			r.Context(),
+			`INSERT INTO m365_accounts (name, tenant_id, client_id, client_secret, description, default_domain, verified_domains, organization_name, enabled, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+			 ON CONFLICT(tenant_id, client_id) DO UPDATE SET
+			   name = excluded.name,
+			   client_secret = excluded.client_secret,
+			   description = excluded.description,
+			   default_domain = excluded.default_domain,
+			   verified_domains = excluded.verified_domains,
+			   organization_name = excluded.organization_name,
+			   enabled = excluded.enabled,
+			   updated_at = CURRENT_TIMESTAMP`,
+			record.Name,
+			record.TenantID,
+			record.ClientID,
+			encryptedSecret,
+			record.Description,
+			record.DefaultDomain,
+			mustJSONString(record.VerifiedDomains),
+			record.Organization,
+			boolToInt(record.Enabled),
+		); err != nil {
+			_ = tx.Rollback()
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	response.OK(w, map[string]interface{}{"imported": len(items)})
 }
 
 func (s *Service) accountMutation(w http.ResponseWriter, r *http.Request, idText string) {
@@ -1622,7 +1751,7 @@ func scanInvite(scanner rowScanner) (inviteRecord, error) {
 func loadRegistrations(ctx context.Context, db *sql.DB) ([]registrationRecord, error) {
 	rows, err := db.QueryContext(
 		ctx,
-		`SELECT r.id, r.invite_id, COALESCE(i.name, ''), r.account_id, COALESCE(a.name, ''), r.display_name, r.user_principal_name, COALESCE(r.graph_user_id, ''), r.status, COALESCE(r.error_message, ''), r.created_at
+		`SELECT r.id, r.invite_id, COALESCE(i.name, ''), COALESCE(i.code, ''), r.account_id, COALESCE(a.name, ''), r.display_name, r.user_principal_name, COALESCE(r.graph_user_id, ''), r.status, COALESCE(r.error_message, ''), r.created_at
 		 FROM m365_registration_records r
 		 LEFT JOIN m365_registration_invites i ON i.id = r.invite_id
 		 LEFT JOIN m365_accounts a ON a.id = r.account_id
@@ -1639,6 +1768,7 @@ func loadRegistrations(ctx context.Context, db *sql.DB) ([]registrationRecord, e
 			&record.ID,
 			&record.InviteID,
 			&record.InviteName,
+			&record.InviteCode,
 			&record.AccountID,
 			&record.AccountName,
 			&record.DisplayName,
@@ -1736,6 +1866,8 @@ func registrationToMap(record registrationRecord) map[string]interface{} {
 		"id":                record.ID,
 		"inviteId":          record.InviteID,
 		"inviteName":        record.InviteName,
+		"publicPageName":    record.InviteName,
+		"inviteCode":        emptyToNil(record.InviteCode),
 		"accountId":         record.AccountID,
 		"accountName":       record.AccountName,
 		"displayName":       record.DisplayName,

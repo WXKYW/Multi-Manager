@@ -69,6 +69,18 @@ export function AppCard({
   );
 }
 
+const insetToneClass = {
+  recessed: 'border-kumo-line/80 bg-kumo-recessed/20',
+  surface: 'border-kumo-line/70 bg-kumo-surface',
+  dashed: 'border-dashed border-kumo-line/70 bg-transparent',
+};
+
+const keyValueGridColumnsClass = {
+  1: 'grid-cols-1',
+  2: 'md:grid-cols-2',
+  3: 'md:grid-cols-3',
+};
+
 export function SectionCard({
   title,
   description,
@@ -114,6 +126,26 @@ export function SectionCard({
         {trailing.length > 0 && <div className="flex shrink-0 items-center gap-2">{trailing}</div>}
       </LayerCard.Secondary>
       <LayerCard.Primary className={cx(cardPaddingClass[bodyPadding] || cardPaddingClass.md, bodyClassName)}>
+        {children}
+      </LayerCard.Primary>
+    </LayerCard>
+  );
+}
+
+export function InsetPanel({
+  tone = 'recessed',
+  className = '',
+  bodyClassName = '',
+  padding = 'md',
+  children,
+  ...props
+}) {
+  return (
+    <LayerCard
+      {...props}
+      className={cx('overflow-hidden rounded-lg border shadow-none', insetToneClass[tone] || insetToneClass.recessed, className)}
+    >
+      <LayerCard.Primary className={cx(cardPaddingClass[padding] || cardPaddingClass.md, bodyClassName)}>
         {children}
       </LayerCard.Primary>
     </LayerCard>
@@ -234,6 +266,28 @@ export function EmptyState({
 
   if (!card) return content;
   return <AppCard padding="none">{content}</AppCard>;
+}
+
+export function KeyValueGrid({
+  items,
+  columns = 2,
+  className = '',
+  itemClassName = '',
+  labelClassName = '',
+  valueClassName = '',
+}) {
+  return (
+    <div className={cx('grid gap-3 text-sm', keyValueGridColumnsClass[columns] || keyValueGridColumnsClass[2], className)}>
+      {items.map((item) => (
+        <div key={item.key || item.label} className={cx('min-w-0', itemClassName, item.className)}>
+          <div className={cx('text-xs text-kumo-subtle', labelClassName, item.labelClassName)}>{item.label}</div>
+          <div className={cx('mt-1 min-w-0 text-kumo-strong', valueClassName, item.valueClassName)}>
+            {item.value}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function ChartBoundaryBox({ className = '', children }) {

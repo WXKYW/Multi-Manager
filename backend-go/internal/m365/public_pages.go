@@ -675,23 +675,84 @@ func deleteInviteCodeBatch(ctx context.Context, db *sql.DB, publicPageID int64, 
 }
 
 func (s *Service) publicPageRegistrations(w http.ResponseWriter, r *http.Request) {
-	db, err := s.open(r.Context())
-	if err != nil {
-		response.Error(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	defer db.Close()
+	switch r.Method {
+	case http.MethodGet:
+		db, err := s.open(r.Context())
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		defer db.Close()
 
-	items, err := loadPublicPageRegistrations(r.Context(), db)
+		items, err := loadPublicPageRegistrations(r.Context(), db)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		payload := make([]map[string]interface{}, 0, len(items))
+		for _, item := range items {
+			payload = append(payload, publicPageRegistrationToMap(item))
+		}
+		response.OK(w, map[string]interface{}{"items": payload})
+	case http.MethodDelete:
+		payload, err := readObject(r)
+		if err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		ids := int64Array(payload["ids"])
+		deleteAll := boolValue(payload["all"], false)
+		if !deleteAll && len(ids) == 0 {
+			response.Error(w, http.StatusBadRequest, "ids or all is required")
+			return
+		}
+
+		db, err := s.open(r.Context())
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		defer db.Close()
+
+		deletedCount, err := deletePublicPageRegistrations(r.Context(), db, ids, deleteAll)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		response.OK(w, map[string]interface{}{
+			"deleted":      true,
+			"deletedCount": deletedCount,
+		})
+	default:
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func deletePublicPageRegistrations(ctx context.Context, db *sql.DB, ids []int64, deleteAll bool) (int64, error) {
+	query := `DELETE FROM m365_public_page_registrations`
+	args := []interface{}{}
+
+	if !deleteAll {
+		placeholders := make([]string, 0, len(ids))
+		for _, id := range ids {
+			if id <= 0 {
+				continue
+			}
+			placeholders = append(placeholders, "?")
+			args = append(args, id)
+		}
+		if len(placeholders) == 0 {
+			return 0, nil
+		}
+		query += ` WHERE id IN (` + strings.Join(placeholders, ",") + `)`
+	}
+
+	result, err := db.ExecContext(ctx, query, args...)
 	if err != nil {
-		response.Error(w, http.StatusInternalServerError, err.Error())
-		return
+		return 0, err
 	}
-	payload := make([]map[string]interface{}, 0, len(items))
-	for _, item := range items {
-		payload = append(payload, publicPageRegistrationToMap(item))
-	}
-	response.OK(w, map[string]interface{}{"items": payload})
+	deletedCount, _ := result.RowsAffected()
+	return deletedCount, nil
 }
 
 func (s *Service) newPublicInvite(w http.ResponseWriter, r *http.Request, code string) {

@@ -70,6 +70,12 @@ export const MODULE_CONFIG = {
     icon: 'fa-hdd',
     description: '腾讯云 DNS / CVM 管理',
   },
+  oracle: {
+    name: '甲骨文云',
+    shortName: 'Oracle',
+    icon: 'fa-cloud',
+    description: 'Oracle Cloud Infrastructure 实例管理',
+  },
   server: {
     name: '主机实例',
     shortName: '主机',
@@ -132,7 +138,7 @@ export const MODULE_GROUPS = [
       {
         id: 'cloud-vendors',
         name: '云厂商',
-        modules: ['aliyun', 'tencent', 'm365'],
+        modules: ['aliyun', 'tencent', 'oracle', 'm365'],
       },
     ],
     trailingModules: ['server'],

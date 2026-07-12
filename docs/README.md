@@ -8,6 +8,8 @@
 - [API 接口文档](./API接口文档.md)
 - [项目架构与技术详解](./项目架构与技术详解.md)
 - [设计文档](./设计文档.md)
+- [Oracle OCI 模块技术设计文档](./oracle-oci-technical-design.md)
+- [Oracle OCI 模块 API 路由清单](./oracle-oci-api-routes.md)
 - [目录结构说明](./目录结构说明.md)
 - [贡献指南](./贡献指南.md)
 
@@ -22,6 +24,7 @@
 ## 参考资料
 
 - [PRD](./prd/)
+- [Oracle OCI 主机管理模块 PRD](./prd/oracle-oci-server-management.md)
 - [Kumo 参考资料](./reference/)
 
 ## 文档安全约定

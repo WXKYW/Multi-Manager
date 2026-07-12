@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -133,6 +134,54 @@ func TestAccountSecretStoredEncrypted(t *testing.T) {
 	}
 	if secret == "secret-1" {
 		t.Fatalf("expected encrypted secret, got plaintext")
+	}
+}
+
+func TestM365AccountExportImport(t *testing.T) {
+	t.Setenv("ENCRYPTION_KEY", "test-encryption-key")
+	service := New(config.Config{
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	createRes := performM365(service, http.MethodPost, "/api/m365/accounts", `{"name":"Contoso","tenantId":"tenant-1","clientId":"client-1","clientSecret":"secret-1","defaultDomain":"contoso.com","verifiedDomains":["contoso.com","campus.contoso.com"],"organization":"Contoso Org","enabled":true}`)
+	if createRes.Code != http.StatusOK {
+		t.Fatalf("create account status=%d body=%s", createRes.Code, createRes.Body.String())
+	}
+
+	exportRes := performM365(service, http.MethodGet, "/api/m365/export/accounts", "")
+	if exportRes.Code != http.StatusOK {
+		t.Fatalf("export accounts status=%d body=%s", exportRes.Code, exportRes.Body.String())
+	}
+	if !strings.Contains(exportRes.Body.String(), `"clientSecret":"secret-1"`) || !strings.Contains(exportRes.Body.String(), `"verifiedDomains":["contoso.com","campus.contoso.com"]`) {
+		t.Fatalf("unexpected export payload body=%s", exportRes.Body.String())
+	}
+
+	importRes := performM365(service, http.MethodPost, "/api/m365/import/accounts", `{"overwrite":true,"accounts":[{"name":"Fabrikam","tenantId":"tenant-2","clientId":"client-2","clientSecret":"secret-2","defaultDomain":"fabrikam.com","verifiedDomains":["fabrikam.com"],"organization":"Fabrikam Org","enabled":false}]}`)
+	if importRes.Code != http.StatusOK {
+		t.Fatalf("import accounts status=%d body=%s", importRes.Code, importRes.Body.String())
+	}
+
+	listRes := performM365(service, http.MethodGet, "/api/m365/accounts", "")
+	if listRes.Code != http.StatusOK {
+		t.Fatalf("list accounts status=%d body=%s", listRes.Code, listRes.Body.String())
+	}
+	if strings.Contains(listRes.Body.String(), `"tenantId":"tenant-1"`) || !strings.Contains(listRes.Body.String(), `"tenantId":"tenant-2"`) || !strings.Contains(listRes.Body.String(), `"enabled":false`) {
+		t.Fatalf("unexpected accounts after import body=%s", listRes.Body.String())
+	}
+
+	db, err := service.open(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	var secret string
+	if err := db.QueryRowContext(context.Background(), `SELECT client_secret FROM m365_accounts WHERE tenant_id = 'tenant-2' AND client_id = 'client-2'`).Scan(&secret); err != nil {
+		t.Fatal(err)
+	}
+	if secret == "secret-2" {
+		t.Fatalf("expected imported secret to be encrypted, got plaintext")
 	}
 }
 
@@ -287,6 +336,25 @@ func TestInviteRegistrationLifecycle(t *testing.T) {
 	registrationRes := performM365(service, http.MethodGet, "/api/m365/registrations", "")
 	if registrationRes.Code != http.StatusOK || !strings.Contains(registrationRes.Body.String(), `"status":"success"`) || !strings.Contains(registrationRes.Body.String(), `"Student One"`) || !strings.Contains(registrationRes.Body.String(), `"accountId":2`) || !strings.Contains(registrationRes.Body.String(), `"publicPageName":"2026 新生批次"`) || !strings.Contains(registrationRes.Body.String(), `"inviteCode":"`+code+`"`) {
 		t.Fatalf("registrations status=%d body=%s", registrationRes.Code, registrationRes.Body.String())
+	}
+	registrationData := decodeEnvelopeData(t, registrationRes)
+	registrationItems := objectArray(registrationData["items"])
+	if len(registrationItems) != 1 {
+		t.Fatalf("expected 1 registration item, body=%s", registrationRes.Body.String())
+	}
+	registrationID := numberValue(registrationItems[0]["id"])
+	if registrationID <= 0 {
+		t.Fatalf("expected valid registration id, body=%s", registrationRes.Body.String())
+	}
+
+	deleteRegistrationRes := performM365(service, http.MethodDelete, "/api/m365/registrations", fmt.Sprintf(`{"ids":[%d]}`, registrationID))
+	if deleteRegistrationRes.Code != http.StatusOK || !strings.Contains(deleteRegistrationRes.Body.String(), `"deletedCount":1`) {
+		t.Fatalf("delete registrations status=%d body=%s", deleteRegistrationRes.Code, deleteRegistrationRes.Body.String())
+	}
+
+	registrationAfterDeleteRes := performM365(service, http.MethodGet, "/api/m365/registrations", "")
+	if registrationAfterDeleteRes.Code != http.StatusOK || strings.Contains(registrationAfterDeleteRes.Body.String(), `"Student One"`) {
+		t.Fatalf("registrations after delete status=%d body=%s", registrationAfterDeleteRes.Code, registrationAfterDeleteRes.Body.String())
 	}
 
 	usedInviteRes := performM365(service, http.MethodGet, "/api/m365/public/invites/"+code, "")
