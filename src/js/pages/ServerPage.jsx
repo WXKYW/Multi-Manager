@@ -7336,32 +7336,30 @@ function ServerPage() {
         onClose={() => setCompactColumnMenu(prev => ({ ...prev, open: false }))}
       />
       {/* 顶部标签导航 */}
-      <div className="flex items-center justify-between gap-2 border-b border-kumo-line pb-3">
-        <div className="min-w-0 max-w-full overflow-x-auto scrollbar-thin">
-          <Tabs
-            {...MODULE_TABS_PROPS}
-            value={serverCurrentTab}
-            onValueChange={(value) => {
-              if (serverCurrentTab === 'terminal' && value !== 'terminal') {
-                saveTerminalsToWarehouse();
-              }
-              setServerCurrentTab(value);
-              if (value === 'status-pages') loadServerStatusPages();
-            }}
-            tabs={[
-              { value: 'list', label: <ServerModuleTabLabel icon={Server} short="主机">主机管理</ServerModuleTabLabel> },
-              { value: 'docker', label: <ServerModuleTabLabel icon={Box}>Docker</ServerModuleTabLabel> },
-              { value: 'status-pages', label: <ServerModuleTabLabel icon={Globe} short="状态">状态页</ServerModuleTabLabel> },
-              { value: 'management', label: <ServerModuleTabLabel icon={Settings} short="管理">后台管理</ServerModuleTabLabel> },
-              ...(sshSessions.length > 0
-                ? [{
-                  value: 'terminal',
-                  label: <ServerModuleTabLabel icon={TerminalIcon} short="SSH" badge={sshSessions.length}>SSH 终端</ServerModuleTabLabel>,
-                }]
-                : []),
-            ]}
-          />
-        </div>
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-kumo-line pb-3 [&>*]:min-w-0">
+        <Tabs
+          {...MODULE_TABS_PROPS}
+          value={serverCurrentTab}
+          onValueChange={(value) => {
+            if (serverCurrentTab === 'terminal' && value !== 'terminal') {
+              saveTerminalsToWarehouse();
+            }
+            setServerCurrentTab(value);
+            if (value === 'status-pages') loadServerStatusPages();
+          }}
+          tabs={[
+            { value: 'list', label: <ServerModuleTabLabel icon={Server} short="主机">主机管理</ServerModuleTabLabel> },
+            { value: 'docker', label: <ServerModuleTabLabel icon={Box}>Docker</ServerModuleTabLabel> },
+            { value: 'status-pages', label: <ServerModuleTabLabel icon={Globe} short="状态">状态页</ServerModuleTabLabel> },
+            { value: 'management', label: <ServerModuleTabLabel icon={Settings} short="管理">后台管理</ServerModuleTabLabel> },
+            ...(sshSessions.length > 0
+              ? [{
+                value: 'terminal',
+                label: <ServerModuleTabLabel icon={TerminalIcon} short="SSH" badge={sshSessions.length}>SSH 终端</ServerModuleTabLabel>,
+              }]
+              : []),
+          ]}
+        />
 
         {/* 右侧快速连接 */}
         <div className="flex shrink-0 items-center justify-end gap-2">

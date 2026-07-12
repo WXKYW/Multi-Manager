@@ -1799,25 +1799,23 @@ function SubscriptionPage() {
   );
 
   return (
-    <PageStack className="flex h-full min-h-0 flex-1 flex-col overflow-hidden px-px">
-      <PageToolbar className="shrink-0">
-        <div className="min-w-0 max-w-full overflow-x-auto scrollbar-thin">
-          <Tabs
-            {...MODULE_TABS_PROPS}
-            value={activeTab}
-            onValueChange={(value) => setActiveTab(String(value))}
-            tabs={[
-              { value: 'profiles', label: '节点库' },
-              { value: 'nodes', label: '节点' },
-              { value: 'subscriptions', label: '订阅管理' },
-            ]}
-          />
-        </div>
+    <PageStack>
+      <PageToolbar>
+        <Tabs
+          {...MODULE_TABS_PROPS}
+          value={activeTab}
+          onValueChange={(value) => setActiveTab(String(value))}
+          tabs={[
+            { value: 'profiles', label: '节点库' },
+            { value: 'nodes', label: '节点' },
+            { value: 'subscriptions', label: '订阅管理' },
+          ]}
+        />
       </PageToolbar>
 
-      <div className="min-h-0 flex-1 overflow-hidden p-px">
+      <div className="min-w-0">
         {loading && nodeLibraries.length === 0 ? renderNodesSkeleton() : (
-          <div className="h-full min-h-0">
+          <div className="min-w-0">
             {activeTab === 'profiles' && renderProfiles()}
             {activeTab === 'nodes' && renderNodes()}
             {activeTab === 'subscriptions' && renderSubscriptions()}

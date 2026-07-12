@@ -89,6 +89,8 @@ npm run backend-go:build
 - [API 接口文档](./docs/API接口文档.md)
 - [Kumo UI 规则](./docs/Kumo%20UI%20规则.md)
 
+前端如果遇到 Kumo `Tabs` 描边被裁、tab 切换左右抖动、双栏页面高度填充不稳定等问题，先看 [docs/README.md](./docs/README.md) 里的“前端布局约定”。
+
 ## 许可证
 
 [MIT](./LICENSE)

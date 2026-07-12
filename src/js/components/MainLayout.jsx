@@ -481,7 +481,7 @@ function MainLayout() {
     }
   }, [mainActiveTab, moduleOrder, moduleVisibility, setMainActiveTab, userSettingsLoaded]);
 
-  const viewportWorkspaceModule = ['apidocs', 'systemlogs', 'settings'].includes(mainActiveTab);
+  const viewportWorkspaceModule = ['apidocs', 'systemlogs', 'settings', 'dns'].includes(mainActiveTab);
   const mainCanvasClassName = viewportWorkspaceModule
     ? 'flex-1 overflow-hidden p-3 sm:p-4 lg:px-8 lg:pb-6 lg:pt-3'
     : 'flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 lg:px-8 lg:pb-6 lg:pt-3 scrollbar-thin';

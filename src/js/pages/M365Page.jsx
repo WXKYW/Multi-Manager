@@ -99,7 +99,7 @@ const defaultInviteCodeGeneratorForm = {
   quantity: 1,
 };
 
-const workspaceHeightClass = 'min-h-0 flex-1 overflow-hidden';
+const workspaceHeightClass = '';
 const panelBodyClass = 'flex min-h-0 flex-1 flex-col';
 const scrollViewportClass = 'min-h-0 flex-1 overflow-auto scrollbar-thin';
 const tableFrameClass = 'h-0 min-h-0 flex-1 overflow-hidden';
@@ -2811,51 +2811,49 @@ function M365Page() {
 
   return (
     <PageStack className={workspaceHeightClass}>
-      <PageToolbar className="pr-2">
-        <div className="min-w-0 max-w-full overflow-x-auto scrollbar-thin">
-          <Tabs
-            {...MODULE_TABS_PROPS}
-            value={activeTab}
-            onValueChange={setActiveTab}
-            tabs={[
-              {
-                value: 'tenants',
-                label: (
-                  <span className="inline-flex items-center gap-1.5">
-                    <Cloud className="h-4 w-4" />
-                    租户
-                  </span>
-                ),
-              },
-              {
-                value: 'users',
-                label: (
-                  <span className="inline-flex items-center gap-1.5">
-                    <Users className="h-4 w-4" />
-                    用户与许可证
-                  </span>
-                ),
-              },
-              {
-                value: 'groups',
-                label: (
-                  <span className="inline-flex items-center gap-1.5">
-                    <Folder className="h-4 w-4" />组
-                  </span>
-                ),
-              },
-              {
-                value: 'public',
-                label: (
-                  <span className="inline-flex items-center gap-1.5">
-                    <Globe className="h-4 w-4" />
-                    公开页
-                  </span>
-                ),
-              },
-            ]}
-          />
-        </div>
+      <PageToolbar>
+        <Tabs
+          {...MODULE_TABS_PROPS}
+          value={activeTab}
+          onValueChange={setActiveTab}
+          tabs={[
+            {
+              value: 'tenants',
+              label: (
+                <span className="inline-flex items-center gap-1.5">
+                  <Cloud className="h-4 w-4" />
+                  租户
+                </span>
+              ),
+            },
+            {
+              value: 'users',
+              label: (
+                <span className="inline-flex items-center gap-1.5">
+                  <Users className="h-4 w-4" />
+                  用户与许可证
+                </span>
+              ),
+            },
+            {
+              value: 'groups',
+              label: (
+                <span className="inline-flex items-center gap-1.5">
+                  <Folder className="h-4 w-4" />组
+                </span>
+              ),
+            },
+            {
+              value: 'public',
+              label: (
+                <span className="inline-flex items-center gap-1.5">
+                  <Globe className="h-4 w-4" />
+                  公开页
+                </span>
+              ),
+            },
+          ]}
+        />
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <Button
             size="sm"

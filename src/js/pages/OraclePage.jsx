@@ -895,16 +895,14 @@ function OraclePage() {
   };
 
   return (
-    <PageStack className="min-h-full flex-1 overflow-hidden">
-      <PageToolbar className="shrink-0 pr-2">
-        <div className="min-w-0 max-w-full overflow-x-auto scrollbar-thin">
-          <Tabs
-            {...MODULE_TABS_PROPS}
-            value={activeTab}
-            onValueChange={setActiveTab}
-            tabs={tabs}
-          />
-        </div>
+    <PageStack>
+      <PageToolbar>
+        <Tabs
+          {...MODULE_TABS_PROPS}
+          value={activeTab}
+          onValueChange={setActiveTab}
+          tabs={tabs}
+        />
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <Select
             aria-label="Oracle 账号"

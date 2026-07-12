@@ -80,7 +80,7 @@ const API_SEGMENT = 'api';
 const routePrefixLiteral = (...segments) => `/${segments.join('/')}`;
 
 const apiDocsShellClass =
-  'api-docs-workspace flex h-full min-h-0 flex-1 w-full max-w-full flex-col gap-3 overflow-hidden px-px';
+  'api-docs-workspace flex h-full min-h-0 flex-1 w-full min-w-0 flex-col gap-3';
 const fixedPanelClass = 'h-full min-h-0';
 
 const defaultMCPForm = {
@@ -1511,7 +1511,7 @@ function ApiDocsPage() {
 
   return (
     <PageStack className={apiDocsShellClass}>
-      <PageToolbar className="shrink-0 pr-2">
+      <PageToolbar className="shrink-0">
         <Tabs
           {...MODULE_TABS_PROPS}
           value={activeView}
@@ -1546,8 +1546,8 @@ function ApiDocsPage() {
       </PageToolbar>
 
       {activeView === 'routes' && (
-        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
-          <div className="shrink-0 space-y-2 p-px">
+        <div className="flex min-h-0 flex-1 flex-col gap-2">
+          <div className="shrink-0 space-y-2">
             <div className="grid grid-cols-4 gap-2 sm:gap-3">
               <StatCard icon={FileText} label="接口总数" value={summary.total} />
               <StatCard
@@ -1613,7 +1613,7 @@ function ApiDocsPage() {
             </AppCard>
           </div>
 
-          <div className="grid min-h-0 min-w-0 flex-1 gap-3 overflow-hidden px-px py-px xl:grid-cols-[minmax(340px,0.9fr)_minmax(0,1.1fr)] 2xl:grid-cols-[minmax(360px,0.84fr)_minmax(0,1.16fr)]">
+          <div className="grid min-h-0 min-w-0 flex-1 gap-3 xl:grid-cols-[minmax(340px,0.9fr)_minmax(0,1.1fr)] 2xl:grid-cols-[minmax(360px,0.84fr)_minmax(0,1.16fr)]">
             <RouteList
               routes={filteredRoutes}
               selectedRoute={selectedRoute}
@@ -1625,7 +1625,7 @@ function ApiDocsPage() {
       )}
 
       {activeView === 'ai' && (
-        <div className="min-h-0 flex-1 overflow-hidden p-px">
+        <div className="min-h-0 flex-1">
           <AIAccessConsole
             aiAccess={aiAccess}
             loading={aiLoading}

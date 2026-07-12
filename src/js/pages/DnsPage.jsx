@@ -375,7 +375,7 @@ function DnsPage() {
   const [tunnelConfigState, setTunnelConfigState] = useState({ tunnel: null, text: EMPTY_TUNNEL_CONFIG });
   const [tunnelConnectionState, setTunnelConnectionState] = useState({ tunnel: null, connections: [] });
 
-  const [zoneColWidths, startZoneResize] = useTableResize([166, 76, 58, 54, 68]);
+  const zoneColWidths = ['31%', '20%', '13%', '11%', '25%'];
   const [recordColWidths, startRecordResize] = useTableResize([34, 54, 82, 140, 48, 50, 106, 70]);
   const [workerColWidths, startWorkerResize] = useTableResize([260, 160, 180, 280]);
   const [pageColWidths, startPageResize] = useTableResize([240, 220, 150, 150, 220]);
@@ -1735,10 +1735,10 @@ function DnsPage() {
     () => r2CurrentPrefix.split('/').filter(Boolean),
     [r2CurrentPrefix]
   );
-  const isCloudflareViewportWorkspace = ['dns', 'r2'].includes(activeTab) && selectedAccountId;
-  const pageShellClassName = isCloudflareViewportWorkspace
-    ? 'dns-workspace flex h-full min-h-0 flex-1 w-full max-w-full flex-col gap-3 overflow-hidden px-px'
-    : '';
+  const isViewportWorkspaceTab = ['dns', 'r2'].includes(activeTab);
+  const pageShellClassName = isViewportWorkspaceTab
+    ? 'dns-workspace h-full min-h-0 flex-1 max-w-full'
+    : 'dns-workspace h-full min-h-0 flex-1 max-w-full overflow-y-auto scrollbar-thin';
   const renderResizeHead = (label, index, startResize, align = 'left') => {
     const alignClassName = {
       left: 'justify-start text-left',
@@ -1758,15 +1758,13 @@ function DnsPage() {
 
   return (
     <PageStack className={pageShellClassName}>
-      <PageToolbar className="shrink-0 pr-2">
-        <div className="min-w-0 max-w-full overflow-x-auto scrollbar-thin">
-          <Tabs
-            {...MODULE_TABS_PROPS}
-            value={activeTab}
-            onValueChange={setActiveTab}
-            tabs={CLOUDFLARE_TABS}
-          />
-        </div>
+      <PageToolbar>
+        <Tabs
+          {...MODULE_TABS_PROPS}
+          value={activeTab}
+          onValueChange={setActiveTab}
+          tabs={CLOUDFLARE_TABS}
+        />
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           {!['accounts', 'templates'].includes(activeTab) && (
@@ -1811,8 +1809,8 @@ function DnsPage() {
       ) : (
         <>
           {activeTab === 'dns' && (
-            <div className="dns-split grid min-h-0 flex-1 max-w-full gap-3 overflow-hidden">
-              <section className="flex min-h-0 min-w-0 max-w-full flex-col gap-2 overflow-hidden">
+            <div className="dns-split grid min-h-0 min-w-0 flex-1 gap-3">
+              <section className="flex min-h-0 min-w-0 flex-col gap-2">
               <div className="flex min-h-8 shrink-0 flex-col gap-2 pl-px sm:flex-row sm:items-center sm:justify-between">
                 <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:items-center">
                   <Button size="sm" variant="secondary" onClick={openZoneModal} icon={<Plus className="h-4 w-4" />} className="w-full justify-center sm:w-auto">
@@ -1860,16 +1858,16 @@ function DnsPage() {
 
               <div className="dns-table-frame hidden min-h-0 max-w-full flex-1 md:block">
                 <div className="dns-table-scroll scrollbar-thin">
-                <Table layout="fixed" className="w-full text-xs" style={{ minWidth: zoneColWidths.reduce((sum, width) => sum + width, 0) }}>
+                <Table layout="fixed" className="w-full text-xs">
                   <colgroup>
                     {zoneColWidths.map((width, index) => <col key={index} style={{ width }} />)}
                   </colgroup>
                   <Table.Header sticky variant="compact">
                     <Table.Row className="h-8">
-                      {renderResizeHead('域名', 0, startZoneResize)}
-                      {renderResizeHead('状态', 1, startZoneResize, 'center')}
-                      {renderResizeHead('类型', 2, startZoneResize, 'center')}
-                      {renderResizeHead('NS', 3, startZoneResize, 'center')}
+                      <Table.Head className="!px-2.5 !py-1.5 text-left">域名</Table.Head>
+                      <Table.Head className="!px-2.5 !py-1.5 text-center">状态</Table.Head>
+                      <Table.Head className="!px-2.5 !py-1.5 text-center">类型</Table.Head>
+                      <Table.Head className="!px-2.5 !py-1.5 text-center">NS</Table.Head>
                       <Table.Head className="!px-2 !py-1.5 text-center">操作</Table.Head>
                     </Table.Row>
                   </Table.Header>
@@ -1990,7 +1988,7 @@ function DnsPage() {
 
               </section>
 
-              <section className="flex min-h-0 min-w-0 max-w-full flex-col gap-2 overflow-hidden">
+              <section className="flex min-h-0 min-w-0 flex-col gap-2">
               <div className="flex min-h-8 shrink-0 items-center justify-between gap-2 px-1">
                 <div className="flex min-w-0 items-center gap-2 text-xs text-kumo-subtle">
                   <Globe className="h-3.5 w-3.5 shrink-0" />
@@ -2378,7 +2376,7 @@ function DnsPage() {
           )}
 
           {activeTab === 'r2' && (
-            <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden p-px lg:grid-cols-[18rem_minmax(0,1fr)]">
+            <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[18rem_minmax(0,1fr)]">
               <LayerCard className="flex min-h-0 flex-col gap-3 p-3 lg:h-full">
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
@@ -2450,7 +2448,7 @@ function DnsPage() {
                 </div>
               </LayerCard>
 
-              <LayerCard className="flex min-w-0 flex-col overflow-hidden p-0 lg:h-full">
+              <LayerCard className="flex min-h-0 min-w-0 flex-col overflow-hidden p-0 lg:h-full">
                 {!r2SelectedBucket ? (
                   <div className="flex min-h-72 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
                     <Database className="h-8 w-8 text-kumo-subtle" />

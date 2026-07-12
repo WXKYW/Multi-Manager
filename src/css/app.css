@@ -4,7 +4,7 @@
 
 /* ==================== Base Resets ==================== */
 html {
-  font-size: 15px; /* Make the UI slightly more compact globally */
+  font-size: 16px;
 }
 
 :root {
@@ -326,6 +326,8 @@ th > button[aria-label='Resize column'] > span {
 }
 
 .dns-table-frame {
+  display: flex;
+  min-height: 0;
   position: relative;
   overflow: hidden;
   border-radius: 0.5rem;
@@ -343,6 +345,8 @@ th > button[aria-label='Resize column'] > span {
 }
 
 .dns-table-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
   position: relative;
   z-index: 0;
   height: 100%;
@@ -367,7 +371,7 @@ th > button[aria-label='Resize column'] > span {
 
 @container (min-width: 980px) {
   .dns-split {
-    grid-template-columns: clamp(300px, 38%, 424px) minmax(0, 1fr);
+    grid-template-columns: clamp(292px, 36%, 396px) minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
   }
 }
