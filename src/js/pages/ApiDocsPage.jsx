@@ -80,7 +80,7 @@ const API_SEGMENT = 'api';
 const routePrefixLiteral = (...segments) => `/${segments.join('/')}`;
 
 const apiDocsShellClass =
-  'h-[calc(100dvh-6.25rem-1px)] max-h-[calc(100dvh-6.25rem-1px)] min-h-0 gap-3 overflow-visible';
+  'api-docs-workspace flex h-full min-h-0 flex-1 w-full max-w-full flex-col gap-3 overflow-hidden px-px';
 const fixedPanelClass = 'h-full min-h-0';
 
 const defaultMCPForm = {
@@ -400,28 +400,23 @@ const formatJSON = value => {
 function StatCard({ icon: Icon, label, value, tone = 'brand' }) {
   const toneClass =
     {
-      brand: 'text-kumo-brand bg-kumo-brand/10 border-kumo-brand/20',
-      success: 'text-kumo-success bg-kumo-success/10 border-kumo-success/20',
-      warning: 'text-kumo-warning bg-kumo-warning/10 border-kumo-warning/20',
-      info: 'text-kumo-info bg-kumo-info/10 border-kumo-info/20',
-    }[tone] || 'text-kumo-brand bg-kumo-brand/10 border-kumo-brand/20';
+      brand: 'bg-kumo-info/6 text-kumo-info',
+      success: 'bg-kumo-success/6 text-kumo-success',
+      warning: 'bg-kumo-warning/8 text-kumo-warning',
+      info: 'bg-kumo-brand/7 text-kumo-brand',
+    }[tone] || 'bg-kumo-info/6 text-kumo-info';
 
   return (
-    <AppCard padding="md" className="min-w-0">
-      <div className="flex items-center gap-3">
-        <div
-          className={cx(
-            'flex h-9 w-9 shrink-0 items-center justify-center rounded-md border',
-            toneClass
-          )}
-        >
-          <Icon className="h-4 w-4" />
-        </div>
-        <div className="min-w-0">
-          <div className="text-[11px] font-semibold text-kumo-subtle">{label}</div>
-          <div className="mt-0.5 truncate font-mono text-xl font-bold text-kumo-strong">
-            {value}
-          </div>
+    <AppCard padding="none" className={cx('min-w-0 p-2 sm:p-3', toneClass)}>
+      <div className="flex items-center justify-between gap-2 text-[11px] text-kumo-subtle sm:gap-3 sm:text-xs">
+        <span className="truncate">{label}</span>
+        <span className="shrink-0">
+          <Icon className="h-5 w-5" />
+        </span>
+      </div>
+      <div className="mt-1">
+        <div className="truncate font-mono text-base font-bold text-kumo-strong sm:text-lg">
+          {value}
         </div>
       </div>
     </AppCard>
@@ -436,7 +431,7 @@ function FilterSelect({ label, value, onValueChange, items }) {
       value={value}
       onValueChange={onValueChange}
       items={items}
-      className="w-full min-w-34 text-xs text-kumo-strong sm:w-36"
+      className="w-full min-w-0 text-xs text-kumo-strong"
     />
   );
 }
@@ -460,58 +455,64 @@ function RouteMethodPills({ methods = [] }) {
 }
 
 function RouteList({ routes, selectedRoute, onSelect }) {
-  if (routes.length === 0) {
-    return (
-      <EmptyState
-        icon={Search}
-        title="没有匹配的接口"
-        description="调整搜索词或筛选条件后再查看。"
-      />
-    );
-  }
-
   return (
-    <AppCard padding="none" className={cx(fixedPanelClass, 'min-h-0 overflow-hidden')}>
-      <div className="h-full overflow-y-auto divide-y divide-kumo-line/80">
-        {routes.map(route => {
-          const active = selectedRoute && getRouteKey(selectedRoute) === getRouteKey(route);
-          return (
-            <Button
-              key={getRouteKey(route)}
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={() => onSelect(route)}
-              className={cx(
-                'h-auto w-full min-w-0 flex-col items-stretch gap-2 rounded-none px-3 py-3 text-left',
-                active && 'bg-kumo-brand/10'
-              )}
-            >
-              <div className="flex min-w-0 items-center justify-between gap-2">
-                <div className="min-w-0 truncate font-mono text-xs font-bold text-kumo-strong">
-                  {route.prefix}
+    <SectionCard
+      title={`接口列表 (${routes.length})`}
+      description="按路径、认证和状态筛选后，在这里选择具体接口。"
+      icon={<Search className="h-4 w-4 text-kumo-brand" />}
+      className={cx(fixedPanelClass, 'min-h-0')}
+      bodyPadding="none"
+      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
+    >
+      {routes.length === 0 ? (
+        <EmptyState
+          icon={Search}
+          title="没有匹配的接口"
+          description="调整搜索词或筛选条件后再查看。"
+          className="h-full"
+        />
+      ) : (
+        <div className="h-full overflow-y-auto divide-y divide-kumo-line/80">
+          {routes.map(route => {
+            const active = selectedRoute && getRouteKey(selectedRoute) === getRouteKey(route);
+            return (
+              <Button
+                key={getRouteKey(route)}
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => onSelect(route)}
+                className={cx(
+                  'h-auto w-full min-w-0 flex-col items-stretch gap-1.5 rounded-none px-3 py-2.5 text-left',
+                  active && 'bg-kumo-brand/10'
+                )}
+              >
+                <div className="flex min-w-0 items-center justify-between gap-2">
+                  <div className="min-w-0 truncate font-mono text-xs font-bold text-kumo-strong">
+                    {route.prefix}
+                  </div>
+                  <InlineStatusPill tone={STATUS_TONE[route.status]}>
+                    {STATUS_LABEL[route.status] || route.status}
+                  </InlineStatusPill>
                 </div>
-                <InlineStatusPill tone={STATUS_TONE[route.status]}>
-                  {STATUS_LABEL[route.status] || route.status}
-                </InlineStatusPill>
-              </div>
-              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                <RouteMethodPills methods={route.methods} />
-                <InlineStatusPill tone={AUTH_TONE[route.auth]}>
-                  {AUTH_LABEL[route.auth] || route.auth}
-                </InlineStatusPill>
-                <span className="truncate text-[11px] font-semibold text-kumo-subtle">
-                  {route.group}
-                </span>
-              </div>
-              <div className="line-clamp-2 text-xs leading-relaxed text-kumo-subtle">
-                {route.description}
-              </div>
-            </Button>
-          );
-        })}
-      </div>
-    </AppCard>
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <RouteMethodPills methods={route.methods} />
+                  <InlineStatusPill tone={AUTH_TONE[route.auth]}>
+                    {AUTH_LABEL[route.auth] || route.auth}
+                  </InlineStatusPill>
+                  <span className="truncate text-[11px] font-semibold text-kumo-subtle">
+                    {route.group}
+                  </span>
+                </div>
+                <div className="line-clamp-2 text-xs leading-relaxed text-kumo-subtle">
+                  {route.description}
+                </div>
+              </Button>
+            );
+          })}
+        </div>
+      )}
+    </SectionCard>
   );
 }
 
@@ -1510,7 +1511,7 @@ function ApiDocsPage() {
 
   return (
     <PageStack className={apiDocsShellClass}>
-      <PageToolbar>
+      <PageToolbar className="shrink-0 pr-2">
         <Tabs
           {...MODULE_TABS_PROPS}
           value={activeView}
@@ -1545,72 +1546,74 @@ function ApiDocsPage() {
       </PageToolbar>
 
       {activeView === 'routes' && (
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-visible px-1 pb-1 pt-1">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard icon={FileText} label="接口总数" value={summary.total} />
-            <StatCard
-              icon={Activity}
-              label="可用接口"
-              value={summary.byStatus.active || 0}
-              tone="success"
-            />
-            <StatCard
-              icon={Shield}
-              label="登录保护"
-              value={summary.byAuth.session || 0}
-              tone="warning"
-            />
-            <StatCard
-              icon={Bot}
-              label="AI 接口"
-              value={summary.byGroup['AI 接入'] || 0}
-              tone="info"
-            />
-          </div>
-
-          <AppCard padding="md">
-            <div className="grid gap-3 lg:grid-cols-[minmax(220px,1fr)_auto_auto_auto]">
-              <Input
-                size="sm"
-                aria-label="搜索接口"
-                value={query}
-                onChange={event => setQuery(event.target.value)}
-                placeholder="搜索路径、模块或描述"
-                className="w-full text-xs text-kumo-strong"
+        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+          <div className="shrink-0 space-y-2 p-px">
+            <div className="grid grid-cols-4 gap-2 sm:gap-3">
+              <StatCard icon={FileText} label="接口总数" value={summary.total} />
+              <StatCard
+                icon={Activity}
+                label="可用接口"
+                value={summary.byStatus.active || 0}
+                tone="success"
               />
-              <FilterSelect
-                label="接口分组"
-                value={group}
-                onValueChange={setGroup}
-                items={groupItems}
+              <StatCard
+                icon={Shield}
+                label="登录保护"
+                value={summary.byAuth.session || 0}
+                tone="warning"
               />
-              <FilterSelect
-                label="认证方式"
-                value={auth}
-                onValueChange={setAuth}
-                items={[
-                  { value: 'all', label: '全部认证' },
-                  { value: 'public', label: '公开' },
-                  { value: 'session', label: '登录' },
-                  { value: 'api_key', label: 'API Key' },
-                  { value: 'agent_key', label: 'Agent Key' },
-                ]}
-              />
-              <FilterSelect
-                label="接口状态"
-                value={status}
-                onValueChange={setStatus}
-                items={[
-                  { value: 'all', label: '全部状态' },
-                  { value: 'active', label: '可用' },
-                  { value: 'retired', label: '停用' },
-                  { value: 'unknown', label: '未知' },
-                ]}
+              <StatCard
+                icon={Bot}
+                label="AI 接口"
+                value={summary.byGroup['AI 接入'] || 0}
+                tone="info"
               />
             </div>
-          </AppCard>
 
-          <div className="grid min-h-0 min-w-0 flex-1 gap-4 overflow-hidden p-px xl:grid-cols-[minmax(360px,1fr)_minmax(0,1fr)]">
+            <AppCard padding="md" className="shrink-0">
+              <div className="grid min-w-0 grid-cols-[minmax(240px,1.35fr)_repeat(3,minmax(0,0.82fr))] items-center gap-2">
+                <Input
+                  size="sm"
+                  aria-label="搜索接口"
+                  value={query}
+                  onChange={event => setQuery(event.target.value)}
+                  placeholder="搜索路径、模块或描述"
+                  className="min-w-0 w-full text-xs text-kumo-strong"
+                />
+                <FilterSelect
+                  label="接口分组"
+                  value={group}
+                  onValueChange={setGroup}
+                  items={groupItems}
+                />
+                <FilterSelect
+                  label="认证方式"
+                  value={auth}
+                  onValueChange={setAuth}
+                  items={[
+                    { value: 'all', label: '全部认证' },
+                    { value: 'public', label: '公开' },
+                    { value: 'session', label: '登录' },
+                    { value: 'api_key', label: 'API Key' },
+                    { value: 'agent_key', label: 'Agent Key' },
+                  ]}
+                />
+                <FilterSelect
+                  label="接口状态"
+                  value={status}
+                  onValueChange={setStatus}
+                  items={[
+                    { value: 'all', label: '全部状态' },
+                    { value: 'active', label: '可用' },
+                    { value: 'retired', label: '停用' },
+                    { value: 'unknown', label: '未知' },
+                  ]}
+                />
+              </div>
+            </AppCard>
+          </div>
+
+          <div className="grid min-h-0 min-w-0 flex-1 gap-3 overflow-hidden px-px py-px xl:grid-cols-[minmax(340px,0.9fr)_minmax(0,1.1fr)] 2xl:grid-cols-[minmax(360px,0.84fr)_minmax(0,1.16fr)]">
             <RouteList
               routes={filteredRoutes}
               selectedRoute={selectedRoute}
@@ -1622,7 +1625,7 @@ function ApiDocsPage() {
       )}
 
       {activeView === 'ai' && (
-        <div className="min-h-0 flex-1 overflow-visible px-1 pb-1 pt-1">
+        <div className="min-h-0 flex-1 overflow-hidden p-px">
           <AIAccessConsole
             aiAccess={aiAccess}
             loading={aiLoading}

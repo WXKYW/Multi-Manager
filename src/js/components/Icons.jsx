@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  AppWindow as PhAppWindow,
   ArrowClockwise,
   ArrowCounterClockwise,
   ArrowLeft as PhArrowLeft,
@@ -20,12 +21,14 @@ import {
   Clock as PhClock,
   ClockCounterClockwise,
   Cloud as PhCloud,
+  Columns as PhColumns,
   Compass as PhCompass,
   Copy as PhCopy,
   Cpu as PhCpu,
   Cube,
   Database as PhDatabase,
   DotsThreeVertical,
+  Desktop as PhDesktop,
   DownloadSimple,
   EnvelopeSimple,
   Eye as PhEye,
@@ -52,6 +55,7 @@ import {
   Lock as PhLock,
   MagnifyingGlass,
   Moon as PhMoon,
+  Palette as PhPalette,
   PaperPlaneTilt,
   Paperclip as PhPaperclip,
   Pause as PhPause,
@@ -62,6 +66,7 @@ import {
   Power,
   Pulse,
   PushPin,
+  Rectangle as PhRectangle,
   Repeat as PhRepeat,
   RepeatOnce,
   Robot,
@@ -153,6 +158,7 @@ const createAssetIcon = (asset, label) => {
 };
 
 export const LayoutDashboard = createIcon(SquaresFour);
+export const AppWindow = createIcon(PhAppWindow);
 export const Bot = createIcon(Robot);
 export const Terminal = createIcon(TerminalWindow);
 export const Cpu = createIcon(PhCpu);
@@ -170,6 +176,8 @@ export const MessageSquare = createIcon(ChatCircle);
 export const Settings = createIcon(GearSix);
 export const Sun = createIcon(PhSun);
 export const Moon = createIcon(PhMoon);
+export const DesktopDisplay = createIcon(PhDesktop);
+export const Palette = createIcon(PhPalette);
 export const LogOut = createIcon(SignOut);
 export const Menu = createIcon(List);
 export const Clock = createIcon(PhClock);
@@ -221,8 +229,10 @@ export const Check = createIcon(PhCheck);
 export const Paperclip = createIcon(PhPaperclip);
 export const PieChart = createIcon(ChartPie);
 export const Heart = createIcon(PhHeart);
+export const Columns = createIcon(PhColumns);
 export const Grid = createIcon(GridFour);
 export const Google = createIcon(GoogleLogo);
+export const Rectangle = createIcon(PhRectangle);
 export const Sliders = createIcon(SlidersHorizontal);
 export const Layers = createIcon(Stack);
 export const GitBranch = createIcon(PhGitBranch);

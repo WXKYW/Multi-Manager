@@ -25,7 +25,6 @@ import {
   Plus,
   RefreshCw,
   RotateCw,
-  Search,
   Server,
   Settings,
   Shield,
@@ -897,13 +896,20 @@ function OraclePage() {
 
   return (
     <PageStack className="min-h-full flex-1 overflow-hidden">
-      <PageToolbar className="shrink-0">
-        <Tabs {...MODULE_TABS_PROPS} value={activeTab} onValueChange={setActiveTab} tabs={tabs} />
-        <div className="flex flex-wrap items-center gap-2">
+      <PageToolbar className="shrink-0 pr-2">
+        <div className="min-w-0 max-w-full overflow-x-auto scrollbar-thin">
+          <Tabs
+            {...MODULE_TABS_PROPS}
+            value={activeTab}
+            onValueChange={setActiveTab}
+            tabs={tabs}
+          />
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           <Select
             aria-label="Oracle 账号"
             size="sm"
-            className="w-44"
+            className="w-32 sm:w-44"
             value={selectedAccountId}
             onValueChange={setSelectedAccountId}
             disabled={loadingAccounts}
@@ -912,7 +918,7 @@ function OraclePage() {
           <Select
             aria-label="Oracle Compartment"
             size="sm"
-            className="w-52"
+            className="w-36 sm:w-52"
             value={selectedCompartmentId}
             onValueChange={setSelectedCompartmentId}
             disabled={!selectedAccountId || compartments.length === 0}
@@ -933,31 +939,29 @@ function OraclePage() {
             bodyPadding="none"
             bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
             icon={<Server className="h-4 w-4 text-kumo-brand" />}
+            actions={(
+              <>
+                <Input
+                  aria-label="搜索 Oracle 实例"
+                  size="sm"
+                  className="w-40 sm:w-52"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="搜索名称、实例 ID、IP、shape"
+                />
+                <Select
+                  aria-label="实例状态筛选"
+                  size="sm"
+                  className="w-32 sm:w-36"
+                  value={stateFilter}
+                  onValueChange={setStateFilter}
+                  items={stateOptions}
+                />
+              </>
+            )}
           >
-            <PageToolbar className="px-4 py-3">
-              <Input
-                aria-label="搜索 Oracle 实例"
-                size="sm"
-                className="w-52"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="搜索名称、实例 ID、IP、shape"
-              />
-              <Select
-                aria-label="实例状态筛选"
-                size="sm"
-                className="w-36"
-                value={stateFilter}
-                onValueChange={setStateFilter}
-                items={stateOptions}
-              />
-              <div className="ml-auto flex items-center gap-2 text-xs text-kumo-subtle">
-                <Search className="h-3.5 w-3.5" />
-                <span>{selectedCompartmentId ? '当前按 Compartment 查询' : '当前使用默认租户范围'}</span>
-              </div>
-            </PageToolbar>
             {loadingInstances ? (
-              <DataTableFrame density="dense" className="min-h-0 flex-1 overflow-auto rounded-none border-0 scrollbar-thin">
+              <DataTableFrame variant="embedded" density="dense" className="min-h-0 flex-1 overflow-auto rounded-none border-0 scrollbar-thin">
                 <AppTable layout="fixed" widths={INSTANCE_TABLE_WIDTHS}>
                   <Table.Header variant="compact">
                     <Table.Row>
@@ -978,7 +982,7 @@ function OraclePage() {
             ) : filteredInstances.length === 0 ? (
               <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-kumo-subtle">暂无实例</div>
             ) : (
-              <DataTableFrame density="dense" className="min-h-0 flex-1 overflow-auto rounded-none border-0 scrollbar-thin">
+              <DataTableFrame variant="embedded" density="dense" className="min-h-0 flex-1 overflow-auto rounded-none border-0 scrollbar-thin">
                 <AppTable layout="fixed" widths={INSTANCE_TABLE_WIDTHS}>
                   <Table.Header variant="compact">
                     <Table.Row>
@@ -1182,7 +1186,7 @@ function OraclePage() {
             </>
           )}
         >
-          <DataTableFrame density="dense" className="min-h-0 flex-1 overflow-auto scrollbar-thin">
+          <DataTableFrame variant="embedded" density="dense" className="min-h-0 flex-1 overflow-auto rounded-none border-0 scrollbar-thin">
             <AppTable layout="fixed" widths={ACCOUNT_TABLE_WIDTHS}>
               <Table.Header variant="compact">
                 <Table.Row>
@@ -1573,7 +1577,7 @@ function DetailGrid({ instance }) {
     ['创建时间', instance.timeCreated],
   ];
   return (
-    <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-kumo-line/90 bg-kumo-base scrollbar-thin">
+    <div className="min-h-0 flex-1 overflow-auto scrollbar-thin">
       <div className="divide-y divide-kumo-line/80">
         {rows.map(([label, value]) => (
           <div key={label} className="grid grid-cols-[108px_minmax(0,1fr)] items-center gap-3 px-4 py-2.5">
@@ -1601,8 +1605,9 @@ function EmptySelection() {
 function ResourceList({ title, icon, items, columns, onCopy, embedded = false, loading = false, renderActions = null }) {
   const table = loading ? (
     <DataTableFrame
+      variant="embedded"
       density="dense"
-      className="min-h-0 flex-1 overflow-auto scrollbar-thin [&_td:first-child]:!pr-1.5 [&_td:last-child]:!pl-1.5"
+      className="min-h-0 flex-1 overflow-auto rounded-none border-0 scrollbar-thin [&_td:first-child]:!pr-1.5 [&_td:last-child]:!pl-1.5"
     >
       <AppTable layout="fixed" widths={resourceWidths(columns, renderActions)}>
         <Table.Header variant="compact">
@@ -1619,7 +1624,7 @@ function ResourceList({ title, icon, items, columns, onCopy, embedded = false, l
   ) : items.length === 0 ? (
     <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-kumo-subtle">暂无数据</div>
   ) : (
-    <DataTableFrame density="dense" className="min-h-0 flex-1 overflow-auto scrollbar-thin">
+    <DataTableFrame variant="embedded" density="dense" className="min-h-0 flex-1 overflow-auto rounded-none border-0 scrollbar-thin">
       <AppTable layout="fixed" widths={resourceWidths(columns, renderActions)}>
         <Table.Header variant="compact">
           <Table.Row>
@@ -1688,7 +1693,7 @@ function TableSkeletonRows({ columns, rows = 5 }) {
 
 function DetailGridSkeleton() {
   return (
-    <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-kumo-line/90 bg-kumo-base scrollbar-thin">
+    <div className="min-h-0 flex-1 overflow-auto scrollbar-thin">
       <div className="divide-y divide-kumo-line/80">
         {Array.from({ length: 8 }).map((_, index) => (
           <div key={index} className="grid grid-cols-[108px_minmax(0,1fr)] items-center gap-3 px-4 py-2.5">

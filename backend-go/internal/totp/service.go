@@ -359,6 +359,15 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.cacheBrandIcon(w, r)
+	case len(parts) == 2 && parts[0] == "icons" && parts[1] == "library":
+		switch r.Method {
+		case http.MethodGet:
+			s.listCustomBrandIcons(w, r)
+		case http.MethodPost:
+			s.uploadCustomBrandIcon(w, r)
+		default:
+			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
 	case len(parts) == 2 && parts[0] == "icons":
 		if r.Method != http.MethodGet {
 			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -1086,6 +1095,10 @@ func (s *Service) serveBrandIcon(w http.ResponseWriter, r *http.Request, fileNam
 	key := strings.TrimSuffix(fileName, ".svg")
 	if !safeBrandIconKeyPattern.MatchString(key) {
 		response.Error(w, http.StatusBadRequest, "invalid icon key")
+		return
+	}
+	if strings.HasPrefix(key, "custom-") {
+		s.serveCustomBrandIcon(w, r, strings.TrimPrefix(key, "custom-"))
 		return
 	}
 	entry, ok := findSVGRepoBrandIconByKey(key)

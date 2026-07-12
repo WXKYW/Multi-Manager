@@ -175,8 +175,9 @@ export default function SystemLogsPage() {
   }, [autoScroll, renderedLines]);
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col gap-3 overflow-hidden px-px py-px sm:gap-4">
       <SectionCard
+        className="shrink-0"
         title="系统日志"
         description={logPath || '查看、筛选并下载 Go 后端应用日志。'}
         icon={<FileText className="h-4 w-4 text-kumo-brand" />}
@@ -204,20 +205,21 @@ export default function SystemLogsPage() {
       </SectionCard>
 
       <SectionCard
+        className="flex min-h-0 flex-1"
         title={logPath || 'app.log'}
         icon={<FileText className="h-4 w-4 text-kumo-brand" />}
         meta={<span className="text-[10px] font-mono text-kumo-subtle">{lines.length} lines</span>}
         bodyPadding="none"
-        bodyClassName="app-terminal-surface app-log-surface"
+        bodyClassName="app-terminal-surface app-log-surface flex min-h-0 flex-1 flex-col"
       >
         {lines.length === 0 ? (
-          <div className="app-log-muted flex min-h-80 flex-col items-center justify-center gap-2 px-6 py-12 text-center">
+          <div className="app-log-muted flex flex-1 min-h-0 flex-col items-center justify-center gap-2 px-6 py-12 text-center">
             <FileText className="h-8 w-8" />
             <div className="app-log-text text-sm font-semibold">暂无日志</div>
             <div className="text-xs">调整筛选条件或刷新后再查看。</div>
           </div>
         ) : (
-          <div ref={logViewportRef} className="app-log-viewport max-h-[calc(100vh-19rem)] min-h-[26rem] overflow-auto px-3 py-2 font-mono text-xs leading-5">
+          <div ref={logViewportRef} className="app-log-viewport min-h-0 flex-1 overflow-auto px-3 py-2 font-mono text-xs leading-5">
             {renderedLines.map((line, index) => (
               <div
                 key={`${line.time}-${index}`}

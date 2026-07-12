@@ -288,6 +288,22 @@ export default function BrandIcon({
     }
   }
 
+  if (typeof icon === 'string' && icon.startsWith('custom:')) {
+    const key = icon.slice('custom:'.length).replace(/[^a-z0-9-]/gi, '').toLowerCase();
+    if (key) {
+      return (
+        <img
+          {...props}
+          src={`/api/totp/icons/custom-${key}`}
+          alt=""
+          aria-hidden={props['aria-label'] ? undefined : true}
+          className={`app-brand-icon app-brand-icon--image ${className}`.trim()}
+          style={style}
+        />
+      );
+    }
+  }
+
   const asset = getIssuerIconAsset(issuer);
   const iconColor = color === 'inherit' ? undefined : getIssuerColor(issuer);
 

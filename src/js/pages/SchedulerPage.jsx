@@ -12,8 +12,8 @@ import { Badge } from '@cloudflare/kumo/components/badge';
 import { Empty } from '@cloudflare/kumo/components/empty';
 import { Flow } from '@cloudflare/kumo/components/flow';
 import { Tooltip, TooltipProvider } from '@cloudflare/kumo/components/tooltip';
-import { Tabs } from '@cloudflare/kumo';
-import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
+import { LayerCard, Tabs } from '@cloudflare/kumo';
+import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { SectionCard } from '../components/ui/AppPrimitives.jsx';
 import {
   Activity,
@@ -406,6 +406,8 @@ function CronEditor({ form, setForm, preview, previewError }) {
 function WorkflowCanvas({ workflow, runs = [], selectedNodeId = '', onSelectNode = null, size = 'default' }) {
   const nodes = workflow.nodes || [];
   const edges = workflow.edges || [];
+  const compact = size === 'compact';
+  const editor = size === 'editor';
   const latestRun = runs.find((run) => run.workflow_id === workflow.id);
   const nodeStatus = Object.fromEntries((latestRun?.node_runs || []).map((run) => [run.node_id, run.status]));
   const validEdges = useMemo(() => getValidWorkflowEdges(nodes, edges), [nodes, edges]);
@@ -448,18 +450,18 @@ function WorkflowCanvas({ workflow, runs = [], selectedNodeId = '', onSelectNode
               onSelectNode(node.id);
             } : undefined}
             style={{ cursor: onSelectNode ? 'pointer' : 'default' }}
-            className={`relative flex min-h-[108px] w-[15rem] flex-col overflow-hidden rounded-md border bg-kumo-base px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-kumo-brand/45 ${selected ? 'border-kumo-brand ring-2 ring-kumo-brand/25' : 'border-kumo-line hover:border-kumo-brand/50'} ${node.enabled === 0 ? 'opacity-60' : ''}`}
+            className={`relative flex flex-col overflow-hidden rounded-md border bg-kumo-base text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-kumo-brand/45 ${compact ? 'min-h-[84px] w-[11.5rem] px-2.5 py-2' : 'min-h-[108px] w-[15rem] px-4 py-3'} ${selected ? 'border-kumo-brand ring-2 ring-kumo-brand/25' : 'border-kumo-line hover:border-kumo-brand/50'} ${node.enabled === 0 ? 'opacity-60' : ''}`}
           >
             <Flow.Anchor
               type="end"
-              render={<span className={`absolute left-0 top-1/2 h-7 w-1 -translate-y-1/2 rounded-r-sm ${selected ? 'bg-kumo-brand' : 'bg-kumo-line'}`} />}
+              render={<span className={`absolute left-0 top-1/2 w-1 -translate-y-1/2 rounded-r-sm ${compact ? 'h-6' : 'h-7'} ${selected ? 'bg-kumo-brand' : 'bg-kumo-line'}`} />}
             />
             <Flow.Anchor
               type="start"
-              render={<span className={`absolute right-0 top-1/2 h-7 w-1 -translate-y-1/2 rounded-l-sm ${selected ? 'bg-kumo-brand' : 'bg-kumo-line'}`} />}
+              render={<span className={`absolute right-0 top-1/2 w-1 -translate-y-1/2 rounded-l-sm ${compact ? 'h-6' : 'h-7'} ${selected ? 'bg-kumo-brand' : 'bg-kumo-line'}`} />}
             />
             <span className={`absolute inset-x-0 top-0 h-0.5 ${selected ? 'bg-kumo-brand' : 'bg-kumo-line'}`} />
-            <span className="flex min-w-0 items-start justify-between gap-3">
+            <span className={`flex min-w-0 items-start justify-between ${compact ? 'gap-2' : 'gap-3'}`}>
               <span className="min-w-0">
                 <span className="block truncate text-sm font-semibold text-kumo-strong">{node.name || node.id}</span>
                 <span className="mt-1 block truncate text-xs text-kumo-subtle">{workflowNodeTypeLabel(node)}</span>
@@ -468,7 +470,7 @@ function WorkflowCanvas({ workflow, runs = [], selectedNodeId = '', onSelectNode
                 {workflowNodeKindLabel(node)}
               </span>
             </span>
-            <span className="mt-auto flex min-w-0 items-center justify-between gap-2 pt-4">
+              <span className={`mt-auto flex min-w-0 items-center justify-between gap-2 ${compact ? 'pt-2.5' : 'pt-4'}`}>
               <Badge variant={statusBadgeVariant(status || (node.enabled === 0 ? 'skipped' : 'queued'))} appearance="dot">
                 {node.enabled === 0 ? '停用' : status ? statusLabel(status) : '待运行'}
               </Badge>
@@ -496,8 +498,8 @@ function WorkflowCanvas({ workflow, runs = [], selectedNodeId = '', onSelectNode
     <Flow
       orientation={looseLayout ? 'vertical' : 'horizontal'}
       align="center"
-      className={`scheduler-workflow-canvas ${size === 'editor' ? 'scheduler-workflow-canvas-editor' : ''} rounded-md border border-kumo-line bg-kumo-recessed/20`}
-      padding={{ x: 56, y: 64 }}
+      className={`scheduler-workflow-canvas ${compact ? 'scheduler-workflow-canvas-compact' : ''} ${editor ? 'scheduler-workflow-canvas-editor' : ''} rounded-md border border-kumo-line bg-kumo-recessed/20`}
+      padding={compact ? { x: 28, y: 32 } : { x: 56, y: 64 }}
     >
       {stages.map((stage, index) => {
         if (stage.length === 1) return renderNode(stage[0]);
@@ -976,16 +978,56 @@ function SchedulerPage() {
 
   const summaryItems = activeTab === 'nodes'
     ? [
-      ['节点总数', stats.totalNodes, <Server className="h-4 w-4" />],
-      ['在线节点', stats.onlineNodes, <Check className="h-4 w-4" />],
-      ['Agent 节点', stats.agentNodes, <GitBranch className="h-4 w-4" />],
-      ['总并发', stats.totalNodeConcurrency, <Activity className="h-4 w-4" />],
+      {
+        label: '节点总数',
+        value: stats.totalNodes,
+        icon: <Server className="h-5 w-5 text-kumo-info" />,
+        cardClassName: 'bg-kumo-info/6',
+      },
+      {
+        label: '在线节点',
+        value: stats.onlineNodes,
+        icon: <Check className="h-5 w-5 text-kumo-success" />,
+        cardClassName: 'bg-kumo-success/6',
+      },
+      {
+        label: 'Agent 节点',
+        value: stats.agentNodes,
+        icon: <GitBranch className="h-5 w-5 text-kumo-warning" />,
+        cardClassName: 'bg-kumo-warning/8',
+      },
+      {
+        label: '总并发',
+        value: stats.totalNodeConcurrency,
+        icon: <Activity className="h-5 w-5 text-kumo-brand" />,
+        cardClassName: 'bg-kumo-brand/7',
+      },
     ]
     : [
-      ['任务总数', stats.totalTasks, <Clock className="h-4 w-4" />],
-      ['启用任务', stats.enabledTasks, <Check className="h-4 w-4" />],
-      ['工作流', stats.workflows, <GitBranch className="h-4 w-4" />],
-      ['失败运行', stats.failedRuns, <Activity className="h-4 w-4" />],
+      {
+        label: '任务总数',
+        value: stats.totalTasks,
+        icon: <Clock className="h-5 w-5 text-kumo-info" />,
+        cardClassName: 'bg-kumo-info/6',
+      },
+      {
+        label: '启用任务',
+        value: stats.enabledTasks,
+        icon: <Check className="h-5 w-5 text-kumo-success" />,
+        cardClassName: 'bg-kumo-success/6',
+      },
+      {
+        label: '工作流',
+        value: stats.workflows,
+        icon: <GitBranch className="h-5 w-5 text-kumo-warning" />,
+        cardClassName: 'bg-kumo-warning/8',
+      },
+      {
+        label: '失败运行',
+        value: stats.failedRuns,
+        icon: <Activity className="h-5 w-5 text-kumo-danger" />,
+        cardClassName: 'bg-kumo-danger/6',
+      },
     ];
 
   const nodeItems = useMemo(() => nodes.map((node) => ({ value: node.id, label: `${node.name}（${node.kind === 'local' ? '本机' : 'Agent'}）` })), [nodes]);
@@ -1024,15 +1066,15 @@ function SchedulerPage() {
           </div>
         </div>
 
-        <div className="grid overflow-hidden rounded-md border border-kumo-line/80 bg-kumo-line/60 sm:grid-cols-2 xl:grid-cols-4">
-          {summaryItems.map(([label, value, icon]) => (
-            <div key={label} className="min-w-0 bg-kumo-base/90 px-4 py-3">
-              <div className="flex items-center justify-between gap-3 text-xs text-kumo-subtle">
+        <div className="grid grid-cols-4 gap-2 sm:gap-3">
+          {summaryItems.map(({ label, value, icon, cardClassName }) => (
+            <LayerCard key={label} className={`min-w-0 p-2 sm:p-3 ${cardClassName || ''}`}>
+              <div className="flex items-center justify-between gap-2 text-[11px] text-kumo-subtle sm:gap-3 sm:text-xs">
                 <span className="truncate">{label}</span>
-                <span className="shrink-0 text-kumo-inactive">{icon}</span>
+                <span className="shrink-0">{icon}</span>
               </div>
-              <div className="mt-1 font-mono text-lg font-bold text-kumo-strong">{value}</div>
-            </div>
+              <div className="mt-1 font-mono text-base font-bold text-kumo-strong sm:text-lg">{value}</div>
+            </LayerCard>
           ))}
         </div>
 
@@ -1090,21 +1132,41 @@ function SchedulerPage() {
             {workflows.length === 0 ? (
               <Empty size="sm" className="rounded-none border-0 bg-transparent" icon={<GitBranch className="h-8 w-8 text-kumo-inactive" />} title="暂无工作流" description="将多个任务连接成 DAG，按成功、失败或完成条件自动编排。" contents={<Button size="sm" variant="primary" onClick={openCreateWorkflow}><Plus className="h-3.5 w-3.5" />新建工作流</Button>} />
             ) : (
-              <div className="grid gap-3">
+              <div className="grid gap-3 lg:grid-cols-2">
                 {workflows.map((workflow) => (
-                  <div key={workflow.id} className="rounded-md border border-kumo-line p-3">
-                    <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <div className="flex items-center gap-2"><h3 className="text-sm font-semibold text-kumo-strong">{workflow.name}</h3><Badge variant={workflow.enabled ? 'success' : 'neutral'} appearance="dot">{workflow.enabled ? '启用' : '停用'}</Badge></div>
-                        <div className="mt-1 text-xs text-kumo-subtle">{workflow.description || '无描述'} / {workflow.schedule ? `Cron ${workflow.schedule}` : '手动触发'} / {workflow.nodes?.length || 0} 个节点</div>
+                  <div key={workflow.id} className="scheduler-workflow-card flex h-full flex-col rounded-md border border-kumo-line p-3">
+                    <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,220px)_minmax(0,1fr)]">
+                      <div className="flex min-h-0 min-w-0 flex-col gap-2.5">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex min-w-0 flex-wrap items-center gap-2">
+                              <h3 className="truncate text-sm font-semibold text-kumo-strong">{workflow.name}</h3>
+                              <Badge variant={workflow.enabled ? 'success' : 'neutral'} appearance="dot">{workflow.enabled ? '启用' : '停用'}</Badge>
+                            </div>
+                            <div className="mt-1 line-clamp-2 text-xs text-kumo-subtle">{workflow.description || '无描述'}</div>
+                          </div>
+                          <div className="flex shrink-0 gap-1">
+                            <IconButton label="运行工作流" onClick={() => runWorkflow(workflow)} icon={<Play className="h-3.5 w-3.5" />} />
+                            <IconButton label="编辑工作流" onClick={() => openEditWorkflow(workflow)} icon={<Edit className="h-3.5 w-3.5" />} />
+                            <IconButton label="删除工作流" variant="secondary-destructive" onClick={() => deleteWorkflow(workflow)} icon={<Trash className="h-3.5 w-3.5" />} />
+                          </div>
+                        </div>
+                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
+                          <div className="rounded-md border border-kumo-line bg-kumo-recessed/25 px-2.5 py-2">
+                            <div className="text-[11px] text-kumo-subtle">触发方式</div>
+                            <div className="mt-1 truncate font-mono text-xs text-kumo-strong">{workflow.schedule ? `Cron ${workflow.schedule}` : '手动触发'}</div>
+                          </div>
+                          <div className="rounded-md border border-kumo-line bg-kumo-recessed/25 px-2.5 py-2">
+                            <div className="text-[11px] text-kumo-subtle">节点规模</div>
+                            <div className="mt-1 text-xs font-semibold text-kumo-strong">{workflow.nodes?.length || 0} 个节点</div>
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex gap-1">
-                        <IconButton label="运行工作流" onClick={() => runWorkflow(workflow)} icon={<Play className="h-3.5 w-3.5" />} />
-                        <IconButton label="编辑工作流" onClick={() => openEditWorkflow(workflow)} icon={<Edit className="h-3.5 w-3.5" />} />
-                        <IconButton label="删除工作流" variant="secondary-destructive" onClick={() => deleteWorkflow(workflow)} icon={<Trash className="h-3.5 w-3.5" />} />
+
+                      <div className="flex min-h-0 min-w-0">
+                        <WorkflowCanvas workflow={workflow} runs={runs} size="compact" />
                       </div>
                     </div>
-                    <WorkflowCanvas workflow={workflow} runs={runs} />
                   </div>
                 ))}
               </div>
@@ -1250,8 +1312,7 @@ function SchedulerPage() {
                   <WorkflowCanvas key={`workflow-editor-${workflowCanvasEpoch}`} workflow={workflowForm} runs={[]} selectedNodeId={selectedWorkflowNode?.id} onSelectNode={setSelectedWorkflowNodeId} size="editor" />
                   <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-md border border-kumo-line p-3">
                     <Tabs
-                      variant="segmented"
-                      size="sm"
+                      {...TOOL_TABS_PROPS}
                       value={selectedWorkflowNode?.id || selectedWorkflowNodeId}
                       onValueChange={setSelectedWorkflowNodeId}
                       tabs={workflowNodeTabs}
@@ -1279,7 +1340,15 @@ function SchedulerPage() {
                       </div>
                       {selectedWorkflowNode ? (
                         <div className="space-y-3">
-                          <Input size="sm" label="节点名称" value={selectedWorkflowNode.name || ''} onChange={(event) => updateWorkflowNode(selectedWorkflowNode.id, { name: event.target.value })} />
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <Input size="sm" label="节点名称" value={selectedWorkflowNode.name || ''} onChange={(event) => updateWorkflowNode(selectedWorkflowNode.id, { name: event.target.value })} />
+                            {selectedWorkflowNode.type !== 'start' && (
+                              <div className="flex items-center justify-between rounded-md border border-kumo-line px-3 py-2">
+                                <span className="text-sm font-medium text-kumo-strong">启用节点</span>
+                                <Switch checked={selectedWorkflowNode.enabled !== 0} onCheckedChange={(checked) => updateWorkflowNode(selectedWorkflowNode.id, { enabled: checked ? 1 : 0 })} />
+                              </div>
+                            )}
+                          </div>
                           {selectedWorkflowNode.type === 'start' ? (
                             <div className="rounded-md border border-kumo-line bg-kumo-recessed/30 px-3 py-2 text-xs text-kumo-subtle">开始节点只负责触发流程，不需要绑定任务。</div>
                           ) : (
@@ -1302,10 +1371,6 @@ function SchedulerPage() {
                                   rows={3}
                                 />
                               )}
-                              <div className="flex items-center justify-between rounded-md border border-kumo-line px-3 py-2">
-                                <span className="text-sm font-medium text-kumo-strong">启用节点</span>
-                                <Switch checked={selectedWorkflowNode.enabled !== 0} onCheckedChange={(checked) => updateWorkflowNode(selectedWorkflowNode.id, { enabled: checked ? 1 : 0 })} />
-                              </div>
                             </div>
                           )}
                         </div>
@@ -1324,7 +1389,7 @@ function SchedulerPage() {
                           <div className="rounded-md border border-kumo-line bg-kumo-recessed/30 px-3 py-4 text-center text-xs text-kumo-subtle">暂无依赖规则，节点会独立存在。</div>
                         )}
                         {workflowForm.edges.map((edge, index) => (
-                          <div key={edge.id} className="grid gap-2 rounded-md border border-kumo-line p-2">
+                          <div key={edge.id} className="grid gap-2 rounded-md border border-kumo-line p-2.5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                             <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
                               <Select size="sm" label="来源" className="w-full" value={edge.from} onValueChange={(value) => setWorkflowForm((prev) => ({ ...prev, edges: prev.edges.map((item, i) => i === index ? { ...item, from: value } : item) }))} items={workflowNodeItems} />
                               <ArrowRight className="mb-2 h-3.5 w-3.5 text-kumo-subtle" />

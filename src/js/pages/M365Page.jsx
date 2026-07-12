@@ -1628,11 +1628,12 @@ function M365Page() {
   }, [requestJSON, selectedAccountId]);
 
   const renderToolbarSelector = ['users', 'groups'].includes(activeTab) ? (
-    <div className="flex items-center gap-2">
-      <span className="text-xs font-medium text-kumo-subtle">租户</span>
+    <div className="flex shrink-0 flex-wrap items-center gap-2">
+      <span className="shrink-0 text-xs font-medium text-kumo-subtle">租户</span>
       <Select
         aria-label="Microsoft 365 租户"
         size="sm"
+        className="w-32 sm:w-48"
         value={selectedAccountId}
         onValueChange={setSelectedAccountId}
         items={accountSelectItems}
@@ -2209,6 +2210,7 @@ function M365Page() {
                 />
               ) : (
                 <DataTableFrame
+                  variant="embedded"
                   density="dense"
                   className="min-h-0 flex-1 overflow-auto scrollbar-thin"
                 >
@@ -2809,8 +2811,8 @@ function M365Page() {
 
   return (
     <PageStack className={workspaceHeightClass}>
-      <PageToolbar>
-        <div className="min-w-0">
+      <PageToolbar className="pr-2">
+        <div className="min-w-0 max-w-full overflow-x-auto scrollbar-thin">
           <Tabs
             {...MODULE_TABS_PROPS}
             value={activeTab}
@@ -2854,7 +2856,7 @@ function M365Page() {
             ]}
           />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           <Button
             size="sm"
             variant="secondary"

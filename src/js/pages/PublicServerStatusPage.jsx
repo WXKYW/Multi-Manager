@@ -7,6 +7,7 @@ import CountryFlag from '../components/CountryFlag.jsx';
 import ServerLocationMap from '../components/server/ServerLocationMap.jsx';
 import { resolveServerDisplayStatus } from '../modules/serverRealtime.js';
 import { FLOW_UNIT_BADGE_CLASS, getFlowUnitClassName } from '../modules/flowUnits.js';
+import { TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import * as echarts from 'echarts/core';
 import { MapChart, ScatterChart } from 'echarts/charts';
 import { TooltipComponent } from 'echarts/components';
@@ -627,8 +628,7 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <Tabs
-              variant="segmented"
-              size="sm"
+              {...TOOL_TABS_PROPS}
               className="hidden w-fit max-w-full sm:block"
               listClassName="w-fit max-w-full"
               value={String(wideColumns)}

@@ -17,7 +17,7 @@ import useStore, {
   normalizeUserSettings,
 } from '../store.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
-import { AppCard, SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { AppCard, SectionCard, cx } from '../components/ui/AppPrimitives.jsx';
 import { BackupPanel } from './BackupPage.jsx';
 import {
   Activity,
@@ -156,6 +156,77 @@ function StatCard({ label, value, hint, icon: Icon }) {
   );
 }
 
+function SummaryMetricCard({ label, value, hint, tone = 'default', compact = false }) {
+  const valueToneClass = {
+    default: 'text-kumo-strong',
+    brand: 'text-kumo-brand',
+    warning: 'text-kumo-warning',
+    info: 'text-kumo-info',
+    success: 'text-kumo-success',
+    danger: 'text-kumo-danger',
+  };
+
+  return (
+    <AppCard
+      padding={compact ? 'sm' : 'md'}
+      className={cx(
+        'flex min-w-0',
+        compact ? 'items-center justify-between gap-3' : 'flex-col gap-1',
+      )}
+    >
+      <span className={cx('font-bold uppercase tracking-wider text-kumo-subtle', compact ? 'truncate text-[11px]' : 'text-[10px]')}>
+        {label}
+      </span>
+      <span className={cx('truncate font-mono font-bold', compact ? 'text-base' : 'text-xl', valueToneClass[tone] || valueToneClass.default)}>
+        {value}
+      </span>
+      {!compact && hint ? <span className="truncate text-[11px] text-kumo-subtle">{hint}</span> : null}
+    </AppCard>
+  );
+}
+
+function MaintenanceActionCard({
+  title,
+  description,
+  icon,
+  tone = 'default',
+  meta,
+  children,
+}) {
+  const toneClassName = {
+    default: 'border-kumo-line/80 bg-kumo-recessed/15',
+    brand: 'border-kumo-brand/15 bg-kumo-brand/5',
+    danger: 'border-kumo-danger/20 bg-kumo-danger/5',
+    warning: 'border-kumo-warning/20 bg-kumo-warning/5',
+  };
+  const compact = !description;
+
+  return (
+    <AppCard
+      padding="md"
+      className={cx(
+        'flex min-h-[102px] min-w-0 flex-col gap-2 border',
+        compact ? 'justify-center' : '',
+        toneClassName[tone] || toneClassName.default,
+      )}
+    >
+      <div className={cx('flex justify-between gap-3', compact ? 'items-center' : 'items-start')}>
+        <div className={cx('flex min-w-0 gap-3', compact ? 'items-center' : 'items-start')}>
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-kumo-line/70 bg-kumo-base text-kumo-brand">
+            {icon}
+          </div>
+          <div className={cx('min-w-0', compact ? 'flex min-h-7 items-center' : '')}>
+            <div className={cx('truncate text-sm font-semibold text-kumo-strong', compact ? 'leading-none' : '')}>{title}</div>
+            {description ? <div className="mt-1 text-xs leading-relaxed text-kumo-subtle">{description}</div> : null}
+          </div>
+        </div>
+        {meta ? <div className={cx('shrink-0', compact ? 'flex min-h-7 items-center' : '')}>{meta}</div> : null}
+      </div>
+      <div className={cx(compact ? 'pt-0.5' : 'mt-auto')}>{children}</div>
+    </AppCard>
+  );
+}
+
 function SettingsPage() {
   const {
     themeMode,
@@ -229,6 +300,10 @@ function SettingsPage() {
     const value = Number(rows);
     return Number.isFinite(value) && value >= 0 ? value : '-';
   }, []);
+  const formatTableMetricSize = useCallback((value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? formatFileSize(parsed) : '-';
+  }, []);
 
   const patchSettings = useCallback((patch) => {
     setSettings((prev) => normalizeUserSettings({ ...prev, ...patch }));
@@ -263,7 +338,7 @@ function SettingsPage() {
     try {
       const [statsResponse, analysisResponse, deprecatedResponse] = await Promise.all([
         fetch('/api/settings/database-stats', { headers: getAuthHeaders() }),
-        fetch('/api/settings/database-analysis', { headers: getAuthHeaders() }),
+        fetch('/api/settings/database-analysis?deep=1', { headers: getAuthHeaders() }),
         fetch('/api/settings/deprecated-tables', { headers: getAuthHeaders() }),
       ]);
 
@@ -677,10 +752,13 @@ function SettingsPage() {
     ? `主库 ${formatFileSize(databaseStorage.mainSizeBytes)} · WAL ${formatFileSize(databaseStorage.walSizeBytes)} · 空闲 ${formatFileSize(databaseStorage.freePageBytes)}`
     : (dbStats?.dbPath || '等待统计');
   const deprecatedTableItems = deprecatedTables?.tables || [];
+  const contentViewportClassName = activeTab === 'database'
+    ? 'flex-1 min-h-0 overflow-auto'
+    : 'flex-1 min-h-0 overflow-hidden';
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4">
-      <div className="flex flex-col gap-3 border-b border-kumo-line pb-3 lg:flex-row lg:items-center lg:justify-between">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col gap-3 overflow-hidden px-px py-px sm:gap-4">
+      <div className="flex shrink-0 flex-col gap-3 border-b border-kumo-line pb-3 lg:flex-row lg:items-center lg:justify-between">
         <Tabs
           {...MODULE_TABS_PROPS}
           value={activeTab}
@@ -709,18 +787,21 @@ function SettingsPage() {
         </div>
       </div>
 
+      <div className={contentViewportClassName}>
       {activeTab === 'general' && (
-        <div className="grid items-start gap-4 lg:grid-cols-4">
-          <StatCard label="运行状态" value="正常" hint={settingsLoading ? '同步中' : '已连接后端'} icon={Check} />
-          <StatCard label="公网入口" value={settings.publicApiUrl || currentOrigin} hint="/api 自动拼接" icon={Globe} />
-          <StatCard label="数据库大小" value={formatFileSize(databaseSizeBytes)} hint={databaseSizeHint} icon={Database} />
-          <StatCard label="日志文件" value={logFileInfo?.sizeFormatted || `${logSettings.logFileSizeMB || 10} MB 上限`} hint="app.log" icon={FileText} />
+        <div className="grid h-full min-h-0 items-start gap-4 overflow-auto px-px py-px pr-px xl:grid-cols-[minmax(16rem,1fr)_minmax(0,3fr)]">
+          <div className="grid min-h-0 gap-4">
+            <StatCard label="运行状态" value="正常" hint={settingsLoading ? '同步中' : '已连接后端'} icon={Check} />
+            <StatCard label="公网入口" value={settings.publicApiUrl || currentOrigin} hint="/api 自动拼接" icon={Globe} />
+            <StatCard label="数据库大小" value={formatFileSize(databaseSizeBytes)} hint={databaseSizeHint} icon={Database} />
+            <StatCard label="日志文件" value={logFileInfo?.sizeFormatted || `${logSettings.logFileSizeMB || 10} MB 上限`} hint="app.log" icon={FileText} />
+          </div>
 
           <SectionCard
             title="部署访问地址"
             description="用于生成公开状态页、回调地址和对外 API 连接配置。"
             icon={<Globe className="h-4 w-4 text-kumo-brand" />}
-            className="lg:col-span-4"
+            className="min-h-0 self-start"
             bodyPadding="none"
           >
             <FieldRow title="公网 API 地址" description="主控端可从公网访问时填写，留空则使用当前访问来源。">
@@ -747,7 +828,9 @@ function SettingsPage() {
 
 
       {activeTab === 'modules' && (
+        <div className="h-full min-h-0 overflow-auto px-px py-px">
         <SectionCard
+          className="flex h-full min-h-0"
           title="功能模块"
           description="模块顺序和显隐会立即影响左侧导航；系统设置入口固定显示。"
           icon={<Activity className="h-4 w-4 text-kumo-brand" />}
@@ -758,7 +841,7 @@ function SettingsPage() {
               </>
           }
           bodyPadding="none"
-          bodyClassName="overflow-x-auto"
+          bodyClassName="flex min-h-0 flex-1 flex-col overflow-auto"
         >
           <Table layout="fixed">
             <colgroup>
@@ -818,10 +901,11 @@ function SettingsPage() {
             </Table.Body>
           </Table>
         </SectionCard>
+        </div>
       )}
 
       {activeTab === 'security' && (
-        <div className="grid items-start gap-4 xl:grid-cols-2">
+        <div className="grid h-full min-h-0 items-start gap-4 overflow-auto px-px py-px pr-px xl:grid-cols-2">
           <SectionCard
             title="管理员密码"
             description="后端接口为 /api/auth/change-password，修改成功后会退出当前会话。"
@@ -953,8 +1037,9 @@ function SettingsPage() {
       )}
 
       {activeTab === 'database' && (
-        <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(24rem,0.9fr)]">
+        <div className="grid items-start gap-3 px-px py-px pr-px xl:grid-cols-[minmax(0,1.1fr)_minmax(24rem,0.9fr)]">
           <SectionCard
+            className="flex h-full min-h-0 flex-1"
             title="数据库统计"
             description={dbStats?.dbPath || 'SQLite 数据文件'}
             icon={<Database className="h-4 w-4 text-kumo-brand" />}
@@ -962,29 +1047,39 @@ function SettingsPage() {
                 <Button size="sm" onClick={() => fetchDbState().catch((error) => toast.error(error.message || '加载数据库统计失败'))} loading={databaseBusy} icon={<RefreshCw className="h-4 w-4" />}>刷新统计</Button>
             }
             bodyPadding="none"
-            bodyClassName="min-h-0 overflow-hidden"
+            bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
           >
             {databaseStorage && (
-              <div className="grid gap-2 border-b border-kumo-line px-4 py-2.5 text-xs text-kumo-subtle md:grid-cols-4">
-                <div>
-                  <div className="font-semibold text-kumo-strong">{formatFileSize(databaseStorage.totalSizeBytes)}</div>
-                  <div>总占用</div>
-                </div>
-                <div>
-                  <div className="font-semibold text-kumo-strong">{formatFileSize(databaseStorage.mainSizeBytes)}</div>
-                  <div>主库文件</div>
-                </div>
-                <div>
-                  <div className="font-semibold text-kumo-strong">{formatFileSize((databaseStorage.walSizeBytes || 0) + (databaseStorage.shmSizeBytes || 0))}</div>
-                  <div>WAL / SHM</div>
-                </div>
-                <div>
-                  <div className="font-semibold text-kumo-strong">{formatFileSize(databaseStorage.freePageBytes)}</div>
-                  <div>空闲页</div>
+              <div className="shrink-0 border-b border-kumo-line px-3 py-3">
+                <div className="grid grid-cols-4 gap-2">
+                  <SummaryMetricCard
+                    label="总占用"
+                    value={formatFileSize(databaseStorage.totalSizeBytes)}
+                    tone="brand"
+                    compact
+                  />
+                  <SummaryMetricCard
+                    label="主库文件"
+                    value={formatFileSize(databaseStorage.mainSizeBytes)}
+                    tone="default"
+                    compact
+                  />
+                  <SummaryMetricCard
+                    label="WAL / SHM"
+                    value={formatFileSize((databaseStorage.walSizeBytes || 0) + (databaseStorage.shmSizeBytes || 0))}
+                    tone="warning"
+                    compact
+                  />
+                  <SummaryMetricCard
+                    label="空闲页"
+                    value={formatFileSize(databaseStorage.freePageBytes)}
+                    tone="info"
+                    compact
+                  />
                 </div>
               </div>
             )}
-            <div className="max-h-[calc(100dvh-17rem)] overflow-auto">
+            <div className="min-h-0 flex-1 overflow-auto pr-px">
               <Table layout="fixed">
                 <colgroup>
                   <col />
@@ -1013,9 +1108,9 @@ function SettingsPage() {
                     <Table.Row key={row.table}>
                       <Table.Cell className="truncate font-mono text-xs text-kumo-strong" title={row.table}>{row.table}</Table.Cell>
                       <Table.Cell className="font-mono text-xs">{formatTableRows(row.rows)}</Table.Cell>
-                      <Table.Cell className="font-mono text-xs">{row.estimatedSizeBytes ? formatFileSize(row.estimatedSizeBytes) : '-'}</Table.Cell>
-                      <Table.Cell className="font-mono text-xs">{row.indexSizeBytes ? formatFileSize(row.indexSizeBytes) : '-'}</Table.Cell>
-                      <Table.Cell className="font-mono text-xs">{row.avgRowSizeBytes ? formatFileSize(row.avgRowSizeBytes) : '-'}</Table.Cell>
+                      <Table.Cell className="font-mono text-xs">{formatTableMetricSize(row.estimatedSizeBytes)}</Table.Cell>
+                      <Table.Cell className="font-mono text-xs">{formatTableMetricSize(row.indexSizeBytes)}</Table.Cell>
+                      <Table.Cell className="font-mono text-xs">{formatTableMetricSize(row.avgRowSizeBytes)}</Table.Cell>
                     </Table.Row>
                   ))}
                 </Table.Body>
@@ -1023,10 +1118,10 @@ function SettingsPage() {
             </div>
           </SectionCard>
 
-          <div className="grid content-start gap-3">
+          <div className="grid content-start gap-3 px-px py-px">
             <SectionCard
               title="数据库导入导出"
-              description="导出当前 SQLite 数据库，或先预检后替换当前数据库。"
+              description="导出当前数据库，或预检后替换。"
               icon={<Download className="h-4 w-4 text-kumo-brand" />}
               bodyPadding="sm"
               bodyClassName="space-y-3"
@@ -1039,21 +1134,43 @@ function SettingsPage() {
                 className="hidden"
                 onChange={previewDatabaseImport}
               />
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-                <Button size="sm" className="justify-start" onClick={exportDatabase} icon={<Upload className="h-4 w-4" />}>导出数据库</Button>
-                <Button size="sm" className="justify-start" onClick={importDatabase} loading={databaseBusy} icon={<Download className="h-4 w-4" />}>导入并预检数据库</Button>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Button
+                  size="sm"
+                  className="w-full justify-center"
+                  onClick={exportDatabase}
+                  icon={<Upload className="h-4 w-4" />}
+                >
+                  导出数据库
+                </Button>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  className="w-full justify-center"
+                  onClick={importDatabase}
+                  loading={databaseBusy}
+                  icon={<Download className="h-4 w-4" />}
+                >
+                  导入并预检
+                </Button>
               </div>
               {dbImportPreview && (
-                <div className="mt-4 app-subcard p-3 text-xs">
+                <div className="app-subcard p-3 text-xs">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-semibold text-kumo-strong truncate">{dbImportPreview.originalName}</span>
                     <Badge variant={dbImportPreview.analysis?.integrity === 'ok' ? 'success' : 'warning'}>
                       {dbImportPreview.analysis?.integrity || 'unknown'}
                     </Badge>
                   </div>
-                  <div className="mt-2 grid grid-cols-2 gap-2 font-mono text-[11px] text-kumo-subtle">
-                    <span>大小 {formatFileSize(dbImportPreview.analysis?.sizeBytes)}</span>
-                    <span>表 {dbImportPreview.analysis?.tableCount || 0} 个</span>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <div className="rounded-md border border-kumo-line/70 bg-kumo-base px-3 py-2">
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-kumo-subtle">大小</div>
+                      <div className="mt-1 font-mono text-kumo-strong">{formatFileSize(dbImportPreview.analysis?.sizeBytes)}</div>
+                    </div>
+                    <div className="rounded-md border border-kumo-line/70 bg-kumo-base px-3 py-2">
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-kumo-subtle">表数量</div>
+                      <div className="mt-1 font-mono text-kumo-strong">{dbImportPreview.analysis?.tableCount || 0}</div>
+                    </div>
                   </div>
                   {dbImportPreview.warnings?.length > 0 && (
                     <div className="mt-2 space-y-1 rounded border border-kumo-warning/30 bg-kumo-warning/10 p-2 text-[11px] text-kumo-warning">
@@ -1081,10 +1198,10 @@ function SettingsPage() {
                     </Table>
                   </div>
                   <div className="mt-3 flex gap-2">
-                    <Button size="sm" variant="primary" onClick={commitDatabaseImport} loading={databaseBusy}>
+                    <Button size="sm" variant="primary" className="flex-1 justify-center" onClick={commitDatabaseImport} loading={databaseBusy}>
                       确认导入
                     </Button>
-                    <Button size="sm" variant="secondary" onClick={() => setDbImportPreview(null)}>
+                    <Button size="sm" variant="secondary" className="flex-1 justify-center" onClick={() => setDbImportPreview(null)}>
                       取消
                     </Button>
                   </div>
@@ -1100,46 +1217,86 @@ function SettingsPage() {
               bodyPadding="sm"
               bodyClassName="space-y-3"
             >
-              <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
-                <Button size="sm" className="justify-start" onClick={() => postSettingsAction('/api/settings/vacuum-database', '数据库已压缩', fetchDbState)} loading={databaseBusy}>
-                  压缩数据库
-                </Button>
-                <Button size="sm"
-                  className="justify-start"
-                  variant="secondary-destructive"
-                  onClick={() => postSettingsAction('/api/settings/clear-logs', '数据库日志已清理', fetchDbState)}
-                  loading={databaseBusy}
-                  icon={<Trash className="h-4 w-4" />}
+              <div className="grid gap-3 xl:grid-cols-3">
+                <MaintenanceActionCard
+                  title="压缩数据库"
+                  icon={<Database className="h-4 w-4" />}
+                  tone="brand"
                 >
-                  清理数据库日志
-                </Button>
-                <Button size="sm"
-                  className="justify-start"
-                  variant="secondary-destructive"
-                  onClick={cleanupDeprecatedTables}
-                  loading={databaseBusy}
-                  disabled={deprecatedTableItems.length === 0}
-                  icon={<Trash className="h-4 w-4" />}
+                  <Button
+                    size="sm"
+                    className="w-full justify-center"
+                    onClick={() => postSettingsAction('/api/settings/vacuum-database', '数据库已压缩', fetchDbState)}
+                    loading={databaseBusy}
+                  >
+                    立即压缩
+                  </Button>
+                </MaintenanceActionCard>
+
+                <MaintenanceActionCard
+                  title="清理运行日志"
+                  icon={<FileText className="h-4 w-4" />}
+                  tone="danger"
                 >
-                  清理废弃表
-                </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary-destructive"
+                    className="w-full justify-center"
+                    onClick={() => postSettingsAction('/api/settings/clear-logs', '数据库日志已清理', fetchDbState)}
+                    loading={databaseBusy}
+                    icon={<Trash className="h-4 w-4" />}
+                  >
+                    清理日志
+                  </Button>
+                </MaintenanceActionCard>
+
+                <MaintenanceActionCard
+                  title="清理废弃表"
+                  icon={<Trash className="h-4 w-4" />}
+                  tone="warning"
+                  meta={<Badge variant={deprecatedTableItems.length > 0 ? 'warning' : 'secondary'}>{deprecatedTableItems.length} 张</Badge>}
+                >
+                  <Button
+                    size="sm"
+                    variant="secondary-destructive"
+                    className="w-full justify-center"
+                    onClick={cleanupDeprecatedTables}
+                    loading={databaseBusy}
+                    disabled={deprecatedTableItems.length === 0}
+                    icon={<Trash className="h-4 w-4" />}
+                  >
+                    清理废弃表
+                  </Button>
+                </MaintenanceActionCard>
               </div>
-              <div className="mt-3 border-t border-kumo-line pt-3">
-                <div className="flex items-center justify-between gap-2 text-xs">
-                  <span className="font-semibold text-kumo-strong">废弃表候选</span>
+
+              <div className="rounded-lg border border-kumo-line/80 bg-kumo-base px-3 pt-3 pb-2">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold text-kumo-strong">废弃表候选</div>
+                    <div className="mt-1 text-xs text-kumo-subtle">这里会列出可清理的旧表及预计释放空间。</div>
+                  </div>
                   <Badge variant={deprecatedTableItems.length > 0 ? 'warning' : 'secondary'}>
                     {deprecatedTableItems.length} 张
                   </Badge>
                 </div>
-                <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-kumo-subtle">
-                  <span>记录 {deprecatedTables?.totalRows || 0}</span>
-                  <span>占用 {formatFileSize(deprecatedTables?.totalSize)}</span>
+
+                <div className="mt-2 rounded-md border border-kumo-line/70 bg-kumo-recessed/20 px-3 py-2.5">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                    <span className="text-kumo-subtle">候选表 <span className="font-semibold text-kumo-strong">{deprecatedTableItems.length}</span></span>
+                    <span className="text-kumo-subtle">记录数 <span className="font-semibold text-kumo-strong">{deprecatedTables?.totalRows || 0}</span></span>
+                    <span className="text-kumo-subtle">占用 <span className="font-semibold text-kumo-strong">{formatFileSize(deprecatedTables?.totalSize)}</span></span>
+                  </div>
                 </div>
+
                 {deprecatedTableItems.length > 0 && (
-                  <div className="mt-2 max-h-40 overflow-y-auto divide-y divide-kumo-line text-[11px]">
+                  <div className="mt-3 max-h-40 overflow-y-auto divide-y divide-kumo-line rounded-md border border-kumo-line/70 bg-kumo-recessed/10 text-[11px]">
                     {deprecatedTableItems.slice(0, 8).map((item) => (
-                      <div key={item.table} className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 py-1.5">
-                        <span className="truncate font-mono text-kumo-strong" title={item.reason}>{item.table}</span>
+                      <div key={item.table} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-3 py-2">
+                        <div className="min-w-0">
+                          <div className="truncate font-mono text-kumo-strong" title={item.table}>{item.table}</div>
+                          <div className="mt-0.5 truncate text-kumo-subtle" title={item.reason}>{item.reason}</div>
+                        </div>
                         <span className="font-mono text-kumo-subtle">{formatFileSize(item.sizeBytes)}</span>
                       </div>
                     ))}
@@ -1152,8 +1309,9 @@ function SettingsPage() {
       )}
 
       {activeTab === 'logs' && (
-        <div className="grid gap-4">
+        <div className="grid content-start gap-4 overflow-auto px-px py-px pr-px">
           <SectionCard
+            className="shrink-0"
             title="审计与保留"
             description="这里只管理数据库审计记录与日志保留策略；应用运行日志请到左侧「系统日志」查看。"
             icon={<FileText className="h-4 w-4 text-kumo-brand" />}
@@ -1175,11 +1333,12 @@ function SettingsPage() {
 
           <div className="grid gap-4">
             <SectionCard
+              className="min-h-0"
               title="审计记录"
               description="最近 100 条数据库操作记录"
               icon={<Database className="h-4 w-4 text-kumo-brand" />}
               bodyPadding="none"
-              bodyClassName="overflow-x-auto"
+              bodyClassName="max-h-[24rem] overflow-auto"
             >
               <Table layout="fixed">
                 <colgroup>
@@ -1218,7 +1377,7 @@ function SettingsPage() {
       )}
 
       {activeTab === 'appearance' && (
-        <div className="grid items-start gap-3 xl:grid-cols-[minmax(20rem,0.82fr)_minmax(0,1.18fr)]">
+        <div className="grid h-full min-h-0 items-start gap-3 overflow-auto px-px py-px pr-px xl:grid-cols-[minmax(20rem,0.82fr)_minmax(0,1.18fr)]">
           <SectionCard
             title="界面外观"
             description={`当前生效主题: ${theme === 'dark' ? '深色' : '浅色'}`}
@@ -1266,24 +1425,23 @@ function SettingsPage() {
       )}
 
       {activeTab === 'about' && (
-        <div className="grid gap-4 lg:grid-cols-1">
+        <div className="grid items-start gap-4 overflow-auto px-px py-px pr-px lg:grid-cols-1">
           <SectionCard
             title="API Monitor"
             description="React 前端 + Go 后端"
             icon={<img src="/logo.svg" alt="" className="h-6 w-6 object-contain" />}
-            className="lg:col-span-2"
-            bodyPadding="xl"
+            bodyPadding="lg"
           >
             <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-lg border border-kumo-line bg-kumo-recessed p-4">
+              <div className="rounded-lg border border-kumo-line bg-kumo-recessed p-3">
                 <div className="text-xs text-kumo-subtle">当前源</div>
                 <div className="mt-1 truncate font-mono text-sm text-kumo-strong">{currentOrigin}</div>
               </div>
-              <div className="rounded-lg border border-kumo-line bg-kumo-recessed p-4">
+              <div className="rounded-lg border border-kumo-line bg-kumo-recessed p-3">
                 <div className="text-xs text-kumo-subtle">API 地址</div>
                 <div className="mt-1 truncate font-mono text-sm text-kumo-strong">{`${currentOrigin}/api`}</div>
               </div>
-              <div className="rounded-lg border border-kumo-line bg-kumo-recessed p-4">
+              <div className="rounded-lg border border-kumo-line bg-kumo-recessed p-3">
                 <div className="text-xs text-kumo-subtle">仓库地址</div>
                 <div className="mt-1 truncate font-mono text-sm text-kumo-strong">
                   <a
@@ -1319,6 +1477,7 @@ function SettingsPage() {
           </LayerCard> */}
         </div>
       )}
+      </div>
     </div>
   );
 }

@@ -186,9 +186,6 @@ const COMPACT_ACTION_BUTTON_CLASS = '!shadow-none';
 const SERVER_SECTION_HEADER_CLASS = 'flex min-h-[56px] items-center justify-between gap-3 border-b border-kumo-line bg-kumo-recessed/20 px-4 py-3.5';
 const SERVER_SECONDARY_BAR_CLASS = 'flex min-h-[46px] flex-col gap-2 rounded-md border border-kumo-line/90 bg-kumo-base px-3 py-2 lg:flex-row lg:items-center lg:justify-between';
 const SERVER_SECONDARY_TABS_GROUP_CLASS = 'flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto whitespace-nowrap p-0.5 scrollbar-thin sm:gap-2';
-const HOST_FILTER_TABS_CLASS = 'w-fit max-w-full';
-const HOST_FILTER_TABS_LIST_CLASS = 'w-fit max-w-full';
-const HOST_FILTER_TABS_INDICATOR_CLASS = undefined;
 const MANAGEMENT_CARD_ICON_CLASS = 'h-3.5 w-3.5 shrink-0 text-kumo-brand';
 const SERVER_MODULE_TAB_ICON_CLASS = 'h-3.5 w-3.5 shrink-0';
 const COMPACT_EXPAND_EXIT_MS = 230;
@@ -7596,9 +7593,6 @@ function ServerPage() {
             <div className={SERVER_SECONDARY_TABS_GROUP_CLASS}>
               <Tabs
                 {...TOOL_TABS_PROPS}
-                className={HOST_FILTER_TABS_CLASS}
-                listClassName={HOST_FILTER_TABS_LIST_CLASS}
-                indicatorClassName={HOST_FILTER_TABS_INDICATOR_CLASS}
                 value={serverStatusFilter === 'offline' ? 'offline' : 'all'}
                 onValueChange={setServerStatusFilter}
                 tabs={[
@@ -7608,9 +7602,6 @@ function ServerPage() {
               />
               <Tabs
                 {...TOOL_TABS_PROPS}
-                className={HOST_FILTER_TABS_CLASS}
-                listClassName={HOST_FILTER_TABS_LIST_CLASS}
-                indicatorClassName={HOST_FILTER_TABS_INDICATOR_CLASS}
                 value={serverListViewMode}
                 onValueChange={setServerListViewMode}
                 tabs={[
@@ -8665,9 +8656,6 @@ function ServerPage() {
             <div className={SERVER_SECONDARY_TABS_GROUP_CLASS}>
               <Tabs
                 {...TOOL_TABS_PROPS}
-                className={HOST_FILTER_TABS_CLASS}
-                listClassName={HOST_FILTER_TABS_LIST_CLASS}
-                indicatorClassName={HOST_FILTER_TABS_INDICATOR_CLASS}
                 value={dockerSubTab}
                 onValueChange={setDockerSubTab}
                 tabs={[

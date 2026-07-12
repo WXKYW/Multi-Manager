@@ -24,7 +24,7 @@ import useStore from '../store.js';
 import useTableResize from '../composables/useTableResize.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
-import { DataTableFrame, PageStack, PageToolbar, SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { PageStack, PageToolbar, SectionCard } from '../components/ui/AppPrimitives.jsx';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
@@ -459,6 +459,7 @@ function DnsPage() {
       },
     ];
   }, [analyticsPoints, analyticsSummary.bandwidth, analyticsSummary.cacheHitRate, analyticsSummary.requests, isDarkMode]);
+  const showAnalyticsPanel = showAnalyticsCharts && (analyticsPoints.length > 0 || loading.analytics);
 
   useEffect(() => {
     setShowAnalyticsCharts(false);
@@ -1734,9 +1735,9 @@ function DnsPage() {
     () => r2CurrentPrefix.split('/').filter(Boolean),
     [r2CurrentPrefix]
   );
-  const isDnsWorkspace = activeTab === 'dns' && selectedAccountId;
-  const pageShellClassName = isDnsWorkspace
-    ? 'dns-workspace flex w-full max-w-full flex-col gap-3 overflow-visible pb-4 md:h-[calc(100dvh-88px)] md:min-h-0 md:overflow-hidden md:pb-1 lg:h-[calc(100dvh-92px)]'
+  const isCloudflareViewportWorkspace = ['dns', 'r2'].includes(activeTab) && selectedAccountId;
+  const pageShellClassName = isCloudflareViewportWorkspace
+    ? 'dns-workspace flex h-full min-h-0 flex-1 w-full max-w-full flex-col gap-3 overflow-hidden px-px'
     : '';
   const renderResizeHead = (label, index, startResize, align = 'left') => {
     const alignClassName = {
@@ -1810,11 +1811,11 @@ function DnsPage() {
       ) : (
         <>
           {activeTab === 'dns' && (
-            <div className="dns-split grid max-w-full gap-3 overflow-visible px-px md:min-h-0 md:flex-1 md:overflow-hidden">
-              <section className="flex min-h-0 min-w-0 max-w-full flex-col gap-2">
-              <div className="flex min-h-8 shrink-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="dns-split grid min-h-0 flex-1 max-w-full gap-3 overflow-hidden">
+              <section className="flex min-h-0 min-w-0 max-w-full flex-col gap-2 overflow-hidden">
+              <div className="flex min-h-8 shrink-0 flex-col gap-2 pl-px sm:flex-row sm:items-center sm:justify-between">
                 <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:items-center">
-                  <Button size="sm" onClick={openZoneModal} icon={<Plus className="h-4 w-4" />} className="w-full justify-center sm:w-auto">
+                  <Button size="sm" variant="secondary" onClick={openZoneModal} icon={<Plus className="h-4 w-4" />} className="w-full justify-center sm:w-auto">
                     添加域名
                   </Button>
                   {selectedZone && (
@@ -1989,7 +1990,7 @@ function DnsPage() {
 
               </section>
 
-              <section className="flex min-w-0 max-w-full flex-col gap-2 overflow-visible md:min-h-0 md:overflow-hidden">
+              <section className="flex min-h-0 min-w-0 max-w-full flex-col gap-2 overflow-hidden">
               <div className="flex min-h-8 shrink-0 items-center justify-between gap-2 px-1">
                 <div className="flex min-w-0 items-center gap-2 text-xs text-kumo-subtle">
                   <Globe className="h-3.5 w-3.5 shrink-0" />
@@ -2063,8 +2064,11 @@ function DnsPage() {
                     </DnsPanelCard>
                   </div>
 
-                  <AnimatedCollapse open={showAnalyticsCharts && (analyticsPoints.length > 0 || loading.analytics)} className="order-5 shrink-0 md:order-none">
-                    <div className="dns-chart-grid grid gap-2 pt-1">
+                  <AnimatedCollapse
+                    open={showAnalyticsPanel}
+                    className={showAnalyticsPanel ? 'order-5 shrink-0 md:order-none' : 'contents'}
+                  >
+                    <div className="dns-chart-grid grid gap-2 pt-0.5">
                     {analyticsChartCards.map((card) => (
                       <DnsPanelCard key={card.key} className="min-w-0 overflow-hidden p-3">
                         <div className="flex items-center justify-between gap-2">
@@ -2275,49 +2279,48 @@ function DnsPage() {
                   新建 Worker
                 </Button>
               )}
-              bodyClassName="space-y-3"
+              bodyPadding="none"
+              bodyClassName="overflow-x-auto"
             >
-              <DataTableFrame>
-                <Table layout="fixed">
-                  <colgroup>{workerColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
-                  <Table.Header variant="compact">
-                    <Table.Row>
-                      <Table.Head className="relative pr-6">名称<Table.ResizeHandle onMouseDown={(e) => startWorkerResize(0, e)} onTouchStart={(e) => startWorkerResize(0, e)} /></Table.Head>
-                      <Table.Head className="relative pr-6">创建时间<Table.ResizeHandle onMouseDown={(e) => startWorkerResize(1, e)} onTouchStart={(e) => startWorkerResize(1, e)} /></Table.Head>
-                      <Table.Head className="relative pr-6">更新时间<Table.ResizeHandle onMouseDown={(e) => startWorkerResize(2, e)} onTouchStart={(e) => startWorkerResize(2, e)} /></Table.Head>
-                      <Table.Head className="text-right">操作</Table.Head>
+              <Table layout="fixed">
+                <colgroup>{workerColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
+                <Table.Header variant="compact">
+                  <Table.Row>
+                    <Table.Head className="relative pr-6">名称<Table.ResizeHandle onMouseDown={(e) => startWorkerResize(0, e)} onTouchStart={(e) => startWorkerResize(0, e)} /></Table.Head>
+                    <Table.Head className="relative pr-6">创建时间<Table.ResizeHandle onMouseDown={(e) => startWorkerResize(1, e)} onTouchStart={(e) => startWorkerResize(1, e)} /></Table.Head>
+                    <Table.Head className="relative pr-6">更新时间<Table.ResizeHandle onMouseDown={(e) => startWorkerResize(2, e)} onTouchStart={(e) => startWorkerResize(2, e)} /></Table.Head>
+                    <Table.Head className="text-right">操作</Table.Head>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {loading.workers ? (
+                    Array.from({ length: 4 }).map((_, index) => <Table.Row key={index}><Table.Cell colSpan={4}><SkeletonLine className="h-4 w-full" /></Table.Cell></Table.Row>)
+                  ) : workers.length === 0 ? (
+                    <Table.Row><Table.Cell colSpan={4} className="py-10 text-center text-kumo-subtle">没有 Workers。</Table.Cell></Table.Row>
+                  ) : workers.map((worker) => (
+                    <Table.Row
+                      key={worker.id || worker.name}
+                      className="cursor-pointer"
+                      title="双击编辑 Worker 代码"
+                      onDoubleClick={(event) => handleEditableRowDoubleClick(event, () => openWorkerModal(worker))}
+                    >
+                      <Table.Cell className="font-medium text-kumo-strong">{worker.name}</Table.Cell>
+                      <Table.Cell>{formatDate(worker.createdOn)}</Table.Cell>
+                      <Table.Cell>{formatDate(worker.modifiedOn)}</Table.Cell>
+                      <Table.Cell className="text-right">
+                        <div className="inline-flex flex-wrap justify-end gap-2">
+                          <Button size="sm" variant="secondary" onClick={() => openWorkerModal(worker)}>代码</Button>
+                          <Button size="sm" variant="secondary" onClick={() => openWorkerRoutesModal(worker)}>路由</Button>
+                          <Button size="sm" variant="secondary" onClick={() => openWorkerDomainsModal(worker)}>域名</Button>
+                          <Button size="sm" variant="secondary" onClick={() => openWorkerAnalyticsModal(worker)}>统计</Button>
+                          <Button size="sm" variant="secondary" onClick={() => toggleWorkerSubdomain(worker, true)}>启用</Button>
+                          <Button size="sm" variant="secondary-destructive" onClick={() => deleteWorker(worker)} aria-label={`删除 ${worker.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                        </div>
+                      </Table.Cell>
                     </Table.Row>
-                  </Table.Header>
-                  <Table.Body>
-                    {loading.workers ? (
-                      Array.from({ length: 4 }).map((_, index) => <Table.Row key={index}><Table.Cell colSpan={4}><SkeletonLine className="h-4 w-full" /></Table.Cell></Table.Row>)
-                    ) : workers.length === 0 ? (
-                      <Table.Row><Table.Cell colSpan={4} className="py-10 text-center text-kumo-subtle">没有 Workers。</Table.Cell></Table.Row>
-                    ) : workers.map((worker) => (
-                      <Table.Row
-                        key={worker.id || worker.name}
-                        className="cursor-pointer"
-                        title="双击编辑 Worker 代码"
-                        onDoubleClick={(event) => handleEditableRowDoubleClick(event, () => openWorkerModal(worker))}
-                      >
-                        <Table.Cell className="font-medium text-kumo-strong">{worker.name}</Table.Cell>
-                        <Table.Cell>{formatDate(worker.createdOn)}</Table.Cell>
-                        <Table.Cell>{formatDate(worker.modifiedOn)}</Table.Cell>
-                        <Table.Cell className="text-right">
-                          <div className="inline-flex flex-wrap justify-end gap-2">
-                            <Button size="sm" variant="secondary" onClick={() => openWorkerModal(worker)}>代码</Button>
-                            <Button size="sm" variant="secondary" onClick={() => openWorkerRoutesModal(worker)}>路由</Button>
-                            <Button size="sm" variant="secondary" onClick={() => openWorkerDomainsModal(worker)}>域名</Button>
-                            <Button size="sm" variant="secondary" onClick={() => openWorkerAnalyticsModal(worker)}>统计</Button>
-                            <Button size="sm" variant="secondary" onClick={() => toggleWorkerSubdomain(worker, true)}>启用</Button>
-                            <Button size="sm" variant="secondary-destructive" onClick={() => deleteWorker(worker)} aria-label={`删除 ${worker.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
-                          </div>
-                        </Table.Cell>
-                      </Table.Row>
-                    ))}
-                  </Table.Body>
-                </Table>
-              </DataTableFrame>
+                  ))}
+                </Table.Body>
+              </Table>
             </SectionCard>
           )}
 
@@ -2325,9 +2328,9 @@ function DnsPage() {
             <SectionCard
               title="Pages 项目"
               icon={<Layers className="h-4 w-4 text-kumo-brand" />}
-              bodyClassName="space-y-3"
+              bodyPadding="none"
+              bodyClassName="overflow-x-auto"
             >
-              <DataTableFrame>
               <Table layout="fixed">
                 <colgroup>{pageColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
                 <Table.Header variant="compact">
@@ -2371,12 +2374,11 @@ function DnsPage() {
                   ))}
                 </Table.Body>
               </Table>
-              </DataTableFrame>
             </SectionCard>
           )}
 
           {activeTab === 'r2' && (
-            <div className="grid min-h-0 grid-cols-1 gap-3 lg:h-[calc(100dvh-11.5rem)] lg:min-h-[34rem] lg:grid-cols-[18rem_minmax(0,1fr)]">
+            <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden p-px lg:grid-cols-[18rem_minmax(0,1fr)]">
               <LayerCard className="flex min-h-0 flex-col gap-3 p-3 lg:h-full">
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
@@ -2633,50 +2635,49 @@ function DnsPage() {
                   创建 Tunnel
                 </Button>
               )}
-              bodyClassName="space-y-3"
+              bodyPadding="none"
+              bodyClassName="overflow-x-auto"
             >
-              <DataTableFrame>
-                <Table layout="fixed">
-                  <colgroup>{tunnelColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
-                  <Table.Header variant="compact">
-                    <Table.Row>
-                      <Table.Head className="relative pr-6">名称<Table.ResizeHandle onMouseDown={(e) => startTunnelResize(0, e)} onTouchStart={(e) => startTunnelResize(0, e)} /></Table.Head>
-                      <Table.Head className="relative pr-6">状态<Table.ResizeHandle onMouseDown={(e) => startTunnelResize(1, e)} onTouchStart={(e) => startTunnelResize(1, e)} /></Table.Head>
-                      <Table.Head className="relative pr-6">连接<Table.ResizeHandle onMouseDown={(e) => startTunnelResize(2, e)} onTouchStart={(e) => startTunnelResize(2, e)} /></Table.Head>
-                      <Table.Head className="relative pr-6">创建时间<Table.ResizeHandle onMouseDown={(e) => startTunnelResize(3, e)} onTouchStart={(e) => startTunnelResize(3, e)} /></Table.Head>
-                      <Table.Head className="text-right">操作</Table.Head>
+              <Table layout="fixed">
+                <colgroup>{tunnelColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
+                <Table.Header variant="compact">
+                  <Table.Row>
+                    <Table.Head className="relative pr-6">名称<Table.ResizeHandle onMouseDown={(e) => startTunnelResize(0, e)} onTouchStart={(e) => startTunnelResize(0, e)} /></Table.Head>
+                    <Table.Head className="relative pr-6">状态<Table.ResizeHandle onMouseDown={(e) => startTunnelResize(1, e)} onTouchStart={(e) => startTunnelResize(1, e)} /></Table.Head>
+                    <Table.Head className="relative pr-6">连接<Table.ResizeHandle onMouseDown={(e) => startTunnelResize(2, e)} onTouchStart={(e) => startTunnelResize(2, e)} /></Table.Head>
+                    <Table.Head className="relative pr-6">创建时间<Table.ResizeHandle onMouseDown={(e) => startTunnelResize(3, e)} onTouchStart={(e) => startTunnelResize(3, e)} /></Table.Head>
+                    <Table.Head className="text-right">操作</Table.Head>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {loading.tunnels ? (
+                    Array.from({ length: 4 }).map((_, index) => <Table.Row key={index}><Table.Cell colSpan={5}><SkeletonLine className="h-4 w-full" /></Table.Cell></Table.Row>)
+                  ) : tunnels.length === 0 ? (
+                    <Table.Row><Table.Cell colSpan={5} className="py-10 text-center text-kumo-subtle">没有 Tunnel。</Table.Cell></Table.Row>
+                  ) : tunnels.map((tunnel) => (
+                    <Table.Row key={tunnel.id}>
+                      <Table.Cell>
+                        <div className="flex flex-col">
+                          <span className="font-medium text-kumo-strong">{tunnel.name}</span>
+                          <span className="text-xs text-kumo-subtle">{tunnel.id}</span>
+                        </div>
+                      </Table.Cell>
+                      <Table.Cell><Badge variant={statusVariant(tunnel.status)}>{tunnelStatusLabel(tunnel.status, tunnel.connections || [])}</Badge></Table.Cell>
+                      <Table.Cell>{tunnel.connections?.length || 0}</Table.Cell>
+                      <Table.Cell>{formatDate(tunnel.createdAt)}</Table.Cell>
+                      <Table.Cell className="text-right">
+                        <div className="inline-flex flex-wrap justify-end gap-2">
+                          <Button size="sm" variant="secondary" onClick={() => openTunnelTokenModal(tunnel)}>令牌</Button>
+                          <Button size="sm" variant="secondary" onClick={() => openTunnelConfigModal(tunnel)}>配置</Button>
+                          <Button size="sm" variant="secondary" onClick={() => openTunnelConnectionsModal(tunnel)}>连接</Button>
+                          <Button size="sm" shape="square" variant="secondary" onClick={() => renameTunnel(tunnel)} aria-label={`重命名 ${tunnel.name}`} title="重命名" icon={<Edit className="h-4 w-4" />} />
+                          <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteTunnel(tunnel)} aria-label={`删除 ${tunnel.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                        </div>
+                      </Table.Cell>
                     </Table.Row>
-                  </Table.Header>
-                  <Table.Body>
-                    {loading.tunnels ? (
-                      Array.from({ length: 4 }).map((_, index) => <Table.Row key={index}><Table.Cell colSpan={5}><SkeletonLine className="h-4 w-full" /></Table.Cell></Table.Row>)
-                    ) : tunnels.length === 0 ? (
-                      <Table.Row><Table.Cell colSpan={5} className="py-10 text-center text-kumo-subtle">没有 Tunnel。</Table.Cell></Table.Row>
-                    ) : tunnels.map((tunnel) => (
-                      <Table.Row key={tunnel.id}>
-                        <Table.Cell>
-                          <div className="flex flex-col">
-                            <span className="font-medium text-kumo-strong">{tunnel.name}</span>
-                            <span className="text-xs text-kumo-subtle">{tunnel.id}</span>
-                          </div>
-                        </Table.Cell>
-                        <Table.Cell><Badge variant={statusVariant(tunnel.status)}>{tunnelStatusLabel(tunnel.status, tunnel.connections || [])}</Badge></Table.Cell>
-                        <Table.Cell>{tunnel.connections?.length || 0}</Table.Cell>
-                        <Table.Cell>{formatDate(tunnel.createdAt)}</Table.Cell>
-                        <Table.Cell className="text-right">
-                          <div className="inline-flex flex-wrap justify-end gap-2">
-                            <Button size="sm" variant="secondary" onClick={() => openTunnelTokenModal(tunnel)}>令牌</Button>
-                            <Button size="sm" variant="secondary" onClick={() => openTunnelConfigModal(tunnel)}>配置</Button>
-                            <Button size="sm" variant="secondary" onClick={() => openTunnelConnectionsModal(tunnel)}>连接</Button>
-                            <Button size="sm" shape="square" variant="secondary" onClick={() => renameTunnel(tunnel)} aria-label={`重命名 ${tunnel.name}`} title="重命名" icon={<Edit className="h-4 w-4" />} />
-                            <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteTunnel(tunnel)} aria-label={`删除 ${tunnel.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
-                          </div>
-                        </Table.Cell>
-                      </Table.Row>
-                    ))}
-                  </Table.Body>
-                </Table>
-              </DataTableFrame>
+                  ))}
+                </Table.Body>
+              </Table>
             </SectionCard>
           )}
 
@@ -2691,46 +2692,45 @@ function DnsPage() {
                 <Button size="sm" onClick={() => openTemplateModal()} icon={<Plus className="h-4 w-4" />}>添加模板</Button>
                 </>
               )}
-              bodyClassName="space-y-3"
+              bodyPadding="none"
+              bodyClassName="overflow-x-auto"
             >
-              <DataTableFrame>
-                <Table layout="fixed">
-                  <colgroup>{templateColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
-                  <Table.Header variant="compact">
-                    <Table.Row>
-                      <Table.Head className="relative pr-6">名称<Table.ResizeHandle onMouseDown={(e) => startTemplateResize(0, e)} onTouchStart={(e) => startTemplateResize(0, e)} /></Table.Head>
-                      <Table.Head className="relative pr-6">记录数<Table.ResizeHandle onMouseDown={(e) => startTemplateResize(1, e)} onTouchStart={(e) => startTemplateResize(1, e)} /></Table.Head>
-                      <Table.Head className="relative pr-6">描述<Table.ResizeHandle onMouseDown={(e) => startTemplateResize(2, e)} onTouchStart={(e) => startTemplateResize(2, e)} /></Table.Head>
-                      <Table.Head className="relative pr-6">更新时间<Table.ResizeHandle onMouseDown={(e) => startTemplateResize(3, e)} onTouchStart={(e) => startTemplateResize(3, e)} /></Table.Head>
-                      <Table.Head className="text-right">操作</Table.Head>
+              <Table layout="fixed">
+                <colgroup>{templateColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
+                <Table.Header variant="compact">
+                  <Table.Row>
+                    <Table.Head className="relative pr-6">名称<Table.ResizeHandle onMouseDown={(e) => startTemplateResize(0, e)} onTouchStart={(e) => startTemplateResize(0, e)} /></Table.Head>
+                    <Table.Head className="relative pr-6">记录数<Table.ResizeHandle onMouseDown={(e) => startTemplateResize(1, e)} onTouchStart={(e) => startTemplateResize(1, e)} /></Table.Head>
+                    <Table.Head className="relative pr-6">描述<Table.ResizeHandle onMouseDown={(e) => startTemplateResize(2, e)} onTouchStart={(e) => startTemplateResize(2, e)} /></Table.Head>
+                    <Table.Head className="relative pr-6">更新时间<Table.ResizeHandle onMouseDown={(e) => startTemplateResize(3, e)} onTouchStart={(e) => startTemplateResize(3, e)} /></Table.Head>
+                    <Table.Head className="text-right">操作</Table.Head>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {templates.length === 0 ? (
+                    <Table.Row><Table.Cell colSpan={5} className="py-10 text-center text-kumo-subtle">没有 DNS 模板。</Table.Cell></Table.Row>
+                  ) : templates.map((template) => (
+                    <Table.Row
+                      key={template.id}
+                      className="cursor-pointer"
+                      title="双击编辑模板"
+                      onDoubleClick={(event) => handleEditableRowDoubleClick(event, () => openTemplateModal(template))}
+                    >
+                      <Table.Cell className="font-medium text-kumo-strong">{template.name}</Table.Cell>
+                      <Table.Cell>{template.records?.length || 0}</Table.Cell>
+                      <Table.Cell><div className="truncate">{template.description || '-'}</div></Table.Cell>
+                      <Table.Cell>{formatDate(template.updatedAt || template.createdAt)}</Table.Cell>
+                      <Table.Cell className="text-right">
+                        <div className="inline-flex gap-2">
+                          <Button size="sm" variant="secondary" onClick={() => applyTemplate(template)}>应用</Button>
+                          <Button size="sm" shape="square" variant="secondary" onClick={() => openTemplateModal(template)} aria-label={`编辑 ${template.name}`} title="编辑" icon={<Edit className="h-4 w-4" />} />
+                          <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteTemplate(template)} aria-label={`删除 ${template.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                        </div>
+                      </Table.Cell>
                     </Table.Row>
-                  </Table.Header>
-                  <Table.Body>
-                    {templates.length === 0 ? (
-                      <Table.Row><Table.Cell colSpan={5} className="py-10 text-center text-kumo-subtle">没有 DNS 模板。</Table.Cell></Table.Row>
-                    ) : templates.map((template) => (
-                      <Table.Row
-                        key={template.id}
-                        className="cursor-pointer"
-                        title="双击编辑模板"
-                        onDoubleClick={(event) => handleEditableRowDoubleClick(event, () => openTemplateModal(template))}
-                      >
-                        <Table.Cell className="font-medium text-kumo-strong">{template.name}</Table.Cell>
-                        <Table.Cell>{template.records?.length || 0}</Table.Cell>
-                        <Table.Cell><div className="truncate">{template.description || '-'}</div></Table.Cell>
-                        <Table.Cell>{formatDate(template.updatedAt || template.createdAt)}</Table.Cell>
-                        <Table.Cell className="text-right">
-                          <div className="inline-flex gap-2">
-                            <Button size="sm" variant="secondary" onClick={() => applyTemplate(template)}>应用</Button>
-                            <Button size="sm" shape="square" variant="secondary" onClick={() => openTemplateModal(template)} aria-label={`编辑 ${template.name}`} title="编辑" icon={<Edit className="h-4 w-4" />} />
-                            <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteTemplate(template)} aria-label={`删除 ${template.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
-                          </div>
-                        </Table.Cell>
-                      </Table.Row>
-                    ))}
-                  </Table.Body>
-                </Table>
-              </DataTableFrame>
+                  ))}
+                </Table.Body>
+              </Table>
             </SectionCard>
           )}
 

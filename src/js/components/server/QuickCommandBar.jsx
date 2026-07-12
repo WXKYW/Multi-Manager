@@ -3,6 +3,7 @@ import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { Tabs } from '@cloudflare/kumo';
+import { TOOL_TABS_PROPS } from '../../modules/kumoTabs.js';
 import { toast } from '../../modules/toast.js';
 import { dialog } from '../../modules/dialog.js';
 import {
@@ -322,8 +323,7 @@ export default function QuickCommandBar({
           </div>
 
           <Tabs
-            variant="segmented"
-            size="sm"
+            {...TOOL_TABS_PROPS}
             value={category}
             onValueChange={setCategory}
             tabs={categoryTabs}

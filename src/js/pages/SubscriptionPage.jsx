@@ -1357,43 +1357,46 @@ function SubscriptionPage() {
       title={`节点库 (${nodeLibraries.length})`}
       description="节点库负责接管原始节点来源；订阅链接从节点库生成。"
       className="h-full min-h-0"
-      bodyClassName="flex min-h-0 flex-1 flex-col gap-3"
+      bodyPadding="none"
+      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
       actions={<Button size="sm" variant="primary" onClick={openCreateProfile}><Plus className="h-3.5 w-3.5" />新建节点库</Button>}
     >
-      <DataTableFrame className="min-h-0 flex-1 overflow-auto scrollbar-thin">
-        <AppTable layout="fixed" widths={[220, 250, 120, 140, 100, 110]}>
+      <div className="min-h-0 flex-1 overflow-auto scrollbar-thin">
+        <AppTable layout="fixed" widths={[260, 360, 120, 120, 100, 132]}>
           <Table.Header sticky variant="compact">
             <Table.Row>
-              <Table.Head className="w-[24%] text-center">节点库</Table.Head>
-              <Table.Head className="w-[26%] text-center">节点来源</Table.Head>
-              <Table.Head className="w-[13%] text-center">节点</Table.Head>
-              <Table.Head className="w-[15%] text-center">对外订阅</Table.Head>
-              <Table.Head className="w-[10%] text-center">状态</Table.Head>
-              <Table.Head className="w-[12%] text-center">操作</Table.Head>
+              <Table.Head>节点库</Table.Head>
+              <Table.Head>节点来源</Table.Head>
+              <Table.Head className="text-center">节点</Table.Head>
+              <Table.Head className="text-center">对外订阅</Table.Head>
+              <Table.Head className="text-center">状态</Table.Head>
+              <Table.Head className="text-right">操作</Table.Head>
             </Table.Row>
           </Table.Header>
           <Table.Body>
             {nodeLibraries.map((profile) => (
               <Table.Row key={profile.id} onDoubleClick={() => openEditProfile(profile)} className="cursor-pointer">
-                <Table.Cell className="text-center">
-                  <div className="truncate text-sm font-bold text-kumo-strong">{profile.name}</div>
+                <Table.Cell>
+                  <div className="truncate text-sm font-semibold text-kumo-strong">{profile.name}</div>
+                </Table.Cell>
+                <Table.Cell>
+                  <div className="truncate font-mono text-xs text-kumo-subtle" title={profile.upstream_url || '手动导入 / 粘贴内容'}>
+                    {profile.upstream_url || '手动导入 / 粘贴内容'}
+                  </div>
                 </Table.Cell>
                 <Table.Cell className="text-center">
-                  <div className="truncate font-mono text-xs text-kumo-strong">{profile.upstream_url || '手动导入 / 粘贴内容'}</div>
+                  <span className="text-xs font-semibold text-kumo-strong">{profile.node_count || profile.nodeCount || 0} 个节点</span>
                 </Table.Cell>
                 <Table.Cell className="text-center">
-                  <div className="text-xs font-semibold text-kumo-strong">{profile.node_count || profile.nodeCount || 0} 个节点</div>
-                </Table.Cell>
-                <Table.Cell className="text-center">
-                  <div className="text-xs font-semibold text-kumo-strong">{profile.subscription_count || profile.subscriptionCount || 0} 个链接</div>
+                  <span className="text-xs font-semibold text-kumo-strong">{profile.subscription_count || profile.subscriptionCount || 0} 个链接</span>
                 </Table.Cell>
                 <Table.Cell className="text-center">
                   <Badge variant={profile.enabled !== false ? 'success' : 'secondary'} appearance="dot">{profile.enabled !== false ? '启用' : '停用'}</Badge>
                 </Table.Cell>
-                <Table.Cell className="text-center">
-                  <div className="flex justify-center gap-1">
-                    <Button size="sm" variant="ghost" shape="square" aria-label="编辑节点库" title="编辑节点库" className="text-kumo-subtle hover:text-kumo-brand" onClick={() => openEditProfile(profile)}><Edit className="h-3.5 w-3.5" /></Button>
-                    <Button size="sm" variant="ghost" shape="square" aria-label="删除节点库" title="删除节点库" className="text-kumo-subtle hover:text-kumo-danger" onClick={() => deleteProfile(profile)}><Trash className="h-3.5 w-3.5" /></Button>
+                <Table.Cell className="text-right">
+                  <div className="inline-flex gap-2">
+                    <Button size="sm" shape="square" variant="secondary" aria-label="编辑节点库" title="编辑节点库" onClick={() => openEditProfile(profile)} icon={<Edit className="h-3.5 w-3.5" />} />
+                    <Button size="sm" shape="square" variant="secondary-destructive" aria-label="删除节点库" title="删除节点库" onClick={() => deleteProfile(profile)} icon={<Trash className="h-3.5 w-3.5" />} />
                   </div>
                 </Table.Cell>
               </Table.Row>
@@ -1403,7 +1406,7 @@ function SubscriptionPage() {
             )}
           </Table.Body>
         </AppTable>
-      </DataTableFrame>
+      </div>
     </SectionCard>
   );
 
@@ -1414,7 +1417,8 @@ function SubscriptionPage() {
         title={`订阅管理 (${currentSubscriptions.length})`}
         description="选择一个节点库，然后生成和管理它对外提供的订阅链接。"
         className="h-full min-h-0"
-        bodyClassName="flex min-h-0 flex-1 flex-col gap-3"
+        bodyPadding="none"
+        bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
         actions={(
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
             <span className="rounded border border-kumo-info/20 bg-kumo-info/10 px-1.5 py-0.5 text-[11px] font-semibold text-kumo-info">{visibleNodes.length} 个节点</span>
@@ -1431,15 +1435,15 @@ function SubscriptionPage() {
           </div>
         )}
       >
-        <DataTableFrame className="min-h-0 flex-1 overflow-auto scrollbar-thin">
-          <AppTable layout="fixed" widths={[260, 120, 210, 120, 160]}>
+        <div className="min-h-0 flex-1 overflow-auto scrollbar-thin">
+          <AppTable layout="fixed" widths={[320, 130, 240, 130, 180]}>
             <Table.Header sticky variant="compact">
               <Table.Row>
-                <Table.Head className="w-[30%] text-center">订阅链接</Table.Head>
-                <Table.Head className="w-[13%] text-center">状态</Table.Head>
-                <Table.Head className="w-[24%] text-center">流量</Table.Head>
-                <Table.Head className="w-[16%] text-center">访问</Table.Head>
-                <Table.Head className="w-[17%] text-center">操作</Table.Head>
+                <Table.Head>订阅链接</Table.Head>
+                <Table.Head className="text-center">状态</Table.Head>
+                <Table.Head>流量</Table.Head>
+                <Table.Head>访问</Table.Head>
+                <Table.Head className="text-right">操作</Table.Head>
               </Table.Row>
             </Table.Header>
             <Table.Body>
@@ -1449,34 +1453,34 @@ function SubscriptionPage() {
                 const link = subscriptionURL(publicBase, sub);
                 return (
                   <Table.Row key={sub.id} onDoubleClick={() => openEditSubscription(sub)} className="cursor-pointer">
-                    <Table.Cell className="text-center">
-                      <div className="truncate text-sm font-bold text-kumo-strong">{sub.name}</div>
-                      <div className="mt-1 flex min-w-0 flex-wrap items-center justify-center gap-1">
+                    <Table.Cell>
+                      <div className="truncate text-sm font-semibold text-kumo-strong">{sub.name}</div>
+                      <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
                         <span className="rounded border border-kumo-info/20 bg-kumo-info/10 px-1.5 py-0.5 text-[10px] font-semibold text-kumo-info">{sub.node_count || visibleNodes.length || 0} 个节点</span>
-                        <span className="truncate font-mono text-[10px] text-kumo-subtle">{sub.id}</span>
+                        <span className="truncate font-mono text-[10px] text-kumo-subtle" title={sub.id}>{sub.id}</span>
                       </div>
                     </Table.Cell>
                     <Table.Cell className="text-center">
                       <Badge variant={variant} appearance="dot">{label}</Badge>
                       <div className="mt-1 text-[11px] text-kumo-subtle">{sub.expire_at ? `过期 ${sub.expire_at}` : '不过期'}</div>
                     </Table.Cell>
-                    <Table.Cell className="text-center">
+                    <Table.Cell>
                       <Meter
                         label="流量"
                         value={Math.min(100, sub.traffic?.percent || 0)}
                         customValue={`${formatBytes(used)} / ${sub.traffic?.total ? formatBytes(sub.traffic.total) : '无限制'}`}
                       />
                     </Table.Cell>
-                    <Table.Cell className="text-center">
-                      <div className="text-xs text-kumo-strong">{sub.access_count_today || 0} 次</div>
+                    <Table.Cell>
+                      <div className="text-xs font-semibold text-kumo-strong">{sub.access_count_today || 0} 次</div>
                       <div className="mt-1 text-[11px] text-kumo-subtle">{formatTime(sub.last_access_at)}</div>
                     </Table.Cell>
-                    <Table.Cell className="text-center">
-                      <div className="flex justify-center gap-1">
-                        <Button size="sm" variant="ghost" shape="square" aria-label="复制订阅链接" title="复制订阅链接" className="text-kumo-subtle hover:text-kumo-brand" onClick={() => copyText(link, '订阅链接已复制')}><Copy className="h-3.5 w-3.5" /></Button>
-                        <Button size="sm" variant="ghost" shape="square" aria-label="编辑订阅链接" title="编辑订阅链接" className="text-kumo-subtle hover:text-kumo-brand" onClick={() => openEditSubscription(sub)}><Edit className="h-3.5 w-3.5" /></Button>
-                        <Button size="sm" variant="ghost" shape="square" aria-label="重置链接" title="重置链接" className="text-kumo-subtle hover:text-kumo-warning" onClick={() => resetToken(sub)}><RefreshCw className="h-3.5 w-3.5" /></Button>
-                        <Button size="sm" variant="ghost" shape="square" aria-label="删除订阅链接" title="删除订阅链接" className="text-kumo-subtle hover:text-kumo-danger" onClick={() => deleteSubscription(sub)}><Trash className="h-3.5 w-3.5" /></Button>
+                    <Table.Cell className="text-right">
+                      <div className="inline-flex gap-2">
+                        <Button size="sm" shape="square" variant="secondary" aria-label="复制订阅链接" title="复制订阅链接" onClick={() => copyText(link, '订阅链接已复制')} icon={<Copy className="h-3.5 w-3.5" />} />
+                        <Button size="sm" shape="square" variant="secondary" aria-label="编辑订阅链接" title="编辑订阅链接" onClick={() => openEditSubscription(sub)} icon={<Edit className="h-3.5 w-3.5" />} />
+                        <Button size="sm" shape="square" variant="secondary" aria-label="重置链接" title="重置链接" onClick={() => resetToken(sub)} icon={<RefreshCw className="h-3.5 w-3.5" />} />
+                        <Button size="sm" shape="square" variant="secondary-destructive" aria-label="删除订阅链接" title="删除订阅链接" onClick={() => deleteSubscription(sub)} icon={<Trash className="h-3.5 w-3.5" />} />
                       </div>
                     </Table.Cell>
                   </Table.Row>
@@ -1487,7 +1491,7 @@ function SubscriptionPage() {
               )}
             </Table.Body>
           </AppTable>
-        </DataTableFrame>
+        </div>
       </SectionCard>
     );
   };
@@ -1497,9 +1501,28 @@ function SubscriptionPage() {
       title={`节点列表 (${filteredNodes.length})`}
       description={visibleNodes.length === filteredNodes.length ? '先导入节点并维护节点库，订阅链接会从这里选择节点源。' : `已从 ${visibleNodes.length} 个节点中过滤。`}
       className="h-full min-h-0"
-      bodyClassName="flex min-h-0 flex-1 flex-col gap-3"
+      bodyPadding="none"
+      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
       actions={(
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+          <Tabs
+            {...TOOL_TABS_PROPS}
+            value={protocolFilter}
+            onValueChange={(value) => setProtocolFilter(String(value))}
+            tabs={protocolItems}
+            className="min-w-0 max-w-full flex-1 sm:flex-none"
+            listClassName="max-w-full overflow-x-auto"
+          />
+          {tagItems.length > 1 && (
+            <Select
+              size="sm"
+              aria-label="标签筛选"
+              value={tagFilter}
+              onValueChange={(value) => setTagFilter(String(value))}
+              items={tagItems}
+              className="w-full sm:w-36"
+            />
+          )}
           <Select
             size="sm"
             aria-label="节点库"
@@ -1519,37 +1542,16 @@ function SubscriptionPage() {
         </div>
       )}
     >
-      <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2">
-        <Tabs
-          {...TOOL_TABS_PROPS}
-          value={protocolFilter}
-          onValueChange={(value) => setProtocolFilter(String(value))}
-          tabs={protocolItems}
-          className="min-w-0 max-w-full flex-1 sm:flex-none"
-          listClassName="max-w-full overflow-x-auto"
-        />
-        {tagItems.length > 1 && (
-          <Select
-            size="sm"
-            aria-label="标签筛选"
-            value={tagFilter}
-            onValueChange={(value) => setTagFilter(String(value))}
-            items={tagItems}
-            className="w-full sm:w-36"
-          />
-        )}
-      </div>
-
-      <DataTableFrame className="min-h-0 flex-1 overflow-auto scrollbar-thin">
-        <AppTable layout="fixed" widths={[90, 210, 100, 280, 190, 110]}>
+      <DataTableFrame variant="embedded" className="min-h-0 flex-1 overflow-auto scrollbar-thin">
+        <AppTable layout="fixed" widths={[90, 220, 100, 300, 190, 132]}>
           <Table.Header sticky variant="compact">
             <Table.Row>
               <Table.Head className="w-[9%] text-center">状态</Table.Head>
-              <Table.Head className="w-[22%] text-center">节点名称</Table.Head>
+              <Table.Head className="w-[22%]">节点名称</Table.Head>
               <Table.Head className="w-[10%] text-center">类型</Table.Head>
-              <Table.Head className="w-[29%] text-center">连接</Table.Head>
-              <Table.Head className="w-[18%] text-center">主机 / 延迟</Table.Head>
-              <Table.Head className="w-[12%] text-center">操作</Table.Head>
+              <Table.Head className="w-[29%]">连接</Table.Head>
+              <Table.Head className="w-[18%]">主机 / 延迟</Table.Head>
+              <Table.Head className="w-[12%] text-right">操作</Table.Head>
             </Table.Row>
           </Table.Header>
           <Table.Body>
@@ -1565,8 +1567,8 @@ function SubscriptionPage() {
                       onCheckedChange={(checked) => toggleNodeEnabled(node, checked)}
                     />
                   </Table.Cell>
-                  <Table.Cell className="text-center">
-                    <div className="flex min-w-0 items-center justify-center gap-2">
+                  <Table.Cell>
+                    <div className="flex min-w-0 items-center gap-2">
                       <NodeFlag node={node} />
                       {node.stable && <Star className="h-3.5 w-3.5 text-kumo-warning" />}
                       <span className="truncate text-sm font-bold text-kumo-strong">{node.name}</span>
@@ -1578,9 +1580,9 @@ function SubscriptionPage() {
                       {node.stable && <Badge variant="success">稳定</Badge>}
                     </div>
                   </Table.Cell>
-                  <Table.Cell className="text-center">
+                  <Table.Cell>
                     <div className="truncate font-mono text-xs text-kumo-strong">{nodeEndpoint(node)}</div>
-                    <div className="mt-1 flex min-w-0 flex-wrap justify-center gap-1">
+                    <div className="mt-1 flex min-w-0 flex-wrap gap-1">
                       {networkTags.map((tag) => (
                         <span
                           key={tag.key}
@@ -1593,27 +1595,25 @@ function SubscriptionPage() {
                       {networkTags.length === 0 && <span className="font-mono text-[11px] text-kumo-subtle">-</span>}
                     </div>
                   </Table.Cell>
-                  <Table.Cell className="text-center">
+                  <Table.Cell>
                     <NodeHostQuality node={node} serverNameById={serverNameById} />
                   </Table.Cell>
-                  <Table.Cell className="text-center">
-                    <div className="flex justify-center gap-1">
-                      <Button size="sm" variant="ghost" shape="square" aria-label="编辑节点" title="编辑节点" className="text-kumo-subtle hover:text-kumo-brand" onClick={() => openEditNode(node)}><Edit className="h-3.5 w-3.5" /></Button>
+                  <Table.Cell className="text-right">
+                    <div className="inline-flex gap-2">
+                      <Button size="sm" shape="square" variant="secondary" aria-label="编辑节点" title="编辑节点" onClick={() => openEditNode(node)} icon={<Edit className="h-3.5 w-3.5" />} />
                       <Button
                         size="sm"
-                        variant="ghost"
                         shape="square"
+                        variant="secondary-destructive"
                         aria-label="双击删除节点"
                         title="双击删除节点"
-                        className="text-kumo-subtle hover:text-kumo-danger"
                         onClick={(event) => event.stopPropagation()}
                         onDoubleClick={(event) => {
                           event.stopPropagation();
                           deleteNode(node);
                         }}
-                      >
-                        <Trash className="h-3.5 w-3.5" />
-                      </Button>
+                        icon={<Trash className="h-3.5 w-3.5" />}
+                      />
                     </div>
                   </Table.Cell>
                 </Table.Row>
@@ -1799,7 +1799,7 @@ function SubscriptionPage() {
   );
 
   return (
-    <PageStack className="min-h-0 flex-1 overflow-hidden">
+    <PageStack className="flex h-full min-h-0 flex-1 flex-col overflow-hidden px-px">
       <PageToolbar className="shrink-0">
         <div className="min-w-0 max-w-full overflow-x-auto scrollbar-thin">
           <Tabs

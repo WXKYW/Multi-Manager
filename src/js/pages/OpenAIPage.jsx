@@ -2318,7 +2318,7 @@ function OpenAIPage() {
         >
 
           {/* Table */}
-          <DataTableFrame>
+          <DataTableFrame variant="embedded">
             <AppTable widths={colWidths}>
               <Table.Header variant="compact">
                 <Table.Row>
@@ -2733,7 +2733,7 @@ function OpenAIPage() {
           </div>
 
           {/* Logs Table */}
-          <DataTableFrame>
+          <DataTableFrame variant="embedded">
             <AppTable>
               <Table.Header>
                 <Table.Row>

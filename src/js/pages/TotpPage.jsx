@@ -48,6 +48,7 @@ const maskEmail = (email) => {
 const GROUP_FILTER_ALL = '__all__';
 
 const isSVGRepoIcon = (icon) => typeof icon === 'string' && icon.startsWith('svgrepo:');
+const isCustomUploadedIcon = (icon) => typeof icon === 'string' && icon.startsWith('custom:');
 const SVG_REPO_ICON_REF_PATTERN = /(?:svgrepo:)?(?:https?:\/\/(?:www\.)?svgrepo\.com\/(?:show|download|svg)\/)?([0-9]{3,9})[-/:]([a-z0-9][a-z0-9-]{0,80})(?:\.svg)?/i;
 const HEX_COLOR_PATTERN = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 
@@ -74,7 +75,7 @@ const normalizeSVGRepoIconRef = (value) => {
 const TotpBrandMark = ({ issuer, icon, color, size = 'card' }) => {
   const isHeader = size === 'header';
   const markColor = color || getIssuerColor(issuer);
-  const remoteIcon = isSVGRepoIcon(icon);
+  const remoteIcon = isSVGRepoIcon(icon) || isCustomUploadedIcon(icon);
   return (
     <span
       className={`app-totp-brand-mark ${remoteIcon ? 'app-totp-brand-mark--remote' : 'border border-kumo-line'} ${isHeader ? 'size-7 rounded-md text-[17px]' : 'size-7 rounded-md text-[18px]'} flex shrink-0 items-center justify-center`}
@@ -121,6 +122,37 @@ const buildBrandStyleOptions = ({ issuer, icon, color, name, options: detectedOp
   return options;
 };
 
+const buildCustomBrandStyleOptions = ({ issuer, entries = [], fallbackColor = '' } = {}) => {
+  const issuerKey = String(issuer || '').trim().toLowerCase();
+  const sorted = [...entries].sort((a, b) => {
+    const aMatched = issuerKey && String(a.issuer || '').trim().toLowerCase() === issuerKey;
+    const bMatched = issuerKey && String(b.issuer || '').trim().toLowerCase() === issuerKey;
+    if (aMatched !== bMatched) return aMatched ? -1 : 1;
+    return String(a.name || '').localeCompare(String(b.name || ''), 'zh-CN');
+  });
+  return sorted.map((entry) => ({
+    id: `custom-${entry.id}`,
+    label: entry.name || entry.issuer || '自定义图标',
+    caption: entry.issuer ? `图标库 / ${entry.issuer}` : '图标库',
+    icon: entry.icon || (entry.id ? `custom:${entry.id}` : ''),
+    color: entry.color || fallbackColor,
+    source: 'custom',
+  }));
+};
+
+const mergeBrandStyleOptions = (...groups) => {
+  const seen = new Set();
+  const merged = [];
+  groups.flat().forEach((option) => {
+    if (!option) return;
+    const key = option.icon || option.id;
+    if (seen.has(key)) return;
+    seen.add(key);
+    merged.push(option);
+  });
+  return merged;
+};
+
 // ==================== TotpPage 组件 ====================
 function TotpPage() {
   const [totpCurrentTab, setTotpCurrentTab] = useState('accounts');
@@ -161,6 +193,9 @@ function TotpPage() {
   const [brandDetecting, setBrandDetecting] = useState(false);
   const [brandStyleOptions, setBrandStyleOptions] = useState([]);
   const [showBrandStyleModal, setShowBrandStyleModal] = useState(false);
+  const [customBrandIcons, setCustomBrandIcons] = useState([]);
+  const [customBrandIconsLoading, setCustomBrandIconsLoading] = useState(false);
+  const [customBrandIconUploading, setCustomBrandIconUploading] = useState(false);
   const [accountAddTab, setAccountAddTab] = useState('scan');
 
   // QR 扫码状态
@@ -169,6 +204,7 @@ function TotpPage() {
   const [qrError, setQrError] = useState('');
   const scannerRef = useRef(null);
   const fileInputRef = useRef(null);
+  const brandUploadInputRef = useRef(null);
 
   // Group Modal 状态
   const [showGroupModal, setShowGroupModal] = useState(false);
@@ -189,6 +225,13 @@ function TotpPage() {
     const password = localStorage.getItem('admin_password') || '';
     return {
       'Content-Type': 'application/json',
+      'x-admin-password': password,
+    };
+  };
+
+  const getAuthOnlyHeaders = () => {
+    const password = localStorage.getItem('admin_password') || '';
+    return {
       'x-admin-password': password,
     };
   };
@@ -396,6 +439,8 @@ function TotpPage() {
     setTotpShowSecret(false);
     setImportUris('');
     setQrError('');
+    setBrandStyleOptions([]);
+    setCustomBrandIcons([]);
     setShowAccountModal(true);
   };
 
@@ -418,8 +463,79 @@ function TotpPage() {
     });
     setAccountModalError('');
     setTotpShowSecret(false);
+    setBrandStyleOptions([]);
+    setCustomBrandIcons([]);
     setShowAccountModal(true);
   };
+
+  const loadCustomBrandIcons = useCallback(async () => {
+    setCustomBrandIconsLoading(true);
+    try {
+      const res = await fetch('/api/totp/icons/library', { headers: getAuthOnlyHeaders() });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || '加载图标库失败');
+      }
+      const list = Array.isArray(data.data) ? data.data : [];
+      setCustomBrandIcons(list);
+      return list;
+    } catch (error) {
+      toast.error(error.message || '加载图标库失败');
+      return [];
+    } finally {
+      setCustomBrandIconsLoading(false);
+    }
+  }, []);
+
+  const uploadCustomBrandIconAsset = useCallback(async (file, fallbackName = '') => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('name', String(accountForm.issuer || fallbackName || file.name || '自定义图标').trim());
+    formData.append('issuer', String(accountForm.issuer || '').trim());
+    formData.append('color', normalizeHexColor(accountForm.color) || resolveFormColor(accountForm));
+    const res = await fetch('/api/totp/icons/library', {
+      method: 'POST',
+      headers: getAuthOnlyHeaders(),
+      body: formData,
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || '上传图标失败');
+    }
+    const uploaded = data.data || {};
+    const nextIcon = uploaded.icon || (uploaded.id ? `custom:${uploaded.id}` : '');
+    setAccountForm((prev) => ({
+      ...prev,
+      icon: nextIcon,
+      color: uploaded.color || prev.color,
+    }));
+    const nextLibrary = await loadCustomBrandIcons();
+    const customOptions = buildCustomBrandStyleOptions({
+      issuer: accountForm.issuer,
+      entries: nextLibrary,
+      fallbackColor: resolveFormColor(accountForm),
+    });
+    setBrandStyleOptions((prev) => mergeBrandStyleOptions(customOptions, prev));
+    setShowBrandStyleModal(true);
+    return uploaded;
+  }, [accountForm.color, accountForm.issuer, loadCustomBrandIcons]);
+
+  const openBrandStylePicker = useCallback(async (baseOptions = null) => {
+    const fallbackOptions = baseOptions || buildBrandStyleOptions({
+      issuer: accountForm.issuer,
+      icon: accountForm.icon,
+      color: resolveFormColor(accountForm),
+      name: accountForm.issuer || accountForm.account || '品牌',
+    });
+    const library = await loadCustomBrandIcons();
+    const customOptions = buildCustomBrandStyleOptions({
+      issuer: accountForm.issuer,
+      entries: library,
+      fallbackColor: resolveFormColor(accountForm),
+    });
+    setBrandStyleOptions(mergeBrandStyleOptions(customOptions, fallbackOptions));
+    setShowBrandStyleModal(true);
+  }, [accountForm.account, accountForm.icon, accountForm.issuer, accountForm.color, loadCustomBrandIcons]);
 
   const detectAccountBrandIcon = async () => {
     setBrandDetecting(true);
@@ -438,35 +554,136 @@ function TotpPage() {
         throw new Error(data.error || '检测失败');
       }
       if (!data.data?.matched) {
-        const localOptions = buildBrandStyleOptions({
+        await openBrandStylePicker(buildBrandStyleOptions({
           issuer: accountForm.issuer,
           icon: accountForm.icon,
           color: resolveFormColor(accountForm),
           name: accountForm.issuer || accountForm.account || '品牌',
-        });
-        setBrandStyleOptions(localOptions);
-        setShowBrandStyleModal(true);
+        }));
         toast.info(data.data?.message || '未检测到远程图标，已提供系统图标样式');
         return;
       }
-      setBrandStyleOptions(buildBrandStyleOptions({
+      const baseOptions = buildBrandStyleOptions({
         issuer: accountForm.issuer,
         icon: data.data.icon,
         color: data.data.color,
         name: data.data.name,
         options: data.data.options,
-      }));
+      });
       const detectedItems = [data.data, ...(Array.isArray(data.data.options) ? data.data.options : [])];
       detectedItems.forEach((item) => {
         cacheDetectedBrandIcon(item);
       });
-      setShowBrandStyleModal(true);
+      await openBrandStylePicker(baseOptions);
     } catch (error) {
       toast.error(error.message || '检测图标失败');
     } finally {
       setBrandDetecting(false);
     }
   };
+
+  const handleCustomBrandIconUpload = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setCustomBrandIconUploading(true);
+    try {
+      await uploadCustomBrandIconAsset(file, file.name);
+      toast.success('已上传并应用自定义图标');
+    } catch (error) {
+      toast.error(error.message || '上传图标失败');
+    } finally {
+      setCustomBrandIconUploading(false);
+    }
+  };
+
+  const uploadCustomBrandIconFromClipboardItems = useCallback(async (items = []) => {
+    for (const item of items) {
+      if (!item) continue;
+      if (item.kind === 'file') {
+        const file = item.getAsFile?.();
+        if (file) {
+          const ext = file.type === 'image/svg+xml'
+            ? 'svg'
+            : file.type === 'image/png'
+              ? 'png'
+              : file.type === 'image/jpeg'
+                ? 'jpg'
+                : file.type === 'image/webp'
+                  ? 'webp'
+                  : file.type === 'image/gif'
+                    ? 'gif'
+                    : 'png';
+          return new File([file], file.name || `clipboard-icon.${ext}`, { type: file.type || 'image/png' });
+        }
+      }
+      if (item.kind === 'string' && item.type === 'text/plain') {
+        const text = await new Promise((resolve) => item.getAsString(resolve));
+        if (typeof text === 'string' && text.toLowerCase().includes('<svg')) {
+          return new File([text], 'clipboard-icon.svg', { type: 'image/svg+xml' });
+        }
+      }
+    }
+    return null;
+  }, []);
+
+  const handleBrandLibraryPaste = useCallback(async (event) => {
+    const items = Array.from(event.clipboardData?.items || []);
+    if (items.length === 0) return;
+    event.preventDefault();
+    setCustomBrandIconUploading(true);
+    try {
+      const file = await uploadCustomBrandIconFromClipboardItems(items);
+      if (!file) {
+        throw new Error('剪贴板里没有可用的图片或 SVG 图标');
+      }
+      await uploadCustomBrandIconAsset(file, 'clipboard-icon');
+      toast.success('已从剪贴板粘贴并应用图标');
+    } catch (error) {
+      toast.error(error.message || '粘贴图标失败');
+    } finally {
+      setCustomBrandIconUploading(false);
+    }
+  }, [uploadCustomBrandIconAsset, uploadCustomBrandIconFromClipboardItems]);
+
+  const handlePasteBrandIconFromClipboard = useCallback(async () => {
+    if (!navigator.clipboard?.read) {
+      toast.info('当前环境不支持直接读取剪贴板，请在下方区域按 Ctrl+V 粘贴');
+      return;
+    }
+    setCustomBrandIconUploading(true);
+    try {
+      const clipboardItems = await navigator.clipboard.read();
+      let uploaded = false;
+      for (const clipboardItem of clipboardItems) {
+        const types = clipboardItem.types || [];
+        const imageType = types.find((type) => ['image/svg+xml', 'image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(type));
+        if (!imageType) continue;
+        const blob = await clipboardItem.getType(imageType);
+        const ext = imageType === 'image/svg+xml'
+          ? 'svg'
+          : imageType === 'image/png'
+            ? 'png'
+            : imageType === 'image/jpeg'
+              ? 'jpg'
+              : imageType === 'image/webp'
+                ? 'webp'
+                : 'gif';
+        const file = new File([blob], `clipboard-icon.${ext}`, { type: imageType });
+        await uploadCustomBrandIconAsset(file, 'clipboard-icon');
+        uploaded = true;
+        break;
+      }
+      if (!uploaded) {
+        throw new Error('剪贴板里没有检测到可上传的图标');
+      }
+      toast.success('已从剪贴板粘贴并应用图标');
+    } catch (error) {
+      toast.error(error.message || '读取剪贴板失败');
+    } finally {
+      setCustomBrandIconUploading(false);
+    }
+  }, [uploadCustomBrandIconAsset]);
 
   const applyBrandStyleOption = (option) => {
     setAccountForm((prev) => ({
@@ -1685,7 +1902,14 @@ function TotpPage() {
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-kumo-subtle">品牌标识</label>
                   <div className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto_minmax(0,8rem)] items-center gap-2">
-                    <TotpBrandMark issuer={accountForm.issuer} icon={accountForm.icon} color={resolveFormColor(accountForm)} />
+                    <button
+                      type="button"
+                      className="rounded-md transition-transform hover:scale-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-kumo-brand/45"
+                      onClick={() => openBrandStylePicker()}
+                      title="点击选择或上传品牌图标"
+                    >
+                      <TotpBrandMark issuer={accountForm.issuer} icon={accountForm.icon} color={resolveFormColor(accountForm)} />
+                    </button>
                     <Input size="sm"
                       aria-label="图标关键字"
                       type="text"
@@ -1878,10 +2102,64 @@ function TotpPage() {
             选择品牌标识样式
           </Dialog.Title>
           <Dialog.Description className="text-xs text-kumo-subtle mb-3">
-            选择后会写入当前账号，保存账号后生效。
+            可直接选择系统样式，也可以上传自定义图标。保存账号后会同步到同发行商账号。
           </Dialog.Description>
 
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="text-[11px] text-kumo-subtle">
+              支持 `SVG / PNG / JPG / WebP / GIF`，也可直接粘贴剪贴板图片或 SVG。
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                ref={brandUploadInputRef}
+                type="file"
+                accept=".svg,image/svg+xml,image/png,image/jpeg,image/webp,image/gif"
+                className="hidden"
+                onChange={handleCustomBrandIconUpload}
+              />
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => brandUploadInputRef.current?.click()}
+                loading={customBrandIconUploading}
+              >
+                <Upload className="w-3.5 h-3.5" />
+                上传自定义图标
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={handlePasteBrandIconFromClipboard}
+                loading={customBrandIconUploading}
+              >
+                粘贴图标
+              </Button>
+              <LinkButton
+                size="sm"
+                variant="secondary"
+                href="https://www.svgrepo.com/"
+                target="_blank"
+                rel="noreferrer"
+              >
+                打开 SVG Repo
+              </LinkButton>
+            </div>
+          </div>
+
+          <div
+            tabIndex={0}
+            onPaste={handleBrandLibraryPaste}
+            className="mb-3 rounded-md border border-dashed border-kumo-line bg-kumo-recessed/15 px-3 py-2.5 text-[11px] text-kumo-subtle outline-none transition-colors focus:border-kumo-brand focus:ring-2 focus:ring-kumo-brand/20"
+          >
+            选中这里后按 `Ctrl+V`，可以直接粘贴截图、复制的图标文件，或 SVG 源码。
+          </div>
+
           <div className="flex gap-2 overflow-x-auto pb-1">
+            {!customBrandIconsLoading && brandStyleOptions.length === 0 && (
+              <div className="rounded-md border border-kumo-line bg-kumo-recessed/20 px-3 py-6 text-center text-xs text-kumo-subtle">
+                当前还没有可选图标。
+              </div>
+            )}
             {brandStyleOptions.map((option) => (
               <button
                 key={option.id}
@@ -1894,9 +2172,9 @@ function TotpPage() {
                   icon={option.icon}
                   color={option.color || resolveFormColor(accountForm)}
                 />
-                <span className="min-w-0">
-                  <span className="block truncate text-xs font-semibold text-kumo-strong">{option.label}</span>
-                  <span className="block truncate text-[11px] text-kumo-subtle">{option.caption}</span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-xs font-semibold text-kumo-strong">{option.label}</span>
+                    <span className="block truncate text-[11px] text-kumo-subtle">{option.caption}</span>
                 </span>
               </button>
             ))}

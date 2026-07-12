@@ -1827,7 +1827,7 @@ function UptimePage() {
             已选择 {selectedMonitorIds.length} 个监测目标用于快速维护窗口。
           </div>
 
-          <DataTableFrame>
+          <DataTableFrame variant="embedded">
             <Table layout="fixed">
               <Table.Header variant="compact">
                 <Table.Row>
@@ -2203,7 +2203,7 @@ function UptimePage() {
                   </div>
                 </div>
 
-                <DataTableFrame>
+                <DataTableFrame variant="embedded">
                   <Table layout="fixed">
                     <Table.Header variant="compact">
                       <Table.Row>

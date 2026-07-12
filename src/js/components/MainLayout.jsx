@@ -7,11 +7,20 @@ import {
 import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Tabs } from '@cloudflare/kumo';
+import { TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import AppPageHeader, { AppBreadcrumbs } from './AppPageHeader.jsx';
 import {
   Globe,
   Server,
   LogOut,
+  AppWindow,
+  Columns,
+  DesktopDisplay,
+  Maximize2,
+  Palette,
+  Rectangle,
+  Sun,
+  Moon,
   getModuleIconComponent,
 } from './Icons.jsx';
 
@@ -125,16 +134,26 @@ const PAGE_WIDTH_CLASSES = {
   full: 'max-w-none',
 };
 
+const renderSidebarStyleIcon = (IconComponent, label) => (
+  <span
+    title={label}
+    aria-label={label}
+    className="inline-flex h-4 w-4 items-center justify-center"
+  >
+    <IconComponent className="h-3.5 w-3.5" />
+  </span>
+);
+
 const PAGE_WIDTH_OPTIONS = [
-  { value: 'standard', label: '标准' },
-  { value: 'wide', label: '宽屏' },
-  { value: 'full', label: '全宽' },
+  { value: 'standard', label: renderSidebarStyleIcon(Rectangle, '标准宽度'), className: 'w-full !justify-center !px-0' },
+  { value: 'wide', label: renderSidebarStyleIcon(Columns, '宽屏宽度'), className: 'w-full !justify-center !px-0' },
+  { value: 'full', label: renderSidebarStyleIcon(Maximize2, '全宽'), className: 'w-full !justify-center !px-0' },
 ];
 
 const THEME_MODE_OPTIONS = [
-  { value: 'auto', label: '自动' },
-  { value: 'light', label: '浅色' },
-  { value: 'dark', label: '深色' },
+  { value: 'auto', label: renderSidebarStyleIcon(DesktopDisplay, '自动跟随系统'), className: 'w-full !justify-center !px-0' },
+  { value: 'light', label: renderSidebarStyleIcon(Sun, '浅色模式'), className: 'w-full !justify-center !px-0' },
+  { value: 'dark', label: renderSidebarStyleIcon(Moon, '深色模式'), className: 'w-full !justify-center !px-0' },
 ];
 
 const useMobileClosingNavigation = (onNavigate) => {
@@ -271,7 +290,7 @@ const SidebarBrand = ({ onHome }) => (
   <button
     type="button"
     onClick={onHome}
-    className="flex h-full w-full min-w-0 items-center gap-2.5 rounded-md text-left outline-none transition-colors hover:bg-kumo-recessed/45 focus-visible:ring-2 focus-visible:ring-kumo-brand/45"
+    className="flex h-full w-full min-w-0 items-center gap-2.5 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-kumo-brand/45"
     aria-label="返回首页"
   >
     <span className="flex size-9 shrink-0 items-center justify-center">
@@ -289,33 +308,71 @@ const SidebarStyleSwitches = ({
   themeMode,
   onThemeModeChange,
 }) => {
-  const { isMobile, state } = useSidebar();
-
-  if (!isMobile && state === 'collapsed') return null;
+  const controlRowClassName = [
+    'group/menu-button relative flex w-full min-w-0 items-center gap-2.5 rounded-lg text-kumo-default',
+    'before:absolute before:inset-x-0 before:-inset-y-px',
+    'min-h-8.5 px-3 py-0 text-sm transition-[color,box-shadow,outline] duration-(--sidebar-animation-duration)',
+    'hover:bg-transparent',
+    'active:bg-transparent',
+    'focus-within:bg-transparent',
+  ].join(' ');
+  const controlRowInnerClassName = [
+    'flex flex-1 min-w-0 items-center gap-3',
+    'translate-x-[-3px] group-not-data-[state=collapsed]/sidebar:translate-x-0',
+    'transition-transform duration-(--sidebar-animation-duration)',
+  ].join(' ');
 
   return (
     <Sidebar.Group className="mt-auto">
       <Sidebar.GroupLabel>样式切换</Sidebar.GroupLabel>
-      <div className="flex flex-col gap-2 px-2">
-        <Tabs
-          variant="segmented"
-          size="sm"
-          className="w-fit max-w-full"
-          listClassName="w-fit max-w-full"
-          value={pageWidthMode}
-          onValueChange={onPageWidthChange}
-          tabs={PAGE_WIDTH_OPTIONS}
-        />
-        <Tabs
-          variant="segmented"
-          size="sm"
-          className="w-fit max-w-full"
-          listClassName="w-fit max-w-full"
-          value={themeMode}
-          onValueChange={onThemeModeChange}
-          tabs={THEME_MODE_OPTIONS}
-        />
-      </div>
+      <Sidebar.Menu>
+        <Sidebar.MenuItem>
+          <div className={controlRowClassName} data-sidebar="menu-button">
+            <div className={controlRowInnerClassName}>
+              <span
+                className="h-4 w-4 shrink-0 opacity-40"
+                title="页面宽度"
+                aria-label="页面宽度"
+              >
+                <AppWindow className="h-4 w-4" />
+              </span>
+              <div className="sidebar-style-tabs min-w-0 flex-1 group-data-[state=collapsed]/sidebar:hidden">
+                <Tabs
+                  {...TOOL_TABS_PROPS}
+                  className="w-full min-w-0"
+                  listClassName="grid w-full grid-cols-3"
+                  value={pageWidthMode}
+                  onValueChange={onPageWidthChange}
+                  tabs={PAGE_WIDTH_OPTIONS}
+                />
+              </div>
+            </div>
+          </div>
+        </Sidebar.MenuItem>
+        <Sidebar.MenuItem>
+          <div className={controlRowClassName} data-sidebar="menu-button">
+            <div className={controlRowInnerClassName}>
+              <span
+                className="h-4 w-4 shrink-0 opacity-40"
+                title="主题模式"
+                aria-label="主题模式"
+              >
+                <Palette className="h-4 w-4" />
+              </span>
+              <div className="sidebar-style-tabs min-w-0 flex-1 group-data-[state=collapsed]/sidebar:hidden">
+                <Tabs
+                  {...TOOL_TABS_PROPS}
+                  className="w-full min-w-0"
+                  listClassName="grid w-full grid-cols-3"
+                  value={themeMode}
+                  onValueChange={onThemeModeChange}
+                  tabs={THEME_MODE_OPTIONS}
+                />
+              </div>
+            </div>
+          </div>
+        </Sidebar.MenuItem>
+      </Sidebar.Menu>
     </Sidebar.Group>
   );
 };
@@ -424,6 +481,12 @@ function MainLayout() {
     }
   }, [mainActiveTab, moduleOrder, moduleVisibility, setMainActiveTab, userSettingsLoaded]);
 
+  const viewportWorkspaceModule = ['apidocs', 'systemlogs', 'settings'].includes(mainActiveTab);
+  const mainCanvasClassName = viewportWorkspaceModule
+    ? 'flex-1 overflow-hidden p-3 sm:p-4 lg:px-8 lg:pb-6 lg:pt-3'
+    : 'flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 lg:px-8 lg:pb-6 lg:pt-3 scrollbar-thin';
+  const mainCanvasInnerClassName = `mx-auto flex w-full min-w-0 flex-col ${viewportWorkspaceModule ? 'h-full min-h-0' : 'min-h-full'} ${pageWidthClass}`;
+
   // 渲染当前模块页
   const renderActivePage = () => {
     switch (mainActiveTab) {
@@ -488,6 +551,7 @@ function MainLayout() {
       defaultOpen={!sidebarCollapsed}
       open={!sidebarCollapsed}
       onOpenChange={(open) => setSidebarCollapsed(!open)}
+      peekable
       style={{
         '--sidebar-width': '12.5rem',
         '--sidebar-width-icon': '54px',
@@ -614,8 +678,8 @@ function MainLayout() {
           </header>
 
           {/* 主内容画布 */}
-          <main className="flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 lg:px-8 lg:pb-6 lg:pt-3 scrollbar-thin">
-            <div className={`mx-auto flex min-h-full w-full min-w-0 flex-col ${pageWidthClass}`}>
+          <main className={mainCanvasClassName}>
+            <div className={mainCanvasInnerClassName}>
               <ModuleErrorBoundary moduleId={mainActiveTab}>
                 <Suspense fallback={<PageLoadingFallback />}>
                   {renderActivePage()}
