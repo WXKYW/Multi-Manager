@@ -14,6 +14,7 @@ import {
 import { CanvasRenderer } from 'echarts/renderers';
 import { io } from 'socket.io-client';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
+import { useCloudflareSpotlight } from '../hooks/useCloudflareSpotlight.js';
 import useStore from '../store.js';
 import {
   Activity,
@@ -216,6 +217,7 @@ function CompactHeartbeatStrip({ beats }) {
 
 function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
   const slug = useMemo(() => normalizePublicPath(), []);
+  const surfaceRef = useCloudflareSpotlight();
   const theme = useStore((state) => state.theme);
   const isDarkMode = theme === 'dark';
   const [page, setPage] = useState(null);
@@ -313,8 +315,9 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
       : '全部服务运行正常';
 
   return (
-    <div className="public-status-page min-h-screen text-kumo-default">
-      <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-4 py-6 sm:px-6 lg:px-8">
+    <div ref={surfaceRef} className="cf-ai-background-surface public-status-page relative isolate min-h-screen text-kumo-default">
+      <div aria-hidden="true" className="cf-ai-background pointer-events-none absolute inset-0" />
+      <main className="relative z-10 mx-auto flex min-h-screen w-full max-w-5xl flex-col px-4 py-6 sm:px-6 lg:px-8">
         <div className="mb-6 flex items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-kumo-interact/80 bg-kumo-base text-kumo-brand">

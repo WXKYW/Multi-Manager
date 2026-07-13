@@ -5,6 +5,7 @@ import { Button } from '@cloudflare/kumo/components/button';
 import { AlertTriangle, Globe, RefreshCw, Server, Shield } from '../components/Icons.jsx';
 import CountryFlag from '../components/CountryFlag.jsx';
 import ServerLocationMap from '../components/server/ServerLocationMap.jsx';
+import { useCloudflareSpotlight } from '../hooks/useCloudflareSpotlight.js';
 import { resolveServerDisplayStatus } from '../modules/serverRealtime.js';
 import { FLOW_UNIT_BADGE_CLASS, getFlowUnitClassName } from '../modules/flowUnits.js';
 import { TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
@@ -338,14 +339,14 @@ function FlowArrow({ children }) {
 function FlowPair({ left, right, leftTitle, rightTitle, kind = 'speed', suffix = '' }) {
   const kindClass = FLOW_KIND_CLASS[kind] || FLOW_KIND_CLASS.speed;
   return (
-    <div className={`grid h-[22px] min-w-0 grid-cols-[minmax(0,1fr)_1px_minmax(0,1fr)] items-center overflow-hidden rounded-md border px-0.5 text-xs font-bold tabular-nums leading-none text-kumo-strong ${kindClass.box}`}>
-      <div className="flex min-w-0 items-center justify-end gap-0.5 px-0.5" title={leftTitle || formatFlowPart(left, suffix)}>
+    <div className={`grid h-6 min-w-0 grid-cols-[minmax(0,1fr)_1px_minmax(0,1fr)] items-center overflow-hidden rounded-md border px-1 text-xs font-bold tabular-nums leading-none text-kumo-strong ${kindClass.box}`}>
+      <div className="flex min-w-0 items-center justify-end gap-1 px-0.5" title={leftTitle || formatFlowPart(left, suffix)}>
         <span className="min-w-[2.6rem] truncate text-right text-[13px]">{left.num}</span>
         <FlowUnitBadge unit={left.unit} suffix={suffix} />
         <FlowArrow>↓</FlowArrow>
       </div>
       <span aria-hidden="true" className="h-full w-px bg-kumo-line/80" />
-      <div className="flex min-w-0 items-center justify-start gap-0.5 px-0.5" title={rightTitle || formatFlowPart(right, suffix)}>
+      <div className="flex min-w-0 items-center justify-start gap-1 px-0.5" title={rightTitle || formatFlowPart(right, suffix)}>
         <FlowArrow>↑</FlowArrow>
         <FlowUnitBadge unit={right.unit} suffix={suffix} />
         <span className="min-w-[2.6rem] truncate text-left text-[13px]">{right.num}</span>
@@ -357,7 +358,7 @@ function FlowPair({ left, right, leftTitle, rightTitle, kind = 'speed', suffix =
 function FlowRow({ label, left, right, leftTitle, rightTitle, kind = 'speed', suffix = '' }) {
   const kindClass = FLOW_KIND_CLASS[kind] || FLOW_KIND_CLASS.speed;
   return (
-    <div className="grid min-h-0 min-w-0 grid-cols-[2rem_minmax(0,1fr)] items-center gap-1.5">
+    <div className="grid h-full min-h-0 min-w-0 grid-cols-[2rem_minmax(0,1fr)] items-center gap-1.5">
       <span className={`text-xs font-bold leading-none ${kindClass.label}`}>{label}</span>
       <FlowPair left={left} right={right} leftTitle={leftTitle} rightTitle={rightTitle} kind={kind} suffix={suffix} />
     </div>
@@ -366,8 +367,8 @@ function FlowRow({ label, left, right, leftTitle, rightTitle, kind = 'speed', su
 
 function NetworkTrafficPanel({ speedLeft, speedRight, totalLeft, totalRight, speedLeftTitle, speedRightTitle, totalLeftTitle, totalRightTitle }) {
   return (
-    <div className="h-16 min-w-0 rounded-md border border-kumo-interact/80 bg-kumo-recessed/35 px-2 py-1.5">
-      <div className="grid h-full min-w-0 grid-rows-[22px_auto_22px] items-center gap-0.5">
+    <div className="h-16 min-w-0 rounded-md border border-kumo-interact/80 bg-kumo-recessed/35 px-2 py-1">
+      <div className="grid h-full min-w-0 grid-rows-[1fr_1px_1fr] items-center gap-0">
         <FlowRow label="网速" left={speedLeft} right={speedRight} leftTitle={speedLeftTitle} rightTitle={speedRightTitle} kind="speed" />
         <div className="h-px bg-kumo-line/80" />
         <FlowRow label="流量" left={totalLeft} right={totalRight} leftTitle={totalLeftTitle} rightTitle={totalRightTitle} kind="traffic" />
@@ -481,6 +482,7 @@ function ServerCard({ server }) {
 
 function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
   const slug = useMemo(() => normalizePublicPath(), []);
+  const surfaceRef = useCloudflareSpotlight();
   const [page, setPage] = useState(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -615,8 +617,9 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
     : 'grid gap-3 md:grid-cols-2 xl:grid-cols-3';
 
   return (
-    <div className="public-server-status-page min-h-screen text-kumo-default">
-      <main className={`mx-auto flex min-h-screen w-full ${pageMaxWidthClass} flex-col px-4 py-6 sm:px-6 lg:px-8`}>
+    <div ref={surfaceRef} className="cf-ai-background-surface public-server-status-page relative isolate min-h-screen text-kumo-default">
+      <div aria-hidden="true" className="cf-ai-background pointer-events-none absolute inset-0" />
+      <main className={`relative z-10 mx-auto flex min-h-screen w-full ${pageMaxWidthClass} flex-col px-4 py-6 sm:px-6 lg:px-8`}>
         <header className="mb-6 flex items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-kumo-line bg-kumo-base text-kumo-brand">
