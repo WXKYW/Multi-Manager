@@ -2932,6 +2932,28 @@ function ServerPage() {
     }
   };
 
+  const refreshServerLocationsAndList = async () => {
+    setServerLoading(true);
+    try {
+      const response = await fetch('/api/server/accounts/refresh-locations', {
+        method: 'POST',
+        cache: 'no-store',
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.success === false) {
+        throw new Error(data.error || data.message || '刷新地理位置失败');
+      }
+      await loadServerList({ silent: true });
+      const updated = Number(data.data?.updated ?? data.updated ?? 0);
+      toast.success(updated > 0 ? `已刷新 ${updated} 台主机地理位置` : '地理位置已是最新缓存');
+    } catch (error) {
+      console.error('刷新地理位置失败:', error);
+      toast.error(error.message || '刷新地理位置失败');
+    } finally {
+      setServerLoading(false);
+    }
+  };
+
   const loadServerStatusPages = async () => {
     setServerStatusPagesLoading(true);
     try {
@@ -7396,10 +7418,10 @@ function ServerPage() {
                 shape="square" size="sm"
                 variant="secondary"
                 icon={<RefreshCw className="w-3.5 h-3.5" />}
-                onClick={loadServerList}
+                onClick={refreshServerLocationsAndList}
                 loading={serverLoading}
-                title="刷新列表"
-                aria-label="刷新列表"
+                title="刷新列表和地理位置"
+                aria-label="刷新列表和地理位置"
               />
               <Button shape="square" size="sm"
                 variant="secondary"

@@ -490,23 +490,14 @@ func (s *Service) handleAgentHeartbeat(w http.ResponseWriter, r *http.Request, d
 		}
 	}
 
-	hasLat := getString(req.Info, "latitude") != ""
-	hasLon := getString(req.Info, "longitude") != ""
-	if !hasLat || !hasLon {
-		if ip := getString(req.Info, "ip"); ip != "" {
-			if geo, ok := s.lookupHostLocation(r.Context(), ip); ok {
-				for key, value := range geo {
-					if getString(req.Info, key) == "" {
-						req.Info[key] = value
-					}
-				}
-				if !hasLat && geo["latitude"] != nil {
-					req.Info["latitude"] = geo["latitude"]
-				}
-				if !hasLon && geo["longitude"] != nil {
-					req.Info["longitude"] = geo["longitude"]
-				}
-			}
+	existingInfo := map[string]interface{}{}
+	var existingCachedInfo string
+	if err := db.QueryRowContext(r.Context(), "SELECT COALESCE(cached_info, '{}') FROM server_accounts WHERE id = ?", req.ServerID).Scan(&existingCachedInfo); err == nil {
+		_ = json.Unmarshal([]byte(existingCachedInfo), &existingInfo)
+	}
+	for key, value := range existingInfo {
+		if _, exists := req.Info[key]; !exists {
+			req.Info[key] = value
 		}
 	}
 

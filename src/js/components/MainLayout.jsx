@@ -591,7 +591,7 @@ function MainLayout() {
       onOpenChange={(open) => setSidebarCollapsed(!open)}
       peekable
       style={{
-        '--sidebar-width': '12.5rem',
+        '--sidebar-width': '11.5rem',
         '--sidebar-width-icon': '57px',
       }}
       className="app-main-shell flex h-screen w-screen overflow-hidden text-kumo-default"

@@ -332,12 +332,6 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
           </Button>
         </div>
 
-        {loading && (
-          <div className="public-status-card flex flex-1 items-center justify-center rounded-lg border border-kumo-interact/80 bg-kumo-base p-10 text-sm text-kumo-subtle">
-            正在加载状态页...
-          </div>
-        )}
-
         {!loading && error && (
           <div className="public-status-card flex flex-1 flex-col items-center justify-center rounded-lg border border-kumo-interact/80 bg-kumo-base p-10 text-center">
             <AlertTriangle className="mb-3 h-9 w-9 text-kumo-warning" />

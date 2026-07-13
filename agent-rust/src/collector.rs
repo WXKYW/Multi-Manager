@@ -24,7 +24,34 @@ pub struct HostInfo {
     pub boot_time: i64,
     pub ip: String,
     pub country_code: String,
+    pub country: String,
+    pub region: String,
+    pub city: String,
+    pub location: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latitude: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub longitude: Option<f64>,
+    pub org: String,
+    pub isp: String,
+    pub asn: String,
+    pub timezone: String,
+    pub geo_source: String,
     pub agent_version: String,
+}
+
+#[derive(Debug, Clone, Default)]
+struct PublicGeo {
+    ip: String,
+    city: String,
+    region: String,
+    country_code: String,
+    country: String,
+    latitude: Option<f64>,
+    longitude: Option<f64>,
+    org: String,
+    asn: String,
+    timezone: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -249,7 +276,7 @@ impl Collector {
         }
 
         let boot_time = System::boot_time() as i64;
-        let ip = get_public_ip().await;
+        let public_geo = get_public_geo().await;
 
         // GPU detection
         let (gpu_models, gpu_mem_total) = self.collect_gpu_metadata();
@@ -269,8 +296,19 @@ impl Collector {
             arch,
             virtualization: String::new(), // Optional
             boot_time,
-            ip,
-            country_code: String::new(),
+            ip: public_geo.ip.clone(),
+            country_code: public_geo.country_code.clone(),
+            country: public_geo.country.clone(),
+            region: public_geo.region.clone(),
+            city: public_geo.city.clone(),
+            location: public_geo.location(),
+            latitude: public_geo.latitude,
+            longitude: public_geo.longitude,
+            org: public_geo.org.clone(),
+            isp: public_geo.org.clone(),
+            asn: public_geo.asn.clone(),
+            timezone: public_geo.timezone.clone(),
+            geo_source: public_geo.source(),
             agent_version: version.to_string(),
         };
 
@@ -935,6 +973,36 @@ $items | Where-Object { $_ }
     }
 }
 
+async fn get_public_geo() -> PublicGeo {
+    let endpoints = vec![
+        "https://64.ipcheck.ing/geo",
+        "https://4.ipcheck.ing/geo",
+        "https://6.ipcheck.ing/geo",
+    ];
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap_or_default();
+
+    for endpoint in endpoints {
+        if let Ok(resp) = client.get(endpoint).send().await {
+            if resp.status().is_success() {
+                if let Ok(text) = resp.text().await {
+                    let geo = parse_ipcheck_geo(&text);
+                    if geo.has_valid_ip() {
+                        return geo;
+                    }
+                }
+            }
+        }
+    }
+
+    PublicGeo {
+        ip: get_public_ip().await,
+        ..PublicGeo::default()
+    }
+}
+
 async fn get_public_ip() -> String {
     let endpoints = vec![
         "https://ip.sb",
@@ -959,6 +1027,80 @@ async fn get_public_ip() -> String {
         }
     }
     String::new()
+}
+
+fn parse_ipcheck_geo(text: &str) -> PublicGeo {
+    let mut geo = PublicGeo::default();
+
+    for line in text.lines() {
+        let Some((raw_key, raw_value)) = line.split_once(':') else {
+            continue;
+        };
+        let key = raw_key.trim().to_ascii_lowercase();
+        let value = normalize_geo_value(raw_value);
+        if value.is_empty() {
+            continue;
+        }
+
+        match key.as_str() {
+            "ip" => geo.ip = value,
+            "city" => geo.city = value,
+            "region" => geo.region = value,
+            "country" => {
+                geo.country_code = value.to_ascii_lowercase();
+                geo.country = value;
+            }
+            "latitude" => geo.latitude = value.parse::<f64>().ok(),
+            "longitude" => geo.longitude = value.parse::<f64>().ok(),
+            "org" => geo.org = value,
+            "timezone" => geo.timezone = value,
+            "asn" => geo.asn = value,
+            _ => {}
+        }
+    }
+
+    geo
+}
+
+fn normalize_geo_value(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("n/a") {
+        String::new()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+impl PublicGeo {
+    fn has_valid_ip(&self) -> bool {
+        self.ip.parse::<std::net::IpAddr>().is_ok()
+    }
+
+    fn has_coordinates(&self) -> bool {
+        self.latitude.is_some() && self.longitude.is_some()
+    }
+
+    fn location(&self) -> String {
+        let mut parts = Vec::new();
+        for value in [&self.city, &self.region, &self.country] {
+            if !value.is_empty() && !parts.iter().any(|part: &&String| *part == value) {
+                parts.push(value);
+            }
+        }
+        parts
+            .into_iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    fn source(&self) -> String {
+        if self.has_coordinates() {
+            "ipcheck".to_string()
+        } else {
+            String::new()
+        }
+    }
 }
 
 fn current_epoch_ms() -> u64 {
@@ -1093,7 +1235,10 @@ fn should_count_network_interface(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{aggregate_network_totals, format_cpu_model, should_count_network_interface};
+    use super::{
+        aggregate_network_totals, format_cpu_model, parse_ipcheck_geo,
+        should_count_network_interface,
+    };
 
     #[test]
     fn format_cpu_model_includes_physical_core_count() {
@@ -1162,5 +1307,35 @@ mod tests {
         ] {
             assert!(!should_count_network_interface(name), "{name}");
         }
+    }
+
+    #[test]
+    fn parse_ipcheck_geo_extracts_stable_coordinates() {
+        let geo = parse_ipcheck_geo(
+            r#"IP: 64.181.246.5
+City: San Jose
+Region: California
+Country: US
+Flag: 🇺🇸
+Latitude: 37.33939
+Longitude: -121.89496
+Org: Oracle Corporation
+Timezone: America/Los_Angeles
+ASN: AS31898
+RiskScore: 0
+TrustedBot: false"#,
+        );
+
+        assert_eq!(geo.ip, "64.181.246.5");
+        assert_eq!(geo.city, "San Jose");
+        assert_eq!(geo.region, "California");
+        assert_eq!(geo.country_code, "us");
+        assert_eq!(geo.latitude, Some(37.33939));
+        assert_eq!(geo.longitude, Some(-121.89496));
+        assert_eq!(geo.org, "Oracle Corporation");
+        assert_eq!(geo.asn, "AS31898");
+        assert_eq!(geo.timezone, "America/Los_Angeles");
+        assert_eq!(geo.location(), "San Jose, California, US");
+        assert_eq!(geo.source(), "ipcheck");
     }
 }

@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { BubbleMap } from '@cloudflare/kumo';
 import { feature } from 'topojson-client';
 import worldCountries from 'world-atlas/countries-110m.json';
@@ -38,36 +38,34 @@ const STATUS_COLORS = {
   warning: '#F8A054',
 };
 
-const COUNTRY_CENTERS = {
-  au: [-25.27, 133.77],
-  ca: [56.13, -106.35],
-  cn: [35.86, 104.2],
-  de: [51.17, 10.45],
-  fr: [46.23, 2.21],
-  gb: [55.38, -3.44],
-  hk: [22.32, 114.17],
-  jp: [36.2, 138.25],
-  kr: [35.91, 127.77],
-  nl: [52.13, 5.29],
-  sg: [1.35, 103.82],
-  tw: [23.7, 120.96],
-  us: [37.09, -95.71],
+const STATUS_LABELS = {
+  online: '在线',
+  offline: '离线',
+  interrupted: '中断',
+  degraded: '异常',
+  warning: '预警',
 };
 
-const COUNTRY_KEYWORDS = {
-  au: ['australia', '澳大利亚'],
-  ca: ['canada', '加拿大'],
-  cn: ['china', '中国'],
-  de: ['germany', 'frankfurt', '德国'],
-  fr: ['france', 'paris', '法国'],
-  gb: ['united kingdom', 'uk', 'london', '英国'],
-  hk: ['hong kong', '香港'],
-  jp: ['japan', 'tokyo', '日本'],
-  kr: ['korea', '韩国'],
-  nl: ['netherlands', 'holland', 'amsterdam', '荷兰'],
-  sg: ['singapore', '新加坡'],
-  tw: ['taiwan', '台湾'],
-  us: ['united states', 'usa', 'america', '美国'],
+const getDocumentDarkMode = () => {
+  if (typeof document === 'undefined') return false;
+  const root = document.documentElement;
+  return root.dataset.mode === 'dark' || root.classList.contains('dark');
+};
+
+const useDocumentDarkMode = () => {
+  const [isDarkMode, setIsDarkMode] = useState(getDocumentDarkMode);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+    const root = document.documentElement;
+    const update = () => setIsDarkMode(getDocumentDarkMode());
+    update();
+    const observer = new MutationObserver(update);
+    observer.observe(root, { attributes: true, attributeFilter: ['data-mode', 'class'] });
+    return () => observer.disconnect();
+  }, []);
+
+  return isDarkMode;
 };
 
 const toFiniteNumber = (value) => {
@@ -81,27 +79,6 @@ const firstNumber = (...values) => {
     if (number !== null) return number;
   }
   return null;
-};
-
-const inferCountryCode = (server) => {
-  const info = server?.info || {};
-  const values = [
-    server?.countryCode,
-    server?.country_code,
-    server?.country,
-    server?.resolved_country,
-    server?.location,
-    server?.region,
-    info.country_code,
-    info.country,
-    info.resolved_country,
-    info.location,
-    info.region,
-  ].map(value => String(value || '').trim()).filter(Boolean);
-  const direct = values.find(value => /^[a-z]{2}$/i.test(value));
-  if (direct) return direct.toLowerCase();
-  const text = values.join(' ').toLowerCase();
-  return Object.entries(COUNTRY_KEYWORDS).find(([, keywords]) => keywords.some(keyword => text.includes(keyword)))?.[0] || '';
 };
 
 const escapeHtml = (value) => String(value ?? '')
@@ -120,19 +97,69 @@ const getServerCoordinates = (server) => {
     if (Math.abs(lat) > 90 && Math.abs(lon) <= 90) return { lat: lon, lon: lat };
     return { lat, lon };
   }
-  const countryCode = inferCountryCode(server);
-  const countryCenter = COUNTRY_CENTERS[countryCode];
-  return countryCenter ? { lat: countryCenter[0], lon: countryCenter[1] } : null;
+  return null;
+};
+
+const STATUS_PRIORITY = ['interrupted', 'degraded', 'warning', 'offline', 'online'];
+
+const getGroupStatus = (items) => STATUS_PRIORITY.find((status) => items.some((item) => item.status === status)) || 'offline';
+
+const getLocationLabel = (items) => {
+  const first = items[0] || {};
+  const info = first.info || {};
+  return first.location
+    || first.region
+    || first.country
+    || info.location
+    || info.region
+    || info.country
+    || `${first.lat.toFixed(2)}, ${first.lon.toFixed(2)}`;
+};
+
+const formatServerListTooltip = (row) => {
+  const servers = Array.isArray(row.servers) ? row.servers : [row];
+  const preview = servers.slice(0, 8);
+  const remaining = servers.length - preview.length;
+  const statusCounts = servers.reduce((acc, server) => {
+    acc[server.status] = (acc[server.status] || 0) + 1;
+    return acc;
+  }, {});
+  const statusSummary = STATUS_PRIORITY
+    .filter((status) => statusCounts[status])
+    .map((status) => `${statusCounts[status]} ${STATUS_LABELS[status] || status}`)
+    .join(' · ');
+
+  const listHtml = preview.map((server) => {
+    const host = server.host ? `<span style="color:var(--text-color-kumo-subtle);font-size:11px;">${escapeHtml(server.host)}</span>` : '';
+    return `<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;min-height:22px;padding:2px 0;">
+      <div style="display:flex;min-width:0;flex-direction:column;gap:1px;">
+        <span style="font-size:12px;color:var(--text-color-kumo-strong);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(server.name)}</span>
+        ${host}
+      </div>
+      <span style="width:7px;height:7px;border-radius:999px;background:${STATUS_COLORS[server.status] || '#4290F0'};box-shadow:0 0 0 1px rgba(255,255,255,.45);"></span>
+    </div>`;
+  }).join('');
+
+  const moreHtml = remaining > 0
+    ? `<div style="padding-top:4px;color:var(--text-color-kumo-subtle);font-size:11px;">还有 ${remaining} 台主机</div>`
+    : '';
+
+  return `<div style="display:flex;min-width:190px;max-width:260px;flex-direction:column;gap:8px;">
+    <div style="display:flex;flex-direction:column;gap:2px;">
+      <strong style="font-size:13px;color:var(--text-color-kumo-strong);">${escapeHtml(row.name)}</strong>
+      <span style="color:var(--text-color-kumo-subtle);font-size:12px;">${servers.length} 台主机${statusSummary ? ` · ${escapeHtml(statusSummary)}` : ''}</span>
+    </div>
+    <div style="display:flex;flex-direction:column;border-top:1px solid var(--border-color-kumo-line);padding-top:5px;">${listHtml}${moreHtml}</div>
+  </div>`;
 };
 
 function ServerLocationMap({
   echarts,
   servers,
   resolveStatus,
-  title = '主机地图',
-  subtitle = '按经纬度展示已定位主机',
   height = 190,
 }) {
+  const isDarkMode = useDocumentDarkMode();
   const points = useMemo(() => {
     const rawPoints = (Array.isArray(servers) ? servers : [])
       .map((server) => {
@@ -143,6 +170,9 @@ function ServerLocationMap({
           id: server?.id,
           name: server?.name || server?.host || server?.id || '主机',
           host: server?.host || '',
+          location: server?.location || server?.resolved_country || info.location || info.region || '',
+          region: server?.region || info.region || '',
+          country: server?.country || server?.countryCode || server?.country_code || info.country || info.country_code || '',
           status,
           value: 1,
           ...coordinates,
@@ -160,35 +190,22 @@ function ServerLocationMap({
       groups[key].push(point);
     });
 
-    const result = [];
-    Object.values(groups).forEach((group) => {
-      if (group.length === 1) {
-        result.push(group[0]);
-      } else {
-        // Spreading overlapping points in a small circle around the center coordinate
-        const radius = 0.35;
-        group.forEach((point, idx) => {
-          const angle = (idx * 2 * Math.PI) / group.length;
-          result.push({
-            ...point,
-            lat: point.lat + radius * Math.sin(angle),
-            lon: point.lon + radius * Math.cos(angle),
-          });
-        });
-      }
+    return Object.values(groups).map((group) => {
+      const first = group[0];
+      const status = getGroupStatus(group);
+      return {
+        ...first,
+        id: group.map((item) => item.id).filter(Boolean).join(',') || first.id,
+        name: group.length > 1 ? getLocationLabel(group) : first.name,
+        status,
+        value: group.length,
+        servers: group,
+      };
     });
-
-    return result;
   }, [servers, resolveStatus]);
 
   return (
     <section className="overflow-hidden rounded-md border border-kumo-line bg-kumo-base">
-      <div className="flex items-center justify-between gap-3 border-b border-kumo-line px-3 py-1.5">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-kumo-strong">{title}</div>
-          <div className="truncate text-[10px] text-kumo-subtle">{subtitle} · {points.length}/{Array.isArray(servers) ? servers.length : 0}</div>
-        </div>
-      </div>
       <div className="bg-kumo-recessed/20 px-2 py-1.5">
         <BubbleMap
           echarts={echarts}
@@ -200,16 +217,14 @@ function ServerLocationMap({
           name="name"
           value="value"
           minRadius={5}
-          maxRadius={8}
+          maxRadius={15}
           bubbleColor={(row) => STATUS_COLORS[row.status] || '#4290F0'}
-          bubbleBorderColor="#ffffff"
+          bubbleBorderColor={isDarkMode ? 'rgba(255,255,255,0.76)' : '#ffffff'}
           bubbleBorderWidth={1}
           height={height}
           zoom={1.15}
-          tooltipFormatter={(row) => {
-            const host = row.host ? `<span style="color:var(--text-color-kumo-subtle)">${escapeHtml(row.host)}</span>` : '';
-            return `<div style="display:flex;flex-direction:column;gap:2px;"><strong>${escapeHtml(row.name)}</strong>${host}</div>`;
-          }}
+          isDarkMode={isDarkMode}
+          tooltipFormatter={formatServerListTooltip}
         />
       </div>
     </section>

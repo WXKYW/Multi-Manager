@@ -1005,6 +1005,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.listAccounts(w, r, db)
 	case len(parts) == 1 && parts[0] == "accounts" && r.Method == http.MethodPost:
 		s.createAccount(w, r, db)
+	case len(parts) == 2 && parts[0] == "accounts" && parts[1] == "refresh-locations" && r.Method == http.MethodPost:
+		s.refreshAccountLocations(w, r, db)
 	case len(parts) == 2 && parts[0] == "accounts" && parts[1] == "export" && r.Method == http.MethodGet:
 		s.exportAccounts(w, r, db)
 	case len(parts) == 2 && parts[0] == "accounts" && parts[1] == "import" && r.Method == http.MethodPost:
@@ -2689,10 +2691,6 @@ func writeLogsWithPagination(w http.ResponseWriter, logs []map[string]interface{
 // ==========================================
 
 func (s *Service) listAccounts(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	if err := s.refreshMissingAccountLocations(r.Context(), db); err != nil {
-		applog.Warn(r.Context(), "serveragent", "failed to refresh server locations", "error", err.Error())
-	}
-
 	rows, err := db.QueryContext(r.Context(), "SELECT id, name, host, port, username, auth_type, password, private_key, passphrase, status, monitor_mode, last_check_time, last_check_status, response_time, cached_info, tags, description, country, resolved_country, starts_at, expires_at, order_index, created_at, traffic_limit_bytes, COALESCE(traffic_limit_mode, 'total'), traffic_alert_enabled, traffic_alert_percent, traffic_cycle_type, traffic_cycle_day, traffic_cycle_start, traffic_cycle_end, updated_at FROM server_accounts ORDER BY order_index ASC, created_at DESC")
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
@@ -2715,52 +2713,70 @@ func (s *Service) listAccounts(w http.ResponseWriter, r *http.Request, db *sql.D
 	response.OK(w, list)
 }
 
-func (s *Service) refreshMissingAccountLocations(ctx context.Context, db *sql.DB) error {
-	rows, err := db.QueryContext(ctx, "SELECT id, host, country, resolved_country, cached_info FROM server_accounts")
+func (s *Service) refreshAccountLocations(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	updated, skipped, err := s.refreshAccountLocationsFromAgents(r.Context(), db)
 	if err != nil {
-		return err
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.OK(w, map[string]interface{}{"updated": updated, "skipped": skipped})
+}
+
+func (s *Service) refreshAccountLocationsFromAgents(ctx context.Context, db *sql.DB) (int, int, error) {
+	rows, err := db.QueryContext(ctx, "SELECT id, cached_info FROM server_accounts")
+	if err != nil {
+		return 0, 0, err
 	}
 	defer rows.Close()
 
 	type candidate struct {
-		id              string
-		host            string
-		country         sql.NullString
-		resolvedCountry sql.NullString
-		cachedInfo      sql.NullString
+		id         string
+		cachedInfo sql.NullString
 	}
 	var candidates []candidate
 	for rows.Next() {
 		var item candidate
-		if err := rows.Scan(&item.id, &item.host, &item.country, &item.resolvedCountry, &item.cachedInfo); err != nil {
-			return err
+		if err := rows.Scan(&item.id, &item.cachedInfo); err != nil {
+			return 0, 0, err
 		}
-		if accountNeedsLocation(item.country, item.resolvedCountry, item.cachedInfo) {
-			candidates = append(candidates, item)
-		}
+		candidates = append(candidates, item)
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return 0, 0, err
 	}
 
 	now := time.Now().Format(time.RFC3339)
+	updated := 0
+	skipped := 0
 	for _, item := range candidates {
-		geo, ok := s.lookupHostLocation(ctx, item.host)
+		if _, ok := s.registry.Get(item.id); !ok {
+			skipped++
+			continue
+		}
+		output, err := s.RunCommandTaskAndWait(item.id, "curl -fsSL https://64.ipcheck.ing/geo", 15*time.Second)
+		if err != nil {
+			skipped++
+			applog.Warn(ctx, "serveragent", "failed to refresh location from agent", "server_id", item.id, "error", err.Error())
+			continue
+		}
+		geo, ok := parseIPCheckGeo(output)
 		if !ok {
+			skipped++
 			continue
 		}
 		cachedInfo := mergeCachedInfo(item.cachedInfo, geo)
-		_, err := db.ExecContext(ctx, `
+		_, err = db.ExecContext(ctx, `
 			UPDATE server_accounts
 			SET resolved_country = ?, cached_info = ?, updated_at = ?
 			WHERE id = ?`,
-			getString(geo, "region"), cachedInfo, now, item.id,
+			firstNonEmpty(getString(geo, "location"), getString(geo, "region"), getString(geo, "country_code")), cachedInfo, now, item.id,
 		)
 		if err != nil {
-			return err
+			return updated, skipped, err
 		}
+		updated++
 	}
-	return nil
+	return updated, skipped, nil
 }
 
 func (s *Service) getAccount(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {

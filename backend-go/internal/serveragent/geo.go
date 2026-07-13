@@ -360,6 +360,56 @@ func mergeCachedInfo(raw sql.NullString, updates map[string]interface{}) string 
 	return string(encoded)
 }
 
+func parseIPCheckGeo(text string) (map[string]interface{}, bool) {
+	fields := map[string]string{}
+	for _, line := range strings.Split(text, "\n") {
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		normalizedKey := strings.ToLower(strings.TrimSpace(key))
+		normalizedValue := strings.TrimSpace(value)
+		if normalizedValue == "" || strings.EqualFold(normalizedValue, "N/A") {
+			continue
+		}
+		fields[normalizedKey] = normalizedValue
+	}
+
+	ip := fields["ip"]
+	if net.ParseIP(ip) == nil {
+		return nil, false
+	}
+	lat, latOK := parseGeoFloat(fields["latitude"])
+	lon, lonOK := parseGeoFloat(fields["longitude"])
+	if !latOK || !lonOK {
+		return nil, false
+	}
+
+	countryCode := strings.ToLower(fields["country"])
+	location := strings.Join(filterNonEmptyStrings([]string{fields["city"], fields["region"], fields["country"]}), ", ")
+	info := map[string]interface{}{
+		"ip":           ip,
+		"country_code": countryCode,
+		"country":      fields["country"],
+		"region":       location,
+		"location":     location,
+		"city":         fields["city"],
+		"latitude":     lat,
+		"longitude":    lon,
+		"isp":          fields["org"],
+		"org":          fields["org"],
+		"asn":          fields["asn"],
+		"timezone":     fields["timezone"],
+		"geo_source":   "ipcheck-agent",
+	}
+	return info, true
+}
+
+func parseGeoFloat(value string) (float64, bool) {
+	number, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	return number, err == nil
+}
+
 func accountNeedsLocation(country, resolvedCountry sql.NullString, cachedInfo sql.NullString) bool {
 	if cachedInfo.Valid && cachedInfo.String != "" {
 		var cached map[string]interface{}

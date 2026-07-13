@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1011,7 +1010,7 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
-func TestListAccountsResolvesMissingLocationFromIPSB(t *testing.T) {
+func TestListAccountsDoesNotResolveMissingLocationAutomatically(t *testing.T) {
 	service, db := testService(t)
 	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, tags, country, cached_info) VALUES ('server-ip', 'edge', '185.255.55.55', 'root', 'password', '[]', 'auto', '{}')`)
 	if err != nil {
@@ -1020,11 +1019,8 @@ func TestListAccountsResolvesMissingLocationFromIPSB(t *testing.T) {
 
 	previousClient := geoHTTPClient
 	geoHTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if !strings.Contains(req.URL.String(), "api.ip.sb/geoip/185.255.55.55") {
-			return &http.Response{StatusCode: http.StatusBadGateway, Body: io.NopCloser(strings.NewReader(`{}`)), Header: http.Header{}}, nil
-		}
-		body := `{"ip":"185.255.55.55","country_code":"NL","country":"Netherlands","latitude":52.3824,"longitude":4.8995,"asn":"3214","organization":"xTom GmbH","timezone":"Europe/Amsterdam"}`
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
+		t.Fatalf("list accounts should not call geo provider: %s", req.URL.String())
+		return nil, nil
 	})}
 	t.Cleanup(func() { geoHTTPClient = previousClient })
 
@@ -1035,12 +1031,58 @@ func TestListAccountsResolvesMissingLocationFromIPSB(t *testing.T) {
 	payload := decodePayload(t, res)
 	list := payload["data"].([]interface{})
 	account := list[0].(map[string]interface{})
-	if account["resolved_country"] != "Netherlands" {
+	if value, _ := account["resolved_country"].(string); value != "" {
 		t.Fatalf("resolved_country = %#v", account["resolved_country"])
 	}
 	info := account["info"].(map[string]interface{})
-	if info["country_code"] != "nl" || info["location"] != "Netherlands" {
-		t.Fatalf("expected IP.SB location in info, info=%#v", info)
+	if info["country_code"] != "" || info["location"] != "" {
+		t.Fatalf("expected empty cached location info, info=%#v", info)
+	}
+}
+
+func TestRefreshAccountLocationsQueriesOnlineAgentIPCheck(t *testing.T) {
+	service, db := testService(t)
+	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, tags, country, cached_info) VALUES ('server-ip', 'edge', '185.255.55.55', 'root', 'password', '[]', 'auto', '{}')`)
+	if err != nil {
+		t.Fatalf("insert account: %v", err)
+	}
+
+	service.registry.Register("server-ip", &taskReplySocket{t: t, service: service, reply: func(taskType int, data string) string {
+		if taskType != 1 {
+			t.Fatalf("task type = %d, want 1", taskType)
+		}
+		if !strings.Contains(data, "curl -fsSL https://64.ipcheck.ing/geo") {
+			t.Fatalf("unexpected command: %s", data)
+		}
+		return `IP: 64.181.246.5
+City: San Jose
+Region: California
+Country: US
+Latitude: 37.33939
+Longitude: -121.89496
+Org: Oracle Corporation
+Timezone: America/Los_Angeles
+ASN: AS31898`
+	}})
+
+	res := perform(service, http.MethodPost, "/api/server/accounts/refresh-locations", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("refresh status=%d body=%s", res.Code, res.Body.String())
+	}
+
+	res = perform(service, http.MethodGet, "/api/server/accounts", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", res.Code, res.Body.String())
+	}
+	payload := decodePayload(t, res)
+	list := payload["data"].([]interface{})
+	account := list[0].(map[string]interface{})
+	if account["resolved_country"] != "San Jose, California, US" {
+		t.Fatalf("resolved_country = %#v", account["resolved_country"])
+	}
+	info := account["info"].(map[string]interface{})
+	if info["country_code"] != "us" || info["location"] != "San Jose, California, US" {
+		t.Fatalf("expected ipcheck location in info, info=%#v", info)
 	}
 }
 
