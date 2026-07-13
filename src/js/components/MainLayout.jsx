@@ -689,7 +689,7 @@ function MainLayout() {
         </Sidebar>
 
         {/* ==================== 2. 主页面区 (Main Panel) ==================== */}
-        <div className="flex-1 flex flex-col h-full overflow-hidden">
+        <div className="app-main-panel flex-1 flex flex-col h-full overflow-hidden">
           {/* 顶部导航 */}
           <header className="app-main-topbar flex h-14 flex-shrink-0 items-center border-b border-kumo-line px-3 min-[450px]:px-4 md:px-6">
             <div className="flex h-full min-w-0 flex-1 items-center gap-3.5">

@@ -4,6 +4,7 @@ import { Button } from '@cloudflare/kumo/components/button';
 import { Input } from '@cloudflare/kumo/components/input';
 import useStore from '../store.js';
 import { SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { useCloudflareSpotlight } from '../hooks/useCloudflareSpotlight.js';
 import {
   AlertTriangle,
   ArrowRight,
@@ -22,6 +23,7 @@ const AUTH_FEATURES = [
 
 function AuthShell({ mode, title, description, children }) {
   const modeLabel = mode === 'setup' ? '初始化' : mode === '2fa' ? '二次验证' : '安全登录';
+  const surfaceRef = useCloudflareSpotlight();
 
   return (
     <main className="relative flex min-h-dvh w-screen overflow-hidden bg-kumo-canvas text-kumo-default">
@@ -58,8 +60,11 @@ function AuthShell({ mode, title, description, children }) {
         </div>
       </section>
 
-      <section className="relative isolate flex min-w-0 flex-1 items-center justify-center overflow-hidden bg-kumo-recessed/30 px-4 py-8 sm:px-6">
-        <div aria-hidden="true" className="auth-login-backdrop pointer-events-none absolute inset-0" />
+      <section
+        ref={surfaceRef}
+        className="cf-ai-background-surface relative isolate flex min-w-0 flex-1 items-center justify-center overflow-hidden bg-kumo-recessed/30 px-4 py-8 sm:px-6"
+      >
+        <div aria-hidden="true" className="cf-ai-background pointer-events-none absolute inset-0" />
 
         <div className="relative z-10 w-full max-w-[400px]">
           <div className="mb-5 flex items-center justify-start gap-3 lg:hidden">

@@ -1909,7 +1909,7 @@ function M365Page() {
                 />
               ) : (
                 <div className={cx(scrollViewportClass, 'space-y-2.5 p-3')}>
-                  {filteredPublicPages.map(page => {
+                  {filteredPublicPages.map(page  => {
                     const pageAccounts = (page.accountIds || [])
                       .map(accountId => accountLookup.get(String(accountId)))
                       .filter(Boolean);

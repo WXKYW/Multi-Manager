@@ -1802,7 +1802,7 @@ function PaasPage() {
                             return (
                               <LayerCard key={app._id} className="self-start">
                                 <LayerCard.Secondary className="flex min-w-0 items-start justify-between gap-3">
-                                  <div className="min-w-0">
+                                  <div className="min-w-0 flex-1">
                                     {app.isEditing ? (
                                       <Input
                                         size="sm"
@@ -1839,17 +1839,13 @@ function PaasPage() {
                                         <Text as="span" bold truncate>{app.name}</Text>
                                       </Button>
                                     )}
-                                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                                      <Badge variant="neutral">{services.length} 服务</Badge>
-                                      {app.region && app.region !== 'unknown' ? (
-                                        <Badge variant="outline">{app.region}</Badge>
-                                      ) : null}
-                                    </div>
                                   </div>
-                                  <Button shape="square" size="sm" variant="ghost" aria-label="查看应用日志" title="查看应用日志" disabled={services.length === 0} onClick={() => {
-                                    const firstService = services[0];
-                                    if (firstService) showKoyebServiceLogs(account, app, firstService);
-                                  }} icon={<FileText className="h-3.5 w-3.5" />} />
+                                  <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                                    <Badge variant="neutral">{services.length} 服务</Badge>
+                                    {app.region && app.region !== 'unknown' ? (
+                                      <Badge variant="outline">{app.region}</Badge>
+                                    ) : null}
+                                  </div>
                                 </LayerCard.Secondary>
 
                                 <LayerCard.Primary className="space-y-3">
@@ -1906,9 +1902,6 @@ function PaasPage() {
                                                 </Button>
                                               )}
                                               <div className="flex flex-wrap items-center gap-1.5">
-                                                <Badge variant={getKoyebStatusTone(service.status)} appearance="dot">
-                                                  {getKoyebStatusText(service.status)}
-                                                </Badge>
                                                 <Badge variant="neutral">{service.type || 'web'}</Badge>
                                                 {service.resourceLimit?.cpu || service.resourceLimit?.memory ? (
                                                   <Badge variant="outline">
@@ -1917,6 +1910,9 @@ function PaasPage() {
                                                 ) : null}
                                               </div>
                                             </div>
+                                            <Badge variant={getKoyebStatusTone(service.status)} appearance="dot">
+                                              {getKoyebStatusText(service.status)}
+                                            </Badge>
                                           </div>
 
                                           {service.domains?.length ? (

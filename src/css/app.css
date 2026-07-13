@@ -1,6 +1,6 @@
 @source "../../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
-@import "@cloudflare/kumo/styles/tailwind";
 @import "tailwindcss";
+@import "@cloudflare/kumo/styles/tailwind";
 
 /* ==================== Base Resets ==================== */
 html {
@@ -11,7 +11,7 @@ html {
   color-scheme: light dark;
   --app-terminal-bg: var(--color-kumo-neutral-1000, #050505);
   --app-terminal-fg: var(--color-kumo-neutral-50, #f8f8f8);
-  --app-main-bg: var(--color-kumo-canvas);
+  --app-main-bg: color-mix(in oklab, var(--color-kumo-canvas) 92%, #dbeafe 8%);
   --app-main-surface: color-mix(in oklab, var(--color-kumo-base) 92%, var(--color-kumo-canvas) 8%);
 }
 
@@ -21,7 +21,7 @@ html {
 
 :root[data-mode='dark'] {
   color-scheme: dark;
-  --app-main-bg: var(--color-kumo-canvas);
+  --app-main-bg: color-mix(in oklab, var(--color-kumo-canvas) 90%, #0f172a 10%);
   --app-main-surface: color-mix(in oklab, var(--color-kumo-base) 88%, var(--color-kumo-canvas) 12%);
   background: var(--app-main-bg);
 }
@@ -52,75 +52,57 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.auth-login-backdrop {
-  background:
-    radial-gradient(
-      closest-side at 34% 22%,
-      color-mix(in oklab, var(--color-kumo-warning) 7%, transparent) 0%,
-      transparent 100%
-    ),
-    radial-gradient(
-      closest-side at 72% 76%,
-      color-mix(in oklab, var(--color-kumo-line) 14%, transparent) 0%,
-      transparent 100%
-    ),
-    linear-gradient(
-      135deg,
-      color-mix(in oklab, var(--color-kumo-recessed) 38%, transparent) 0%,
-      color-mix(in oklab, var(--color-kumo-canvas) 92%, transparent) 100%
-    );
+.cf-ai-background-surface {
+  --cf-ai-spotlight-x: -1000px;
+  --cf-ai-spotlight-y: -1000px;
+  --cf-ai-spotlight-opacity: 0;
 }
 
-.auth-login-backdrop::before,
-.auth-login-backdrop::after {
+.cf-ai-background {
+  background: var(--color-kumo-overlay);
+}
+
+:root[data-mode='dark'] .cf-ai-background {
+  background: oklch(0.145 0 0);
+}
+
+.cf-ai-background::before,
+.cf-ai-background::after {
   position: absolute;
   inset: 0;
   content: '';
 }
 
-.auth-login-backdrop::before {
-  background-image:
-    linear-gradient(
-      to right,
-      color-mix(in oklab, var(--color-kumo-line) 78%, transparent) 1px,
-      transparent 1px
-    ),
-    linear-gradient(
-      to bottom,
-      color-mix(in oklab, var(--color-kumo-line) 78%, transparent) 1px,
-      transparent 1px
-    ),
-    linear-gradient(
-      to right,
-      color-mix(in oklab, var(--color-kumo-line) 92%, transparent) 1px,
-      transparent 1px
-    ),
-    linear-gradient(
-      to bottom,
-      color-mix(in oklab, var(--color-kumo-line) 92%, transparent) 1px,
-      transparent 1px
-    );
-  background-size:
-    56px 56px,
-    56px 56px,
-    224px 224px,
-    224px 224px;
-  mask-image: radial-gradient(
-    ellipse at 50% 45%,
-    var(--color-kumo-base) 0%,
-    var(--color-kumo-base) 50%,
-    transparent 86%
+.cf-ai-background::before {
+  background-image: radial-gradient(
+    circle,
+    rgba(125, 125, 125, 0.1) 1px,
+    transparent 1px
   );
-  opacity: 0.34;
+  background-size: 12px 12px;
+  opacity: 1;
 }
 
-.auth-login-backdrop::after {
+.cf-ai-background::after {
   background: radial-gradient(
-    ellipse at 50% 48%,
-    transparent 0%,
-    transparent 48%,
-    color-mix(in oklab, var(--color-kumo-canvas) 76%, transparent) 100%
+    60px at var(--cf-ai-spotlight-x) var(--cf-ai-spotlight-y),
+    rgba(251, 146, 60, 0.7),
+    rgba(125, 125, 125, 0.1)
   );
+  mask-image: radial-gradient(
+    circle,
+    black 1px,
+    transparent 1px
+  );
+  mask-size: 12px 12px;
+  opacity: var(--cf-ai-spotlight-opacity);
+  transition: opacity 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cf-ai-background::after {
+    transition: none;
+  }
 }
 
 [data-sidebar='trigger'] svg path[d='M6.25 7.25v9.5'] {
@@ -349,12 +331,28 @@ th > button[aria-label='Resize column'] > span {
   background: var(--app-main-bg);
 }
 
+.app-main-panel {
+  background: var(--color-kumo-overlay);
+}
+
 .app-main-topbar {
   background-color: var(--app-main-surface);
 }
 
+.app-layer-frame {
+  box-shadow: 0 0 0 1.2px var(--color-kumo-line);
+}
+
 :root[data-mode='dark'] .app-main-shell {
   background: var(--app-main-bg);
+}
+
+:root[data-mode='dark'] .app-main-panel {
+  background: oklch(0.145 0 0);
+}
+
+:root[data-mode='dark'] .app-main-topbar {
+  background-color: var(--app-main-surface);
 }
 
 .public-server-status-page {

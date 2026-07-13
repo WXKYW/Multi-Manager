@@ -8,7 +8,7 @@ import { Info } from '../Icons.jsx';
 
 export const pageStackClass = 'flex w-full min-w-0 flex-col gap-3 sm:gap-4';
 export const pageToolbarClass = 'flex min-w-0 flex-col items-stretch gap-3 border-b border-kumo-line pb-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between [&>*]:min-w-0';
-export const sectionCardHeaderClass = 'flex min-h-[52px] items-center justify-between gap-3 border-b border-kumo-line bg-kumo-recessed/30 px-4 py-2.5 sm:min-h-[56px] sm:flex-row sm:flex-wrap sm:items-center sm:py-3.5';
+export const sectionCardHeaderClass = 'flex min-h-[52px] items-center justify-between gap-3 border-b border-kumo-line bg-kumo-elevated px-4 py-2.5 sm:min-h-[56px] sm:flex-row sm:flex-wrap sm:items-center sm:py-3.5';
 export const sectionCardTitleClass = 'inline-flex min-w-0 max-w-full items-center gap-2 text-sm font-bold text-kumo-strong';
 export const iconButtonIconClass = 'h-3.5 w-3.5';
 export const actionIconClass = 'h-4 w-4';
@@ -83,7 +83,7 @@ export function AppCard({
     <LayerCard
       {...props}
       className={cx(
-        'rounded-lg border border-kumo-line/90 bg-kumo-base shadow-none',
+        'app-layer-frame rounded-lg bg-kumo-base shadow-none ring-0',
         cardPaddingClass[padding] || cardPaddingClass.md,
         interactive && 'transition-colors hover:border-kumo-brand/60',
         className
@@ -130,7 +130,7 @@ export function SectionCard({
   return (
     <LayerCard
       {...props}
-      className={cx('flex flex-col overflow-visible p-0 shadow-none', className)}
+      className={cx('app-layer-frame flex flex-col overflow-hidden p-0 shadow-none ring-0', className)}
     >
       <LayerCard.Secondary className={cx(sectionCardHeaderClass, headerClassName)}>
         <div className="flex min-w-0 flex-1 items-center gap-x-3 gap-y-1 sm:flex-row sm:flex-wrap sm:items-center">
