@@ -294,13 +294,13 @@ const SidebarBrand = ({ onHome }) => (
     type="button"
     variant="ghost"
     onClick={onHome}
-    className="!h-full w-full min-w-0 justify-start gap-2.5 rounded-md text-left"
+    className="!h-full w-full min-w-0 justify-start gap-1 rounded-none text-left !bg-transparent !p-0 hover:!bg-transparent active:!bg-transparent focus:!bg-transparent focus-visible:!bg-transparent data-[active=true]:!bg-transparent data-[selected=true]:!bg-transparent"
     aria-label="返回首页"
   >
-    <span className="flex size-9 shrink-0 items-center justify-center">
-      <img src="/logo.svg" className="size-6.5 shrink-0 object-contain" alt="" />
+    <span className="flex size-10 shrink-0 items-center justify-center transition-transform duration-250 ease-[cubic-bezier(0.4,0,0.2,1)]">
+      <img src="/logo.svg" className="size-7 shrink-0 object-contain" alt="" />
     </span>
-    <span className="min-w-0 truncate text-sm font-semibold text-kumo-strong">
+    <span className="min-w-0 max-w-32 overflow-hidden truncate whitespace-nowrap text-sm font-semibold text-kumo-strong opacity-100 transition-[max-width,opacity] duration-250 ease-[cubic-bezier(0.4,0,0.2,1)] group-data-[state=collapsed]/sidebar:max-w-0 group-data-[state=collapsed]/sidebar:opacity-0">
       API Monitor
     </span>
   </Button>
@@ -600,7 +600,7 @@ function MainLayout() {
         {/* ==================== 1. 侧边栏 (Sidebar) ==================== */}
         <Sidebar>
           {/* 顶部 Logo */}
-          <Sidebar.Header className="h-14! px-2.5!">
+          <Sidebar.Header className="h-[58px]! shrink-0 overflow-hidden px-3! transition-[padding] duration-250 ease-[cubic-bezier(0.4,0,0.2,1)] group-data-[state=collapsed]/sidebar:px-2!">
             <SidebarBrand onHome={navigateHome} />
           </Sidebar.Header>
 
@@ -691,7 +691,7 @@ function MainLayout() {
         {/* ==================== 2. 主页面区 (Main Panel) ==================== */}
         <div className="app-main-panel flex-1 flex flex-col h-full overflow-hidden">
           {/* 顶部导航 */}
-          <header className="app-main-topbar flex h-14 flex-shrink-0 items-center border-b border-kumo-line px-3 min-[450px]:px-4 md:px-6">
+          <header className="app-main-topbar flex h-[58px] flex-shrink-0 items-center border-b border-kumo-line px-3 min-[450px]:px-4 md:px-6">
             <div className="flex h-full min-w-0 flex-1 items-center gap-3.5">
               <Sidebar.Trigger className="md:hidden" />
 
@@ -700,7 +700,7 @@ function MainLayout() {
                 spacing="compact"
                 breadcrumbs={(
                   <AppBreadcrumbs size="sm" className="mr-0 min-w-0 overflow-hidden">
-                    <AppBreadcrumbs.Link href={MODULE_PATHS.dashboard}>首页</AppBreadcrumbs.Link>
+                    <AppBreadcrumbs.Link href="/">首页</AppBreadcrumbs.Link>
                     <AppBreadcrumbs.Separator />
                     <AppBreadcrumbs.Current>{getModuleName(mainActiveTab)}</AppBreadcrumbs.Current>
                   </AppBreadcrumbs>
