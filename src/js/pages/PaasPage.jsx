@@ -1,14 +1,13 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
-import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Table } from '@cloudflare/kumo/components/table';
 import { Checkbox } from '@cloudflare/kumo/components/checkbox';
-import { Tabs } from '@cloudflare/kumo';
+import { Badge, ClipboardText, Empty, Grid as KumoGrid, LayerCard, Link, Tabs, Text } from '@cloudflare/kumo';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
 import useStore from '../store.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
@@ -19,6 +18,12 @@ import {
   Plus,
   Trash,
   Search,
+  Play,
+  Pause,
+  Square,
+  Lock,
+  Info,
+  ExternalLink,
   Upload,
   Download,
   X,
@@ -69,9 +74,18 @@ const normalizeStoredRefreshIntervalSec = (value) => {
   return clampRefreshIntervalSec(seconds);
 };
 
+const normalizeFlyImageForInput = (image) => {
+  const value = String(image || '').trim();
+  const mirrorPrefix = 'docker-hub-mirror.fly.io/';
+  if (value.startsWith(mirrorPrefix)) {
+    return value.slice(mirrorPrefix.length);
+  }
+  return value;
+};
+
 function PaasPage() {
   const { theme } = useStore();
-  const [activeTab, setActiveTab] = useState('koyeb'); // 'koyeb' | 'fly' | 'config'
+  const [activeTab, setActiveTab] = useState('fly'); // 'fly' | 'koyeb' | 'config'
   const didInitialLoadRef = useRef(false);
 
   // Global Auth Header
@@ -689,6 +703,15 @@ function PaasPage() {
     return map[String(status).toUpperCase()] || status || '未知';
   };
 
+  const getKoyebStatusTone = (status) => {
+    const up = String(status || '').toUpperCase();
+    if (up === 'RUNNING' || up === 'HEALTHY') return 'success';
+    if (up === 'STARTING') return 'info';
+    if (up === 'SUSPENDED' || up === 'PAUSED' || up === 'STOPPED') return 'warning';
+    if (up === 'ERROR' || up === 'ERRORED' || up === 'UNHEALTHY') return 'danger';
+    return 'neutral';
+  };
+
   // ==================== 4. Fly.io State & Logic ====================
   const [flyAccounts, setFlyAccounts] = useState([]);
   const [flyLoading, setFlyLoading] = useState(false);
@@ -837,14 +860,20 @@ function PaasPage() {
       console.warn('获取当前镜像失败:', e);
     }
 
+    const defaultImage = normalizeFlyImageForInput(currentImage);
     const newImage = await dialog.prompt({
       message: currentImage
-        ? `当前正在运行：\n${currentImage}\n\n默认保留当前镜像引用并重新部署；如需切换镜像，请输入完整镜像地址：`
+        ? `当前正在运行：\n${currentImage}\n\n默认使用 Docker Hub 标准镜像引用；如需切换镜像，请输入完整镜像地址：`
         : '未能检测到当前运行的镜像。请输入完整的容器镜像地址：',
-      defaultValue: currentImage,
+      defaultValue: defaultImage,
     });
 
     if (newImage === null || newImage.trim() === '') return;
+    const leaseNonce = await dialog.prompt({
+      message: '如果该 Machine 已被 lease，请输入 lease nonce；未 lease 可留空：',
+      defaultValue: '',
+    });
+    if (leaseNonce === null) return;
 
     toast.info('正在更新容器镜像，请稍候...');
     try {
@@ -854,14 +883,30 @@ function PaasPage() {
         body: JSON.stringify({
           accountId: account.id,
           image: newImage.trim(),
+          leaseNonce: leaseNonce.trim() || undefined,
         }),
       });
       const result = await response.json();
       if (result.success) {
-        toast.success(`容器镜像已成功提交更新！成功: ${result.updated}, 失败: ${result.failed}`);
+        const details = Array.isArray(result.details) ? result.details : [];
+        const changedCount = details.filter((item) => item?.changed).length;
+        const digestChangedCount = details.filter((item) => item?.digestChanged).length;
+        const digest = details.find((item) => item?.currentDigest)?.currentDigest;
+        const digestHint = digest ? `，digest ${String(digest).slice(0, 19)}...` : '';
+        if (changedCount > 0) {
+          toast.success(`容器镜像已更新：${result.updated} 台已提交，${changedCount} 台有变化${digestHint}`);
+        } else if (result.updated > 0) {
+          toast.warning(`已提交 ${result.updated} 台，但镜像 digest 未变化；Fly 官网 Release Activity 可能不会新增记录`);
+        } else {
+          toast.warning('没有 Machine 被更新');
+        }
+        if (digestChangedCount === 0 && changedCount > 0) {
+          toast.info('Machine 配置/版本有变化，但镜像 digest 未变化');
+        }
         loadFlyData(false);
       } else {
-        toast.error('更新失败: ' + result.error);
+        const detail = result.error || result.errors?.[0]?.message || '请查看后端日志';
+        toast.error('更新失败: ' + detail);
       }
     } catch (error) {
       toast.error('更新异常: ' + error.message);
@@ -946,6 +991,165 @@ function PaasPage() {
           return { ...p, loadingMachines: false };
         })
       })));
+    }
+  };
+
+  const refreshFlyMachines = async (account, app) => {
+    try {
+      const response = await fetch(`/api/flyio/apps/${app.name}/machines?accountId=${account.id}`, {
+        headers: getAuthHeaders(),
+      });
+      const result = await response.json();
+      if (!result.success) throw new Error(result.error || '获取机器列表失败');
+      setFlyAccounts(prev => prev.map(acc => ({
+        ...acc,
+        projects: acc.projects.map(p => {
+          if (p.id !== app.id) return p;
+          return { ...p, machines: result.data || [], showMachines: true, loadingMachines: false };
+        })
+      })));
+      return result.data || [];
+    } catch (e) {
+      toast.error('刷新机器列表失败: ' + e.message);
+      return null;
+    }
+  };
+
+  const callFlyMachineEndpoint = async (account, app, machine, action, options = {}) => {
+    const machineID = machine?.id;
+    if (!machineID) return null;
+    const method = options.method || 'POST';
+    const path = action
+      ? `/api/flyio/apps/${app.name}/machines/${machineID}/${action}`
+      : `/api/flyio/apps/${app.name}/machines/${machineID}`;
+    const response = await fetch(path, {
+      method,
+      headers: getAuthHeaders(),
+      body: method === 'GET' ? undefined : JSON.stringify({ accountId: account.id, ...(options.body || {}) }),
+    });
+    const result = await response.json();
+    if (!result.success) throw new Error(result.error || 'Fly.io 请求失败');
+    return result.data;
+  };
+
+  const runFlyMachineAction = async (account, app, machine, action, label, options = {}) => {
+    if (options.confirm && !(await dialog.confirm(options.confirm))) return;
+    try {
+      await callFlyMachineEndpoint(account, app, machine, action, options);
+      toast.success(label);
+      await refreshFlyMachines(account, app);
+    } catch (e) {
+      toast.error(`${label}失败: ${e.message}`);
+    }
+  };
+
+  const createFlyMachine = async (account, app) => {
+    const currentImage = app.machines?.[0]?.config?.image || '';
+    const image = await dialog.prompt({
+      message: '请输入新机器使用的完整镜像地址：',
+      defaultValue: normalizeFlyImageForInput(currentImage),
+    });
+    if (image === null || image.trim() === '') return;
+    const region = await dialog.prompt({
+      message: '请输入部署区域代码，例如 hkg、nrt、sin。留空则由 Fly.io 决定：',
+      defaultValue: app.machines?.[0]?.region || '',
+    });
+    if (region === null) return;
+    try {
+      const response = await fetch(`/api/flyio/apps/${app.name}/machines`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          accountId: account.id,
+          image: image.trim(),
+          region: region.trim() || undefined,
+        }),
+      });
+      const result = await response.json();
+      if (!result.success) throw new Error(result.error || '创建机器失败');
+      toast.success('Fly.io 机器已创建');
+      await refreshFlyMachines(account, app);
+    } catch (e) {
+      toast.error('创建机器失败: ' + e.message);
+    }
+  };
+
+  const deleteFlyMachine = async (account, app, machine) => {
+    if (!(await dialog.confirm(`确定要删除 Fly.io 机器 "${machine.id}" 吗？`))) return;
+    try {
+      await callFlyMachineEndpoint(account, app, machine, '', { method: 'DELETE', body: { force: true } });
+      toast.success('机器已删除');
+      await refreshFlyMachines(account, app);
+    } catch (e) {
+      toast.error('删除机器失败: ' + e.message);
+    }
+  };
+
+  const showFlyMachineDetails = (account, app, machine) => {
+    openLogViewer({
+      title: `机器详情: ${machine.id}`,
+      subtitle: `Fly.io / ${account.name} / ${app.name}`,
+      fetcher: async () => {
+        const [detailResponse, metadataResponse, leaseResponse, eventsResponse, memoryResponse, psResponse, versionsResponse] = await Promise.all([
+          fetch(`/api/flyio/apps/${app.name}/machines/${machine.id}?accountId=${account.id}`, { headers: getAuthHeaders() }),
+          fetch(`/api/flyio/apps/${app.name}/machines/${machine.id}/metadata?accountId=${account.id}`, { headers: getAuthHeaders() }),
+          fetch(`/api/flyio/apps/${app.name}/machines/${machine.id}/lease?accountId=${account.id}`, { headers: getAuthHeaders() }),
+          fetch(`/api/flyio/apps/${app.name}/machines/${machine.id}/events?accountId=${account.id}`, { headers: getAuthHeaders() }),
+          fetch(`/api/flyio/apps/${app.name}/machines/${machine.id}/memory?accountId=${account.id}`, { headers: getAuthHeaders() }),
+          fetch(`/api/flyio/apps/${app.name}/machines/${machine.id}/ps?accountId=${account.id}`, { headers: getAuthHeaders() }),
+          fetch(`/api/flyio/apps/${app.name}/machines/${machine.id}/versions?accountId=${account.id}`, { headers: getAuthHeaders() }),
+        ]);
+        const detail = await detailResponse.json();
+        const metadata = await metadataResponse.json();
+        const lease = await leaseResponse.json();
+        const events = await eventsResponse.json();
+        const memory = await memoryResponse.json();
+        const ps = await psResponse.json();
+        const versions = await versionsResponse.json();
+        const payload = {
+          machine: detail.success ? detail.data : { error: detail.error },
+          metadata: metadata.success ? metadata.data : { error: metadata.error },
+          lease: lease.success ? lease.data : { error: lease.error },
+          events: events.success ? events.data : { error: events.error },
+          memory: memory.success ? memory.data : { error: memory.error },
+          processes: ps.success ? ps.data : { error: ps.error },
+          versions: versions.success ? versions.data : { error: versions.error },
+        };
+        return JSON.stringify(payload, null, 2).split('\n').map(line => ({
+          timestamp: Date.now(),
+          level: 'INFO',
+          message: line,
+        }));
+      }
+    });
+  };
+
+  const setFlyMachineMetadata = async (account, app, machine) => {
+    const key = await dialog.prompt({ message: '请输入 metadata key：', defaultValue: 'api-monitor-note' });
+    if (key === null || key.trim() === '') return;
+    const value = await dialog.prompt({ message: `请输入 ${key.trim()} 的值：`, defaultValue: '' });
+    if (value === null) return;
+    try {
+      const response = await fetch(`/api/flyio/apps/${app.name}/machines/${machine.id}/metadata/${encodeURIComponent(key.trim())}`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ accountId: account.id, value }),
+      });
+      const result = await response.json();
+      if (!result.success) throw new Error(result.error || '设置 metadata 失败');
+      toast.success('机器 metadata 已更新');
+    } catch (e) {
+      toast.error('设置 metadata 失败: ' + e.message);
+    }
+  };
+
+  const acquireFlyMachineLease = async (account, app, machine) => {
+    try {
+      const data = await callFlyMachineEndpoint(account, app, machine, 'lease', { body: { ttl: 60 } });
+      const nonce = data?.nonce || data?.Nonce || '';
+      toast.success(nonce ? `Lease 已获取: ${nonce}` : 'Lease 已获取');
+    } catch (e) {
+      toast.error('获取 lease 失败: ' + e.message);
     }
   };
 
@@ -1122,6 +1326,15 @@ function PaasPage() {
       return getStatusPillClass('info');
     }
     return getStatusPillClass('neutral');
+  };
+
+  const getFlyStatusTone = (status) => {
+    const up = String(status || '').toLowerCase();
+    if (['deployed', 'running', 'started'].includes(up)) return 'success';
+    if (['pending', 'created', 'launching'].includes(up)) return 'info';
+    if (['suspended', 'stopped', 'stopping'].includes(up)) return 'warning';
+    if (['dead', 'destroyed', 'failed'].includes(up)) return 'error';
+    return 'neutral';
   };
 
   const getFlyStatusText = (status) => {
@@ -1477,8 +1690,8 @@ function PaasPage() {
             value={activeTab}
             onValueChange={setActiveTab}
             tabs={[
-              { value: 'koyeb', label: <span className="inline-flex items-center gap-1.5"><KoyebBrand className="w-4 h-4 text-kumo-info" />Koyeb</span> },
               { value: 'fly', label: <span className="inline-flex items-center gap-1.5"><FlyIoBrand className="w-4 h-4 text-kumo-brand" />Fly.io</span> },
+              { value: 'koyeb', label: <span className="inline-flex items-center gap-1.5"><KoyebBrand className="w-4 h-4 text-kumo-info" />Koyeb</span> },
               { value: 'config', label: <span className="inline-flex items-center gap-1.5"><Settings className="w-4 h-4 text-kumo-success" />配置</span> },
             ]}
           />
@@ -1498,216 +1711,240 @@ function PaasPage() {
         )}
       </div>
 
-      <div className="min-h-[400px]">
+      <div className="min-w-0">
 
       {/* ==================== Koyeb Tab Content ==================== */}
       {activeTab === 'koyeb' && (
         <div className="space-y-3">
           {koyebLoading && koyebAccounts.length === 0 ? (
-            <div className="text-center py-12 text-kumo-subtle text-xs flex flex-col items-center justify-center gap-2">
-              <RefreshCw className="w-8 h-8 animate-spin text-kumo-brand" />
-              <span>正在加载 Koyeb 数据快照...</span>
-            </div>
+            <Empty
+              size="base"
+              icon={<RefreshCw className="h-8 w-8 animate-spin text-kumo-info" />}
+              title="正在加载 Koyeb"
+              description="正在同步应用、服务、实例和域名状态。"
+            />
           ) : koyebAccounts.length === 0 ? (
-            <div className="rounded-md border border-kumo-line bg-kumo-base p-12 text-center text-xs text-kumo-subtle">
-              暂无配置 Koyeb 账号。请前往“配置”添加账号 API 令牌。
-            </div>
+            <Empty
+              size="base"
+              icon={<KoyebBrand className="h-8 w-8 text-kumo-info" />}
+              title="暂无 Koyeb 账号"
+              description="请前往配置页添加 Koyeb API Token。"
+            />
           ) : (
-            <div className="overflow-x-auto rounded-md border border-kumo-line bg-kumo-base">
-              <Table className="min-w-[60rem]">
-                <Table.Header>
-                  <Table.Row className="border-b border-kumo-line bg-kumo-recessed/25 text-[11px] font-bold text-kumo-subtle">
-                    <Table.Head className="!px-3 !py-2">账号</Table.Head>
-                    <Table.Head className="!px-3 !py-2">邮箱</Table.Head>
-                    <Table.Head className="!px-3 !py-2 text-center">项目</Table.Head>
-                    <Table.Head className="!px-3 !py-2 text-center">服务</Table.Head>
-                    <Table.Head className="!px-3 !py-2 text-right">余额</Table.Head>
-                  </Table.Row>
-                </Table.Header>
-                <Table.Body>
+            <div className="space-y-5">
               {koyebAccounts.map((account) => {
                 const expanded = isKoyebAccountExpanded(account.name);
                 const projectCount = account.projects?.length || 0;
                 const serviceCount = (account.projects || []).reduce((total, project) => total + (project.services?.length || 0), 0);
+                const balance = Number(account.data?.balance ?? account.balance ?? 0);
                 return (
-                  <React.Fragment key={account.name}>
-                    <Table.Row
-                      className="cursor-pointer border-b border-kumo-line/80 transition-colors hover:bg-kumo-recessed/20"
-                      onClick={() => toggleKoyebAccount(account.name)}
-                    >
-                      <Table.Cell className="!px-3 !py-2 align-middle">
-                        <div className="flex min-w-0 items-center gap-3">
-                        <ChevronDown className={`w-4 h-4 text-kumo-subtle transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />
-                        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-kumo-info text-xs font-bold text-kumo-inverse">
-                          {account.name.charAt(0).toUpperCase()}
+                  <section key={account.name} className="space-y-3">
+                    <LayerCard className="self-start">
+                      <LayerCard.Secondary
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={expanded}
+                        className="flex min-w-0 cursor-pointer flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+                        onClick={() => toggleKoyebAccount(account.name)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            toggleKoyebAccount(account.name);
+                          }
+                        }}
+                      >
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          tabIndex={-1}
+                          className="min-w-0 justify-start px-0"
+                          icon={<ChevronDown className={`h-4 w-4 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />}
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <KoyebBrand className="h-4 w-4 shrink-0 text-kumo-info" />
+                            <Text as="span" bold truncate>{account.name}</Text>
+                          </span>
+                        </Button>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {account.data?.email ? (
+                            <Badge variant="outline" className="max-w-full">
+                              <Mail className="h-3 w-3 shrink-0" />
+                              <span className="truncate">{account.data.email}</span>
+                            </Badge>
+                          ) : null}
+                          <Badge variant="neutral">{projectCount} 应用</Badge>
+                          <Badge variant="neutral">{serviceCount} 服务</Badge>
+                          <Badge variant="info">${Number.isFinite(balance) ? balance.toFixed(2) : '0.00'}</Badge>
                         </div>
-                        <div>
-                          <div className="text-sm font-bold text-kumo-strong">{account.name}</div>
-                        </div>
-                        </div>
-                      </Table.Cell>
-                      <Table.Cell className="!px-3 !py-2 align-middle">
-                        {account.data?.email ? (
-                          <div className="flex min-w-0 items-center gap-1 text-xs text-kumo-subtle">
-                            <Mail className="h-3.5 w-3.5 shrink-0" />
-                            <span className="truncate">{account.data.email}</span>
-                          </div>
-                        ) : (
-                          <span className="text-kumo-subtle">-</span>
-                        )}
-                      </Table.Cell>
-                      <Table.Cell className="!px-3 !py-2 text-center align-middle font-mono text-[11px] text-kumo-subtle">{projectCount}</Table.Cell>
-                      <Table.Cell className="!px-3 !py-2 text-center align-middle font-mono text-[11px] text-kumo-subtle">{serviceCount}</Table.Cell>
-                      <Table.Cell className="!px-3 !py-2 text-right align-middle font-mono text-xs text-kumo-info">${(account.data?.balance || 0).toFixed(2)}</Table.Cell>
-                    </Table.Row>
+                      </LayerCard.Secondary>
+                    </LayerCard>
 
-                    <Table.Row className={expanded ? 'border-b border-kumo-line/80 bg-kumo-canvas/40' : 'border-0'}>
-                      <Table.Cell colSpan={5} className="!p-0">
-                        <AnimatedCollapse open={expanded}>
-                          {account.error ? (
-                            <div className="m-2 rounded border border-kumo-danger/20 bg-kumo-danger/10 p-2 text-xs text-kumo-danger">
-                              出错了: {account.error}
-                            </div>
-                          ) : !account.projects || account.projects.length === 0 ? (
-                            <div className="py-6 text-center text-xs text-kumo-subtle">暂无应用服务</div>
-                          ) : (
-                            <div className="overflow-x-auto">
-                              <Table className="min-w-[52rem] table-fixed">
-                              <Table.Body>
-                                {account.projects.flatMap((app) => {
-                                  const services = app.services?.length ? app.services : [null];
-                                  return services.flatMap((service, serviceIndex) => {
-                                    const rowKey = service?._id || `${app._id}-empty`;
-                                    return [
-                                      <Table.Row key={rowKey} className="border-b border-kumo-line/70 last:border-b-0 hover:bg-kumo-recessed/20">
-                                        <Table.Cell className="w-[28%] !px-3 !py-2 align-middle">
-                                          {serviceIndex === 0 && (
-                                            <div className="flex min-w-0 items-center gap-2">
-                                              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-kumo-line bg-kumo-recessed/45 text-kumo-warning">
-                                                <Folder className="h-3.5 w-3.5" />
-                                              </span>
-                                              {app.isEditing ? (
-                                                <Input size="sm"
-                                                  aria-label="Koyeb 应用名称"
+                    <AnimatedCollapse open={expanded} panelClassName="overflow-visible">
+                      {account.error ? (
+                        <Empty
+                          size="sm"
+                          icon={<Info className="h-8 w-8 text-kumo-danger" />}
+                          title="Koyeb 同步失败"
+                          description={account.error}
+                        />
+                      ) : !account.projects || account.projects.length === 0 ? (
+                        <Empty
+                          size="sm"
+                          icon={<KoyebBrand className="h-8 w-8 text-kumo-info" />}
+                          title="暂无应用"
+                          description="此账号下还没有 Koyeb 应用。"
+                        />
+                      ) : (
+                        <KumoGrid variant="4up" gap="sm" className="items-start">
+                          {account.projects.map((app) => {
+                            const services = app.services || [];
+                            return (
+                              <LayerCard key={app._id} className="self-start">
+                                <LayerCard.Secondary className="flex min-w-0 items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    {app.isEditing ? (
+                                      <Input
+                                        size="sm"
+                                        aria-label="Koyeb 应用名称"
+                                        type="text"
+                                        value={app.editingName}
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          setKoyebAccounts(prev => prev.map(acc => ({
+                                            ...acc,
+                                            projects: acc.projects.map(p => {
+                                              if (p._id !== app._id) return p;
+                                              return { ...p, editingName: val };
+                                            })
+                                          })));
+                                        }}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') renameKoyebApp(account, app);
+                                          if (e.key === 'Escape') cancelEditKoyebAppName(app);
+                                        }}
+                                        onBlur={() => renameKoyebApp(account, app)}
+                                        autoFocus
+                                      />
+                                    ) : (
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onDoubleClick={() => startEditKoyebAppName(app)}
+                                        className="min-w-0 justify-start px-0"
+                                        title="双击重命名"
+                                        icon={<KoyebBrand className="h-4 w-4 text-kumo-info" />}
+                                      >
+                                        <Text as="span" bold truncate>{app.name}</Text>
+                                      </Button>
+                                    )}
+                                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                      <Badge variant="neutral">{services.length} 服务</Badge>
+                                      {app.region && app.region !== 'unknown' ? (
+                                        <Badge variant="outline">{app.region}</Badge>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                  <Button shape="square" size="sm" variant="ghost" aria-label="查看应用日志" title="查看应用日志" disabled={services.length === 0} onClick={() => {
+                                    const firstService = services[0];
+                                    if (firstService) showKoyebServiceLogs(account, app, firstService);
+                                  }} icon={<FileText className="h-3.5 w-3.5" />} />
+                                </LayerCard.Secondary>
+
+                                <LayerCard.Primary className="space-y-3">
+                                  {services.length === 0 ? (
+                                    <Empty
+                                      size="sm"
+                                      icon={<Server className="h-7 w-7 text-kumo-subtle" />}
+                                      title="暂无服务"
+                                      description="此应用还没有可管理的服务。"
+                                    />
+                                  ) : (
+                                    <div className="space-y-3">
+                                      {services.map((service) => (
+                                        <div key={service._id} className="space-y-2 border-b border-kumo-line/70 pb-3 last:border-b-0 last:pb-0">
+                                          <div className="flex min-w-0 items-start justify-between gap-2">
+                                            <div className="min-w-0 space-y-1">
+                                              {service.isEditing ? (
+                                                <Input
+                                                  size="sm"
+                                                  aria-label="Koyeb 服务名称"
                                                   type="text"
-                                                  value={app.editingName}
+                                                  value={service.editingName}
                                                   onChange={(e) => {
                                                     const val = e.target.value;
                                                     setKoyebAccounts(prev => prev.map(acc => ({
                                                       ...acc,
-                                                      projects: acc.projects.map(p => {
-                                                        if (p._id !== app._id) return p;
-                                                        return { ...p, editingName: val };
-                                                      })
+                                                      projects: acc.projects.map(p => ({
+                                                        ...p,
+                                                        services: p.services.map(s => {
+                                                          if (s._id !== service._id) return s;
+                                                          return { ...s, editingName: val };
+                                                        })
+                                                      }))
                                                     })));
                                                   }}
                                                   onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') renameKoyebApp(account, app);
-                                                    if (e.key === 'Escape') cancelEditKoyebAppName(app);
+                                                    if (e.key === 'Enter') renameKoyebService(account, app, service);
+                                                    if (e.key === 'Escape') cancelEditKoyebServiceName(service);
                                                   }}
-                                                  onBlur={() => renameKoyebApp(account, app)}
-                                                  className="w-full px-2 py-0.5 text-xs font-bold text-kumo-strong"
+                                                  onBlur={() => renameKoyebService(account, app, service)}
                                                   autoFocus
                                                 />
                                               ) : (
-                                                <span
-                                                  onDoubleClick={() => startEditKoyebAppName(app)}
-                                                  className="min-w-0 truncate text-xs font-bold text-kumo-strong hover:text-kumo-brand"
-                                                  title="双击重命名应用"
+                                                <Button
+                                                  type="button"
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  onDoubleClick={() => startEditKoyebServiceName(service)}
+                                                  className="min-w-0 justify-start px-0"
+                                                  title="双击重命名"
+                                                  icon={<Server className="h-3.5 w-3.5 text-kumo-info" />}
                                                 >
-                                                  {app.name}
-                                                </span>
+                                                  <Text as="span" bold truncate>{service.name}</Text>
+                                                </Button>
                                               )}
+                                              <div className="flex flex-wrap items-center gap-1.5">
+                                                <Badge variant={getKoyebStatusTone(service.status)} appearance="dot">
+                                                  {getKoyebStatusText(service.status)}
+                                                </Badge>
+                                                <Badge variant="neutral">{service.type || 'web'}</Badge>
+                                                {service.resourceLimit?.cpu || service.resourceLimit?.memory ? (
+                                                  <Badge variant="outline">
+                                                    {service.resourceLimit?.cpu || '-'} CPU / {service.resourceLimit?.memory || '-'} RAM
+                                                  </Badge>
+                                                ) : null}
+                                              </div>
                                             </div>
-                                          )}
-                                        </Table.Cell>
-                                        <Table.Cell className="w-[28%] !px-3 !py-2 align-middle">
-                                          {service ? (
-                                            service.isEditing ? (
-                                              <Input size="sm"
-                                                aria-label="Koyeb 服务名称"
-                                                type="text"
-                                                value={service.editingName}
-                                                onChange={(e) => {
-                                                  const val = e.target.value;
-                                                  setKoyebAccounts(prev => prev.map(acc => ({
-                                                    ...acc,
-                                                    projects: acc.projects.map(p => ({
-                                                      ...p,
-                                                      services: p.services.map(s => {
-                                                        if (s._id !== service._id) return s;
-                                                        return { ...s, editingName: val };
-                                                      })
-                                                    }))
-                                                  })));
-                                                }}
-                                                onKeyDown={(e) => {
-                                                  if (e.key === 'Enter') renameKoyebService(account, app, service);
-                                                  if (e.key === 'Escape') cancelEditKoyebServiceName(service);
-                                                }}
-                                                onBlur={() => renameKoyebService(account, app, service)}
-                                                className="w-full px-2 py-0.5 text-xs text-kumo-strong"
-                                                autoFocus
-                                              />
-                                            ) : (
-                                              <Button
-                                                type="button"
-                                                variant="ghost"
-                                                onDoubleClick={() => startEditKoyebServiceName(service)}
-                                                className="!h-auto max-w-64 justify-start truncate px-0 py-0 text-left text-xs font-semibold text-kumo-strong hover:text-kumo-brand"
-                                                title="双击重命名服务"
-                                              >
-                                                {service.name}
-                                              </Button>
-                                            )
-                                          ) : (
-                                            <span className="text-xs text-kumo-subtle">暂无服务</span>
-                                          )}
-                                        </Table.Cell>
-                                        <Table.Cell className="w-[12%] !px-3 !py-2 text-center align-middle">
-                                          {service ? (
-                                            <Badge className={getKoyebStatusBadge(service.status)}>
-                                              {getKoyebStatusText(service.status)}
-                                            </Badge>
-                                          ) : (
-                                            <span className="text-kumo-subtle">-</span>
-                                          )}
-                                        </Table.Cell>
-                                        <Table.Cell className="w-[10%] !px-3 !py-2 text-center align-middle">
-                                          {service ? (
-                                            <span className="font-mono text-[11px] text-kumo-subtle">
-                                              {service.instances?.length ?? '-'}
-                                            </span>
-                                          ) : (
-                                            <span className="text-kumo-subtle">-</span>
-                                          )}
-                                        </Table.Cell>
-                                        <Table.Cell className="w-[22%] !px-3 !py-2 align-middle">
-                                          {service && (
-                                            <div className="flex justify-end gap-1">
-                                              <Button shape="square" size="sm" variant="ghost" aria-label="重启服务" onClick={() => restartKoyebService(account, app, service)} title="重启服务" className="text-kumo-subtle hover:text-kumo-brand">
-                                                <RefreshCw className="h-3.5 w-3.5" />
-                                              </Button>
-                                              <Button shape="square" size="sm" variant="ghost" aria-label="重新部署服务" onClick={() => redeployKoyebService(account, app, service)} title="重新部署" className="text-kumo-subtle hover:text-kumo-info">
-                                                <Rocket className="h-3.5 w-3.5" />
-                                              </Button>
-                                              <Button shape="square" size="sm" variant="ghost" aria-label="查看服务实例" onClick={() => fetchKoyebServiceInstances(account, service)} title="查看实例" className="text-kumo-subtle hover:text-kumo-brand">
-                                                <Server className={`h-3.5 w-3.5 ${service.loadingInstances ? 'animate-spin' : ''}`} />
-                                              </Button>
-                                              <Button shape="square" size="sm" variant="ghost" aria-label="查看服务日志" onClick={() => showKoyebServiceLogs(account, app, service)} title="查看日志" className="text-kumo-subtle hover:text-kumo-success">
-                                                <FileText className="h-3.5 w-3.5" />
-                                              </Button>
+                                          </div>
+
+                                          {service.domains?.length ? (
+                                            <div className="space-y-1">
+                                              <Text as="div" variant="secondary" size="xs" bold>访问域名</Text>
+                                              <div className="flex min-w-0 flex-wrap gap-1.5">
+                                                {service.domains.map((dom) => {
+                                                  const domain = dom.domain || dom.name || String(dom);
+                                                  if (!domain) return null;
+                                                  return (
+                                                    <Link key={`${service._id}-${domain}`} href={`https://${domain}`} target="_blank" rel="noreferrer" variant="plain" className="min-w-0">
+                                                      <Badge variant={dom.isGenerated ? 'outline' : 'success'} appearance={dom.isGenerated ? undefined : 'dot'} className="max-w-full">
+                                                        <Globe className="h-3 w-3 shrink-0" />
+                                                        <span className="truncate">{domain}</span>
+                                                        {dom.isGenerated ? <span>默认</span> : null}
+                                                      </Badge>
+                                                    </Link>
+                                                  );
+                                                })}
+                                              </div>
                                             </div>
-                                          )}
-                                        </Table.Cell>
-                                      </Table.Row>,
-                                      service?.showInstances && service.instances ? (
-                                        <Table.Row key={`${rowKey}-instances`} className="border-b border-kumo-line/80 bg-kumo-recessed/20">
-                                          <Table.Cell colSpan={5} className="px-3 py-2">
-                                            <div className="space-y-1 rounded-md border border-kumo-line bg-kumo-base p-2 text-[10px]">
-                                              <div className="flex items-center justify-between text-kumo-subtle">
-                                                <span className="font-bold">实例列表 ({service.instances.length})</span>
-                                                <Button size="sm" variant="ghost" onClick={() => {
+                                          ) : null}
+
+                                          {service.showInstances && service.instances ? (
+                                            <div className="space-y-2">
+                                              <div className="flex items-center justify-between gap-2">
+                                                <Text as="span" size="xs" bold>实例列表 ({service.instances.length})</Text>
+                                                <Button size="xs" variant="ghost" onClick={() => {
                                                   setKoyebAccounts(prev => prev.map(acc => ({
                                                     ...acc,
                                                     projects: acc.projects.map(p => ({
@@ -1718,34 +1955,44 @@ function PaasPage() {
                                                       })
                                                     }))
                                                   })));
-                                                }} className="text-kumo-danger hover:underline">关闭</Button>
+                                                }} icon={<X className="h-3 w-3" />} aria-label="关闭实例列表" title="关闭实例列表" />
                                               </div>
-                                              {service.instances.map(inst => (
-                                                <div key={inst.id} className="grid grid-cols-[minmax(0,1fr)_7rem_6rem] items-center gap-2 border-t border-kumo-line/70 py-1 first:border-t-0">
-                                                  <span className="truncate font-mono text-kumo-subtle">{inst.id}</span>
-                                                  <span className="text-kumo-strong font-semibold">{inst.region?.toUpperCase() || '-'}</span>
-                                                  <span className={`justify-self-start rounded px-1.5 text-[9px] font-bold ${getKoyebStatusBadge(inst.status)}`}>{inst.status}</span>
-                                                </div>
-                                              ))}
+                                              <div className="space-y-2">
+                                                {service.instances.map(inst => (
+                                                  <div key={inst.id} className="flex min-w-0 items-center justify-between gap-2 border-t border-kumo-line/70 pt-2 first:border-t-0 first:pt-0">
+                                                    <div className="min-w-0">
+                                                      <ClipboardText size="sm" text={inst.id} />
+                                                    </div>
+                                                    <div className="flex shrink-0 items-center gap-1.5">
+                                                      <Badge variant="neutral">{inst.region?.toUpperCase() || '-'}</Badge>
+                                                      <Badge variant={getKoyebStatusTone(inst.status)} appearance="dot">{inst.status || 'unknown'}</Badge>
+                                                    </div>
+                                                  </div>
+                                                ))}
+                                              </div>
                                             </div>
-                                          </Table.Cell>
-                                        </Table.Row>
-                                      ) : null,
-                                    ].filter(Boolean);
-                                  });
-                                })}
-                              </Table.Body>
-                            </Table>
-                          </div>
-                          )}
-                        </AnimatedCollapse>
-                      </Table.Cell>
-                    </Table.Row>
-                  </React.Fragment>
+                                          ) : null}
+
+                                          <div className="flex flex-wrap justify-end gap-1">
+                                            <Button shape="square" size="sm" variant="ghost" aria-label="重启服务" onClick={() => restartKoyebService(account, app, service)} title={service.status === 'SUSPENDED' ? '启动服务' : '重启服务'} icon={<RefreshCw className="h-3.5 w-3.5" />} />
+                                            <Button shape="square" size="sm" variant="ghost" aria-label="重新部署服务" onClick={() => redeployKoyebService(account, app, service)} title="重新部署" icon={<Rocket className="h-3.5 w-3.5" />} />
+                                            <Button shape="square" size="sm" variant="ghost" aria-label="查看服务实例" onClick={() => fetchKoyebServiceInstances(account, service)} title="查看实例" icon={<Server className={`h-3.5 w-3.5 ${service.loadingInstances ? 'animate-spin' : ''}`} />} />
+                                            <Button shape="square" size="sm" variant="ghost" aria-label="查看服务日志" onClick={() => showKoyebServiceLogs(account, app, service)} title="查看日志" icon={<FileText className="h-3.5 w-3.5" />} />
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </LayerCard.Primary>
+                              </LayerCard>
+                            );
+                          })}
+                        </KumoGrid>
+                      )}
+                    </AnimatedCollapse>
+                  </section>
                 );
               })}
-                </Table.Body>
-              </Table>
             </div>
           )}
         </div>
@@ -1755,223 +2002,221 @@ function PaasPage() {
       {activeTab === 'fly' && (
         <div className="space-y-3">
           {flyLoading && flyAccounts.length === 0 ? (
-            <div className="text-center py-12 text-kumo-subtle text-xs flex flex-col items-center justify-center gap-2">
-              <RefreshCw className="w-8 h-8 animate-spin text-kumo-brand" />
-              <span>正在加载 Fly.io 数据快照...</span>
-            </div>
+            <Empty
+              size="base"
+              icon={<RefreshCw className="h-8 w-8 animate-spin text-kumo-brand" />}
+              title="正在加载 Fly.io"
+              description="正在同步应用、机器和域名状态。"
+            />
           ) : flyAccounts.length === 0 ? (
-            <div className="rounded-md border border-kumo-line bg-kumo-base p-12 text-center text-xs text-kumo-subtle">
-              暂无配置 Fly.io 账号。请前往“配置”添加账号 API 令牌。
-            </div>
+            <Empty
+              size="base"
+              icon={<FlyIoBrand className="h-8 w-8 text-kumo-brand" />}
+              title="暂无 Fly.io 账号"
+              description="请前往配置页添加 Fly.io API Token。"
+            />
           ) : (
-            <div className="overflow-x-auto rounded-md border border-kumo-line bg-kumo-base">
-              <Table className="min-w-[60rem]">
-                <Table.Header>
-                  <Table.Row className="border-b border-kumo-line bg-kumo-recessed/25 text-[11px] font-bold text-kumo-subtle">
-                    <Table.Head className="!px-3 !py-2">账号</Table.Head>
-                    <Table.Head className="!px-3 !py-2 text-center">应用</Table.Head>
-                    <Table.Head className="!px-3 !py-2 text-center">机器</Table.Head>
-                    <Table.Head className="!px-3 !py-2 text-right">账号操作</Table.Head>
-                  </Table.Row>
-                </Table.Header>
-                <Table.Body>
+            <div className="space-y-5">
               {flyAccounts.map((account) => {
                 const expanded = isFlyAccountExpanded(account.name);
                 const appCount = account.projects?.length || 0;
                 const machineCount = (account.projects || []).reduce((total, project) => total + (project.machines?.length || 0), 0);
                 return (
-                  <React.Fragment key={account.name}>
-                    <Table.Row
-                      className="cursor-pointer border-b border-kumo-line/80 transition-colors hover:bg-kumo-recessed/20"
-                      onClick={() => toggleFlyAccount(account.name)}
-                    >
-                      <Table.Cell className="!px-3 !py-2 align-middle">
-                        <div className="flex min-w-0 items-center gap-3">
-                        <ChevronDown className={`w-4 h-4 text-kumo-subtle transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />
-                        <div className="flex h-7 w-7 items-center justify-center rounded-full bg-kumo-brand text-xs font-bold text-kumo-inverse">
-                          {(account.name || 'F').charAt(0).toUpperCase()}
-                        </div>
-                        <div>
-                          <div className="text-sm font-bold text-kumo-strong">{account.name}</div>
-                        </div>
-                        </div>
-                      </Table.Cell>
-                      <Table.Cell className="!px-3 !py-2 text-center align-middle font-mono text-[11px] text-kumo-subtle">{appCount}</Table.Cell>
-                      <Table.Cell className="!px-3 !py-2 text-center align-middle font-mono text-[11px] text-kumo-subtle">{machineCount}</Table.Cell>
-                      <Table.Cell className="!px-3 !py-2 align-middle">
-                        <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
-                        <Button size="sm"
-                          variant="secondary"
-                          onClick={() => updateAllFlyAppsImage(account)}
-                          className="text-[10px] font-semibold text-kumo-info flex items-center gap-1"
+                  <section key={account.name} className="space-y-3">
+                    <LayerCard className="self-start">
+                      <LayerCard.Secondary
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={expanded}
+                        className="flex min-w-0 cursor-pointer flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+                        onClick={() => toggleFlyAccount(account.name)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            toggleFlyAccount(account.name);
+                          }
+                        }}
+                      >
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          tabIndex={-1}
+                          className="min-w-0 justify-start px-0"
+                          icon={<ChevronDown className={`h-4 w-4 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />}
                         >
-                          批量更新
+                          <span className="flex min-w-0 items-center gap-2">
+                            <FlyIoBrand className="h-4 w-4 shrink-0 text-kumo-brand" />
+                            <Text as="span" bold truncate>{account.name}</Text>
+                          </span>
                         </Button>
-                        <Button size="sm"
-                          variant="secondary"
-                          onClick={() => createFlyApp(account)}
-                          className="text-[10px] font-semibold text-kumo-brand flex items-center gap-1"
-                        >
-                          <Plus className="w-3 h-3" />
-                          <span>新建应用</span>
-                        </Button>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="neutral">{appCount} 应用</Badge>
+                          <Badge variant="neutral">{machineCount} 机器</Badge>
+                          <Button size="sm" variant="secondary" onClick={(e) => { e.stopPropagation(); updateAllFlyAppsImage(account); }} icon={<Rocket className="h-3.5 w-3.5" />}>
+                            批量更新
+                          </Button>
+                          <Button size="sm" variant="primary" onClick={(e) => { e.stopPropagation(); createFlyApp(account); }} icon={<Plus className="h-3.5 w-3.5" />}>
+                            新建应用
+                          </Button>
                         </div>
-                      </Table.Cell>
-                    </Table.Row>
+                      </LayerCard.Secondary>
+                    </LayerCard>
 
-                    <Table.Row className={expanded ? 'border-b border-kumo-line/80 bg-kumo-canvas/40' : 'border-0'}>
-                      <Table.Cell colSpan={4} className="!p-0">
-                        <AnimatedCollapse open={expanded}>
-                          {account.error ? (
-                            <div className="m-2 rounded border border-kumo-danger/20 bg-kumo-danger/10 p-2 text-xs text-kumo-danger">
-                              出错了: {account.error}
-                            </div>
-                          ) : !account.projects || account.projects.length === 0 ? (
-                            <div className="py-6 text-center text-xs text-kumo-subtle">暂无配置应用</div>
-                          ) : (
-                            <div className="overflow-x-auto">
-                              <Table className="min-w-[58rem] table-fixed">
-                              <Table.Body>
-                                {account.projects.map((app) => (
-                                  <React.Fragment key={app.id}>
-                                    <Table.Row className="border-b border-kumo-line/70 last:border-b-0 hover:bg-kumo-recessed/20">
-                                      <Table.Cell className="w-[24%] !px-3 !py-2 align-middle">
-                                        <div className="flex min-w-0 items-center gap-2">
-                                          <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-kumo-line bg-kumo-recessed/45 text-kumo-brand">
-                                            <FlyIoBrand className="h-3.5 w-3.5" />
-                                          </span>
-                                          {app.isEditing ? (
-                                            <Input size="sm"
-                                              aria-label="Fly 应用名称"
-                                              type="text"
-                                              value={app.editingName}
-                                              onChange={(e) => {
-                                                const val = e.target.value;
-                                                setFlyAccounts(prev => prev.map(acc => ({
-                                                  ...acc,
-                                                  projects: acc.projects.map(p => {
-                                                    if (p.id !== app.id) return p;
-                                                    return { ...p, editingName: val };
-                                                  })
-                                                })));
-                                              }}
-                                              onKeyDown={(e) => {
-                                                if (e.key === 'Enter') saveFlyAppName(account, app);
-                                                if (e.key === 'Escape') cancelEditFlyAppName(app);
-                                              }}
-                                              onBlur={() => saveFlyAppName(account, app)}
-                                              className="w-full px-2 py-0.5 text-xs text-kumo-strong"
-                                              autoFocus
-                                            />
-                                          ) : (
-                                            <Button
-                                              type="button"
-                                              variant="ghost"
-                                              onDoubleClick={() => startEditFlyAppName(app)}
-                                              className="!h-auto max-w-64 justify-start truncate px-0 py-0 text-left text-xs font-bold text-kumo-strong hover:text-kumo-brand"
-                                              title="双击重命名"
-                                            >
-                                              {app.name}
-                                            </Button>
-                                          )}
-                                        </div>
-                                      </Table.Cell>
-                                      <Table.Cell className="w-[34%] !px-3 !py-2 align-middle">
-                                        <div className="flex max-w-xl flex-wrap gap-1.5">
-                                          {app.hostname ? (
-                                            <a href={`https://${app.hostname}`} target="_blank" rel="noreferrer" className="inline-flex max-w-64 items-center gap-1 rounded border border-kumo-line bg-kumo-recessed px-2 py-0.5 text-[10px] font-semibold text-kumo-brand hover:bg-kumo-recessed/80">
-                                              <Globe className="h-3 w-3 shrink-0" />
-                                              <span className="truncate">{app.hostname}</span>
-                                              <span className="rounded bg-kumo-subtle/20 px-1 text-[8px] text-kumo-strong">默认</span>
-                                            </a>
-                                          ) : (
-                                            <span className="font-mono text-[11px] text-kumo-subtle">{app.name}</span>
-                                          )}
-                                          {app.domains?.map((dom) => (
-                                            <a key={dom.domain} href={`https://${dom.domain}`} target="_blank" rel="noreferrer" className="inline-flex max-w-56 items-center gap-1 rounded border border-kumo-line bg-kumo-recessed px-2 py-0.5 text-[10px] font-semibold text-kumo-strong hover:bg-kumo-recessed/80">
-                                              <Globe className="h-3 w-3 shrink-0" />
-                                              <span className="truncate">{dom.domain}</span>
-                                              <span className={`rounded px-1 text-[8px] font-bold ${dom.isVerified ? 'bg-kumo-success/10 text-kumo-success' : 'bg-kumo-warning/10 text-kumo-warning'}`}>
-                                                {dom.isVerified ? '已就绪' : '配置中'}
-                                              </span>
-                                            </a>
-                                          ))}
-                                        </div>
-                                      </Table.Cell>
-                                      <Table.Cell className="w-[12%] !px-3 !py-2 text-center align-middle">
-                                        <Badge className={getFlyStatusBadge(app.status)}>
-                                          {getFlyStatusText(app.status)}
+                    <AnimatedCollapse open={expanded} panelClassName="overflow-visible">
+                      {account.error ? (
+                        <Empty
+                          size="sm"
+                          icon={<Info className="h-8 w-8 text-kumo-danger" />}
+                          title="Fly.io 同步失败"
+                          description={account.error}
+                        />
+                      ) : !account.projects || account.projects.length === 0 ? (
+                        <Empty
+                          size="sm"
+                          icon={<FlyIoBrand className="h-8 w-8 text-kumo-brand" />}
+                          title="暂无应用"
+                          description="此账号下还没有 Fly.io 应用。"
+                          contents={<Button size="sm" variant="primary" onClick={() => createFlyApp(account)} icon={<Plus className="h-3.5 w-3.5" />}>新建应用</Button>}
+                        />
+                      ) : (
+                        <KumoGrid variant="4up" gap="sm" className="items-start">
+                          {account.projects.map((app) => (
+                            <LayerCard key={app.id} className="self-start">
+                              <LayerCard.Secondary className="flex min-w-0 items-start justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                  {app.isEditing ? (
+                                    <Input
+                                      size="sm"
+                                      aria-label="Fly 应用名称"
+                                      type="text"
+                                      value={app.editingName}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        setFlyAccounts(prev => prev.map(acc => ({
+                                          ...acc,
+                                          projects: acc.projects.map(p => {
+                                            if (p.id !== app.id) return p;
+                                            return { ...p, editingName: val };
+                                          })
+                                        })));
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') saveFlyAppName(account, app);
+                                        if (e.key === 'Escape') cancelEditFlyAppName(app);
+                                      }}
+                                      onBlur={() => saveFlyAppName(account, app)}
+                                      autoFocus
+                                    />
+                                  ) : (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      onDoubleClick={() => startEditFlyAppName(app)}
+                                      className="min-w-0 justify-start px-0"
+                                      title="双击重命名"
+                                      icon={<FlyIoBrand className="h-4 w-4 text-kumo-brand" />}
+                                    >
+                                      <Text as="span" bold truncate>{app.name}</Text>
+                                    </Button>
+                                  )}
+                                </div>
+                                <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                                  <Badge variant={getFlyStatusTone(app.status)} appearance="dot">
+                                    {getFlyStatusText(app.status)}
+                                  </Badge>
+                                  <Badge variant="neutral">{app.machines?.length ?? '-'} 机器</Badge>
+                                </div>
+                              </LayerCard.Secondary>
+
+                              <LayerCard.Primary className="space-y-3">
+                                <div className="space-y-2">
+                                  <Text as="div" variant="secondary" size="xs" bold>访问域名</Text>
+                                  <div className="flex min-w-0 flex-wrap gap-1.5">
+                                    {app.hostname ? (
+                                      <Link href={`https://${app.hostname}`} target="_blank" rel="noreferrer" variant="plain" className="min-w-0">
+                                        <Badge variant="outline" className="max-w-full">
+                                          <Globe className="h-3 w-3 shrink-0" />
+                                          <span className="truncate">{app.hostname}</span>
+                                          <span>默认</span>
                                         </Badge>
-                                      </Table.Cell>
-                                      <Table.Cell className="w-[10%] !px-3 !py-2 text-center align-middle">
-                                        <span className="font-mono text-[11px] text-kumo-subtle">
-                                          {app.machines?.length ?? '-'}
-                                        </span>
-                                      </Table.Cell>
-                                      <Table.Cell className="w-[20%] !px-3 !py-2 align-middle">
-                                        <div className="flex justify-end gap-1">
-                                          <Button shape="square" size="sm" variant="ghost" aria-label="重启应用" onClick={() => redeployFlyApp(account, app)} title="重启应用" className="text-kumo-subtle hover:text-kumo-brand">
-                                            <RefreshCw className="h-3.5 w-3.5" />
-                                          </Button>
-                                          <Button shape="square" size="sm" variant="ghost" aria-label="更新容器镜像" onClick={() => updateFlyAppImage(account, app)} title="更新容器镜像" className="text-kumo-subtle hover:text-kumo-brand">
-                                            <Rocket className="h-3.5 w-3.5" />
-                                          </Button>
-                                          <Button shape="square" size="sm" variant="ghost" aria-label="查看机器实例" onClick={() => fetchFlyMachines(account, app)} title="查看机器/实例" className="text-kumo-subtle hover:text-kumo-info">
-                                            <Server className={`h-3.5 w-3.5 ${app.loadingMachines ? 'animate-spin' : ''}`} />
-                                          </Button>
-                                          <Button shape="square" size="sm" variant="ghost" aria-label="查看运行日志" onClick={() => showFlyAppLogs(account, app)} title="查看运行日志" className="text-kumo-subtle hover:text-kumo-success">
-                                            <FileText className="h-3.5 w-3.5" />
-                                          </Button>
-                                          <Button shape="square" size="sm" variant="ghost" aria-label="查看应用配置" onClick={() => viewFlyConfig(account, app)} title="查看应用配置" className="text-kumo-subtle hover:text-kumo-strong">
-                                            <Terminal className="h-3.5 w-3.5" />
-                                          </Button>
-                                          <Button shape="square" size="sm" variant="ghost" aria-label="删除 Fly 应用" onClick={() => deleteFlyApp(account, app)} title="删除应用" className="text-kumo-subtle hover:text-kumo-danger">
-                                            <Trash className="h-3.5 w-3.5" />
-                                          </Button>
-                                        </div>
-                                      </Table.Cell>
-                                    </Table.Row>
-                                    {app.showMachines && app.machines ? (
-                                      <Table.Row className="border-b border-kumo-line/80 bg-kumo-recessed/20">
-                                        <Table.Cell colSpan={5} className="px-3 py-2">
-                                          <div className="space-y-1 rounded-md border border-kumo-line bg-kumo-base p-2 text-[10px]">
-                                            <div className="flex items-center justify-between text-kumo-subtle">
-                                              <span className="font-bold">机器实例 ({app.machines.length})</span>
-                                              <Button size="sm" variant="ghost" onClick={() => {
-                                                setFlyAccounts(prev => prev.map(acc => ({
-                                                  ...acc,
-                                                  projects: acc.projects.map(p => {
-                                                    if (p.id !== app.id) return p;
-                                                    return { ...p, showMachines: false };
-                                                  })
-                                                })));
-                                              }} className="text-kumo-danger hover:underline">关闭</Button>
-                                            </div>
-                                            {app.machines.map(m => (
-                                              <div key={m.id} className="grid grid-cols-[minmax(0,1fr)_7rem_6rem] items-center gap-2 border-t border-kumo-line/70 py-1 first:border-t-0">
-                                                <span className="truncate font-mono text-kumo-subtle">{m.id}</span>
-                                                <span className="text-kumo-strong font-semibold">{formatRegion(m.region) || '-'}</span>
-                                                <span className={`justify-self-start rounded px-1.5 text-[9px] font-bold ${getFlyStatusBadge(m.state)}`}>{m.state}</span>
+                                      </Link>
+                                    ) : (
+                                      <ClipboardText size="sm" text={app.name} />
+                                    )}
+                                    {app.domains?.map((dom) => (
+                                      <Link key={dom.domain} href={`https://${dom.domain}`} target="_blank" rel="noreferrer" variant="plain" className="min-w-0">
+                                        <Badge variant={dom.isVerified ? 'success' : 'warning'} appearance={dom.isVerified ? 'dot' : 'filled'} className="max-w-full">
+                                          <Globe className="h-3 w-3 shrink-0" />
+                                          <span className="truncate">{dom.domain}</span>
+                                        </Badge>
+                                      </Link>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                {app.showMachines && app.machines ? (
+                                  <div className="space-y-2">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <Text as="span" size="xs" bold>机器实例 ({app.machines.length})</Text>
+                                      <Button size="xs" variant="ghost" onClick={() => {
+                                        setFlyAccounts(prev => prev.map(acc => ({
+                                          ...acc,
+                                          projects: acc.projects.map(p => {
+                                            if (p.id !== app.id) return p;
+                                            return { ...p, showMachines: false };
+                                          })
+                                        })));
+                                      }} icon={<X className="h-3 w-3" />} aria-label="关闭机器列表" title="关闭机器列表" />
+                                    </div>
+                                    <div className="space-y-2">
+                                    {app.machines.map(m => (
+                                      <div key={m.id} className="space-y-2">
+                                          <div className="flex items-start justify-between gap-2">
+                                            <div className="min-w-0 space-y-1">
+                                              <ClipboardText size="sm" text={m.id} />
+                                              <div className="flex flex-wrap items-center gap-1.5">
+                                                <Badge variant={getFlyStatusTone(m.state)} appearance="dot">{m.state || 'unknown'}</Badge>
+                                                <Badge variant="neutral">{formatRegion(m.region) || 'REGION'}</Badge>
                                               </div>
-                                            ))}
+                                            </div>
+                                            <Button shape="square" size="sm" variant="ghost" aria-label="机器详情" title="机器详情" onClick={() => showFlyMachineDetails(account, app, m)} icon={<Info className="h-3.5 w-3.5" />} />
                                           </div>
-                                        </Table.Cell>
-                                      </Table.Row>
-                                    ) : null}
-                                  </React.Fragment>
-                                ))}
-                              </Table.Body>
-                            </Table>
-                          </div>
-                          )}
-                        </AnimatedCollapse>
-                      </Table.Cell>
-                    </Table.Row>
-                  </React.Fragment>
+                                          <div className="flex flex-wrap gap-1">
+                                            <Button shape="square" size="xs" variant="secondary" aria-label="启动机器" title="启动" onClick={() => runFlyMachineAction(account, app, m, 'start', '机器已启动')} icon={<Play className="h-3 w-3" />} />
+                                            <Button shape="square" size="xs" variant="secondary" aria-label="停止机器" title="停止" onClick={() => runFlyMachineAction(account, app, m, 'stop', '机器已停止', { body: { signal: 'SIGTERM', timeout: '30s' } })} icon={<Square className="h-3 w-3" />} />
+                                            <Button shape="square" size="xs" variant="secondary" aria-label="挂起机器" title="挂起" onClick={() => runFlyMachineAction(account, app, m, 'suspend', '机器已挂起')} icon={<Pause className="h-3 w-3" />} />
+                                            <Button shape="square" size="xs" variant="secondary" aria-label="禁用调度" title="Cordon" onClick={() => runFlyMachineAction(account, app, m, 'cordon', '机器已 cordon')} icon={<Lock className="h-3 w-3" />} />
+                                            <Button shape="square" size="xs" variant="secondary" aria-label="恢复调度" title="Uncordon" onClick={() => runFlyMachineAction(account, app, m, 'uncordon', '机器已 uncordon')} icon={<ExternalLink className="h-3 w-3" />} />
+                                            <Button shape="square" size="xs" variant="secondary" aria-label="获取 lease" title="获取 lease" onClick={() => acquireFlyMachineLease(account, app, m)} icon={<Lock className="h-3 w-3" />} />
+                                            <Button shape="square" size="xs" variant="secondary" aria-label="设置 metadata" title="设置 metadata" onClick={() => setFlyMachineMetadata(account, app, m)} icon={<Settings className="h-3 w-3" />} />
+                                            <Button shape="square" size="xs" variant="secondary-destructive" aria-label="删除机器" title="删除机器" onClick={() => deleteFlyMachine(account, app, m)} icon={<Trash className="h-3 w-3" />} />
+                                          </div>
+                                      </div>
+                                    ))}
+                                    </div>
+                                  </div>
+                                ) : null}
+
+                                <div className="flex flex-wrap justify-end gap-1">
+                                    <Button shape="square" size="sm" variant="ghost" aria-label="重启应用" onClick={() => redeployFlyApp(account, app)} title="重启应用" icon={<RefreshCw className="h-3.5 w-3.5" />} />
+                                    <Button shape="square" size="sm" variant="ghost" aria-label="更新容器镜像" onClick={() => updateFlyAppImage(account, app)} title="更新容器镜像" icon={<Rocket className="h-3.5 w-3.5" />} />
+                                    <Button shape="square" size="sm" variant="ghost" aria-label="创建机器" onClick={() => createFlyMachine(account, app)} title="创建机器" icon={<Plus className="h-3.5 w-3.5" />} />
+                                    <Button shape="square" size="sm" variant="ghost" aria-label="查看机器实例" onClick={() => fetchFlyMachines(account, app)} title="查看机器/实例" icon={<Server className={`h-3.5 w-3.5 ${app.loadingMachines ? 'animate-spin' : ''}`} />} />
+                                    <Button shape="square" size="sm" variant="ghost" aria-label="查看运行日志" onClick={() => showFlyAppLogs(account, app)} title="查看运行日志" icon={<FileText className="h-3.5 w-3.5" />} />
+                                    <Button shape="square" size="sm" variant="ghost" aria-label="查看应用配置" onClick={() => viewFlyConfig(account, app)} title="查看应用配置" icon={<Terminal className="h-3.5 w-3.5" />} />
+                                    <Button shape="square" size="sm" variant="secondary-destructive" aria-label="删除 Fly 应用" onClick={() => deleteFlyApp(account, app)} title="删除应用" icon={<Trash className="h-3.5 w-3.5" />} />
+                                </div>
+                              </LayerCard.Primary>
+                            </LayerCard>
+                          ))}
+                        </KumoGrid>
+                      )}
+                    </AnimatedCollapse>
+                  </section>
                 );
               })}
-                </Table.Body>
-              </Table>
             </div>
           )}
         </div>

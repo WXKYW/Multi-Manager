@@ -62,7 +62,7 @@ const DASHBOARD_CACHE_TTL_MS = 30_000;
 const DASHBOARD_FETCH_TIMEOUT_MS = 6_000;
 const HOST_METRICS_POLL_MS = 2_000;
 const HOST_METRICS_FETCH_TIMEOUT_MS = 4_000;
-const DASHBOARD_SERVER_STATUS_LIMIT = 8;
+const DASHBOARD_SERVER_STATUS_LIMIT = 7;
 const SERVICE_TOOL_ITEM_CLASS = 'group flex min-h-8 cursor-pointer items-center justify-between gap-2 rounded-md border border-kumo-line bg-kumo-recessed/45 px-2 py-1 transition-colors hover:border-kumo-brand/60 hover:bg-kumo-base sm:min-h-9 sm:px-2.5 sm:py-1 xl:min-h-9';
 const SERVICE_TOOL_ICON_CLASS = 'flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-sm sm:h-6.5 sm:w-6.5';
 const SERVICE_TOOL_BADGE_CLASS = 'flex h-5 min-w-8 items-center justify-center gap-1 rounded-md border border-kumo-line bg-kumo-base px-1.5 text-[10px] font-semibold text-kumo-strong tabular-nums sm:min-w-8 sm:px-1.5 sm:text-[11px]';
@@ -214,7 +214,7 @@ function ServerStatusCapsules({ servers = [], total = 0, online = 0, error = 0 }
       className="flex h-5 w-[128px] items-center justify-end gap-1.5"
       aria-label="主机在线状态"
     >
-      <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1.5">
+      <div className="flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-1.5">
         {visibleServers.map((server, index) => {
           const statusMeta = getServerStatusMeta(server.status);
           const label = `${server.name}: ${statusMeta.label}`;

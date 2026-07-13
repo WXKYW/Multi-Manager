@@ -79,6 +79,32 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.updateAppImage(w, r, parts[1])
 	case len(parts) == 3 && parts[0] == "apps" && parts[2] == "machines" && r.Method == http.MethodGet:
 		s.machines(w, r, parts[1])
+	case len(parts) == 3 && parts[0] == "apps" && parts[2] == "machines" && r.Method == http.MethodPost:
+		s.machineCreate(w, r, parts[1])
+	case len(parts) == 4 && parts[0] == "apps" && parts[2] == "machines" && r.Method == http.MethodGet:
+		s.machineGet(w, r, parts[1], parts[3])
+	case len(parts) == 4 && parts[0] == "apps" && parts[2] == "machines" && r.Method == http.MethodPost:
+		s.machineUpdate(w, r, parts[1], parts[3])
+	case len(parts) == 5 && parts[0] == "apps" && parts[2] == "machines" && parts[4] == "wait" && r.Method == http.MethodGet:
+		s.machineWait(w, r, parts[1], parts[3])
+	case len(parts) == 5 && parts[0] == "apps" && parts[2] == "machines" && isMachineGetSubresource(parts[4]) && r.Method == http.MethodGet:
+		s.machineGetSubresource(w, r, parts[1], parts[3], parts[4])
+	case len(parts) == 5 && parts[0] == "apps" && parts[2] == "machines" && isMachinePostSubresource(parts[4]) && r.Method == http.MethodPost:
+		s.machinePostSubresource(w, r, parts[1], parts[3], parts[4])
+	case len(parts) == 6 && parts[0] == "apps" && parts[2] == "machines" && parts[4] == "memory" && parts[5] == "reclaim" && r.Method == http.MethodPost:
+		s.machinePostSubresource(w, r, parts[1], parts[3], "memory/reclaim")
+	case len(parts) == 5 && parts[0] == "apps" && parts[2] == "machines" && parts[4] == "memory" && r.Method == http.MethodPut:
+		s.machinePutSubresource(w, r, parts[1], parts[3], parts[4])
+	case len(parts) == 5 && parts[0] == "apps" && parts[2] == "machines" && isMachineAction(parts[4]) && r.Method == http.MethodPost:
+		s.machineAction(w, r, parts[1], parts[3], parts[4])
+	case len(parts) == 4 && parts[0] == "apps" && parts[2] == "machines" && r.Method == http.MethodDelete:
+		s.machineDelete(w, r, parts[1], parts[3])
+	case len(parts) == 5 && parts[0] == "apps" && parts[2] == "machines" && parts[4] == "lease":
+		s.machineLease(w, r, parts[1], parts[3])
+	case len(parts) == 5 && parts[0] == "apps" && parts[2] == "machines" && parts[4] == "metadata" && (r.Method == http.MethodGet || r.Method == http.MethodPut || r.Method == http.MethodPatch):
+		s.machineMetadata(w, r, parts[1], parts[3])
+	case len(parts) == 6 && parts[0] == "apps" && parts[2] == "machines" && parts[4] == "metadata":
+		s.machineMetadataKey(w, r, parts[1], parts[3], parts[5])
 	case len(parts) == 3 && parts[0] == "apps" && parts[2] == "events" && r.Method == http.MethodGet:
 		s.events(w, r, parts[1])
 	case len(parts) == 3 && parts[0] == "apps" && parts[2] == "config" && r.Method == http.MethodGet:
@@ -344,8 +370,15 @@ func (s *Service) updateAppImage(w http.ResponseWriter, r *http.Request, appName
 		response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "message": "No machines found"})
 		return
 	}
-	result := s.updateMachinesImage(r.Context(), stringValue(account["api_token"], ""), appName, machines, image)
-	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "updated": result.updated, "failed": result.failed, "errors": result.errors})
+	result := s.updateMachinesImage(r.Context(), stringValue(account["api_token"], ""), appName, machines, image, stringValue(payload["leaseNonce"], ""))
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success":   result.failed == 0,
+		"updated":   result.updated,
+		"unchanged": result.unchanged,
+		"failed":    result.failed,
+		"errors":    result.errors,
+		"details":   result.details,
+	})
 }
 
 func (s *Service) machines(w http.ResponseWriter, r *http.Request, appName string) {
@@ -360,6 +393,327 @@ func (s *Service) machines(w http.ResponseWriter, r *http.Request, appName strin
 		return
 	}
 	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "data": machines})
+}
+
+func (s *Service) machineCreate(w http.ResponseWriter, r *http.Request, appName string) {
+	payload, _ := readObject(r)
+	account, db, ok := s.accountForRequest(w, r, stringValue(payload["accountId"], ""))
+	if !ok {
+		return
+	}
+	defer db.Close()
+	config := objectValue(payload["config"])
+	if len(config) == 0 {
+		image := strings.TrimSpace(stringValue(payload["image"], ""))
+		if image == "" {
+			response.JSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "Image is required"})
+			return
+		}
+		config = map[string]interface{}{"image": image}
+	}
+	body := map[string]interface{}{"config": config}
+	if region := strings.TrimSpace(stringValue(payload["region"], "")); region != "" {
+		body["region"] = region
+	}
+	if name := strings.TrimSpace(stringValue(payload["name"], "")); name != "" {
+		body["name"] = name
+	}
+	if boolValue(payload["skipLaunch"]) {
+		body["skip_launch"] = true
+	}
+	data, err := s.machine(r.Context(), stringValue(account["api_token"], ""), http.MethodPost, "/apps/"+url.PathEscape(appName)+"/machines", body)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "data": data})
+}
+
+func (s *Service) machineGet(w http.ResponseWriter, r *http.Request, appName, machineID string) {
+	account, db, ok := s.accountForRequest(w, r, r.URL.Query().Get("accountId"))
+	if !ok {
+		return
+	}
+	defer db.Close()
+	machine, err := s.machine(r.Context(), stringValue(account["api_token"], ""), http.MethodGet, "/apps/"+url.PathEscape(appName)+"/machines/"+url.PathEscape(machineID), nil)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "data": machine})
+}
+
+func (s *Service) machineUpdate(w http.ResponseWriter, r *http.Request, appName, machineID string) {
+	payload, _ := readObject(r)
+	account, db, ok := s.accountForRequest(w, r, stringValue(payload["accountId"], ""))
+	if !ok {
+		return
+	}
+	defer db.Close()
+	config := objectValue(payload["config"])
+	if len(config) == 0 {
+		response.JSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "Config is required"})
+		return
+	}
+	body := map[string]interface{}{"config": config}
+	if payload["skipLaunch"] != nil {
+		body["skip_launch"] = boolValue(payload["skipLaunch"])
+	}
+	headers := map[string]string{}
+	if nonce := strings.TrimSpace(stringValue(payload["leaseNonce"], "")); nonce != "" {
+		headers["fly-machine-lease-nonce"] = nonce
+	}
+	data, err := s.machineWithHeaders(r.Context(), stringValue(account["api_token"], ""), http.MethodPost, "/apps/"+url.PathEscape(appName)+"/machines/"+url.PathEscape(machineID), body, headers)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "data": data})
+}
+
+func (s *Service) machineWait(w http.ResponseWriter, r *http.Request, appName, machineID string) {
+	account, db, ok := s.accountForRequest(w, r, r.URL.Query().Get("accountId"))
+	if !ok {
+		return
+	}
+	defer db.Close()
+	query := url.Values{}
+	if state := strings.TrimSpace(r.URL.Query().Get("state")); state != "" {
+		query.Set("state", state)
+	}
+	if timeout := strings.TrimSpace(r.URL.Query().Get("timeout")); timeout != "" {
+		query.Set("timeout", timeout)
+	}
+	path := "/apps/" + url.PathEscape(appName) + "/machines/" + url.PathEscape(machineID) + "/wait"
+	if encoded := query.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	data, err := s.machine(r.Context(), stringValue(account["api_token"], ""), http.MethodGet, path, nil)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "data": data})
+}
+
+func (s *Service) machineGetSubresource(w http.ResponseWriter, r *http.Request, appName, machineID, subresource string) {
+	account, db, ok := s.accountForRequest(w, r, r.URL.Query().Get("accountId"))
+	if !ok {
+		return
+	}
+	defer db.Close()
+	data, err := s.machine(r.Context(), stringValue(account["api_token"], ""), http.MethodGet, "/apps/"+url.PathEscape(appName)+"/machines/"+url.PathEscape(machineID)+"/"+subresource, nil)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "data": data})
+}
+
+func (s *Service) machinePostSubresource(w http.ResponseWriter, r *http.Request, appName, machineID, subresource string) {
+	payload, _ := readObject(r)
+	account, db, ok := s.accountForRequest(w, r, stringValue(payload["accountId"], ""))
+	if !ok {
+		return
+	}
+	defer db.Close()
+	body := map[string]interface{}{}
+	switch subresource {
+	case "exec":
+		body["cmd"] = payload["cmd"]
+	case "signal":
+		body["signal"] = stringValue(payload["signal"], "SIGTERM")
+	case "memory", "memory/reclaim":
+		body = copyMap(payload)
+		delete(body, "accountId")
+	case "restart":
+		if signal := strings.TrimSpace(stringValue(payload["signal"], "")); signal != "" {
+			body["signal"] = signal
+		}
+		if timeout := strings.TrimSpace(stringValue(payload["timeout"], "")); timeout != "" {
+			body["timeout"] = timeout
+		}
+	}
+	var requestBody interface{}
+	if len(body) > 0 {
+		requestBody = body
+	}
+	pathSubresource := subresource
+	if pathSubresource == "memory" {
+		pathSubresource = "memory/reclaim"
+	}
+	data, err := s.machine(r.Context(), stringValue(account["api_token"], ""), http.MethodPost, "/apps/"+url.PathEscape(appName)+"/machines/"+url.PathEscape(machineID)+"/"+pathSubresource, requestBody)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "data": data})
+}
+
+func (s *Service) machinePutSubresource(w http.ResponseWriter, r *http.Request, appName, machineID, subresource string) {
+	payload, _ := readObject(r)
+	account, db, ok := s.accountForRequest(w, r, stringValue(payload["accountId"], ""))
+	if !ok {
+		return
+	}
+	defer db.Close()
+	body := copyMap(payload)
+	delete(body, "accountId")
+	data, err := s.machine(r.Context(), stringValue(account["api_token"], ""), http.MethodPut, "/apps/"+url.PathEscape(appName)+"/machines/"+url.PathEscape(machineID)+"/"+subresource, body)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "data": data})
+}
+
+func (s *Service) machineAction(w http.ResponseWriter, r *http.Request, appName, machineID, action string) {
+	payload, _ := readObject(r)
+	account, db, ok := s.accountForRequest(w, r, stringValue(payload["accountId"], ""))
+	if !ok {
+		return
+	}
+	defer db.Close()
+	body := map[string]interface{}{}
+	switch action {
+	case "stop":
+		if signal := strings.TrimSpace(stringValue(payload["signal"], "")); signal != "" {
+			body["signal"] = signal
+		}
+		if timeout := strings.TrimSpace(stringValue(payload["timeout"], "")); timeout != "" {
+			body["timeout"] = timeout
+		}
+	case "start":
+		if nonce := strings.TrimSpace(stringValue(payload["leaseNonce"], "")); nonce != "" {
+			body["lease_nonce"] = nonce
+		}
+	}
+	var requestBody interface{}
+	if len(body) > 0 {
+		requestBody = body
+	}
+	data, err := s.machine(r.Context(), stringValue(account["api_token"], ""), http.MethodPost, "/apps/"+url.PathEscape(appName)+"/machines/"+url.PathEscape(machineID)+"/"+action, requestBody)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "data": data})
+}
+
+func (s *Service) machineDelete(w http.ResponseWriter, r *http.Request, appName, machineID string) {
+	payload, _ := readObject(r)
+	account, db, ok := s.accountForRequest(w, r, stringValue(payload["accountId"], r.URL.Query().Get("accountId")))
+	if !ok {
+		return
+	}
+	defer db.Close()
+	query := url.Values{}
+	if boolValue(payload["force"]) || r.URL.Query().Get("force") == "true" {
+		query.Set("force", "true")
+	}
+	path := "/apps/" + url.PathEscape(appName) + "/machines/" + url.PathEscape(machineID)
+	if encoded := query.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	data, err := s.machine(r.Context(), stringValue(account["api_token"], ""), http.MethodDelete, path, nil)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "data": data})
+}
+
+func (s *Service) machineLease(w http.ResponseWriter, r *http.Request, appName, machineID string) {
+	payload, _ := readObject(r)
+	accountID := stringValue(payload["accountId"], r.URL.Query().Get("accountId"))
+	account, db, ok := s.accountForRequest(w, r, accountID)
+	if !ok {
+		return
+	}
+	defer db.Close()
+	path := "/apps/" + url.PathEscape(appName) + "/machines/" + url.PathEscape(machineID) + "/lease"
+	switch r.Method {
+	case http.MethodGet:
+		data, err := s.machine(r.Context(), stringValue(account["api_token"], ""), http.MethodGet, path, nil)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "data": data})
+	case http.MethodPost:
+		ttl := intValue(payload["ttl"], 15)
+		data, err := s.machine(r.Context(), stringValue(account["api_token"], ""), http.MethodPost, path, map[string]interface{}{"ttl": ttl})
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "data": data})
+	case http.MethodDelete:
+		headers := map[string]string{}
+		if nonce := strings.TrimSpace(stringValue(payload["nonce"], "")); nonce != "" {
+			headers["fly-machine-lease-nonce"] = nonce
+		}
+		data, err := s.machineWithHeaders(r.Context(), stringValue(account["api_token"], ""), http.MethodDelete, path, nil, headers)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "data": data})
+	default:
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (s *Service) machineMetadata(w http.ResponseWriter, r *http.Request, appName, machineID string) {
+	payload, _ := readObject(r)
+	accountID := stringValue(payload["accountId"], r.URL.Query().Get("accountId"))
+	account, db, ok := s.accountForRequest(w, r, accountID)
+	if !ok {
+		return
+	}
+	defer db.Close()
+	var body interface{}
+	if r.Method == http.MethodPut || r.Method == http.MethodPatch {
+		copy := copyMap(payload)
+		delete(copy, "accountId")
+		body = copy
+	}
+	data, err := s.machine(r.Context(), stringValue(account["api_token"], ""), r.Method, "/apps/"+url.PathEscape(appName)+"/machines/"+url.PathEscape(machineID)+"/metadata", body)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "data": data})
+}
+
+func (s *Service) machineMetadataKey(w http.ResponseWriter, r *http.Request, appName, machineID, key string) {
+	payload, _ := readObject(r)
+	accountID := stringValue(payload["accountId"], r.URL.Query().Get("accountId"))
+	account, db, ok := s.accountForRequest(w, r, accountID)
+	if !ok {
+		return
+	}
+	defer db.Close()
+	path := "/apps/" + url.PathEscape(appName) + "/machines/" + url.PathEscape(machineID) + "/metadata/" + url.PathEscape(key)
+	switch r.Method {
+	case http.MethodPost:
+		value := stringValue(payload["value"], "")
+		data, err := s.machine(r.Context(), stringValue(account["api_token"], ""), http.MethodPost, path, map[string]interface{}{"value": value})
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "data": data})
+	case http.MethodDelete:
+		data, err := s.machine(r.Context(), stringValue(account["api_token"], ""), http.MethodDelete, path, nil)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "data": data})
+	default:
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
 }
 
 func (s *Service) events(w http.ResponseWriter, r *http.Request, appName string) {
@@ -451,7 +805,7 @@ func (s *Service) updateAllImages(w http.ResponseWriter, r *http.Request, accoun
 			details = append(details, map[string]interface{}{"app": appName, "skipped": true})
 			continue
 		}
-		machineResult := s.updateMachinesImage(r.Context(), stringValue(account["api_token"], ""), appName, machines, image)
+		machineResult := s.updateMachinesImage(r.Context(), stringValue(account["api_token"], ""), appName, machines, image, "")
 		if machineResult.failed > 0 {
 			failed++
 			details = append(details, map[string]interface{}{"app": appName, "error": "machine update failed"})
@@ -533,7 +887,11 @@ func (s *Service) machineList(ctx context.Context, token, appName string) ([]map
 }
 
 func (s *Service) machine(ctx context.Context, token, method, path string, body interface{}) (interface{}, error) {
-	return s.httpAny(ctx, method, s.machinesURL+path, token, body)
+	return s.machineWithHeaders(ctx, token, method, path, body, nil)
+}
+
+func (s *Service) machineWithHeaders(ctx context.Context, token, method, path string, body interface{}, headers map[string]string) (interface{}, error) {
+	return s.httpAnyWithHeaders(ctx, method, s.machinesURL+path, token, body, headers)
 }
 
 func (s *Service) fetchLogs(ctx context.Context, token, appName string) ([]map[string]interface{}, error) {
@@ -588,6 +946,10 @@ func (s *Service) httpJSON(ctx context.Context, method, target, token string, bo
 }
 
 func (s *Service) httpAny(ctx context.Context, method, target, token string, body interface{}) (interface{}, error) {
+	return s.httpAnyWithHeaders(ctx, method, target, token, body, nil)
+}
+
+func (s *Service) httpAnyWithHeaders(ctx context.Context, method, target, token string, body interface{}, headers map[string]string) (interface{}, error) {
 	if cleanToken(token) == "" {
 		return nil, errors.New("missing Fly.io token")
 	}
@@ -606,6 +968,11 @@ func (s *Service) httpAny(ctx context.Context, method, target, token string, bod
 	req.Header.Set("Authorization", "Bearer "+cleanToken(token))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "API-Monitor/1.0")
+	for key, value := range headers {
+		if strings.TrimSpace(key) != "" && strings.TrimSpace(value) != "" {
+			req.Header.Set(key, value)
+		}
+	}
 	res, err := s.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -624,38 +991,122 @@ func (s *Service) httpAny(ctx context.Context, method, target, token string, bod
 	return payload, nil
 }
 
-type machineUpdateResult struct {
-	updated int
-	failed  int
-	errors  []map[string]interface{}
+func isMachineAction(action string) bool {
+	switch action {
+	case "start", "stop", "suspend", "cordon", "uncordon":
+		return true
+	default:
+		return false
+	}
 }
 
-func (s *Service) updateMachinesImage(ctx context.Context, token, appName string, machines []map[string]interface{}, image string) machineUpdateResult {
-	result := machineUpdateResult{errors: []map[string]interface{}{}}
+func isMachineGetSubresource(subresource string) bool {
+	switch subresource {
+	case "events", "memory", "ps", "versions":
+		return true
+	default:
+		return false
+	}
+}
+
+func isMachinePostSubresource(subresource string) bool {
+	switch subresource {
+	case "exec", "memory", "restart", "signal":
+		return true
+	default:
+		return false
+	}
+}
+
+type machineUpdateResult struct {
+	updated   int
+	unchanged int
+	failed    int
+	errors    []map[string]interface{}
+	details   []map[string]interface{}
+}
+
+func (s *Service) updateMachinesImage(ctx context.Context, token, appName string, machines []map[string]interface{}, image, leaseNonce string) machineUpdateResult {
+	result := machineUpdateResult{errors: []map[string]interface{}{}, details: []map[string]interface{}{}}
+	updateMarker := time.Now().UTC().Format(time.RFC3339Nano)
 	for _, machine := range machines {
 		machineID := stringValue(machine["id"], "")
+		if machineID == "" {
+			result.failed++
+			result.errors = append(result.errors, map[string]interface{}{"error": true, "message": "missing machine id"})
+			continue
+		}
 		config := objectValue(machine["config"])
+		previousImage := stringValue(config["image"], "")
+		previousDigest := machineDigest(machine)
+		previousVersion := stringValue(machine["version"], "")
 		targetImage := image
 		if image == "latest" {
-			current := stringValue(config["image"], "")
-			if current != "" {
-				targetImage = withImageTag(current, "latest")
+			if previousImage != "" {
+				targetImage = withImageTag(previousImage, "latest")
 			}
 		}
 		if targetImage == "" {
-			targetImage = stringValue(config["image"], "")
+			targetImage = previousImage
 		}
+		targetImage = normalizeFlyImageForUpdate(targetImage)
 		updatedConfig := copyMap(config)
 		updatedConfig["image"] = targetImage
-		_, err := s.machine(ctx, token, http.MethodPost, "/apps/"+url.PathEscape(appName)+"/machines/"+url.PathEscape(machineID), map[string]interface{}{"config": updatedConfig})
+		metadata := copyMap(objectValue(updatedConfig["metadata"]))
+		metadata["api-monitor-update"] = updateMarker
+		updatedConfig["metadata"] = metadata
+		headers := map[string]string{}
+		if nonce := strings.TrimSpace(leaseNonce); nonce != "" {
+			headers["fly-machine-lease-nonce"] = nonce
+		}
+		updatedMachine, err := s.machineWithHeaders(ctx, token, http.MethodPost, "/apps/"+url.PathEscape(appName)+"/machines/"+url.PathEscape(machineID), map[string]interface{}{
+			"config":      updatedConfig,
+			"skip_launch": false,
+		}, headers)
 		if err != nil {
 			result.failed++
 			result.errors = append(result.errors, map[string]interface{}{"error": true, "id": machineID, "message": err.Error()})
 			continue
 		}
+		updatedObject := objectValue(updatedMachine)
+		if len(updatedObject) == 0 {
+			if fetched, err := s.machine(ctx, token, http.MethodGet, "/apps/"+url.PathEscape(appName)+"/machines/"+url.PathEscape(machineID), nil); err == nil {
+				updatedObject = objectValue(fetched)
+			}
+		}
+		currentImage := stringValue(objectValue(updatedObject["config"])["image"], targetImage)
+		currentDigest := machineDigest(updatedObject)
+		currentVersion := stringValue(updatedObject["version"], "")
+		imageChanged := previousImage != "" && currentImage != "" && previousImage != currentImage
+		digestChanged := previousDigest != "" && currentDigest != "" && previousDigest != currentDigest
+		versionChanged := previousVersion != "" && currentVersion != "" && previousVersion != currentVersion
+		changed := imageChanged || digestChanged || versionChanged
+		if !changed {
+			result.unchanged++
+		}
+		result.details = append(result.details, map[string]interface{}{
+			"id":              machineID,
+			"name":            stringValue(machine["name"], ""),
+			"state":           stringValue(updatedObject["state"], stringValue(machine["state"], "")),
+			"previousImage":   previousImage,
+			"targetImage":     targetImage,
+			"currentImage":    currentImage,
+			"previousDigest":  previousDigest,
+			"currentDigest":   currentDigest,
+			"previousVersion": previousVersion,
+			"currentVersion":  currentVersion,
+			"imageChanged":    imageChanged,
+			"digestChanged":   digestChanged,
+			"versionChanged":  versionChanged,
+			"changed":         changed,
+		})
 		result.updated++
 	}
 	return result
+}
+
+func machineDigest(machine map[string]interface{}) string {
+	return stringValue(objectValue(machine["image_ref"])["digest"], "")
 }
 
 func withImageTag(image, tag string) string {
@@ -673,6 +1124,15 @@ func withImageTag(image, tag string) string {
 		image = image[:lastColon]
 	}
 	return image + ":" + tag
+}
+
+func normalizeFlyImageForUpdate(image string) string {
+	image = strings.TrimSpace(image)
+	const dockerHubMirrorPrefix = "docker-hub-mirror.fly.io/"
+	if strings.HasPrefix(image, dockerHubMirrorPrefix) {
+		return strings.TrimPrefix(image, dockerHubMirrorPrefix)
+	}
+	return image
 }
 
 func loadAccounts(ctx context.Context, db *sql.DB) ([]map[string]interface{}, error) {
@@ -865,6 +1325,38 @@ func errorString(err error) interface{} {
 		return nil
 	}
 	return err.Error()
+}
+
+func boolValue(value interface{}) bool {
+	if typed, ok := value.(bool); ok {
+		return typed
+	}
+	text := strings.ToLower(strings.TrimSpace(stringValue(value, "")))
+	return text == "true" || text == "1" || text == "yes"
+}
+
+func intValue(value interface{}, fallback int) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case json.Number:
+		if parsed, err := typed.Int64(); err == nil {
+			return int(parsed)
+		}
+	}
+	text := strings.TrimSpace(stringValue(value, ""))
+	if text == "" {
+		return fallback
+	}
+	var parsed int
+	if _, err := fmt.Sscanf(text, "%d", &parsed); err == nil {
+		return parsed
+	}
+	return fallback
 }
 
 func errorMessage(value interface{}, fallback string) string {
