@@ -108,13 +108,6 @@ const toInt = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const moveItem = (items, fromIndex, toIndex) => {
-  const next = [...items];
-  const [item] = next.splice(fromIndex, 1);
-  next.splice(toIndex, 0, item);
-  return next;
-};
-
 const moduleRows = DEFAULT_MODULE_ORDER.map((moduleId) => {
   const group = MODULE_GROUPS.find((item) => getGroupModuleIds(item).includes(moduleId));
   return {
@@ -171,13 +164,13 @@ function SummaryMetricCard({ label, value, hint, tone = 'default', compact = fal
       padding={compact ? 'sm' : 'md'}
       className={cx(
         'flex min-w-0',
-        compact ? 'items-center justify-between gap-3' : 'flex-col gap-1',
+        compact ? 'min-h-[4.5rem] flex-col items-start justify-center gap-1.5' : 'flex-col gap-1',
       )}
     >
-      <span className={cx('font-bold uppercase tracking-wider text-kumo-subtle', compact ? 'truncate text-[11px]' : 'text-[10px]')}>
+      <span className={cx('font-bold uppercase tracking-wider text-kumo-subtle', compact ? 'text-[11px] leading-none' : 'text-[10px]')}>
         {label}
       </span>
-      <span className={cx('truncate font-mono font-bold', compact ? 'text-base' : 'text-xl', valueToneClass[tone] || valueToneClass.default)}>
+      <span className={cx('font-mono font-bold leading-none', compact ? 'text-lg sm:text-base' : 'text-xl', valueToneClass[tone] || valueToneClass.default)}>
         {value}
       </span>
       {!compact && hint ? <span className="truncate text-[11px] text-kumo-subtle">{hint}</span> : null}
@@ -234,6 +227,7 @@ function SettingsPage() {
     setThemeMode,
     pageWidthMode,
     setPageWidthMode,
+    setVibrationEnabled,
     applyUserSettings,
     loadUserSettings,
     logout,
@@ -321,6 +315,11 @@ function SettingsPage() {
     setPageWidthMode(nextMode);
     patchSettings({ pageWidthMode: nextMode });
   }, [patchSettings, setPageWidthMode]);
+
+  const handleVibrationEnabledChange = useCallback((checked) => {
+    setVibrationEnabled(checked);
+    patchSettings({ vibrationEnabled: Boolean(checked) });
+  }, [patchSettings, setVibrationEnabled]);
 
   const fetchSettings = useCallback(async () => {
     const response = await fetch('/api/settings', { headers: getAuthHeaders() });
@@ -739,25 +738,16 @@ function SettingsPage() {
     });
   };
 
-  const reorderModule = (moduleId, direction) => {
-    const index = settings.moduleOrder.indexOf(moduleId);
-    const nextIndex = index + direction;
-    if (index < 0 || nextIndex < 0 || nextIndex >= settings.moduleOrder.length) return;
-    patchSettings({ moduleOrder: moveItem(settings.moduleOrder, index, nextIndex) });
-  };
-
   const databaseStorage = dbStats?.storage || dbAnalysis?.storage || null;
   const databaseSizeBytes = dbStats?.totalSize ?? dbStats?.dbSize;
   const databaseSizeHint = databaseStorage
     ? `主库 ${formatFileSize(databaseStorage.mainSizeBytes)} · WAL ${formatFileSize(databaseStorage.walSizeBytes)} · 空闲 ${formatFileSize(databaseStorage.freePageBytes)}`
     : (dbStats?.dbPath || '等待统计');
   const deprecatedTableItems = deprecatedTables?.tables || [];
-  const contentViewportClassName = activeTab === 'database'
-    ? 'flex-1 min-h-0 overflow-auto'
-    : 'flex-1 min-h-0 overflow-hidden';
+  const contentViewportClassName = 'min-h-0 md:flex-1 md:overflow-auto';
 
   return (
-    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col gap-3 overflow-hidden px-px py-px sm:gap-4">
+    <div className="flex min-h-full w-full min-w-0 flex-col gap-3 px-px py-px sm:gap-4 md:h-full md:min-h-0 md:flex-1 md:overflow-hidden">
       <div className="flex shrink-0 flex-col gap-3 border-b border-kumo-line pb-3 lg:flex-row lg:items-center lg:justify-between">
         <Tabs
           {...MODULE_TABS_PROPS}
@@ -766,7 +756,7 @@ function SettingsPage() {
           tabs={SETTINGS_TABS}
         />
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center lg:justify-end">
+        <div className="flex flex-row flex-wrap items-center gap-2 lg:justify-end">
           <Button size="sm"
             onClick={() => refreshCurrent(true)}
             loading={settingsLoading || (activeTab === 'database' && databaseBusy) || (activeTab === 'logs' && logsBusy)}
@@ -789,7 +779,7 @@ function SettingsPage() {
 
       <div className={contentViewportClassName}>
       {activeTab === 'general' && (
-        <div className="grid h-full min-h-0 items-start gap-4 overflow-auto px-px py-px pr-px xl:grid-cols-[minmax(16rem,1fr)_minmax(0,3fr)]">
+        <div className="grid min-h-0 items-start gap-4 px-px py-px pr-px md:h-full md:overflow-auto xl:grid-cols-[minmax(16rem,1fr)_minmax(0,3fr)]">
           <div className="grid min-h-0 gap-4">
             <StatCard label="运行状态" value="正常" hint={settingsLoading ? '同步中' : '已连接后端'} icon={Check} />
             <StatCard label="公网入口" value={settings.publicApiUrl || currentOrigin} hint="/api 自动拼接" icon={Globe} />
@@ -828,47 +818,75 @@ function SettingsPage() {
 
 
       {activeTab === 'modules' && (
-        <div className="h-full min-h-0 overflow-auto px-px py-px">
+        <div className="min-h-0 overflow-auto px-px py-px md:h-full">
         <SectionCard
-          className="flex h-full min-h-0"
+          className="flex min-h-0 md:h-full"
           title="功能模块"
-          description="模块顺序和显隐会立即影响左侧导航；系统设置入口固定显示。"
+          description="模块显隐会立即影响左侧导航；系统设置入口固定显示。"
           icon={<Activity className="h-4 w-4 text-kumo-brand" />}
           actions={
               <>
                 <Button size="sm" onClick={() => setAllModulesVisibility(true)} icon={<Eye className="h-4 w-4" />}>显示全部</Button>
-                <Button size="sm" onClick={() => setAllModulesVisibility(false)} icon={<EyeOff className="h-4 w-4" />}>隐藏可选模块</Button>
+                <Button size="sm" onClick={() => setAllModulesVisibility(false)} icon={<EyeOff className="h-4 w-4" />}>隐藏可选</Button>
               </>
           }
           bodyPadding="none"
           bodyClassName="flex min-h-0 flex-1 flex-col overflow-auto"
         >
+          <div className="grid gap-2 p-3 md:hidden">
+            {settings.moduleOrder.map((moduleId) => {
+              const row = moduleRows.find((item) => item.id === moduleId);
+              if (!row) return null;
+              const ModuleIcon = getModuleIconComponent(moduleId);
+
+              return (
+                <div key={moduleId} className="rounded-md border border-kumo-line bg-kumo-base p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-kumo-line bg-kumo-recessed text-kumo-brand">
+                        <ModuleIcon className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="min-w-0 truncate text-sm font-semibold text-kumo-strong">{row.config.name}</span>
+                          <Badge variant="outline">{row.groupName}</Badge>
+                        </div>
+                        <div className="mt-1 line-clamp-2 text-xs leading-5 text-kumo-subtle">{row.config.description}</div>
+                      </div>
+                    </div>
+                    <Switch
+                      checked={settings.moduleVisibility[moduleId] !== false}
+                      onCheckedChange={(checked) => toggleModule(moduleId, checked)}
+                      disabled={moduleId === 'dashboard'}
+                      aria-label={`切换 ${row.config.name}`}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
           <Table layout="fixed">
             <colgroup>
-              <col className="w-[82px]" />
               <col />
               <col className="w-[150px]" />
               <col className="w-[120px]" />
-              <col className="w-[150px]" />
             </colgroup>
             <Table.Header>
               <Table.Row>
-                <Table.Head>顺序</Table.Head>
                 <Table.Head>模块</Table.Head>
                 <Table.Head>分组</Table.Head>
                 <Table.Head>可见</Table.Head>
-                <Table.Head>排序</Table.Head>
               </Table.Row>
             </Table.Header>
             <Table.Body>
-              {settings.moduleOrder.map((moduleId, index) => {
+              {settings.moduleOrder.map((moduleId) => {
                 const row = moduleRows.find((item) => item.id === moduleId);
                 if (!row) return null;
                 const ModuleIcon = getModuleIconComponent(moduleId);
 
                 return (
                   <Table.Row key={moduleId}>
-                    <Table.Cell className="font-mono text-xs text-kumo-subtle">{index + 1}</Table.Cell>
                     <Table.Cell>
                       <div className="flex min-w-0 items-center gap-3">
                         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-kumo-line bg-kumo-recessed text-kumo-brand">
@@ -889,17 +907,12 @@ function SettingsPage() {
                         aria-label={`切换 ${row.config.name}`}
                       />
                     </Table.Cell>
-                    <Table.Cell>
-                      <div className="flex gap-2">
-                        <Button size="sm" onClick={() => reorderModule(moduleId, -1)} disabled={index === 0}>上移</Button>
-                        <Button size="sm" onClick={() => reorderModule(moduleId, 1)} disabled={index === settings.moduleOrder.length - 1}>下移</Button>
-                      </div>
-                    </Table.Cell>
                   </Table.Row>
                 );
               })}
             </Table.Body>
           </Table>
+          </div>
         </SectionCard>
         </div>
       )}
@@ -987,9 +1000,9 @@ function SettingsPage() {
             {twoFA.setupMode && (
               <div className="mt-5 grid gap-4">
                 {twoFA.qrCode && (
-                  <div className="flex justify-center app-card p-4">
+                  <AppCard padding="none" className="flex justify-center p-4">
                     <img src={twoFA.qrCode} alt="2FA QR Code" className="h-44 w-44" />
-                  </div>
+                  </AppCard>
                 )}
                 <Input size="sm" label="手动密钥" value={twoFA.secret} readOnly className="font-mono" />
                 <Input size="sm"
@@ -1051,7 +1064,7 @@ function SettingsPage() {
           >
             {databaseStorage && (
               <div className="shrink-0 border-b border-kumo-line px-3 py-3">
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
                   <SummaryMetricCard
                     label="总占用"
                     value={formatFileSize(databaseStorage.totalSizeBytes)}
@@ -1082,11 +1095,11 @@ function SettingsPage() {
             <div className="min-h-0 flex-1 overflow-auto pr-px">
               <Table layout="fixed">
                 <colgroup>
-                  <col />
-                  <col className="w-[96px]" />
-                  <col className="w-[112px]" />
-                  <col className="w-[96px]" />
-                  <col className="w-[112px]" />
+                  <col className="w-[28%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[19%]" />
+                  <col className="w-[18%]" />
+                  <col className="w-[21%]" />
                 </colgroup>
                 <Table.Header>
                   <Table.Row>
@@ -1134,28 +1147,28 @@ function SettingsPage() {
                 className="hidden"
                 onChange={previewDatabaseImport}
               />
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className="flex flex-wrap gap-2">
                 <Button
                   size="sm"
-                  className="w-full justify-center"
+                  shape="square"
                   onClick={exportDatabase}
+                  aria-label="导出数据库"
+                  title="导出数据库"
                   icon={<Upload className="h-4 w-4" />}
-                >
-                  导出数据库
-                </Button>
+                />
                 <Button
                   size="sm"
                   variant="primary"
-                  className="w-full justify-center"
+                  shape="square"
                   onClick={importDatabase}
                   loading={databaseBusy}
+                  aria-label="导入数据库"
+                  title="导入数据库"
                   icon={<Download className="h-4 w-4" />}
-                >
-                  导入并预检
-                </Button>
+                />
               </div>
               {dbImportPreview && (
-                <div className="app-subcard p-3 text-xs">
+                <AppCard padding="none" className="bg-kumo-recessed/40 p-3 text-xs">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-semibold text-kumo-strong truncate">{dbImportPreview.originalName}</span>
                     <Badge variant={dbImportPreview.analysis?.integrity === 'ok' ? 'success' : 'warning'}>
@@ -1205,7 +1218,7 @@ function SettingsPage() {
                       取消
                     </Button>
                   </div>
-                </div>
+                </AppCard>
               )}
             </SectionCard>
 
@@ -1391,7 +1404,7 @@ function SettingsPage() {
               <Select size="sm" label="页面宽度" value={pageWidthMode} onValueChange={handlePageWidthModeChange} items={PAGE_WIDTH_OPTIONS} />
             </FieldRow>
             <FieldRow title="触感反馈" description="移动端交互振动开关。">
-              <Switch checked={settings.vibrationEnabled} onCheckedChange={(checked) => patchSettings({ vibrationEnabled: checked })} />
+              <Switch checked={settings.vibrationEnabled} onCheckedChange={handleVibrationEnabledChange} />
             </FieldRow>
           </SectionCard>
 

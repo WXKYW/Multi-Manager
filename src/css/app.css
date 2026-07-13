@@ -142,42 +142,8 @@ body {
   display: none !important;
 }
 
-.app-card {
-  border: 1px solid var(--color-kumo-line);
-  border-radius: 0.5rem;
-  background-color: var(--color-kumo-base);
-  box-shadow: none;
-  outline: 1px solid color-mix(in oklab, var(--color-kumo-line) 72%, transparent);
-  outline-offset: -1px;
-}
-
-.app-card-md {
-  border-radius: 0.375rem;
-}
-
-.app-subcard {
-  border: 1px solid var(--color-kumo-line);
-  border-radius: 0.5rem;
-  background-color: color-mix(in oklab, var(--color-kumo-recessed) 40%, transparent);
-  box-shadow: none;
-  outline: 1px solid color-mix(in oklab, var(--color-kumo-line) 66%, transparent);
-  outline-offset: -1px;
-}
-
 .app-table-frame {
   overflow-x: auto;
-}
-
-.app-status-pill {
-  display: inline-flex;
-  align-items: center;
-  border-width: 1px;
-  border-style: solid;
-  border-radius: 0.25rem;
-  padding: 0.125rem 0.5rem;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1.25;
 }
 
 .app-brand-icon {
@@ -255,7 +221,7 @@ body {
 }
 
 .scheduler-workflow-canvas-compact {
-  min-height: 7.5rem;
+  min-height: 14rem;
 }
 
 @media (min-width: 1024px) {
@@ -326,7 +292,6 @@ th > button[aria-label='Resize column'] > span {
 }
 
 .dns-table-frame {
-  display: flex;
   min-height: 0;
   position: relative;
   overflow: hidden;
@@ -444,6 +409,104 @@ th > button[aria-label='Resize column'] > span {
   width: 100%;
   min-width: 0;
   max-width: 100%;
+}
+
+.app-code-editor-shell {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-kumo-fill);
+  border-radius: 6px;
+  background: var(--color-kumo-base);
+}
+
+.app-code-editor-shell:focus-within {
+  border-color: color-mix(in oklab, var(--color-kumo-brand) 76%, var(--color-kumo-fill));
+  outline: 2px solid color-mix(in oklab, var(--color-kumo-brand) 18%, transparent);
+  outline-offset: 1px;
+}
+
+.app-code-editor-highlight,
+.app-code-editor-input {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  margin: 0;
+  padding: 12px 14px;
+  border-color: var(--color-kumo-fill) !important;
+  border: 0;
+  background: transparent;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace !important;
+  font-size: 13px !important;
+  font-weight: 400;
+  line-height: 20px !important;
+  letter-spacing: 0;
+  tab-size: 2;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: auto;
+  font-variant-ligatures: none;
+  box-shadow: none !important;
+  white-space: pre;
+}
+
+.app-code-editor-highlight {
+  pointer-events: none;
+  color: var(--text-color-kumo-default);
+}
+
+.app-code-editor-shiki,
+.app-code-editor-shiki pre,
+.app-code-editor-shiki code,
+.app-code-editor-plain {
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  font: inherit !important;
+  line-height: inherit !important;
+  white-space: pre !important;
+}
+
+.app-code-editor-shiki pre,
+.app-code-editor-plain {
+  min-width: max-content;
+}
+
+:root[data-mode='dark'] .app-code-editor-shiki .shiki,
+:root[data-mode='dark'] .app-code-editor-shiki .shiki span {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg) !important;
+  font-style: var(--shiki-dark-font-style) !important;
+  font-weight: var(--shiki-dark-font-weight) !important;
+  text-decoration: var(--shiki-dark-text-decoration) !important;
+}
+
+.app-code-editor-input {
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  resize: none;
+  color: transparent;
+  caret-color: var(--text-color-kumo-default);
+  -webkit-text-fill-color: transparent;
+}
+
+.app-code-editor-input::selection {
+  background: color-mix(in oklab, var(--color-kumo-brand) 28%, transparent);
+  color: transparent;
+}
+
+.app-code-editor-input:focus,
+.app-code-editor-input:focus-visible {
+  outline: none;
 }
 
 .app-terminal-surface {

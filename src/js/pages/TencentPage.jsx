@@ -1,6 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { toast } from '../modules/toast.js';
-import { dialog } from '../modules/dialog.js';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input, Textarea } from '@cloudflare/kumo/components/input';
@@ -9,31 +7,20 @@ import { Table } from '@cloudflare/kumo/components/table';
 import { Tabs } from '@cloudflare/kumo';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import useTableResize from '../composables/useTableResize.js';
-import useStore from '../store.js';
+import { dialog } from '../modules/dialog.js';
+import { toast } from '../modules/toast.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
-import { getStatusPillClass, SectionCard } from '../components/ui/AppPrimitives.jsx';
-import {
-  Database,
-  Globe,
-  Server,
-  Cloud,
-  Settings,
-  Plus,
-  Trash,
-  RefreshCw,
-  Search,
-  Play,
-  Square,
-  RotateCw,
-  MoreVertical,
-  Activity,
-  History,
-  ArrowRight,
-  Shield,
-  ChevronRight,
-  ChevronDown
-} from '../components/Icons.jsx';
+import { AppTable, DataTableFrame, EmptyState, InlineStatusPill, PageStack, PageToolbar, SectionCard, getStatusPillClass } from '../components/ui/AppPrimitives.jsx';
+import { Cloud, Globe, Play, Plus, RefreshCw, RotateCw, Server, Settings, Square, Trash } from '../components/Icons.jsx';
+
+const emptyAccountForm = {
+  name: '',
+  secretId: '',
+  secretKey: '',
+  regionId: 'ap-guangzhou',
+  description: '',
+};
 
 const extractTencentDomains = (result) => {
   if (Array.isArray(result)) return result;
@@ -43,6 +30,7 @@ const extractTencentDomains = (result) => {
   if (Array.isArray(result?.DomainList)) return result.DomainList;
   return [];
 };
+
 const extractTencentInstances = (result) => {
   if (Array.isArray(result)) return result;
   if (Array.isArray(result?.instances)) return result.instances;
@@ -51,143 +39,124 @@ const extractTencentInstances = (result) => {
   return [];
 };
 
+const statusTone = (status) => {
+  const value = String(status || '').toUpperCase();
+  if (value === 'RUNNING') return 'success';
+  if (value === 'STOPPED') return 'danger';
+  if (value.includes('ING')) return 'warning';
+  return 'neutral';
+};
+
+const statusText = (status) => ({
+  RUNNING: '运行中',
+  STOPPED: '已停止',
+  STARTING: '启动中',
+  STOPPING: '停止中',
+  REBOOTING: '重启中',
+}[String(status || '').toUpperCase()] || status || '-');
+
+function LoadingRows({ columns = 5, rows = 5 }) {
+  return Array.from({ length: rows }, (_, row) => (
+    <Table.Row key={row}>
+      {Array.from({ length: columns }, (_, col) => (
+        <Table.Cell key={col}><SkeletonLine className={col === 0 ? 'h-4 w-36' : 'h-4 w-20'} /></Table.Cell>
+      ))}
+    </Table.Row>
+  ));
+}
+
+function CloudToolbar({ activeTab, setActiveTab, accounts, selectedAccountId, setSelectedAccountId, refreshing, refreshData }) {
+  return (
+    <PageToolbar>
+      <Tabs
+        {...MODULE_TABS_PROPS}
+        value={activeTab}
+        onValueChange={(value) => setActiveTab(String(value))}
+        tabs={[
+          { value: 'dns', label: <span className="inline-flex items-center gap-1.5"><Globe className="h-3.5 w-3.5" />DNS 解析</span> },
+          { value: 'cvm', label: <span className="inline-flex items-center gap-1.5"><Server className="h-3.5 w-3.5" />CVM 实例</span> },
+          { value: 'lighthouse', label: <span className="inline-flex items-center gap-1.5"><Cloud className="h-3.5 w-3.5" />轻量服务器</span> },
+          { value: 'accounts', label: <span className="inline-flex items-center gap-1.5"><Settings className="h-3.5 w-3.5" />账号管理</span> },
+        ]}
+      />
+      {activeTab !== 'accounts' && (
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <Select
+            size="sm"
+            aria-label="腾讯云账号"
+            value={selectedAccountId}
+            onValueChange={(value) => setSelectedAccountId(String(value))}
+            items={accounts.map((account) => ({ value: String(account.id), label: account.name }))}
+            className="w-56 min-w-0"
+          />
+          <Button
+            size="sm"
+            shape="square"
+            variant="secondary"
+            onClick={refreshData}
+            disabled={refreshing || !selectedAccountId}
+            aria-label="刷新"
+            title="刷新"
+            icon={<RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />}
+          />
+        </div>
+      )}
+    </PageToolbar>
+  );
+}
+
+function InstanceActions({ disabled, onAction }) {
+  return (
+    <div className="flex w-full justify-end gap-1">
+      <Button size="sm" shape="square" variant="secondary" disabled={disabled.start} onClick={() => onAction('START')} aria-label="启动" title="启动" icon={<Play className="h-3.5 w-3.5 text-kumo-success" />} />
+      <Button size="sm" shape="square" variant="secondary" disabled={disabled.stop} onClick={() => onAction('STOP')} aria-label="停止" title="停止" icon={<Square className="h-3.5 w-3.5 text-kumo-danger" />} />
+      <Button size="sm" shape="square" variant="secondary" onClick={() => onAction('REBOOT')} aria-label="重启" title="重启" icon={<RotateCw className="h-3.5 w-3.5 text-kumo-brand" />} />
+    </div>
+  );
+}
+
 function TencentPage() {
-  const { theme } = useStore();
-  const [activeTab, setActiveTab] = useState('dns'); // 'dns' | 'cvm' | 'lighthouse' | 'accounts'
-  
-  // Accounts state
+  const [activeTab, setActiveTab] = useState('dns');
   const [accounts, setAccounts] = useState([]);
   const [selectedAccountId, setSelectedAccountId] = useState('');
-  const [loadingAccounts, setLoadingAccounts] = useState(false);
-
-  // Column resizing
-  const [dnsColWidths, startDnsResize] = useTableResize([180, 100, 100, 150, 100]);
-  const [accountsColWidths, startAccountsResize] = useTableResize([180, 220, 120, 200, 100]);
-
-  // Data state
   const [domains, setDomains] = useState([]);
-  const [cvmInstances, setCvmInstances] = useState([]); // CVM
-  const [lighthouseInstances, setLighthouseInstances] = useState([]); // Lighthouse
+  const [cvmInstances, setCvmInstances] = useState([]);
+  const [lighthouseInstances, setLighthouseInstances] = useState([]);
   const [loadingData, setLoadingData] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-
-  // Modal states
   const [showAddAccountModal, setShowAddAccountModal] = useState(false);
   const [editingAccount, setEditingAccount] = useState(null);
-  const [accountForm, setAccountForm] = useState({
-    name: '',
-    secretId: '',
-    secretKey: '',
-    regionId: 'ap-guangzhou',
-    description: ''
-  });
+  const [accountForm, setAccountForm] = useState(emptyAccountForm);
   const [submittingAccount, setSubmittingAccount] = useState(false);
+  const [dnsColWidths, startDnsResize] = useTableResize([240, 100, 100, 180, 120]);
+  const [accountsColWidths, startAccountsResize] = useTableResize([180, 240, 150, 280, 120]);
 
-  // Global Auth Header
-  const getAuthHeaders = useCallback(() => {
-    const password = localStorage.getItem('admin_password') || '';
-    return {
-      'Content-Type': 'application/json',
-      'x-admin-password': password,
-    };
-  }, []);
+  const getAuthHeaders = useCallback(() => ({
+    'Content-Type': 'application/json',
+    'x-admin-password': localStorage.getItem('admin_password') || '',
+  }), []);
 
-  // ==================== 1. Account Management ====================
   const loadAccounts = useCallback(async () => {
-    setLoadingAccounts(true);
     try {
-      const response = await fetch('/api/tencent/accounts', {
-        headers: getAuthHeaders(),
-      });
+      const response = await fetch('/api/tencent/accounts', { headers: getAuthHeaders() });
       const data = await response.json();
       if (Array.isArray(data)) {
         setAccounts(data);
-        if (data.length > 0 && !selectedAccountId) {
-          setSelectedAccountId(String(data[0].id));
-        }
+        if (data.length > 0 && !selectedAccountId) setSelectedAccountId(String(data[0].id));
       }
-    } catch (e) {
-      console.error('[Tencent] 加载账号失败:', e);
+    } catch (error) {
+      console.error('[Tencent] 加载账号失败:', error);
       toast.error('加载腾讯云账号失败');
-    } finally {
-      setLoadingAccounts(false);
     }
   }, [getAuthHeaders, selectedAccountId]);
 
-  const handleAddAccount = async () => {
-    if (!accountForm.name || !accountForm.secretId || (!editingAccount && !accountForm.secretKey)) {
-      toast.warning('请填写必填字段');
-      return;
-    }
-
-    setSubmittingAccount(true);
-    try {
-      const isEdit = !!editingAccount;
-      const url = isEdit ? `/api/tencent/accounts/${editingAccount.id}` : '/api/tencent/accounts';
-      const method = isEdit ? 'PUT' : 'POST';
-
-      const response = await fetch(url, {
-        method,
-        headers: getAuthHeaders(),
-        body: JSON.stringify(accountForm),
-      });
-      const result = await response.json();
-      if (result.success || result.id) {
-        toast.success(isEdit ? '账号已更新' : '账号已添加');
-        setShowAddAccountModal(false);
-        setEditingAccount(null);
-        setAccountForm({ name: '', secretId: '', secretKey: '', regionId: 'ap-guangzhou', description: '' });
-        loadAccounts();
-      } else {
-        toast.error(result.error || '操作失败');
-      }
-    } catch (e) {
-      toast.error('请求失败: ' + e.message);
-    } finally {
-      setSubmittingAccount(false);
-    }
-  };
-
-  const deleteAccount = async (id) => {
-    if (!(await dialog.confirm('确定要删除此腾讯云账号吗？'))) return;
-    try {
-      const response = await fetch(`/api/tencent/accounts/${id}`, {
-        method: 'DELETE',
-        headers: getAuthHeaders(),
-      });
-      const result = await response.json();
-      if (result.success) {
-        toast.success('账号已删除');
-        if (selectedAccountId === String(id)) setSelectedAccountId('');
-        loadAccounts();
-      }
-    } catch (e) {
-      toast.error('删除失败');
-    }
-  };
-
-  const openEditModal = (acc) => {
-    setEditingAccount(acc);
-    setAccountForm({
-      name: acc.name,
-      secretId: acc.secret_id || '',
-      secretKey: '', 
-      regionId: acc.region_id || 'ap-guangzhou',
-      description: acc.description || ''
-    });
-    setShowAddAccountModal(true);
-  };
-
-  // ==================== 2. Data Loading ====================
   const loadDnsData = useCallback(async (accountId) => {
     setLoadingData(true);
     try {
-      const response = await fetch(`/api/tencent/accounts/${accountId}/domains`, {
-        headers: getAuthHeaders(),
-      });
+      const response = await fetch(`/api/tencent/accounts/${accountId}/domains`, { headers: getAuthHeaders() });
       const result = await response.json();
       setDomains(extractTencentDomains(result));
-    } catch (e) {
+    } catch {
       toast.error('加载域名列表失败');
     } finally {
       setLoadingData(false);
@@ -197,12 +166,10 @@ function TencentPage() {
   const loadCvmData = useCallback(async (accountId) => {
     setLoadingData(true);
     try {
-      const response = await fetch(`/api/tencent/accounts/${accountId}/cvm`, {
-        headers: getAuthHeaders(),
-      });
+      const response = await fetch(`/api/tencent/accounts/${accountId}/cvm`, { headers: getAuthHeaders() });
       const result = await response.json();
       setCvmInstances(extractTencentInstances(result));
-    } catch (e) {
+    } catch {
       toast.error('加载 CVM 实例失败');
     } finally {
       setLoadingData(false);
@@ -212,12 +179,10 @@ function TencentPage() {
   const loadLighthouseData = useCallback(async (accountId) => {
     setLoadingData(true);
     try {
-      const response = await fetch(`/api/tencent/accounts/${accountId}/lighthouse`, {
-        headers: getAuthHeaders(),
-      });
+      const response = await fetch(`/api/tencent/accounts/${accountId}/lighthouse`, { headers: getAuthHeaders() });
       const result = await response.json();
       setLighthouseInstances(extractTencentInstances(result));
-    } catch (e) {
+    } catch {
       toast.error('加载轻量服务器失败');
     } finally {
       setLoadingData(false);
@@ -227,584 +192,270 @@ function TencentPage() {
   const refreshData = useCallback(() => {
     if (!selectedAccountId) return;
     setRefreshing(true);
-    if (activeTab === 'dns') loadDnsData(selectedAccountId).then(() => setRefreshing(false));
-    else if (activeTab === 'cvm') loadCvmData(selectedAccountId).then(() => setRefreshing(false));
-    else if (activeTab === 'lighthouse') loadLighthouseData(selectedAccountId).then(() => setRefreshing(false));
-    else setRefreshing(false);
-  }, [activeTab, selectedAccountId, loadDnsData, loadCvmData, loadLighthouseData]);
+    const task = activeTab === 'dns'
+      ? loadDnsData(selectedAccountId)
+      : activeTab === 'cvm'
+        ? loadCvmData(selectedAccountId)
+        : activeTab === 'lighthouse'
+          ? loadLighthouseData(selectedAccountId)
+          : Promise.resolve();
+    Promise.resolve(task).finally(() => setRefreshing(false));
+  }, [activeTab, loadCvmData, loadDnsData, loadLighthouseData, selectedAccountId]);
 
   useEffect(() => {
     loadAccounts();
   }, [loadAccounts]);
 
   useEffect(() => {
-    if (selectedAccountId && activeTab !== 'accounts') {
-      if (activeTab === 'dns') loadDnsData(selectedAccountId);
-      else if (activeTab === 'cvm') loadCvmData(selectedAccountId);
-      else if (activeTab === 'lighthouse') loadLighthouseData(selectedAccountId);
+    if (selectedAccountId && activeTab !== 'accounts') refreshData();
+  }, [activeTab, selectedAccountId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const saveAccount = async () => {
+    if (!accountForm.name || !accountForm.secretId || (!editingAccount && !accountForm.secretKey)) {
+      toast.warning('请填写必填字段');
+      return;
     }
-  }, [activeTab, selectedAccountId, loadDnsData, loadCvmData, loadLighthouseData]);
-
-  // ==================== 3. Instance Actions ====================
-  const handleInstanceAction = async (type, instance, action) => {
-    const isLighthouse = type === 'lighthouse';
-    const endpoint = isLighthouse ? 'lighthouse' : 'cvm';
-    const actionText = action === 'START' ? '启动' : action === 'STOP' ? '停止' : '重启';
-    
-    if (!(await dialog.confirm(`确认${actionText}实例 ${instance.InstanceName || instance.InstanceId} 吗？`))) return;
-
+    setSubmittingAccount(true);
     try {
+      const isEdit = !!editingAccount;
+      const response = await fetch(isEdit ? `/api/tencent/accounts/${editingAccount.id}` : '/api/tencent/accounts', {
+        method: isEdit ? 'PUT' : 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(accountForm),
+      });
+      const result = await response.json();
+      if (!result.success && !result.id) throw new Error(result.error || '操作失败');
+      toast.success(isEdit ? '账号已更新' : '账号已添加');
+      setShowAddAccountModal(false);
+      setEditingAccount(null);
+      setAccountForm(emptyAccountForm);
+      loadAccounts();
+    } catch (error) {
+      toast.error(error.message || '保存失败');
+    } finally {
+      setSubmittingAccount(false);
+    }
+  };
+
+  const deleteAccount = async (account) => {
+    if (!(await dialog.confirm(`确定要删除腾讯云账号“${account.name}”吗？`))) return;
+    try {
+      const response = await fetch(`/api/tencent/accounts/${account.id}`, { method: 'DELETE', headers: getAuthHeaders() });
+      const result = await response.json();
+      if (!result.success) throw new Error(result.error || '删除失败');
+      toast.success('账号已删除');
+      if (selectedAccountId === String(account.id)) setSelectedAccountId('');
+      loadAccounts();
+    } catch (error) {
+      toast.error(error.message || '删除失败');
+    }
+  };
+
+  const openCreateModal = () => {
+    setEditingAccount(null);
+    setAccountForm(emptyAccountForm);
+    setShowAddAccountModal(true);
+  };
+
+  const openEditModal = (account) => {
+    setEditingAccount(account);
+    setAccountForm({
+      name: account.name,
+      secretId: account.secret_id || '',
+      secretKey: '',
+      regionId: account.region_id || 'ap-guangzhou',
+      description: account.description || '',
+    });
+    setShowAddAccountModal(true);
+  };
+
+  const handleInstanceAction = async (kind, instance, action) => {
+    const actionText = action === 'START' ? '启动' : action === 'STOP' ? '停止' : '重启';
+    if (!(await dialog.confirm(`确认${actionText}实例 ${instance.InstanceName || instance.InstanceId} 吗？`))) return;
+    try {
+      const endpoint = kind === 'lighthouse' ? 'lighthouse' : 'cvm';
       const response = await fetch(`/api/tencent/accounts/${selectedAccountId}/${endpoint}/${instance.InstanceId}/control`, {
         method: 'POST',
-        headers: {
-            ...getAuthHeaders(),
-            'Content-Type': 'application/json'
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ action, region: instance._Region || instance.Region }),
       });
       const result = await response.json();
-      if (result.success) {
-        toast.success(`${actionText}指令已下发`);
-        setTimeout(refreshData, 2000);
-      } else {
-        toast.error(`${actionText}失败: ${result.error}`);
-      }
-    } catch (e) {
-      toast.error(`${actionText}请求异常`);
+      if (!result.success) throw new Error(result.error || `${actionText}失败`);
+      toast.success(`${actionText}指令已下发`);
+      setTimeout(refreshData, 2000);
+    } catch (error) {
+      toast.error(error.message || `${actionText}请求异常`);
     }
   };
 
-  // ==================== Helpers ====================
-  const getStatusBadge = (status) => {
-    const s = String(status).toUpperCase();
-    if (s === 'RUNNING') return getStatusPillClass('success');
-    if (s === 'STOPPED') return getStatusPillClass('danger');
-    if (s.includes('ING')) return getStatusPillClass('warning');
-    return getStatusPillClass('neutral');
+  const renderDns = () => (
+    <SectionCard title="DNS 域名" description="域名列表和解析记录数量，双击后续可接入解析记录管理。" icon={<Globe className="h-4 w-4 text-kumo-brand" />} bodyPadding="none">
+      <DataTableFrame variant="embedded" density="compact">
+        <AppTable layout="fixed" widths={dnsColWidths}>
+          <colgroup>{dnsColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
+          <Table.Header sticky variant="compact">
+            <Table.Row>
+              <Table.Head className="relative pr-6">域名<Table.ResizeHandle onMouseDown={(event) => startDnsResize(0, event)} /></Table.Head>
+              <Table.Head className="relative pr-6">记录数<Table.ResizeHandle onMouseDown={(event) => startDnsResize(1, event)} /></Table.Head>
+              <Table.Head className="relative pr-6">状态<Table.ResizeHandle onMouseDown={(event) => startDnsResize(2, event)} /></Table.Head>
+              <Table.Head className="relative pr-6">到期时间<Table.ResizeHandle onMouseDown={(event) => startDnsResize(3, event)} /></Table.Head>
+              <Table.Head className="text-right">操作</Table.Head>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
+            {loadingData ? <LoadingRows columns={5} /> : domains.length === 0 ? (
+              <Table.Row><Table.Cell colSpan={5}><EmptyState card={false} title="暂无域名数据" description="添加账号并选择后刷新数据。" /></Table.Cell></Table.Row>
+            ) : domains.map((domain) => (
+              <Table.Row key={domain.DomainId || domain.Name}>
+                <Table.Cell className="font-semibold text-kumo-strong">{domain.Name}</Table.Cell>
+                <Table.Cell className="tabular-nums">{domain.RecordCount || '-'}</Table.Cell>
+                <Table.Cell><InlineStatusPill tone={domain.Status === 'ENABLE' ? 'success' : 'neutral'}>{domain.Status === 'ENABLE' ? '正常' : '已暂停'}</InlineStatusPill></Table.Cell>
+                <Table.Cell className="truncate text-kumo-subtle">{domain.Expiration || '-'}</Table.Cell>
+                <Table.Cell><div className="flex w-full justify-end"><Button size="sm" variant="secondary">管理解析</Button></div></Table.Cell>
+              </Table.Row>
+            ))}
+          </Table.Body>
+        </AppTable>
+      </DataTableFrame>
+    </SectionCard>
+  );
+
+  const renderInstances = (kind) => {
+    const items = kind === 'cvm' ? cvmInstances : lighthouseInstances;
+    const title = kind === 'cvm' ? 'CVM 实例' : '轻量应用服务器';
+    return (
+      <SectionCard title={title} description="按实例状态、地域、地址和规格快速扫描资源。" icon={<Server className="h-4 w-4 text-kumo-brand" />} bodyPadding="none">
+        <DataTableFrame variant="embedded" density="compact">
+          <AppTable layout="fixed" widths={[240, 96, 140, 150, 120, 180, 116]}>
+            <Table.Header sticky variant="compact">
+              <Table.Row>
+                <Table.Head>实例</Table.Head>
+                <Table.Head>状态</Table.Head>
+                <Table.Head>地域 / 可用区</Table.Head>
+                <Table.Head>公网 / 内网</Table.Head>
+                <Table.Head>规格</Table.Head>
+                <Table.Head>{kind === 'cvm' ? '操作系统' : '到期时间'}</Table.Head>
+                <Table.Head className="text-right">操作</Table.Head>
+              </Table.Row>
+            </Table.Header>
+            <Table.Body>
+              {loadingData ? <LoadingRows columns={7} rows={6} /> : items.length === 0 ? (
+                <Table.Row><Table.Cell colSpan={7}><EmptyState card={false} title={`暂无${title}`} description="添加账号并选择后刷新数据。" /></Table.Cell></Table.Row>
+              ) : items.map((item) => {
+                const status = item.InstanceState;
+                const zone = kind === 'cvm' ? item.Placement?.Zone : item.Zone;
+                const address = kind === 'cvm' ? item.PublicIpAddresses?.[0] || item.PrivateIpAddresses?.[0] || '-' : item.PublicAddresses?.[0] || '-';
+                return (
+                  <Table.Row key={item.InstanceId}>
+                    <Table.Cell>
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold text-kumo-strong">{item.InstanceName || item.InstanceId}</div>
+                        <div className="truncate font-mono text-[11px] text-kumo-subtle">{item.InstanceId}</div>
+                      </div>
+                    </Table.Cell>
+                    <Table.Cell><span className={`inline-flex rounded px-2 py-0.5 text-[10px] font-bold ${getStatusPillClass(statusTone(status))}`}>{statusText(status)}</span></Table.Cell>
+                    <Table.Cell className="truncate">{zone || '-'}</Table.Cell>
+                    <Table.Cell className="font-mono text-[11px]">{address}</Table.Cell>
+                    <Table.Cell>{item.CPU || '-'}核 {item.Memory || '-'}GB</Table.Cell>
+                    <Table.Cell className="truncate text-kumo-subtle">{kind === 'cvm' ? item.OsName || '-' : item.ExpiredTime ? new Date(item.ExpiredTime).toLocaleDateString() : '-'}</Table.Cell>
+                    <Table.Cell className="text-right">
+                      <InstanceActions
+                        disabled={{ start: status === 'RUNNING', stop: status === 'STOPPED' }}
+                        onAction={(action) => handleInstanceAction(kind, item, action)}
+                      />
+                    </Table.Cell>
+                  </Table.Row>
+                );
+              })}
+            </Table.Body>
+          </AppTable>
+        </DataTableFrame>
+      </SectionCard>
+    );
   };
 
-  const getStatusText = (status) => {
-    const map = {
-      RUNNING: '运行中',
-      STOPPED: '已停止',
-      STARTING: '启动中',
-      STOPPING: '停止中',
-      REBOOTING: '重启中',
-    };
-    return map[String(status).toUpperCase()] || status;
-  };
+  const renderAccounts = () => (
+    <SectionCard
+      title="腾讯云账号"
+      description="真实账号走后端加密存储，Secret 保存后不会回显。"
+      icon={<Cloud className="h-4 w-4 text-kumo-brand" />}
+      action={<Button size="sm" onClick={openCreateModal}><Plus className="h-3.5 w-3.5" />添加账号</Button>}
+      bodyPadding="none"
+    >
+      <DataTableFrame variant="embedded" density="compact">
+        <AppTable layout="fixed" widths={accountsColWidths}>
+          <colgroup>{accountsColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
+          <Table.Header sticky variant="compact">
+            <Table.Row>
+              <Table.Head className="relative pr-6">名称<Table.ResizeHandle onMouseDown={(event) => startAccountsResize(0, event)} /></Table.Head>
+              <Table.Head className="relative pr-6">Secret ID<Table.ResizeHandle onMouseDown={(event) => startAccountsResize(1, event)} /></Table.Head>
+              <Table.Head className="relative pr-6">默认地域<Table.ResizeHandle onMouseDown={(event) => startAccountsResize(2, event)} /></Table.Head>
+              <Table.Head className="relative pr-6">描述<Table.ResizeHandle onMouseDown={(event) => startAccountsResize(3, event)} /></Table.Head>
+              <Table.Head className="text-right">操作</Table.Head>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
+            {accounts.length === 0 ? (
+              <Table.Row><Table.Cell colSpan={5}><EmptyState card={false} title="尚未配置账号" description="添加腾讯云账号后即可加载 DNS 和实例资源。" action={<Button size="sm" onClick={openCreateModal}><Plus className="h-3.5 w-3.5" />添加账号</Button>} /></Table.Cell></Table.Row>
+            ) : accounts.map((account) => (
+              <Table.Row key={account.id} title="双击编辑账号" onDoubleClick={(event) => handleEditableRowDoubleClick(event, () => openEditModal(account))}>
+                <Table.Cell><span className="font-semibold text-kumo-strong">{account.name}</span></Table.Cell>
+                <Table.Cell className="font-mono text-[11px]">{account.secret_id}</Table.Cell>
+                <Table.Cell>{account.region_id}</Table.Cell>
+                <Table.Cell className="truncate text-kumo-subtle">{account.description || '-'}</Table.Cell>
+                <Table.Cell className="text-right">
+                  <div className="flex w-full justify-end gap-1">
+                    <Button size="sm" shape="square" variant="secondary" onClick={() => openEditModal(account)} aria-label="编辑账号" title="编辑账号" icon={<Settings className="h-3.5 w-3.5" />} />
+                    <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteAccount(account)} aria-label="删除账号" title="删除账号" icon={<Trash className="h-3.5 w-3.5" />} />
+                  </div>
+                </Table.Cell>
+              </Table.Row>
+            ))}
+          </Table.Body>
+        </AppTable>
+      </DataTableFrame>
+    </SectionCard>
+  );
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4">
-      {/* Header Tabs */}
-      <div className="flex flex-wrap items-center justify-between border-b border-kumo-line pb-3 gap-4">
-        <div className="min-w-0 w-full md:w-auto">
-          <Tabs
-            {...MODULE_TABS_PROPS}
-            value={activeTab}
-            onValueChange={setActiveTab}
-            tabs={[
-              { value: 'dns', label: <span className="inline-flex items-center gap-1.5"><Globe className="w-4 h-4" />DNS 解析</span> },
-              { value: 'cvm', label: <span className="inline-flex items-center gap-1.5"><Server className="w-4 h-4" />CVM 实例</span> },
-              { value: 'lighthouse', label: <span className="inline-flex items-center gap-1.5"><Cloud className="w-4 h-4" />轻量服务器</span> },
-              { value: 'accounts', label: <span className="inline-flex items-center gap-1.5"><Settings className="w-4 h-4" />账号管理</span> },
-            ]}
-          />
-        </div>
+    <PageStack>
+      <CloudToolbar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        accounts={accounts}
+        selectedAccountId={selectedAccountId}
+        setSelectedAccountId={setSelectedAccountId}
+        refreshing={refreshing}
+        refreshData={refreshData}
+      />
 
-        {activeTab !== 'accounts' && (
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-kumo-subtle font-medium">账号</span>
-              <Select
-                aria-label="腾讯云账号" size="sm"
-                value={selectedAccountId}
-                onValueChange={setSelectedAccountId}
-                items={accounts.map((acc) => ({ value: String(acc.id), label: acc.name }))}
-              />
-            </div>
-            <Button
-              onClick={refreshData}
-              disabled={refreshing || !selectedAccountId}
-              variant="secondary" size="sm"
-              shape="square"
-              aria-label="刷新"
-              title="刷新"
-              icon={<RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />}
-            />
-          </div>
-        )}
-      </div>
+      {activeTab === 'dns' && renderDns()}
+      {activeTab === 'cvm' && renderInstances('cvm')}
+      {activeTab === 'lighthouse' && renderInstances('lighthouse')}
+      {activeTab === 'accounts' && renderAccounts()}
 
-      {/* Content Area */}
-      <div className="min-h-[400px]">
-        {loadingData ? (
-          activeTab === 'dns' ? (
-            <div className="app-card overflow-hidden">
-              <Table layout="fixed">
-                <colgroup>
-                  {dnsColWidths.map((w, idx) => (
-                    <col key={idx} style={{ width: w }} />
-                  ))}
-                </colgroup>
-                <Table.Header>
-                  <Table.Row className="bg-kumo-recessed/40 border-b border-kumo-line font-bold text-kumo-subtle">
-                    <Table.Head className="p-4">域名</Table.Head>
-                    <Table.Head className="p-4">记录数</Table.Head>
-                    <Table.Head className="p-4">状态</Table.Head>
-                    <Table.Head className="p-4">到期时间</Table.Head>
-                    <Table.Head className="p-4 text-center">操作</Table.Head>
-                  </Table.Row>
-                </Table.Header>
-                <Table.Body>
-                  {[...Array(5)].map((_, idx) => (
-                    <Table.Row key={idx} className="border-b border-kumo-line">
-                      <Table.Cell className="p-4"><SkeletonLine className="w-32 h-4" /></Table.Cell>
-                      <Table.Cell className="p-4"><SkeletonLine className="w-12 h-4" /></Table.Cell>
-                      <Table.Cell className="p-4"><SkeletonLine className="w-16 h-4" /></Table.Cell>
-                      <Table.Cell className="p-4"><SkeletonLine className="w-40 h-4" /></Table.Cell>
-                      <Table.Cell className="p-4 text-center"><SkeletonLine className="w-16 h-4 mx-auto" /></Table.Cell>
-                    </Table.Row>
-                  ))}
-                </Table.Body>
-              </Table>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {[...Array(6)].map((_, idx) => (
-                <div key={idx} className="app-card p-4 flex flex-col gap-3">
-                  <div className="flex justify-between items-start">
-                    <div className="flex flex-col gap-1 w-2/3">
-                      <SkeletonLine className="w-full h-4" />
-                      <SkeletonLine className="w-1/2 h-3" />
-                    </div>
-                    <SkeletonLine className="w-16 h-5 rounded" />
-                  </div>
-                  <div className="border-y border-kumo-line/50 py-2.5 my-1 flex flex-col gap-2">
-                    <div className="flex justify-between">
-                      <SkeletonLine className="w-1/3 h-3" />
-                      <SkeletonLine className="w-1/3 h-3" />
-                    </div>
-                    <div className="flex justify-between">
-                      <SkeletonLine className="w-1/3 h-3" />
-                      <SkeletonLine className="w-1/3 h-3" />
-                    </div>
-                  </div>
-                  <div className="flex justify-between items-center mt-auto pt-1">
-                    <div className="flex gap-1.5">
-                      <SkeletonLine className="w-8 h-8 rounded" />
-                      <SkeletonLine className="w-8 h-8 rounded" />
-                      <SkeletonLine className="w-8 h-8 rounded" />
-                    </div>
-                    <SkeletonLine className="w-20 h-7 rounded" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )
-        ) : (
-          <>
-            {/* 1. DNS Tab */}
-            {activeTab === 'dns' && (
-              <div className="app-card overflow-hidden">
-                <Table layout="fixed">
-                  <colgroup>
-                    {dnsColWidths.map((w, idx) => (
-                      <col key={idx} style={{ width: w }} />
-                    ))}
-                  </colgroup>
-                  <Table.Header>
-                    <Table.Row className="bg-kumo-recessed/40 border-b border-kumo-line font-bold text-kumo-subtle">
-                      <Table.Head className="relative group pr-6 p-4">
-                        域名
-                        <Table.ResizeHandle onMouseDown={(e) => startDnsResize(0, e)} />
-                      </Table.Head>
-                      <Table.Head className="relative group pr-6 p-4">
-                        记录数
-                        <Table.ResizeHandle onMouseDown={(e) => startDnsResize(1, e)} />
-                      </Table.Head>
-                      <Table.Head className="relative group pr-6 p-4">
-                        状态
-                        <Table.ResizeHandle onMouseDown={(e) => startDnsResize(2, e)} />
-                      </Table.Head>
-                      <Table.Head className="relative group pr-6 p-4">
-                        到期时间
-                        <Table.ResizeHandle onMouseDown={(e) => startDnsResize(3, e)} />
-                      </Table.Head>
-                      <Table.Head className="p-4 text-center">操作</Table.Head>
-                    </Table.Row>
-                  </Table.Header>
-                  <Table.Body>
-                    {domains.length === 0 ? (
-                      <Table.Row>
-                        <Table.Cell colSpan={5} className="p-12 text-center text-kumo-subtle">暂无域名数据</Table.Cell>
-                      </Table.Row>
-                    ) : (
-                      domains.map((dom) => (
-                        <Table.Row key={dom.DomainId} className="border-b border-kumo-line last:border-0 hover:bg-kumo-recessed/10 transition-colors">
-                          <Table.Cell className="p-4 font-bold text-kumo-strong">{dom.Name}</Table.Cell>
-                          <Table.Cell className="p-4 text-kumo-default tabular-nums">{dom.RecordCount || '-'}</Table.Cell>
-                          <Table.Cell className="p-4">
-                            <span className={`app-status-pill ${dom.Status === 'ENABLE' ? 'bg-kumo-success/10 border-kumo-success/20 text-kumo-success' : 'bg-kumo-recessed border-kumo-line text-kumo-subtle'}`}>
-                              {dom.Status === 'ENABLE' ? '正常' : '已暂停'}
-                            </span>
-                          </Table.Cell>
-                          <Table.Cell className="p-4 text-kumo-subtle">{dom.Expiration || '-'}</Table.Cell>
-                          <Table.Cell className="p-4 text-center">
-                            <Button size="sm" className="text-[10px] hover:text-kumo-brand">
-                              管理解析
-                            </Button>
-                          </Table.Cell>
-                        </Table.Row>
-                      ))
-                    )}
-                  </Table.Body>
-                </Table>
-              </div>
-            )}
-
-            {/* 2. CVM Tab */}
-            {activeTab === 'cvm' && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {cvmInstances.length === 0 ? (
-                  <div className="col-span-full p-20 text-center text-kumo-subtle app-card">暂无 CVM 实例</div>
-                ) : (
-                  cvmInstances.map((inst) => (
-                    <div key={inst.InstanceId} className="app-card p-4 hover:border-kumo-brand transition-all flex flex-col gap-3">
-                      <div className="flex justify-between items-start">
-                        <div className="flex flex-col min-w-0">
-                          <span className="text-xs font-bold text-kumo-strong truncate">{inst.InstanceName || inst.InstanceId}</span>
-                          <span className="text-[10px] text-kumo-subtle font-mono">{inst.InstanceId}</span>
-                        </div>
-                        <span className={`app-status-pill ${getStatusBadge(inst.InstanceState)}`}>
-                          {getStatusText(inst.InstanceState)}
-                        </span>
-                      </div>
-                      
-                      <div className="grid grid-cols-2 gap-y-2 text-[10px] border-y border-kumo-line/50 py-2.5 my-1">
-                        <div className="flex flex-col">
-                          <span className="text-kumo-subtle font-medium">可用区</span>
-                          <span className="text-kumo-strong font-bold">{inst.Placement?.Zone}</span>
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-kumo-subtle font-medium">IP 地址</span>
-                          <span className="text-kumo-strong font-bold font-mono">
-                            {inst.PublicIpAddresses?.[0] || inst.PrivateIpAddresses?.[0] || '-'}
-                          </span>
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-kumo-subtle font-medium">规格</span>
-                          <span className="text-kumo-strong font-bold">{inst.CPU}核 {inst.Memory}GB</span>
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-kumo-subtle font-medium">操作系统</span>
-                          <span className="text-kumo-strong font-bold truncate">{inst.OsName || '-'}</span>
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center justify-between gap-2 mt-auto pt-1">
-                        <div className="flex gap-1.5">
-                          <Button
-                            onClick={() => handleInstanceAction('cvm', inst, 'START')}
-                            disabled={inst.InstanceState === 'RUNNING'}
-                            variant="secondary" size="sm"
-                            shape="square"
-                            aria-label="启动 CVM 实例"
-                            className="text-kumo-success"
-                          >
-                            <Play className="w-3.5 h-3.5" />
-                          </Button>
-                          <Button
-                            onClick={() => handleInstanceAction('cvm', inst, 'STOP')}
-                            disabled={inst.InstanceState === 'STOPPED'}
-                            variant="secondary" size="sm"
-                            shape="square"
-                            aria-label="停止 CVM 实例"
-                            className="text-kumo-danger"
-                          >
-                            <Square className="w-3.5 h-3.5" />
-                          </Button>
-                          <Button
-                            onClick={() => handleInstanceAction('cvm', inst, 'REBOOT')}
-                            variant="secondary" size="sm"
-                            shape="square"
-                            aria-label="重启 CVM 实例"
-                            className="text-kumo-brand"
-                          >
-                            <RotateCw className="w-3.5 h-3.5" />
-                          </Button>
-                        </div>
-                        <Button size="sm" className="text-[10px] font-bold">
-                          监控详情
-                        </Button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-
-            {/* 3. Lighthouse Tab */}
-            {activeTab === 'lighthouse' && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {lighthouseInstances.length === 0 ? (
-                  <div className="col-span-full p-20 text-center text-kumo-subtle app-card">暂无轻量应用服务器</div>
-                ) : (
-                  lighthouseInstances.map((inst) => (
-                    <div key={inst.InstanceId} className="app-card p-4 hover:border-kumo-brand transition-all flex flex-col gap-3">
-                      <div className="flex justify-between items-start">
-                        <div className="flex flex-col min-w-0">
-                          <span className="text-xs font-bold text-kumo-strong truncate">{inst.InstanceName || inst.InstanceId}</span>
-                          <span className="text-[10px] text-kumo-subtle font-mono">{inst.InstanceId}</span>
-                        </div>
-                        <span className={`app-status-pill ${getStatusBadge(inst.InstanceState)}`}>
-                          {getStatusText(inst.InstanceState)}
-                        </span>
-                      </div>
-                      
-                      <div className="grid grid-cols-2 gap-y-2 text-[10px] border-y border-kumo-line/50 py-2.5 my-1">
-                        <div className="flex flex-col">
-                          <span className="text-kumo-subtle font-medium">可用区</span>
-                          <span className="text-kumo-strong font-bold">{inst.Zone}</span>
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-kumo-subtle font-medium">公网 IP</span>
-                          <span className="text-kumo-strong font-bold font-mono">{inst.PublicAddresses?.[0] || '-'}</span>
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-kumo-subtle font-medium">套餐规格</span>
-                          <span className="text-kumo-strong font-bold">{inst.CPU}核 {inst.Memory}GB</span>
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-kumo-subtle font-medium">到期时间</span>
-                          <span className={`font-bold ${new Date(inst.ExpiredTime).getTime() < Date.now() + 7*24*3600*1000 ? 'text-kumo-danger' : 'text-kumo-strong'}`}>
-                            {new Date(inst.ExpiredTime).toLocaleDateString()}
-                          </span>
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center justify-between gap-2 mt-auto pt-1">
-                        <div className="flex gap-1.5">
-                          <Button
-                            onClick={() => handleInstanceAction('lighthouse', inst, 'START')}
-                            disabled={inst.InstanceState === 'RUNNING'}
-                            variant="secondary" size="sm"
-                            shape="square"
-                            aria-label="启动轻量服务器"
-                            className="text-kumo-success"
-                          >
-                            <Play className="w-3.5 h-3.5" />
-                          </Button>
-                          <Button
-                            onClick={() => handleInstanceAction('lighthouse', inst, 'STOP')}
-                            disabled={inst.InstanceState === 'STOPPED'}
-                            variant="secondary" size="sm"
-                            shape="square"
-                            aria-label="停止轻量服务器"
-                            className="text-kumo-danger"
-                          >
-                            <Square className="w-3.5 h-3.5" />
-                          </Button>
-                          <Button
-                            onClick={() => handleInstanceAction('lighthouse', inst, 'REBOOT')}
-                            variant="secondary" size="sm"
-                            shape="square"
-                            aria-label="重启轻量服务器"
-                            className="text-kumo-brand"
-                          >
-                            <RotateCw className="w-3.5 h-3.5" />
-                          </Button>
-                        </div>
-                        <Button size="sm" className="text-[10px] font-bold">
-                          管理详情
-                        </Button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-
-            {/* 4. Accounts Tab */}
-            {activeTab === 'accounts' && (
-              <SectionCard
-                title="腾讯云账号列表"
-                icon={<Cloud className="h-4 w-4 text-kumo-brand" />}
-                action={(
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      setEditingAccount(null);
-                      setAccountForm({ name: '', secretId: '', secretKey: '', regionId: 'ap-guangzhou', description: '' });
-                      setShowAddAccountModal(true);
-                    }}
-                    className="text-xs flex items-center gap-1.5"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>添加账号</span>
-                  </Button>
-                )}
-                bodyPadding="none"
-                bodyClassName="overflow-x-auto"
-              >
-                  <Table layout="fixed">
-                    <colgroup>
-                      {accountsColWidths.map((w, idx) => (
-                        <col key={idx} style={{ width: w }} />
-                      ))}
-                    </colgroup>
-                    <Table.Header>
-                      <Table.Row className="bg-kumo-recessed/40 border-b border-kumo-line font-bold text-kumo-subtle">
-                        <Table.Head className="relative group pr-6 p-4">
-                          备注名称
-                          <Table.ResizeHandle onMouseDown={(e) => startAccountsResize(0, e)} />
-                        </Table.Head>
-                        <Table.Head className="relative group pr-6 p-4">
-                          Secret ID
-                          <Table.ResizeHandle onMouseDown={(e) => startAccountsResize(1, e)} />
-                        </Table.Head>
-                        <Table.Head className="relative group pr-6 p-4">
-                          默认地域
-                          <Table.ResizeHandle onMouseDown={(e) => startAccountsResize(2, e)} />
-                        </Table.Head>
-                        <Table.Head className="relative group pr-6 p-4">
-                          描述
-                          <Table.ResizeHandle onMouseDown={(e) => startAccountsResize(3, e)} />
-                        </Table.Head>
-                        <Table.Head className="p-4 text-center">操作</Table.Head>
-                      </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
-                      {accounts.length === 0 ? (
-                        <Table.Row>
-                          <Table.Cell colSpan={5} className="p-12 text-center text-kumo-subtle">尚未配置任何账号</Table.Cell>
-                        </Table.Row>
-                      ) : (
-                        accounts.map((acc) => (
-                          <Table.Row
-                            key={acc.id}
-                            className="border-b border-kumo-line last:border-0 hover:bg-kumo-recessed/10 cursor-pointer"
-                            title="双击编辑账号"
-                            onDoubleClick={(event) => handleEditableRowDoubleClick(event, () => openEditModal(acc))}
-                          >
-                            <Table.Cell className="p-4 font-bold text-kumo-strong">{acc.name}</Table.Cell>
-                            <Table.Cell className="p-4 font-mono text-kumo-default">{acc.secret_id}</Table.Cell>
-                            <Table.Cell className="p-4 text-kumo-default">{acc.region_id}</Table.Cell>
-                            <Table.Cell className="p-4 text-kumo-subtle truncate max-w-xs">{acc.description || '-'}</Table.Cell>
-                            <Table.Cell className="p-4 text-center">
-                              <div className="flex justify-center gap-2">
-                                <Button
-                                  onClick={() => openEditModal(acc)}
-                                  variant="secondary" size="sm"
-                                  shape="square"
-                                  aria-label="编辑腾讯云账号"
-                                  className="text-kumo-subtle hover:text-kumo-brand"
-                                >
-                                  <Settings className="w-3.5 h-3.5" />
-                                </Button>
-                                <Button
-                                  onClick={() => deleteAccount(acc.id)}
-                                  variant="secondary-destructive" size="sm"
-                                  shape="square"
-                                  aria-label="删除腾讯云账号"
-                                >
-                                  <Trash className="w-3.5 h-3.5" />
-                                </Button>
-                              </div>
-                            </Table.Cell>
-                          </Table.Row>
-                        ))
-                      )}
-                    </Table.Body>
-                  </Table>
-              </SectionCard>
-            )}
-          </>
-        )}
-      </div>
-
-      {/* Add/Edit Account Modal */}
       <Dialog.Root open={showAddAccountModal} onOpenChange={setShowAddAccountModal}>
-        <Dialog className="!w-[min(32rem,calc(100vw-2rem))] !max-w-[min(32rem,calc(100vw-2rem))] p-6">
-          <Dialog.Title className="text-sm font-bold text-kumo-strong mb-1">
-            {editingAccount ? '编辑腾讯云账号' : '添加腾讯云账号'}
-          </Dialog.Title>
-          <Dialog.Description className="text-xs text-kumo-subtle mb-4">
-            请输入您的腾讯云 API 密钥 (SecretId & SecretKey)。
-          </Dialog.Description>
-          
-          <div className="space-y-4">
-            <Input
-              label="备注名称"
-              type="text" size="sm"
-              value={accountForm.name}
-              onChange={(e) => setAccountForm({ ...accountForm, name: e.target.value })}
-              placeholder="我的腾讯云生产环境"
-              className="w-full"
-            />
-            
-            <div className="grid grid-cols-2 gap-4">
-              <Input
-                label="Secret ID"
-                type="text" size="sm"
-                value={accountForm.secretId}
-                onChange={(e) => setAccountForm({ ...accountForm, secretId: e.target.value })}
-                placeholder="AKID..."
-                className="w-full font-mono"
-              />
-              <Input
-                label="默认地域 ID"
-                type="text" size="sm"
-                value={accountForm.regionId}
-                onChange={(e) => setAccountForm({ ...accountForm, regionId: e.target.value })}
-                placeholder="ap-guangzhou"
-                className="w-full font-mono"
-              />
+        <Dialog className="flex max-h-[min(calc(100dvh-2rem),34rem)] w-[min(calc(100vw-2rem),34rem)] flex-col overflow-hidden p-0">
+          <div className="border-b border-kumo-line bg-kumo-recessed/20 px-5 py-4">
+            <Dialog.Title className="text-base font-semibold text-kumo-strong">{editingAccount ? '编辑腾讯云账号' : '添加腾讯云账号'}</Dialog.Title>
+            <Dialog.Description className="mt-1 text-xs text-kumo-subtle">Secret 保存后不会回显，建议使用最小权限子账号。</Dialog.Description>
+          </div>
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
+            <Input size="sm" label="备注名称" value={accountForm.name} onChange={(event) => setAccountForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="生产环境" />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Input size="sm" label="Secret ID" value={accountForm.secretId} onChange={(event) => setAccountForm((prev) => ({ ...prev, secretId: event.target.value }))} className="font-mono" placeholder="AKID..." />
+              <Input size="sm" label="默认地域 ID" value={accountForm.regionId} onChange={(event) => setAccountForm((prev) => ({ ...prev, regionId: event.target.value }))} className="font-mono" placeholder="ap-guangzhou" />
             </div>
-
-            <Input
-              label="Secret Key"
-              type="text" size="sm"
-              value={accountForm.secretKey}
-              onChange={(e) => setAccountForm({ ...accountForm, secretKey: e.target.value })}
-              placeholder={editingAccount ? '(不修改请留空)' : '请输入 SecretKey'}
-              autoComplete="off"
-              data-1p-ignore
-              data-lpignore="true"
-              data-bwignore="true"
-              data-form-type="other"
-              spellCheck={false}
-              className="w-full font-mono"
-            />
-
-            <Textarea
-              label="账号描述"
-              size="sm"
-              value={accountForm.description}
-              onChange={(e) => setAccountForm({ ...accountForm, description: e.target.value })}
-              className="w-full min-h-[60px]"
-            />
-
-            <div className="flex justify-end gap-2 pt-2">
-              <Dialog.Close
-                render={(props) => (
-                  <Button size="sm"
-                    {...props}
-                    variant="secondary"
-                    className="text-xs"
-                  >
-                    取消
-                  </Button>
-                )}
-              />
-              <Button size="sm" onClick={handleAddAccount} disabled={submittingAccount} className="text-xs">
-                {submittingAccount ? '提交中...' : '保存账号'}
-              </Button>
-            </div>
+            <Input size="sm" label="Secret Key" value={accountForm.secretKey} onChange={(event) => setAccountForm((prev) => ({ ...prev, secretKey: event.target.value }))} placeholder={editingAccount ? '不修改请留空' : '请输入 SecretKey'} autoComplete="off" spellCheck={false} className="font-mono" />
+            <Textarea size="sm" label="账号描述" value={accountForm.description} onChange={(event) => setAccountForm((prev) => ({ ...prev, description: event.target.value }))} className="min-h-20" />
+          </div>
+          <div className="flex justify-end gap-2 border-t border-kumo-line bg-kumo-recessed/25 px-5 py-3">
+            <Dialog.Close render={(props) => <Button size="sm" variant="secondary" {...props}>取消</Button>} />
+            <Button size="sm" onClick={saveAccount} loading={submittingAccount}>保存账号</Button>
           </div>
         </Dialog>
       </Dialog.Root>
-    </div>
+    </PageStack>
   );
 }
 

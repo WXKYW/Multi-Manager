@@ -182,7 +182,7 @@ function AuthPage() {
         <form onSubmit={handleSetupPassword} className="space-y-4">
           <Input
             size="base"
-            type="text"
+            type="password"
             label="新密码"
             description="至少 6 位，建议使用更长的短语。"
             placeholder="设置管理员密码"
@@ -200,7 +200,7 @@ function AuthPage() {
 
           <Input
             size="base"
-            type="text"
+            type="password"
             label="确认密码"
             placeholder="再次输入密码"
             value={confirmPassword}
@@ -258,7 +258,7 @@ function AuthPage() {
         {!isDemoMode && !loginRequire2FA && (
           <Input
             size="base"
-            type="text"
+            type="password"
             aria-label="管理员密码"
             placeholder="请输入管理员密码"
             value={loginPassword}

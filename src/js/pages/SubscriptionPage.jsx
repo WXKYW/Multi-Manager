@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Checkbox } from '@cloudflare/kumo/components/checkbox';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
@@ -9,6 +9,7 @@ import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Badge, ClipboardText, Code, LayerCard, Meter, Tabs } from '@cloudflare/kumo';
+import { ShikiProvider, useShikiHighlighter } from '@cloudflare/kumo/code';
 import { AppTable, DataTableFrame, PageStack, PageToolbar, SectionCard } from '../components/ui/AppPrimitives.jsx';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import useStore from '../store.js';
@@ -547,14 +548,14 @@ function NodeHostQuality({ node, serverNameById }) {
       }).slice(0, 3)
     : [];
   return (
-    <div className="flex min-w-0 flex-col items-center gap-1">
+    <div className="flex min-w-0 flex-col items-start gap-1 text-left">
       <span
         className={`inline-flex max-w-full items-center rounded-[3px] border px-1.5 py-0.5 text-[10px] font-semibold leading-4 ${hostName ? 'border-kumo-info/25 bg-kumo-info/10 text-kumo-info' : 'border-kumo-line bg-kumo-recessed/45 text-kumo-subtle'}`}
         title={hostName || '未绑定主机'}
       >
         <span className="truncate">{hostName || '未绑定'}</span>
       </span>
-      <div className="flex max-w-full flex-wrap justify-center gap-1">
+      <div className="flex max-w-full flex-wrap justify-start gap-1">
         {samples.length > 0 ? samples.map((item) => {
           const latency = Math.round(Number(item.avg_latency_ms ?? item.latency_ms) || 0);
           return (
@@ -634,6 +635,63 @@ const copyText = async (text, message = '已复制') => {
     toast.error('复制失败');
   }
 };
+
+const templateLanguage = (format) => (format === 'clash' ? 'yaml' : 'bash');
+
+function TemplateCodeEditorInner({ label, value, format, onChange }) {
+  const highlightRef = useRef(null);
+  const { highlight, isReady } = useShikiHighlighter();
+  const language = templateLanguage(format);
+  const highlightedHtml = useMemo(() => {
+    if (!isReady) return null;
+    return highlight(String(value || ''), language);
+  }, [highlight, isReady, language, value]);
+
+  const handleScroll = (event) => {
+    if (!highlightRef.current) return;
+    highlightRef.current.scrollTop = event.currentTarget.scrollTop;
+    highlightRef.current.scrollLeft = event.currentTarget.scrollLeft;
+  };
+
+  return (
+    <div className="min-w-0 space-y-1.5">
+      <Label className="text-xs font-semibold text-kumo-subtle">{label}</Label>
+      <div className="app-code-editor-shell min-h-64 lg:min-h-80">
+        <div
+          ref={highlightRef}
+          aria-hidden="true"
+          className="app-code-editor-highlight"
+        >
+          {highlightedHtml ? (
+            <div
+              className="app-code-editor-shiki"
+              dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+            />
+          ) : (
+            <pre className="app-code-editor-plain">{String(value || '')}</pre>
+          )}
+        </div>
+        <textarea
+          aria-label={label}
+          className="app-code-editor-input"
+          value={value}
+          onChange={onChange}
+          onScroll={handleScroll}
+          spellCheck={false}
+          wrap="off"
+        />
+      </div>
+    </div>
+  );
+}
+
+function TemplateCodeEditor(props) {
+  return (
+    <ShikiProvider engine="javascript" languages={['yaml', 'bash']}>
+      <TemplateCodeEditorInner {...props} />
+    </ShikiProvider>
+  );
+}
 
 function LinkCopyButton({ label, text, onCopy, variant = 'secondary' }) {
   return (
@@ -1501,16 +1559,17 @@ function SubscriptionPage() {
       title={`节点列表 (${filteredNodes.length})`}
       description={visibleNodes.length === filteredNodes.length ? '先导入节点并维护节点库，订阅链接会从这里选择节点源。' : `已从 ${visibleNodes.length} 个节点中过滤。`}
       className="h-full min-h-0"
+      headerClassName="flex-wrap items-center gap-y-2 [&>div:last-child]:ml-0 [&>div:last-child]:w-full [&>div:last-child]:justify-start sm:[&>div:last-child]:ml-auto sm:[&>div:last-child]:w-auto sm:[&>div:last-child]:justify-end"
       bodyPadding="none"
       bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
       actions={(
-        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+        <div className="flex w-full min-w-0 flex-wrap items-center justify-start gap-2 sm:justify-end">
           <Tabs
             {...TOOL_TABS_PROPS}
             value={protocolFilter}
             onValueChange={(value) => setProtocolFilter(String(value))}
             tabs={protocolItems}
-            className="min-w-0 max-w-full flex-1 sm:flex-none"
+            className="min-w-0 w-full sm:w-auto sm:max-w-full sm:flex-1 md:flex-none"
             listClassName="max-w-full"
           />
           {tagItems.length > 1 && (
@@ -1529,29 +1588,34 @@ function SubscriptionPage() {
             value={nodeSubscriptionId}
             onValueChange={(value) => setNodeSubscriptionId(String(value))}
             items={nodeLibraryItems}
-            className="w-56 min-w-0"
+            className="w-full min-w-0 sm:w-56"
           />
           <Button size="sm" variant="secondary" onClick={() => selectedNodeLibrary && refreshProfileUpstream(selectedNodeLibrary)} disabled={!selectedNodeLibrary || !selectedNodeLibrary.upstream_url}>
             <RefreshCw className="h-3.5 w-3.5" />
             拉取来源
           </Button>
-          <Button size="sm" variant="primary" onClick={() => openImportModal()} disabled={!selectedNodeLibrary}>
-            <Download className="h-3.5 w-3.5" />
-            导入节点
-          </Button>
+          <Button size="sm" shape="square" variant="primary" onClick={() => openImportModal()} disabled={!selectedNodeLibrary} aria-label="导入节点" title="导入节点" icon={<Download className="h-3.5 w-3.5" />} />
         </div>
       )}
     >
       <DataTableFrame variant="embedded" className="min-h-0 flex-1 overflow-auto scrollbar-thin">
-        <AppTable layout="fixed" widths={[90, 220, 100, 300, 190, 132]}>
+        <AppTable layout="fixed" widths={[92, 248, 104, 300, 172, 116]}>
+          <colgroup>
+            <col style={{ width: '9%' }} />
+            <col style={{ width: '24%' }} />
+            <col style={{ width: '10%' }} />
+            <col style={{ width: '29%' }} />
+            <col style={{ width: '17%' }} />
+            <col style={{ width: '11%' }} />
+          </colgroup>
           <Table.Header sticky variant="compact">
             <Table.Row>
-              <Table.Head className="w-[9%] text-center">状态</Table.Head>
-              <Table.Head className="w-[22%]">节点名称</Table.Head>
-              <Table.Head className="w-[10%] text-center">类型</Table.Head>
-              <Table.Head className="w-[29%]">连接</Table.Head>
-              <Table.Head className="w-[18%]">主机 / 延迟</Table.Head>
-              <Table.Head className="w-[12%] text-right">操作</Table.Head>
+              <Table.Head className="text-center">状态</Table.Head>
+              <Table.Head>节点名称</Table.Head>
+              <Table.Head className="text-center">类型</Table.Head>
+              <Table.Head>连接</Table.Head>
+              <Table.Head>主机 / 延迟</Table.Head>
+              <Table.Head className="text-right">操作</Table.Head>
             </Table.Row>
           </Table.Header>
           <Table.Body>
@@ -1728,7 +1792,7 @@ function SubscriptionPage() {
               </div>
               <div className="flex shrink-0 gap-1">
                 <Button size="sm" variant="secondary" onClick={() => setDefaultTemplate(tpl)}>默认</Button>
-                <Button size="sm" variant="secondary" onClick={() => openEditTemplate(tpl)} disabled={tpl.builtin}><Edit className="h-3.5 w-3.5" /></Button>
+                <Button size="sm" shape="square" variant="secondary" onClick={() => openEditTemplate(tpl)} aria-label="编辑模板" title="编辑模板" icon={<Edit className="h-3.5 w-3.5" />} />
                 <Button size="sm" variant="secondary-destructive" onClick={() => deleteTemplate(tpl)} disabled={tpl.builtin}><Trash className="h-3.5 w-3.5" /></Button>
               </div>
             </LayerCard.Secondary>
@@ -1809,6 +1873,7 @@ function SubscriptionPage() {
             { value: 'profiles', label: '节点库' },
             { value: 'nodes', label: '节点' },
             { value: 'subscriptions', label: '订阅管理' },
+            { value: 'templates', label: '模板' },
           ]}
         />
       </PageToolbar>
@@ -1819,6 +1884,7 @@ function SubscriptionPage() {
             {activeTab === 'profiles' && renderProfiles()}
             {activeTab === 'nodes' && renderNodes()}
             {activeTab === 'subscriptions' && renderSubscriptions()}
+            {activeTab === 'templates' && renderTemplates()}
           </div>
         )}
       </div>
@@ -1884,9 +1950,9 @@ function SubscriptionPage() {
               </div>
             </div>
 
-            <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-kumo-line bg-kumo-recessed/25 px-5 py-3 sm:flex-row sm:justify-end">
-              <Dialog.Close render={(props) => <Button size="sm" variant="secondary" className="w-full sm:w-auto" {...props}>取消</Button>} />
-              <Button size="sm" variant="primary" loading={saving} onClick={saveProfile} className="w-full sm:w-auto"><Save className="h-3.5 w-3.5" />保存节点库</Button>
+            <div className="flex shrink-0 items-center justify-between gap-3 border-t border-kumo-line bg-kumo-recessed/25 px-5 py-3 sm:justify-end">
+              <Dialog.Close render={(props) => <Button size="sm" variant="secondary" {...props}>取消</Button>} />
+              <Button size="sm" variant="primary" loading={saving} onClick={saveProfile}><Save className="h-3.5 w-3.5" />保存节点库</Button>
             </div>
           </div>
         </Dialog>
@@ -2034,9 +2100,9 @@ function SubscriptionPage() {
               </div>
             </div>
 
-            <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-kumo-line bg-kumo-recessed/25 px-5 py-3 sm:flex-row sm:justify-end">
-              <Dialog.Close render={(props) => <Button size="sm" variant="secondary" className="w-full sm:w-auto" {...props}>取消</Button>} />
-              <Button size="sm" variant="primary" loading={saving} onClick={saveSubscription} className="w-full sm:w-auto"><Save className="h-3.5 w-3.5" />保存</Button>
+            <div className="flex shrink-0 items-center justify-between gap-3 border-t border-kumo-line bg-kumo-recessed/25 px-5 py-3 sm:justify-end">
+              <Dialog.Close render={(props) => <Button size="sm" variant="secondary" {...props}>取消</Button>} />
+              <Button size="sm" variant="primary" loading={saving} onClick={saveSubscription}><Save className="h-3.5 w-3.5" />保存</Button>
             </div>
           </div>
         </Dialog>
@@ -2106,9 +2172,9 @@ function SubscriptionPage() {
               </div>
             </div>
 
-            <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-kumo-line bg-kumo-recessed/25 px-5 py-3 sm:flex-row sm:justify-end">
-              <Dialog.Close render={(props) => <Button size="sm" variant="secondary" className="w-full sm:w-auto" {...props}>取消</Button>} />
-              <Button size="sm" variant="primary" loading={saving} onClick={saveNode} className="w-full sm:w-auto"><Save className="h-3.5 w-3.5" />保存节点</Button>
+            <div className="flex shrink-0 items-center justify-between gap-3 border-t border-kumo-line bg-kumo-recessed/25 px-5 py-3 sm:justify-end">
+              <Dialog.Close render={(props) => <Button size="sm" variant="secondary" {...props}>取消</Button>} />
+              <Button size="sm" variant="primary" loading={saving} onClick={saveNode}><Save className="h-3.5 w-3.5" />保存节点</Button>
             </div>
           </div>
         </Dialog>
@@ -2176,10 +2242,18 @@ function SubscriptionPage() {
               </div>
             </div>
 
-            <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-kumo-line bg-kumo-recessed/25 px-5 py-3 sm:flex-row sm:justify-end">
-              <Button size="sm" variant="secondary" onClick={previewImport} className="w-full sm:w-auto">预览</Button>
-              <Button size="sm" variant="secondary" onClick={() => commitImport(true)} className="w-full sm:w-auto"><Download className="h-3.5 w-3.5" />覆盖导入</Button>
-              <Button size="sm" variant="primary" onClick={() => commitImport(false)} className="w-full sm:w-auto"><Download className="h-3.5 w-3.5" />追加导入</Button>
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-kumo-line bg-kumo-recessed/25 px-5 py-3 sm:justify-end">
+              <Button size="sm" variant="secondary" onClick={previewImport}>预览</Button>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="secondary" onClick={() => commitImport(true)}>
+                  <Download className="h-3.5 w-3.5" />
+                  覆盖导入
+                </Button>
+                <Button size="sm" variant="primary" onClick={() => commitImport(false)}>
+                  <Download className="h-3.5 w-3.5" />
+                  追加导入
+                </Button>
+              </div>
             </div>
           </div>
         </Dialog>
@@ -2220,14 +2294,14 @@ function SubscriptionPage() {
                   <Input size="sm" label="名称" value={templateForm.name} onChange={(e) => setTemplateForm((prev) => ({ ...prev, name: e.target.value }))} />
                   <Select size="sm" label="格式" value={templateForm.format} onValueChange={(value) => setTemplateForm((prev) => ({ ...prev, format: String(value) }))} items={[{ value: 'clash', label: 'Mihomo/Clash YAML' }, { value: 'raw', label: 'Raw URI List' }, { value: 'base64', label: 'Base64 URI List' }]} />
                 </div>
-                <InputArea label="模板内容" className="min-h-64 w-full font-mono text-xs lg:min-h-80" value={templateForm.content} onChange={(e) => setTemplateForm((prev) => ({ ...prev, content: e.target.value }))} />
+                <TemplateCodeEditor label="模板内容" value={templateForm.content} format={templateForm.format} onChange={(e) => setTemplateForm((prev) => ({ ...prev, content: e.target.value }))} />
                 <Input size="sm" label="描述" value={templateForm.description} onChange={(e) => setTemplateForm((prev) => ({ ...prev, description: e.target.value }))} />
               </div>
             </div>
 
-            <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-kumo-line bg-kumo-recessed/25 px-5 py-3 sm:flex-row sm:justify-end">
-              <Dialog.Close render={(props) => <Button size="sm" variant="secondary" className="w-full sm:w-auto" {...props}>取消</Button>} />
-              <Button size="sm" variant="primary" loading={saving} onClick={saveTemplate} className="w-full sm:w-auto"><Save className="h-3.5 w-3.5" />保存模板</Button>
+            <div className="flex shrink-0 items-center justify-between gap-3 border-t border-kumo-line bg-kumo-recessed/25 px-5 py-3 sm:justify-end">
+              <Dialog.Close render={(props) => <Button size="sm" variant="secondary" {...props}>取消</Button>} />
+              <Button size="sm" variant="primary" loading={saving} onClick={saveTemplate}><Save className="h-3.5 w-3.5" />保存模板</Button>
             </div>
           </div>
         </Dialog>

@@ -10,13 +10,13 @@ import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { LayerCard, Tabs } from '@cloudflare/kumo';
-import { DEFAULT_TOTP_SETTINGS } from '../store.js';
+import useStore, { DEFAULT_TOTP_SETTINGS } from '../store.js';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
 import { buildTotpAccountPayload } from '../modules/totpPayload.js';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
 import BrandIcon, { BRAND_COLOR_FALLBACK, getIssuerColor } from '../components/ui/BrandIcon.jsx';
-import { SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { AppCard, SectionCard } from '../components/ui/AppPrimitives.jsx';
 import {
   Key,
   FolderOpen,
@@ -155,6 +155,7 @@ const mergeBrandStyleOptions = (...groups) => {
 
 // ==================== TotpPage 组件 ====================
 function TotpPage() {
+  const triggerHaptic = useStore((state) => state.triggerHaptic);
   const [totpCurrentTab, setTotpCurrentTab] = useState('accounts');
   const [totpAccounts, setTotpAccounts] = useState([]);
   const [totpGroups, setTotpGroups] = useState([]);
@@ -834,9 +835,7 @@ function TotpPage() {
 
         const successCallback = async (decodedText) => {
           if (decodedText.startsWith('otpauth://')) {
-            if (window.navigator && window.navigator.vibrate) {
-              window.navigator.vibrate(100);
-            }
+            triggerHaptic('success');
             await stopQrScan();
 
             if (totpSettings.autoSave) {
@@ -1423,7 +1422,7 @@ function TotpPage() {
 
       {/* ==================== 2. 分组列表 ==================== */}
       {totpCurrentTab === 'groups' && (
-        <div className="app-card overflow-hidden">
+        <AppCard padding="none" className="overflow-hidden">
           {totpGroups.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-kumo-subtle">
               <FolderOpen className="w-12 h-12 opacity-30 mb-4" />
@@ -1506,7 +1505,7 @@ function TotpPage() {
               </Table>
             </div>
           )}
-        </div>
+        </AppCard>
       )}
 
       {/* ==================== 3. 选项设置 ==================== */}
@@ -1658,16 +1657,18 @@ function TotpPage() {
 
             <div className="flex flex-wrap items-center gap-2 pt-3 first:pt-0 last:pb-0">
               <Button size="sm"
+                shape="square"
                 onClick={async () => {
                   const uris = await dialog.prompt({
                     message: '请输入批量导入的 otpauth:// 链接列表 (每行一条)',
                   });
                   importUrisDirectly(uris || '');
                 }}
-              >
-                批量导入 URI
-              </Button>
-              <Button size="sm" onClick={handleExportAccounts}>批量导出备份</Button>
+                aria-label="批量导入 URI"
+                title="批量导入 URI"
+                icon={<Download className="w-3.5 h-3.5" />}
+              />
+              <Button size="sm" shape="square" onClick={handleExportAccounts} aria-label="批量导出备份" title="批量导出备份" icon={<Upload className="w-3.5 h-3.5" />} />
               <Button size="sm" onClick={refreshCodes} icon={<RotateCw className="w-3.5 h-3.5" />}>
                 手动刷新验证码
               </Button>
@@ -1902,14 +1903,16 @@ function TotpPage() {
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-kumo-subtle">品牌标识</label>
                   <div className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto_minmax(0,8rem)] items-center gap-2">
-                    <button
+                    <Button
                       type="button"
-                      className="rounded-md transition-transform hover:scale-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-kumo-brand/45"
+                      variant="ghost"
+                      shape="square"
+                      className="!h-auto p-0 transition-transform hover:scale-[1.03]"
                       onClick={() => openBrandStylePicker()}
                       title="点击选择或上传品牌图标"
                     >
                       <TotpBrandMark issuer={accountForm.issuer} icon={accountForm.icon} color={resolveFormColor(accountForm)} />
-                    </button>
+                    </Button>
                     <Input size="sm"
                       aria-label="图标关键字"
                       type="text"
@@ -2161,11 +2164,12 @@ function TotpPage() {
               </div>
             )}
             {brandStyleOptions.map((option) => (
-              <button
+              <Button
                 key={option.id}
                 type="button"
+                variant="secondary"
                 onClick={() => applyBrandStyleOption(option)}
-                className="app-subcard grid min-w-[7.5rem] grid-cols-[auto_minmax(0,1fr)] items-center gap-2 px-3 py-2 text-left transition-colors hover:border-kumo-brand hover:bg-kumo-brand/5"
+                className="grid !h-auto min-w-[7.5rem] grid-cols-[auto_minmax(0,1fr)] items-center gap-2 px-3 py-2 text-left"
               >
                 <TotpBrandMark
                   issuer={accountForm.issuer}
@@ -2176,7 +2180,7 @@ function TotpPage() {
                     <span className="block truncate text-xs font-semibold text-kumo-strong">{option.label}</span>
                     <span className="block truncate text-[11px] text-kumo-subtle">{option.caption}</span>
                 </span>
-              </button>
+              </Button>
             ))}
           </div>
 

@@ -9,6 +9,7 @@ import { Button } from '@cloudflare/kumo/components/button';
 import { Tabs } from '@cloudflare/kumo';
 import { TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import AppPageHeader, { AppBreadcrumbs } from './AppPageHeader.jsx';
+import { AppCard } from './ui/AppPrimitives.jsx';
 import {
   Globe,
   Server,
@@ -81,7 +82,7 @@ class ModuleErrorBoundary extends React.Component {
     }
     return (
       <div className="flex min-h-[360px] items-center justify-center">
-        <div className="app-card w-full max-w-xl p-5">
+        <AppCard padding="none" className="w-full max-w-xl p-5">
           <div className="mb-2 text-sm font-bold text-kumo-strong">模块加载失败</div>
           <div className="mb-4 text-xs leading-relaxed text-kumo-subtle">
             前端资源可能已更新或缓存仍指向旧文件。请重新加载当前页面后再试。
@@ -102,7 +103,7 @@ class ModuleErrorBoundary extends React.Component {
           >
             重新加载
           </Button>
-        </div>
+        </AppCard>
       </div>
     );
   }
@@ -155,6 +156,8 @@ const THEME_MODE_OPTIONS = [
   { value: 'light', label: renderSidebarStyleIcon(Sun, '浅色模式'), className: 'w-full !justify-center !px-0' },
   { value: 'dark', label: renderSidebarStyleIcon(Moon, '深色模式'), className: 'w-full !justify-center !px-0' },
 ];
+
+const HAPTIC_INTERACTIVE_SELECTOR = 'button, a, [role="button"], [role="tab"], [role="switch"], input, select, textarea';
 
 const useMobileClosingNavigation = (onNavigate) => {
   const { isMobile, setOpenMobile } = useSidebar();
@@ -287,10 +290,11 @@ const SidebarLogoutButton = ({ onLogout }) => {
 };
 
 const SidebarBrand = ({ onHome }) => (
-  <button
+  <Button
     type="button"
+    variant="ghost"
     onClick={onHome}
-    className="flex h-full w-full min-w-0 items-center gap-2.5 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-kumo-brand/45"
+    className="!h-full w-full min-w-0 justify-start gap-2.5 rounded-md text-left"
     aria-label="返回首页"
   >
     <span className="flex size-9 shrink-0 items-center justify-center">
@@ -299,7 +303,7 @@ const SidebarBrand = ({ onHome }) => (
     <span className="min-w-0 truncate text-sm font-semibold text-kumo-strong">
       API Monitor
     </span>
-  </button>
+  </Button>
 );
 
 const SidebarStyleSwitches = ({
@@ -391,6 +395,7 @@ function MainLayout() {
     moduleOrder,
     userSettingsLoaded,
     loadUserSettings,
+    triggerHaptic,
     logout,
   } = useStore();
   const pageWidthClass = PAGE_WIDTH_CLASSES[pageWidthMode] || PAGE_WIDTH_CLASSES.standard;
@@ -455,6 +460,7 @@ function MainLayout() {
   }, []);
 
   const navigateToModule = (module) => {
+    triggerHaptic();
     setMainActiveTab(module);
     const nextPath = MODULE_PATHS[module] || `/${module}`;
     if (window.location.pathname !== nextPath) {
@@ -481,11 +487,43 @@ function MainLayout() {
     }
   }, [mainActiveTab, moduleOrder, moduleVisibility, setMainActiveTab, userSettingsLoaded]);
 
-  const viewportWorkspaceModule = ['apidocs', 'systemlogs', 'settings', 'dns'].includes(mainActiveTab);
-  const mainCanvasClassName = viewportWorkspaceModule
-    ? 'flex-1 overflow-hidden p-3 sm:p-4 lg:px-8 lg:pb-6 lg:pt-3'
-    : 'flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 lg:px-8 lg:pb-6 lg:pt-3 scrollbar-thin';
-  const mainCanvasInnerClassName = `mx-auto flex w-full min-w-0 flex-col ${viewportWorkspaceModule ? 'h-full min-h-0' : 'min-h-full'} ${pageWidthClass}`;
+  useEffect(() => {
+    const matchesInteractiveTarget = (target) => (
+      target instanceof Element && Boolean(target.closest(HAPTIC_INTERACTIVE_SELECTOR))
+    );
+
+    const handlePointerUp = (event) => {
+      if (event.pointerType && event.pointerType !== 'touch') return;
+      if (!matchesInteractiveTarget(event.target)) return;
+      triggerHaptic();
+    };
+
+    const handleClick = (event) => {
+      const hasTouchCapability = typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0;
+      if (!hasTouchCapability) return;
+      if (!matchesInteractiveTarget(event.target)) return;
+      triggerHaptic();
+    };
+
+    document.addEventListener('pointerup', handlePointerUp, true);
+    document.addEventListener('click', handleClick, true);
+
+    return () => {
+      document.removeEventListener('pointerup', handlePointerUp, true);
+      document.removeEventListener('click', handleClick, true);
+    };
+  }, [triggerHaptic]);
+
+  const responsiveWorkspaceModule = ['dns', 'settings'].includes(mainActiveTab);
+  const viewportWorkspaceModule = ['apidocs', 'systemlogs'].includes(mainActiveTab);
+  const mainCanvasClassName = responsiveWorkspaceModule
+    ? 'flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 md:overflow-hidden lg:px-8 lg:pb-6 lg:pt-3 scrollbar-thin'
+    : viewportWorkspaceModule
+      ? 'flex-1 overflow-hidden p-3 sm:p-4 lg:px-8 lg:pb-6 lg:pt-3'
+      : 'flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 lg:px-8 lg:pb-6 lg:pt-3 scrollbar-thin';
+  const mainCanvasInnerClassName = `mx-auto flex w-full min-w-0 flex-col ${
+    responsiveWorkspaceModule ? 'min-h-full md:h-full md:min-h-0' : viewportWorkspaceModule ? 'h-full min-h-0' : 'min-h-full'
+  } ${pageWidthClass}`;
 
   // 渲染当前模块页
   const renderActivePage = () => {
@@ -531,8 +569,8 @@ function MainLayout() {
       default:
         const ActiveIcon = getModuleIconComponent(mainActiveTab, Server);
         return (
-          <div className="flex flex-col items-center justify-center h-[60vh] text-center p-6 app-card max-w-xl mx-auto">
-            <div className="w-16 h-16 rounded-full app-subcard bg-kumo-recessed flex items-center justify-center mb-5 text-kumo-brand">
+          <AppCard padding="none" className="mx-auto flex h-[60vh] max-w-xl flex-col items-center justify-center p-6 text-center">
+            <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full border border-kumo-line bg-kumo-recessed text-kumo-brand shadow-none">
               <ActiveIcon className="w-7 h-7" />
             </div>
             <h2 className="text-base font-bold text-kumo-strong mb-2.5">
@@ -541,7 +579,7 @@ function MainLayout() {
             <p className="text-xs text-kumo-subtle max-w-sm leading-relaxed">
               我们正在使用 React + Kumo + Tailwind v4 像素级重构该页面，在此期间原有逻辑将暂时不可用。
             </p>
-          </div>
+          </AppCard>
         );
     }
   };
@@ -554,7 +592,7 @@ function MainLayout() {
       peekable
       style={{
         '--sidebar-width': '12.5rem',
-        '--sidebar-width-icon': '54px',
+        '--sidebar-width-icon': '57px',
       }}
       className="app-main-shell flex h-screen w-screen overflow-hidden text-kumo-default"
     >

@@ -21,6 +21,7 @@ import ServerLocationMap from '../components/server/ServerLocationMap.jsx';
 import {
   ChartBoundaryBox,
   ChartWarmupSkeleton,
+  AppCard,
   ScrollableTable,
   SectionCard,
 } from '../components/ui/AppPrimitives.jsx';
@@ -148,6 +149,10 @@ const HOST_COMPACT_COLUMNS = [
   { id: 'actions', label: '操作', required: true },
 ];
 const HOST_COMPACT_COLUMN_IDS = HOST_COMPACT_COLUMNS.map(column => column.id);
+const HOST_COMPACT_DEFAULT_VISIBLE_COLUMNS = Array.from(new Set([
+  ...HOST_COMPACT_COLUMN_IDS,
+  'quotaRemaining',
+]));
 const HOST_COMPACT_COLUMN_WIDTHS = {
   status: 74,
   name: 112,
@@ -333,14 +338,18 @@ const getInitialServerListViewMode = () => {
 };
 
 const getInitialCompactVisibleColumns = () => {
-  if (typeof window === 'undefined') return HOST_COMPACT_COLUMN_IDS;
+  if (typeof window === 'undefined') return HOST_COMPACT_DEFAULT_VISIBLE_COLUMNS;
   try {
     const saved = JSON.parse(window.localStorage.getItem(SERVER_COMPACT_COLUMNS_STORAGE_KEY) || '[]');
     const valid = Array.isArray(saved) ? saved.filter(id => HOST_COMPACT_COLUMN_IDS.includes(id)) : [];
     const required = HOST_COMPACT_COLUMNS.filter(column => column.required).map(column => column.id);
-    return Array.from(new Set([...required, ...(valid.length > 0 ? valid : HOST_COMPACT_COLUMN_IDS)]));
+    return Array.from(new Set([
+      ...required,
+      ...(valid.length > 0 ? valid : HOST_COMPACT_DEFAULT_VISIBLE_COLUMNS),
+      'quotaRemaining',
+    ]));
   } catch (error) {
-    return HOST_COMPACT_COLUMN_IDS;
+    return HOST_COMPACT_DEFAULT_VISIBLE_COLUMNS;
   }
 };
 
@@ -397,7 +406,7 @@ function DenseUsageMeterComponent({ label, value, detail, indicatorClassName = '
     <div className={`relative h-8 min-w-[96px] w-full rounded-md bg-kumo-recessed/45 ${COMPACT_INLINE_BOX_CLASS}`}>
       <div className="absolute left-1.5 right-1.5 top-[3px] grid h-4 grid-cols-[minmax(0,1fr)_auto] items-center gap-1 text-[10px] leading-4 text-kumo-default">
         <span className="min-w-0 truncate text-kumo-subtle">{label}</span>
-        <span className="min-w-0 truncate text-right text-[10px] font-medium leading-4 text-kumo-default">{detail || `${Math.round(percent)}%`}</span>
+        <span className="min-w-0 truncate text-right text-[11px] font-semibold leading-4 text-kumo-default">{detail || `${Math.round(percent)}%`}</span>
       </div>
       <div className="absolute bottom-1 left-1.5 right-1.5 h-1.5 overflow-hidden rounded-full bg-kumo-fill">
         <div
@@ -500,7 +509,7 @@ const EXPANDED_VALUE_TONES = {
 
 function ExpandedSection({ title, tone = 'brand', action, className = '', children }) {
   return (
-    <section className={`min-w-0 overflow-hidden app-card p-1.5 ${className}`}>
+    <AppCard as="section" padding="none" className={`min-w-0 overflow-hidden p-1.5 ${className}`}>
       <div className="mb-2 flex min-w-0 items-center justify-between gap-2">
         <h4 className="flex min-w-0 items-center gap-1.5 text-xs font-bold text-kumo-strong">
           <span className={`h-3 w-1 shrink-0 rounded-full ${EXPANDED_SECTION_ACCENTS[tone] || EXPANDED_SECTION_ACCENTS.brand}`}></span>
@@ -509,7 +518,7 @@ function ExpandedSection({ title, tone = 'brand', action, className = '', childr
         {action && <div className="shrink-0">{action}</div>}
       </div>
       {children}
-    </section>
+    </AppCard>
   );
 }
 
@@ -729,7 +738,7 @@ function ExpandedTrendChartCard({ title, tone = 'brand', legend, compact = false
   const legendGapClassName = compact ? 'gap-x-2 gap-y-0.5' : 'gap-x-2.5 gap-y-0.5';
 
   return (
-    <ChartBoundaryBox className={`min-w-0 overflow-hidden app-card ${compact ? 'app-card-md' : ''} p-1.5 h-full ${className}`}>
+    <ChartBoundaryBox className={`min-w-0 overflow-hidden rounded-lg border border-kumo-line/90 bg-kumo-base p-1.5 shadow-none ${compact ? 'rounded-md' : ''} h-full ${className}`}>
       {(tooltipBoundary) => (
         <div className="flex h-full min-w-0 flex-col">
           <div className={`grid min-w-0 grid-cols-[minmax(0,max-content)_minmax(0,1fr)] items-center gap-2 overflow-hidden ${headerHeightClassName}`}>
@@ -784,7 +793,7 @@ function NetworkQualityPanel({
   const networkQualityBodyHeight = chartHeight;
 
   return (
-    <ChartBoundaryBox className={`min-w-0 overflow-hidden app-card p-1.5 ${className}`}>
+    <ChartBoundaryBox className={`min-w-0 overflow-hidden rounded-lg border border-kumo-line/90 bg-kumo-base p-1.5 shadow-none ${className}`}>
       {(tooltipBoundary) => (
         <div className="flex min-w-0 flex-col gap-1.5">
           <div className={`flex min-w-0 flex-wrap items-center justify-between gap-2 ${compact ? 'min-h-2' : ''}`}>
@@ -6213,9 +6222,9 @@ function ServerPage() {
   );
 
   const renderDockerEmptyState = (message) => (
-    <div className="app-card p-10 text-center text-xs text-kumo-subtle">
+    <AppCard padding="none" className="p-10 text-center text-xs text-kumo-subtle">
       {message}
-    </div>
+    </AppCard>
   );
 
   const renderDockerHostResourceSection = ({
@@ -7643,15 +7652,15 @@ function ServerPage() {
               height="calc(100vh - 260px)"
             />
           ) : serverLoading && serverList.length === 0 ? (
-            <div className="flex flex-col items-center justify-center p-12 app-card app-card-md text-kumo-subtle gap-2">
+            <AppCard padding="none" className="flex flex-col items-center justify-center gap-2 p-12 text-kumo-subtle">
               <div className="w-6 h-6 border-2 border-kumo-brand border-t-transparent rounded-full animate-spin"></div>
               <p className="text-xs">正在连接并加载主机结构中...</p>
-            </div>
+            </AppCard>
           ) : filteredServers.length === 0 ? (
-            <div className="flex flex-col items-center justify-center p-16 app-card app-card-md text-kumo-subtle gap-1.5">
+            <AppCard padding="none" className="flex flex-col items-center justify-center gap-1.5 p-16 text-kumo-subtle">
               <span className="text-xl">🔍</span>
               <p className="text-xs">未找到符合当前条件的主机节点</p>
-            </div>
+            </AppCard>
           ) : (
             <div className="flex flex-col gap-3">
               {serverListViewMode === 'compact' ? (
@@ -8504,7 +8513,7 @@ function ServerPage() {
                                 />
 
                                 {server.info?.docker?.installed && (
-                                  <div className="overflow-hidden app-card">
+                                  <AppCard padding="none" className="overflow-hidden">
                                     <Button
                                       type="button"
                                       variant="ghost" size="sm"
@@ -8630,7 +8639,7 @@ function ServerPage() {
                                         <div className="px-3 py-4 text-center text-xs text-kumo-subtle">暂无容器</div>
                                       )}
                                     </AnimatedCollapse>
-                                  </div>
+                                  </AppCard>
                                 )}
                               </div>
                             )}
@@ -8740,7 +8749,7 @@ function ServerPage() {
           {/* Docker 任务中心 */}
           {dockerSubTab !== 'containers' && dockerSubTab === 'task-center' && dockerTasks.length > 0 && (
             <Collapsible.Root open={showDockerTaskDetails} onOpenChange={setShowDockerTaskDetails}>
-              <div className="app-subcard bg-kumo-recessed p-2.5 rounded-lg text-xs text-kumo-default">
+              <AppCard padding="none" className="bg-kumo-recessed p-2.5 text-xs text-kumo-default">
                 {(() => {
                   const latestTask = dockerTasks[0];
                   const progress = clampPercent(toNumber(latestTask.progress, 0));
@@ -8796,13 +8805,13 @@ function ServerPage() {
                     })}
                   </div>
                 </Collapsible.Panel>
-              </div>
+              </AppCard>
             </Collapsible.Root>
           )}
 
           {/* 内容区域 */}
           {showDockerBlockingLoading ? (
-            <div className="app-card overflow-hidden p-4">
+            <AppCard padding="none" className="overflow-hidden p-4">
               <div className="space-y-4">
                 {[...Array(3)].map((_, i) => (
                   <div key={i} className="space-y-2">
@@ -8811,7 +8820,7 @@ function ServerPage() {
                   </div>
                 ))}
               </div>
-            </div>
+            </AppCard>
           ) : (
             <div className="flex flex-col gap-4">
               {/* 1. 容器管理 */}
@@ -10026,19 +10035,21 @@ function ServerPage() {
                 <Button
                   size="sm"
                   variant="secondary"
+                  shape="square"
                   onClick={exportServers}
+                  aria-label="导出主机配置备份"
+                  title="导出主机配置备份"
                   icon={<Upload className="h-3.5 w-3.5" />}
-                >
-                  导出备份
-                </Button>
+                />
                 <Button
                   size="sm"
                   variant="secondary"
+                  shape="square"
                   onClick={openImportServerModal}
+                  aria-label="导入主机配置"
+                  title="导入主机配置"
                   icon={<Download className="h-3.5 w-3.5" />}
-                >
-                  导入配置
-                </Button>
+                />
             </SectionCard>
               </div>
 
@@ -10260,7 +10271,7 @@ function ServerPage() {
         const terminalTxTotal = getByteParts(activeInfo.network?.tx_total);
         const terminalRxTotal = getByteParts(activeInfo.network?.rx_total);
         return (
-          <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden app-card">
+          <AppCard padding="none" className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
             <div className="flex min-h-11 items-center justify-between gap-3 border-b border-kumo-line bg-kumo-base px-3 py-2 text-xs">
               <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto scrollbar-thin">
                 {sshSessions.map(sess => (
@@ -10564,7 +10575,7 @@ function ServerPage() {
                 />
               </div>
             </div>
-          </div>
+          </AppCard>
         );
       })()}
 
@@ -10967,14 +10978,14 @@ function ServerPage() {
                         {getAgentInstallExecutionHint(agentInstallOS)}
                       </div>
                       <div className="grid grid-cols-1 gap-2 text-[11px] text-kumo-subtle sm:grid-cols-2">
-                        <div className="app-card app-card-md p-2">
+                        <AppCard padding="none" className="p-2">
                           <div className="font-semibold text-kumo-strong">主机 ID</div>
                           <div className="mt-1 font-mono">{quickDeployResult.serverId}</div>
-                        </div>
-                        <div className="app-card app-card-md p-2">
+                        </AppCard>
+                        <AppCard padding="none" className="p-2">
                           <div className="font-semibold text-kumo-strong">API 地址</div>
                           <div className="mt-1 truncate font-mono" title={quickDeployResult.apiUrl}>{quickDeployResult.apiUrl}</div>
-                        </div>
+                        </AppCard>
                       </div>
                     </div>
                   )}
@@ -11467,7 +11478,7 @@ function ServerPage() {
                 {serverList.map(server => {
                   const deployable = canSshDeployAgent(server);
                   return (
-                    <div key={server.id} className="app-card app-card-md p-2">
+                    <AppCard key={server.id} padding="none" className="p-2">
                       <Checkbox
                         label={
                           <span className="inline-flex min-w-0 items-center gap-1.5">
@@ -11487,7 +11498,7 @@ function ServerPage() {
                           });
                         }}
                       />
-                    </div>
+                    </AppCard>
                   );
                 })}
               </div>
@@ -11664,9 +11675,9 @@ function ServerPage() {
                   </pre>
                 </div>
               ) : (
-                <div className="app-card app-card-md p-3 text-kumo-subtle">
+                <AppCard padding="none" className="p-3 text-kumo-subtle">
                   将对在线 Agent 或 Agent 模式主机下发升级任务。
-                </div>
+                </AppCard>
               )}
             </div>
           </div>

@@ -722,7 +722,30 @@ func TestR2AndTunnelsLifecycle(t *testing.T) {
 		t.Fatalf("unexpected download info payload: %#v", downloadPayload)
 	}
 
-	// 5. R2 Object Preview
+	// 5. R2 Object Upload
+	res = perform(service, http.MethodPut, "/api/cloudflare/accounts/"+accountID+"/r2/buckets/test-bucket/objects/new%2Fupload.txt", "uploaded from test")
+	if res.Code != http.StatusOK {
+		t.Fatalf("upload object status=%d body=%s", res.Code, res.Body.String())
+	}
+	var uploadPayload map[string]interface{}
+	mustDecode(t, res, &uploadPayload)
+	if uploadPayload["success"] != true || uploadPayload["objectKey"] != "new/upload.txt" {
+		t.Fatalf("unexpected upload object payload: %#v", uploadPayload)
+	}
+
+	// 6. R2 Object Download
+	res = perform(service, http.MethodGet, "/api/cloudflare/accounts/"+accountID+"/r2/buckets/test-bucket/objects/test%2Fkey.txt/download", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("download object status=%d body=%s", res.Code, res.Body.String())
+	}
+	if body := res.Body.String(); body != "hello from r2" {
+		t.Fatalf("unexpected download body: %q", body)
+	}
+	if disposition := res.Header().Get("Content-Disposition"); !strings.Contains(disposition, "attachment") {
+		t.Fatalf("unexpected download disposition: %s", disposition)
+	}
+
+	// 7. R2 Object Preview
 	res = perform(service, http.MethodGet, "/api/cloudflare/accounts/"+accountID+"/r2/buckets/test-bucket/objects/test%2Fkey.txt/preview", "")
 	if res.Code != http.StatusOK {
 		t.Fatalf("preview object status=%d body=%s", res.Code, res.Body.String())
@@ -734,7 +757,7 @@ func TestR2AndTunnelsLifecycle(t *testing.T) {
 		t.Fatalf("unexpected preview content type: %s", contentType)
 	}
 
-	// 6. R2 Object Delete
+	// 8. R2 Object Delete
 	res = perform(service, http.MethodDelete, "/api/cloudflare/accounts/"+accountID+"/r2/buckets/test-bucket/objects/test%2Fkey.txt", "")
 	if res.Code != http.StatusOK {
 		t.Fatalf("delete object status=%d body=%s", res.Code, res.Body.String())
@@ -745,7 +768,7 @@ func TestR2AndTunnelsLifecycle(t *testing.T) {
 		t.Fatalf("unexpected delete object payload: %#v", deleteObjPayload)
 	}
 
-	// 7. R2 Bucket delete
+	// 9. R2 Bucket delete
 	res = perform(service, http.MethodDelete, "/api/cloudflare/accounts/"+accountID+"/r2/buckets/test-bucket", "")
 	if res.Code != http.StatusOK {
 		t.Fatalf("delete bucket status=%d body=%s", res.Code, res.Body.String())
@@ -1555,6 +1578,11 @@ func handleFakeR2Path(t *testing.T, w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodGet {
 				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 				_, _ = w.Write([]byte("hello from r2"))
+				return
+			}
+			if r.Method == http.MethodPut {
+				_, _ = io.ReadAll(r.Body)
+				writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
 				return
 			}
 			if r.Method == http.MethodDelete {

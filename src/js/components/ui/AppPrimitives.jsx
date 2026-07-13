@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { Badge } from '@cloudflare/kumo/components/badge';
+import { Button } from '@cloudflare/kumo/components/button';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Table } from '@cloudflare/kumo/components/table';
 import { LayerCard } from '@cloudflare/kumo';
 import { Info } from '../Icons.jsx';
 
 export const pageStackClass = 'flex w-full min-w-0 flex-col gap-3 sm:gap-4';
-export const pageToolbarClass = 'flex min-w-0 flex-wrap items-start justify-between gap-3 border-b border-kumo-line pb-3 sm:items-center [&>*]:min-w-0';
-export const sectionCardHeaderClass = 'flex min-h-[56px] flex-wrap items-start justify-between gap-3 border-b border-kumo-line bg-kumo-recessed/30 px-4 py-3.5 sm:items-center';
+export const pageToolbarClass = 'flex min-w-0 flex-col items-stretch gap-3 border-b border-kumo-line pb-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between [&>*]:min-w-0';
+export const sectionCardHeaderClass = 'flex min-h-[52px] items-center justify-between gap-3 border-b border-kumo-line bg-kumo-recessed/30 px-4 py-2.5 sm:min-h-[56px] sm:flex-row sm:flex-wrap sm:items-center sm:py-3.5';
 export const sectionCardTitleClass = 'inline-flex min-w-0 max-w-full items-center gap-2 text-sm font-bold text-kumo-strong';
 export const iconButtonIconClass = 'h-3.5 w-3.5';
 export const actionIconClass = 'h-4 w-4';
@@ -37,6 +38,30 @@ const pillToneClass = {
 
 export function cx(...parts) {
   return parts.filter(Boolean).join(' ');
+}
+
+function withCompactCardActions(node) {
+  if (Array.isArray(node)) return node.map(withCompactCardActions);
+  if (!React.isValidElement(node)) return node;
+
+  if (node.type === React.Fragment) {
+    return (
+      <React.Fragment key={node.key}>
+        {React.Children.map(node.props.children, withCompactCardActions)}
+      </React.Fragment>
+    );
+  }
+
+  if (node.type === Button) {
+    return React.cloneElement(node, {
+      size: 'sm',
+    });
+  }
+
+  if (!node.props?.children) return node;
+  return React.cloneElement(node, {
+    children: React.Children.map(node.props.children, withCompactCardActions),
+  });
 }
 
 export function PageStack({ className = '', children }) {
@@ -98,17 +123,17 @@ export function SectionCard({
   ...props
 }) {
   const trailing = [
-    meta && <React.Fragment key="meta">{meta}</React.Fragment>,
-    action && <React.Fragment key="action">{action}</React.Fragment>,
-    actions && <React.Fragment key="actions">{actions}</React.Fragment>,
+    meta && <React.Fragment key="meta">{withCompactCardActions(meta)}</React.Fragment>,
+    action && <React.Fragment key="action">{withCompactCardActions(action)}</React.Fragment>,
+    actions && <React.Fragment key="actions">{withCompactCardActions(actions)}</React.Fragment>,
   ].filter(Boolean);
   return (
-    <div
+    <LayerCard
       {...props}
-      className={cx('flex flex-col overflow-hidden rounded-lg border border-kumo-line/90 bg-kumo-base p-0 shadow-none', className)}
+      className={cx('flex flex-col overflow-visible p-0 shadow-none', className)}
     >
-      <div className={cx(sectionCardHeaderClass, headerClassName)}>
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+      <LayerCard.Secondary className={cx(sectionCardHeaderClass, headerClassName)}>
+        <div className="flex min-w-0 flex-1 items-center gap-x-3 gap-y-1 sm:flex-row sm:flex-wrap sm:items-center">
           <div className={cx(sectionCardTitleClass, titleClassName)}>
             {icon}
             {typeof title === 'string' || typeof title === 'number' ? (
@@ -118,21 +143,21 @@ export function SectionCard({
             )}
           </div>
           {description && (
-            <div className={cx('min-w-0 flex-1 basis-40 truncate text-xs font-normal text-kumo-subtle', descriptionClassName)}>
+            <div className={cx('hidden min-w-0 flex-1 text-xs font-normal leading-5 text-kumo-subtle sm:block sm:basis-40 sm:truncate', descriptionClassName)}>
               {description}
             </div>
           )}
         </div>
         {trailing.length > 0 && (
-          <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2">
+          <div className="ml-3 flex shrink-0 items-center justify-end gap-2 whitespace-nowrap sm:ml-auto sm:flex-wrap sm:whitespace-normal [&>*]:shrink-0">
             {trailing}
           </div>
         )}
-      </div>
-      <div className={cx(cardPaddingClass[bodyPadding] || cardPaddingClass.md, bodyClassName)}>
+      </LayerCard.Secondary>
+      <LayerCard.Primary className={cx(cardPaddingClass[bodyPadding] || cardPaddingClass.md, bodyClassName)}>
         {children}
-      </div>
-    </div>
+      </LayerCard.Primary>
+    </LayerCard>
   );
 }
 

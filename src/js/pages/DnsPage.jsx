@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChartPalette, ClipboardText, LayerCard, Popover, Tabs, TimeseriesChart } from '@cloudflare/kumo';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
@@ -347,6 +347,7 @@ function DnsPage() {
   const [r2CurrentPrefix, setR2CurrentPrefix] = useState('');
   const [r2BucketSearch, setR2BucketSearch] = useState('');
   const [r2ObjectSearch, setR2ObjectSearch] = useState('');
+  const r2UploadInputRef = useRef(null);
   const [tunnels, setTunnels] = useState([]);
   const [sslInfo, setSslInfo] = useState(null);
   const [analytics, setAnalytics] = useState(null);
@@ -369,6 +370,7 @@ function DnsPage() {
   const [pagesDeployState, setPagesDeployState] = useState({ project: null, deployments: [] });
   const [pagesDomainState, setPagesDomainState] = useState({ project: null, domains: [], domain: '' });
   const [r2BucketForm, setR2BucketForm] = useState({ name: '', location: 'auto' });
+  const [r2FolderForm, setR2FolderForm] = useState({ name: '' });
   const [importState, setImportState] = useState({ kind: '', text: '', overwrite: false });
   const [tunnelForm, setTunnelForm] = useState({ name: '' });
   const [tunnelTokenState, setTunnelTokenState] = useState({ tunnel: null, token: '' });
@@ -1495,6 +1497,67 @@ function DnsPage() {
     await loadR2Objects(bucket.name, '');
   };
 
+  const r2ObjectApiPath = (objectKey, suffix = '') => (
+    `/accounts/${selectedAccountId}/r2/buckets/${encodeURIComponent(r2SelectedBucket.name)}/objects/${encodeURIComponent(objectKey)}${suffix}`
+  );
+
+  const uploadR2Object = async (objectKey, body, contentType = 'application/octet-stream') => {
+    if (!selectedAccountId || !r2SelectedBucket?.name) throw new Error('请先选择 R2 存储桶');
+    const response = await fetch(`/api/cloudflare${r2ObjectApiPath(objectKey)}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': contentType || 'application/octet-stream',
+      },
+      body,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.error) {
+      throw new Error(payload.error || `上传失败：HTTP ${response.status}`);
+    }
+    return payload;
+  };
+
+  const handleR2UploadFiles = async (event) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (files.length === 0) return;
+    setLoadingKey('uploadR2', true);
+    try {
+      await Promise.all(files.map((file) => {
+        const relativePath = file.webkitRelativePath || file.name;
+        const key = `${r2CurrentPrefix}${relativePath}`.replace(/^\/+/, '');
+        return uploadR2Object(key, file, file.type || 'application/octet-stream');
+      }));
+      toast.success(`已上传 ${files.length} 个文件`);
+      await loadR2Objects(r2SelectedBucket.name, r2CurrentPrefix);
+    } catch (error) {
+      toast.error(`上传 R2 对象失败：${error.message}`);
+    } finally {
+      setLoadingKey('uploadR2', false);
+    }
+  };
+
+  const createR2Folder = async () => {
+    const folderName = r2FolderForm.name.trim().replace(/^\/+|\/+$/g, '');
+    if (!folderName) {
+      toast.warning('请输入文件夹名称');
+      return;
+    }
+    setLoadingKey('createR2Folder', true);
+    try {
+      const key = `${r2CurrentPrefix}${folderName}/.keep`;
+      await uploadR2Object(key, new Blob([''], { type: 'application/octet-stream' }));
+      toast.success('文件夹已创建');
+      setR2FolderForm({ name: '' });
+      setModal({ type: null, data: null });
+      await loadR2Objects(r2SelectedBucket.name, r2CurrentPrefix);
+    } catch (error) {
+      toast.error(`创建文件夹失败：${error.message}`);
+    } finally {
+      setLoadingKey('createR2Folder', false);
+    }
+  };
+
   const deleteR2Object = async (objectKey) => {
     if (!(await dialog.confirm(`确定要删除对象“${objectKey}”吗？`))) return;
     try {
@@ -1528,18 +1591,7 @@ function DnsPage() {
   };
 
   const downloadR2Object = async (objectKey) => {
-    try {
-      const data = await cfApi(
-        `/accounts/${selectedAccountId}/r2/buckets/${encodeURIComponent(r2SelectedBucket.name)}/objects/${encodeURIComponent(objectKey)}/download-info`
-      );
-      if (data.publicUrl) {
-        window.open(data.publicUrl, '_blank', 'noopener,noreferrer');
-      } else {
-        toast.warning('该对象没有公开访问地址，可在 R2 绑定公开域名后再下载');
-      }
-    } catch (error) {
-      toast.error(`获取下载信息失败：${error.message}`);
-    }
+    window.open(`/api/cloudflare${r2ObjectApiPath(objectKey, '/download')}`, '_blank', 'noopener,noreferrer');
   };
 
   const r2ObjectPreviewUrl = (objectKey) => (
@@ -1707,12 +1759,14 @@ function DnsPage() {
       name: prefix.slice(r2CurrentPrefix.length).replace(/\/$/, '') || prefix.replace(/\/$/, ''),
       isFolder: true,
     })),
-    ...r2Objects.map((object) => ({
-      ...object,
-      key: object.key || object.name,
-      name: (object.key || object.name || '').slice(r2CurrentPrefix.length) || object.key || object.name,
-      isFolder: false,
-    })),
+    ...r2Objects
+      .filter((object) => !String(object.key || object.name || '').endsWith('/.keep'))
+      .map((object) => ({
+        ...object,
+        key: object.key || object.name,
+        name: (object.key || object.name || '').slice(r2CurrentPrefix.length) || object.key || object.name,
+        isFolder: false,
+      })),
   ], [r2CurrentPrefix, r2Objects, r2Prefixes]);
 
   const filteredR2Rows = useMemo(() => {
@@ -1736,10 +1790,10 @@ function DnsPage() {
     [r2CurrentPrefix]
   );
   const isViewportWorkspaceTab = ['dns', 'r2'].includes(activeTab);
-  const pageShellClassName = 'dns-workspace h-full min-h-0 flex-1 max-w-full';
+  const pageShellClassName = 'dns-workspace min-h-full max-w-full md:h-full md:min-h-0 md:flex-1';
   const contentAreaClassName = isViewportWorkspaceTab
-    ? 'flex min-h-0 min-w-0 flex-1 flex-col'
-    : 'min-h-0 min-w-0 flex-1 overflow-y-auto scrollbar-thin';
+    ? 'flex min-w-0 flex-col md:min-h-0 md:flex-1'
+    : 'min-w-0';
   const renderResizeHead = (label, index, startResize, align = 'left') => {
     const alignClassName = {
       left: 'justify-start text-left',
@@ -1767,14 +1821,14 @@ function DnsPage() {
           tabs={CLOUDFLARE_TABS}
         />
 
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto">
           {!['accounts', 'templates'].includes(activeTab) && (
             <Select size="sm"
               aria-label="选择 Cloudflare 账号"
               value={selectedAccountId || null}
               onValueChange={(value) => setSelectedAccountId(value ? String(value) : '')}
               placeholder="选择账号"
-              className="w-32 sm:w-48"
+              className="min-w-0 flex-1 sm:w-48 sm:flex-none"
               items={accounts.map((account) => ({
                 value: String(account.id),
                 label: account.name,
@@ -1811,8 +1865,8 @@ function DnsPage() {
         ) : (
           <>
           {activeTab === 'dns' && (
-            <div className="dns-split grid min-h-0 min-w-0 flex-1 gap-3">
-              <section className="flex min-h-0 min-w-0 flex-col gap-2">
+            <div className="dns-split grid min-w-0 gap-3 md:min-h-0 md:flex-1">
+              <section className="flex min-w-0 flex-col gap-2 md:min-h-0">
               <div className="flex min-h-8 shrink-0 flex-col gap-2 pl-px sm:flex-row sm:items-center sm:justify-between">
                 <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:items-center">
                   <Button size="sm" variant="secondary" onClick={openZoneModal} icon={<Plus className="h-4 w-4" />} className="w-full justify-center sm:w-auto">
@@ -1858,7 +1912,7 @@ function DnsPage() {
                 ))}
               </div>
 
-              <div className="dns-table-frame hidden min-h-0 max-w-full flex-1 md:block">
+              <div className="dns-table-frame hidden min-h-0 max-w-full flex-1 md:flex">
                 <div className="dns-table-scroll scrollbar-thin">
                 <Table layout="fixed" className="w-full text-xs">
                   <colgroup>
@@ -1990,7 +2044,7 @@ function DnsPage() {
 
               </section>
 
-              <section className="flex min-h-0 min-w-0 flex-col gap-2">
+              <section className="flex min-w-0 flex-col gap-2 md:min-h-0">
               <div className="flex min-h-8 shrink-0 items-center justify-between gap-2 px-1">
                 <div className="flex min-w-0 items-center gap-2 text-xs text-kumo-subtle">
                   <Globe className="h-3.5 w-3.5 shrink-0" />
@@ -2098,7 +2152,7 @@ function DnsPage() {
                   </AnimatedCollapse>
 
                   <div className="dns-toolbar-frame order-1 flex shrink-0 flex-wrap items-center justify-between gap-2 p-2 md:order-none">
-                    <div className="grid w-full grid-cols-[minmax(0,1fr)_8rem_auto] gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
+                    <div className="grid w-full grid-cols-[minmax(0,1fr)_minmax(7rem,0.7fr)_auto] gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
                       <Input size="sm"
                         aria-label="按名称筛选 DNS 记录"
                         value={recordFilter.name}
@@ -2177,7 +2231,7 @@ function DnsPage() {
                     ))}
                   </div>
 
-                  <div className="dns-table-frame order-2 hidden min-h-0 max-w-full flex-1 md:block md:order-none">
+                  <div className="dns-table-frame order-2 hidden min-h-0 max-w-full flex-1 md:flex md:order-none">
                     <div className="dns-table-scroll scrollbar-thin">
                     <Table layout="fixed" className="w-full text-xs" style={{ minWidth: recordColWidths.reduce((sum, width) => sum + width, 0) }}>
                       <colgroup>
@@ -2400,6 +2454,7 @@ function DnsPage() {
                   <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-kumo-subtle" />
                   <Input
                     size="sm"
+                    aria-label="搜索 R2 存储桶"
                     value={r2BucketSearch}
                     onChange={(event) => setR2BucketSearch(event.target.value)}
                     placeholder="搜索存储桶"
@@ -2464,14 +2519,22 @@ function DnsPage() {
                   </div>
                 ) : (
                   <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                    <div className="shrink-0 flex flex-col gap-3 border-b border-kumo-line p-3">
+                    <input
+                      ref={r2UploadInputRef}
+                      type="file"
+                      multiple
+                      className="hidden"
+                      onChange={handleR2UploadFiles}
+                    />
+                    <div className="flex shrink-0 flex-col gap-3 border-b border-kumo-line p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="flex min-w-0 items-center gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex min-w-0 flex-wrap items-center gap-1 rounded-md border border-kumo-line bg-kumo-recessed/25 px-2 py-1.5 text-sm">
                             <Database className="h-4 w-4 shrink-0 text-kumo-brand" />
-                            <span className="truncate text-base font-semibold text-kumo-strong">{r2SelectedBucket.name}</span>
-                          </div>
-                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-kumo-subtle">
+                            <Button type="button" size="xs" variant="ghost" className="h-auto max-w-48 truncate px-1.5 py-0.5 font-semibold text-kumo-strong" onClick={() => loadR2Objects(r2SelectedBucket.name, '')}>
+                              {r2SelectedBucket.name}
+                            </Button>
+                            <span className="text-kumo-subtle">/</span>
                             <Button type="button" size="xs" variant="ghost" className="h-auto px-1.5 py-0.5 text-kumo-subtle hover:text-kumo-strong" onClick={() => loadR2Objects(r2SelectedBucket.name, '')}>
                               根目录
                             </Button>
@@ -2479,7 +2542,7 @@ function DnsPage() {
                               const prefix = `${r2PathSegments.slice(0, index + 1).join('/')}/`;
                               return (
                                 <React.Fragment key={prefix}>
-                                  <span>/</span>
+                                  <span className="text-kumo-subtle">/</span>
                                   <Button type="button" size="xs" variant="ghost" className="h-auto max-w-40 truncate px-1.5 py-0.5 text-kumo-subtle hover:text-kumo-strong" onClick={() => loadR2Objects(r2SelectedBucket.name, prefix)}>
                                     {segment}
                                   </Button>
@@ -2490,6 +2553,26 @@ function DnsPage() {
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            onClick={() => r2UploadInputRef.current?.click()}
+                            disabled={loading.uploadR2}
+                            icon={<Upload className="h-4 w-4" />}
+                          >
+                            上传
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => {
+                              setR2FolderForm({ name: '' });
+                              setModal({ type: 'r2Folder', data: null });
+                            }}
+                            icon={<Folder className="h-4 w-4" />}
+                          >
+                            新建文件夹
+                          </Button>
                           {r2CurrentPrefix && (
                             <Button
                               size="sm"
@@ -2512,113 +2595,102 @@ function DnsPage() {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-                        <div className="rounded-md border border-kumo-line px-3 py-2">
-                          <div className="text-xs text-kumo-subtle">文件夹</div>
-                          <div className="mt-1 text-sm font-semibold text-kumo-strong">{r2Prefixes.length}</div>
+                      <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-kumo-subtle">
+                          <Badge variant="outline">{r2Prefixes.length} 个文件夹</Badge>
+                          <Badge variant="outline">{r2Objects.filter((object) => !String(object.key || object.name || '').endsWith('/.keep')).length} 个对象</Badge>
+                          <Badge variant="outline">{formatBytes(r2ObjectTotalBytes)}</Badge>
+                          {selectedR2Objects.length > 0 && <Badge variant="info">已选择 {selectedR2Objects.length}</Badge>}
                         </div>
-                        <div className="rounded-md border border-kumo-line px-3 py-2">
-                          <div className="text-xs text-kumo-subtle">对象</div>
-                          <div className="mt-1 text-sm font-semibold text-kumo-strong">{r2Objects.length}</div>
+                        <div className="relative w-full max-w-md">
+                          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-kumo-subtle" />
+                          <Input
+                            size="sm"
+                            aria-label="搜索当前 R2 目录"
+                            value={r2ObjectSearch}
+                            onChange={(event) => setR2ObjectSearch(event.target.value)}
+                            placeholder="搜索当前目录"
+                            className="pl-8"
+                          />
                         </div>
-                        <div className="rounded-md border border-kumo-line px-3 py-2">
-                          <div className="text-xs text-kumo-subtle">当前大小</div>
-                          <div className="mt-1 text-sm font-semibold text-kumo-strong">{formatBytes(r2ObjectTotalBytes)}</div>
-                        </div>
-                        <div className="rounded-md border border-kumo-line px-3 py-2">
-                          <div className="text-xs text-kumo-subtle">已选择</div>
-                          <div className="mt-1 text-sm font-semibold text-kumo-strong">{selectedR2Objects.length}</div>
-                        </div>
-                      </div>
-
-                      <div className="relative max-w-md">
-                        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-kumo-subtle" />
-                        <Input
-                          size="sm"
-                          value={r2ObjectSearch}
-                          onChange={(event) => setR2ObjectSearch(event.target.value)}
-                          placeholder="搜索当前目录"
-                          className="pl-8"
-                        />
                       </div>
                     </div>
 
                     <div className="min-h-0 flex-1 overflow-auto">
-                      <Table layout="fixed">
-                        <colgroup>{r2ColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
-                        <Table.Header variant="compact">
-                          <Table.Row>
-                            <Table.CheckHead
-                              checked={r2VisibleObjectKeys.length > 0 && r2VisibleObjectKeys.every((key) => selectedR2Objects.includes(key))}
-                              indeterminate={selectedR2Objects.length > 0 && !r2VisibleObjectKeys.every((key) => selectedR2Objects.includes(key))}
-                              onCheckedChange={(checked) => setSelectedR2Objects(checked ? r2VisibleObjectKeys : [])}
-                              aria-label="全选当前可见 R2 对象"
-                            />
-                            <Table.Head className="relative pr-6">名称<Table.ResizeHandle onMouseDown={(e) => startR2Resize(1, e)} onTouchStart={(e) => startR2Resize(1, e)} /></Table.Head>
-                            <Table.Head className="relative pr-6">大小<Table.ResizeHandle onMouseDown={(e) => startR2Resize(2, e)} onTouchStart={(e) => startR2Resize(2, e)} /></Table.Head>
-                            <Table.Head className="relative pr-6">修改时间<Table.ResizeHandle onMouseDown={(e) => startR2Resize(3, e)} onTouchStart={(e) => startR2Resize(3, e)} /></Table.Head>
-                            <Table.Head className="text-right">操作</Table.Head>
-                          </Table.Row>
-                        </Table.Header>
-                        <Table.Body>
-                          {loading.r2Objects ? (
-                            Array.from({ length: 7 }).map((_, index) => <Table.Row key={index}><Table.Cell colSpan={5}><SkeletonLine className="h-4 w-full" /></Table.Cell></Table.Row>)
-                          ) : r2Rows.length === 0 ? (
-                            <Table.Row><Table.Cell colSpan={5} className="py-12 text-center text-kumo-subtle">当前目录为空。</Table.Cell></Table.Row>
-                          ) : filteredR2Rows.length === 0 ? (
-                            <Table.Row><Table.Cell colSpan={5} className="py-12 text-center text-kumo-subtle">没有匹配的对象。</Table.Cell></Table.Row>
-                          ) : filteredR2Rows.map((row) => (
-                            <Table.Row
-                              key={row.key}
-                              className="cursor-pointer hover:bg-kumo-recessed/35"
-                              onClick={() => (row.isFolder ? loadR2Objects(r2SelectedBucket.name, row.key) : previewR2Object(row.key))}
-                              title={row.isFolder ? '打开目录' : '预览文件'}
-                            >
-                              {row.isFolder ? (
-                                <Table.Cell />
-                              ) : (
-                                <Table.CheckCell
-                                  checked={selectedR2Objects.includes(row.key)}
-                                  onClick={(event) => event.stopPropagation()}
-                                  onCheckedChange={(checked) => toggleR2Selection(row.key, Boolean(checked))}
-                                  aria-label={`选择 ${row.key}`}
-                                />
-                              )}
-                              <Table.Cell>
-                                <Button
-                                  type="button"
-                                  size="xs"
-                                  variant="ghost"
-                                  className={`h-auto min-w-0 justify-start gap-2 px-0 py-0 text-left ${row.isFolder ? 'font-medium text-kumo-strong hover:text-kumo-brand' : 'text-kumo-strong'}`}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    if (row.isFolder) loadR2Objects(r2SelectedBucket.name, row.key);
-                                    else previewR2Object(row.key);
-                                  }}
-                                  disabled={!row.isFolder}
-                                  title={row.key}
-                                >
-                                  {row.isFolder ? <Folder className="h-4 w-4 shrink-0 text-kumo-brand" /> : <FileText className="h-4 w-4 shrink-0 text-kumo-subtle" />}
-                                  <span className="truncate">{row.name || row.key}</span>
-                                </Button>
-                              </Table.Cell>
-                              <Table.Cell>{row.isFolder ? '-' : formatBytes(row.size)}</Table.Cell>
-                              <Table.Cell>{row.isFolder ? '-' : formatDate(row.uploaded || row.last_modified)}</Table.Cell>
-                              <Table.Cell className="text-right">
-                                {row.isFolder ? (
-                                  <Button size="sm" variant="secondary" onClick={(event) => { event.stopPropagation(); loadR2Objects(r2SelectedBucket.name, row.key); }}>进入</Button>
-                                ) : (
-                                  <div className="inline-flex gap-2" onClick={(event) => event.stopPropagation()}>
-                                    <Button size="sm" shape="square" variant="secondary" onClick={() => previewR2Object(row.key)} aria-label={`预览 ${row.key}`} title="预览" icon={<Eye className="h-4 w-4" />} />
-                                    <Button size="sm" shape="square" variant="secondary" onClick={() => downloadR2Object(row.key)} aria-label={`下载 ${row.key}`} title="下载" icon={<Download className="h-4 w-4" />} />
-                                    <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteR2Object(row.key)} aria-label={`删除 ${row.key}`} title="删除" icon={<Trash className="h-4 w-4" />} />
-                                  </div>
-                                )}
-                              </Table.Cell>
+                        <Table layout="fixed">
+                          <colgroup>{r2ColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
+                          <Table.Header variant="compact">
+                            <Table.Row>
+                              <Table.CheckHead
+                                checked={r2VisibleObjectKeys.length > 0 && r2VisibleObjectKeys.every((key) => selectedR2Objects.includes(key))}
+                                indeterminate={selectedR2Objects.length > 0 && !r2VisibleObjectKeys.every((key) => selectedR2Objects.includes(key))}
+                                onCheckedChange={(checked) => setSelectedR2Objects(checked ? r2VisibleObjectKeys : [])}
+                                aria-label="全选当前可见 R2 对象"
+                              />
+                              <Table.Head className="relative pr-6">名称<Table.ResizeHandle onMouseDown={(e) => startR2Resize(1, e)} onTouchStart={(e) => startR2Resize(1, e)} /></Table.Head>
+                              <Table.Head className="relative pr-6">大小<Table.ResizeHandle onMouseDown={(e) => startR2Resize(2, e)} onTouchStart={(e) => startR2Resize(2, e)} /></Table.Head>
+                              <Table.Head className="relative pr-6">修改时间<Table.ResizeHandle onMouseDown={(e) => startR2Resize(3, e)} onTouchStart={(e) => startR2Resize(3, e)} /></Table.Head>
+                              <Table.Head className="text-right">操作</Table.Head>
                             </Table.Row>
-                          ))}
-                        </Table.Body>
-                      </Table>
+                          </Table.Header>
+                          <Table.Body>
+                            {loading.r2Objects ? (
+                              Array.from({ length: 7 }).map((_, index) => <Table.Row key={index}><Table.Cell colSpan={5}><SkeletonLine className="h-4 w-full" /></Table.Cell></Table.Row>)
+                            ) : r2Rows.length === 0 ? (
+                              <Table.Row><Table.Cell colSpan={5} className="py-12 text-center text-kumo-subtle">当前目录为空。可以上传文件或新建文件夹。</Table.Cell></Table.Row>
+                            ) : filteredR2Rows.length === 0 ? (
+                              <Table.Row><Table.Cell colSpan={5} className="py-12 text-center text-kumo-subtle">没有匹配的对象。</Table.Cell></Table.Row>
+                            ) : filteredR2Rows.map((row) => (
+                              <Table.Row
+                                key={row.key}
+                                className="cursor-pointer hover:bg-kumo-recessed/35"
+                                onClick={() => (row.isFolder ? loadR2Objects(r2SelectedBucket.name, row.key) : previewR2Object(row.key))}
+                                title={row.isFolder ? '打开目录' : '预览文件'}
+                              >
+                                {row.isFolder ? (
+                                  <Table.Cell />
+                                ) : (
+                                  <Table.CheckCell
+                                    checked={selectedR2Objects.includes(row.key)}
+                                    onClick={(event) => event.stopPropagation()}
+                                    onCheckedChange={(checked) => toggleR2Selection(row.key, Boolean(checked))}
+                                    aria-label={`选择 ${row.key}`}
+                                  />
+                                )}
+                                <Table.Cell>
+                                  <Button
+                                    type="button"
+                                    size="xs"
+                                    variant="ghost"
+                                    className={`h-auto min-w-0 justify-start gap-2 px-0 py-0 text-left ${row.isFolder ? 'font-medium text-kumo-strong hover:text-kumo-brand' : 'text-kumo-strong'}`}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      if (row.isFolder) loadR2Objects(r2SelectedBucket.name, row.key);
+                                      else previewR2Object(row.key);
+                                    }}
+                                    title={row.key}
+                                  >
+                                    {row.isFolder ? <Folder className="h-4 w-4 shrink-0 text-kumo-brand" /> : <FileText className="h-4 w-4 shrink-0 text-kumo-subtle" />}
+                                    <span className="truncate">{row.name || row.key}</span>
+                                  </Button>
+                                </Table.Cell>
+                                <Table.Cell>{row.isFolder ? '-' : formatBytes(row.size)}</Table.Cell>
+                                <Table.Cell>{row.isFolder ? '-' : formatDate(row.uploaded || row.last_modified)}</Table.Cell>
+                                <Table.Cell className="text-right">
+                                  {row.isFolder ? (
+                                    <Button size="sm" variant="secondary" onClick={(event) => { event.stopPropagation(); loadR2Objects(r2SelectedBucket.name, row.key); }}>进入</Button>
+                                  ) : (
+                                    <div className="inline-flex gap-2" onClick={(event) => event.stopPropagation()}>
+                                      <Button size="sm" shape="square" variant="secondary" onClick={() => previewR2Object(row.key)} aria-label={`预览 ${row.key}`} title="预览" icon={<Eye className="h-4 w-4" />} />
+                                      <Button size="sm" shape="square" variant="secondary" onClick={() => downloadR2Object(row.key)} aria-label={`下载 ${row.key}`} title="下载" icon={<Download className="h-4 w-4" />} />
+                                      <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteR2Object(row.key)} aria-label={`删除 ${row.key}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                                    </div>
+                                  )}
+                                </Table.Cell>
+                              </Table.Row>
+                            ))}
+                          </Table.Body>
+                        </Table>
                     </div>
                   </div>
                 )}
@@ -2687,8 +2759,8 @@ function DnsPage() {
               icon={<FileText className="h-4 w-4 text-kumo-brand" />}
               actions={(
                 <>
-                <Button size="sm" variant="secondary" onClick={() => openImportModal('templates')} icon={<Download className="h-4 w-4" />}>导入模板</Button>
-                <Button size="sm" variant="secondary" onClick={() => downloadJson(`cloudflare-dns-templates-${Date.now()}.json`, { version: '1.0', templates })} icon={<Upload className="h-4 w-4" />}>导出模板</Button>
+                <Button size="sm" shape="square" variant="secondary" onClick={() => openImportModal('templates')} aria-label="导入模板" title="导入模板" icon={<Download className="h-4 w-4" />} />
+                <Button size="sm" shape="square" variant="secondary" onClick={() => downloadJson(`cloudflare-dns-templates-${Date.now()}.json`, { version: '1.0', templates })} aria-label="导出模板" title="导出模板" icon={<Upload className="h-4 w-4" />} />
                 <Button size="sm" onClick={() => openTemplateModal()} icon={<Plus className="h-4 w-4" />}>添加模板</Button>
                 </>
               )}
@@ -2740,8 +2812,8 @@ function DnsPage() {
               icon={<Settings className="h-4 w-4 text-kumo-brand" />}
               actions={(
                 <>
-                <Button size="sm" variant="secondary" onClick={exportAccounts} icon={<Upload className="h-4 w-4" />}>导出账号</Button>
-                <Button size="sm" variant="secondary" onClick={() => openImportModal('accounts')} icon={<Download className="h-4 w-4" />}>导入账号</Button>
+                <Button size="sm" shape="square" variant="secondary" onClick={exportAccounts} aria-label="导出账号" title="导出账号" icon={<Upload className="h-4 w-4" />} />
+                <Button size="sm" shape="square" variant="secondary" onClick={() => openImportModal('accounts')} aria-label="导入账号" title="导入账号" icon={<Download className="h-4 w-4" />} />
                 <Button size="sm" variant="primary" onClick={() => openAccountModal()} icon={<Plus className="h-4 w-4" />}>添加账号</Button>
                 </>
               )}
@@ -3135,6 +3207,29 @@ function DnsPage() {
               <div className="flex justify-end gap-2">
                 <Button size="sm" variant="secondary" onClick={closeModal}>取消</Button>
                 <Button size="sm" onClick={createR2Bucket} disabled={loading.saveR2Bucket}>创建</Button>
+              </div>
+            </div>
+          )}
+
+          {modal.type === 'r2Folder' && (
+            <div className="flex flex-col gap-4">
+              <div>
+                <Dialog.Title className="text-base font-semibold text-kumo-strong">新建文件夹</Dialog.Title>
+                <Dialog.Description className="mt-1 text-xs text-kumo-subtle">
+                  将在当前路径 {r2CurrentPrefix || '/'} 下创建文件夹。
+                </Dialog.Description>
+              </div>
+              <Input
+                size="sm"
+                label="文件夹名称"
+                value={r2FolderForm.name}
+                onChange={(event) => setR2FolderForm({ name: event.target.value })}
+                placeholder="assets"
+                autoFocus
+              />
+              <div className="flex justify-end gap-2">
+                <Button size="sm" variant="secondary" onClick={closeModal}>取消</Button>
+                <Button size="sm" onClick={createR2Folder} disabled={loading.createR2Folder}>创建</Button>
               </div>
             </div>
           )}

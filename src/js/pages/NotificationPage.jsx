@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
+import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input, Textarea } from '@cloudflare/kumo/components/input';
@@ -10,7 +11,7 @@ import { Checkbox } from '@cloudflare/kumo/components/checkbox';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Tabs } from '@cloudflare/kumo';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
-import { SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { AppCard, SectionCard } from '../components/ui/AppPrimitives.jsx';
 import {
   Bell,
   Plus,
@@ -745,7 +746,7 @@ function NotificationPage() {
           {notificationLoading && notificationChannels.length === 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {[...Array(4)].map((_, i) => (
-                <div key={i} className="app-card p-4 space-y-4">
+                <AppCard key={i} padding="none" className="space-y-4 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <SkeletonLine className="w-8 h-8 rounded-lg" />
                     <div className="flex-1 space-y-1.5">
@@ -754,7 +755,7 @@ function NotificationPage() {
                     </div>
                   </div>
                   <SkeletonLine className="w-full h-1" />
-                </div>
+                </AppCard>
               ))}
             </div>
           ) : notificationChannels.length === 0 ? (
@@ -768,9 +769,11 @@ function NotificationPage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {notificationChannels.map((channel) => (
-                <div
+                <AppCard
                   key={channel.id}
-                  className="app-card hover:border-kumo-brand p-4 transition-all flex flex-col justify-between min-h-[128px]"
+                  padding="none"
+                  interactive
+                  className="flex min-h-[128px] flex-col justify-between p-4 transition-all hover:border-kumo-brand"
                 >
                   <div className="flex items-start justify-between gap-3">
                     {/* Icon */}
@@ -833,7 +836,7 @@ function NotificationPage() {
                       {channel.enabled ? '启用中' : '已禁用'}
                     </span>
                   </div>
-                </div>
+                </AppCard>
               ))}
             </div>
           )}
@@ -872,7 +875,7 @@ function NotificationPage() {
           {notificationLoading && notificationRules.length === 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {[...Array(3)].map((_, i) => (
-                <div key={i} className="app-card p-4 space-y-4">
+                <AppCard key={i} padding="none" className="space-y-4 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <SkeletonLine className="w-8 h-8 rounded-lg" />
                     <div className="flex-1 space-y-1.5">
@@ -881,7 +884,7 @@ function NotificationPage() {
                     </div>
                   </div>
                   <SkeletonLine className="w-full h-1" />
-                </div>
+                </AppCard>
               ))}
             </div>
           ) : filteredRules.length === 0 ? (
@@ -895,9 +898,11 @@ function NotificationPage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredRules.map((rule) => (
-                <div
+                <AppCard
                   key={rule.id}
-                  className="app-card hover:border-kumo-brand p-4 transition-all flex flex-col justify-between min-h-[148px]"
+                  padding="none"
+                  interactive
+                  className="flex min-h-[148px] flex-col justify-between p-4 transition-all hover:border-kumo-brand"
                 >
                   <div className="flex items-start justify-between gap-3">
                     {/* Severity Indicator */}
@@ -927,12 +932,12 @@ function NotificationPage() {
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5 mt-2 flex-wrap select-none">
-                        <span className="text-[9px] app-subcard bg-kumo-recessed text-kumo-subtle px-1.5 py-0.5 rounded font-medium">
+                        <Badge className="bg-kumo-recessed text-[9px] font-medium text-kumo-subtle">
                           {getSourceModuleName(rule.source_module)}
-                        </span>
-                        <span className="text-[9px] app-subcard bg-kumo-recessed text-kumo-subtle px-1.5 py-0.5 rounded font-medium">
+                        </Badge>
+                        <Badge className="bg-kumo-recessed text-[9px] font-medium text-kumo-subtle">
                           {getEventTypeName(rule.event_type)}
-                        </span>
+                        </Badge>
                       </div>
                     </div>
 
@@ -1008,7 +1013,7 @@ function NotificationPage() {
                       </div>
                     )}
                   </div>
-                </div>
+                </AppCard>
               ))}
             </div>
           )}
@@ -1017,13 +1022,15 @@ function NotificationPage() {
 
       {/* ==================== 事件目录 Tab ==================== */}
       {notificationCurrentTab === 'events' && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
           {notificationEventCatalog.map((item) => (
             <SectionCard
               key={item.module}
               title={getSourceModuleName(item.module)}
               icon={<Info className="w-4 h-4 text-kumo-brand" />}
               meta={<span className="text-[10px] font-mono text-kumo-subtle">{item.events?.length || 0}</span>}
+              className="self-start"
+              bodyClassName="p-4"
             >
               <div className="flex flex-wrap gap-2">
                 {(item.events || []).map((eventName) => (
@@ -1085,13 +1092,13 @@ function NotificationPage() {
           {notificationLoading && notificationHistory.length === 0 ? (
             <div className="space-y-3">
               {[...Array(3)].map((_, i) => (
-                <div key={i} className="app-card p-4 space-y-3">
+                <AppCard key={i} padding="none" className="space-y-3 p-4">
                   <div className="flex items-center justify-between">
                     <SkeletonLine className="w-1/4 h-3.5" />
                     <SkeletonLine className="w-1/6 h-2.5" />
                   </div>
                   <SkeletonLine className="w-full h-12 rounded-md" />
-                </div>
+                </AppCard>
               ))}
             </div>
           ) : filteredHistory.length === 0 ? (
@@ -1102,9 +1109,10 @@ function NotificationPage() {
           ) : (
             <div className="flex flex-col gap-3">
               {filteredHistory.map((log) => (
-                <div
+                <AppCard
                   key={log.id}
-                  className="app-card p-4 flex items-start gap-3.5"
+                  padding="none"
+                  className="flex items-start gap-3.5 p-4"
                 >
                   {/* Status indicator pill */}
                   <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs flex-shrink-0 select-none ${
@@ -1127,9 +1135,9 @@ function NotificationPage() {
                       </span>
                     </div>
                     {/* Message block */}
-                    <div className="text-xs text-kumo-subtle font-mono p-3 app-subcard bg-kumo-recessed rounded-md mt-2.5 whitespace-pre-wrap select-all">
+                    <AppCard padding="none" className="mt-2.5 whitespace-pre-wrap bg-kumo-recessed p-3 font-mono text-xs text-kumo-subtle">
                       {log.message}
-                    </div>
+                    </AppCard>
 
                     {/* Metadata indicators */}
                     {(log.error_message || log.retry_count > 0) && (
@@ -1147,7 +1155,7 @@ function NotificationPage() {
                       </div>
                     )}
                   </div>
-                </div>
+                </AppCard>
               ))}
             </div>
           )}
@@ -1519,7 +1527,7 @@ function NotificationPage() {
             {/* Target Delivery Channels Checkboxes */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-kumo-subtle">发送通知的渠道 *</label>
-              <div className="flex flex-wrap gap-2.5 p-3.5 app-subcard bg-kumo-recessed/50">
+              <AppCard padding="none" className="flex flex-wrap gap-2.5 bg-kumo-recessed/50 p-3.5">
                 {notificationChannels.filter(c => c.enabled).map((channel) => (
                   <Checkbox
                     key={channel.id}
@@ -1536,7 +1544,7 @@ function NotificationPage() {
                     label={channel.name}
                   />
                 ))}
-              </div>
+              </AppCard>
             </div>
 
             {/* Repeats & Cooldown Suppression */}
@@ -1575,7 +1583,7 @@ function NotificationPage() {
             {/* Backup Notification Channels Checkboxes */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-kumo-subtle">首选失败时的备用通知渠道</label>
-              <div className="flex flex-wrap gap-2.5 p-3.5 app-subcard bg-kumo-recessed/50">
+              <AppCard padding="none" className="flex flex-wrap gap-2.5 bg-kumo-recessed/50 p-3.5">
                 {notificationChannels.filter(c => c.enabled).map((channel) => (
                   <Checkbox
                     key={`backup_${channel.id}`}
@@ -1592,7 +1600,7 @@ function NotificationPage() {
                     label={channel.name}
                   />
                 ))}
-              </div>
+              </AppCard>
             </div>
 
             {/* Custom Template Titles */}

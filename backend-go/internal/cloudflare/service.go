@@ -75,9 +75,11 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case len(parts) == 6 && parts[0] == "accounts" && parts[2] == "r2" && parts[3] == "buckets" && parts[5] == "objects":
 		s.r2Objects(w, r, parts[1], parts[4])
 	case len(parts) == 7 && parts[0] == "accounts" && parts[2] == "r2" && parts[3] == "buckets" && parts[5] == "objects":
-		s.deleteR2Object(w, r, parts[1], parts[4], parts[6])
+		s.r2ObjectMutation(w, r, parts[1], parts[4], parts[6])
 	case len(parts) == 8 && parts[0] == "accounts" && parts[2] == "r2" && parts[3] == "buckets" && parts[5] == "objects" && parts[7] == "download-info":
 		s.r2ObjectDownloadInfo(w, r, parts[1], parts[4], parts[6])
+	case len(parts) == 8 && parts[0] == "accounts" && parts[2] == "r2" && parts[3] == "buckets" && parts[5] == "objects" && parts[7] == "download":
+		s.r2ObjectDownload(w, r, parts[1], parts[4], parts[6])
 	case len(parts) == 8 && parts[0] == "accounts" && parts[2] == "r2" && parts[3] == "buckets" && parts[5] == "objects" && parts[7] == "preview":
 		s.r2ObjectPreview(w, r, parts[1], parts[4], parts[6])
 
@@ -2867,11 +2869,18 @@ func (s *Service) r2Objects(w http.ResponseWriter, r *http.Request, accountID, b
 	})
 }
 
-func (s *Service) deleteR2Object(w http.ResponseWriter, r *http.Request, accountID, bucketName, objectKey string) {
-	if r.Method != http.MethodDelete {
+func (s *Service) r2ObjectMutation(w http.ResponseWriter, r *http.Request, accountID, bucketName, objectKey string) {
+	switch r.Method {
+	case http.MethodDelete:
+		s.deleteR2Object(w, r, accountID, bucketName, objectKey)
+	case http.MethodPut:
+		s.uploadR2Object(w, r, accountID, bucketName, objectKey)
+	default:
 		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
 	}
+}
+
+func (s *Service) deleteR2Object(w http.ResponseWriter, r *http.Request, accountID, bucketName, objectKey string) {
 	auth, ok := s.authForAccount(w, r, accountID)
 	if !ok {
 		return
@@ -2888,6 +2897,37 @@ func (s *Service) deleteR2Object(w http.ResponseWriter, r *http.Request, account
 		return
 	}
 	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true})
+}
+
+func (s *Service) uploadR2Object(w http.ResponseWriter, r *http.Request, accountID, bucketName, objectKey string) {
+	if strings.Trim(objectKey, "/") == "" {
+		response.Error(w, http.StatusBadRequest, "对象路径必填")
+		return
+	}
+	auth, ok := s.authForAccount(w, r, accountID)
+	if !ok {
+		return
+	}
+	cfAccountID, err := s.cloudflareAccountID(r.Context(), auth)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	contentType := r.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	path := "/accounts/" + url.PathEscape(cfAccountID) + "/r2/buckets/" + url.PathEscape(bucketName) + "/objects/" + url.PathEscape(objectKey)
+	_, _, err = s.cfRawRequest(r.Context(), http.MethodPut, path, auth, "application/json", contentType, r.Body)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success":    true,
+		"objectKey":  objectKey,
+		"bucketName": bucketName,
+	})
 }
 
 func (s *Service) r2ObjectDownloadInfo(w http.ResponseWriter, r *http.Request, accountID, bucketName, objectKey string) {
@@ -2918,6 +2958,37 @@ func (s *Service) r2ObjectDownloadInfo(w http.ResponseWriter, r *http.Request, a
 		"objectKey":  objectKey,
 		"bucketName": bucketName,
 	})
+}
+
+func (s *Service) r2ObjectDownload(w http.ResponseWriter, r *http.Request, accountID, bucketName, objectKey string) {
+	if r.Method != http.MethodGet {
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	auth, ok := s.authForAccount(w, r, accountID)
+	if !ok {
+		return
+	}
+	cfAccountID, err := s.cloudflareAccountID(r.Context(), auth)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	path := "/accounts/" + url.PathEscape(cfAccountID) + "/r2/buckets/" + url.PathEscape(bucketName) + "/objects/" + url.PathEscape(objectKey)
+	raw, contentType, err := s.cfRawRequest(r.Context(), http.MethodGet, path, auth, "*/*", "", nil)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": objectFileName(objectKey)}))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "private, max-age=60")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(raw)
 }
 
 func (s *Service) r2ObjectPreview(w http.ResponseWriter, r *http.Request, accountID, bucketName, objectKey string) {

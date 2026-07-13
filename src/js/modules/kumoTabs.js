@@ -1,12 +1,12 @@
 export const MODULE_TABS_PROPS = {
   variant: 'segmented',
-  className: 'w-fit max-w-full',
-  listClassName: 'w-fit max-w-full',
+  className: 'w-full max-w-full sm:w-fit',
+  listClassName: 'w-full max-w-full overflow-x-auto scrollbar-thin sm:w-fit',
 };
 
 export const TOOL_TABS_PROPS = {
   variant: 'segmented',
   size: 'sm',
-  className: 'w-fit max-w-full',
-  listClassName: 'w-fit max-w-full',
+  className: 'w-full max-w-full sm:w-fit',
+  listClassName: 'w-full max-w-full overflow-x-auto scrollbar-thin sm:w-fit',
 };

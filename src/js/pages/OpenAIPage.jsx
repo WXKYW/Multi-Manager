@@ -2304,14 +2304,8 @@ function OpenAIPage() {
                   />
                   <span>刷新全部</span>
                 </Button>
-                <Button size="sm" onClick={exportEndpoints} className="flex items-center gap-1">
-                  <Upload className={iconButtonIconClass} />
-                  <span>导出</span>
-                </Button>
-                <Button size="sm" onClick={importEndpoints} className="flex items-center gap-1">
-                  <Download className={iconButtonIconClass} />
-                  <span>导入</span>
-                </Button>
+                <Button size="sm" shape="square" onClick={exportEndpoints} aria-label="导出端点" title="导出端点" icon={<Upload className={iconButtonIconClass} />} />
+                <Button size="sm" shape="square" onClick={importEndpoints} aria-label="导入端点" title="导入端点" icon={<Download className={iconButtonIconClass} />} />
               </div>
           }
           bodyClassName="space-y-4"

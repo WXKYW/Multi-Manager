@@ -1437,7 +1437,7 @@ func (s *Service) updateTemplate(w http.ResponseWriter, r *http.Request, db *sql
 	if !decodeJSON(w, r, &tpl) {
 		return
 	}
-	_, err := db.ExecContext(r.Context(), `UPDATE subscription_templates SET name = ?, format = ?, content = ?, description = ?, updated_at = datetime('now') WHERE id = ? AND builtin = 0`,
+	_, err := db.ExecContext(r.Context(), `UPDATE subscription_templates SET name = ?, format = ?, content = ?, description = ?, updated_at = datetime('now') WHERE id = ?`,
 		tpl.Name, tpl.Format, tpl.Content, tpl.Description, id)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())

@@ -6,6 +6,7 @@
 import { create } from 'zustand';
 import { dialog } from './modules/dialog.js';
 import toastManager from './modules/toast.js';
+import { triggerHapticFeedback } from './modules/haptics.js';
 
 // ==================== 模块元数据配置 ====================
 export const MODULE_CONFIG = {
@@ -526,6 +527,19 @@ const useStore = create((set, get) => ({
     get().setThemeMode(theme, persist);
   },
 
+  setVibrationEnabled: (enabled, persist = true) => {
+    const nextEnabled = Boolean(enabled);
+    if (persist && get().isAuthenticated) {
+      scheduleAppearanceSettingsSave({ vibrationEnabled: nextEnabled });
+    }
+    set({ vibrationEnabled: nextEnabled });
+  },
+
+  triggerHaptic: (type = 'selection') => {
+    if (!get().vibrationEnabled) return false;
+    return triggerHapticFeedback(type);
+  },
+
   applyUserSettings: (settings) => {
     const normalized = normalizeUserSettings(settings);
     applyCustomCss(normalized.customCss);
@@ -584,6 +598,9 @@ const useStore = create((set, get) => ({
       }
       if (rawSettings.sidebarCollapsed === undefined && rawSettings.sidebar_collapsed === undefined) {
         appearancePatch.sidebarCollapsed = normalized.sidebarCollapsed;
+      }
+      if (rawSettings.vibrationEnabled === undefined) {
+        appearancePatch.vibrationEnabled = normalized.vibrationEnabled;
       }
       if (Object.keys(appearancePatch).length > 0) {
         scheduleAppearanceSettingsSave(appearancePatch);

@@ -320,9 +320,9 @@ function DashboardOverviewCard({
             {label}
           </span>
         </div>
-        <span className={`app-status-pill shrink-0 whitespace-nowrap text-[9px] sm:text-[11px] ${badgeClassName}`}>
+        <Badge className={`shrink-0 whitespace-nowrap text-[9px] sm:text-[11px] ${badgeClassName}`}>
           {badge}
-        </span>
+        </Badge>
       </div>
 
       <div className="flex h-8 min-w-0 items-center justify-between gap-2 sm:h-9">

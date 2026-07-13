@@ -1479,7 +1479,7 @@ function UptimePage() {
             <div className="space-y-3">
               {/* 批量控制条 */}
               {showMonitorSelectionControls && (
-                <div className="flex items-center justify-between app-subcard bg-kumo-recessed/30 px-4 py-2.5">
+                <AppCard padding="none" className="flex items-center justify-between bg-kumo-recessed/30 px-4 py-2.5">
                   <Checkbox
                     checked={isAllSelected}
                     onCheckedChange={handleToggleSelectAll}
@@ -1494,7 +1494,7 @@ function UptimePage() {
                       批量删除
                     </Button>
                   )}
-                </div>
+                </AppCard>
               )}
 
               {/* 监测卡片列表 */}
@@ -1580,9 +1580,9 @@ function UptimePage() {
                               </span>
                               {/* 标签 */}
                               {monitor.tags && monitor.tags.map(t => (
-                                <span key={t} className="text-[9px] app-subcard bg-kumo-recessed text-kumo-subtle px-1.5 py-0.5 rounded font-medium">
+                                <StatusBadge key={t} tone="neutral" className="text-[9px] font-medium">
                                   {t}
-                                </span>
+                                </StatusBadge>
                               ))}
                               {/* SSL 证书到期徽章 */}
                               {monitor.sslExpiry && (() => {
@@ -1664,7 +1664,7 @@ function UptimePage() {
       )}
 
       {uptimeCurrentTab === 'status-pages' && (
-        <div className="grid gap-4 xl:grid-cols-[minmax(24rem,0.9fr)_minmax(0,1.1fr)]">
+        <div className="grid items-start gap-4 xl:grid-cols-[minmax(24rem,0.9fr)_minmax(0,1.1fr)]">
           <SectionCard
             title={statusPageForm.id ? '编辑状态页' : '新建状态页'}
             description="生成可公开访问的单页状态看板，可绑定独立域名或使用 /status/slug。"
@@ -1808,6 +1808,7 @@ function UptimePage() {
             title="已发布状态页"
             description="公开单页会显示整体状态、监测项、延迟和 24h 可用率。"
             icon={<Globe className="h-4 w-4 text-kumo-brand" />}
+            className="self-start"
             actions={(
               <>
                 <Button size="sm" variant="secondary" icon={<RotateCw className="h-3.5 w-3.5" />} onClick={loadUptimeStatusPages} disabled={uptimeMetaLoading}>刷新</Button>
@@ -2062,12 +2063,12 @@ function UptimePage() {
               </div>
             ) : uptimeForm.type === 'push' ? (
               <div className="md:col-span-8">
-                <div className="app-subcard p-3">
+                <AppCard padding="none" className="bg-kumo-recessed/40 p-3">
                   <div className="text-[10px] font-semibold text-kumo-subtle">Push URL</div>
                   <div className="mt-1 truncate font-mono text-xs text-kumo-strong">
                     {uptimeForm.pushToken ? `/api/uptime/push/${uptimeForm.pushToken}` : '保存后自动生成 token URL'}
                   </div>
-                </div>
+                </AppCard>
               </div>
             ) : (
               <>
@@ -2222,7 +2223,7 @@ function UptimePage() {
             </div>
 
             <div className="md:col-span-12 space-y-2">
-              <div className="flex flex-wrap gap-4 p-3.5 app-subcard bg-kumo-recessed/50">
+              <AppCard padding="none" className="flex flex-wrap gap-4 bg-kumo-recessed/50 p-3.5">
                 {notificationChannels.filter(c => c.enabled).map((channel) => (
                   <Checkbox
                     key={channel.id}
@@ -2246,7 +2247,7 @@ function UptimePage() {
                     <span>暂无启用的告警通道。请先在 "通知渠道" 标签中配置并启用。</span>
                   </div>
                 )}
-              </div>
+              </AppCard>
             </div>
 
             {/* 标签管理 */}
@@ -2274,7 +2275,7 @@ function UptimePage() {
 
       {/* ==================== 3. 配置迁移 Tab ==================== */}
       {uptimeCurrentTab === 'stats' && (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
+        <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
           <SectionCard
             title="配置导入预览"
             description="用于导出当前 Uptime 配置，或预览外部配置导入后将创建、更新的内容。"
@@ -2311,7 +2312,7 @@ function UptimePage() {
               />
             ) : (
               <div className="space-y-4">
-                <div className="app-subcard px-4 py-3.5">
+                <AppCard padding="none" className="bg-kumo-recessed/40 px-4 py-3.5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 space-y-1">
                       <div className="text-sm font-semibold text-kumo-strong">
@@ -2335,11 +2336,11 @@ function UptimePage() {
                       </div>
                     ))}
                   </div>
-                </div>
+                </AppCard>
 
                 <div className="grid gap-3 xl:grid-cols-3">
                   {uptimeImportSections.map((section) => (
-                    <div key={section.key} className="app-subcard overflow-hidden">
+                    <AppCard key={section.key} padding="none" className="overflow-hidden bg-kumo-recessed/40">
                       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-kumo-line/70 bg-kumo-recessed/20 px-4 py-3">
                         <div className="min-w-0">
                           <div className="text-sm font-semibold text-kumo-strong">{section.title}</div>
@@ -2373,7 +2374,7 @@ function UptimePage() {
                           })}
                         </div>
                       )}
-                    </div>
+                    </AppCard>
                   ))}
                 </div>
               </div>
@@ -2383,10 +2384,11 @@ function UptimePage() {
           <SectionCard
             title="导入执行"
             icon={<Download className="h-4 w-4 text-kumo-brand" />}
+            className="self-start"
             bodyPadding="lg"
             bodyClassName="space-y-3.5"
           >
-            <div className="app-subcard px-4 py-3">
+            <AppCard padding="none" className="bg-kumo-recessed/40 px-4 py-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-sm font-semibold text-kumo-strong">执行状态</div>
                 {uptimeImportPreview ? (
@@ -2407,7 +2409,7 @@ function UptimePage() {
                   <StatusBadge tone="neutral">{uptimeImportSummary.nonEmptySections.length} 类对象</StatusBadge>
                 </div>
               )}
-            </div>
+            </AppCard>
 
             <div className="space-y-2 rounded-lg border border-kumo-line/70 bg-kumo-recessed/20 px-4 py-3">
               <div className="text-xs font-semibold text-kumo-strong">匹配规则</div>

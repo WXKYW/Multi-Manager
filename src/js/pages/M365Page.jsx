@@ -107,8 +107,8 @@ const userTableViewportClass = 'max-h-[calc(100dvh-26rem)] min-h-[18rem] overscr
 const DEFAULT_NEW_USER_PASSWORD = 'Mjj@1234';
 const USER_TABLE_COLUMN_WIDTHS = [96, 180, 220, 220, 260, 220];
 const REGISTRATION_TABLE_COLUMN_WIDTHS = [40, 176, 84, 168, 128, 156, 144, 236];
-const tenantGridStyle = { gridTemplateColumns: 'repeat(auto-fill, minmax(18rem, 21rem))' };
-const tenantCardFrameClass = 'min-h-[13.25rem] rounded-xl px-4 py-3.5';
+const tenantGridClass = 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-4';
+const tenantCardFrameClass = 'min-h-[11.75rem] rounded-xl px-4 py-3.5';
 const defaultAccountImportState = {
   text: '',
   overwrite: false,
@@ -142,8 +142,7 @@ function SkuGridSkeleton() {
 function TenantGridSkeleton() {
   return (
     <div
-      className={cx(scrollViewportClass, 'grid auto-rows-max content-start items-start gap-3 p-1')}
-      style={tenantGridStyle}
+      className={cx(scrollViewportClass, 'grid auto-rows-max content-start items-start gap-3 p-1', tenantGridClass)}
     >
       {Array.from({ length: 4 }).map((_, index) => (
         <div key={index} className="rounded-xl border border-kumo-line/80 bg-kumo-base/95 p-3">
@@ -200,7 +199,7 @@ function CardTableSkeleton({ rows = 6, showToolbar = false }) {
 function GroupsTabSkeleton() {
   return (
     <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-      <AppCard padding="none" className="flex min-h-0 flex-col overflow-hidden">
+      <AppCard padding="none" className="flex min-h-0 flex-col overflow-visible">
         <div className="space-y-3 p-3">
           <SkeletonLine className="h-9 w-full" />
           {Array.from({ length: 6 }).map((_, index) => (
@@ -1682,14 +1681,10 @@ function M365Page() {
       {loadingAccounts ? (
         <TenantGridSkeleton />
       ) : (
-        <div
-          className={cx(scrollViewportClass, 'grid content-start gap-3 p-1')}
-          style={tenantGridStyle}
-        >
+        <div className={cx(scrollViewportClass, 'grid content-start gap-3 p-1', tenantGridClass)}>
           {accounts.map(account => {
             const active = String(account.id) === String(selectedAccountId);
             const verifying = String(account.id) === String(verifyingAccountId);
-            const accountDomains = getAccountDomainList(account);
             return (
               <div
                 key={account.id}
@@ -1746,15 +1741,6 @@ function M365Page() {
                       title={getDisplayText(account.defaultDomain)}
                     >
                       {getDisplayText(account.defaultDomain)}
-                    </span>
-                  </div>
-                  <div className="flex items-start justify-between gap-3">
-                    <span className="shrink-0 pt-0.5 text-kumo-subtle">全部域名</span>
-                    <span
-                      className="min-w-0 text-right font-medium text-kumo-strong"
-                      title={accountDomains.join('、') || '-'}
-                    >
-                      {accountDomains.length > 0 ? accountDomains.join('、') : '-'}
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-3">
@@ -1815,12 +1801,13 @@ function M365Page() {
               </div>
             );
           })}
-          <button
+          <Button
             key="tenant-placeholder"
             type="button"
+            variant="secondary"
             className={cx(
               tenantCardFrameClass,
-              'group flex h-full w-full items-center justify-center border border-dashed border-kumo-line/80 bg-kumo-base/35 text-kumo-subtle transition hover:border-kumo-brand/45 hover:bg-kumo-brand/5 hover:text-kumo-brand focus:outline-none focus-visible:border-kumo-brand/70'
+              'group !h-full w-full justify-center border-dashed border-kumo-line/80 bg-kumo-base/35 text-kumo-subtle hover:border-kumo-brand/45 hover:bg-kumo-brand/5 hover:text-kumo-brand'
             )}
             onClick={openCreateAccount}
             aria-label="添加新租户"
@@ -1833,14 +1820,14 @@ function M365Page() {
                 添加新租户
               </span>
             </div>
-          </button>
+          </Button>
         </div>
       )}
     </SectionCard>
   );
 
   const renderPublicPages = () => (
-    <PageStack className="min-h-0 flex-1 overflow-hidden">
+    <PageStack className="min-h-0 flex-1 overflow-visible">
       <SectionCard
         className="flex min-h-0 flex-1 flex-col"
         bodyClassName={panelBodyClass}
@@ -1904,10 +1891,7 @@ function M365Page() {
             <AppCard padding="none" className="flex min-h-0 flex-1 flex-col overflow-hidden">
               <div className="flex items-center justify-between border-b border-kumo-line/60 px-4 py-3">
                 <div>
-                  <div className="text-sm font-semibold text-kumo-strong">公开页配置</div>
-                  <div className="text-xs text-kumo-subtle">
-                    共 {filteredPublicPages.length} 个模板，外部访问不再按租户分栏。
-                  </div>
+                  <div className="text-sm font-semibold text-kumo-strong">公开页配置【{filteredPublicPages.length}个】</div>
                 </div>
               </div>
               {publicPagesLoading ? (
@@ -2023,9 +2007,6 @@ function M365Page() {
               <div className="flex items-center justify-between border-b border-kumo-line/60 px-4 py-3">
                 <div>
                   <div className="text-sm font-semibold text-kumo-strong">邀请码批次</div>
-                  <div className="text-xs text-kumo-subtle">
-                    按批次管理，生成后直接使用带 `code` 的注册链接即可，单次最多生成 5 个。
-                  </div>
                 </div>
               </div>
               {inviteCodesLoading ? (
@@ -2174,9 +2155,6 @@ function M365Page() {
               <div className="flex items-center justify-between border-b border-kumo-line/60 px-4 py-3">
                 <div>
                   <div className="text-sm font-semibold text-kumo-strong">注册记录</div>
-                  <div className="text-xs text-kumo-subtle">
-                    按账号、状态、来源公开页、邀请码、租户、Graph ID 和错误信息集中查看。
-                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   {selectedRegistrationIds.length > 0 ? (
@@ -2321,21 +2299,22 @@ function M365Page() {
                             </div>
                           </Table.Cell>
                           <Table.Cell>
-                            <button
+                            <Button
                               type="button"
+                              variant="ghost"
                               title={getRegistrationResultText(record)}
                               onClick={() => setRegistrationDetail(record)}
                               className={cx(
-                                'block w-full overflow-hidden rounded-md px-2.5 py-1.5 text-left text-xs',
+                                '!h-auto w-full justify-start overflow-hidden px-2.5 py-1.5 text-left text-xs',
                                 record.errorMessage
-                                  ? 'border border-kumo-danger/20 bg-kumo-danger/5 text-kumo-danger transition-colors hover:bg-kumo-danger/10'
-                                  : 'text-kumo-subtle transition-colors hover:bg-kumo-recessed/25'
+                                  ? 'border border-kumo-danger/20 bg-kumo-danger/5 text-kumo-danger hover:bg-kumo-danger/10'
+                                  : 'text-kumo-subtle hover:bg-kumo-recessed/25'
                               )}
                             >
                               <span className="block truncate">
                                 {getRegistrationResultText(record)}
                               </span>
-                            </button>
+                            </Button>
                           </Table.Cell>
                         </Table.Row>
                       ))}
@@ -2351,7 +2330,7 @@ function M365Page() {
   );
 
   const renderUsers = () => (
-    <PageStack className="min-h-0 flex-1 overflow-hidden">
+    <PageStack className="min-h-0 flex-1 overflow-visible">
       <SectionCard
         className="shrink-0"
         bodyClassName={panelBodyClass}
@@ -2459,7 +2438,7 @@ function M365Page() {
       </SectionCard>
 
       <SectionCard
-        className="flex min-h-0 flex-1 flex-col overflow-hidden"
+        className="flex min-h-0 flex-1 flex-col overflow-visible"
         bodyClassName={panelBodyClass}
         title="用户与许可证"
         description="查看、创建、编辑、删除用户，并在列表中直接管理许可证。"
@@ -2637,7 +2616,7 @@ function M365Page() {
   );
 
   const renderGroups = () => (
-    <PageStack className="min-h-0 flex-1 overflow-hidden">
+    <PageStack className="min-h-0 flex-1 overflow-visible">
       <SectionCard
         className="flex min-h-0 flex-1 flex-col"
         bodyClassName={panelBodyClass}
@@ -2677,7 +2656,7 @@ function M365Page() {
           />
         ) : (
           <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-            <AppCard padding="none" className="flex min-h-0 flex-col overflow-hidden">
+            <AppCard padding="none" className="flex min-h-0 flex-col overflow-visible">
               <div className={scrollViewportClass}>
                 <Table layout="auto" className="[&_td]:py-3 [&_th]:py-3">
                   <Table.Header>
