@@ -10030,26 +10030,38 @@ function ServerPage() {
               icon={<Database className={MANAGEMENT_CARD_ICON_CLASS} />}
               meta={<span className="text-xs font-semibold text-kumo-subtle">JSON</span>}
               bodyPadding="sm"
-              bodyClassName="flex flex-wrap items-center gap-2"
+              bodyClassName="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
             >
+                <div className="min-w-0 space-y-1">
+                  <div className="text-xs font-medium text-kumo-strong">主机配置备份</div>
+                  <div className="max-w-xl text-xs leading-5 text-kumo-subtle">
+                    包含连接信息、认证方式、标签、描述、地区和监控模式，适合跨环境迁移或本地备份。
+                  </div>
+                </div>
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
                 <Button
                   size="sm"
                   variant="secondary"
-                  shape="square"
                   onClick={exportServers}
                   aria-label="导出主机配置备份"
                   title="导出主机配置备份"
                   icon={<Upload className="h-3.5 w-3.5" />}
-                />
+                  className="w-full justify-center sm:w-auto"
+                >
+                  导出 JSON
+                </Button>
                 <Button
                   size="sm"
-                  variant="secondary"
-                  shape="square"
+                  variant="primary"
                   onClick={openImportServerModal}
                   aria-label="导入主机配置"
                   title="导入主机配置"
                   icon={<Download className="h-3.5 w-3.5" />}
-                />
+                  className="w-full justify-center sm:w-auto"
+                >
+                  导入 JSON
+                </Button>
+                </div>
             </SectionCard>
               </div>
 

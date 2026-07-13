@@ -1347,8 +1347,15 @@ function SchedulerPage() {
               <Empty size="sm" className="rounded-none border-0 bg-transparent" icon={<Server className="h-8 w-8 text-kumo-inactive" />} title="暂无执行节点" description="本机会自动作为默认执行节点，Agent 连接后也会显示在这里。" />
             ) : (
               <div className="overflow-x-auto">
-                <Table layout="fixed" className="min-w-[920px]">
-                  <colgroup><col className="w-[240px]" /><col className="w-[110px]" /><col className="w-[110px]" /><col className="w-[110px]" /><col className="w-[220px]" /><col /></colgroup>
+                <Table layout="fixed" className="w-full min-w-[760px]">
+                  <colgroup>
+                    <col style={{ width: '18%' }} />
+                    <col style={{ width: '10%' }} />
+                    <col style={{ width: '8%' }} />
+                    <col style={{ width: '8%' }} />
+                    <col style={{ width: '16%' }} />
+                    <col style={{ width: '40%' }} />
+                  </colgroup>
                   <Table.Header><Table.Row><Table.Head>节点</Table.Head><Table.Head>状态</Table.Head><Table.Head>类型</Table.Head><Table.Head>并发</Table.Head><Table.Head>标签</Table.Head><Table.Head>说明</Table.Head></Table.Row></Table.Header>
                   <Table.Body>
                     {nodes.map((node) => (
