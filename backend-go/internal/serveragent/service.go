@@ -54,6 +54,7 @@ type Service struct {
 	networkQualityPersistInterval time.Duration
 	agentTaskWaiters              sync.Map
 	autoLocationRefreshes         sync.Map
+	lastAutoLocationRefresh       sync.Map
 	targetsCache                  []networkQualityTarget
 	targetsCacheMu                sync.RWMutex
 	notifier                      Notifier
@@ -315,6 +316,7 @@ func New(cfg config.Config) *Service {
 							db, err := s.open(ctx)
 							if err == nil {
 								defer db.Close()
+								fullCachedInfo = s.mergeCachedLocationFieldsFromDB(ctx, db, serverID, fullCachedInfo)
 								now := time.Now().Format("2006-01-02 15:04:05")
 								cachedInfoJSON, _ := json.Marshal(fullCachedInfo)
 								_, _ = db.ExecContext(ctx, `UPDATE server_accounts
@@ -2709,6 +2711,7 @@ func (s *Service) listAccounts(w http.ResponseWriter, r *http.Request, db *sql.D
 			response.Error(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		s.refreshAccountLocationIfMissingFromList(account)
 		list = append(list, account)
 	}
 	if list == nil {
@@ -2764,6 +2767,30 @@ func (s *Service) refreshAccountLocationsFromAgents(ctx context.Context, db *sql
 		}
 	}
 	return updated, skipped, nil
+}
+
+func (s *Service) refreshAccountLocationIfMissingFromList(account map[string]interface{}) {
+	if account == nil || !getBoolVal(account, "agent_online", false) {
+		return
+	}
+	serverID := strings.TrimSpace(getString(account, "id"))
+	if serverID == "" {
+		return
+	}
+	if countryCode := cleanCountryCode(getString(account, "countryCode")); countryCode != "" {
+		lat, hasLat := firstOptionalFloatValue(account, "lat", "latitude")
+		lon, hasLon := firstOptionalFloatValue(account, "lon", "longitude")
+		if hasLat && hasLon && hasUsableCoordinates(lat, lon) {
+			return
+		}
+	}
+	if last, ok := s.lastAutoLocationRefresh.Load(serverID); ok {
+		if lastAt, ok := last.(time.Time); ok && time.Since(lastAt) < 5*time.Minute {
+			return
+		}
+	}
+	s.lastAutoLocationRefresh.Store(serverID, time.Now())
+	go s.refreshAccountLocationFromAgentIfMissing(serverID)
 }
 
 func (s *Service) refreshAccountLocationFromAgentIfMissing(serverID string) {

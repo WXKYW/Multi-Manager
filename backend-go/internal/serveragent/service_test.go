@@ -653,6 +653,71 @@ func TestListAccountsUsesLiveAgentLocationMetadataWithoutCachedInfo(t *testing.T
 	}
 }
 
+func TestListAccountsQueuesMissingAgentLocationRefresh(t *testing.T) {
+	service, db := testService(t)
+	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, status, tags, cached_info) VALUES ('server-ip', 'ip', '127.0.0.1', 'root', 'password', 'online', '[]', '{"cpu":1,"mem_percent":2}')`)
+	if err != nil {
+		t.Fatalf("insert account: %v", err)
+	}
+	service.registry.Register("server-ip", &taskReplySocket{t: t, service: service, reply: func(_ int, command string) string {
+		if command != "curl -fsSL https://64.ipcheck.ing/geo" {
+			t.Fatalf("unexpected command: %s", command)
+		}
+		return `IP: 64.181.246.5
+City: San Jose
+Region: California
+Country: US
+Latitude: 37.33939
+Longitude: -121.89496
+Org: Oracle Corporation
+Timezone: America/Los_Angeles
+ASN: AS31898`
+	}})
+
+	res := perform(service, http.MethodGet, "/api/server/accounts", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", res.Code, res.Body.String())
+	}
+
+	var cachedRaw string
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := db.QueryRowContext(context.Background(), "SELECT COALESCE(cached_info, '{}') FROM server_accounts WHERE id = 'server-ip'").Scan(&cachedRaw); err != nil {
+			t.Fatalf("read cached info: %v", err)
+		}
+		cached := map[string]interface{}{}
+		_ = json.Unmarshal([]byte(cachedRaw), &cached)
+		if cached["country_code"] == "us" && cached["latitude"] == 37.33939 && cached["longitude"] == -121.89496 {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("expected location refresh to update cached_info, got %s", cachedRaw)
+}
+
+func TestMergeCachedLocationFieldsFromDBPreservesGeoOnHostInfoUpdate(t *testing.T) {
+	service, db := testService(t)
+	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, cached_info) VALUES ('server-geo', 'geo', '127.0.0.1', 'root', 'password', '{"country_code":"us","location":"San Jose, California, US","latitude":37.33939,"longitude":-121.89496}')`)
+	if err != nil {
+		t.Fatalf("insert account: %v", err)
+	}
+
+	next := service.mergeCachedLocationFieldsFromDB(context.Background(), db, "server-geo", map[string]interface{}{
+		"platform":      "Windows",
+		"agent_version": "1.2.3",
+	})
+
+	if next["country_code"] != "us" || next["location"] != "San Jose, California, US" {
+		t.Fatalf("expected location fields to be preserved, next=%#v", next)
+	}
+	if next["latitude"] != 37.33939 || next["longitude"] != -121.89496 {
+		t.Fatalf("expected coordinates to be preserved, next=%#v", next)
+	}
+	if next["platform"] != "Windows" || next["agent_version"] != "1.2.3" {
+		t.Fatalf("expected host info fields to be preserved, next=%#v", next)
+	}
+}
+
 func TestPublicServerStatusPageWithNoServersDoesNotExposeAllHosts(t *testing.T) {
 	service, db := testService(t)
 	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, status, cached_info) VALUES ('server-1', 'edge', '127.0.0.1', 'root', 'password', 'online', '{"cpu":12.5}')`)
