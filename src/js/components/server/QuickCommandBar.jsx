@@ -290,7 +290,7 @@ export default function QuickCommandBar({
 
   return (
     <>
-      <div className="flex h-full min-h-0 flex-col border-t border-kumo-line bg-kumo-base">
+      <div className="flex h-full min-h-0 w-full flex-col overflow-hidden border-t border-kumo-line bg-kumo-base">
         <div className="flex items-center justify-between gap-3 border-b border-kumo-line px-3 py-3">
           <div className="min-w-0">
             <div className="text-sm font-semibold text-kumo-strong">命令片段</div>

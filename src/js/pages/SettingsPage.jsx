@@ -1322,7 +1322,7 @@ function SettingsPage() {
       )}
 
       {activeTab === 'logs' && (
-        <div className="grid content-start gap-4 overflow-auto px-px py-px pr-px">
+        <div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden px-px py-px pr-px">
           <SectionCard
             className="shrink-0"
             title="审计与保留"
@@ -1344,14 +1344,14 @@ function SettingsPage() {
             </div>
           </SectionCard>
 
-          <div className="grid gap-4">
+          <div className="flex min-h-0 flex-1">
             <SectionCard
-              className="min-h-0"
+              className="min-h-0 flex-1"
               title="审计记录"
               description="最近 100 条数据库操作记录"
               icon={<Database className="h-4 w-4 text-kumo-brand" />}
               bodyPadding="none"
-              bodyClassName="max-h-[24rem] overflow-auto"
+              bodyClassName="min-h-0 flex-1 overflow-auto"
             >
               <Table layout="fixed">
                 <colgroup>

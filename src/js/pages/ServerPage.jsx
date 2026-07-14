@@ -7424,7 +7424,7 @@ function ServerPage() {
     <div
       className={
         serverCurrentTab === 'terminal'
-          ? 'flex h-[calc(100dvh-80px)] min-h-0 w-full min-w-0 flex-col gap-3 overflow-hidden sm:h-[calc(100dvh-88px)] lg:h-[calc(100dvh-92px)]'
+          ? 'flex h-full min-h-0 w-full min-w-0 flex-1 flex-col gap-3 overflow-visible'
           : 'flex w-full min-w-0 flex-col gap-3 sm:gap-4'
       }
     >
@@ -10364,8 +10364,8 @@ function ServerPage() {
         const terminalTxTotal = getByteParts(activeInfo.network?.tx_total);
         const terminalRxTotal = getByteParts(activeInfo.network?.rx_total);
         return (
-          <AppCard padding="none" className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
-            <div className="flex min-h-11 items-center justify-between gap-3 border-b border-kumo-line bg-kumo-base px-3 py-2 text-xs">
+          <AppCard padding="none" className="flex h-full min-h-0 w-full flex-1 flex-col overflow-visible">
+            <div className="flex min-h-11 items-center justify-between gap-3 rounded-t-[inherit] border-b border-kumo-line bg-kumo-base px-3 py-2 text-xs">
               <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto scrollbar-thin">
                 {sshSessions.map(sess => (
                   <div
@@ -10438,11 +10438,11 @@ function ServerPage() {
               </div>
             </div>
 
-            <div className="flex min-h-0 flex-1">
+            <div className="flex min-h-0 flex-1 overflow-hidden rounded-b-[inherit]">
               <div className="flex min-w-0 flex-1 flex-col">
-                <div className="flex min-h-0 flex-1">
+                <div className="relative flex min-h-0 flex-1">
                   <div
-                    className={`grid min-w-0 flex-1 gap-1.5 bg-kumo-recessed p-1.5 ${sshViewLayout === 'split-h' ? 'grid-cols-2' :
+                    className={`grid min-w-0 flex-1 gap-1.5 bg-kumo-recessed p-1.5 transition-[margin] duration-200 ${activeTerminalSidebar ? 'mr-[clamp(18rem,24vw,26rem)]' : ''} ${sshViewLayout === 'split-h' ? 'grid-cols-2' :
                       sshViewLayout === 'split-v' ? 'grid-rows-2' :
                         sshViewLayout === 'grid' ? 'grid-cols-2 grid-rows-2' : 'grid-cols-1'
                       }`}
@@ -10517,7 +10517,7 @@ function ServerPage() {
                   </div>
 
                   {activeTerminalSidebar && (
-                    <div className="w-[clamp(18rem,24vw,26rem)] shrink-0 border-l border-kumo-line bg-kumo-base">
+                    <div className="absolute bottom-0 right-0 top-0 z-10 flex min-h-0 w-[clamp(18rem,24vw,26rem)] flex-col overflow-hidden border-l border-kumo-line bg-kumo-base shadow-[-12px_0_24px_-24px_rgba(0,0,0,0.5)]">
                       {showServerStatusSidebar && (
                         <div className="flex h-full min-h-0 flex-col p-2.5 text-xs">
                           <div className="mb-2.5 flex items-center justify-between border-b border-kumo-line pb-2">
@@ -10608,7 +10608,7 @@ function ServerPage() {
                         </div>
                       )}
                       {showSftpSidebar && (
-                        <div className="h-full min-h-0">
+                        <div className="flex h-full min-h-0 overflow-hidden">
                           <SftpPanel
                             serverId={activeServer?.id || sftpServerId}
                             serverName={activeServer?.name}
@@ -10623,7 +10623,7 @@ function ServerPage() {
                         </div>
                       )}
                       {showCommandSidebar && (
-                        <div className="h-full min-h-0">
+                        <div className="flex h-full min-h-0 overflow-hidden">
                           <QuickCommandBar
                             activeServer={activeServer}
                             activeSessionId={activeSSHSessionId}

@@ -465,14 +465,17 @@ function RouteList({ routes, selectedRoute, onSelect }) {
       bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
     >
       {routes.length === 0 ? (
-        <EmptyState
-          icon={Search}
-          title="没有匹配的接口"
-          description="调整搜索词或筛选条件后再查看。"
-          className="h-full"
-        />
+        <AppCard padding="none" className="flex min-h-0 flex-1">
+          <EmptyState
+            icon={Search}
+            title="没有匹配的接口"
+            description="调整搜索词或筛选条件后再查看。"
+            card={false}
+            className="min-h-0 flex-1"
+          />
+        </AppCard>
       ) : (
-        <div className="h-full overflow-y-auto divide-y divide-kumo-line/80">
+        <div className="min-h-0 flex-1 overflow-y-auto divide-y divide-kumo-line/80">
           {routes.map(route => {
             const active = selectedRoute && getRouteKey(selectedRoute) === getRouteKey(route);
             return (
@@ -586,12 +589,15 @@ function RouteDetail({ route, openapiRoute }) {
   if (!route) {
     return (
       <div className={fixedPanelClass}>
-        <EmptyState
-          icon={FileText}
-          title="选择一个接口"
-          description="左侧接口列表会自动跟随后端路由清单更新。"
-          className="h-full"
-        />
+        <AppCard padding="none" className="flex h-full min-h-0">
+          <EmptyState
+            icon={FileText}
+            title="选择一个接口"
+            description="左侧接口列表会自动跟随后端路由清单更新。"
+            card={false}
+            className="min-h-0 flex-1"
+          />
+        </AppCard>
       </div>
     );
   }

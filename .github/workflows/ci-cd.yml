@@ -210,7 +210,10 @@ jobs:
   # 阶段 3: 多架构 Docker 镜像分平台构建 (仅 push 触发)
   # ==========================================
   build-docker:
-    needs: [ci-frontend, ci-backend, build-agent]
+    # Dockerfile builds the frontend and Go backend inside the image. The only
+    # upstream artifacts needed here are the prebuilt Agent binaries, so start
+    # image builds as soon as Agent builds complete and keep CI as a publish gate.
+    needs: build-agent
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
@@ -309,7 +312,7 @@ jobs:
   # 阶段 4: 合并多架构 manifest 并打上分支对应标签 (latest / dev)
   # ==========================================
   merge-docker:
-    needs: build-docker
+    needs: [ci-frontend, ci-backend, build-docker]
     runs-on: ubuntu-latest
     steps:
       - name: Download digests
@@ -425,11 +428,25 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
+      - name: Select image tag to scan
+        id: scan-tag
+        shell: bash
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.ref }}" = "refs/heads/dev" ]; then
+            echo "tag=dev" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ github.event.inputs.tag }}" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: "image"
-          image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest
+          image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.scan-tag.outputs.tag }}
           severity: "HIGH,CRITICAL"
           ignore-unfixed: true
           limit-severities-for-sarif: true
