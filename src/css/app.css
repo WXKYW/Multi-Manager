@@ -339,6 +339,10 @@ th > button[aria-label='Resize column'] > span {
   background-color: var(--app-main-surface);
 }
 
+.app-main-footer {
+  background-color: var(--app-main-surface);
+}
+
 .app-layer-frame {
   box-shadow: 0 0 0 1.2px var(--color-kumo-line);
 }
@@ -352,6 +356,10 @@ th > button[aria-label='Resize column'] > span {
 }
 
 :root[data-mode='dark'] .app-main-topbar {
+  background-color: var(--app-main-surface);
+}
+
+:root[data-mode='dark'] .app-main-footer {
   background-color: var(--app-main-surface);
 }
 

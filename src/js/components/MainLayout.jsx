@@ -146,6 +146,18 @@ const renderSidebarStyleIcon = (IconComponent, label) => (
   </span>
 );
 
+const formatAppProcessUptime = (seconds) => {
+  const totalSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+
+  if (days > 0) return `${days}天 ${hours}小时`;
+  if (hours > 0) return `${hours}小时 ${minutes}分钟`;
+  if (minutes > 0) return `${minutes}分钟`;
+  return `${totalSeconds}秒`;
+};
+
 const PAGE_WIDTH_OPTIONS = [
   { value: 'standard', label: renderSidebarStyleIcon(Rectangle, '标准宽度'), className: 'w-full !justify-center !px-0' },
   { value: 'wide', label: renderSidebarStyleIcon(Columns, '宽屏宽度'), className: 'w-full !justify-center !px-0' },
@@ -392,6 +404,10 @@ function MainLayout() {
     setThemeMode,
     pageWidthMode,
     setPageWidthMode,
+    dashboardFooterVisible,
+    dashboardFooterRecordNumber,
+    appProcessUptimeSeconds,
+    appProcessUptimeMeasuredAt,
     moduleVisibility,
     moduleOrder,
     userSettingsLoaded,
@@ -399,7 +415,18 @@ function MainLayout() {
     triggerHaptic,
     logout,
   } = useStore();
+  const [runtimeClock, setRuntimeClock] = useState(() => Date.now());
   const pageWidthClass = PAGE_WIDTH_CLASSES[pageWidthMode] || PAGE_WIDTH_CLASSES.standard;
+  const displayedAppProcessUptime = appProcessUptimeSeconds > 0
+    ? appProcessUptimeSeconds + Math.max(0, runtimeClock - appProcessUptimeMeasuredAt) / 1000
+    : 0;
+
+  useEffect(() => {
+    if (mainActiveTab !== 'dashboard' || !dashboardFooterVisible) return undefined;
+    setRuntimeClock(Date.now());
+    const interval = window.setInterval(() => setRuntimeClock(Date.now()), 30000);
+    return () => window.clearInterval(interval);
+  }, [dashboardFooterVisible, mainActiveTab]);
 
   const visibleModuleGroups = useMemo(() => {
     return MODULE_GROUPS.map((group) => {
@@ -714,6 +741,37 @@ function MainLayout() {
               </ModuleErrorBoundary>
             </div>
           </main>
+          {mainActiveTab === 'dashboard' && dashboardFooterVisible && (
+            <footer className="app-main-footer flex h-12 shrink-0 items-center justify-between gap-4 border-t border-kumo-line px-3 text-[11px] text-kumo-subtle min-[450px]:px-4 md:px-6">
+              <div className="flex min-w-0 items-center gap-2">
+                <img src="/logo.svg" alt="" className="h-5 w-5 shrink-0 object-contain" />
+                <span className="truncate font-semibold text-kumo-strong">API Monitor</span>
+                <span className="hidden shrink-0 text-kumo-subtle min-[520px]:inline">
+                  · 已运行 {appProcessUptimeMeasuredAt > 0 ? formatAppProcessUptime(displayedAppProcessUptime) : '加载中'}
+                </span>
+              </div>
+              <div className="flex min-w-0 items-center justify-end gap-4">
+                {dashboardFooterRecordNumber ? (
+                  <a
+                    href="https://beian.miit.gov.cn/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="min-w-0 truncate text-right text-kumo-subtle transition-colors hover:text-kumo-strong hover:underline"
+                  >
+                    {dashboardFooterRecordNumber}
+                  </a>
+                ) : null}
+                <a
+                  href="https://github.com/iwvw/API-Monitor"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="shrink-0 text-kumo-subtle transition-colors hover:text-kumo-strong hover:underline"
+                >
+                  GitHub
+                </a>
+              </div>
+            </footer>
+          )}
         </div>
       </>
     </Sidebar.Provider>

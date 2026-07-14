@@ -359,7 +359,7 @@ function DashboardOverviewCard({
 }
 
 function DashboardPage({ onNavigate } = {}) {
-  const { setMainActiveTab, theme } = useStore();
+  const { setMainActiveTab, setAppProcessUptimeSeconds, theme } = useStore();
   const isDarkMode = theme === 'dark';
   const isCompactViewport = useMediaQuery('(max-width: 640px)');
   const apiChartHeight = isCompactViewport ? 126 : 170;
@@ -756,6 +756,7 @@ function DashboardPage({ onNavigate } = {}) {
         if (!data.success || !data.data || stopped) return;
 
         dashboardHostMetricsCache = data.data;
+        setAppProcessUptimeSeconds(data.data.process?.uptime);
         setStats((currentStats) => {
           const nextStats = { ...currentStats, host: data.data };
 
@@ -791,7 +792,7 @@ function DashboardPage({ onNavigate } = {}) {
       window.clearInterval(interval);
       activeController?.abort();
     };
-  }, []);
+  }, [setAppProcessUptimeSeconds]);
 
 
   const apiTrend = stats.apiStats?.trend || [];

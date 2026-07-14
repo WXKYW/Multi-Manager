@@ -219,6 +219,8 @@ function SettingsPage() {
     setThemeMode,
     pageWidthMode,
     setPageWidthMode,
+    setDashboardFooterVisible,
+    setDashboardFooterRecordNumber,
     setVibrationEnabled,
     applyUserSettings,
     loadUserSettings,
@@ -313,6 +315,17 @@ function SettingsPage() {
     setVibrationEnabled(checked);
     patchSettings({ vibrationEnabled: Boolean(checked) });
   }, [patchSettings, setVibrationEnabled]);
+
+  const handleDashboardFooterVisibleChange = useCallback((checked) => {
+    setDashboardFooterVisible(checked);
+    patchSettings({ dashboardFooterVisible: Boolean(checked) });
+  }, [patchSettings, setDashboardFooterVisible]);
+
+  const handleDashboardFooterRecordNumberChange = useCallback((event) => {
+    const recordNumber = event.target.value;
+    setDashboardFooterRecordNumber(recordNumber);
+    patchSettings({ dashboardFooterRecordNumber: recordNumber });
+  }, [patchSettings, setDashboardFooterRecordNumber]);
 
   const fetchSettings = useCallback(async () => {
     const response = await fetch('/api/settings', { headers: getAuthHeaders() });
@@ -1399,6 +1412,19 @@ function SettingsPage() {
             </FieldRow>
             <FieldRow title="页面宽度" description="云端偏好，顶部宽度切换器也会同步。">
               <Select size="sm" label="页面宽度" value={pageWidthMode} onValueChange={handlePageWidthModeChange} items={PAGE_WIDTH_OPTIONS} />
+            </FieldRow>
+            <FieldRow title="显示首页页脚" description="控制仪表盘底部页脚栏及其内容，切换后立即生效。">
+              <Switch aria-label="显示首页页脚" checked={settings.dashboardFooterVisible} onCheckedChange={handleDashboardFooterVisibleChange} />
+            </FieldRow>
+            <FieldRow title="备案号" description="显示在首页页脚右侧；留空时不显示。">
+              <Input
+                size="sm"
+                aria-label="首页页脚备案号"
+                value={settings.dashboardFooterRecordNumber}
+                onChange={handleDashboardFooterRecordNumberChange}
+                placeholder="例如：京ICP备12345678号"
+                className="w-full min-w-52"
+              />
             </FieldRow>
             <FieldRow title="触感反馈" description="移动端交互振动开关。">
               <Switch checked={settings.vibrationEnabled} onCheckedChange={handleVibrationEnabledChange} />

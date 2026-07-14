@@ -10711,7 +10711,7 @@ function ServerPage() {
 
       {/* ==================== 模态框: 添加与编辑服务器 ==================== */}
       <Dialog.Root open={showServerModal} onOpenChange={setShowServerModal}>
-        <Dialog size="sm" className="flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] flex-col overflow-hidden p-0 sm:min-w-[32rem] sm:max-w-[calc(100vw-3rem)]">
+        <Dialog size="xl" className="flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-[48rem] flex-col overflow-hidden p-0 sm:max-w-[calc(100vw-3rem)]">
           <div ref={serverModalPortalRef} className="flex min-h-0 flex-1 flex-col">
             <div className="flex min-w-0 items-center justify-between gap-3 bg-kumo-recessed/35 px-4 py-3 border-b border-kumo-line">
               <Dialog.Title className="min-w-0 truncate text-sm font-bold text-kumo-strong">
@@ -10733,7 +10733,7 @@ function ServerPage() {
               />
             </div>
 
-            <div className="min-w-0 p-4 flex-1 overflow-y-auto flex flex-col gap-4 text-xs">
+            <div className="min-w-0 flex flex-1 flex-col gap-3 overflow-y-auto p-4 text-xs">
               {serverModalMode === 'add' && (
                 <Tabs
                   {...TOOL_TABS_PROPS}
@@ -10751,7 +10751,7 @@ function ServerPage() {
 
               {serverModalMode === 'edit' || serverAddMode === 'ssh' ? (
                 <>
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)]">
                     <div className="flex flex-col gap-1.5">
                       <label className="font-semibold text-kumo-subtle">主机名称 (别名)</label>
                       <Input size="sm"
@@ -10785,136 +10785,158 @@ function ServerPage() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(18rem,auto)] sm:items-end">
-                    <div className="flex flex-col gap-1.5">
-                      <label className="font-semibold text-kumo-subtle">流量配额</label>
-                      <div className="grid grid-cols-[minmax(0,1fr)_6.5rem] gap-2">
-                        <Input size="sm"
-                          aria-label="总流量配额"
-                          type="number"
-                          min="0"
-                          step="0.001"
-                          value={serverForm.trafficLimitValue}
-                          onChange={e => setServerForm(prev => ({ ...prev, trafficLimitValue: e.target.value }))}
-                          placeholder="留空则不显示进度条"
-                          className="px-3 py-2 text-kumo-strong"
-                        />
-                        <Select size="sm"
-                          aria-label="流量配额单位"
-                          value={serverForm.trafficLimitUnit}
-                          onValueChange={(value) => setServerForm(prev => ({ ...prev, trafficLimitUnit: String(value) }))}
-                          className="px-3 py-2"
-                          items={[
-                            { value: 'GB', label: 'GB' },
-                            { value: 'TB', label: 'TB' },
-                            { value: 'PB', label: 'PB' },
-                          ]}
-                        />
-                        <Select size="sm"
-                          aria-label="配额方向"
-                          value={serverForm.trafficLimitMode}
-                          onValueChange={(value) => setServerForm(prev => ({ ...prev, trafficLimitMode: String(value) }))}
-                          className="col-span-2 px-3 py-2"
-                          items={[{ value: 'total', label: '总流量（上行+下行）' }, { value: 'upload', label: '上行' }, { value: 'download', label: '下行' }]}
-                        />
-                      </div>
+                  <section className="rounded-lg border border-kumo-line bg-kumo-recessed/20 p-3.5">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <h3 className="font-bold text-kumo-strong">流量配置</h3>
+                      <span className="text-[11px] text-kumo-subtle">配额、报警与重置周期</span>
                     </div>
-                    <div className="flex min-w-0 flex-col gap-1.5">
-                      <label className="font-semibold text-kumo-subtle">流量报警</label>
-                      <div className="grid min-w-0 grid-cols-[auto_minmax(4.75rem,1fr)_auto] items-center gap-2">
-                        <Checkbox
-                          label="启用"
-                          checked={Boolean(serverForm.trafficAlertEnabled)}
-                          disabled={trafficQuotaInputToBytes(serverForm.trafficLimitValue, serverForm.trafficLimitUnit) <= 0}
-                          onCheckedChange={(checked) => setServerForm(prev => ({ ...prev, trafficAlertEnabled: Boolean(checked) }))}
-                        />
-                        <Input size="sm"
-                          aria-label="报警阈值百分比"
-                          type="number"
-                          min="1"
-                          max="100"
-                          step="1"
-                          value={serverForm.trafficAlertPercent}
-                          disabled={!serverForm.trafficAlertEnabled || trafficQuotaInputToBytes(serverForm.trafficLimitValue, serverForm.trafficLimitUnit) <= 0}
-                          onChange={e => setServerForm(prev => ({ ...prev, trafficAlertPercent: e.target.value }))}
-                          onBlur={() => setServerForm(prev => ({ ...prev, trafficAlertPercent: normalizeTrafficAlertPercentInput(prev.trafficAlertPercent) }))}
-                          className="px-3 py-2 text-kumo-strong"
-                        />
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="secondary"
-                          disabled={serverModalSaving || !serverForm.trafficAlertEnabled || trafficQuotaInputToBytes(serverForm.trafficLimitValue, serverForm.trafficLimitUnit) <= 0}
-                          onClick={testTrafficAlert}
-                          className="px-3 py-1.5 text-xs font-semibold"
-                        >
-                          测试
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
 
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)] sm:items-end">
-                    <div className="flex flex-col gap-1.5">
-                      <label className="font-semibold text-kumo-subtle">流量周期</label>
-                      <Select size="sm"
-                        aria-label="流量周期"
-                        value={serverForm.trafficCycleType}
-                        onValueChange={(value) => setServerForm(prev => ({ ...prev, trafficCycleType: String(value) }))}
-                        className="px-3 py-2"
-                        items={TRAFFIC_CYCLE_OPTIONS}
-                      />
+                    <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(18rem,0.85fr)]">
+                      <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_8rem]">
+                        <div className="flex min-w-0 flex-col gap-1.5">
+                          <label className="font-semibold text-kumo-subtle">流量配额</label>
+                          <div className="grid grid-cols-[minmax(0,1fr)_4.5rem] gap-2">
+                            <Input size="sm"
+                              aria-label="总流量配额"
+                              type="number"
+                              min="0"
+                              step="0.001"
+                              value={serverForm.trafficLimitValue}
+                              onChange={e => setServerForm(prev => ({ ...prev, trafficLimitValue: e.target.value }))}
+                              placeholder="留空则不限额"
+                              className="px-3 py-2 text-kumo-strong"
+                            />
+                            <Select size="sm"
+                              aria-label="流量配额单位"
+                              value={serverForm.trafficLimitUnit}
+                              onValueChange={(value) => setServerForm(prev => ({ ...prev, trafficLimitUnit: String(value) }))}
+                              className="px-3 py-2"
+                              items={[
+                                { value: 'GB', label: 'GB' },
+                                { value: 'TB', label: 'TB' },
+                                { value: 'PB', label: 'PB' },
+                              ]}
+                            />
+                          </div>
+                        </div>
+                        <div className="flex min-w-0 flex-col gap-1.5">
+                          <label className="font-semibold text-kumo-subtle">统计范围</label>
+                          <Select size="sm"
+                            aria-label="配额方向"
+                            value={serverForm.trafficLimitMode}
+                            onValueChange={(value) => setServerForm(prev => ({ ...prev, trafficLimitMode: String(value) }))}
+                            className="px-3 py-2"
+                            items={[{ value: 'total', label: '总流量' }, { value: 'upload', label: '上行' }, { value: 'download', label: '下行' }]}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex min-w-0 flex-col gap-1.5">
+                        <label className="font-semibold text-kumo-subtle">流量报警</label>
+                        <div className="grid min-w-0 grid-cols-[auto_minmax(4.75rem,1fr)_auto_auto] items-center gap-2">
+                          <div className="whitespace-nowrap">
+                            <Checkbox
+                              label="启用"
+                              checked={Boolean(serverForm.trafficAlertEnabled)}
+                              disabled={trafficQuotaInputToBytes(serverForm.trafficLimitValue, serverForm.trafficLimitUnit) <= 0}
+                              onCheckedChange={(checked) => setServerForm(prev => ({ ...prev, trafficAlertEnabled: Boolean(checked) }))}
+                            />
+                          </div>
+                          <Input size="sm"
+                            aria-label="报警阈值百分比"
+                            type="number"
+                            min="1"
+                            max="100"
+                            step="1"
+                            value={serverForm.trafficAlertPercent}
+                            disabled={!serverForm.trafficAlertEnabled || trafficQuotaInputToBytes(serverForm.trafficLimitValue, serverForm.trafficLimitUnit) <= 0}
+                            onChange={e => setServerForm(prev => ({ ...prev, trafficAlertPercent: e.target.value }))}
+                            onBlur={() => setServerForm(prev => ({ ...prev, trafficAlertPercent: normalizeTrafficAlertPercentInput(prev.trafficAlertPercent) }))}
+                            className="min-w-0 px-3 py-2 text-kumo-strong"
+                          />
+                          <span className="text-kumo-subtle">%</span>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            disabled={serverModalSaving || !serverForm.trafficAlertEnabled || trafficQuotaInputToBytes(serverForm.trafficLimitValue, serverForm.trafficLimitUnit) <= 0}
+                            onClick={testTrafficAlert}
+                            className="whitespace-nowrap px-3 py-1.5 text-xs font-semibold"
+                          >
+                            测试
+                          </Button>
+                        </div>
+                      </div>
                     </div>
-                    {serverForm.trafficCycleType === 'monthly' && (
+
+                    <div className="mt-3 grid grid-cols-1 gap-3 border-t border-kumo-line pt-3 sm:grid-cols-3">
                       <div className="flex flex-col gap-1.5">
-                        <label className="font-semibold text-kumo-subtle">账单日</label>
-                        <Input size="sm"
-                          aria-label="每月流量重置日"
-                          type="number"
-                          min="1"
-                          max="28"
-                          step="1"
-                          value={serverForm.trafficCycleDay}
-                          onChange={e => setServerForm(prev => ({ ...prev, trafficCycleDay: e.target.value }))}
-                          onBlur={() => setServerForm(prev => ({ ...prev, trafficCycleDay: normalizeTrafficCycleDayInput(prev.trafficCycleDay) }))}
-                          className="px-3 py-2 text-kumo-strong"
+                        <label className="font-semibold text-kumo-subtle">流量周期</label>
+                        <Select size="sm"
+                          aria-label="流量周期"
+                          value={serverForm.trafficCycleType}
+                          onValueChange={(value) => setServerForm(prev => ({ ...prev, trafficCycleType: String(value) }))}
+                          className="px-3 py-2"
+                          items={TRAFFIC_CYCLE_OPTIONS}
                         />
                       </div>
-                    )}
-                    {serverForm.trafficCycleType === 'custom' && (
-                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                        <div className="flex flex-col gap-1.5">
-                          <label className="font-semibold text-kumo-subtle">周期开始</label>
+                      {serverForm.trafficCycleType === 'monthly' && (
+                        <div className="flex flex-col gap-1.5 sm:col-span-2">
+                          <label className="font-semibold text-kumo-subtle">账单日</label>
                           <Input size="sm"
-                            aria-label="流量周期开始"
-                            type="date"
-                            value={serverForm.trafficCycleStart}
-                            onChange={e => setServerForm(prev => ({ ...prev, trafficCycleStart: e.target.value }))}
+                            aria-label="每月流量重置日"
+                            type="number"
+                            min="1"
+                            max="28"
+                            step="1"
+                            value={serverForm.trafficCycleDay}
+                            onChange={e => setServerForm(prev => ({ ...prev, trafficCycleDay: e.target.value }))}
+                            onBlur={() => setServerForm(prev => ({ ...prev, trafficCycleDay: normalizeTrafficCycleDayInput(prev.trafficCycleDay) }))}
                             className="px-3 py-2 text-kumo-strong"
                           />
                         </div>
-                        <div className="flex flex-col gap-1.5">
-                          <label className="font-semibold text-kumo-subtle">周期结束</label>
-                          <Input size="sm"
-                            aria-label="流量周期结束"
-                            type="date"
-                            value={serverForm.trafficCycleEnd}
-                            onChange={e => setServerForm(prev => ({ ...prev, trafficCycleEnd: e.target.value }))}
-                            className="px-3 py-2 text-kumo-strong"
-                          />
+                      )}
+                      {serverForm.trafficCycleType === 'custom' && (
+                        <div className="grid grid-cols-1 gap-3 sm:col-span-2 sm:grid-cols-2">
+                          <div className="flex flex-col gap-1.5">
+                            <label className="font-semibold text-kumo-subtle">周期开始</label>
+                            <Input size="sm"
+                              aria-label="流量周期开始"
+                              type="date"
+                              value={serverForm.trafficCycleStart}
+                              onChange={e => setServerForm(prev => ({ ...prev, trafficCycleStart: e.target.value }))}
+                              className="px-3 py-2 text-kumo-strong"
+                            />
+                          </div>
+                          <div className="flex flex-col gap-1.5">
+                            <label className="font-semibold text-kumo-subtle">周期结束</label>
+                            <Input size="sm"
+                              aria-label="流量周期结束"
+                              type="date"
+                              value={serverForm.trafficCycleEnd}
+                              onChange={e => setServerForm(prev => ({ ...prev, trafficCycleEnd: e.target.value }))}
+                              className="px-3 py-2 text-kumo-strong"
+                            />
+                          </div>
                         </div>
-                      </div>
-                    )}
-                    {(serverForm.trafficCycleType === 'calendar_month' || serverForm.trafficCycleType === 'none') && (
-                      <div className="rounded-md border border-kumo-line bg-kumo-recessed/30 px-3 py-2 text-xs text-kumo-subtle">
-                        {serverForm.trafficCycleType === 'calendar_month' ? '每月 1 日作为新流量周期。' : '不设置重置周期，按累计流量显示。'}
-                      </div>
-                    )}
-                  </div>
+                      )}
+                      {(serverForm.trafficCycleType === 'calendar_month' || serverForm.trafficCycleType === 'none') && (
+                        <div className="rounded-md border border-kumo-line bg-kumo-surface px-3 py-2 text-xs text-kumo-subtle sm:col-span-2">
+                          {serverForm.trafficCycleType === 'calendar_month' ? '每月 1 日作为新流量周期。' : '不设置重置周期，按累计流量显示。'}
+                        </div>
+                      )}
+                    </div>
+                  </section>
 
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                  <section className="rounded-lg border border-kumo-line bg-kumo-recessed/20 p-3.5">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <h3 className="font-bold text-kumo-strong">连接与验证</h3>
+                      <span className="text-[11px] text-kumo-subtle">SSH 登录信息</span>
+                    </div>
+
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                     <div className="flex flex-col gap-1.5 sm:col-span-2">
-                      <label className="font-semibold text-kumo-subtle">连接地址 (IP / Host)</label>
+                      <label className="font-semibold text-kumo-subtle">连接地址（IP 或域名）</label>
                       <Input size="sm"
                         aria-label="连接地址"
                         type="text"
@@ -10937,16 +10959,16 @@ function ServerPage() {
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-2">
+                  <div className="mt-3 flex flex-col gap-1.5">
                     <label className="font-semibold text-kumo-subtle">选择凭据预设进行快速填充</label>
                     <Select size="sm"
                       aria-label="选择凭据预设"
                       value={selectedCredentialId}
                       onValueChange={applyCredential}
-                      placeholder="-- 手动录入 --"
+                      placeholder="手动录入"
                       className="w-full min-w-0 px-3 py-2"
                       items={[
-                        { value: '', label: '-- 手动录入 --' },
+                        { value: '', label: '手动录入' },
                         ...serverCredentials.map(c => ({
                           value: String(c.id),
                           label: `${c.name} (${c.username})`,
@@ -10955,8 +10977,8 @@ function ServerPage() {
                     />
                   </div>
 
-                  <div className="border-t border-kumo-line pt-3 flex flex-col gap-3">
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="mt-3 flex flex-col gap-3 border-t border-kumo-line pt-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <div className="flex flex-col gap-1.5">
                         <label className="font-semibold text-kumo-subtle">登录用户名</label>
                         <Input size="sm"
@@ -10970,7 +10992,7 @@ function ServerPage() {
                       </div>
                       <div className="flex flex-col gap-1.5">
                         <label className="font-semibold text-kumo-subtle">身份验证方案</label>
-                        <div className="flex flex-wrap gap-2 py-1">
+                        <div className="flex flex-wrap gap-2">
                           <Button size="sm"
                             variant={serverForm.authType === 'password' ? 'primary' : 'secondary'}
                             onClick={() => setServerForm(prev => ({ ...prev, authType: 'password' }))}
@@ -10981,7 +11003,7 @@ function ServerPage() {
                             variant={serverForm.authType === 'privateKey' ? 'primary' : 'secondary'}
                             onClick={() => setServerForm(prev => ({ ...prev, authType: 'privateKey' }))}
                           >
-                            秘钥证书
+                            密钥证书
                           </Button>
                         </div>
                       </div>
@@ -11008,7 +11030,7 @@ function ServerPage() {
                     ) : (
                       <div className="flex flex-col gap-3">
                         <div className="flex flex-col gap-1.5">
-                          <label className="font-semibold text-kumo-subtle">证书密钥 (Private Key)</label>
+                          <label className="font-semibold text-kumo-subtle">私钥证书</label>
                           <Textarea
                             aria-label="证书密钥"
                             value={serverForm.privateKey}
@@ -11018,7 +11040,7 @@ function ServerPage() {
                           />
                         </div>
                         <div className="flex flex-col gap-1.5">
-                          <label className="font-semibold text-kumo-subtle">密钥口令 (密码保护短语，若有)</label>
+                          <label className="font-semibold text-kumo-subtle">密钥口令（如有）</label>
                           <Input size="sm"
                             aria-label="密钥口令"
                             type="text"
@@ -11038,17 +11060,18 @@ function ServerPage() {
                     )}
                   </div>
 
-                  <div className="flex flex-col gap-1.5">
-                    <label className="font-semibold text-kumo-subtle">自定义主机标签 (逗号分隔)</label>
+                  <div className="mt-3 flex flex-col gap-1.5 border-t border-kumo-line pt-3">
+                    <label className="font-semibold text-kumo-subtle">主机标签（使用英文逗号分隔）</label>
                     <Input size="sm"
                       aria-label="自定义主机标签"
                       type="text"
                       value={serverForm.tagsInput}
                       onChange={e => setServerForm(prev => ({ ...prev, tagsInput: e.target.value }))}
-                      placeholder="Production,Database,US"
+                      placeholder="生产环境,数据库,美国"
                       className="px-3 py-2 text-kumo-strong"
                     />
                   </div>
+                  </section>
 
                 </>
               ) : (

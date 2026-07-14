@@ -180,6 +180,8 @@ const THEME_STORAGE_KEY = 'app_theme_mode';
 const LEGACY_THEME_STORAGE_KEY = 'app_theme';
 const PAGE_WIDTH_STORAGE_KEY = 'app_page_width_mode';
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'app_sidebar_collapsed';
+const DASHBOARD_FOOTER_VISIBLE_STORAGE_KEY = 'app_dashboard_footer_visible';
+const DASHBOARD_FOOTER_RECORD_NUMBER_STORAGE_KEY = 'app_dashboard_footer_record_number';
 const AUTH_LOGGED_OUT_STORAGE_KEY = 'auth_explicitly_logged_out';
 
 export const THEME_MODE_OPTIONS = ['auto', 'light', 'dark'];
@@ -199,6 +201,10 @@ const normalizeSidebarCollapsed = (value, fallback = false) => {
   if (value === false || value === 'false' || value === 0 || value === '0') return false;
   return fallback;
 };
+
+const normalizeDashboardFooterRecordNumber = (value, fallback = '') => (
+  typeof value === 'string' ? value.trim().slice(0, 80) : fallback
+);
 
 export const DEFAULT_TOTP_SETTINGS = {
   hideCode: false,
@@ -338,6 +344,14 @@ export const normalizeUserSettings = (settings = {}) => {
       settings.sidebarCollapsed ?? settings.sidebar_collapsed,
       typeof getInitialSidebarCollapsed === 'function' ? getInitialSidebarCollapsed() : false
     ),
+    dashboardFooterVisible: normalizeSidebarCollapsed(
+      settings.dashboardFooterVisible ?? settings.dashboard_footer_visible,
+      typeof getInitialDashboardFooterVisible === 'function' ? getInitialDashboardFooterVisible() : true
+    ),
+    dashboardFooterRecordNumber: normalizeDashboardFooterRecordNumber(
+      settings.dashboardFooterRecordNumber ?? settings.dashboard_footer_record_number,
+      typeof getInitialDashboardFooterRecordNumber === 'function' ? getInitialDashboardFooterRecordNumber() : ''
+    ),
     koyebRefreshInterval: Number(settings.koyebRefreshInterval) || 30000,
     flyRefreshInterval: Number(settings.flyRefreshInterval) || 30000,
     moduleVisibility,
@@ -425,6 +439,28 @@ const getInitialSidebarCollapsed = () => {
 
 const initialSidebarCollapsed = getInitialSidebarCollapsed();
 
+const getInitialDashboardFooterVisible = () => {
+  try {
+    return normalizeSidebarCollapsed(localStorage.getItem(DASHBOARD_FOOTER_VISIBLE_STORAGE_KEY), true);
+  } catch (e) {
+    console.error('Failed to get dashboard footer visibility:', e);
+  }
+  return true;
+};
+
+const initialDashboardFooterVisible = getInitialDashboardFooterVisible();
+
+const getInitialDashboardFooterRecordNumber = () => {
+  try {
+    return normalizeDashboardFooterRecordNumber(localStorage.getItem(DASHBOARD_FOOTER_RECORD_NUMBER_STORAGE_KEY));
+  } catch (e) {
+    console.error('Failed to get dashboard footer record number:', e);
+  }
+  return '';
+};
+
+const initialDashboardFooterRecordNumber = getInitialDashboardFooterRecordNumber();
+
 const useStore = create((set, get) => ({
   // --- 1. 认证状态 ---
   isAuthenticated: false,
@@ -441,6 +477,10 @@ const useStore = create((set, get) => ({
   // --- 2. 界面与布局状态 ---
   mainActiveTab: 'dashboard',
   sidebarCollapsed: initialSidebarCollapsed,
+  dashboardFooterVisible: initialDashboardFooterVisible,
+  dashboardFooterRecordNumber: initialDashboardFooterRecordNumber,
+  appProcessUptimeSeconds: 0,
+  appProcessUptimeMeasuredAt: 0,
   themeMode: initialThemeMode,
   theme: resolveThemeMode(initialThemeMode),
   pageWidthMode: initialPageWidthMode,
@@ -487,6 +527,42 @@ const useStore = create((set, get) => ({
       }
     }
     set({ sidebarCollapsed: normalizedCollapsed });
+  },
+  setDashboardFooterVisible: (visible, persist = true) => {
+    const normalizedVisible = normalizeSidebarCollapsed(visible, true);
+    if (persist) {
+      try {
+        localStorage.setItem(DASHBOARD_FOOTER_VISIBLE_STORAGE_KEY, String(normalizedVisible));
+      } catch (e) {
+        console.error('Failed to save dashboard footer visibility:', e);
+      }
+      if (get().isAuthenticated) {
+        scheduleAppearanceSettingsSave({ dashboardFooterVisible: normalizedVisible });
+      }
+    }
+    set({ dashboardFooterVisible: normalizedVisible });
+  },
+  setDashboardFooterRecordNumber: (recordNumber, persist = true) => {
+    const normalizedRecordNumber = normalizeDashboardFooterRecordNumber(recordNumber);
+    if (persist) {
+      try {
+        localStorage.setItem(DASHBOARD_FOOTER_RECORD_NUMBER_STORAGE_KEY, normalizedRecordNumber);
+      } catch (e) {
+        console.error('Failed to save dashboard footer record number:', e);
+      }
+      if (get().isAuthenticated) {
+        scheduleAppearanceSettingsSave({ dashboardFooterRecordNumber: normalizedRecordNumber });
+      }
+    }
+    set({ dashboardFooterRecordNumber: normalizedRecordNumber });
+  },
+  setAppProcessUptimeSeconds: (seconds) => {
+    const normalizedSeconds = Number(seconds);
+    if (!Number.isFinite(normalizedSeconds) || normalizedSeconds < 0) return;
+    set({
+      appProcessUptimeSeconds: normalizedSeconds,
+      appProcessUptimeMeasuredAt: Date.now(),
+    });
   },
   setNavGroupExpanded: (group) => set({ navGroupExpanded: group }),
   setPageWidthMode: (mode, persist = true) => {
@@ -549,6 +625,8 @@ const useStore = create((set, get) => ({
       localStorage.removeItem(LEGACY_THEME_STORAGE_KEY);
       localStorage.setItem(PAGE_WIDTH_STORAGE_KEY, normalized.pageWidthMode);
       localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(normalized.sidebarCollapsed));
+      localStorage.setItem(DASHBOARD_FOOTER_VISIBLE_STORAGE_KEY, String(normalized.dashboardFooterVisible));
+      localStorage.setItem(DASHBOARD_FOOTER_RECORD_NUMBER_STORAGE_KEY, normalized.dashboardFooterRecordNumber);
     } catch (e) {
       console.error('Failed to cache appearance settings:', e);
     }
@@ -558,6 +636,8 @@ const useStore = create((set, get) => ({
       theme: resolveThemeMode(normalized.themeMode),
       pageWidthMode: normalized.pageWidthMode,
       sidebarCollapsed: normalized.sidebarCollapsed,
+      dashboardFooterVisible: normalized.dashboardFooterVisible,
+      dashboardFooterRecordNumber: normalized.dashboardFooterRecordNumber,
       customCss: normalized.customCss,
       moduleVisibility: normalized.moduleVisibility,
       moduleOrder: normalized.moduleOrder,
@@ -598,6 +678,12 @@ const useStore = create((set, get) => ({
       }
       if (rawSettings.sidebarCollapsed === undefined && rawSettings.sidebar_collapsed === undefined) {
         appearancePatch.sidebarCollapsed = normalized.sidebarCollapsed;
+      }
+      if (rawSettings.dashboardFooterVisible === undefined && rawSettings.dashboard_footer_visible === undefined) {
+        appearancePatch.dashboardFooterVisible = normalized.dashboardFooterVisible;
+      }
+      if (rawSettings.dashboardFooterRecordNumber === undefined && rawSettings.dashboard_footer_record_number === undefined) {
+        appearancePatch.dashboardFooterRecordNumber = normalized.dashboardFooterRecordNumber;
       }
       if (rawSettings.vibrationEnabled === undefined) {
         appearancePatch.vibrationEnabled = normalized.vibrationEnabled;
