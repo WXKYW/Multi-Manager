@@ -3424,7 +3424,7 @@ func (s *Service) buildAccountResponse(
 	trafficCycleDay int,
 	trafficCycleStart, trafficCycleEnd sql.NullString,
 ) map[string]interface{} {
-	_, agentOnline := s.registry.Get(id)
+	conn, agentOnline := s.registry.Get(id)
 	health := s.resolveAgentMetricsHealth(id, cachedInfo, agentOnline, time.Now())
 	effectiveStatus := status
 	if agentOnline {
@@ -3485,30 +3485,45 @@ func (s *Service) buildAccountResponse(
 	res["metrics_age_ms"] = health["age_ms"]
 
 	// Metrics mapping
+	cachedMetrics := map[string]interface{}{}
+	hasMetricsPayload := cachedInfo.Valid && cachedInfo.String != ""
 	if cachedInfo.Valid && cachedInfo.String != "" {
-		var cachedMetrics map[string]interface{}
-		if err := json.Unmarshal([]byte(cachedInfo.String), &cachedMetrics); err == nil {
-			info := s.buildInfoField(cachedMetrics)
-			enrichTrafficQuota(info, cachedMetrics, trafficLimitBytes, trafficLimitMode, trafficAlertEnabled, trafficAlertPercent)
-			res["info"] = info
-			resolvedCountryText := ""
-			if resolvedCountry.Valid {
-				resolvedCountryText = resolvedCountry.String
+		var parsed map[string]interface{}
+		if err := json.Unmarshal([]byte(cachedInfo.String), &parsed); err == nil {
+			cachedMetrics = parsed
+		}
+	}
+	if agentOnline && conn != nil {
+		metadata := conn.GetMetadata()
+		for key, value := range metadata {
+			if !isEmptyHeartbeatInfoValue(value) {
+				cachedMetrics[key] = value
 			}
-			countryText := ""
-			if country.Valid {
-				countryText = country.String
-			}
-			res["location"] = firstNonEmpty(getString(cachedMetrics, "location"), getString(cachedMetrics, "region"), resolvedCountryText)
-			res["countryCode"] = firstNonEmpty(cleanCountryCode(getString(cachedMetrics, "country_code")), cleanCountryCode(getString(cachedMetrics, "country")), cleanCountryCode(countryText))
-			lat, hasLat := firstOptionalFloatValue(cachedMetrics, "lat", "latitude")
-			lon, hasLon := firstOptionalFloatValue(cachedMetrics, "lon", "longitude")
-			if hasLat && hasUsableCoordinates(lat, lon) {
-				res["latitude"] = lat
-			}
-			if hasLon && hasUsableCoordinates(lat, lon) {
-				res["longitude"] = lon
-			}
+		}
+		normalizePublicServerLiveMetrics(cachedMetrics, metadata)
+		hasMetricsPayload = true
+	}
+	if hasMetricsPayload {
+		info := s.buildInfoField(cachedMetrics)
+		enrichTrafficQuota(info, cachedMetrics, trafficLimitBytes, trafficLimitMode, trafficAlertEnabled, trafficAlertPercent)
+		res["info"] = info
+		resolvedCountryText := ""
+		if resolvedCountry.Valid {
+			resolvedCountryText = resolvedCountry.String
+		}
+		countryText := ""
+		if country.Valid {
+			countryText = country.String
+		}
+		res["location"] = firstNonEmpty(getString(cachedMetrics, "location"), getString(cachedMetrics, "region"), resolvedCountryText)
+		res["countryCode"] = firstNonEmpty(cleanCountryCode(getString(cachedMetrics, "country_code")), cleanCountryCode(getString(cachedMetrics, "country")), cleanCountryCode(countryText))
+		lat, hasLat := firstOptionalFloatValue(cachedMetrics, "lat", "latitude")
+		lon, hasLon := firstOptionalFloatValue(cachedMetrics, "lon", "longitude")
+		if hasLat && hasUsableCoordinates(lat, lon) {
+			res["latitude"] = lat
+		}
+		if hasLon && hasUsableCoordinates(lat, lon) {
+			res["longitude"] = lon
 		}
 	}
 

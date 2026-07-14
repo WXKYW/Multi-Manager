@@ -579,6 +579,80 @@ func TestPublicServerStatusPageUsesLiveAgentMetadata(t *testing.T) {
 	}
 }
 
+func TestListAccountsUsesLiveAgentLocationMetadata(t *testing.T) {
+	service, db := testService(t)
+	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, status, tags, cached_info) VALUES ('server-geo', 'geo', '127.0.0.1', 'root', 'password', 'offline', '[]', '{"cpu":1,"mem_percent":2}')`)
+	if err != nil {
+		t.Fatalf("insert account: %v", err)
+	}
+	conn := service.registry.Register("server-geo", &taskReplySocket{t: t, service: service})
+	conn.UpdateMetadata(map[string]interface{}{
+		"country_code":      "us",
+		"country":           "US",
+		"location":          "San Jose, California, US",
+		"region":            "San Jose, California, US",
+		"latitude":          37.33939,
+		"longitude":         -121.89496,
+		"metrics_last_seen": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+
+	res := perform(service, http.MethodGet, "/api/server/accounts", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", res.Code, res.Body.String())
+	}
+	payload := decodePayload(t, res)
+	list := payload["data"].([]interface{})
+	account := list[0].(map[string]interface{})
+	if account["countryCode"] != "us" || account["location"] != "San Jose, California, US" {
+		t.Fatalf("expected live location fields on account, account=%#v", account)
+	}
+	if account["latitude"] != 37.33939 || account["longitude"] != -121.89496 {
+		t.Fatalf("expected live coordinates on account, account=%#v", account)
+	}
+	info := account["info"].(map[string]interface{})
+	if info["country_code"] != "us" || info["location"] != "San Jose, California, US" {
+		t.Fatalf("expected live location fields in info, info=%#v", info)
+	}
+	if info["latitude"] != 37.33939 || info["longitude"] != -121.89496 {
+		t.Fatalf("expected live coordinates in info, info=%#v", info)
+	}
+}
+
+func TestListAccountsUsesLiveAgentLocationMetadataWithoutCachedInfo(t *testing.T) {
+	service, db := testService(t)
+	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, status, tags) VALUES ('server-geo-empty', 'geo', '127.0.0.1', 'root', 'password', 'offline', '[]')`)
+	if err != nil {
+		t.Fatalf("insert account: %v", err)
+	}
+	conn := service.registry.Register("server-geo-empty", &taskReplySocket{t: t, service: service})
+	conn.UpdateMetadata(map[string]interface{}{
+		"country_code":      "us",
+		"country":           "US",
+		"location":          "San Jose, California, US",
+		"latitude":          37.33939,
+		"longitude":         -121.89496,
+		"metrics_last_seen": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+
+	res := perform(service, http.MethodGet, "/api/server/accounts", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", res.Code, res.Body.String())
+	}
+	payload := decodePayload(t, res)
+	list := payload["data"].([]interface{})
+	account := list[0].(map[string]interface{})
+	if account["countryCode"] != "us" || account["location"] != "San Jose, California, US" {
+		t.Fatalf("expected live location fields on account without cached info, account=%#v", account)
+	}
+	if account["latitude"] != 37.33939 || account["longitude"] != -121.89496 {
+		t.Fatalf("expected live coordinates on account without cached info, account=%#v", account)
+	}
+	info := account["info"].(map[string]interface{})
+	if info["country_code"] != "us" || info["location"] != "San Jose, California, US" {
+		t.Fatalf("expected live location fields in info without cached info, info=%#v", info)
+	}
+}
+
 func TestPublicServerStatusPageWithNoServersDoesNotExposeAllHosts(t *testing.T) {
 	service, db := testService(t)
 	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, status, cached_info) VALUES ('server-1', 'edge', '127.0.0.1', 'root', 'password', 'online', '{"cpu":12.5}')`)
