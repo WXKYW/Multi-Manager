@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -2063,6 +2064,7 @@ func resolveInviteTargetsFromAccounts(record inviteRecord, accounts []accountRec
 			break
 		}
 		if len(targets) > 0 {
+			sortInviteTargets(targets)
 			return targets
 		}
 	}
@@ -2087,7 +2089,20 @@ func resolveInviteTargetsFromAccounts(record inviteRecord, accounts []accountRec
 			})
 		}
 	}
+	sortInviteTargets(targets)
 	return targets
+}
+
+func sortInviteTargets(targets []inviteTarget) {
+	sort.SliceStable(targets, func(i, j int) bool {
+		if targets[i].Domain != targets[j].Domain {
+			return targets[i].Domain < targets[j].Domain
+		}
+		if targets[i].ID != targets[j].ID {
+			return targets[i].ID < targets[j].ID
+		}
+		return targets[i].Name < targets[j].Name
+	})
 }
 
 func resolveInviteRegistrationTarget(ctx context.Context, db *sql.DB, invite inviteRecord, payload map[string]interface{}) (inviteTarget, error) {
