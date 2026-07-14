@@ -400,17 +400,18 @@ const CompactMetricBar = React.memo(CompactMetricBarComponent, (prev, next) => (
   && prev.width === next.width
 ));
 
-function DenseUsageMeterComponent({ label, value, detail, indicatorClassName = '!bg-none !bg-kumo-brand' }) {
+function DenseUsageMeterComponent({ label, value, detail, indicatorClassName = '!bg-none !bg-kumo-brand', muted = false }) {
   const percent = clampPercent(toNumber(value, 0));
+  const resolvedIndicatorClassName = muted ? '!bg-none !bg-kumo-subtle/55' : indicatorClassName;
   return (
     <div className={`relative h-8 min-w-[96px] w-full rounded-md bg-kumo-recessed/45 ${COMPACT_INLINE_BOX_CLASS}`}>
       <div className="absolute left-1.5 right-1.5 top-[3px] grid h-4 grid-cols-[minmax(0,1fr)_auto] items-center gap-1 text-[10px] leading-4 text-kumo-default">
         <span className="min-w-0 truncate text-kumo-subtle">{label}</span>
-        <span className="min-w-0 truncate text-right text-[11px] font-semibold leading-4 text-kumo-default">{detail || `${Math.round(percent)}%`}</span>
+        <span className={`min-w-0 truncate text-right text-[11px] font-semibold leading-4 ${muted ? 'text-kumo-subtle' : 'text-kumo-default'}`}>{detail || `${Math.round(percent)}%`}</span>
       </div>
       <div className="absolute bottom-1 left-1.5 right-1.5 h-1.5 overflow-hidden rounded-full bg-kumo-fill">
         <div
-          className={`absolute inset-y-0 left-0 rounded-full ${indicatorClassName}`}
+          className={`absolute inset-y-0 left-0 rounded-full ${resolvedIndicatorClassName}`}
           style={{ width: `${percent}%` }}
         />
       </div>
@@ -423,15 +424,17 @@ const DenseUsageMeter = React.memo(DenseUsageMeterComponent, (prev, next) => (
   && prev.value === next.value
   && prev.detail === next.detail
   && prev.indicatorClassName === next.indicatorClassName
+  && prev.muted === next.muted
 ));
 
-function DenseLifecycleMeterComponent({ lifecycle }) {
+function DenseLifecycleMeterComponent({ lifecycle, muted = false }) {
   return (
     <DenseUsageMeter
       label="剩余"
       value={lifecycle.remainingPercent}
       detail={lifecycle.label}
       indicatorClassName={lifecycle.indicatorClassName}
+      muted={muted}
     />
   );
 }
@@ -440,19 +443,20 @@ const DenseLifecycleMeter = React.memo(DenseLifecycleMeterComponent, (prev, next
   prev.lifecycle?.remainingPercent === next.lifecycle?.remainingPercent
   && prev.lifecycle?.label === next.lifecycle?.label
   && prev.lifecycle?.indicatorClassName === next.lifecycle?.indicatorClassName
+  && prev.muted === next.muted
 ));
 
-function FlowUnitBadge({ unit }) {
+function FlowUnitBadge({ unit, muted = false }) {
   return (
-    <span className={`${FLOW_UNIT_BADGE_CLASS} ${getFlowUnitClassName(unit)}`}>
+    <span className={`${FLOW_UNIT_BADGE_CLASS} ${muted ? 'border-kumo-line/70 bg-kumo-recessed text-kumo-subtle' : getFlowUnitClassName(unit)}`}>
       {unit || 'B'}
     </span>
   );
 }
 
-function FlowArrow({ children }) {
+function FlowArrow({ children, muted = false }) {
   return (
-    <span className={`inline-flex h-5 w-5 items-center justify-center rounded-[4px] bg-kumo-recessed/70 text-[14px] font-bold leading-none text-kumo-default ${COMPACT_INLINE_SUBBOX_CLASS}`}>
+    <span className={`inline-flex h-5 w-5 items-center justify-center rounded-[4px] bg-kumo-recessed/70 text-[14px] font-bold leading-none ${muted ? 'text-kumo-subtle' : 'text-kumo-default'} ${COMPACT_INLINE_SUBBOX_CLASS}`}>
       {children}
     </span>
   );
@@ -463,17 +467,17 @@ const formatDenseFlowValue = (value) => {
   return Number.isFinite(numericValue) ? numericValue.toFixed(1) : '0.0';
 };
 
-function DenseTrafficCell({ left, leftUnit, right, rightUnit, leftTitle, rightTitle }) {
+function DenseTrafficCell({ left, leftUnit, right, rightUnit, leftTitle, rightTitle, muted = false }) {
   const leftValue = formatDenseFlowValue(left);
   const rightValue = formatDenseFlowValue(right);
   return (
-    <div className={`flex h-8 w-full min-w-[208px] shrink-0 items-center justify-center gap-1 overflow-hidden rounded-md bg-kumo-recessed/35 px-2 text-[14px] leading-none text-kumo-strong tabular-nums ${COMPACT_INLINE_BOX_CLASS}`}>
+    <div className={`flex h-8 w-full min-w-[208px] shrink-0 items-center justify-center gap-1 overflow-hidden rounded-md bg-kumo-recessed/35 px-2 text-[14px] leading-none tabular-nums ${muted ? 'text-kumo-subtle' : 'text-kumo-strong'} ${COMPACT_INLINE_BOX_CLASS}`}>
       <span className="min-w-0 flex-1 truncate text-right" title={leftTitle || `${left}${leftUnit}`}>{leftValue}</span>
-      <FlowUnitBadge unit={leftUnit} />
-      <FlowArrow>&darr;</FlowArrow>
-      <span aria-hidden="true" className="-my-px mx-0.5 w-px self-stretch shrink-0 bg-kumo-interact/80"></span>
-      <FlowArrow>&uarr;</FlowArrow>
-      <FlowUnitBadge unit={rightUnit} />
+      <FlowUnitBadge unit={leftUnit} muted={muted} />
+      <FlowArrow muted={muted}>&darr;</FlowArrow>
+      <span aria-hidden="true" className={`-my-px mx-0.5 w-px self-stretch shrink-0 ${muted ? 'bg-kumo-line/70' : 'bg-kumo-interact/80'}`}></span>
+      <FlowArrow muted={muted}>&uarr;</FlowArrow>
+      <FlowUnitBadge unit={rightUnit} muted={muted} />
       <span className="min-w-0 flex-1 truncate text-left" title={rightTitle || `${right}${rightUnit}`}>{rightValue}</span>
     </div>
   );
@@ -529,18 +533,20 @@ function ExpandedProgressMetricComponent({
   caption,
   indicatorClassName = '!bg-none !bg-kumo-brand',
   valueClassName = 'text-kumo-strong',
+  muted = false,
 }) {
   const percent = clampPercent(toNumber(value, 0));
   const displayValue = detail || `${Math.round(percent)}%`;
+  const resolvedIndicatorClassName = muted ? '!bg-none !bg-kumo-subtle/55' : indicatorClassName;
   return (
     <div className="flex min-w-0 flex-col gap-1.5 rounded-md border border-kumo-line/70 bg-kumo-recessed/25 px-2.5 py-2">
       <div className="flex min-w-0 items-start justify-between gap-2">
         <span className="text-[11px] font-medium text-kumo-subtle">{label}</span>
-        <span className={`min-w-0 truncate text-right text-sm font-bold tabular-nums ${valueClassName}`} title={String(displayValue)}>{displayValue}</span>
+        <span className={`min-w-0 truncate text-right text-sm font-bold tabular-nums ${muted ? 'text-kumo-subtle' : valueClassName}`} title={String(displayValue)}>{displayValue}</span>
       </div>
       <div className="h-1.5 overflow-hidden rounded-full border border-kumo-line/70 bg-kumo-base">
         <div
-          className={`h-full rounded-full transition-[width] duration-300 ${indicatorClassName}`}
+          className={`h-full rounded-full transition-[width] duration-300 ${resolvedIndicatorClassName}`}
           style={{ width: `${percent}%` }}
         ></div>
       </div>
@@ -560,6 +566,7 @@ const ExpandedProgressMetric = React.memo(ExpandedProgressMetricComponent, (prev
   && prev.caption === next.caption
   && prev.indicatorClassName === next.indicatorClassName
   && prev.valueClassName === next.valueClassName
+  && prev.muted === next.muted
 ));
 
 function TrafficTotalSummary({ txTotal, rxTotal, quota, compact = false }) {
@@ -7183,6 +7190,21 @@ function ServerPage() {
     }
   };
 
+  const getTerminalCopyBaseName = (session) => {
+    const name = String(session?.name || session?.server?.name || '终端').trim();
+    return name.replace(/\s+(?:共享|复制(?:\s*\d+)?)$/u, '') || '终端';
+  };
+
+  const getNextTerminalCopyName = (session) => {
+    const baseName = getTerminalCopyBaseName(session);
+    const pattern = new RegExp(`^${baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+(?:共享|复制(?:\\s*(\\d+))?)$`, 'u');
+    const copyNumbers = sshSessions
+      .map(item => String(item.name || '').trim().match(pattern))
+      .filter(Boolean)
+      .map(match => Number(match[1] || 1));
+    return `${baseName} 复制 ${Math.max(0, ...copyNumbers) + 1}`;
+  };
+
   const createAttachedTerminalView = (targetId, position = 'right') => {
     const sourceSession = sshSessions.find(session => session.id === targetId);
     if (!sourceSession) return '';
@@ -7197,7 +7219,7 @@ function ServerPage() {
       id: sessionId,
       connected: false,
       attachToPtyId,
-      name: `${sourceSession.name || sourceSession.server?.name || '终端'} 共享`,
+      name: getNextTerminalCopyName(sourceSession),
     };
 
     saveTerminalsToWarehouse();
@@ -7844,6 +7866,7 @@ function ServerPage() {
                           || isNetworkQualityUnsupportedError(networkQuality.error || networkQuality.unsupportedMessage)
                         );
                         const metricsHealth = resolveServerMetricsHealth(server);
+                        const rowMuted = !isServerOnline(server);
 
                         return (
                           <React.Fragment key={server.id}>
@@ -7868,10 +7891,10 @@ function ServerPage() {
                                     )}
                                     {isCompactColumnVisible('name') && (
                                       <Table.Cell className="!px-[2px] !py-1.5 whitespace-nowrap">
-                                        <div className="mx-auto flex w-[96px] items-center gap-2">
-                                          <i className={getOSIconClass(server.info?.platform)}></i>
+                                        <div className={`mx-auto flex w-[96px] items-center gap-2 ${rowMuted ? 'text-kumo-subtle' : ''}`}>
+                                          <i className={`${getOSIconClass(server.info?.platform)} ${rowMuted ? 'opacity-60 grayscale' : ''}`}></i>
                                           <div className="min-w-0">
-                                            <div className="truncate font-bold text-kumo-strong" title={server.name}>{server.name}</div>
+                                            <div className={`truncate font-bold ${rowMuted ? 'text-kumo-subtle' : 'text-kumo-strong'}`} title={server.name}>{server.name}</div>
                                             {/* {(server.tags || []).filter(t => t !== 'Agent').length > 0 && (
                                         <div className="flex min-w-0 gap-1">
                                           {(server.tags || []).filter(t => t !== 'Agent').slice(0, 2).map(tag => (
@@ -7890,8 +7913,8 @@ function ServerPage() {
                                         <div className="mx-auto flex w-[55px] items-center justify-center gap-1.5">
                                           {locationText ? (
                                             <>
-                                              {country && <CountryFlag preferSvg countryCode={country} className="h-3.5 w-5 shrink-0 !rounded-[2px] text-sm" />}
-                                              <span className="truncate font-semibold uppercase text-kumo-strong" title={locationTitle}>{locationText}</span>
+                                              {country && <CountryFlag preferSvg countryCode={country} className={`h-3.5 w-5 shrink-0 !rounded-[2px] text-sm ${rowMuted ? 'opacity-60 grayscale' : ''}`} />}
+                                              <span className={`truncate font-semibold uppercase ${rowMuted ? 'text-kumo-subtle' : 'text-kumo-strong'}`} title={locationTitle}>{locationText}</span>
                                             </>
                                           ) : (
                                             <span className="font-semibold text-kumo-subtle">-</span>
@@ -7901,14 +7924,14 @@ function ServerPage() {
                                     )}
                                     {isCompactColumnVisible('uptime') && (
                                       <Table.Cell className="!px-[2px] !py-1.5 text-center whitespace-nowrap">
-                                        <span className="inline-flex w-[55px] justify-center font-semibold tabular-nums text-kumo-strong">
+                                        <span className={`inline-flex w-[55px] justify-center font-semibold tabular-nums ${rowMuted ? 'text-kumo-subtle' : 'text-kumo-strong'}`}>
                                           {formatUptimeDaysOnly(server.info?.uptime || server.info?.system?.Uptime)}
                                         </span>
                                       </Table.Cell>
                                     )}
                                     {isCompactColumnVisible('load') && (
                                       <Table.Cell className="!px-[2px] !py-1.5 text-center whitespace-nowrap">
-                                        <code className={`rounded-md bg-kumo-recessed/50 px-1.5 py-1 font-mono text-[10px] text-kumo-strong ${COMPACT_INLINE_BOX_CLASS}`}>
+                                        <code className={`rounded-md bg-kumo-recessed/50 px-1.5 py-1 font-mono text-[10px] ${rowMuted ? 'text-kumo-subtle' : 'text-kumo-strong'} ${COMPACT_INLINE_BOX_CLASS}`}>
                                           {getPrimaryLoadValue(server.info?.cpu?.Load)}
                                         </code>
                                       </Table.Cell>
@@ -7922,6 +7945,7 @@ function ServerPage() {
                                           rightUnit={tx.unit}
                                           leftTitle={server.info?.network?.rx_speed || '0 B/s'}
                                           rightTitle={server.info?.network?.tx_speed || '0 B/s'}
+                                          muted={rowMuted}
                                         />
                                       </Table.Cell>
                                     )}
@@ -7934,6 +7958,7 @@ function ServerPage() {
                                           rightUnit={txTotal.unit}
                                           leftTitle={rxTotal.text}
                                           rightTitle={txTotal.text}
+                                          muted={rowMuted}
                                         />
                                       </Table.Cell>
                                     )}
@@ -7944,6 +7969,7 @@ function ServerPage() {
                                           value={cpuUsage}
                                           detail={`${Math.round(cpuUsage)}%`}
                                           indicatorClassName="!bg-none !bg-kumo-success"
+                                          muted={rowMuted}
                                         />
                                       </Table.Cell>
                                     )}
@@ -7954,6 +7980,7 @@ function ServerPage() {
                                           value={memUsage}
                                           detail={`${Math.round(memUsage)}%`}
                                           indicatorClassName="!bg-none !bg-kumo-info"
+                                          muted={rowMuted}
                                         />
                                       </Table.Cell>
                                     )}
@@ -7964,13 +7991,14 @@ function ServerPage() {
                                           value={diskUsage}
                                           detail={`${Math.round(diskUsage)}%`}
                                           indicatorClassName="!bg-none !bg-kumo-warning"
+                                          muted={rowMuted}
                                         />
                                       </Table.Cell>
                                     )}
                                     {isCompactColumnVisible('remaining') && (
                                       <Table.Cell className="!px-[2px] !py-1.5 whitespace-nowrap">
                                         <div title={lifecycle.expiresAt ? `${formatDateTime(lifecycle.startsAt)} - ${formatDateTime(lifecycle.expiresAt)}，剩余 ${Math.round(lifecycle.remainingPercent)}%` : '永久'}>
-                                          <DenseLifecycleMeter lifecycle={lifecycle} />
+                                          <DenseLifecycleMeter lifecycle={lifecycle} muted={rowMuted} />
                                         </div>
                                       </Table.Cell>
                                     )}
@@ -7981,6 +8009,7 @@ function ServerPage() {
                                           value={trafficQuota.unlimited ? 100 : Math.max(0, 100 - trafficQuota.percent)}
                                           detail={trafficQuota.unlimited ? '无限' : trafficQuota.remainingText}
                                           indicatorClassName={trafficQuota.overLimit ? '!bg-none !bg-kumo-danger' : '!bg-none !bg-kumo-info'}
+                                          muted={rowMuted}
                                         />
                                       </Table.Cell>
                                     )}
@@ -8240,6 +8269,7 @@ function ServerPage() {
                     || isNetworkQualityUnsupportedError(networkQuality.error || networkQuality.unsupportedMessage)
                   );
                   const metricsHealth = resolveServerMetricsHealth(server);
+                  const rowMuted = !isServerOnline(server);
 
                   return (
                     <ContextMenu.Root key={server.id}>
@@ -8408,6 +8438,7 @@ function ServerPage() {
                                       caption={`${coreText}${cpuTemp > 0 ? ` · ${Math.round(cpuTemp)}°C` : ''}${cpuPower > 0 ? ` · ${cpuPower.toFixed(1)}W` : ''}`}
                                       indicatorClassName="!bg-none !bg-kumo-success"
                                       valueClassName="text-kumo-success"
+                                      muted={rowMuted}
                                     />
                                     <ExpandedProgressMetric
                                       label="内存"
@@ -8416,6 +8447,7 @@ function ServerPage() {
                                       caption={`${server.info?.memory?.Used || '-'} / ${server.info?.memory?.Total || '-'}`}
                                       indicatorClassName="!bg-none !bg-kumo-info"
                                       valueClassName="text-kumo-info"
+                                      muted={rowMuted}
                                     />
                                     <ExpandedProgressMetric
                                       label="磁盘"
@@ -8424,6 +8456,7 @@ function ServerPage() {
                                       caption={primaryDisk ? `${primaryDisk.used || '-'} / ${primaryDisk.total || '-'}` : '未上报'}
                                       indicatorClassName="!bg-none !bg-kumo-warning"
                                       valueClassName="text-kumo-warning"
+                                      muted={rowMuted}
                                     />
                                     <ExpandedProgressMetric
                                       label="剩余"
@@ -8432,6 +8465,7 @@ function ServerPage() {
                                       caption={lifecycle.expiresAt ? `${formatDateTime(lifecycle.startsAt)} - ${formatDateTime(lifecycle.expiresAt)}` : '长期有效'}
                                       indicatorClassName={lifecycle.indicatorClassName}
                                       valueClassName={lifecycle.toneClass}
+                                      muted={rowMuted}
                                     />
                                   </div>
                                 </ExpandedSection>
@@ -10440,11 +10474,11 @@ function ServerPage() {
 
             <div className="flex min-h-0 flex-1 overflow-hidden rounded-b-[inherit]">
               <div className="flex min-w-0 flex-1 flex-col">
-                <div className="relative flex min-h-0 flex-1">
+                <div className="relative flex min-h-0 flex-1 overflow-hidden">
                   <div
-                    className={`grid min-w-0 flex-1 gap-1.5 bg-kumo-recessed p-1.5 transition-[margin] duration-200 ${activeTerminalSidebar ? 'mr-[clamp(18rem,24vw,26rem)]' : ''} ${sshViewLayout === 'split-h' ? 'grid-cols-2' :
-                      sshViewLayout === 'split-v' ? 'grid-rows-2' :
-                        sshViewLayout === 'grid' ? 'grid-cols-2 grid-rows-2' : 'grid-cols-1'
+                    className={`grid min-h-0 min-w-0 flex-1 gap-1.5 overflow-hidden bg-kumo-recessed p-1.5 transition-[margin] duration-200 ${activeTerminalSidebar ? 'mr-[clamp(18rem,24vw,26rem)]' : ''} ${sshViewLayout === 'split-h' ? 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)] grid-rows-1' :
+                      sshViewLayout === 'split-v' ? 'grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)]' :
+                        sshViewLayout === 'grid' ? 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_minmax(0,1fr)]' : 'grid-cols-1 grid-rows-1'
                       }`}
                   >
                     {visibleSessionIds.map((id, index) => {
@@ -10463,7 +10497,7 @@ function ServerPage() {
                             setDropTargetId(null);
                             setDropHint('');
                           }}
-                          className={`relative flex h-full w-full flex-col overflow-hidden rounded-md border bg-kumo-base ${activeSSHSessionId === id ? 'border-kumo-interact' : 'border-kumo-line'
+                          className={`relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-md border bg-kumo-base ${activeSSHSessionId === id ? 'border-kumo-interact' : 'border-kumo-line'
                             }`}
                         >
                           <div
@@ -10485,10 +10519,10 @@ function ServerPage() {
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                onClick={() => triggerSplitPane(id, 'right')}
-                                title="左右分屏"
+                                onClick={() => createAttachedTerminalView(id, 'right')}
+                                title="复制终端"
                               >
-                                分屏
+                                复制
                               </Button>
                               <Button
                                 shape="square" size="sm"
@@ -10531,7 +10565,7 @@ function ServerPage() {
                               onClick={() => setActiveTerminalSidebar(null)}
                             />
                           </div>
-                          <div className="min-h-0 space-y-2 overflow-y-auto pr-1">
+                          <div className="min-h-0 space-y-2 overflow-y-auto px-1 pb-1 pr-2">
                             <div className="min-w-0 rounded-md border border-kumo-line/70 bg-kumo-recessed/20 p-2">
                               <div className="flex min-w-0 items-center gap-2">
                                 <i className={getOSIconClass(activeInfo.platform)}></i>

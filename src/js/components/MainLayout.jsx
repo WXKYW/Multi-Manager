@@ -522,7 +522,7 @@ function MainLayout() {
       ? 'flex-1 overflow-hidden p-3 sm:p-4 lg:px-8 lg:pb-6 lg:pt-3'
       : 'flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 lg:px-8 lg:pb-6 lg:pt-3 scrollbar-thin';
   const mainCanvasInnerClassName = `mx-auto flex w-full min-w-0 flex-col ${
-    responsiveWorkspaceModule ? 'min-h-full md:h-full md:min-h-0' : viewportWorkspaceModule ? 'h-full min-h-0' : 'min-h-full'
+    responsiveWorkspaceModule ? 'min-h-full md:h-full md:min-h-0' : viewportWorkspaceModule || mainActiveTab === 'server' ? 'h-full min-h-0' : 'min-h-full'
   } ${pageWidthClass}`;
 
   // 渲染当前模块页

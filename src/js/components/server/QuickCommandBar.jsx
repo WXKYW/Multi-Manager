@@ -15,7 +15,7 @@ import {
   recordCommandHistory,
   updateCommandSnippet,
 } from '../../modules/server-commands.js';
-import { Clock, Copy, Edit, Eye, Plus, Save, Send, Star, Trash, Users } from '../Icons.jsx';
+import { Clock, Copy, Edit, Plus, Save, Send, Star, Trash } from '../Icons.jsx';
 
 const DEFAULT_LINUX_COMMANDS = [
   { title: '当前目录', content: 'pwd', category: '默认', platform: 'linux' },
@@ -69,8 +69,6 @@ export default function QuickCommandBar({
   const [managerOpen, setManagerOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewState, setPreviewState] = useState(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyItems, setHistoryItems] = useState([]);
@@ -105,22 +103,25 @@ export default function QuickCommandBar({
   }, [platform]);
 
   const commands = useMemo(() => {
-    const backend = snippets.map(item => ({ ...item, source: 'saved' }));
+    const backend = snippets.map((item, index) => ({ ...item, source: 'saved', order: index }));
     const fallback = defaultCommands.map((item, index) => ({
       id: `default-${platform}-${index}`,
       ...item,
       source: 'default',
+      order: index,
       favorite: false,
       dangerous: false,
       dangerous_reasons: [],
     }));
     const merged = backend.length > 0 ? backend : fallback;
-    return merged.filter(item => {
-      const matchesCategory = category === 'all' || normalizeCategory(item.category) === category;
-      const q = query.trim().toLowerCase();
-      const matchesQuery = !q || `${item.title} ${item.content} ${item.description || ''}`.toLowerCase().includes(q);
-      return matchesCategory && matchesQuery;
-    });
+    const q = query.trim().toLowerCase();
+    return merged
+      .filter(item => {
+        const matchesCategory = category === 'all' || normalizeCategory(item.category) === category;
+        const matchesQuery = !q || `${item.title} ${item.content} ${item.description || ''}`.toLowerCase().includes(q);
+        return matchesCategory && matchesQuery;
+      })
+      .sort((a, b) => Number(Boolean(b.favorite)) - Number(Boolean(a.favorite)) || a.order - b.order);
   }, [category, defaultCommands, platform, query, snippets]);
 
   const categories = useMemo(() => {
@@ -162,19 +163,6 @@ export default function QuickCommandBar({
     };
   };
 
-  const openPreview = async (command, options = {}) => {
-    if (!command?.trim()) return;
-    try {
-      setPreviewState({
-        ...(await getPreview(command, options)),
-        targetCount: effectiveTargetCount,
-      });
-      setPreviewOpen(true);
-    } catch (error) {
-      toast.error(error.message || '生成命令预览失败');
-    }
-  };
-
   const runCommand = async (command, options = {}) => {
     if (targetSessionIds.length === 0 || !command?.trim()) return;
 
@@ -190,16 +178,13 @@ export default function QuickCommandBar({
       // ignore preview failure
     }
 
-    const isBatch = effectiveTargetCount > 1;
-    if (dangerous || isBatch || (syncEnabled && options.syncAware !== false)) {
+    if (dangerous) {
       const ok = await dialog.confirm({
-        title: dangerous ? '确认执行高风险命令' : '确认批量执行命令',
-        message: dangerous
-          ? `检测到风险项：${dangerReasons.join('、') || '请谨慎执行'}\n\n${rendered}`
-          : `该命令会发送到 ${effectiveTargetCount} 个终端。\n\n${rendered}`,
+        title: '确认执行高风险命令',
+        message: `检测到风险项：${dangerReasons.join('、') || '请谨慎执行'}\n\n${rendered}`,
         confirmText: '确认执行',
         cancelText: '取消',
-        variant: dangerous ? 'danger' : 'default',
+        variant: 'danger',
       });
       if (!ok) return;
     }
@@ -276,6 +261,28 @@ export default function QuickCommandBar({
     }
   };
 
+  const toggleFavorite = async (snippet) => {
+    if (snippet.source !== 'saved' || !snippet.id) return;
+    const nextFavorite = !snippet.favorite;
+    try {
+      await updateCommandSnippet(snippet.id, {
+        title: snippet.title || '',
+        content: snippet.content || '',
+        category: normalizeCategory(snippet.category),
+        platform: 'all',
+        tags: snippet.tags || [],
+        favorite: nextFavorite,
+        description: snippet.description || '',
+      });
+      setSnippets(prev => prev.map(item => (
+        item.id === snippet.id ? { ...item, favorite: nextFavorite } : item
+      )));
+      toast.success(nextFavorite ? '已收藏命令片段' : '已取消收藏');
+    } catch (error) {
+      toast.error(error.message || '更新收藏状态失败');
+    }
+  };
+
   const sendCustomCommand = () => {
     const command = customCommand.trim();
     if (targetSessionIds.length === 0 || !command) return;
@@ -317,9 +324,6 @@ export default function QuickCommandBar({
             <Button size="sm" variant="primary" className="shrink-0" icon={<Send className="h-3.5 w-3.5" />} disabled={targetSessionIds.length === 0 || !customCommand.trim()} onClick={sendCustomCommand}>
               发送
             </Button>
-            <Button size="sm" variant="secondary" className="shrink-0" icon={<Eye className="h-3.5 w-3.5" />} disabled={!customCommand.trim()} onClick={() => openPreview(customCommand.trim())}>
-              预览
-            </Button>
           </div>
 
           <Tabs
@@ -340,7 +344,7 @@ export default function QuickCommandBar({
               <div className="rounded-md border border-dashed border-kumo-line px-3 py-8 text-center text-xs text-kumo-subtle">暂无匹配的命令片段</div>
             ) : commands.map(command => (
               <div key={command.id} className="min-w-0 overflow-hidden rounded-md border border-kumo-line bg-kumo-base p-2.5">
-                <div className="flex min-w-0 items-start gap-2">
+                <div className="flex min-w-0 items-center gap-2">
                   <Button
                     type="button"
                     size="sm"
@@ -352,15 +356,56 @@ export default function QuickCommandBar({
                     <div className="flex w-full min-w-0 flex-col items-start overflow-hidden">
                       <div className="flex w-full min-w-0 items-center gap-1.5">
                         <span className="min-w-0 flex-1 truncate text-sm font-medium text-kumo-strong">{command.title || command.content}</span>
-                        {command.favorite ? <Star className="h-3.5 w-3.5 shrink-0 text-kumo-warning" /> : null}
                       </div>
                       <div className="mt-1 w-full min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-kumo-subtle" title={command.content}>{command.content}</div>
                       {command.description ? <div className="mt-1 w-full min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-kumo-subtle">{command.description}</div> : null}
                     </div>
                   </Button>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Button shape="square" size="sm" variant="ghost" icon={<Eye className="h-3.5 w-3.5" />} aria-label="预览命令" title="预览命令" onClick={() => openPreview(command.content, { snippetId: command.source === 'saved' ? command.id : undefined })} />
-                    {command.source === 'saved' ? <Button shape="square" size="sm" variant="ghost" icon={<Edit className="h-3.5 w-3.5" />} aria-label="编辑命令" title="编辑命令" onClick={() => startEdit(command)} /> : null}
+                  <div className="flex w-16 shrink-0 items-center justify-end gap-1 self-center">
+                    {command.source === 'saved' ? (
+                      <Button
+                        shape="square"
+                        size="sm"
+                        variant="ghost"
+                        icon={<Star className={`h-3.5 w-3.5 ${command.favorite ? 'fill-current text-kumo-warning' : 'text-kumo-subtle'}`} />}
+                        aria-label={command.favorite ? '取消收藏命令' : '收藏命令'}
+                        title={command.favorite ? '取消收藏' : '收藏'}
+                        onClick={() => toggleFavorite(command)}
+                      />
+                    ) : (
+                      <Button
+                        shape="square"
+                        size="sm"
+                        variant="ghost"
+                        className="opacity-0"
+                        icon={<Star className="h-3.5 w-3.5" />}
+                        aria-label="默认命令不可收藏"
+                        tabIndex={-1}
+                        disabled
+                      />
+                    )}
+                    {command.source === 'saved' ? (
+                      <Button
+                        shape="square"
+                        size="sm"
+                        variant="ghost"
+                        icon={<Edit className="h-3.5 w-3.5" />}
+                        aria-label="编辑命令"
+                        title="编辑命令"
+                        onClick={() => startEdit(command)}
+                      />
+                    ) : (
+                      <Button
+                        shape="square"
+                        size="sm"
+                        variant="ghost"
+                        className="opacity-0"
+                        icon={<Edit className="h-3.5 w-3.5" />}
+                        aria-label="默认命令不可编辑"
+                        tabIndex={-1}
+                        disabled
+                      />
+                    )}
                   </div>
                 </div>
               </div>
@@ -380,7 +425,7 @@ export default function QuickCommandBar({
             <div className="space-y-1.5">
               <Input size="sm" label="分类" value={form.category} onChange={event => setForm(prev => ({ ...prev, category: event.target.value }))} />
               {categoryOptions.length > 0 && (
-                <div className="flex max-h-20 flex-wrap gap-1 overflow-y-auto pr-1">
+                <div className="flex max-h-24 flex-wrap gap-1 overflow-y-auto px-1 py-1 pr-2">
                   {categoryOptions.map(option => (
                     <Button
                       key={option}
@@ -414,41 +459,6 @@ export default function QuickCommandBar({
         </Dialog>
       </Dialog.Root>
 
-      <Dialog.Root open={previewOpen} onOpenChange={setPreviewOpen}>
-        <Dialog size="lg" className="flex max-h-[calc(100dvh-1rem)] !w-[min(40rem,calc(100vw-2rem))] !max-w-[min(40rem,calc(100vw-2rem))] flex-col overflow-hidden p-0">
-          <div className="flex items-center justify-between gap-3 border-b border-kumo-line px-4 py-3">
-            <Dialog.Title className="text-sm font-bold text-kumo-strong">命令预览</Dialog.Title>
-            <Dialog.Close />
-          </div>
-          <div className="space-y-3 overflow-y-auto p-4 text-xs">
-            <div className="grid gap-2 sm:grid-cols-2">
-              <div className="rounded-md border border-kumo-line bg-kumo-recessed/30 p-2">
-                <div className="text-kumo-subtle">目标终端</div>
-                <div className="mt-1 flex items-center gap-1 font-semibold text-kumo-strong">
-                  <Users className="h-3.5 w-3.5" />
-                  {previewState?.targetCount || 0} 个
-                </div>
-              </div>
-              <div className="rounded-md border border-kumo-line bg-kumo-recessed/30 p-2">
-                <div className="text-kumo-subtle">发送模式</div>
-                <div className="mt-1 font-semibold text-kumo-strong">立即执行</div>
-              </div>
-            </div>
-            <Textarea label="原始命令" readOnly value={previewState?.command || ''} className="min-h-20 font-mono text-xs" />
-            <Textarea label="变量替换后" readOnly value={previewState?.rendered || ''} className="min-h-24 font-mono text-xs" />
-          </div>
-          <div className="flex justify-end gap-2 border-t border-kumo-line px-4 py-3">
-            <Button size="sm" variant="secondary" onClick={() => setPreviewOpen(false)}>关闭</Button>
-            <Button size="sm" variant="primary" icon={<Send className="h-3.5 w-3.5" />} disabled={!previewState?.command || targetSessionIds.length === 0} onClick={() => {
-              setPreviewOpen(false);
-              runCommand(previewState.command);
-            }}>
-              执行
-            </Button>
-          </div>
-        </Dialog>
-      </Dialog.Root>
-
       <Dialog.Root open={historyOpen} onOpenChange={setHistoryOpen}>
         <Dialog size="lg" className="flex max-h-[calc(100dvh-1rem)] !w-[min(48rem,calc(100vw-2rem))] !max-w-[min(48rem,calc(100vw-2rem))] flex-col overflow-hidden p-0">
           <div className="flex items-center justify-between gap-3 border-b border-kumo-line px-4 py-3">
@@ -463,8 +473,8 @@ export default function QuickCommandBar({
             ) : (
               <div className="max-h-[26rem] overflow-auto rounded-md border border-kumo-line scrollbar-thin">
                 {historyItems.map(item => (
-                  <div key={item.id} className="flex min-w-0 items-start justify-between gap-3 border-b border-kumo-line bg-kumo-base p-2 last:border-b-0">
-                    <div className="min-w-0">
+                  <div key={item.id} className="flex min-w-0 items-center gap-3 border-b border-kumo-line bg-kumo-base p-2 last:border-b-0">
+                    <div className="min-w-0 flex-1">
                       <div className="truncate font-mono text-[12px] font-semibold leading-5 text-kumo-strong" title={item.rendered_command}>{item.rendered_command}</div>
                       <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] font-medium leading-4 text-kumo-default">
                         <span>{item.server_name || '未指定主机'}</span>
@@ -472,7 +482,7 @@ export default function QuickCommandBar({
                         <span>{item.created_at || '-'}</span>
                       </div>
                     </div>
-                    <div className="flex shrink-0 gap-1">
+                    <div className="flex w-16 shrink-0 items-center justify-end gap-1 self-center">
                       <Button shape="square" size="sm" variant="ghost" icon={<Copy className="h-3.5 w-3.5" />} aria-label="填入历史命令" title="填入历史命令" onClick={() => {
                         setCustomCommand(item.rendered_command || item.command || '');
                         setHistoryOpen(false);

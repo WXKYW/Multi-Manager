@@ -995,6 +995,7 @@ func (s *Service) hostMetrics() (map[string]interface{}, error) {
 	hostInfo, _ := host.Info()
 	cpuPercent := readCPUPercent()
 	cpuInfo := readCPUInfo()
+	cpuCoreInfo := readCPUCoreInfo()
 	virtualMemory := readVirtualMemory()
 	diskUsage := readDiskUsage()
 	currentProcess := readProcessInfo(s.startedAt)
@@ -1005,10 +1006,13 @@ func (s *Service) hostMetrics() (map[string]interface{}, error) {
 		"platformLabel": platformLabel(hostInfo),
 		"uptime":        systemUptimeSeconds(hostInfo),
 		"cpu": map[string]interface{}{
-			"usage":       cpuPercent,
-			"cores":       runtime.NumCPU(),
-			"model":       cpuInfo.model,
-			"loadAverage": readLoadAverage(),
+			"usage":         cpuPercent,
+			"cores":         cpuCoreInfo.physical,
+			"physicalCores": cpuCoreInfo.physical,
+			"logicalCores":  cpuCoreInfo.logical,
+			"threads":       cpuCoreInfo.logical,
+			"model":         cpuInfo.model,
+			"loadAverage":   readLoadAverage(),
 		},
 		"memory":    virtualMemory,
 		"disk":      diskUsage,
@@ -1019,6 +1023,11 @@ func (s *Service) hostMetrics() (map[string]interface{}, error) {
 
 type cpuDetails struct {
 	model string
+}
+
+type cpuCoreDetails struct {
+	physical int
+	logical  int
 }
 
 func readCPUPercent() float64 {
@@ -1035,6 +1044,21 @@ func readCPUInfo() cpuDetails {
 		return cpuDetails{}
 	}
 	return cpuDetails{model: info[0].ModelName}
+}
+
+func readCPUCoreInfo() cpuCoreDetails {
+	logical, err := cpu.Counts(true)
+	if err != nil || logical < 1 {
+		logical = runtime.NumCPU()
+	}
+	physical, err := cpu.Counts(false)
+	if err != nil || physical < 1 {
+		physical = logical
+	}
+	return cpuCoreDetails{
+		physical: physical,
+		logical:  logical,
+	}
 }
 
 func readVirtualMemory() map[string]interface{} {

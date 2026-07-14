@@ -45,6 +45,15 @@ func TestHostMetricsShape(t *testing.T) {
 	if cpuPayload["cores"].(int) < 1 {
 		t.Fatalf("expected at least one cpu core, got %#v", cpuPayload)
 	}
+	if cpuPayload["physicalCores"].(int) < 1 {
+		t.Fatalf("expected at least one physical cpu core, got %#v", cpuPayload)
+	}
+	if cpuPayload["logicalCores"].(int) < cpuPayload["physicalCores"].(int) {
+		t.Fatalf("expected logical cores to be >= physical cores, got %#v", cpuPayload)
+	}
+	if cpuPayload["threads"].(int) != cpuPayload["logicalCores"].(int) {
+		t.Fatalf("expected threads to match logical cores, got %#v", cpuPayload)
+	}
 	memoryPayload, ok := payload["memory"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("expected memory payload, got %#v", payload["memory"])

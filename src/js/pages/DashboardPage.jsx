@@ -37,7 +37,7 @@ const DEFAULT_DASHBOARD_STATS = {
     hostname: '',
     platformLabel: '',
     uptime: 0,
-    cpu: { usage: 0, cores: 0, loadAverage: [] },
+    cpu: { usage: 0, cores: 0, physicalCores: 0, logicalCores: 0, threads: 0, loadAverage: [] },
     memory: { total: 0, used: 0, usage: 0 },
     disk: { root: '', total: 0, used: 0, usage: 0 },
   },
@@ -63,8 +63,8 @@ const DASHBOARD_FETCH_TIMEOUT_MS = 6_000;
 const HOST_METRICS_POLL_MS = 2_000;
 const HOST_METRICS_FETCH_TIMEOUT_MS = 4_000;
 const DASHBOARD_SERVER_STATUS_LIMIT = 7;
-const SERVICE_TOOL_ITEM_CLASS = 'group flex min-h-8 cursor-pointer items-center justify-between gap-2 rounded-md border border-kumo-line bg-kumo-recessed/45 px-2 py-1 transition-colors hover:border-kumo-brand/60 hover:bg-kumo-base sm:min-h-9 sm:px-2.5 sm:py-1 xl:min-h-9';
-const SERVICE_TOOL_ICON_CLASS = 'flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-sm sm:h-6.5 sm:w-6.5';
+const SERVICE_TOOL_ITEM_CLASS = 'group flex min-h-7 cursor-pointer items-center justify-between gap-2 rounded-md border border-kumo-line bg-kumo-recessed/45 px-2 py-0.5 transition-colors hover:border-kumo-brand/60 hover:bg-kumo-base sm:min-h-8 sm:px-2 sm:py-0.5 xl:min-h-8';
+const SERVICE_TOOL_ICON_CLASS = 'flex h-5.5 w-5.5 flex-shrink-0 items-center justify-center rounded-md text-sm sm:h-6 sm:w-6';
 const SERVICE_TOOL_BADGE_CLASS = 'flex h-5 min-w-8 items-center justify-center gap-1 rounded-md border border-kumo-line bg-kumo-base px-1.5 text-[10px] font-semibold text-kumo-strong tabular-nums sm:min-w-8 sm:px-1.5 sm:text-[11px]';
 
 let dashboardStatsCache = null;
@@ -147,6 +147,15 @@ function formatDuration(seconds) {
   if (days > 0) return `${days}天 ${hours}小时`;
   if (hours > 0) return `${hours}小时 ${minutes}分钟`;
   return `${minutes}分钟`;
+}
+
+function formatHostCpuDetail(cpu = {}, usage = 0) {
+  const physicalCores = Number(cpu.physicalCores ?? cpu.physical_cores ?? cpu.cores) || 0;
+  const logicalCores = Number(cpu.logicalCores ?? cpu.logical_cores ?? cpu.threads) || 0;
+  const coreDetail = logicalCores && logicalCores !== physicalCores
+    ? `${physicalCores || '-'}核 / ${logicalCores}线程`
+    : `${physicalCores || logicalCores || 0}核`;
+  return `${formatPercent(usage)} / ${coreDetail}`;
 }
 
 function normalizeServerStatus(status) {
@@ -978,10 +987,10 @@ function DashboardPage({ onNavigate } = {}) {
         <SectionCard
           title="服务与工具"
           icon={<Box className="h-4 w-4 text-kumo-brand" />}
-          className="order-2 h-full xl:col-start-2 xl:row-span-2 xl:row-start-1"
-          bodyClassName="flex min-h-0 flex-1 flex-col p-2.5 sm:min-h-[248px] sm:p-3"
+          className="order-2 h-full min-w-0 xl:col-start-2 xl:row-span-2 xl:row-start-1"
+          bodyClassName="flex min-h-0 flex-1 flex-col p-2 sm:p-2.5"
         >
-          <div className="grid flex-1 grid-cols-2 gap-1.5 xl:grid-cols-1">
+          <div className="grid flex-1 grid-cols-2 gap-1.5 xl:grid-cols-1 xl:auto-rows-fr">
             {/* Koyeb */}
             <div
               onClick={() => navigateToModule('paas')}
@@ -1147,7 +1156,7 @@ function DashboardPage({ onNavigate } = {}) {
           )}
         >
           <div className="grid gap-2.5 md:grid-cols-3 md:gap-3 md:[&>*+*]:border-l md:[&>*+*]:border-kumo-line md:[&>*+*]:pl-4 md:[&>*:not(:last-child)]:pr-4">
-            <MiniMeter label="CPU" value={hostCpuUsage} detail={`${formatPercent(hostCpuUsage)} / ${stats.host?.cpu?.cores || 0}C`} tone="success" />
+            <MiniMeter label="CPU" value={hostCpuUsage} detail={formatHostCpuDetail(stats.host?.cpu, hostCpuUsage)} tone="success" />
             <MiniMeter label="内存" value={hostMemoryUsage} detail={`${formatBytes(stats.host?.memory?.used)} / ${formatBytes(stats.host?.memory?.total)}`} tone="info" />
             <MiniMeter label="磁盘" value={hostDiskUsage} detail={`${formatBytes(stats.host?.disk?.used)} / ${formatBytes(stats.host?.disk?.total)}`} tone="brand" />
           </div>
