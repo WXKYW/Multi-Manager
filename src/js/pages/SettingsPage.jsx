@@ -25,8 +25,6 @@ import {
   Check,
   Database,
   Download,
-  Eye,
-  EyeOff,
   FileText,
   Globe,
   HardDrive,
@@ -34,6 +32,7 @@ import {
   Lock,
   RefreshCw,
   Save,
+  Search,
   Settings,
   Shield,
   Sun,
@@ -79,13 +78,6 @@ const TIMEZONE_OPTIONS = [
 
 
 
-const GROUP_LABELS = {
-  overview: '总览',
-  'api-gateway': 'API 网关',
-  infrastructure: '云服务',
-  toolbox: '工具箱',
-};
-
 const getAuthHeaders = () => ({
   'Content-Type': 'application/json',
   'x-admin-password': localStorage.getItem('admin_password') || useStore.getState().loginPassword || '',
@@ -113,7 +105,7 @@ const moduleRows = DEFAULT_MODULE_ORDER.map((moduleId) => {
   return {
     id: moduleId,
     groupId: group?.id || 'other',
-    groupName: GROUP_LABELS[group?.id] || group?.name || '其他',
+    groupName: group?.name || '其他模块',
     config: MODULE_CONFIG[moduleId] || { name: moduleId },
   };
 });
@@ -240,6 +232,7 @@ function SettingsPage() {
   const [settingsPatch, setSettingsPatch] = useState({});
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsSaving, setSettingsSaving] = useState(false);
+  const [moduleSearch, setModuleSearch] = useState('');
 
 
 
@@ -721,14 +714,6 @@ function SettingsPage() {
     );
   };
 
-  const setAllModulesVisibility = (visible) => {
-    const moduleVisibility = DEFAULT_MODULE_ORDER.reduce((acc, moduleId) => {
-      acc[moduleId] = moduleId === 'dashboard' ? true : visible;
-      return acc;
-    }, {});
-    patchSettings({ moduleVisibility });
-  };
-
   const toggleModule = (moduleId, checked) => {
     patchSettings({
       moduleVisibility: {
@@ -737,6 +722,35 @@ function SettingsPage() {
       },
     });
   };
+
+  const orderedModuleRows = useMemo(() => {
+    const rowById = new Map(moduleRows.map((row) => [row.id, row]));
+    const orderedIds = MODULE_GROUPS.flatMap((group) => [
+      ...settings.moduleOrder.filter((moduleId) => (group.modules || []).includes(moduleId)),
+      ...(group.subgroups || []).flatMap((subgroup) => (
+        settings.moduleOrder.filter((moduleId) => (subgroup.modules || []).includes(moduleId))
+      )),
+      ...settings.moduleOrder.filter((moduleId) => (group.trailingModules || []).includes(moduleId)),
+    ]);
+
+    return orderedIds.map((moduleId) => rowById.get(moduleId)).filter(Boolean);
+  }, [settings.moduleOrder]);
+  const moduleGroups = useMemo(() => (
+    MODULE_GROUPS
+      .map((group) => ({
+        id: group.id,
+        name: group.name,
+        count: orderedModuleRows.filter((item) => item.groupId === group.id).length,
+      }))
+      .filter((group) => group.count > 0)
+  ), [orderedModuleRows]);
+  const normalizedModuleSearch = moduleSearch.trim().toLocaleLowerCase();
+  const filteredModuleRows = orderedModuleRows.filter((item) => {
+    const matchesSearch = !normalizedModuleSearch || [item.config.name, item.config.description, item.groupName]
+      .filter(Boolean)
+      .some((value) => value.toLocaleLowerCase().includes(normalizedModuleSearch));
+    return matchesSearch;
+  });
 
   const databaseStorage = dbStats?.storage || dbAnalysis?.storage || null;
   const databaseSizeBytes = dbStats?.totalSize ?? dbStats?.dbSize;
@@ -821,98 +835,81 @@ function SettingsPage() {
         <div className="min-h-0 overflow-auto px-px py-px md:h-full">
         <SectionCard
           className="flex min-h-0 md:h-full"
+          headerClassName="max-sm:min-h-12 max-sm:flex-row max-sm:items-center max-sm:px-3 max-sm:py-2"
           title="功能模块"
-          description="模块显隐会立即影响左侧导航；系统设置入口固定显示。"
+          description="集中管理现有侧栏入口；修改后即时生效，保存后长期保留。"
           icon={<Activity className="h-4 w-4 text-kumo-brand" />}
+          actionsClassName="max-sm:ml-auto max-sm:w-auto max-sm:gap-1.5"
           actions={
               <>
-                <Button size="sm" onClick={() => setAllModulesVisibility(true)} icon={<Eye className="h-4 w-4" />}>显示全部</Button>
-                <Button size="sm" onClick={() => setAllModulesVisibility(false)} icon={<EyeOff className="h-4 w-4" />}>隐藏可选</Button>
+                <Input
+                  size="sm"
+                  aria-label="搜索模块"
+                  value={moduleSearch}
+                  onChange={(event) => setModuleSearch(event.target.value)}
+                  placeholder="搜索模块"
+                  className="hidden w-52 sm:block"
+                  prefix={<Search className="h-4 w-4" />}
+                />
               </>
           }
-          bodyPadding="none"
-          bodyClassName="flex min-h-0 flex-1 flex-col overflow-auto"
+          bodyClassName="flex min-h-0 flex-1 flex-col gap-3 overflow-auto"
         >
-          <div className="grid gap-2 p-3 md:hidden">
-            {settings.moduleOrder.map((moduleId) => {
-              const row = moduleRows.find((item) => item.id === moduleId);
-              if (!row) return null;
-              const ModuleIcon = getModuleIconComponent(moduleId);
+          <div className="sm:hidden">
+            <Input
+              size="sm"
+              aria-label="搜索模块"
+              value={moduleSearch}
+              onChange={(event) => setModuleSearch(event.target.value)}
+              placeholder="搜索模块名称或用途"
+              className="w-full"
+              prefix={<Search className="h-4 w-4" />}
+            />
+          </div>
+
+          <div className="flex flex-col gap-3 sm:gap-4">
+            {moduleGroups.map((group) => {
+              const groupRows = filteredModuleRows.filter((row) => row.groupId === group.id);
+              if (groupRows.length === 0) return null;
 
               return (
-                <div key={moduleId} className="rounded-md border border-kumo-line bg-kumo-base p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex min-w-0 items-start gap-3">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-kumo-line bg-kumo-recessed text-kumo-brand">
-                        <ModuleIcon className="h-4 w-4" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className="min-w-0 truncate text-sm font-semibold text-kumo-strong">{row.config.name}</span>
-                          <Badge variant="outline">{row.groupName}</Badge>
-                        </div>
-                        <div className="mt-1 line-clamp-2 text-xs leading-5 text-kumo-subtle">{row.config.description}</div>
-                      </div>
-                    </div>
-                    <Switch
-                      checked={settings.moduleVisibility[moduleId] !== false}
-                      onCheckedChange={(checked) => toggleModule(moduleId, checked)}
-                      disabled={moduleId === 'dashboard'}
-                      aria-label={`切换 ${row.config.name}`}
-                    />
+                <section key={group.id} className="min-w-0">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-kumo-subtle">
+                    <span>{group.name}</span>
+                    <span className="h-px min-w-4 flex-1 bg-kumo-line" />
+                    <span className="font-normal">{groupRows.length} 项</span>
                   </div>
-                </div>
+                  <div className="grid gap-1.5 lg:grid-cols-2 xl:grid-cols-3">
+                    {groupRows.map((row) => {
+                      const ModuleIcon = getModuleIconComponent(row.id);
+                      const isVisible = settings.moduleVisibility[row.id] !== false;
+
+                      return (
+                        <div key={row.id} className={cx('flex min-h-15 items-center gap-2.5 rounded-md border px-2.5 py-2 transition-colors sm:min-h-16 sm:gap-3 sm:px-3', isVisible ? 'border-kumo-line bg-kumo-base' : 'border-kumo-line/70 bg-kumo-recessed/35 opacity-75')}>
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-kumo-line bg-kumo-recessed text-kumo-brand">
+                            <ModuleIcon className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-semibold text-kumo-strong">{row.config.name}</div>
+                            <div className="hidden truncate text-xs text-kumo-subtle sm:block">{row.config.description}</div>
+                          </div>
+                          <Switch
+                            checked={isVisible}
+                            onCheckedChange={(checked) => toggleModule(row.id, checked)}
+                            disabled={row.id === 'dashboard'}
+                            aria-label={`切换 ${row.config.name}`}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
               );
             })}
           </div>
-          <div className="hidden overflow-x-auto md:block">
-          <Table layout="fixed">
-            <colgroup>
-              <col />
-              <col className="w-[150px]" />
-              <col className="w-[120px]" />
-            </colgroup>
-            <Table.Header>
-              <Table.Row>
-                <Table.Head>模块</Table.Head>
-                <Table.Head>分组</Table.Head>
-                <Table.Head>可见</Table.Head>
-              </Table.Row>
-            </Table.Header>
-            <Table.Body>
-              {settings.moduleOrder.map((moduleId) => {
-                const row = moduleRows.find((item) => item.id === moduleId);
-                if (!row) return null;
-                const ModuleIcon = getModuleIconComponent(moduleId);
-
-                return (
-                  <Table.Row key={moduleId}>
-                    <Table.Cell>
-                      <div className="flex min-w-0 items-center gap-3">
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-kumo-line bg-kumo-recessed text-kumo-brand">
-                          <ModuleIcon className="h-4 w-4" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold text-kumo-strong">{row.config.name}</div>
-                          <div className="truncate text-xs text-kumo-subtle">{row.config.description}</div>
-                        </div>
-                      </div>
-                    </Table.Cell>
-                    <Table.Cell><Badge variant="outline">{row.groupName}</Badge></Table.Cell>
-                    <Table.Cell>
-                      <Switch
-                        checked={settings.moduleVisibility[moduleId] !== false}
-                        onCheckedChange={(checked) => toggleModule(moduleId, checked)}
-                        disabled={moduleId === 'dashboard'}
-                        aria-label={`切换 ${row.config.name}`}
-                      />
-                    </Table.Cell>
-                  </Table.Row>
-                );
-              })}
-            </Table.Body>
-          </Table>
-          </div>
+          {filteredModuleRows.length === 0 && (
+            <div className="rounded-lg border border-dashed border-kumo-line p-8 text-center text-sm text-kumo-subtle">没有找到匹配的模块，请调整搜索或分组筛选。</div>
+          )}
         </SectionCard>
         </div>
       )}

@@ -385,7 +385,7 @@ function CompactMetricBarComponent({ label, value, valueClassName, barClassName,
         <span className={`shrink-0 font-bold ${color ? '' : valueClassName}`} style={color ? { color } : undefined}>{value}</span>
       </div>
       <div className="h-1.5 overflow-hidden rounded-full border border-kumo-line/70 bg-kumo-recessed">
-        <div className={`h-full ${color ? '' : barClassName}`} style={{ width: resolvedWidth, backgroundColor: color || undefined }}></div>
+        <div className={`h-full transition-[width] duration-300 ease-out ${color ? '' : barClassName}`} style={{ width: resolvedWidth, backgroundColor: color || undefined }}></div>
       </div>
     </div>
   );
@@ -411,7 +411,7 @@ function DenseUsageMeterComponent({ label, value, detail, indicatorClassName = '
       </div>
       <div className="absolute bottom-1 left-1.5 right-1.5 h-1.5 overflow-hidden rounded-full bg-kumo-fill">
         <div
-          className={`absolute inset-y-0 left-0 rounded-full ${resolvedIndicatorClassName}`}
+          className={`absolute inset-y-0 left-0 rounded-full transition-[width] duration-300 ease-out ${resolvedIndicatorClassName}`}
           style={{ width: `${percent}%` }}
         />
       </div>
@@ -546,7 +546,7 @@ function ExpandedProgressMetricComponent({
       </div>
       <div className="h-1.5 overflow-hidden rounded-full border border-kumo-line/70 bg-kumo-base">
         <div
-          className={`h-full rounded-full transition-[width] duration-300 ${resolvedIndicatorClassName}`}
+          className={`h-full rounded-full transition-[width] duration-300 ease-out ${resolvedIndicatorClassName}`}
           style={{ width: `${percent}%` }}
         ></div>
       </div>

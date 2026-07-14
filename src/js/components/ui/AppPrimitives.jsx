@@ -113,6 +113,7 @@ export function SectionCard({
   meta,
   action,
   actions,
+  actionsClassName = '',
   children,
   className = '',
   headerClassName = '',
@@ -149,7 +150,7 @@ export function SectionCard({
           )}
         </div>
         {trailing.length > 0 && (
-          <div className="ml-3 flex shrink-0 items-center justify-end gap-2 whitespace-nowrap sm:ml-auto sm:flex-wrap sm:whitespace-normal [&>*]:shrink-0">
+          <div className={cx('ml-3 flex shrink-0 items-center justify-end gap-2 whitespace-nowrap sm:ml-auto sm:flex-wrap sm:whitespace-normal [&>*]:shrink-0', actionsClassName)}>
             {trailing}
           </div>
         )}

@@ -22,6 +22,7 @@ import {
   Rectangle,
   Sun,
   Moon,
+  Settings,
   getModuleIconComponent,
 } from './Icons.jsx';
 
@@ -250,7 +251,7 @@ const SidebarModuleSubgroup = ({ subgroup, activeModule, onNavigate }) => {
 
   return (
     <Sidebar.MenuItem>
-      <Sidebar.Collapsible key={`${subgroup.id}-${active ? 'active' : 'idle'}`} defaultOpen={active} autoScrollOnOpen>
+      <Sidebar.Collapsible defaultOpen={active}>
         <Sidebar.CollapsibleTrigger
           render={(
             <Sidebar.MenuButton icon={ParentIcon} className={quietTriggerClassName}>
@@ -646,28 +647,16 @@ function MainLayout() {
             <Sidebar.Group>
               <Sidebar.GroupLabel>系统</Sidebar.GroupLabel>
               <Sidebar.Menu>
-                {moduleOrder.includes('apidocs') && moduleVisibility.apidocs !== false && (
-                  <SidebarModuleButton
-                    module="apidocs"
-                    active={mainActiveTab === 'apidocs'}
-                    icon={getModuleIconComponent('apidocs', Server)}
-                    onNavigate={navigateToModule}
-                  />
-                )}
-
-                {moduleOrder.includes('systemlogs') && moduleVisibility.systemlogs !== false && (
-                  <SidebarModuleButton
-                    module="systemlogs"
-                    active={mainActiveTab === 'systemlogs'}
-                    icon={getModuleIconComponent('systemlogs', Server)}
-                    onNavigate={navigateToModule}
-                  />
-                )}
-
-                <SidebarModuleButton
-                  module="settings"
-                  active={mainActiveTab === 'settings'}
-                  icon={getModuleIconComponent('settings', Server)}
+                <SidebarModuleSubgroup
+                  subgroup={{
+                    id: 'configuration',
+                    name: '配置',
+                    icon: Settings,
+                    modules: ['apidocs', 'systemlogs', 'settings'].filter(
+                      (module) => module === 'settings' || (moduleOrder.includes(module) && moduleVisibility[module] !== false)
+                    ),
+                  }}
+                  activeModule={mainActiveTab}
                   onNavigate={navigateToModule}
                 />
 
