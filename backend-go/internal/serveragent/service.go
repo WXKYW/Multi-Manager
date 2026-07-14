@@ -53,6 +53,7 @@ type Service struct {
 	realtimePersistInterval       time.Duration
 	networkQualityPersistInterval time.Duration
 	agentTaskWaiters              sync.Map
+	autoLocationRefreshes         sync.Map
 	targetsCache                  []networkQualityTarget
 	targetsCacheMu                sync.RWMutex
 	notifier                      Notifier
@@ -174,6 +175,7 @@ func New(cfg config.Config) *Service {
 				} else if s.presence != nil {
 					s.presence.recordConnect(serverID, transport)
 				}
+				go s.refreshAccountLocationFromAgentIfMissing(serverID)
 			}
 		},
 		// onMessage: 接收 Agent 消息
@@ -242,19 +244,21 @@ func New(cfg config.Config) *Service {
 
 						// 实时广播走内存；SQLite 落库按较低频率节流，避免 Agent 高频上报拖慢前端和后端。
 						if s.shouldPersistRealtimeMetrics(serverID, time.Now()) {
+							persistedInfoMap := cloneMap(cachedInfoMap)
 							go func() {
 								ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 								defer cancel()
 								db, err := s.open(ctx)
 								if err == nil {
 									defer db.Close()
+									persistedInfoMap = s.mergeCachedLocationFieldsFromDB(ctx, db, serverID, persistedInfoMap)
 									now := time.Now().Format("2006-01-02 15:04:05")
-									cachedInfoJSON, _ := json.Marshal(cachedInfoMap)
+									cachedInfoJSON, _ := json.Marshal(persistedInfoMap)
 									_, _ = db.ExecContext(ctx, `UPDATE server_accounts
 									SET status = 'online', last_check_time = ?, last_check_status = 'success', response_time = 0, cached_info = ?, updated_at = ?
 									WHERE id = ?`, now, string(cachedInfoJSON), now, serverID)
 
-									if err := s.persistMetrics(ctx, db, serverID, cachedInfoMap); err != nil {
+									if err := s.persistMetrics(ctx, db, serverID, persistedInfoMap); err != nil {
 										s.markRealtimeMetricsPersistResult(serverID, false, err, time.Now())
 										applog.Warn(ctx, "serveragent", "failed to persist realtime metrics", "server_id", serverID, "error", err.Error())
 									} else {
@@ -1293,17 +1297,17 @@ func (s *Service) getPublicServerStatusItems(ctx context.Context, db *sql.DB, id
 		if uptimeSeconds > 0 {
 			uptimeLabel = formatUptime(int64(uptimeSeconds))
 		}
-		lat := firstFloatValue(cached, "lat", "latitude")
-		lon := firstFloatValue(cached, "lon", "longitude")
+		lat, hasLat := firstOptionalFloatValue(cached, "lat", "latitude")
+		lon, hasLon := firstOptionalFloatValue(cached, "lon", "longitude")
 		item := map[string]interface{}{
 			"id":               id,
 			"name":             name,
 			"status":           status,
 			"online":           status == "online",
 			"description":      description,
-			"location":         firstNonEmpty(location, getString(cached, "location"), getString(cached, "resolved_country"), getString(cached, "country_code"), getString(cached, "country")),
+			"location":         firstNonEmpty(location, getString(cached, "location"), getString(cached, "resolved_country"), cleanCountryCode(getString(cached, "country_code")), cleanCountryCode(getString(cached, "country"))),
 			"region":           getString(cached, "region"),
-			"countryCode":      firstNonEmpty(getString(cached, "country_code"), getString(cached, "country"), country),
+			"countryCode":      firstNonEmpty(cleanCountryCode(getString(cached, "country_code")), cleanCountryCode(getString(cached, "country")), cleanCountryCode(country)),
 			"platform":         firstNonEmpty(getString(cached, "platform"), getString(cached, "os")),
 			"platformVersion":  getString(cached, "platform_version"),
 			"agentVersion":     getString(cached, "agent_version"),
@@ -1334,10 +1338,10 @@ func (s *Service) getPublicServerStatusItems(ctx context.Context, db *sql.DB, id
 			"responseTime":     responseTime,
 			"updatedAt":        firstNonEmpty(lastHeartbeat, getString(cached, "metrics_last_seen"), updatedAt),
 		}
-		if lat != 0.0 {
+		if hasLat && hasUsableCoordinates(lat, lon) {
 			item["latitude"] = lat
 		}
-		if lon != 0.0 {
+		if hasLon && hasUsableCoordinates(lat, lon) {
 			item["longitude"] = lon
 		}
 		if !hideHosts {
@@ -2749,34 +2753,93 @@ func (s *Service) refreshAccountLocationsFromAgents(ctx context.Context, db *sql
 	updated := 0
 	skipped := 0
 	for _, item := range candidates {
-		if _, ok := s.registry.Get(item.id); !ok {
-			skipped++
-			continue
-		}
-		output, err := s.RunCommandTaskAndWait(item.id, "curl -fsSL https://64.ipcheck.ing/geo", 15*time.Second)
-		if err != nil {
-			skipped++
-			applog.Warn(ctx, "serveragent", "failed to refresh location from agent", "server_id", item.id, "error", err.Error())
-			continue
-		}
-		geo, ok := parseIPCheckGeo(output)
-		if !ok {
-			skipped++
-			continue
-		}
-		cachedInfo := mergeCachedInfo(item.cachedInfo, geo)
-		_, err = db.ExecContext(ctx, `
-			UPDATE server_accounts
-			SET resolved_country = ?, cached_info = ?, updated_at = ?
-			WHERE id = ?`,
-			firstNonEmpty(getString(geo, "location"), getString(geo, "region"), getString(geo, "country_code")), cachedInfo, now, item.id,
-		)
+		ok, err := s.refreshAccountLocationFromAgent(ctx, db, item.id, item.cachedInfo, now, true)
 		if err != nil {
 			return updated, skipped, err
 		}
-		updated++
+		if ok {
+			updated++
+		} else {
+			skipped++
+		}
 	}
 	return updated, skipped, nil
+}
+
+func (s *Service) refreshAccountLocationFromAgentIfMissing(serverID string) {
+	serverID = strings.TrimSpace(serverID)
+	if serverID == "" {
+		return
+	}
+	if _, loaded := s.autoLocationRefreshes.LoadOrStore(serverID, struct{}{}); loaded {
+		return
+	}
+	defer s.autoLocationRefreshes.Delete(serverID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	db, err := s.open(ctx)
+	if err != nil {
+		return
+	}
+
+	var cachedInfo sql.NullString
+	var country, resolvedCountry sql.NullString
+	if err := db.QueryRowContext(ctx, "SELECT country, resolved_country, cached_info FROM server_accounts WHERE id = ?", serverID).Scan(&country, &resolvedCountry, &cachedInfo); err != nil {
+		return
+	}
+	_ = db.Close()
+	if !accountNeedsLocation(country, resolvedCountry, cachedInfo) {
+		return
+	}
+	if _, err := s.refreshAccountLocationFromAgent(ctx, nil, serverID, cachedInfo, time.Now().Format(time.RFC3339), false); err != nil {
+		applog.Warn(ctx, "serveragent", "failed to refresh initial location from agent", "server_id", serverID, "error", err.Error())
+	}
+}
+
+func (s *Service) refreshAccountLocationFromAgent(ctx context.Context, db *sql.DB, serverID string, cachedInfo sql.NullString, now string, force bool) (bool, error) {
+	if _, ok := s.registry.Get(serverID); !ok {
+		return false, nil
+	}
+	if !force && !accountNeedsLocation(sql.NullString{}, sql.NullString{}, cachedInfo) {
+		return false, nil
+	}
+	output, err := s.RunCommandTaskAndWait(serverID, "curl -fsSL https://64.ipcheck.ing/geo", 15*time.Second)
+	if err != nil {
+		applog.Warn(ctx, "serveragent", "failed to refresh location from agent", "server_id", serverID, "error", err.Error())
+		return false, nil
+	}
+	geo, ok := parseIPCheckGeo(output)
+	if !ok {
+		return false, nil
+	}
+	s.mergeConnectionLocationMetadata(serverID, geo)
+	openedDB := false
+	if db == nil {
+		var err error
+		db, err = s.open(ctx)
+		if err != nil {
+			return false, err
+		}
+		openedDB = true
+	}
+	if openedDB {
+		defer db.Close()
+	}
+	nextCachedInfo := mergeCachedInfo(cachedInfo, geo)
+	_, err = db.ExecContext(ctx, `
+		UPDATE server_accounts
+		SET resolved_country = ?, cached_info = ?, updated_at = ?
+		WHERE id = ?`,
+		firstNonEmpty(getString(geo, "location"), getString(geo, "region"), getString(geo, "country_code")), nextCachedInfo, now, serverID,
+	)
+	if err != nil {
+		return false, err
+	}
+	if s.metricsHub != nil {
+		s.metricsHub.BroadcastMetrics(serverID, geo)
+	}
+	return true, nil
 }
 
 func (s *Service) getAccount(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {
@@ -2838,6 +2901,7 @@ func (s *Service) createAccount(w http.ResponseWriter, r *http.Request, db *sql.
 
 	id := uuid.NewString()
 	now := time.Now().Format(time.RFC3339)
+	country := cleanCountryCode(req.Country)
 
 	// Max order_index
 	var maxOrder sql.NullInt64
@@ -2849,7 +2913,7 @@ func (s *Service) createAccount(w http.ResponseWriter, r *http.Request, db *sql.
 	encPassphrase := s.encryptField(req.Passphrase)
 	resolvedCountry := ""
 	cachedInfo := sql.NullString{}
-	if req.Country == "" || req.Country == "auto" {
+	if country == "" {
 		if geo, ok := s.lookupHostLocation(r.Context(), req.Host); ok {
 			resolvedCountry = getString(geo, "region")
 			cachedInfo = sql.NullString{String: mergeCachedInfo(sql.NullString{}, geo), Valid: true}
@@ -2866,7 +2930,7 @@ func (s *Service) createAccount(w http.ResponseWriter, r *http.Request, db *sql.
 			id, name, host, port, username, auth_type, password, private_key, passphrase, status, tags, description, monitor_mode, country, resolved_country, starts_at, expires_at, traffic_limit_bytes, traffic_limit_mode, traffic_alert_enabled, traffic_alert_percent, traffic_cycle_type, traffic_cycle_day, traffic_cycle_start, traffic_cycle_end, order_index, created_at, updated_at, cached_info
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, req.Name, req.Host, coalesceInt(req.Port, 22), coalesceStr(req.Username, "agent"), coalesceStr(req.AuthType, "password"),
-		encPassword, encPrivateKey, encPassphrase, "unknown", SerializeList(req.Tags), req.Description, coalesceStr(req.MonitorMode, "agent"), req.Country, nullStr(resolvedCountry), nullStr(req.StartsAt), nullStr(req.ExpiresAt), trafficLimitBytes, trafficLimitMode, boolToInt(req.TrafficAlertEnabled), trafficAlertPercent, trafficCycleType, trafficCycleDay, nullStr(req.TrafficCycleStart), nullStr(req.TrafficCycleEnd), orderIndex, now, now, nullStr(cachedInfo.String),
+		encPassword, encPrivateKey, encPassphrase, "unknown", SerializeList(req.Tags), req.Description, coalesceStr(req.MonitorMode, "agent"), nullStr(country), nullStr(resolvedCountry), nullStr(req.StartsAt), nullStr(req.ExpiresAt), trafficLimitBytes, trafficLimitMode, boolToInt(req.TrafficAlertEnabled), trafficAlertPercent, trafficCycleType, trafficCycleDay, nullStr(req.TrafficCycleStart), nullStr(req.TrafficCycleEnd), orderIndex, now, now, nullStr(cachedInfo.String),
 	)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
@@ -2925,10 +2989,10 @@ func (s *Service) updateAccount(w http.ResponseWriter, r *http.Request, db *sql.
 	authType := getStringVal(req, "auth_type", raw.authType)
 	description := getStringVal(req, "description", raw.description.String)
 	monitorMode := getStringVal(req, "monitor_mode", raw.monitorMode)
-	country := getStringVal(req, "country", raw.country.String)
+	country := cleanCountryCode(getStringVal(req, "country", raw.country.String))
 	resolvedCountry := getStringVal(req, "resolved_country", raw.resolvedCountry.String)
 	cachedInfo := raw.cachedInfo
-	if country == "" || country == "auto" {
+	if country == "" {
 		hostChanged := host != raw.host
 		if hostChanged || resolvedCountry == "" || accountNeedsLocation(sql.NullString{String: country, Valid: country != ""}, sql.NullString{String: resolvedCountry, Valid: resolvedCountry != ""}, cachedInfo) {
 			if geo, ok := s.lookupHostLocation(r.Context(), host); ok {
@@ -3391,7 +3455,7 @@ func (s *Service) buildAccountResponse(
 		"response_time":         nullIntVal(responseTime),
 		"tags":                  parseJSONTags(tagsStr),
 		"description":           nullStringVal(description),
-		"country":               nullStringVal(country),
+		"country":               nullStr(cleanCountryCode(country.String)),
 		"resolved_country":      nullStringVal(resolvedCountry),
 		"starts_at":             nullStringVal(startsAt),
 		"expires_at":            nullStringVal(expiresAt),
@@ -3427,6 +3491,24 @@ func (s *Service) buildAccountResponse(
 			info := s.buildInfoField(cachedMetrics)
 			enrichTrafficQuota(info, cachedMetrics, trafficLimitBytes, trafficLimitMode, trafficAlertEnabled, trafficAlertPercent)
 			res["info"] = info
+			resolvedCountryText := ""
+			if resolvedCountry.Valid {
+				resolvedCountryText = resolvedCountry.String
+			}
+			countryText := ""
+			if country.Valid {
+				countryText = country.String
+			}
+			res["location"] = firstNonEmpty(getString(cachedMetrics, "location"), getString(cachedMetrics, "region"), resolvedCountryText)
+			res["countryCode"] = firstNonEmpty(cleanCountryCode(getString(cachedMetrics, "country_code")), cleanCountryCode(getString(cachedMetrics, "country")), cleanCountryCode(countryText))
+			lat, hasLat := firstOptionalFloatValue(cachedMetrics, "lat", "latitude")
+			lon, hasLon := firstOptionalFloatValue(cachedMetrics, "lon", "longitude")
+			if hasLat && hasUsableCoordinates(lat, lon) {
+				res["latitude"] = lat
+			}
+			if hasLon && hasUsableCoordinates(lat, lon) {
+				res["longitude"] = lon
+			}
 		}
 	}
 
@@ -3487,6 +3569,83 @@ func (s *Service) markRealtimeMetricsPersistResult(serverID string, ok bool, err
 			s.triggerServerStatusNotification(ctx, serverID, serverName, serverHost, "degraded")
 		}()
 	}
+}
+
+func (s *Service) mergeConnectionLocationMetadata(serverID string, geo map[string]interface{}) {
+	if geo == nil {
+		return
+	}
+	conn, exists := s.registry.Get(serverID)
+	if !exists {
+		return
+	}
+	for _, key := range cachedLocationFieldNames() {
+		if value, ok := geo[key]; ok && !isEmptyHeartbeatInfoValue(value) {
+			conn.SetMetadata(key, value)
+		}
+	}
+}
+
+func (s *Service) mergeCachedLocationFieldsFromDB(ctx context.Context, db *sql.DB, serverID string, metrics map[string]interface{}) map[string]interface{} {
+	if metrics == nil {
+		metrics = map[string]interface{}{}
+	}
+	var raw string
+	if err := db.QueryRowContext(ctx, "SELECT COALESCE(cached_info, '{}') FROM server_accounts WHERE id = ?", serverID).Scan(&raw); err != nil {
+		return metrics
+	}
+	existing := map[string]interface{}{}
+	if err := json.Unmarshal([]byte(raw), &existing); err != nil {
+		return metrics
+	}
+	preserveCachedLocationFields(metrics, existing)
+	s.mergeConnectionLocationMetadata(serverID, metrics)
+	return metrics
+}
+
+func cachedLocationFieldNames() []string {
+	return []string{
+		"ip",
+		"country_code",
+		"country",
+		"resolved_country",
+		"region",
+		"location",
+		"city",
+		"latitude",
+		"longitude",
+		"lat",
+		"lon",
+		"isp",
+		"org",
+		"asn",
+		"timezone",
+		"geo_source",
+	}
+}
+
+func preserveCachedLocationFields(target map[string]interface{}, existing map[string]interface{}) {
+	if target == nil || existing == nil {
+		return
+	}
+	for _, key := range cachedLocationFieldNames() {
+		if value, ok := existing[key]; ok && !isEmptyHeartbeatInfoValue(value) {
+			if current, exists := target[key]; !exists || isEmptyHeartbeatInfoValue(current) {
+				target[key] = value
+			}
+		}
+	}
+}
+
+func cloneMap(source map[string]interface{}) map[string]interface{} {
+	if source == nil {
+		return map[string]interface{}{}
+	}
+	cloned := make(map[string]interface{}, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func (s *Service) resolveAgentMetricsHealth(serverID string, cachedInfo sql.NullString, agentOnline bool, now time.Time) map[string]interface{} {
@@ -3689,9 +3848,11 @@ func (s *Service) buildInfoField(metrics map[string]interface{}) map[string]inte
 	if i, ok := metrics["ip"].(string); ok {
 		ip = i
 	}
-	countryCode := firstNonEmpty(getString(metrics, "country_code"), getString(metrics, "country"))
+	countryCode := firstNonEmpty(cleanCountryCode(getString(metrics, "country_code")), cleanCountryCode(getString(metrics, "country")))
 	resolvedCountry := firstNonEmpty(getString(metrics, "resolved_country"), countryCode)
 	location := firstNonEmpty(getString(metrics, "location"), getString(metrics, "region"), resolvedCountry)
+	latitude, hasLatitude := firstOptionalFloatValue(metrics, "lat", "latitude")
+	longitude, hasLongitude := firstOptionalFloatValue(metrics, "lon", "longitude")
 	uptime := ""
 	if u, ok := metrics["uptime"].(string); ok {
 		uptime = u
@@ -3748,6 +3909,12 @@ func (s *Service) buildInfoField(metrics map[string]interface{}) map[string]inte
 		"metrics_stale_after_ms": getIntValue(metrics, "metrics_stale_after_ms"),
 		"metrics_sequence":       getIntValue(metrics, "sequence"),
 		"sample_interval_ms":     getIntValue(metrics, "sample_interval_ms"),
+	}
+	if hasLatitude && hasUsableCoordinates(latitude, longitude) {
+		cachedInfo["latitude"] = latitude
+	}
+	if hasLongitude && hasUsableCoordinates(latitude, longitude) {
+		cachedInfo["longitude"] = longitude
 	}
 	return cachedInfo
 }
@@ -3811,6 +3978,14 @@ func nullStr(s string) interface{} {
 		return nil
 	}
 	return s
+}
+
+func cleanCountryCode(value string) string {
+	code := strings.TrimSpace(value)
+	if code == "" || strings.EqualFold(code, "auto") {
+		return ""
+	}
+	return strings.ToLower(code)
 }
 
 func nullStringVal(s sql.NullString) interface{} {
@@ -4277,6 +4452,24 @@ func firstFloatValue(m map[string]interface{}, keys ...string) float64 {
 		}
 	}
 	return 0
+}
+
+func firstOptionalFloatValue(m map[string]interface{}, keys ...string) (float64, bool) {
+	for _, key := range keys {
+		raw, exists := m[key]
+		if !exists || raw == nil {
+			continue
+		}
+		value, err := toFloat(raw)
+		if err == nil {
+			return value, true
+		}
+	}
+	return 0, false
+}
+
+func hasUsableCoordinates(lat, lon float64) bool {
+	return !(lat == 0 && lon == 0)
 }
 
 func getIntValue(m map[string]interface{}, key string) int {

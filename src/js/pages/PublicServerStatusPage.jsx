@@ -6,7 +6,6 @@ import { AlertTriangle, Globe, RefreshCw, Server, Shield } from '../components/I
 import CountryFlag from '../components/CountryFlag.jsx';
 import ServerLocationMap from '../components/server/ServerLocationMap.jsx';
 import { useCloudflareSpotlight } from '../hooks/useCloudflareSpotlight.js';
-import { resolveServerDisplayStatus } from '../modules/serverRealtime.js';
 import { FLOW_UNIT_BADGE_CLASS, getFlowUnitClassName } from '../modules/flowUnits.js';
 import { TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import * as echarts from 'echarts/core';
@@ -87,6 +86,12 @@ const firstText = (source, keys, fallback = '') => {
   return fallback;
 };
 
+const cleanCountryDisplayCode = (value) => {
+  const text = String(value || '').trim();
+  if (!text || text.toLowerCase() === 'auto') return '';
+  return text;
+};
+
 const mergeRealtimeMetrics = (server, metrics, timestamp) => {
   const network = metrics?.network && typeof metrics.network === 'object' ? metrics.network : {};
   const docker = metrics?.docker && typeof metrics.docker === 'object' ? metrics.docker : {};
@@ -107,9 +112,9 @@ const mergeRealtimeMetrics = (server, metrics, timestamp) => {
     ...server,
     status: 'online',
     online: true,
-    location: firstText(metrics, ['location', 'resolved_country', 'country_code', 'country'], server.location),
+    location: firstText(metrics, ['location', 'resolved_country', 'region'], server.location),
     region: firstText(metrics, ['region'], server.region),
-    countryCode: firstText(metrics, ['country_code', 'country'], server.countryCode),
+    countryCode: cleanCountryDisplayCode(firstText(metrics, ['country_code', 'country'], server.countryCode)),
     latitude: firstNumber(metrics, ['lat', 'latitude'], server.latitude),
     longitude: firstNumber(metrics, ['lon', 'longitude'], server.longitude),
     platform: firstText(metrics, ['platform', 'os'], server.platform),
@@ -196,8 +201,8 @@ const inferCountryCodeFromLocation = (value) => {
 };
 
 const getFlagCountry = (server) => (
-  server.countryCode ||
-  server.country_code ||
+  cleanCountryDisplayCode(server.countryCode) ||
+  cleanCountryDisplayCode(server.country_code) ||
   inferCountryCodeFromLocation(server.location) ||
   inferCountryCodeFromLocation(server.region) ||
   inferCountryCodeFromLocation(server.resolved_country) ||
@@ -675,9 +680,7 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
               <ServerLocationMap
                 echarts={echarts}
                 servers={servers}
-                resolveStatus={(server) => resolveServerDisplayStatus(server).state}
-                title="主机地图"
-                subtitle="状态页主机地理分布"
+                resolveStatus={(server) => (server?.online ? 'online' : 'offline')}
                 height="calc(100vh - 160px)"
               />
             ) : (

@@ -61,6 +61,7 @@ if (!(Test-Path $INSTALL_DIR)) {
 $AGENT_URL = "$AGENT_DOWNLOAD_BASE_URL/agent-windows-amd64.exe"
 $AGENT_PATH = "$INSTALL_DIR\api-monitor-agent.exe"
 $TEMP_AGENT_PATH = "$INSTALL_DIR\api-monitor-agent.exe.download"
+$CONFIG_PATH = "$INSTALL_DIR\config.json"
 
 Write-Host "Downloading Agent..."
 
@@ -88,6 +89,11 @@ if (Test-Path $TEMP_AGENT_PATH) {
     Remove-Item -Path $TEMP_AGENT_PATH -Force -ErrorAction SilentlyContinue
 }
 
+if (Test-Path $CONFIG_PATH) {
+    Write-Host "Removing old Agent config..."
+    Remove-Item -Path $CONFIG_PATH -Force -ErrorAction SilentlyContinue
+}
+
 try {
     [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
     Invoke-WebRequest -Uri $AGENT_URL -OutFile $TEMP_AGENT_PATH -UseBasicParsing
@@ -113,6 +119,19 @@ WshShell.Run """$AGENT_PATH"" -s ""$SERVER_URL"" --id ""$SERVER_ID"" -k ""$AGENT
 "@
 
 Set-Content -Path $VBS_PATH -Value $VBS_CONTENT -Encoding ASCII
+
+Write-Host "Writing Agent config..."
+$CONFIG_CONTENT = @"
+{
+  "agentKey": "$AGENT_KEY",
+  "debug": false,
+  "reportInterval": 1500,
+  "serverId": "$SERVER_ID",
+  "serverUrl": "$SERVER_URL"
+}
+"@
+
+Set-Content -Path $CONFIG_PATH -Value $CONFIG_CONTENT -Encoding ASCII
 
 Write-Host "Configuring startup..."
 $REG_PATH = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"

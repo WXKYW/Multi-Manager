@@ -1004,6 +1004,84 @@ func TestServerDetailResolvesCountryFromCachedAgentMetadata(t *testing.T) {
 	}
 }
 
+func TestAgentHeartbeatPreservesCachedLocationMetadata(t *testing.T) {
+	service, db := testService(t)
+	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, cached_info) VALUES ('server-geo', 'geo', '127.0.0.1', 'root', 'password', '{"country_code":"us","location":"San Jose, California, US","latitude":37.33939,"longitude":-121.89496,"platform":"Windows"}')`)
+	if err != nil {
+		t.Fatalf("insert account: %v", err)
+	}
+	_, err = db.ExecContext(context.Background(), `INSERT OR REPLACE INTO system_config (key, value, updated_at) VALUES ('global_agent_key', 'good-key', datetime('now'))`)
+	if err != nil {
+		t.Fatalf("insert key: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/server/agent/heartbeat", strings.NewReader(`{"server_id":"server-geo","status":"online","info":{"cpu":18,"country_code":"","location":""}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer good-key")
+	res := httptest.NewRecorder()
+	service.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("heartbeat status=%d body=%s", res.Code, res.Body.String())
+	}
+
+	var cached string
+	if err := db.QueryRowContext(context.Background(), `SELECT COALESCE(cached_info, '{}') FROM server_accounts WHERE id = 'server-geo'`).Scan(&cached); err != nil {
+		t.Fatalf("read cached info: %v", err)
+	}
+	var info map[string]interface{}
+	if err := json.Unmarshal([]byte(cached), &info); err != nil {
+		t.Fatalf("decode cached info: %v", err)
+	}
+	if info["country_code"] != "us" || info["location"] != "San Jose, California, US" {
+		t.Fatalf("expected heartbeat to preserve location metadata, info=%#v", info)
+	}
+	if info["latitude"] != 37.33939 || info["longitude"] != -121.89496 {
+		t.Fatalf("expected heartbeat to preserve coordinates, info=%#v", info)
+	}
+	if info["cpu"] != float64(18) {
+		t.Fatalf("expected heartbeat metrics to update, info=%#v", info)
+	}
+}
+
+func TestRealtimeMetricsPersistPreservesCachedLocationMetadata(t *testing.T) {
+	service, db := testService(t)
+	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, cached_info) VALUES ('server-geo', 'geo', '127.0.0.1', 'root', 'password', '{"country_code":"us","country":"US","location":"San Jose, California, US","latitude":37.33939,"longitude":-121.89496,"geo_source":"ipcheck-agent"}')`)
+	if err != nil {
+		t.Fatalf("insert account: %v", err)
+	}
+	service.registry.Register("server-geo", &taskReplySocket{t: t, service: service, reply: func(taskType int, data string) string {
+		return ""
+	}})
+
+	metrics := map[string]interface{}{
+		"cpu":         12.5,
+		"mem_used":    float64(512 * 1024 * 1024),
+		"mem_total":   float64(1024 * 1024 * 1024),
+		"disk_used":   float64(10 * 1024 * 1024),
+		"disk_total":  float64(20 * 1024 * 1024),
+		"uptime":      float64(60),
+		"server_id":   "server-geo",
+		"countryCode": "",
+	}
+
+	merged := service.mergeCachedLocationFieldsFromDB(context.Background(), db, "server-geo", metrics)
+	if merged["country_code"] != "us" || merged["country"] != "US" || merged["location"] != "San Jose, California, US" {
+		t.Fatalf("expected realtime metrics to preserve cached location, merged=%#v", merged)
+	}
+	if merged["latitude"] != 37.33939 || merged["longitude"] != -121.89496 {
+		t.Fatalf("expected realtime metrics to preserve coordinates, merged=%#v", merged)
+	}
+
+	conn, ok := service.registry.Get("server-geo")
+	if !ok {
+		t.Fatal("expected registered agent")
+	}
+	metadata := conn.GetMetadata()
+	if metadata["country_code"] != "us" || metadata["location"] != "San Jose, California, US" {
+		t.Fatalf("expected preserved location in connection metadata, metadata=%#v", metadata)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -1034,9 +1112,27 @@ func TestListAccountsDoesNotResolveMissingLocationAutomatically(t *testing.T) {
 	if value, _ := account["resolved_country"].(string); value != "" {
 		t.Fatalf("resolved_country = %#v", account["resolved_country"])
 	}
+	if value, _ := account["countryCode"].(string); value != "" {
+		t.Fatalf("countryCode should not expose auto country: %#v", account)
+	}
+	if value, _ := account["location"].(string); value == "auto" {
+		t.Fatalf("location should not expose auto country: %#v", account)
+	}
 	info := account["info"].(map[string]interface{})
 	if info["country_code"] != "" || info["location"] != "" {
 		t.Fatalf("expected empty cached location info, info=%#v", info)
+	}
+	if _, ok := account["latitude"]; ok {
+		t.Fatalf("account should not expose missing latitude as zero: %#v", account)
+	}
+	if _, ok := account["longitude"]; ok {
+		t.Fatalf("account should not expose missing longitude as zero: %#v", account)
+	}
+	if _, ok := info["latitude"]; ok {
+		t.Fatalf("info should not expose missing latitude as zero: %#v", info)
+	}
+	if _, ok := info["longitude"]; ok {
+		t.Fatalf("info should not expose missing longitude as zero: %#v", info)
 	}
 }
 
@@ -1084,6 +1180,74 @@ ASN: AS31898`
 	if info["country_code"] != "us" || info["location"] != "San Jose, California, US" {
 		t.Fatalf("expected ipcheck location in info, info=%#v", info)
 	}
+	if account["countryCode"] != "us" || account["location"] != "San Jose, California, US" {
+		t.Fatalf("expected location fields on account, account=%#v", account)
+	}
+	if account["latitude"] != 37.33939 || account["longitude"] != -121.89496 {
+		t.Fatalf("expected coordinates on account, account=%#v", account)
+	}
+}
+
+func TestInitialAgentConnectRefreshesMissingLocationOnce(t *testing.T) {
+	service, db := testService(t)
+	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, tags, country, cached_info) VALUES ('server-ip', 'edge', '185.255.55.55', 'root', 'password', '[]', 'auto', '{}')`)
+	if err != nil {
+		t.Fatalf("insert account: %v", err)
+	}
+
+	calls := 0
+	service.registry.Register("server-ip", &taskReplySocket{t: t, service: service, reply: func(taskType int, data string) string {
+		calls++
+		if taskType != 1 {
+			t.Fatalf("task type = %d, want 1", taskType)
+		}
+		if !strings.Contains(data, "curl -fsSL https://64.ipcheck.ing/geo") {
+			t.Fatalf("unexpected command: %s", data)
+		}
+		return `IP: 64.181.246.5
+City: San Jose
+Region: California
+Country: US
+Latitude: 37.33939
+Longitude: -121.89496
+Org: Oracle Corporation
+Timezone: America/Los_Angeles
+ASN: AS31898`
+	}})
+
+	service.refreshAccountLocationFromAgentIfMissing("server-ip")
+
+	if calls != 1 {
+		t.Fatalf("initial refresh calls = %d, want 1", calls)
+	}
+	var cached string
+	if err := db.QueryRowContext(context.Background(), `SELECT COALESCE(cached_info, '{}') FROM server_accounts WHERE id = 'server-ip'`).Scan(&cached); err != nil {
+		t.Fatalf("read cached info: %v", err)
+	}
+	var info map[string]interface{}
+	if err := json.Unmarshal([]byte(cached), &info); err != nil {
+		t.Fatalf("decode cached info: %v", err)
+	}
+	if info["country_code"] != "us" || info["location"] != "San Jose, California, US" {
+		t.Fatalf("expected initial refresh location, info=%#v", info)
+	}
+	if info["latitude"] != 37.33939 || info["longitude"] != -121.89496 {
+		t.Fatalf("expected initial refresh coordinates, info=%#v", info)
+	}
+}
+
+func TestInitialAgentConnectSkipsCachedLocation(t *testing.T) {
+	service, db := testService(t)
+	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, tags, cached_info) VALUES ('server-ip', 'edge', '185.255.55.55', 'root', 'password', '[]', '{"country_code":"us","location":"San Jose, California, US","latitude":37.33939,"longitude":-121.89496}')`)
+	if err != nil {
+		t.Fatalf("insert account: %v", err)
+	}
+	service.registry.Register("server-ip", &taskReplySocket{t: t, service: service, reply: func(taskType int, data string) string {
+		t.Fatalf("initial refresh should not run when location is cached: type=%d data=%s", taskType, data)
+		return ""
+	}})
+
+	service.refreshAccountLocationFromAgentIfMissing("server-ip")
 }
 
 func TestNetworkQualityCollectAndReadback(t *testing.T) {
@@ -1506,6 +1670,12 @@ func TestAgentQuickInstallCreatesHostFromName(t *testing.T) {
 	}
 	if !strings.Contains(resWin.Body.String(), `$TEMP_AGENT_PATH = "$INSTALL_DIR\api-monitor-agent.exe.download"`) {
 		t.Fatalf("windows install script should use a temp download path: %s", resWin.Body.String())
+	}
+	if !strings.Contains(resWin.Body.String(), `$CONFIG_PATH = "$INSTALL_DIR\config.json"`) ||
+		!strings.Contains(resWin.Body.String(), `Remove-Item -Path $CONFIG_PATH -Force`) ||
+		!strings.Contains(resWin.Body.String(), `"serverUrl": "$SERVER_URL"`) ||
+		!strings.Contains(resWin.Body.String(), `"serverId": "$SERVER_ID"`) {
+		t.Fatalf("windows install script should replace stale agent config: %s", resWin.Body.String())
 	}
 	if !strings.Contains(resWin.Body.String(), `Move-Item -Path $TEMP_AGENT_PATH -Destination $AGENT_PATH -Force`) {
 		t.Fatalf("windows install script should atomically replace the agent binary: %s", resWin.Body.String())

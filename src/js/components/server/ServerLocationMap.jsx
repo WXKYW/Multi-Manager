@@ -94,6 +94,7 @@ const getServerCoordinates = (server) => {
   const lat = firstNumber(server?.latitude, server?.lat, info.latitude, info.lat, system.latitude, system.lat);
   const lon = firstNumber(server?.longitude, server?.lon, info.longitude, info.lon, system.longitude, system.lon);
   if (lat !== null && lon !== null) {
+    if (lat === 0 && lon === 0) return null;
     if (Math.abs(lat) > 90 && Math.abs(lon) <= 90) return { lat: lon, lon: lat };
     return { lat, lon };
   }
@@ -104,15 +105,24 @@ const STATUS_PRIORITY = ['interrupted', 'degraded', 'warning', 'offline', 'onlin
 
 const getGroupStatus = (items) => STATUS_PRIORITY.find((status) => items.some((item) => item.status === status)) || 'offline';
 
+const cleanAutoText = (value) => {
+  const text = String(value || '').trim();
+  if (!text || text.toLowerCase() === 'auto') return '';
+  return text;
+};
+
 const getLocationLabel = (items) => {
   const first = items[0] || {};
   const info = first.info || {};
-  return first.location
-    || first.region
-    || first.country
-    || info.location
-    || info.region
-    || info.country
+  return cleanAutoText(first.location)
+    || cleanAutoText(first.region)
+    || cleanAutoText(first.countryCode)
+    || cleanAutoText(first.country)
+    || cleanAutoText(info.location)
+    || cleanAutoText(info.region)
+    || cleanAutoText(info.countryCode)
+    || cleanAutoText(info.country_code)
+    || cleanAutoText(info.country)
     || `${first.lat.toFixed(2)}, ${first.lon.toFixed(2)}`;
 };
 
@@ -165,14 +175,16 @@ function ServerLocationMap({
       .map((server) => {
         const coordinates = getServerCoordinates(server);
         if (!coordinates) return null;
+        const info = server?.info || {};
         const status = resolveStatus ? resolveStatus(server) : (server?.online ? 'online' : 'offline');
         return {
           id: server?.id,
           name: server?.name || server?.host || server?.id || '主机',
           host: server?.host || '',
-          location: server?.location || server?.resolved_country || info.location || info.region || '',
-          region: server?.region || info.region || '',
-          country: server?.country || server?.countryCode || server?.country_code || info.country || info.country_code || '',
+          location: cleanAutoText(server?.location) || cleanAutoText(server?.resolved_country) || cleanAutoText(info.location) || cleanAutoText(info.region),
+          region: cleanAutoText(server?.region) || cleanAutoText(info.region),
+          countryCode: cleanAutoText(server?.countryCode) || cleanAutoText(server?.country_code) || cleanAutoText(info.countryCode) || cleanAutoText(info.country_code),
+          country: cleanAutoText(server?.country) || cleanAutoText(info.country),
           status,
           value: 1,
           ...coordinates,
@@ -196,7 +208,7 @@ function ServerLocationMap({
       return {
         ...first,
         id: group.map((item) => item.id).filter(Boolean).join(',') || first.id,
-        name: group.length > 1 ? getLocationLabel(group) : first.name,
+        name: getLocationLabel(group),
         status,
         value: group.length,
         servers: group,

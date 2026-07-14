@@ -496,7 +496,7 @@ func (s *Service) handleAgentHeartbeat(w http.ResponseWriter, r *http.Request, d
 		_ = json.Unmarshal([]byte(existingCachedInfo), &existingInfo)
 	}
 	for key, value := range existingInfo {
-		if _, exists := req.Info[key]; !exists {
+		if current, exists := req.Info[key]; !exists || isEmptyHeartbeatInfoValue(current) {
 			req.Info[key] = value
 		}
 	}
@@ -544,6 +544,16 @@ func (s *Service) handleAgentHeartbeat(w http.ResponseWriter, r *http.Request, d
 		"success": true,
 		"message": "Heartbeat received",
 	})
+}
+
+func isEmptyHeartbeatInfoValue(value interface{}) bool {
+	if value == nil {
+		return true
+	}
+	if text, ok := value.(string); ok {
+		return strings.TrimSpace(text) == ""
+	}
+	return false
 }
 
 // getAgentStatus 获取 Agent 状态
