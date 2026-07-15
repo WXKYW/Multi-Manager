@@ -153,6 +153,10 @@ func Routes() []Route {
 		{Prefix: "/api/m365", Module: "m365", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Microsoft 365 tenant, users, groups, licenses, and usage reports"},
 		{Prefix: "/api/koyeb", Module: "koyeb", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Koyeb accounts and services"},
 		{Prefix: "/api/flyio", Module: "flyio", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Fly.io accounts, apps, and machines"},
+		{Prefix: "/api/github/webhook/{repositoryId}", Module: "github-webhook", Owner: OwnerGo, Auth: AuthPublic, ResponseMode: ResponseJSON, Description: "GitHub webhook receiver", MatchMode: MatchPattern},
+		{Prefix: "/api/github/webhook", Module: "github-webhook", Owner: OwnerGo, Auth: AuthPublic, ResponseMode: ResponseJSON, Description: "GitHub webhook receiver by repository payload", MatchMode: MatchExact},
+		{Prefix: "/api/github/events/stream", Module: "github-events", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseStream, Description: "GitHub realtime event stream", MatchMode: MatchExact},
+		{Prefix: "/api/github", Module: "github", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "GitHub repository observability and Actions operations"},
 
 		{Prefix: "/api/openai", Module: "openai", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "OpenAI endpoint manager and proxy"},
 		{Prefix: "/api/subscription", Module: "subscription", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Subscription distribution, nodes, templates, logs, and settings"},

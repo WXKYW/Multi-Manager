@@ -258,6 +258,7 @@ export const AlibabaCloudBrand = createFontIcon('si si-alibabacloud', 'AlibabaCl
 export const TencentCloudBrand = createAssetIcon(tencentCloudIcon, 'TencentCloud');
 export const KoyebBrand = createFontIcon('si si-koyeb', 'Koyeb');
 export const FlyIoBrand = createFontIcon('si si-flydotio', 'Fly.io');
+export const GitHubBrand = createFontIcon('si si-github', 'GitHub');
 
 export const MODULE_ICON_MAP = {
   dashboard: LayoutDashboard,
@@ -270,6 +271,7 @@ export const MODULE_ICON_MAP = {
   tencent: TencentCloudBrand,
   oracle: Cloud,
   m365: Cloud,
+  github: GitHubBrand,
   server: Server,
   scheduler: Clock,
   totp: ShieldCheck,
@@ -284,6 +286,7 @@ export const MODULE_GROUP_ICON_MAP = {
   overview: LayoutDashboard,
   'api-gateway': TrendingUp,
   infrastructure: Layers,
+  devops: GitBranch,
   toolbox: Grid,
   system: Settings,
 };

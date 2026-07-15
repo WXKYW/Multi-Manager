@@ -65,6 +65,12 @@ export const MODULE_CONFIG = {
     icon: 'fa-clock',
     description: '定时任务管理',
   },
+  github: {
+    name: 'GitHub',
+    shortName: 'GitHub',
+    icon: 'fa-github',
+    description: '仓库观察、Actions 活动、趋势和 DevOps 通知',
+  },
   tencent: {
     name: '腾讯云',
     shortName: '腾讯',
@@ -140,6 +146,11 @@ export const MODULE_GROUPS = [
         id: 'cloud-vendors',
         name: '云厂商',
         modules: ['aliyun', 'tencent', 'oracle', 'm365'],
+      },
+      {
+        id: 'devops',
+        name: 'DevOps',
+        modules: ['github'],
       },
     ],
     trailingModules: ['server'],

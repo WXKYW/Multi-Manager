@@ -19,6 +19,7 @@ import (
 	"github.com/iwvw/api-monitor/backend-go/internal/cronjobs"
 	"github.com/iwvw/api-monitor/backend-go/internal/filebox"
 	"github.com/iwvw/api-monitor/backend-go/internal/flyio"
+	githubmodule "github.com/iwvw/api-monitor/backend-go/internal/github"
 	"github.com/iwvw/api-monitor/backend-go/internal/koyeb"
 	"github.com/iwvw/api-monitor/backend-go/internal/m365"
 	"github.com/iwvw/api-monitor/backend-go/internal/manifest"
@@ -48,6 +49,7 @@ type Server struct {
 	uptime   *uptime.Service
 	koyeb    *koyeb.Service
 	flyio    *flyio.Service
+	github   *githubmodule.Service
 	aliyun   *aliyun.Service
 	tencent  *tencent.Service
 	oracle   *oracle.Service
@@ -73,6 +75,8 @@ func NewServer(cfg config.Config) *Server {
 	cronService.SetAgentRunner(serverAgentService)
 	uptimeService := uptime.New(cfg, authService, notifyService)
 	uptimeService.SetHeartbeatBroadcaster(serverAgentService.BroadcastUptimeHeartbeat)
+	githubService := githubmodule.New(cfg)
+	githubService.SetNotifier(notifyService)
 	systemService := systemmetrics.New(cfg)
 	systemService.SetNotifier(notifyService)
 	backupService := backup.New(cfg)
@@ -89,6 +93,7 @@ func NewServer(cfg config.Config) *Server {
 		uptime:   uptimeService,
 		koyeb:    koyeb.New(cfg),
 		flyio:    flyio.New(cfg),
+		github:   githubService,
 		aliyun:   aliyun.New(cfg),
 		tencent:  tencent.New(cfg),
 		oracle:   oracle.New(cfg),
@@ -110,6 +115,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	if s.system != nil {
 		s.system.Shutdown()
+	}
+	if s.github != nil {
+		s.github.Stop()
 	}
 	if s.cron == nil {
 		return nil
@@ -277,6 +285,8 @@ func (s *Server) serveGoRoute(w http.ResponseWriter, r *http.Request, route mani
 		s.koyeb.ServeHTTP(w, r)
 	case "/api/flyio":
 		s.flyio.ServeHTTP(w, r)
+	case "/api/github", "/api/github/webhook/{repositoryId}", "/api/github/webhook", "/api/github/events/stream":
+		s.github.ServeHTTP(w, r)
 	case "/api/aliyun":
 		s.aliyun.ServeHTTP(w, r)
 	case "/api/tencent":
@@ -306,6 +316,10 @@ func (s *Server) serveGoRoute(w http.ResponseWriter, r *http.Request, route mani
 		}
 		if strings.HasPrefix(route.Prefix, "/api/server/") {
 			s.server.ServeHTTP(w, r)
+			return
+		}
+		if strings.HasPrefix(route.Prefix, "/api/github") {
+			s.github.ServeHTTP(w, r)
 			return
 		}
 		response.Error(w, http.StatusNotFound, "go route not implemented: "+route.Prefix)

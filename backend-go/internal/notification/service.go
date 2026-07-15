@@ -1498,6 +1498,7 @@ func eventCatalog() []map[string]interface{} {
 		{"module": "server", "events": []string{"offline", "online", "interrupted", "degraded", "cpu_high", "memory_high", "disk_high", "traffic_high", "traffic_normal"}},
 		{"module": "system", "events": []string{"database.backup", "database.import", "log.cleanup", "migration.failed", "cpu_high", "memory_high", "disk_high"}},
 		{"module": "filebox", "events": []string{"resource.created", "resource.deleted", "cleanup"}},
+		{"module": "github", "events": []string{"action_failed", "action_recovered", "release_published", "star_spike", "issue_opened", "pull_request_opened", "repository_unreachable", "token_invalid", "rate_limit_low", "webhook_delivery_failed", "webhook_ping"}},
 		{"module": "totp", "events": []string{"resource.created", "resource.updated", "resource.deleted", "security.revealed", "backup.imported", "backup.exported"}},
 	}
 }

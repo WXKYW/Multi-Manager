@@ -23,6 +23,7 @@ import {
   Sun,
   Moon,
   Settings,
+  MODULE_GROUP_ICON_MAP,
   getModuleIconComponent,
 } from './Icons.jsx';
 
@@ -34,6 +35,7 @@ const UptimePage = lazy(() => import('../pages/UptimePage.jsx'));
 const NotificationPage = lazy(() => import('../pages/NotificationPage.jsx'));
 const OpenAIPage = lazy(() => import('../pages/OpenAIPage.jsx'));
 const SubscriptionPage = lazy(() => import('../pages/SubscriptionPage.jsx'));
+const GitHubPage = lazy(() => import('../pages/GitHubPage.jsx'));
 
 
 const PaasPage = lazy(() => import('../pages/PaasPage.jsx'));
@@ -244,7 +246,7 @@ const SidebarModuleSubButton = ({ module, active, onNavigate }) => {
 const SidebarModuleSubgroup = ({ subgroup, activeModule, onNavigate }) => {
   const subgroupModules = subgroup.modules || [];
   const active = subgroupModules.includes(activeModule);
-  const ParentIcon = subgroup.icon || Globe;
+  const ParentIcon = subgroup.icon || MODULE_GROUP_ICON_MAP[subgroup.id] || Globe;
   const quietTriggerClassName = [
     '!bg-transparent',
     '!shadow-none',
@@ -586,6 +588,8 @@ function MainLayout() {
         return <UptimePage />;
       case 'notification':
         return <NotificationPage />;
+      case 'github':
+        return <GitHubPage />;
       case 'settings':
         return <SettingsPage />;
       case 'scheduler':

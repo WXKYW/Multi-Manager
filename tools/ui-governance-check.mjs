@@ -59,15 +59,25 @@ function noteAllowed(rel, lineNumber, value, reason) {
   allowedExceptions.push(`${rel}:${lineNumber} ${value} (${reason})`);
 }
 
-function isAllowedRawControl(tag, line) {
+function isAllowedRawControl(tag, line, lines, index) {
+  const block = lines.slice(index, Math.min(lines.length, index + 8)).join(' ');
+  if (tag === 'textarea' && /\bapp-code-editor-input\b/.test(block)) {
+    return 'code editor transparent textarea overlay';
+  }
   if (tag !== 'input') return null;
-  if (/type=["']file["']/.test(line) && /\b(hidden|sr-only)\b/.test(line)) {
+  if (/type=["']file["']/.test(block) && /\b(hidden|sr-only)\b/.test(block)) {
     return 'hidden native file picker';
   }
   return null;
 }
 
 function allowedColorReason(rel, line, value) {
+  if (rel === 'src/js/modules/pwa.js' && value.startsWith('#')) {
+    return 'browser titlebar theme-color metadata';
+  }
+  if (rel === 'src/css/app.css' && line.includes('--app-main-bg')) {
+    return 'app canvas color-mix fallback';
+  }
   if (rel === 'src/js/components/ui/BrandIcon.jsx' && value.startsWith('#')) {
     return 'external brand identity color';
   }
@@ -92,6 +102,9 @@ function allowedColorReason(rel, line, value) {
   if (rel === 'src/js/pages/TotpPage.jsx' && value === 'bg-black') {
     return 'camera/QR scanner surface';
   }
+  if (rel === 'src/js/pages/TotpPage.jsx' && value.startsWith('#')) {
+    return 'TOTP brand/icon color value example or fallback';
+  }
   if (rel === 'src/js/pages/DnsPage.jsx' && (value === 'bg-black' || value === 'bg-white')) {
     return 'media preview surface';
   }
@@ -107,7 +120,7 @@ function scanFile(rel) {
     const lineNumber = index + 1;
 
     for (const match of line.matchAll(rawControlRe)) {
-      const reason = isAllowedRawControl(match[1], line);
+      const reason = isAllowedRawControl(match[1], line, lines, index);
       if (reason) {
         noteAllowed(rel, lineNumber, match[0], reason);
       } else {
