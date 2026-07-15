@@ -35,6 +35,7 @@ export default defineConfig(({ mode }) => {
   return {
     root: 'src',
     base: '/',
+    publicDir: path.resolve(__dirname, './src/pwa-public'),
     customLogger: createDevLogger(),
     plugins: [
       react(),

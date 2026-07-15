@@ -5,6 +5,11 @@
 /* ==================== Base Resets ==================== */
 html {
   font-size: 16px;
+  min-height: 100%;
+  min-height: 100dvh;
+  background: var(--app-main-bg);
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 :root {
@@ -27,10 +32,15 @@ html {
 }
 
 body {
+  min-height: 100%;
+  min-height: 100dvh;
+  margin: 0;
   background: var(--app-main-bg);
   color: var(--text-color-kumo-default);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+  touch-action: manipulation;
 }
 
 :root[data-mode='dark'] body {
@@ -328,10 +338,17 @@ th > button[aria-label='Resize column'] > span {
 }
 
 .app-main-shell {
+  height: 100dvh;
+  min-height: 100dvh;
   background: var(--app-main-bg);
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
 }
 
 .app-main-panel {
+  min-width: 0;
   background: var(--color-kumo-overlay);
 }
 
@@ -341,6 +358,41 @@ th > button[aria-label='Resize column'] > span {
 
 .app-main-footer {
   background-color: var(--app-main-surface);
+}
+
+:root[data-display-mode='standalone'] body {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+:root[data-display-mode='standalone'] input,
+:root[data-display-mode='standalone'] textarea,
+:root[data-display-mode='standalone'] [contenteditable='true'],
+:root[data-display-mode='standalone'] [role='textbox'] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+:root[data-display-mode='standalone'] .app-main-topbar {
+  -webkit-app-region: drag;
+}
+
+:root[data-display-mode='standalone'] button,
+:root[data-display-mode='standalone'] a,
+:root[data-display-mode='standalone'] input,
+:root[data-display-mode='standalone'] select,
+:root[data-display-mode='standalone'] textarea,
+:root[data-display-mode='standalone'] [role='button'],
+:root[data-display-mode='standalone'] [role='menuitem'],
+:root[data-display-mode='standalone'] [role='tab'] {
+  -webkit-app-region: no-drag;
+}
+
+@supports (top: env(titlebar-area-height)) {
+  :root[data-display-mode='standalone'] .app-main-topbar {
+    min-height: max(58px, env(titlebar-area-height, 0px));
+    padding-top: env(titlebar-area-y, 0px);
+  }
 }
 
 .app-layer-frame {
