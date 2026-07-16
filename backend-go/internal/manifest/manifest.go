@@ -193,6 +193,9 @@ func Routes() []Route {
 		{Prefix: "/api/server/agent/batch/{id}", Module: "server-agent", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Agent batch task status", MatchMode: MatchPattern},
 		{Prefix: "/api/server/agent/connection-info/{id}", Module: "server-agent", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Agent connection status info", MatchMode: MatchPattern},
 		{Prefix: "/api/server/agent/uninstall/{id}", Module: "server-agent", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Agent uninstall", MatchMode: MatchPattern},
+		{Prefix: "/api/server/remote-desktop/sessions/{id}/signals", Module: "server-remote-desktop", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Remote desktop WebRTC signaling", MatchMode: MatchPattern},
+		{Prefix: "/api/server/remote-desktop/sessions/{id}", Module: "server-remote-desktop", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Remote desktop session", MatchMode: MatchPattern},
+		{Prefix: "/api/server/remote-desktop/sessions", Module: "server-remote-desktop", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Create remote desktop session", MatchMode: MatchExact},
 
 		{Prefix: "/api/server/monitor/status", Module: "server-monitor", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Monitor status", MatchMode: MatchExact},
 		{Prefix: "/api/server/monitor/collect", Module: "server-monitor", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Trigger metrics collection", MatchMode: MatchExact},

@@ -64,6 +64,9 @@ function isAllowedRawControl(tag, line, lines, index) {
   if (tag === 'textarea' && /\bapp-code-editor-input\b/.test(block)) {
     return 'code editor transparent textarea overlay';
   }
+  if (tag === 'textarea' && /\bremote-system-keyboard-input\b/.test(block)) {
+    return 'hidden native mobile system-keyboard bridge';
+  }
   if (tag !== 'input') return null;
   if (/type=["']file["']/.test(block) && /\b(hidden|sr-only)\b/.test(block)) {
     return 'hidden native file picker';

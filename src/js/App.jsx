@@ -9,6 +9,7 @@ const PublicStatusPage = lazy(() => import('./pages/PublicStatusPage.jsx'));
 const PublicServerStatusPage = lazy(() => import('./pages/PublicServerStatusPage.jsx'));
 const PublicGitHubPage = lazy(() => import('./pages/PublicGitHubPage.jsx'));
 const VoidRoomPage = lazy(() => import('./pages/VoidRoomPage.jsx'));
+const RemoteDesktopPage = lazy(() => import('./pages/RemoteDesktopPage.jsx'));
 
 const isLocalHost = (host) => /^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(host || '');
 
@@ -50,6 +51,7 @@ function App() {
   const publicFileboxRouteMode = getPublicFileboxRouteMode();
   const publicM365RegisterRoute = isPublicM365RegisterRoute();
   const dockerMockPreview = isDockerMockPreviewRoute();
+  const remoteDesktopRoute = /^\/remote-desktop\/[^/]+$/.test(window.location.pathname);
 
   // 挂载时自动运行初始身份校验
   useEffect(() => {
@@ -139,6 +141,9 @@ function App() {
   }
 
   if (isAuthenticated || dockerMockPreview) {
+    if (remoteDesktopRoute) {
+      return <Suspense fallback={null}><RemoteDesktopPage /></Suspense>;
+    }
     return <MainLayout />;
   }
 

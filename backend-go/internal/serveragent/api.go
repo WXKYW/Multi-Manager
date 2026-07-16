@@ -16,26 +16,27 @@ import (
 
 // ServerListItem 服务器列表项
 type ServerListItem struct {
-	ID              string                 `json:"id"`
-	Name            string                 `json:"name"`
-	Host            string                 `json:"host"`
-	Status          string                 `json:"status"`
-	Type            string                 `json:"type"`
-	Country         string                 `json:"country,omitempty"`
-	ResolvedCountry string                 `json:"resolved_country,omitempty"`
-	Location        string                 `json:"location,omitempty"`
-	Tags            []string               `json:"tags,omitempty"`
-	IsOnline        bool                   `json:"is_online"`
-	LastSeen        time.Time              `json:"last_seen,omitempty"`
-	CPU             float64                `json:"cpu,omitempty"`
-	Memory          float64                `json:"memory,omitempty"`
-	Disk            float64                `json:"disk,omitempty"`
-	NetworkRx       float64                `json:"network_rx,omitempty"`
-	NetworkTx       float64                `json:"network_tx,omitempty"`
-	Platform        string                 `json:"platform,omitempty"`
-	AgentVersion    string                 `json:"agent_version,omitempty"`
-	CreatedAt       time.Time              `json:"created_at"`
-	Info            map[string]interface{} `json:"info,omitempty"`
+	ID                string                 `json:"id"`
+	Name              string                 `json:"name"`
+	Host              string                 `json:"host"`
+	Status            string                 `json:"status"`
+	Type              string                 `json:"type"`
+	Country           string                 `json:"country,omitempty"`
+	ResolvedCountry   string                 `json:"resolved_country,omitempty"`
+	Location          string                 `json:"location,omitempty"`
+	Tags              []string               `json:"tags,omitempty"`
+	IsOnline          bool                   `json:"is_online"`
+	LastSeen          time.Time              `json:"last_seen,omitempty"`
+	CPU               float64                `json:"cpu,omitempty"`
+	Memory            float64                `json:"memory,omitempty"`
+	Disk              float64                `json:"disk,omitempty"`
+	NetworkRx         float64                `json:"network_rx,omitempty"`
+	NetworkTx         float64                `json:"network_tx,omitempty"`
+	Platform          string                 `json:"platform,omitempty"`
+	AgentVersion      string                 `json:"agent_version,omitempty"`
+	AgentCapabilities map[string]bool        `json:"agent_capabilities,omitempty"`
+	CreatedAt         time.Time              `json:"created_at"`
+	Info              map[string]interface{} `json:"info,omitempty"`
 }
 
 // ServerDetail 服务器详情
@@ -146,6 +147,7 @@ func (s *Service) HandleGetServers(w http.ResponseWriter, r *http.Request) {
 		conn, exists := s.engineIO.registry.Get(item.ID)
 		item.IsOnline = exists
 		if exists {
+			item.AgentCapabilities = conn.GetCapabilities()
 			item.Status = "online"
 		} else if item.Status == "online" {
 			item.Status = "offline"

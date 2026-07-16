@@ -44,6 +44,7 @@ type Service struct {
 	ptyHub                        *ptyDataHub
 	presence                      *agentPresenceManager
 	terminalBroker                *agentTerminalBroker
+	remoteDesktop                 *remoteDesktopManager
 	lastCollect                   time.Time
 	lastCollectMu                 sync.RWMutex
 	lastPersist                   map[string]time.Time
@@ -124,6 +125,7 @@ func New(cfg config.Config) *Service {
 		metricsHub:                    metricsHub,
 		ptyHub:                        ptyHub,
 		terminalBroker:                newAgentTerminalBroker(),
+		remoteDesktop:                 newRemoteDesktopManager(),
 		lastPersist:                   make(map[string]time.Time),
 		lastNetworkQualityPersist:     make(map[string]time.Time),
 		realtimePersistInterval:       resolveRealtimeMetricsPersistInterval(),
@@ -380,6 +382,8 @@ func New(cfg config.Config) *Service {
 						s.ptyHub.Publish("status:"+ptyStatus.ID, string(data))
 					}
 				}
+			case "agent:rd_signal":
+				s.handleRemoteDesktopAgentSignal(serverID, data)
 			case "agent:heartbeat":
 				// Agent 心跳
 				var hb struct {
@@ -971,6 +975,9 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Agent routes (Wave 5b)
 	case len(parts) >= 1 && parts[0] == "agent":
 		s.handleAgentRoutes(w, r, db, parts[1:])
+
+	case len(parts) >= 1 && parts[0] == "remote-desktop":
+		s.handleRemoteDesktopRoutes(w, r, parts[1:])
 
 	// Metrics routes (Wave 5b)
 	case len(parts) >= 1 && parts[0] == "metrics":
@@ -3504,6 +3511,9 @@ func (s *Service) buildAccountResponse(
 	}
 	res["agent_online"] = agentOnline
 	res["agent_connected"] = agentOnline
+	if agentOnline && conn != nil {
+		res["agent_capabilities"] = conn.GetCapabilities()
+	}
 	res["supports_metrics"] = agentOnline && health["state"] == "fresh"
 	res["metrics_health"] = health["state"]
 	res["metrics_stale"] = health["stale"]

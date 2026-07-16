@@ -1601,7 +1601,8 @@ func TestListAccountsUsesLiveAgentConnectionAsOnlineStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("insert account: %v", err)
 	}
-	service.registry.Register("live-agent", &taskReplySocket{t: t, service: service, reply: func(int, string) string { return "" }})
+	connection := service.registry.Register("live-agent", &taskReplySocket{t: t, service: service, reply: func(int, string) string { return "" }})
+	connection.UpdateCapabilities(map[string]bool{"remote_desktop_v1": true})
 
 	res := perform(service, http.MethodGet, "/api/server/accounts", "")
 	if res.Code != http.StatusOK {
@@ -1615,6 +1616,10 @@ func TestListAccountsUsesLiveAgentConnectionAsOnlineStatus(t *testing.T) {
 	server := list[0].(map[string]interface{})
 	if server["status"] != "online" || server["agent_online"] != true {
 		t.Fatalf("live agent should override stale offline db status: %#v", server)
+	}
+	agentCapabilities, ok := server["agent_capabilities"].(map[string]interface{})
+	if !ok || agentCapabilities["remote_desktop_v1"] != true {
+		t.Fatalf("live agent capabilities should be included in account list: %#v", server)
 	}
 }
 
@@ -1807,7 +1812,7 @@ func TestAgentQuickInstallCreatesHostFromName(t *testing.T) {
 	if !strings.Contains(resWin.Body.String(), `$AGENT_PATH = "$INSTALL_DIR\api-monitor-agent.exe"`) {
 		t.Fatalf("windows install script should use a valid agent path: %s", resWin.Body.String())
 	}
-	if !strings.Contains(resWin.Body.String(), `$TEMP_AGENT_PATH = "$INSTALL_DIR\api-monitor-agent.exe.download"`) {
+	if !strings.Contains(resWin.Body.String(), `$TEMP_AGENT_PATH = "$INSTALL_DIR\api-monitor-agent.download.exe"`) {
 		t.Fatalf("windows install script should use a temp download path: %s", resWin.Body.String())
 	}
 	if !strings.Contains(resWin.Body.String(), `$CONFIG_PATH = "$INSTALL_DIR\config.json"`) ||
@@ -1818,6 +1823,10 @@ func TestAgentQuickInstallCreatesHostFromName(t *testing.T) {
 	}
 	if !strings.Contains(resWin.Body.String(), `Move-Item -Path $TEMP_AGENT_PATH -Destination $AGENT_PATH -Force`) {
 		t.Fatalf("windows install script should atomically replace the agent binary: %s", resWin.Body.String())
+	}
+	if !strings.Contains(resWin.Body.String(), `$DOWNLOADED_VERSION = (& $TEMP_AGENT_PATH --version 2>&1 | Out-String).Trim()`) ||
+		!strings.Contains(resWin.Body.String(), `Agent download completed: $DOWNLOADED_VERSION`) {
+		t.Fatalf("windows install script should validate and report the downloaded agent version: %s", resWin.Body.String())
 	}
 	if strings.ContainsRune(resWin.Body.String(), '\a') {
 		t.Fatalf("windows install script should not contain bell characters: %q", resWin.Body.String())

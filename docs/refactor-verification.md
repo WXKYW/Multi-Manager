@@ -16,6 +16,7 @@ This file records allowed exceptions so future AI audits do not repeatedly flag 
 | Legacy ECharts colors | `src/js/pages/UptimePage.jsx` | Existing ECharts options contain raw theme colors. This is an accepted legacy exception for now. | When touching uptime charts, migrate toward Kumo `TimeseriesChart`, `Meter`, or `ChartPalette`. |
 | Map status/bubble colors | `src/js/components/server/ServerLocationMap.jsx` | ECharts maps require hardcoded hex values for data points/bubbles representing statuses. | Keep colors localized to map rendering or legend. |
 | Native file picker | Any page | Browser file selection can require a native hidden file input. | Keep the input hidden or screen-reader-only and trigger it from Kumo `Button` / `Input` UI. |
+| Remote system keyboard bridge | `src/js/pages/RemoteDesktopPage.jsx` | Mobile browsers require focus on a real native text control to open the OS keyboard and IME. | Keep the textarea hidden and expose it only through the visible Kumo `Button`; remote text still travels through the P2P control channel. |
 
 ## Verification Checklist
 

@@ -7,6 +7,7 @@ mod docker;
 mod file_manager;
 mod protocol;
 mod pty;
+mod remote_desktop;
 
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
@@ -28,9 +29,26 @@ use crate::docker::DockerBridge;
 use crate::file_manager::FileManager;
 use crate::protocol::*;
 use crate::pty::PtySession;
+use crate::remote_desktop::{
+    RemoteDesktopManager, SignalPayload as RemoteDesktopSignalPayload,
+    StartPayload as RemoteDesktopStartPayload, StopPayload as RemoteDesktopStopPayload,
+};
 use clap::Parser;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn agent_capabilities() -> Vec<String> {
+    let mut capabilities = vec![
+        "terminal_stream_v2".to_string(),
+        "self_update_v1".to_string(),
+    ];
+    #[cfg(target_os = "windows")]
+    {
+        capabilities.push("remote_desktop_v1".to_string());
+        capabilities.push("remote_desktop_video_v2".to_string());
+    }
+    capabilities
+}
 
 #[derive(Deserialize, Debug, Clone, Default)]
 struct UpgradePayload {
@@ -160,6 +178,7 @@ async fn main() {
     let docker_bridge = Arc::new(tokio::sync::Mutex::new(DockerBridge::new()));
     let pty_sessions = Arc::new(Mutex::new(HashMap::<String, Arc<PtySession>>::new()));
     let task_progress = Arc::new(Mutex::new(HashMap::<String, TaskProgress>::new()));
+    let remote_desktop = Arc::new(RemoteDesktopManager::new());
 
     // Keep dialing loop. A healthy long-lived connection resets the delay; only
     // repeated short failures back off to avoid hammering the control plane.
@@ -175,6 +194,7 @@ async fn main() {
             docker_bridge.clone(),
             pty_sessions.clone(),
             task_progress.clone(),
+            remote_desktop.clone(),
         )
         .await
         {
@@ -241,6 +261,7 @@ async fn run_client(
     docker_bridge: Arc<tokio::sync::Mutex<DockerBridge>>,
     pty_sessions: Arc<Mutex<HashMap<String, Arc<PtySession>>>>,
     task_progress: Arc<Mutex<HashMap<String, TaskProgress>>>,
+    remote_desktop: Arc<RemoteDesktopManager>,
 ) -> Result<(), String> {
     // 直接 WebSocket 连接（无需 polling handshake）
     let mut ws_url = if config.server_url.starts_with("https://") {
@@ -356,6 +377,7 @@ async fn run_client(
     let config_clone = config.clone();
     let network_targets_clone = network_targets.clone();
     let latest_network_quality_clone = latest_network_quality.clone();
+    let remote_desktop_clone = remote_desktop.clone();
 
     let mut read_task = tokio::spawn(async move {
         while let Some(res) = ws_reader.next().await {
@@ -564,6 +586,41 @@ async fn run_client(
                             .to_string();
                         eprintln!("[Agent] ❌ 认证失败: {}", reason);
                         std::process::exit(1);
+                    } else if event == EVENT_DASHBOARD_REMOTE_DESKTOP_START {
+                        if let Ok(payload) =
+                            serde_json::from_value::<RemoteDesktopStartPayload>(data)
+                        {
+                            let manager = remote_desktop_clone.clone();
+                            let outbound = tx_clone.clone();
+                            let session_id = payload.session_id.clone();
+                            if let Err(error) = manager.start(payload, outbound.clone()).await {
+                                let event = serde_json::json!({
+                                    "session_id": session_id,
+                                    "state": "error",
+                                    "signal": {"kind": "error", "message": error},
+                                });
+                                let _ = outbound
+                                    .send_normal(format_event(
+                                        EVENT_AGENT_REMOTE_DESKTOP_SIGNAL,
+                                        &event,
+                                    ))
+                                    .await;
+                            }
+                        }
+                    } else if event == EVENT_DASHBOARD_REMOTE_DESKTOP_SIGNAL {
+                        if let Ok(payload) =
+                            serde_json::from_value::<RemoteDesktopSignalPayload>(data)
+                        {
+                            let manager = remote_desktop_clone.clone();
+                            let _ = manager.signal(payload).await;
+                        }
+                    } else if event == EVENT_DASHBOARD_REMOTE_DESKTOP_STOP {
+                        if let Ok(payload) =
+                            serde_json::from_value::<RemoteDesktopStopPayload>(data)
+                        {
+                            let manager = remote_desktop_clone.clone();
+                            manager.stop(&payload.session_id).await;
+                        }
                     } else if event == EVENT_DASHBOARD_TASK {
                         if let Ok(task) = serde_json::from_value::<TaskPayload>(data) {
                             let tx_task = tx_clone.clone();
@@ -1094,10 +1151,7 @@ async fn run_client(
                             version: VERSION.to_string(),
                             platform: std::env::consts::OS.to_string(),
                             arch: normalized_agent_arch(),
-                            capabilities: vec![
-                                "terminal_stream_v2".to_string(),
-                                "self_update_v1".to_string(),
-                            ],
+                            capabilities: agent_capabilities(),
                         };
 
                         let msg = format_event(EVENT_AGENT_CONNECT, &auth);
@@ -1385,7 +1439,6 @@ try {{
     if (Test-Path $TempAgentPath) {{
         Remove-Item -Path $TempAgentPath -Force -ErrorAction SilentlyContinue
     }}
-    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {{$true}}
     Invoke-WebRequest -Uri $DownloadUrl -OutFile $TempAgentPath -UseBasicParsing
     & $TempAgentPath --version | Out-Host
 

@@ -60,7 +60,7 @@ if (!(Test-Path $INSTALL_DIR)) {
 
 $AGENT_URL = "$AGENT_DOWNLOAD_BASE_URL/agent-windows-amd64.exe"
 $AGENT_PATH = "$INSTALL_DIR\api-monitor-agent.exe"
-$TEMP_AGENT_PATH = "$INSTALL_DIR\api-monitor-agent.exe.download"
+$TEMP_AGENT_PATH = "$INSTALL_DIR\api-monitor-agent.download.exe"
 $CONFIG_PATH = "$INSTALL_DIR\config.json"
 
 Write-Host "Downloading Agent..."
@@ -95,15 +95,19 @@ if (Test-Path $CONFIG_PATH) {
 }
 
 try {
-    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
     Invoke-WebRequest -Uri $AGENT_URL -OutFile $TEMP_AGENT_PATH -UseBasicParsing
+
+    $DOWNLOADED_VERSION = (& $TEMP_AGENT_PATH --version 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $DOWNLOADED_VERSION -notmatch '^api-monitor-agent\s+\S+$') {
+        throw "Downloaded file is not a valid API Monitor Agent binary: $DOWNLOADED_VERSION"
+    }
 
     if (Test-Path $AGENT_PATH) {
         Remove-Item -Path $AGENT_PATH -Force
     }
 
     Move-Item -Path $TEMP_AGENT_PATH -Destination $AGENT_PATH -Force
-    Write-Host "Agent download completed"
+    Write-Host "Agent download completed: $DOWNLOADED_VERSION"
 } catch {
     Write-Host "Error: failed to download Agent binary"
     Write-Host "URL: $AGENT_URL"

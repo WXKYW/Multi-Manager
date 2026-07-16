@@ -15,6 +15,10 @@ pub const EVENT_DASHBOARD_PTY_STOP: &str = "dashboard:pty_stop";
 pub const EVENT_AGENT_PTY_DATA: &str = "agent:pty_data";
 pub const EVENT_AGENT_PTY_STATUS: &str = "agent:pty_status";
 pub const EVENT_AGENT_TASK_PROGRESS: &str = "agent:task_progress";
+pub const EVENT_AGENT_REMOTE_DESKTOP_SIGNAL: &str = "agent:rd_signal";
+pub const EVENT_DASHBOARD_REMOTE_DESKTOP_START: &str = "dashboard:rd_start";
+pub const EVENT_DASHBOARD_REMOTE_DESKTOP_SIGNAL: &str = "dashboard:rd_signal";
+pub const EVENT_DASHBOARD_REMOTE_DESKTOP_STOP: &str = "dashboard:rd_stop";
 
 #[derive(Serialize, Debug, Clone)]
 pub struct AuthPayload {

@@ -1,6 +1,6 @@
 [package]
 name = "api-monitor-agent"
-version = "0.1.6"
+version = "0.3.5"
 edition = "2021"
 
 [dependencies]
@@ -22,6 +22,14 @@ webpki-roots = "0.26"
 url = { version = "2.5" }
 chrono = { version = "0.4", features = ["serde"] }
 hostname = { version = "0.4" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+bytes = "1.10"
+enigo = { version = "0.6.1", default-features = false, features = ["platform_specific"] }
+rand = "0.8"
+rtp = "0.8.0"
+webrtc = "0.8.0"
+win-native-media = { version = "0.1.1", path = "vendor/win-native-media-0.1.1" }
 
 [features]
 default = ["nvidia"]
