@@ -273,7 +273,7 @@ function StatusPageShortcutCard({ page }) {
       padding="none"
       interactive
       onClick={() => url && window.open(url, '_blank', 'noopener,noreferrer')}
-      className="group flex h-14 min-w-0 cursor-pointer items-center justify-between gap-3 px-3.5 py-3 sm:h-16 sm:px-4"
+      className="group flex h-12 min-w-0 cursor-pointer items-center justify-between gap-2.5 px-3 sm:h-[52px] sm:px-3.5"
     >
       <span className="min-w-0 truncate text-sm font-semibold text-kumo-strong group-hover:text-kumo-brand">
         {page.title || page.slug}
@@ -1144,9 +1144,9 @@ function DashboardPage({ onNavigate } = {}) {
             title="快捷入口"
             icon={<Activity className="h-4 w-4 text-kumo-brand" />}
             className="order-3 min-w-0 xl:col-span-2 xl:row-start-3"
-            bodyClassName="p-3 sm:p-4"
+            bodyClassName="p-2.5 sm:p-3"
           >
-            <div className="grid w-full auto-rows-fr grid-cols-2 gap-2.5 lg:grid-cols-3 xl:grid-cols-5">
+            <div className="grid w-full auto-rows-fr grid-cols-2 gap-2 lg:grid-cols-3 xl:grid-cols-5">
               {dashboardStatusPages.map((page) => (
                 <StatusPageShortcutCard key={`${page.kind}-${page.id || page.slug}`} page={page} />
               ))}
