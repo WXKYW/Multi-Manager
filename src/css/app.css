@@ -333,7 +333,6 @@ th > button[aria-label='Resize column'] > span {
   height: 100dvh;
   min-height: 100dvh;
   background: var(--app-main-bg);
-  padding-top: env(safe-area-inset-top, 0px);
   padding-right: env(safe-area-inset-right, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
   padding-left: env(safe-area-inset-left, 0px);
@@ -346,6 +345,8 @@ th > button[aria-label='Resize column'] > span {
 
 .app-main-topbar {
   background-color: var(--app-main-surface);
+  box-sizing: content-box;
+  padding-top: env(safe-area-inset-top, 0px);
 }
 
 .app-main-footer {

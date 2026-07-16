@@ -3,7 +3,6 @@ import { toast } from './toast.js';
 const THEME_META_SELECTOR = 'meta[name="theme-color"]';
 const LIGHT_TITLEBAR = '#f8f7f4';
 const DARK_TITLEBAR = '#050505';
-const BRAND_TITLEBAR = '#dc7d40';
 
 let updateToastId = null;
 let refreshingForUpdate = false;
@@ -31,11 +30,13 @@ const upsertThemeMeta = (name, media) => {
 
 const applyTitlebarColor = () => {
   const mode = document.documentElement.dataset.mode === 'dark' ? 'dark' : 'light';
-  const color = mode === 'dark' ? DARK_TITLEBAR : LIGHT_TITLEBAR;
+  const fallbackColor = mode === 'dark' ? DARK_TITLEBAR : LIGHT_TITLEBAR;
+  const topbar = document.querySelector('.app-main-topbar');
+  const color = topbar ? getComputedStyle(topbar).backgroundColor : fallbackColor;
 
   upsertThemeMeta('theme-color').content = color;
-  upsertThemeMeta('theme-color', '(prefers-color-scheme: light)').content = LIGHT_TITLEBAR;
-  upsertThemeMeta('theme-color', '(prefers-color-scheme: dark)').content = DARK_TITLEBAR;
+  upsertThemeMeta('theme-color', '(prefers-color-scheme: light)').content = color;
+  upsertThemeMeta('theme-color', '(prefers-color-scheme: dark)').content = color;
 
   if ('windowControlsOverlay' in navigator) {
     document.documentElement.style.setProperty('--app-titlebar-area-x', 'env(titlebar-area-x, 0px)');
@@ -49,12 +50,22 @@ const applyTitlebarColor = () => {
 
 const watchTitlebarColor = () => {
   applyTitlebarColor();
+  window.requestAnimationFrame(applyTitlebarColor);
 
-  const observer = new MutationObserver(applyTitlebarColor);
-  observer.observe(document.documentElement, {
+  const themeObserver = new MutationObserver(applyTitlebarColor);
+  themeObserver.observe(document.documentElement, {
     attributes: true,
     attributeFilter: ['data-mode', 'data-theme-mode'],
   });
+
+  if (!document.querySelector('.app-main-topbar')) {
+    const topbarObserver = new MutationObserver(() => {
+      if (!document.querySelector('.app-main-topbar')) return;
+      applyTitlebarColor();
+      topbarObserver.disconnect();
+    });
+    topbarObserver.observe(document.documentElement, { childList: true, subtree: true });
+  }
 
   window.matchMedia?.('(display-mode: standalone)').addEventListener('change', applyTitlebarColor);
   window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener('change', applyTitlebarColor);
@@ -147,7 +158,6 @@ const registerServiceWorker = () => {
 
 export const setupPwa = () => {
   document.documentElement.dataset.pwaReady = 'true';
-  document.documentElement.style.setProperty('--app-pwa-brand-titlebar', BRAND_TITLEBAR);
   watchTitlebarColor();
   registerServiceWorker();
 };

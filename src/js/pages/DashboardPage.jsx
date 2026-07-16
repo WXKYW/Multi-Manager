@@ -64,9 +64,9 @@ const DASHBOARD_FETCH_TIMEOUT_MS = 6_000;
 const HOST_METRICS_POLL_MS = 2_000;
 const HOST_METRICS_FETCH_TIMEOUT_MS = 4_000;
 const DASHBOARD_SERVER_STATUS_LIMIT = 7;
-const SERVICE_TOOL_ITEM_CLASS = 'group flex min-h-7 cursor-pointer items-center justify-between gap-2 rounded-md border border-kumo-line bg-kumo-recessed/45 px-2 py-0.5 transition-colors hover:border-kumo-brand/60 hover:bg-kumo-base sm:min-h-8 sm:px-2 sm:py-0.5 xl:min-h-8';
-const SERVICE_TOOL_ICON_CLASS = 'flex h-5.5 w-5.5 flex-shrink-0 items-center justify-center rounded-md text-sm sm:h-6 sm:w-6';
-const SERVICE_TOOL_BADGE_CLASS = 'flex h-5 min-w-8 items-center justify-center gap-1 rounded-md border border-kumo-line bg-kumo-base px-1.5 text-[10px] font-semibold text-kumo-strong tabular-nums sm:min-w-8 sm:px-1.5 sm:text-[11px]';
+const SERVICE_TOOL_ITEM_CLASS = 'group flex h-11 min-w-0 cursor-pointer items-center justify-between gap-2 rounded-md border border-kumo-line bg-kumo-recessed/45 px-2.5 py-1.5 transition-colors hover:border-kumo-brand/60 hover:bg-kumo-base sm:h-12 sm:px-3 xl:h-auto xl:min-h-12';
+const SERVICE_TOOL_ICON_CLASS = 'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-sm sm:h-8 sm:w-8';
+const SERVICE_TOOL_BADGE_CLASS = 'flex h-6 min-w-9 shrink-0 items-center justify-center gap-1 rounded-md border border-kumo-line bg-kumo-base px-1.5 text-[10px] font-semibold text-kumo-strong tabular-nums sm:min-w-10 sm:text-[11px]';
 
 let dashboardStatsCache = null;
 let dashboardStatsFetchPromise = null;
@@ -273,7 +273,7 @@ function StatusPageShortcutCard({ page }) {
       padding="none"
       interactive
       onClick={() => url && window.open(url, '_blank', 'noopener,noreferrer')}
-      className="group flex min-h-11 cursor-pointer items-center justify-between gap-3 px-3 py-2.5"
+      className="group flex h-14 min-w-0 cursor-pointer items-center justify-between gap-3 px-3.5 py-3 sm:h-16 sm:px-4"
     >
       <span className="min-w-0 truncate text-sm font-semibold text-kumo-strong group-hover:text-kumo-brand">
         {page.title || page.slug}
@@ -1014,15 +1014,15 @@ function DashboardPage({ onNavigate } = {}) {
           title="服务与工具"
           icon={<Box className="h-4 w-4 text-kumo-brand" />}
           className="order-2 h-full min-w-0 xl:col-start-2 xl:row-span-2 xl:row-start-1"
-          bodyClassName="flex min-h-0 flex-1 flex-col p-2 sm:p-2.5"
+          bodyClassName="flex min-h-0 flex-1 flex-col p-2.5 sm:p-3"
         >
-          <div className="grid flex-1 grid-cols-2 gap-1.5 xl:grid-cols-1 xl:auto-rows-fr">
+          <div className="grid flex-1 auto-rows-fr grid-cols-2 gap-2 xl:grid-cols-1">
             {/* Koyeb */}
             <div
               onClick={() => navigateToModule('paas')}
               className={SERVICE_TOOL_ITEM_CLASS}
             >
-              <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+              <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
                 <div className={`${SERVICE_TOOL_ICON_CLASS} bg-kumo-badge-purple/10 text-kumo-badge-purple`}>
                   <KoyebBrand className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 </div>
@@ -1042,7 +1042,7 @@ function DashboardPage({ onNavigate } = {}) {
               onClick={() => navigateToModule('paas')}
               className={SERVICE_TOOL_ITEM_CLASS}
             >
-              <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+              <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
                 <div className={`${SERVICE_TOOL_ICON_CLASS} bg-kumo-brand/10 text-kumo-brand`}>
                   <FlyIoBrand className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 </div>
@@ -1062,7 +1062,7 @@ function DashboardPage({ onNavigate } = {}) {
               onClick={() => navigateToModule('uptime')}
               className={SERVICE_TOOL_ITEM_CLASS}
             >
-              <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+              <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
                 <div className={`${SERVICE_TOOL_ICON_CLASS} bg-kumo-success/10 text-kumo-success`}>
                   <Activity className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 </div>
@@ -1082,7 +1082,7 @@ function DashboardPage({ onNavigate } = {}) {
               onClick={() => navigateToModule('scheduler')}
               className={SERVICE_TOOL_ITEM_CLASS}
             >
-              <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+              <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
                 <div className={`${SERVICE_TOOL_ICON_CLASS} bg-kumo-warning/10 text-kumo-warning`}>
                   <Clock className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 </div>
@@ -1102,7 +1102,7 @@ function DashboardPage({ onNavigate } = {}) {
               onClick={() => navigateToModule('totp')}
               className={SERVICE_TOOL_ITEM_CLASS}
             >
-              <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+              <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
                 <div className={`${SERVICE_TOOL_ICON_CLASS} bg-kumo-success/10 text-kumo-success`}>
                   <Shield className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 </div>
@@ -1122,7 +1122,7 @@ function DashboardPage({ onNavigate } = {}) {
               onClick={() => navigateToModule('filebox')}
               className={SERVICE_TOOL_ITEM_CLASS}
             >
-              <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+              <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
                 <div className={`${SERVICE_TOOL_ICON_CLASS} bg-kumo-info-tint text-kumo-info`}>
                   <FolderOpen className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 </div>
@@ -1144,9 +1144,9 @@ function DashboardPage({ onNavigate } = {}) {
             title="快捷入口"
             icon={<Activity className="h-4 w-4 text-kumo-brand" />}
             className="order-3 min-w-0 xl:col-span-2 xl:row-start-3"
-            bodyClassName="p-2.5 sm:p-4"
+            bodyClassName="p-3 sm:p-4"
           >
-            <div className="grid w-full grid-cols-2 gap-2 lg:grid-cols-3 xl:grid-cols-5">
+            <div className="grid w-full auto-rows-fr grid-cols-2 gap-2.5 lg:grid-cols-3 xl:grid-cols-5">
               {dashboardStatusPages.map((page) => (
                 <StatusPageShortcutCard key={`${page.kind}-${page.id || page.slug}`} page={page} />
               ))}
