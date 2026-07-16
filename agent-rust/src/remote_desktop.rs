@@ -246,12 +246,26 @@ mod windows_impl {
                         Box::pin(async move {
                             if message.is_string {
                                 if let Ok(value) = serde_json::from_slice::<Value>(&message.data) {
-                                    if handle_channel_message(value, &enigo, &geometry, &profile)
-                                        && !ack_sent.swap(true, Ordering::Relaxed)
-                                    {
-                                        let _ = ack_channel
-                                            .send_text(json!({"type": "input-ack"}).to_string())
-                                            .await;
+                                    let pointer_sequence = (value
+                                        .get("type")
+                                        .and_then(Value::as_str)
+                                        == Some("pointer-relative"))
+                                    .then(|| {
+                                        value.get("sequence").and_then(Value::as_u64).unwrap_or(0)
+                                            as u32
+                                    });
+                                    if handle_channel_message(value, &enigo, &geometry, &profile) {
+                                        if let Some(sequence) = pointer_sequence {
+                                            if let Some(position) = pointer_position_message(
+                                                &enigo, &geometry, sequence,
+                                            ) {
+                                                let _ = ack_channel.send_text(position).await;
+                                            }
+                                        } else if !ack_sent.swap(true, Ordering::Relaxed) {
+                                            let _ = ack_channel
+                                                .send_text(json!({"type": "input-ack"}).to_string())
+                                                .await;
+                                        }
                                     }
                                 }
                             }
@@ -713,6 +727,11 @@ mod windows_impl {
                 let py = geometry.y + (y * geometry.height.saturating_sub(1) as f64).round() as i32;
                 enigo.move_mouse(px, py, Coordinate::Abs).is_ok()
             }
+            "pointer-relative" => {
+                let geometry = geometry.lock().map(|item| *item).unwrap_or_default();
+                let (dx, dy) = normalized_pointer_delta(&value, geometry);
+                (dx != 0 || dy != 0) && enigo.move_mouse(dx, dy, Coordinate::Rel).is_ok()
+            }
             "mouse" => {
                 let button = match value.get("button").and_then(Value::as_u64).unwrap_or(0) {
                     1 => Button::Middle,
@@ -771,6 +790,43 @@ mod windows_impl {
                 .unwrap_or(false),
             _ => false,
         }
+    }
+
+    fn normalized_pointer_delta(value: &Value, geometry: DesktopGeometry) -> (i32, i32) {
+        let dx = value
+            .get("dx")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0)
+            .clamp(-1.0, 1.0);
+        let dy = value
+            .get("dy")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0)
+            .clamp(-1.0, 1.0);
+        (
+            (dx * geometry.width.max(1) as f64).round() as i32,
+            (dy * geometry.height.max(1) as f64).round() as i32,
+        )
+    }
+
+    fn pointer_position_message(
+        enigo: &Arc<Mutex<Option<Enigo>>>,
+        geometry: &Arc<Mutex<DesktopGeometry>>,
+        sequence: u32,
+    ) -> Option<String> {
+        let (x, y) = enigo.lock().ok()?.as_ref()?.location().ok()?;
+        let geometry = geometry.lock().ok().map(|item| *item)?;
+        let width = geometry.width.saturating_sub(1).max(1) as f64;
+        let height = geometry.height.saturating_sub(1).max(1) as f64;
+        Some(
+            json!({
+                "type": "pointer-position",
+                "sequence": sequence,
+                "x": ((x - geometry.x) as f64 / width).clamp(0.0, 1.0),
+                "y": ((y - geometry.y) as f64 / height).clamp(0.0, 1.0),
+            })
+            .to_string(),
+        )
     }
 
     fn input_direction(action: Option<&str>) -> Direction {
@@ -853,6 +909,18 @@ mod windows_impl {
                 last + Duration::from_micros(16_100),
                 30
             ));
+        }
+
+        #[test]
+        fn normalized_touchpad_delta_scales_to_remote_desktop_pixels() {
+            let geometry = DesktopGeometry {
+                x: -1_920,
+                y: 0,
+                width: 1_920,
+                height: 1_080,
+            };
+            let delta = normalized_pointer_delta(&json!({"dx": 0.25, "dy": -0.5}), geometry);
+            assert_eq!(delta, (480, -540));
         }
 
         #[test]

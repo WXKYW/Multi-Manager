@@ -2,6 +2,19 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
 import { ChevronUp, DesktopDisplay, Maximize2, Menu, RefreshCw, X } from '../components/Icons.jsx';
+import {
+  TOUCH_LONG_PRESS_MS,
+  TOUCH_PINCH_SLOP,
+  TOUCH_SCROLL_SLOP,
+  TOUCH_TAP_MAX_MS,
+  TOUCH_TAP_SLOP,
+  accelerateTrackpadDelta,
+  consumeScrollDelta,
+  isDoubleTap,
+  nextPinchTransform,
+  pointDistance,
+  remoteCursorPoint,
+} from '../modules/remoteDesktopTouch.js';
 
 const ICE_SERVERS = [
   { urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] },
@@ -53,6 +66,8 @@ export default function RemoteDesktopPage() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [fullscreenToolbarOpen, setFullscreenToolbarOpen] = useState(false);
   const [virtualCursor, setVirtualCursor] = useState({ x: 0.5, y: 0.5, visible: false });
+  const [viewTransform, setViewTransform] = useState({ scale: 1, x: 0, y: 0 });
+  const [surfaceSize, setSurfaceSize] = useState({ width: 1, height: 1 });
   const [controlEnabled, setControlEnabled] = useState(true);
   const [controlAcknowledged, setControlAcknowledged] = useState(false);
   const [stats, setStats] = useState({
@@ -83,19 +98,40 @@ export default function RemoteDesktopPage() {
   const streamProfileRef = useRef({ fps: 60, bitrate: 12_000_000 });
   const healthyIntervalsRef = useRef(0);
   const pointerFrameRef = useRef(0);
+  const pendingRelativePointerRef = useRef({ x: 0, y: 0 });
+  const pointerSequenceRef = useRef(0);
+  const lastPointerAckRef = useRef(0);
   const cursorPositionRef = useRef({ x: 0.5, y: 0.5 });
   const touchGestureRef = useRef(null);
+  const lastTapRef = useRef(null);
+  const longPressTimerRef = useRef(0);
+  const ignoreMouseUntilRef = useRef(0);
+  const viewTransformRef = useRef(viewTransform);
   const remoteInputRef = useRef(null);
   const remoteInputValueRef = useRef('');
 
   const sendControl = useCallback((payload) => {
-    const highFrequency = payload.type === 'pointer' || payload.type === 'wheel';
+    const highFrequency = payload.type === 'pointer' || payload.type === 'pointer-relative' || payload.type === 'wheel';
     const fastChannel = pointerChannelRef.current;
     const channel = highFrequency && fastChannel?.readyState === 'open' ? fastChannel : channelRef.current;
     if (!controlEnabled || channel?.readyState !== 'open') return;
     if (highFrequency && channel.bufferedAmount > 16 * 1024) return;
     channel.send(JSON.stringify(payload));
   }, [controlEnabled]);
+
+  const updateViewTransform = useCallback((next) => {
+    viewTransformRef.current = next;
+    setViewTransform(next);
+  }, []);
+
+  const resetViewTransform = useCallback(() => {
+    updateViewTransform({ scale: 1, x: 0, y: 0 });
+  }, [updateViewTransform]);
+
+  const clearLongPress = useCallback(() => {
+    if (longPressTimerRef.current) window.clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = 0;
+  }, []);
 
   const postSignal = useCallback(async (signal, peer, generation) => {
     if (peer !== peerRef.current || generation !== connectionGenerationRef.current || stoppedRef.current) return;
@@ -180,6 +216,9 @@ export default function RemoteDesktopPage() {
     pointerChannelRef.current = null;
     peerRef.current = null;
     previousVideoStatsRef.current = null;
+    pendingRelativePointerRef.current = { x: 0, y: 0 };
+    pointerSequenceRef.current = 0;
+    lastPointerAckRef.current = 0;
     if (videoRef.current) videoRef.current.srcObject = null;
     setVideoReady(false);
     if (sessionId) {
@@ -235,17 +274,28 @@ export default function RemoteDesktopPage() {
       const channel = peer.createDataChannel('remote-desktop', { ordered: true });
       bindChannel(channel, peer, generation);
       pointerChannelRef.current = peer.createDataChannel('remote-pointer', { ordered: false, maxRetransmits: 0 });
-      channel.onmessage = (event) => {
+      const handleControlMessage = (event) => {
         if (peer !== peerRef.current || generation !== connectionGenerationRef.current) return;
         if (typeof event.data === 'string') {
           try {
             const meta = JSON.parse(event.data);
             if (meta.type === 'input-ack') setControlAcknowledged(true);
+            if (meta.type === 'pointer-position' && Number(meta.sequence || 0) >= lastPointerAckRef.current) {
+              lastPointerAckRef.current = Number(meta.sequence || 0);
+              const position = {
+                x: Math.max(0, Math.min(1, Number(meta.x || 0))),
+                y: Math.max(0, Math.min(1, Number(meta.y || 0))),
+              };
+              cursorPositionRef.current = position;
+              setVirtualCursor({ ...position, visible: true });
+            }
           } catch {
             // Ignore unknown control messages.
           }
         }
       };
+      channel.onmessage = handleControlMessage;
+      pointerChannelRef.current.onmessage = handleControlMessage;
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
       setState('connecting');
@@ -384,6 +434,28 @@ export default function RemoteDesktopPage() {
   }, []);
 
   useEffect(() => {
+    const surface = surfaceRef.current;
+    if (!surface) return undefined;
+    const updateSize = () => {
+      const rect = surface.getBoundingClientRect();
+      setSurfaceSize({ width: Math.max(1, rect.width), height: Math.max(1, rect.height) });
+    };
+    updateSize();
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(updateSize) : null;
+    observer?.observe(surface);
+    window.addEventListener('resize', updateSize);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', updateSize);
+    };
+  }, []);
+
+  useEffect(() => () => {
+    clearLongPress();
+    if (pointerFrameRef.current) window.cancelAnimationFrame(pointerFrameRef.current);
+  }, [clearLongPress]);
+
+  useEffect(() => {
     const handleKey = (event, action) => {
       if (!controlEnabled || document.activeElement !== surfaceRef.current) return;
       event.preventDefault();
@@ -402,6 +474,7 @@ export default function RemoteDesktopPage() {
   const pointerPosition = (event) => {
     const rect = surfaceRef.current?.getBoundingClientRect();
     if (!rect) return null;
+    const transform = viewTransformRef.current;
     const video = videoRef.current;
     const videoWidth = video?.videoWidth || rect.width;
     const videoHeight = video?.videoHeight || rect.height;
@@ -412,13 +485,16 @@ export default function RemoteDesktopPage() {
     const renderedHeight = videoHeight * scale;
     const offsetX = (rect.width - renderedWidth) / 2;
     const offsetY = (rect.height - renderedHeight) / 2;
+    const localX = (event.clientX - rect.left - transform.x) / transform.scale;
+    const localY = (event.clientY - rect.top - transform.y) / transform.scale;
     return {
-      x: Math.max(0, Math.min(1, (event.clientX - rect.left - offsetX) / Math.max(1, renderedWidth))),
-      y: Math.max(0, Math.min(1, (event.clientY - rect.top - offsetY) / Math.max(1, renderedHeight))),
+      x: Math.max(0, Math.min(1, (localX - offsetX) / Math.max(1, renderedWidth))),
+      y: Math.max(0, Math.min(1, (localY - offsetY) / Math.max(1, renderedHeight))),
     };
   };
 
   const handlePointerMove = (event) => {
+    if (performance.now() < ignoreMouseUntilRef.current) return;
     const position = pointerPosition(event);
     if (!position || pointerFrameRef.current) return;
     cursorPositionRef.current = position;
@@ -429,6 +505,7 @@ export default function RemoteDesktopPage() {
   };
 
   const handleMouse = (event, action) => {
+    if (performance.now() < ignoreMouseUntilRef.current) return;
     event.preventDefault();
     surfaceRef.current?.focus();
     const position = pointerPosition(event);
@@ -436,21 +513,36 @@ export default function RemoteDesktopPage() {
     sendControl({ type: 'mouse', button: event.button, action });
   };
 
-  const moveRelativePointer = (deltaX, deltaY) => {
+  const moveRelativePointer = (deltaX, deltaY, elapsedMs = 16) => {
     const rect = surfaceRef.current?.getBoundingClientRect();
     if (!rect) return;
+    const accelerated = accelerateTrackpadDelta(deltaX, deltaY, elapsedMs);
+    const normalizedDelta = {
+      x: accelerated.x / Math.max(1, rect.width),
+      y: accelerated.y / Math.max(1, rect.height),
+    };
     const current = cursorPositionRef.current;
     const next = {
-      x: Math.max(0, Math.min(1, current.x + (deltaX / Math.max(1, rect.width)) * 1.35)),
-      y: Math.max(0, Math.min(1, current.y + (deltaY / Math.max(1, rect.height)) * 1.35)),
+      x: Math.max(0, Math.min(1, current.x + normalizedDelta.x)),
+      y: Math.max(0, Math.min(1, current.y + normalizedDelta.y)),
     };
     cursorPositionRef.current = next;
+    pendingRelativePointerRef.current.x += normalizedDelta.x;
+    pendingRelativePointerRef.current.y += normalizedDelta.y;
     if (pointerFrameRef.current) return;
     pointerFrameRef.current = window.requestAnimationFrame(() => {
       pointerFrameRef.current = 0;
       const latest = cursorPositionRef.current;
+      const pending = pendingRelativePointerRef.current;
+      pendingRelativePointerRef.current = { x: 0, y: 0 };
+      pointerSequenceRef.current = (pointerSequenceRef.current + 1) >>> 0;
       setVirtualCursor({ ...latest, visible: true });
-      sendControl({ type: 'pointer', ...latest });
+      sendControl({
+        type: 'pointer-relative',
+        dx: pending.x,
+        dy: pending.y,
+        sequence: pointerSequenceRef.current,
+      });
     });
   };
 
@@ -464,66 +556,173 @@ export default function RemoteDesktopPage() {
     touches[0].clientY - touches[1].clientY,
   );
 
+  const touchCenterInSurface = (touches) => {
+    const center = touchCenter(touches);
+    const rect = surfaceRef.current?.getBoundingClientRect();
+    return {
+      x: center.x - (rect?.left || 0),
+      y: center.y - (rect?.top || 0),
+    };
+  };
+
+  const releaseTouchDrag = (gesture) => {
+    if (gesture?.buttonDown) {
+      sendControl({ type: 'mouse', button: 0, action: 'up' });
+      gesture.buttonDown = false;
+    }
+  };
+
   const handleTouchStart = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    ignoreMouseUntilRef.current = performance.now() + 800;
+    surfaceRef.current?.focus({ preventScroll: true });
     const { touches } = event;
     if (touches.length === 1) {
+      clearLongPress();
       setVirtualCursor(cursor => ({ ...cursor, visible: true }));
-      touchGestureRef.current = {
-        kind: 'pointer', lastX: touches[0].clientX, lastY: touches[0].clientY, moved: false, startedAt: performance.now(),
+      const now = performance.now();
+      const point = { at: now, x: touches[0].clientX, y: touches[0].clientY };
+      const doubleTapDrag = isDoubleTap(lastTapRef.current, point);
+      const gesture = {
+        kind: 'pointer',
+        startX: point.x,
+        startY: point.y,
+        lastX: point.x,
+        lastY: point.y,
+        lastAt: now,
+        moved: false,
+        buttonDown: doubleTapDrag,
+        startedAt: now,
       };
+      touchGestureRef.current = gesture;
+      if (doubleTapDrag) {
+        lastTapRef.current = null;
+        sendControl({ type: 'mouse', button: 0, action: 'down' });
+        navigator.vibrate?.(8);
+      } else {
+        longPressTimerRef.current = window.setTimeout(() => {
+          if (touchGestureRef.current !== gesture || gesture.moved || gesture.buttonDown) return;
+          gesture.buttonDown = true;
+          sendControl({ type: 'mouse', button: 0, action: 'down' });
+          navigator.vibrate?.(12);
+        }, TOUCH_LONG_PRESS_MS);
+      }
     } else if (touches.length === 2) {
+      clearLongPress();
+      releaseTouchDrag(touchGestureRef.current);
+      const center = touchCenterInSurface(touches);
+      const distance = touchDistance(touches);
       touchGestureRef.current = {
-        kind: 'two-finger', center: touchCenter(touches), distance: touchDistance(touches), mode: '', moved: false, startedAt: performance.now(),
+        kind: 'two-finger',
+        startCenter: center,
+        lastCenter: center,
+        startDistance: distance,
+        mode: '',
+        maxMovement: 0,
+        scrollRemainder: { x: 0, y: 0 },
+        startTransform: viewTransformRef.current,
+        startedAt: performance.now(),
       };
     }
   };
 
   const handleTouchMove = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    ignoreMouseUntilRef.current = performance.now() + 800;
     const gesture = touchGestureRef.current;
     const { touches } = event;
     if (!gesture) return;
     if (gesture.kind === 'pointer' && touches.length === 1) {
+      const now = performance.now();
       const deltaX = touches[0].clientX - gesture.lastX;
       const deltaY = touches[0].clientY - gesture.lastY;
+      const totalMovement = Math.hypot(
+        touches[0].clientX - gesture.startX,
+        touches[0].clientY - gesture.startY,
+      );
+      gesture.moved ||= totalMovement >= TOUCH_TAP_SLOP;
+      if (gesture.moved) clearLongPress();
+      moveRelativePointer(deltaX, deltaY, now - gesture.lastAt);
       gesture.lastX = touches[0].clientX;
       gesture.lastY = touches[0].clientY;
-      gesture.moved ||= Math.hypot(deltaX, deltaY) > 3;
-      if (gesture.moved) {
-        event.preventDefault();
-        moveRelativePointer(deltaX, deltaY);
-      }
+      gesture.lastAt = now;
       return;
     }
     if (gesture.kind === 'two-finger' && touches.length === 2) {
-      const center = touchCenter(touches);
+      const center = touchCenterInSurface(touches);
       const distance = touchDistance(touches);
-      const deltaX = center.x - gesture.center.x;
-      const deltaY = center.y - gesture.center.y;
-      if (!gesture.mode && Math.abs(distance - gesture.distance) > 12) {
+      const deltaX = center.x - gesture.lastCenter.x;
+      const deltaY = center.y - gesture.lastCenter.y;
+      const centerMovement = pointDistance(gesture.startCenter, center);
+      const pinchMovement = Math.abs(distance - gesture.startDistance);
+      gesture.maxMovement = Math.max(gesture.maxMovement, centerMovement, pinchMovement);
+      if (!gesture.mode && pinchMovement >= TOUCH_PINCH_SLOP && pinchMovement > centerMovement) {
         gesture.mode = 'zoom';
-        gesture.moved = true;
       }
-      if (gesture.mode !== 'zoom' && Math.hypot(deltaX, deltaY) > 2) {
+      if (!gesture.mode && centerMovement >= TOUCH_SCROLL_SLOP) {
         gesture.mode = 'scroll';
-        gesture.moved = true;
-        event.preventDefault();
-        sendControl({ type: 'wheel', deltaX: -deltaX * 14, deltaY: -deltaY * 14 });
       }
-      gesture.center = center;
-      gesture.distance = distance;
+      if (gesture.mode === 'zoom') {
+        const rect = surfaceRef.current?.getBoundingClientRect();
+        if (rect) {
+          updateViewTransform(nextPinchTransform(
+            gesture.startTransform,
+            gesture.startCenter,
+            center,
+            gesture.startDistance,
+            distance,
+            rect,
+          ));
+        }
+      } else if (gesture.mode === 'scroll') {
+        const scroll = consumeScrollDelta(gesture.scrollRemainder, deltaX, deltaY);
+        gesture.scrollRemainder = scroll.remainder;
+        if (scroll.stepsX || scroll.stepsY) {
+          sendControl({
+            type: 'wheel',
+            deltaX: -scroll.stepsX * 100,
+            deltaY: -scroll.stepsY * 100,
+          });
+        }
+      }
+      gesture.lastCenter = center;
     }
   };
 
   const handleTouchEnd = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    ignoreMouseUntilRef.current = performance.now() + 800;
     const gesture = touchGestureRef.current;
-    if (gesture?.kind === 'pointer' && !gesture.moved && event.touches.length === 0) {
-      sendControl({ type: 'mouse', button: 0, action: 'click' });
-    }
-    if (gesture?.kind === 'two-finger' && !gesture.moved && event.touches.length === 0 && performance.now() - gesture.startedAt < 400) {
-      event.preventDefault();
+    clearLongPress();
+    if (!gesture || event.touches.length > 0) return;
+    const now = performance.now();
+    if (gesture.kind === 'pointer') {
+      if (gesture.buttonDown) {
+        releaseTouchDrag(gesture);
+      } else if (!gesture.moved && now - gesture.startedAt <= TOUCH_TAP_MAX_MS) {
+        sendControl({ type: 'mouse', button: 0, action: 'click' });
+        lastTapRef.current = { at: now, x: gesture.startX, y: gesture.startY };
+      }
+    } else if (
+      gesture.kind === 'two-finger'
+      && !gesture.mode
+      && gesture.maxMovement < TOUCH_TAP_SLOP
+      && now - gesture.startedAt <= TOUCH_TAP_MAX_MS
+    ) {
       sendControl({ type: 'mouse', button: 2, action: 'click' });
+      navigator.vibrate?.(8);
     }
-    if (event.touches.length === 0) touchGestureRef.current = null;
+    touchGestureRef.current = null;
+  };
+
+  const handleTouchCancel = (event) => {
+    event.preventDefault();
+    clearLongPress();
+    releaseTouchDrag(touchGestureRef.current);
+    touchGestureRef.current = null;
   };
 
   const openSystemKeyboard = () => {
@@ -548,6 +747,22 @@ export default function RemoteDesktopPage() {
     if (document.fullscreenElement) document.exitFullscreen();
     else desktopAreaRef.current?.requestFullscreen?.();
   };
+
+  const toggleFillMode = () => {
+    resetViewTransform();
+    setFillMode(mode => mode === 'cover' ? 'contain' : 'cover');
+  };
+
+  const cursorDisplayPoint = remoteCursorPoint(
+    virtualCursor,
+    surfaceSize,
+    {
+      width: videoRef.current?.videoWidth || surfaceSize.width,
+      height: videoRef.current?.videoHeight || surfaceSize.height,
+    },
+    fillMode,
+    viewTransform,
+  );
 
   return (
     <div className="flex h-dvh min-h-0 flex-col bg-kumo-recessed text-kumo-default">
@@ -575,9 +790,10 @@ export default function RemoteDesktopPage() {
             {controlEnabled ? (controlAcknowledged ? '控制通道正常' : '控制已开启') : '仅观看'}
           </Button>
           <Button size="sm" variant="secondary" onClick={openSystemKeyboard}>键盘</Button>
-          <Button size="sm" variant="secondary" onClick={() => setFillMode(mode => mode === 'cover' ? 'contain' : 'cover')}>
+          <Button size="sm" variant="secondary" onClick={toggleFillMode}>
             {fillMode === 'cover' ? '填满' : '适应'}
           </Button>
+          {viewTransform.scale > 1 && <Button size="sm" variant="secondary" onClick={resetViewTransform}>重置缩放</Button>}
           <Button size="sm" shape="square" variant="secondary" icon={<RefreshCw className="h-4 w-4" />} aria-label="重新连接" onClick={connect} />
           <Button size="sm" shape="square" variant="secondary" icon={<Maximize2 className="h-4 w-4" />} aria-label="全屏" onClick={toggleFullscreen} />
           <Button size="sm" shape="square" variant="secondary" icon={<X className="h-4 w-4" />} aria-label="关闭" onClick={() => window.close()} />
@@ -597,8 +813,8 @@ export default function RemoteDesktopPage() {
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
-          onTouchCancel={() => { touchGestureRef.current = null; }}
-          style={{ touchAction: 'pinch-zoom' }}
+          onTouchCancel={handleTouchCancel}
+          style={{ touchAction: 'none', overscrollBehavior: 'contain' }}
         >
           <video
             ref={videoRef}
@@ -608,6 +824,11 @@ export default function RemoteDesktopPage() {
             aria-label={`${serverName} 远程桌面`}
             onLoadedData={() => setVideoReady(true)}
             className={`h-full w-full select-none ${fillMode === 'cover' ? 'object-cover' : 'object-contain'} ${videoReady ? 'block' : 'hidden'}`}
+            style={{
+              transform: `translate3d(${viewTransform.x}px, ${viewTransform.y}px, 0) scale(${viewTransform.scale})`,
+              transformOrigin: '0 0',
+              willChange: viewTransform.scale > 1 ? 'transform' : 'auto',
+            }}
           />
           {!videoReady && (
             <div className="flex flex-col items-center gap-3 text-center text-kumo-inverse/70">
@@ -620,7 +841,7 @@ export default function RemoteDesktopPage() {
             <div
               aria-hidden="true"
               className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-1/2"
-              style={{ left: `${virtualCursor.x * 100}%`, top: `${virtualCursor.y * 100}%` }}
+              style={{ left: `${cursorDisplayPoint.x}px`, top: `${cursorDisplayPoint.y}px` }}
             >
               <div className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-kumo-inverse bg-kumo-brand/70">
                 <div className="h-1.5 w-1.5 rounded-full bg-kumo-inverse" />
@@ -658,9 +879,10 @@ export default function RemoteDesktopPage() {
                   {controlEnabled ? '控制开启' : '仅观看'}
                 </Button>
                 <Button size="sm" variant="secondary" onClick={openSystemKeyboard}>键盘</Button>
-                <Button size="sm" variant="secondary" onClick={() => setFillMode(mode => mode === 'cover' ? 'contain' : 'cover')}>
+                <Button size="sm" variant="secondary" onClick={toggleFillMode}>
                   {fillMode === 'cover' ? '填满' : '适应'}
                 </Button>
+                {viewTransform.scale > 1 && <Button size="sm" variant="secondary" onClick={resetViewTransform}>重置缩放</Button>}
                 <Button size="sm" shape="square" variant="secondary" icon={<RefreshCw className="h-4 w-4" />} aria-label="重新连接" onClick={connect} />
                 <Button size="sm" shape="square" variant="secondary" icon={<Maximize2 className="h-4 w-4" />} aria-label="退出全屏" onClick={toggleFullscreen} />
                 <Button
@@ -677,7 +899,7 @@ export default function RemoteDesktopPage() {
         )}
         {virtualCursor.visible && (
           <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-kumo-line bg-kumo-base/80 px-2 py-1 text-[11px] text-kumo-subtle">
-            单指移动/轻点左键 · 双指轻点右键 · 双指拖动滚动 · 双指张合缩放
+            单指移动/轻点左键 · 双击按住或长按拖拽 · 双指轻点右键 · 双指拖动滚动 · 张合缩放
           </div>
         )}
         {error && (
