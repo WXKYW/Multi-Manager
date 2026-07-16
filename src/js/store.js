@@ -140,12 +140,12 @@ export const MODULE_GROUPS = [
     id: 'infrastructure',
     name: '云服务',
     icon: 'fa-cubes',
-    modules: ['paas', 'dns'],
+    modules: ['paas'],
     subgroups: [
       {
         id: 'cloud-vendors',
         name: '云厂商',
-        modules: ['aliyun', 'tencent', 'oracle', 'm365'],
+        modules: ['dns', 'aliyun', 'tencent', 'oracle', 'm365'],
       },
       {
         id: 'devops',
