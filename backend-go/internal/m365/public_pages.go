@@ -787,11 +787,11 @@ func (s *Service) newPublicRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	code := strings.TrimSpace(stringValue(payload["code"], ""))
+	batchID := strings.TrimSpace(stringValue(payload["batch"], ""))
 	mailNickname := strings.TrimSpace(stringValue(payload["mailNickname"], ""))
-	password := strings.TrimSpace(stringValue(payload["password"], ""))
 	displayName := strings.TrimSpace(stringValue(payload["displayName"], mailNickname))
-	if code == "" || mailNickname == "" || password == "" {
-		response.Error(w, http.StatusBadRequest, "code, mailNickname and password are required")
+	if (code == "" && batchID == "") || mailNickname == "" {
+		response.Error(w, http.StatusBadRequest, "code or batch and mailNickname are required")
 		return
 	}
 
@@ -802,18 +802,39 @@ func (s *Service) newPublicRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
-	inviteCode, err := loadInviteCodeByCode(r.Context(), db, code)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			response.Error(w, http.StatusNotFound, "invite code not found")
+	now := time.Now().UTC()
+	inviteCode := inviteCodeRecord{}
+	switch {
+	case code != "":
+		inviteCode, err = loadInviteCodeByCode(r.Context(), db, code)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				response.Error(w, http.StatusNotFound, "invite code not found")
+				return
+			}
+			response.Error(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		response.Error(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if available, reason := evaluateInviteCodeAvailability(inviteCode, time.Now().UTC()); !available {
-		response.Error(w, http.StatusBadRequest, "invite code unavailable: "+reason)
-		return
+		if available, reason := evaluateInviteCodeAvailability(inviteCode, now); !available {
+			response.Error(w, http.StatusBadRequest, "invite code unavailable: "+reason)
+			return
+		}
+	case batchID != "":
+		items, batchErr := loadInviteCodesByBatch(r.Context(), db, batchID)
+		if batchErr != nil {
+			if errors.Is(batchErr, sql.ErrNoRows) {
+				response.Error(w, http.StatusNotFound, "invite batch not found")
+				return
+			}
+			response.Error(w, http.StatusInternalServerError, batchErr.Error())
+			return
+		}
+		selected, available, reason := pickInviteCodeFromBatch(items, now)
+		if !available {
+			response.Error(w, http.StatusBadRequest, "invite batch unavailable: "+reason)
+			return
+		}
+		inviteCode = selected
 	}
 
 	target, err := resolveInviteRegistrationTarget(r.Context(), db, inviteCodeToInviteRecord(inviteCode), payload)
@@ -831,20 +852,33 @@ func (s *Service) newPublicRegister(w http.ResponseWriter, r *http.Request) {
 		displayName = mailNickname
 	}
 	userPrincipalName := mailNickname + "@" + target.Domain
-	body := map[string]interface{}{
-		"accountEnabled":    true,
-		"displayName":       displayName,
-		"mailNickname":      mailNickname,
-		"userPrincipalName": userPrincipalName,
-		"passwordProfile": map[string]interface{}{
-			"password":                      password,
-			"forceChangePasswordNextSignIn": inviteCode.ForceChangePasswordNextSignIn,
-		},
-	}
-	body["usageLocation"] = resolvedInviteUsageLocation(inviteCode.UsageLocation)
-
+	const maxPasswordAttempts = 5
+	generatedPassword := ""
 	created := map[string]interface{}{}
-	createErr := s.graphJSON(r.Context(), account, http.MethodPost, "/users", body, nil, &created)
+	var createErr error
+	for attempt := 0; attempt < maxPasswordAttempts; attempt++ {
+		generatedPassword, err = generateTemporaryPassword()
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, "generate temporary password: "+err.Error())
+			return
+		}
+		created = map[string]interface{}{}
+		body := map[string]interface{}{
+			"accountEnabled":    true,
+			"displayName":       displayName,
+			"mailNickname":      mailNickname,
+			"userPrincipalName": userPrincipalName,
+			"passwordProfile": map[string]interface{}{
+				"password":                      generatedPassword,
+				"forceChangePasswordNextSignIn": inviteCode.ForceChangePasswordNextSignIn,
+			},
+		}
+		body["usageLocation"] = resolvedInviteUsageLocation(inviteCode.UsageLocation)
+		createErr = s.graphJSON(r.Context(), account, http.MethodPost, "/users", body, nil, &created)
+		if createErr == nil || !isPasswordComplexityError(createErr) {
+			break
+		}
+	}
 	graphUserID := strings.TrimSpace(stringValue(created["id"], ""))
 	status := "success"
 	warning := ""
@@ -877,12 +911,14 @@ func (s *Service) newPublicRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.OK(w, map[string]interface{}{
-		"id":                graphUserID,
-		"status":            status,
-		"accountId":         target.ID,
-		"domain":            target.Domain,
-		"userPrincipalName": userPrincipalName,
-		"warning":           emptyToNil(warning),
+		"id":                            graphUserID,
+		"status":                        status,
+		"accountId":                     target.ID,
+		"domain":                        target.Domain,
+		"userPrincipalName":             userPrincipalName,
+		"initialPassword":               generatedPassword,
+		"forceChangePasswordNextSignIn": inviteCode.ForceChangePasswordNextSignIn,
+		"warning":                       emptyToNil(warning),
 	})
 }
 
@@ -895,13 +931,20 @@ func (s *Service) newPublicRegisterDescriptor(w http.ResponseWriter, r *http.Req
 	defer db.Close()
 
 	payload := map[string]interface{}{
-		"method": "POST",
-		"fields": []string{"code", "mailNickname", "password", "displayName", "accountId", "domain"},
+		"method":       "POST",
+		"fields":       []string{"code", "batch", "mailNickname", "displayName", "accountId", "domain"},
+		"passwordMode": "generated",
 	}
+	now := time.Now().UTC()
 	if code := strings.TrimSpace(r.URL.Query().Get("code")); code != "" {
 		record, err := loadInviteCodeByCode(r.Context(), db, code)
 		if err == nil {
-			payload["invite"] = publicInviteCodePayload(r.Context(), db, record, time.Now().UTC())
+			payload["invite"] = publicInviteCodePayload(r.Context(), db, record, now)
+		}
+	} else if batchID := strings.TrimSpace(r.URL.Query().Get("batch")); batchID != "" {
+		items, err := loadInviteCodesByBatch(r.Context(), db, batchID)
+		if err == nil {
+			payload["invite"] = publicInviteBatchPayload(r.Context(), db, items, now)
 		}
 	}
 	response.OK(w, payload)
@@ -1073,9 +1116,54 @@ func loadInviteCodes(ctx context.Context, db *sql.DB, publicPageID int64) ([]inv
 	return items, rows.Err()
 }
 
+func loadInviteCodesByBatch(ctx context.Context, db *sql.DB, batchID string) ([]inviteCodeRecord, error) {
+	rows, err := db.QueryContext(
+		ctx,
+		inviteCodeSelectSQL+` WHERE c.batch_id = ? ORDER BY c.id ASC`,
+		strings.TrimSpace(batchID),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := []inviteCodeRecord{}
+	for rows.Next() {
+		record, scanErr := scanInviteCode(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		items = append(items, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, sql.ErrNoRows
+	}
+	return items, nil
+}
+
 func loadInviteCodeByCode(ctx context.Context, db *sql.DB, code string) (inviteCodeRecord, error) {
 	row := db.QueryRowContext(ctx, inviteCodeSelectSQL+` WHERE c.code = ?`, strings.TrimSpace(code))
 	return scanInviteCode(row)
+}
+
+func pickInviteCodeFromBatch(items []inviteCodeRecord, now time.Time) (inviteCodeRecord, bool, string) {
+	availabilityReason := ""
+	for _, item := range items {
+		available, reason := evaluateInviteCodeAvailability(item, now)
+		if available {
+			return item, true, ""
+		}
+		if availabilityReason == "" {
+			availabilityReason = reason
+		}
+	}
+	if availabilityReason == "" {
+		availabilityReason = "used"
+	}
+	return inviteCodeRecord{}, false, availabilityReason
 }
 
 func scanInviteCode(scanner rowScanner) (inviteCodeRecord, error) {
@@ -1276,6 +1364,47 @@ func publicInviteCodePayload(ctx context.Context, db *sql.DB, record inviteCodeR
 	}
 	payload["targets"] = targetItems
 	payload["targetCount"] = len(targetItems)
+	return payload
+}
+
+func publicInviteBatchPayload(ctx context.Context, db *sql.DB, items []inviteCodeRecord, now time.Time) map[string]interface{} {
+	if len(items) == 0 {
+		return map[string]interface{}{
+			"mode":           "batch",
+			"inviteCount":    0,
+			"usedCount":      0,
+			"availableCount": 0,
+			"available":      false,
+		}
+	}
+
+	primary := items[0]
+	payload := publicInviteCodePayload(ctx, db, primary, now)
+	usedCount := int64(0)
+	availableCount := int64(0)
+	availabilityReason := ""
+	for _, item := range items {
+		if item.UsedCount > 0 {
+			usedCount++
+		}
+		available, reason := evaluateInviteCodeAvailability(item, now)
+		if available {
+			availableCount++
+		} else if availabilityReason == "" {
+			availabilityReason = reason
+		}
+	}
+
+	payload["mode"] = "batch"
+	payload["batchId"] = emptyToNil(primary.BatchID)
+	payload["inviteCount"] = len(items)
+	payload["usedCount"] = usedCount
+	payload["availableCount"] = availableCount
+	payload["used"] = availableCount == 0
+	payload["available"] = availableCount > 0
+	payload["availabilityReason"] = emptyToNil(availabilityReason)
+	delete(payload, "code")
+	delete(payload, "id")
 	return payload
 }
 

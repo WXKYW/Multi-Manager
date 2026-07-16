@@ -314,6 +314,10 @@ func (s *Server) serveGoRoute(w http.ResponseWriter, r *http.Request, route mani
 			s.sub.ServeHTTP(w, r)
 			return
 		}
+		if strings.HasPrefix(route.Prefix, "/api/m365") {
+			s.m365.ServeHTTP(w, r)
+			return
+		}
 		if strings.HasPrefix(route.Prefix, "/api/server/") {
 			s.server.ServeHTTP(w, r)
 			return

@@ -7,7 +7,7 @@ import { Select } from '@cloudflare/kumo/components/select';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
-import { Tabs } from '@cloudflare/kumo';
+import { Popover, Tabs } from '@cloudflare/kumo';
 import { dialog } from '../modules/dialog.js';
 import { toast } from '../modules/toast.js';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
@@ -102,11 +102,21 @@ const defaultInviteCodeGeneratorForm = {
 const workspaceHeightClass = '';
 const panelBodyClass = 'flex min-h-0 flex-1 flex-col';
 const scrollViewportClass = 'min-h-0 flex-1 overflow-auto scrollbar-thin';
-const tableFrameClass = 'h-0 min-h-0 flex-1 overflow-hidden';
+const tableFrameClass = 'flex h-0 min-h-0 flex-1 flex-col overflow-hidden';
 const userTableViewportClass = 'max-h-[calc(100dvh-26rem)] min-h-[18rem] overscroll-contain';
 const DEFAULT_NEW_USER_PASSWORD = 'Mjj@1234';
 const USER_TABLE_COLUMN_WIDTHS = [96, 180, 220, 220, 260, 220];
 const REGISTRATION_TABLE_COLUMN_WIDTHS = [40, 176, 84, 168, 128, 156, 144, 236];
+const publicResourceCardClass =
+  'flex h-full min-h-[15rem] flex-col overflow-hidden rounded-xl border border-kumo-line bg-kumo-base';
+const publicResourceCardHeaderClass =
+  'flex items-center justify-between gap-3 border-b border-kumo-line bg-kumo-recessed/10 px-3.5 py-3';
+const publicResourceCardPillClass =
+  'inline-flex max-w-40 shrink-0 items-center rounded-full border border-kumo-line bg-kumo-recessed/35 px-2.5 py-1 text-[11px] font-medium text-kumo-strong';
+const publicResourceCardGridClass = 'grid flex-1 grid-cols-2 gap-2 p-3';
+const publicResourceCardFieldClass = 'rounded-lg border border-kumo-line bg-kumo-recessed/15 p-2.5';
+const publicResourceCardActionBarClass =
+  'flex items-center gap-2 border-t border-kumo-line px-3 py-3';
 const tenantGridClass = 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-4';
 const tenantCardFrameClass = 'min-h-[11.75rem] rounded-xl px-4 py-3.5';
 const defaultAccountImportState = {
@@ -142,7 +152,11 @@ function SkuGridSkeleton() {
 function TenantGridSkeleton() {
   return (
     <div
-      className={cx(scrollViewportClass, 'grid auto-rows-max content-start items-start gap-3 p-1', tenantGridClass)}
+      className={cx(
+        scrollViewportClass,
+        'grid auto-rows-max content-start items-start gap-3 p-1',
+        tenantGridClass
+      )}
     >
       {Array.from({ length: 4 }).map((_, index) => (
         <div key={index} className="rounded-xl border border-kumo-line/80 bg-kumo-base/95 p-3">
@@ -184,7 +198,7 @@ function CardTableSkeleton({ rows = 6, showToolbar = false }) {
           <SkeletonLine className="h-8 w-24" />
         </div>
       ) : null}
-      <div className={cx(tableFrameClass, 'rounded-lg border border-kumo-line/80')}>
+      <div className={cx(tableFrameClass, 'rounded-lg border border-kumo-line/80 bg-kumo-base')}>
         <div className="space-y-3 p-3">
           <SkeletonLine className="h-9 w-full" />
           {Array.from({ length: rows }).map((_, index) => (
@@ -199,7 +213,7 @@ function CardTableSkeleton({ rows = 6, showToolbar = false }) {
 function GroupsTabSkeleton() {
   return (
     <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-      <AppCard padding="none" className="flex min-h-0 flex-col overflow-visible">
+      <AppCard padding="none" className="flex min-h-0 flex-col">
         <div className="space-y-3 p-3">
           <SkeletonLine className="h-9 w-full" />
           {Array.from({ length: 6 }).map((_, index) => (
@@ -249,6 +263,7 @@ const SKU_ID_DISPLAY_NAMES = {
   '189a915c-fe4f-4ffa-bde4-85b9628d07a0': 'E3 开发者订阅',
   '6fd2c87f-b296-42f0-b197-1e91e994b900': 'E3Y',
   'c42b9cae-ea4f-4ab7-9717-81576235ccac': 'E5 开发者订阅',
+  'f30db892-07e9-47e9-837c-80727f46fd3d': 'Power Automate 免费版',
 };
 
 function getDisplayText(value) {
@@ -374,6 +389,121 @@ function getFriendlyErrorMessage(message, fallback) {
   return message;
 }
 
+function ItemListPopover({
+  items,
+  copyText,
+  label = '列表',
+  emptyText = '暂无内容',
+  unitLabel = '个',
+  codeStyle = false,
+}) {
+  return (
+    <Popover>
+      <Popover.Trigger
+        render={
+          <Button
+            size="sm"
+            variant="secondary"
+            className="w-full justify-between"
+            disabled={items.length === 0}
+          >
+            <span>{items.length > 0 ? `共 ${items.length} ${unitLabel}` : '暂无'}</span>
+            <span className="text-[10px] text-kumo-subtle">查看</span>
+          </Button>
+        }
+      />
+      <Popover.Content side="bottom" align="start" className="w-[min(24rem,calc(100vw-2rem))] p-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <Popover.Title className="truncate text-sm font-semibold text-kumo-strong">
+            {label}
+          </Popover.Title>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={items.length === 0}
+            icon={<Copy className="h-3.5 w-3.5" />}
+            onClick={() => copyText(items.join('\n'), `${label}已复制`)}
+          >
+            全部
+          </Button>
+        </div>
+        <div className="grid gap-2">
+          {items.length > 0 ? (
+            items.map((item, index) => (
+              <div
+                key={`${item}-${index}`}
+                className="flex min-w-0 items-center gap-2 rounded-md border border-kumo-line bg-kumo-recessed/25 px-2.5 py-2"
+              >
+                {codeStyle ? (
+                  <code
+                    className="min-w-0 flex-1 truncate text-xs font-medium text-kumo-strong"
+                    title={item}
+                  >
+                    {item}
+                  </code>
+                ) : (
+                  <div
+                    className="min-w-0 flex-1 truncate text-xs font-medium text-kumo-strong"
+                    title={item}
+                  >
+                    {item}
+                  </div>
+                )}
+                <Button
+                  size="sm"
+                  shape="square"
+                  variant="secondary"
+                  aria-label={`复制 ${item}`}
+                  title="复制"
+                  icon={<Copy className="h-3.5 w-3.5" />}
+                  onClick={() => copyText(item, `${item} 已复制`)}
+                />
+              </div>
+            ))
+          ) : (
+            <div className="rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 py-3 text-center text-xs text-kumo-subtle">
+              {emptyText}
+            </div>
+          )}
+        </div>
+      </Popover.Content>
+    </Popover>
+  );
+}
+
+function DomainListPopover({ domains, copyText, label = '域名列表' }) {
+  const items = Array.isArray(domains)
+    ? Array.from(new Set(domains.map(item => normalizeDomainValue(item)).filter(Boolean)))
+    : [];
+
+  return (
+    <ItemListPopover
+      items={items}
+      copyText={copyText}
+      label={label}
+      emptyText="暂无域名"
+      unitLabel="个"
+      codeStyle
+    />
+  );
+}
+
+function LicenseListPopover({ licenses, copyText, label = '许可证列表' }) {
+  const items = Array.isArray(licenses)
+    ? Array.from(new Set(licenses.map(item => String(item || '').trim()).filter(Boolean)))
+    : [];
+
+  return (
+    <ItemListPopover
+      items={items}
+      copyText={copyText}
+      label={label}
+      emptyText="暂无许可证"
+      unitLabel="项"
+    />
+  );
+}
+
 const getAuthHeaders = () => ({
   'Content-Type': 'application/json',
   'x-admin-password': localStorage.getItem('admin_password') || '',
@@ -475,6 +605,7 @@ function M365Page() {
   const [publicTab, setPublicTab] = useState('pages');
   const [publicPagesLoading, setPublicPagesLoading] = useState(false);
   const [publicPages, setPublicPages] = useState([]);
+  const [publicPageSkuCatalog, setPublicPageSkuCatalog] = useState({});
   const [inviteCodesLoading, setInviteCodesLoading] = useState(false);
   const [inviteCodes, setInviteCodes] = useState([]);
   const [registrationsLoading, setRegistrationsLoading] = useState(false);
@@ -486,6 +617,7 @@ function M365Page() {
   const [publicPageForm, setPublicPageForm] = useState(defaultPublicPageForm);
   const [publicAccountDomains, setPublicAccountDomains] = useState({});
   const [submittingPublicPage, setSubmittingPublicPage] = useState(false);
+  const [togglingPublicPageId, setTogglingPublicPageId] = useState('');
   const [showInviteCodeDialog, setShowInviteCodeDialog] = useState(false);
   const [inviteCodeGeneratorForm, setInviteCodeGeneratorForm] = useState(
     defaultInviteCodeGeneratorForm
@@ -551,6 +683,19 @@ function M365Page() {
       ),
     [skus]
   );
+
+  const publicPageSkuLabelLookup = useMemo(() => {
+    const lookup = new Map();
+    Object.values(publicPageSkuCatalog).forEach(labels => {
+      Object.entries(labels || {}).forEach(([skuId, label]) => {
+        const normalizedSkuId = String(skuId || '').trim();
+        const normalizedLabel = String(label || '').trim();
+        if (!normalizedSkuId || !normalizedLabel) return;
+        lookup.set(normalizedSkuId, normalizedLabel);
+      });
+    });
+    return lookup;
+  }, [publicPageSkuCatalog]);
 
   const userEmailDomainItems = useMemo(() => {
     const domains = new Set();
@@ -749,42 +894,58 @@ function M365Page() {
     }
   }, [requestJSON, selectedAccountId]);
 
-  const loadPublicPages = useCallback(async () => {
-    setPublicPagesLoading(true);
-    try {
-      const data = await requestJSON('/api/m365/public-pages');
-      const items = Array.isArray(data.items) ? data.items : [];
-      setPublicPages(items);
-      setInviteCodeGeneratorForm(current => {
-        if (
-          current.publicPageId &&
-          items.some(item => String(item.id) === String(current.publicPageId))
-        ) {
-          return current;
+  const loadPublicPages = useCallback(
+    async (options = {}) => {
+      const { silent = false } = options;
+      if (!silent) {
+        setPublicPagesLoading(true);
+      }
+      try {
+        const data = await requestJSON('/api/m365/public-pages');
+        const items = Array.isArray(data.items) ? data.items : [];
+        setPublicPages(items);
+        setInviteCodeGeneratorForm(current => {
+          if (
+            current.publicPageId &&
+            items.some(item => String(item.id) === String(current.publicPageId))
+          ) {
+            return current;
+          }
+          return {
+            ...current,
+            publicPageId: items[0] ? String(items[0].id) : '',
+          };
+        });
+      } catch (error) {
+        toast.error(error.message || '加载公开页配置失败');
+      } finally {
+        if (!silent) {
+          setPublicPagesLoading(false);
         }
-        return {
-          ...current,
-          publicPageId: items[0] ? String(items[0].id) : '',
-        };
-      });
-    } catch (error) {
-      toast.error(error.message || '加载公开页配置失败');
-    } finally {
-      setPublicPagesLoading(false);
-    }
-  }, [requestJSON]);
+      }
+    },
+    [requestJSON]
+  );
 
-  const loadInviteCodes = useCallback(async () => {
-    setInviteCodesLoading(true);
-    try {
-      const data = await requestJSON('/api/m365/invite-codes');
-      setInviteCodes(Array.isArray(data.items) ? data.items : []);
-    } catch (error) {
-      toast.error(error.message || '加载邀请码失败');
-    } finally {
-      setInviteCodesLoading(false);
-    }
-  }, [requestJSON]);
+  const loadInviteCodes = useCallback(
+    async (options = {}) => {
+      const { silent = false } = options;
+      if (!silent) {
+        setInviteCodesLoading(true);
+      }
+      try {
+        const data = await requestJSON('/api/m365/invite-codes');
+        setInviteCodes(Array.isArray(data.items) ? data.items : []);
+      } catch (error) {
+        toast.error(error.message || '加载邀请码失败');
+      } finally {
+        if (!silent) {
+          setInviteCodesLoading(false);
+        }
+      }
+    },
+    [requestJSON]
+  );
 
   const loadRegistrations = useCallback(async () => {
     setRegistrationsLoading(true);
@@ -878,6 +1039,61 @@ function M365Page() {
   }, [activeTab, loadGroupMembers, selectedGroupId]);
 
   useEffect(() => {
+    if (activeTab !== 'public' || publicPages.length === 0) return;
+    const accountIds = Array.from(
+      new Set(
+        publicPages
+          .flatMap(page =>
+            Array.isArray(page.accountIds) && page.accountIds.length > 0
+              ? page.accountIds
+              : page.accountId
+                ? [page.accountId]
+                : []
+          )
+          .map(accountId => String(accountId || '').trim())
+          .filter(Boolean)
+      )
+    );
+    const missingAccountIds = accountIds.filter(accountId => !publicPageSkuCatalog[accountId]);
+    if (missingAccountIds.length === 0) return;
+
+    let cancelled = false;
+    void Promise.all(
+      missingAccountIds.map(async accountId => {
+        try {
+          const data = await requestJSON(`/api/m365/accounts/${accountId}/licenses/skus`);
+          const items = Array.isArray(data.items) ? data.items : [];
+          return [
+            accountId,
+            Object.fromEntries(
+              items.map(sku => [
+                String(sku?.skuId || '').trim(),
+                getSkuDisplayLabel(sku?.skuPartNumber, sku?.skuId),
+              ])
+            ),
+          ];
+        } catch (error) {
+          console.error('load public page sku labels failed:', accountId, error);
+          return [accountId, {}];
+        }
+      })
+    ).then(results => {
+      if (cancelled) return;
+      setPublicPageSkuCatalog(current => {
+        const next = { ...current };
+        results.forEach(([accountId, labels]) => {
+          next[String(accountId)] = labels;
+        });
+        return next;
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, publicPageSkuCatalog, publicPages, requestJSON]);
+
+  useEffect(() => {
     if (!showPublicPageDialog) return;
     const primaryAccountId = String(publicPageForm.accountIds[0] || '');
     if (!primaryAccountId) {
@@ -952,7 +1168,7 @@ function M365Page() {
       setPendingInviteBatchDeleteKey(current =>
         current === pendingInviteBatchDeleteKey ? '' : current
       );
-    }, 1600);
+    }, 2200);
     return () => window.clearTimeout(timer);
   }, [pendingInviteBatchDeleteKey]);
 
@@ -960,7 +1176,7 @@ function M365Page() {
     if (!pendingUserDeleteId) return undefined;
     const timer = window.setTimeout(() => {
       setPendingUserDeleteId(current => (current === pendingUserDeleteId ? '' : current));
-    }, 1400);
+    }, 2200);
     return () => window.clearTimeout(timer);
   }, [pendingUserDeleteId]);
 
@@ -1523,6 +1739,35 @@ function M365Page() {
     }
   };
 
+  const togglePublicPageEnabled = async (page, checked) => {
+    const targetId = String(page?.id || '');
+    if (!targetId) return;
+    const previousEnabled = page.enabled !== false;
+    const nextEnabled = typeof checked === 'boolean' ? checked : !previousEnabled;
+    if (nextEnabled === previousEnabled) return;
+    setTogglingPublicPageId(targetId);
+    setPublicPages(current =>
+      current.map(item => (String(item.id) === targetId ? { ...item, enabled: nextEnabled } : item))
+    );
+    try {
+      await requestJSON(`/api/m365/public-pages/${targetId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ enabled: nextEnabled }),
+      });
+      toast.success(nextEnabled ? '公开页已启用' : '公开页已关闭');
+      await Promise.all([loadPublicPages({ silent: true }), loadInviteCodes()]);
+    } catch (error) {
+      setPublicPages(current =>
+        current.map(item =>
+          String(item.id) === targetId ? { ...item, enabled: previousEnabled } : item
+        )
+      );
+      toast.error(error.message || '更新公开页状态失败');
+    } finally {
+      setTogglingPublicPageId('');
+    }
+  };
+
   const generateInviteCodes = async () => {
     if (!inviteCodeGeneratorForm.publicPageId) {
       toast.warning('请先选择公开页');
@@ -1559,7 +1804,7 @@ function M365Page() {
     try {
       await requestJSON(`/api/m365/public-pages/${page.id}`, { method: 'DELETE' });
       toast.success('公开页配置已删除');
-      await Promise.all([loadPublicPages(), loadInviteCodes(), loadRegistrations()]);
+      await Promise.all([loadPublicPages({ silent: true }), loadInviteCodes({ silent: true })]);
     } catch (error) {
       toast.error(error.message || '删除公开页配置失败');
     }
@@ -1581,7 +1826,7 @@ function M365Page() {
       });
       setPendingInviteBatchDeleteKey('');
       toast.success(`已删除 ${result.deletedCount || ids.length} 个邀请码`);
-      await Promise.all([loadPublicPages(), loadInviteCodes(), loadRegistrations()]);
+      await Promise.all([loadPublicPages({ silent: true }), loadInviteCodes({ silent: true })]);
     } catch (error) {
       toast.error(error.message || '删除邀请码批次失败');
     }
@@ -1827,7 +2072,7 @@ function M365Page() {
   );
 
   const renderPublicPages = () => (
-    <PageStack className="min-h-0 flex-1 overflow-visible">
+    <PageStack className="min-h-0 flex-1">
       <SectionCard
         className="flex min-h-0 flex-1 flex-col"
         bodyClassName={panelBodyClass}
@@ -1888,16 +2133,11 @@ function M365Page() {
           </div>
 
           {publicTab === 'pages' ? (
-            <AppCard padding="none" className="flex min-h-0 flex-1 flex-col overflow-hidden">
-              <div className="flex items-center justify-between border-b border-kumo-line/60 px-4 py-3">
-                <div>
-                  <div className="text-sm font-semibold text-kumo-strong">公开页配置【{filteredPublicPages.length}个】</div>
-                </div>
-              </div>
+            <div className="flex min-h-0 flex-1 flex-col">
               {publicPagesLoading ? (
-                <div className="space-y-3 p-4">
+                <div className="grid auto-rows-fr gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                   {Array.from({ length: 4 }).map((_, index) => (
-                    <SkeletonLine key={index} className="h-20 w-full" />
+                    <SkeletonLine key={index} className="h-60 w-full" />
                   ))}
                 </div>
               ) : filteredPublicPages.length === 0 ? (
@@ -1908,72 +2148,118 @@ function M365Page() {
                   card={false}
                 />
               ) : (
-                <div className={cx(scrollViewportClass, 'space-y-2.5 p-3')}>
-                  {filteredPublicPages.map(page  => {
-                    const pageAccounts = (page.accountIds || [])
-                      .map(accountId => accountLookup.get(String(accountId)))
-                      .filter(Boolean);
-                    const accountNames = pageAccounts.map(account => account.name).filter(Boolean);
-                    const domainList = Array.isArray(page.domains) ? page.domains : [];
-                    const skuLabels = (page.skuIds || [])
-                      .map(skuId => getSkuDisplayLabel('', skuId))
-                      .filter(Boolean);
-                    return (
-                      <AppCard key={page.id} className="border-kumo-line/70 bg-kumo-base/95 p-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <div className="truncate text-sm font-semibold text-kumo-strong">
-                                {page.name}
+                <div className={cx(scrollViewportClass, 'pr-1')}>
+                  <div className="grid auto-rows-fr gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                    {filteredPublicPages.map(page => {
+                      const pageAccounts = (page.accountIds || [])
+                        .map(accountId => accountLookup.get(String(accountId)))
+                        .filter(Boolean);
+                      const accountNames = pageAccounts
+                        .map(account => account.name)
+                        .filter(Boolean);
+                      const domainList = Array.isArray(page.domains) ? page.domains : [];
+                      const skuLabels = (page.skuIds || [])
+                        .map(skuId => {
+                          const normalizedSkuId = String(skuId || '').trim();
+                          return (
+                            publicPageSkuLabelLookup.get(normalizedSkuId) ||
+                            skuLabelLookup.get(normalizedSkuId) ||
+                            getSkuDisplayLabel('', normalizedSkuId)
+                          );
+                        })
+                        .filter(Boolean);
+                      const totalInviteCodeCount = page.inviteCodeCount || 0;
+                      const usedInviteCodeCount = page.usedInviteCodeCount || 0;
+                      const inviteCodeSummary = `邀请码 ${usedInviteCodeCount}/${totalInviteCodeCount}`;
+                      const pageEnabled = page.enabled !== false;
+                      const togglingCurrentPage = togglingPublicPageId === String(page.id);
+                      return (
+                        <div key={page.id} className={publicResourceCardClass}>
+                          <div className={publicResourceCardHeaderClass}>
+                            <div className="min-w-0 flex flex-1 items-center">
+                              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                <div
+                                  className="truncate text-sm font-semibold text-kumo-strong"
+                                  title={page.name}
+                                >
+                                  {page.name}
+                                </div>
+                                <StatusBadge tone={page.available ? 'success' : 'warning'}>
+                                  {page.available ? '可用' : '停用'}
+                                </StatusBadge>
                               </div>
-                              <StatusBadge tone={page.available ? 'success' : 'warning'}>
-                                {page.available ? '可用' : '停用'}
-                              </StatusBadge>
-                              <span className="text-[11px] text-kumo-subtle">
-                                邀请码 {page.inviteCodeCount || 0} / 已用{' '}
-                                {page.usedInviteCodeCount || 0}
-                              </span>
                             </div>
-                            <div className="mt-2 grid gap-2 text-xs text-kumo-subtle lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-                              <div className="rounded-lg border border-kumo-line/60 bg-kumo-recessed/15 px-3 py-2">
-                                <div className="text-[11px] uppercase tracking-wide">目标租户</div>
-                                <div
-                                  className="mt-1 font-medium text-kumo-strong"
-                                  title={accountNames.join('、') || '-'}
-                                >
-                                  {accountNames.join('、') || '-'}
-                                </div>
-                              </div>
-                              <div className="rounded-lg border border-kumo-line/60 bg-kumo-recessed/15 px-3 py-2">
-                                <div className="text-[11px] uppercase tracking-wide">域名</div>
-                                <div
-                                  className="mt-1 font-medium text-kumo-strong"
-                                  title={domainList.join('、') || '-'}
-                                >
-                                  {domainList.join('、') || '-'}
-                                </div>
-                              </div>
-                              <div className="rounded-lg border border-kumo-line/60 bg-kumo-recessed/15 px-3 py-2">
-                                <div className="text-[11px] uppercase tracking-wide">配置</div>
-                                <div className="mt-1 font-medium text-kumo-strong">
-                                  {page.forceChangePasswordNextSignIn ? '首次改密' : '不强制改密'}
-                                </div>
-                              </div>
-                              <div className="rounded-lg border border-kumo-line/60 bg-kumo-recessed/15 px-3 py-2">
-                                <div className="text-[11px] uppercase tracking-wide">许可证</div>
-                                <div
-                                  className="mt-1 font-medium text-kumo-strong"
-                                  title={skuLabels.join('、') || '-'}
-                                >
-                                  {skuLabels.join('、') || '-'}
-                                </div>
+                            <div className="flex shrink-0 items-center gap-3">
+                              <span
+                                className={publicResourceCardPillClass}
+                                title={inviteCodeSummary}
+                              >
+                                <span className="truncate">{inviteCodeSummary}</span>
+                              </span>
+                              <div
+                                className="flex items-center"
+                                title={pageEnabled ? '已启用' : '已关闭'}
+                              >
+                                <Switch
+                                  size="sm"
+                                  aria-label={`${page.name} 启用开关`}
+                                  checked={pageEnabled}
+                                  disabled={togglingCurrentPage}
+                                  onCheckedChange={checked =>
+                                    togglePublicPageEnabled(page, checked)
+                                  }
+                                />
                               </div>
                             </div>
                           </div>
-                          <div className="flex shrink-0 gap-2">
+
+                          <div className={publicResourceCardGridClass}>
+                            <div className={publicResourceCardFieldClass}>
+                              <div className="text-[11px] text-kumo-subtle">目标租户</div>
+                              <div
+                                className="mt-2 truncate text-xs font-medium text-kumo-strong"
+                                title={accountNames.join('、') || '-'}
+                              >
+                                {accountNames.join('、') || '-'}
+                              </div>
+                            </div>
+
+                            <div className={publicResourceCardFieldClass}>
+                              <div className="text-[11px] text-kumo-subtle">域名</div>
+                              <div className="mt-2">
+                                <DomainListPopover
+                                  domains={domainList}
+                                  copyText={copyText}
+                                  label={`${page.name} 域名`}
+                                />
+                              </div>
+                            </div>
+
+                            <div className={publicResourceCardFieldClass}>
+                              <div className="text-[11px] text-kumo-subtle">配置</div>
+                              <div className="mt-2 text-xs font-medium text-kumo-strong">
+                                {page.forceChangePasswordNextSignIn ? '首次改密' : '无需改密'}
+                              </div>
+                            </div>
+
+                            <div className={publicResourceCardFieldClass}>
+                              <div className="text-[11px] text-kumo-subtle">许可证</div>
+                              <div className="mt-2">
+                                <LicenseListPopover
+                                  licenses={skuLabels}
+                                  copyText={copyText}
+                                  label={`${page.name} 许可证`}
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className={publicResourceCardActionBarClass}>
                             <Button
                               size="sm"
-                              variant="secondary"
+                              variant="primary"
+                              className="basis-0 !justify-center text-center"
+                              style={{ flex: 2.6 }}
                               onClick={() => openInviteCodeGenerator(page.id)}
                             >
                               生成邀请码
@@ -1981,6 +2267,8 @@ function M365Page() {
                             <Button
                               size="sm"
                               variant="secondary"
+                              className="basis-0 !justify-center text-center"
+                              style={{ flex: 1.2 }}
                               onClick={() => openEditPublicPage(page)}
                             >
                               编辑
@@ -1988,31 +2276,28 @@ function M365Page() {
                             <Button
                               size="sm"
                               variant="destructive"
-                              shape="square"
-                              icon={<Trash className="h-3.5 w-3.5" />}
+                              className="basis-0 !justify-center text-center"
+                              style={{ flex: 1 }}
                               onClick={() => deletePublicPage(page)}
-                            />
+                            >
+                              删除
+                            </Button>
                           </div>
                         </div>
-                      </AppCard>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
               )}
-            </AppCard>
+            </div>
           ) : null}
 
           {publicTab === 'codes' ? (
-            <AppCard padding="none" className="flex min-h-0 flex-1 flex-col overflow-hidden">
-              <div className="flex items-center justify-between border-b border-kumo-line/60 px-4 py-3">
-                <div>
-                  <div className="text-sm font-semibold text-kumo-strong">邀请码批次</div>
-                </div>
-              </div>
+            <div className="flex min-h-0 flex-1 flex-col">
               {inviteCodesLoading ? (
-                <div className="space-y-3 p-4">
+                <div className="space-y-2.5">
                   {Array.from({ length: 4 }).map((_, index) => (
-                    <SkeletonLine key={index} className="h-24 w-full" />
+                    <SkeletonLine key={index} className="h-20 w-full" />
                   ))}
                 </div>
               ) : groupedInviteCodeBatches.length === 0 ? (
@@ -2023,131 +2308,126 @@ function M365Page() {
                   card={false}
                 />
               ) : (
-                <div className={cx(scrollViewportClass, 'space-y-3 p-3')}>
-                  {groupedInviteCodeBatches.map(group => (
-                    <AppCard key={group.key} className="border-kumo-line/70 bg-kumo-base/95 p-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <div className="truncate text-sm font-semibold text-kumo-strong">
-                              {group.publicPageName}
-                            </div>
-                            <StatusBadge tone={group.availableCount > 0 ? 'success' : 'warning'}>
-                              可用 {group.availableCount} / {group.codes.length}
-                            </StatusBadge>
-                            <span className="text-[11px] text-kumo-subtle">
-                              已用 {group.usedCount}
-                            </span>
-                          </div>
-                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-kumo-subtle">
-                            <span>批次 {group.batchId || '单个生成'}</span>
-                            <span title={group.domains.join('、') || '-'}>
-                              域名 {group.domains.join('、') || '-'}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="flex shrink-0 gap-2">
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => {
-                              if (pendingInviteBatchDeleteKey === group.key) {
-                                void deleteInviteBatch(group);
-                                return;
-                              }
-                              setPendingInviteBatchDeleteKey(group.key);
-                              toast.warning('再次点击即可删除整个批次');
-                            }}
-                          >
-                            {pendingInviteBatchDeleteKey === group.key ? '再次删除' : '删除批次'}
-                          </Button>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 overflow-hidden rounded-lg border border-kumo-line/60 bg-kumo-recessed/10">
-                        {group.codes.map((codeItem, index) => {
-                          const publicRegisterUrl = `${window.location.origin}/m365/register?code=${encodeURIComponent(codeItem.code)}`;
-                          return (
-                            <div
-                              key={codeItem.id}
-                              className={cx(
-                                'grid gap-2 px-3 py-2.5 lg:grid-cols-[minmax(0,1fr)_13rem_auto]',
-                                index > 0 && 'border-t border-kumo-line/60'
-                              )}
-                            >
-                              <div className="min-w-0">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="font-mono text-xs font-semibold text-kumo-strong">
-                                    {codeItem.code}
-                                  </span>
-                                  <StatusBadge
-                                    tone={
-                                      codeItem.used
-                                        ? 'warning'
-                                        : codeItem.available
-                                          ? 'success'
-                                          : 'danger'
-                                    }
-                                  >
-                                    {codeItem.used
-                                      ? '已使用'
-                                      : codeItem.available
-                                        ? '可用'
-                                        : '失效'}
+                <div className={cx(scrollViewportClass, 'pr-1')}>
+                  <div className="grid auto-rows-fr gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                    {groupedInviteCodeBatches.map(group =>
+                      (() => {
+                        const totalCount = group.codes.length;
+                        const remainingCount = Math.max(totalCount - group.usedCount, 0);
+                        const exhausted = remainingCount <= 0;
+                        const partiallyUsed = group.usedCount > 0 && !exhausted;
+                        const statusTone = exhausted
+                          ? 'danger'
+                          : partiallyUsed
+                            ? 'warning'
+                            : 'success';
+                        const batchLabel = group.batchId || '单个生成';
+                        const fallbackCode = group.codes[0]?.code || '';
+                        const publicRegisterPath = group.batchId
+                          ? `/m365/register?batch=${encodeURIComponent(group.batchId)}`
+                          : `/m365/register?code=${encodeURIComponent(fallbackCode)}`;
+                        const publicRegisterUrl = `${window.location.origin}${publicRegisterPath}`;
+                        return (
+                          <div key={group.key} className={publicResourceCardClass}>
+                            <div className={publicResourceCardHeaderClass}>
+                              <div className="min-w-0 flex flex-1 items-center">
+                                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                  <div className="truncate text-sm font-semibold text-kumo-strong">
+                                    {group.publicPageName}
+                                  </div>
+                                  <StatusBadge tone={statusTone}>
+                                    已用 {group.usedCount}/{totalCount}
                                   </StatusBadge>
                                 </div>
-                                <div className="mt-1 truncate font-mono text-[11px] text-kumo-subtle">
-                                  {publicRegisterUrl}
+                              </div>
+                              <span className={publicResourceCardPillClass} title={batchLabel}>
+                                <span className="truncate">{batchLabel}</span>
+                              </span>
+                            </div>
+
+                            <div className={publicResourceCardGridClass}>
+                              <div className={publicResourceCardFieldClass}>
+                                <div className="text-[11px] text-kumo-subtle">域名</div>
+                                <div className="mt-2">
+                                  <DomainListPopover
+                                    domains={group.domains}
+                                    copyText={copyText}
+                                    label={`${group.publicPageName} 域名`}
+                                  />
                                 </div>
                               </div>
-                              <div className="text-[11px] text-kumo-subtle lg:text-right">
-                                <div>
-                                  使用 {codeItem.usedCount || 0} / {codeItem.maxUses || 1}
-                                </div>
-                                <div className="mt-1">
-                                  {codeItem.lastUsedAt
-                                    ? `最后使用 ${formatDateTime(codeItem.lastUsedAt)}`
-                                    : '未使用'}
-                                </div>
-                              </div>
-                              <div className="flex shrink-0 justify-start gap-2 lg:justify-end">
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  shape="square"
-                                  icon={<Copy className="h-3.5 w-3.5" />}
-                                  onClick={() => copyText(publicRegisterUrl, '公开注册链接已复制')}
-                                />
-                                <Button
-                                  size="sm"
-                                  variant={codeItem.enabled ? 'secondary' : 'primary'}
-                                  onClick={async () => {
-                                    try {
-                                      await requestJSON(`/api/m365/invite-codes/${codeItem.id}`, {
-                                        method: 'PUT',
-                                        body: JSON.stringify({ enabled: !codeItem.enabled }),
-                                      });
-                                      toast.success(
-                                        codeItem.enabled ? '邀请码已停用' : '邀请码已启用'
-                                      );
-                                      await loadInviteCodes();
-                                    } catch (error) {
-                                      toast.error(error.message || '更新邀请码状态失败');
-                                    }
-                                  }}
+
+                              <div className={publicResourceCardFieldClass}>
+                                <div className="text-[11px] text-kumo-subtle">剩余可用</div>
+                                <div
+                                  className={cx(
+                                    'mt-2 text-sm font-semibold',
+                                    exhausted ? 'text-kumo-danger' : 'text-kumo-strong'
+                                  )}
                                 >
-                                  {codeItem.enabled ? '停用' : '启用'}
-                                </Button>
+                                  {remainingCount} / {totalCount}
+                                </div>
+                              </div>
+
+                              <div className={publicResourceCardFieldClass}>
+                                <div className="text-[11px] text-kumo-subtle">创建时间</div>
+                                <div
+                                  className="mt-2 truncate text-xs font-medium text-kumo-strong"
+                                  title={group.createdAt ? formatDateTime(group.createdAt) : '-'}
+                                >
+                                  {group.createdAt ? formatDateTime(group.createdAt) : '-'}
+                                </div>
+                              </div>
+
+                              <div className={publicResourceCardFieldClass}>
+                                <div className="text-[11px] text-kumo-subtle">最后使用</div>
+                                <div
+                                  className="mt-2 truncate text-xs font-medium text-kumo-strong"
+                                  title={
+                                    group.lastUsedAt ? formatDateTime(group.lastUsedAt) : '未使用'
+                                  }
+                                >
+                                  {group.lastUsedAt ? formatDateTime(group.lastUsedAt) : '未使用'}
+                                </div>
                               </div>
                             </div>
-                          );
-                        })}
-                      </div>
-                    </AppCard>
-                  ))}
+
+                            <div className={publicResourceCardActionBarClass}>
+                              <Button
+                                size="sm"
+                                variant={exhausted ? 'secondary' : 'primary'}
+                                className="basis-0 !justify-center text-center"
+                                style={{ flex: 3 }}
+                                icon={<Copy className="h-3.5 w-3.5" />}
+                                onClick={() => copyText(publicRegisterUrl, '注册链接已复制')}
+                                disabled={!publicRegisterUrl}
+                              >
+                                复制注册链接
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                className="basis-0 !justify-center text-center"
+                                style={{ flex: 1 }}
+                                onClick={() => {
+                                  if (pendingInviteBatchDeleteKey === group.key) {
+                                    void deleteInviteBatch(group);
+                                    return;
+                                  }
+                                  setPendingInviteBatchDeleteKey(group.key);
+                                }}
+                              >
+                                {pendingInviteBatchDeleteKey === group.key ? '确认' : '删除'}
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })()
+                    )}
+                  </div>
                 </div>
               )}
-            </AppCard>
+            </div>
           ) : null}
 
           {publicTab === 'registrations' ? (
@@ -2330,7 +2610,7 @@ function M365Page() {
   );
 
   const renderUsers = () => (
-    <PageStack className="min-h-0 flex-1 overflow-visible">
+    <PageStack className="min-h-0 flex-1">
       <SectionCard
         className="shrink-0"
         bodyClassName={panelBodyClass}
@@ -2438,7 +2718,7 @@ function M365Page() {
       </SectionCard>
 
       <SectionCard
-        className="flex min-h-0 flex-1 flex-col overflow-visible"
+        className="flex min-h-0 flex-1 flex-col"
         bodyClassName={panelBodyClass}
         title="用户与许可证"
         description="查看、创建、编辑、删除用户，并在列表中直接管理许可证。"
@@ -2482,14 +2762,20 @@ function M365Page() {
         ) : users.length === 0 ? (
           <EmptyState icon={User} title="暂无用户" description="当前筛选条件下没有可展示的用户。" />
         ) : (
-          <div className="dns-table-frame min-h-0">
-            <div className={cx('dns-table-scroll scrollbar-thin', userTableViewportClass)}>
-              <Table
+          <div
+            className={cx(
+              'flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-kumo-line/80 bg-kumo-base'
+            )}
+          >
+            <DataTableFrame
+              variant="embedded"
+              density="compact"
+              className={cx('min-h-0 flex-1 overflow-auto scrollbar-thin', userTableViewportClass)}
+            >
+              <AppTable
                 layout="fixed"
+                widths={USER_TABLE_COLUMN_WIDTHS}
                 className="w-full text-xs [&_td]:align-middle"
-                style={{
-                  minWidth: USER_TABLE_COLUMN_WIDTHS.reduce((sum, width) => sum + width, 0),
-                }}
               >
                 <colgroup>
                   {USER_TABLE_COLUMN_WIDTHS.map((width, index) => (
@@ -2585,30 +2871,29 @@ function M365Page() {
                             </Button>
                             <Button
                               size="sm"
-                              variant="destructive"
-                              shape="square"
-                              title={deleteArmed ? '双击删除用户' : '双击删除'}
-                              aria-label="删除"
+                              variant={deleteArmed ? 'destructive' : 'secondary-destructive'}
+                              title={deleteArmed ? '确认' : '删除用户'}
+                              aria-label={deleteArmed ? '确认' : '删除用户'}
                               icon={<Trash className="h-3.5 w-3.5" />}
                               className={deleteArmed ? 'ring-1 ring-kumo-danger/50' : ''}
                               onClick={() => {
-                                if (!deleteArmed) {
-                                  setPendingUserDeleteId(String(user.id));
-                                  toast.warning('双击删除按钮即可删除该用户');
+                                if (deleteArmed) {
+                                  void deleteUser(user);
+                                  return;
                                 }
+                                setPendingUserDeleteId(String(user.id));
                               }}
-                              onDoubleClick={() => {
-                                void deleteUser(user);
-                              }}
-                            />
+                            >
+                              {deleteArmed ? '确认' : '删除'}
+                            </Button>
                           </div>
                         </Table.Cell>
                       </Table.Row>
                     );
                   })}
                 </Table.Body>
-              </Table>
-            </div>
+              </AppTable>
+            </DataTableFrame>
           </div>
         )}
       </SectionCard>
@@ -2616,7 +2901,7 @@ function M365Page() {
   );
 
   const renderGroups = () => (
-    <PageStack className="min-h-0 flex-1 overflow-visible">
+    <PageStack className="min-h-0 flex-1">
       <SectionCard
         className="flex min-h-0 flex-1 flex-col"
         bodyClassName={panelBodyClass}
@@ -2656,8 +2941,8 @@ function M365Page() {
           />
         ) : (
           <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-            <AppCard padding="none" className="flex min-h-0 flex-col overflow-visible">
-              <div className={scrollViewportClass}>
+            <AppCard padding="none" className="flex min-h-0 flex-col">
+              <DataTableFrame variant="embedded" density="compact" className={scrollViewportClass}>
                 <Table layout="auto" className="[&_td]:py-3 [&_th]:py-3">
                   <Table.Header>
                     <Table.Row>
@@ -2687,7 +2972,7 @@ function M365Page() {
                     ))}
                   </Table.Body>
                 </Table>
-              </div>
+              </DataTableFrame>
             </AppCard>
 
             <SectionCard
@@ -2740,8 +3025,17 @@ function M365Page() {
                       分配组许可证
                     </Button>
                   </div>
-                  <div className={cx(tableFrameClass, 'rounded-lg border border-kumo-line/80')}>
-                    <div className={scrollViewportClass}>
+                  <div
+                    className={cx(
+                      tableFrameClass,
+                      'rounded-lg border border-kumo-line/80 bg-kumo-base'
+                    )}
+                  >
+                    <DataTableFrame
+                      variant="embedded"
+                      density="compact"
+                      className={scrollViewportClass}
+                    >
                       <Table layout="auto" className="[&_td]:py-3 [&_th]:py-3">
                         <Table.Header>
                           <Table.Row>
@@ -2777,7 +3071,7 @@ function M365Page() {
                           ))}
                         </Table.Body>
                       </Table>
-                    </div>
+                    </DataTableFrame>
                   </div>
                 </div>
               )}

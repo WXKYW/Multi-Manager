@@ -417,6 +417,55 @@ func TestUptimeRoutesAreGoOwnedWithInternalAuthSplit(t *testing.T) {
 	}
 }
 
+func TestM365PublicRegistrationRoutesBypassSessionAuth(t *testing.T) {
+	handler := testServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/m365/public/register?code=missing", nil)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("public register descriptor status = %d body=%s", res.Code, res.Body.String())
+	}
+	var descriptorPayload struct {
+		Success bool                   `json:"success"`
+		Data    map[string]interface{} `json:"data"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &descriptorPayload); err != nil {
+		t.Fatalf("decode public register descriptor: %v body=%s", err, res.Body.String())
+	}
+	if !descriptorPayload.Success || descriptorPayload.Data["method"] != "POST" {
+		t.Fatalf("unexpected public register descriptor payload: %#v", descriptorPayload)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/m365/public/invites/missing", nil)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("public invite descriptor status = %d body=%s", res.Code, res.Body.String())
+	}
+	if strings.Contains(res.Body.String(), "请先登录") {
+		t.Fatalf("public invite route should bypass session auth: %s", res.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/m365/public/register", strings.NewReader(`{"mailNickname":"user1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("public register post status = %d body=%s", res.Code, res.Body.String())
+	}
+	if strings.Contains(res.Body.String(), "请先登录") {
+		t.Fatalf("public register post should bypass session auth: %s", res.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/m365/accounts", nil)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("private m365 accounts status = %d body=%s", res.Code, res.Body.String())
+	}
+}
+
 func TestKoyebRoutesAreGoOwnedAndRequireSession(t *testing.T) {
 	handler := testServer(t)
 

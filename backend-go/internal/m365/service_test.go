@@ -373,15 +373,23 @@ func TestInviteRegistrationLifecycle(t *testing.T) {
 		t.Fatalf("register descriptor status=%d body=%s", registerDescriptorRes.Code, registerDescriptorRes.Body.String())
 	}
 
-	registerRes := performM365(service, http.MethodPost, "/api/m365/public/register", `{"code":"`+code+`","domain":"fabrikam.com","mailNickname":"student1","displayName":"Student One","password":"TempPassw0rd!"}`)
+	registerRes := performM365(service, http.MethodPost, "/api/m365/public/register", `{"code":"`+code+`","domain":"fabrikam.com","mailNickname":"student1","displayName":"Student One"}`)
 	if registerRes.Code != http.StatusOK || !strings.Contains(registerRes.Body.String(), `"status":"success"`) || !strings.Contains(registerRes.Body.String(), `"userPrincipalName":"student1@fabrikam.com"`) {
 		t.Fatalf("register status=%d body=%s", registerRes.Code, registerRes.Body.String())
+	}
+	registerData := decodeEnvelopeData(t, registerRes)
+	initialPassword := strings.TrimSpace(stringValue(registerData["initialPassword"], ""))
+	if initialPassword == "" {
+		t.Fatalf("expected generated initialPassword, body=%s", registerRes.Body.String())
 	}
 	if !strings.Contains(createUserBody, `"userPrincipalName":"student1@fabrikam.com"`) || !strings.Contains(createUserBody, `"usageLocation":"CN"`) {
 		t.Fatalf("unexpected create user body: %s", createUserBody)
 	}
 	if !strings.Contains(createUserBody, `"forceChangePasswordNextSignIn":true`) {
 		t.Fatalf("expected forceChangePasswordNextSignIn in body: %s", createUserBody)
+	}
+	if !strings.Contains(createUserBody, `"password":"`+initialPassword+`"`) {
+		t.Fatalf("expected generated password in create user body: %s", createUserBody)
 	}
 	if !strings.Contains(assignLicenseBody, `"skuId":"sku-1"`) {
 		t.Fatalf("unexpected assign license body: %s", assignLicenseBody)
@@ -414,6 +422,32 @@ func TestInviteRegistrationLifecycle(t *testing.T) {
 	usedInviteRes := performM365(service, http.MethodGet, "/api/m365/public/invites/"+code, "")
 	if usedInviteRes.Code != http.StatusOK || !strings.Contains(usedInviteRes.Body.String(), `"available":false`) || !strings.Contains(usedInviteRes.Body.String(), `"availabilityReason":"used"`) {
 		t.Fatalf("used invite status=%d body=%s", usedInviteRes.Code, usedInviteRes.Body.String())
+	}
+
+	batchDescriptorRes := performM365(service, http.MethodGet, "/api/m365/public/register?batch="+batchID, "")
+	if batchDescriptorRes.Code != http.StatusOK || !strings.Contains(batchDescriptorRes.Body.String(), `"inviteCount":2`) || !strings.Contains(batchDescriptorRes.Body.String(), `"availableCount":1`) {
+		t.Fatalf("batch register descriptor status=%d body=%s", batchDescriptorRes.Code, batchDescriptorRes.Body.String())
+	}
+
+	batchRegisterRes := performM365(service, http.MethodPost, "/api/m365/public/register", `{"batch":"`+batchID+`","domain":"contoso.com","mailNickname":"student2","displayName":"Student Two"}`)
+	if batchRegisterRes.Code != http.StatusOK || !strings.Contains(batchRegisterRes.Body.String(), `"status":"success"`) || !strings.Contains(batchRegisterRes.Body.String(), `"userPrincipalName":"student2@contoso.com"`) {
+		t.Fatalf("batch register status=%d body=%s", batchRegisterRes.Code, batchRegisterRes.Body.String())
+	}
+	batchRegisterData := decodeEnvelopeData(t, batchRegisterRes)
+	batchInitialPassword := strings.TrimSpace(stringValue(batchRegisterData["initialPassword"], ""))
+	if batchInitialPassword == "" {
+		t.Fatalf("expected generated initialPassword for batch registration, body=%s", batchRegisterRes.Body.String())
+	}
+	if !strings.Contains(createUserBody, `"userPrincipalName":"student2@contoso.com"`) {
+		t.Fatalf("unexpected batch create user body: %s", createUserBody)
+	}
+	if !strings.Contains(createUserBody, `"password":"`+batchInitialPassword+`"`) {
+		t.Fatalf("expected generated batch password in create user body: %s", createUserBody)
+	}
+
+	registrationAfterBatchRes := performM365(service, http.MethodGet, "/api/m365/registrations", "")
+	if registrationAfterBatchRes.Code != http.StatusOK || !strings.Contains(registrationAfterBatchRes.Body.String(), `"Student Two"`) || !strings.Contains(registrationAfterBatchRes.Body.String(), `"accountId":1`) {
+		t.Fatalf("registrations after batch register status=%d body=%s", registrationAfterBatchRes.Code, registrationAfterBatchRes.Body.String())
 	}
 
 	updatePageRes := performM365(service, http.MethodPut, "/api/m365/public-pages/1", `{"name":"已关闭批次","enabled":false,"accountIds":[1,2],"domains":["contoso.com","fabrikam.com"]}`)

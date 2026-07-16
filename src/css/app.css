@@ -1,6 +1,6 @@
 @source "../../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
-@import "tailwindcss";
-@import "@cloudflare/kumo/styles/tailwind";
+@import 'tailwindcss';
+@import '@cloudflare/kumo/styles/tailwind';
 
 /* ==================== Base Resets ==================== */
 html {
@@ -84,11 +84,7 @@ body {
 }
 
 .cf-ai-background::before {
-  background-image: radial-gradient(
-    circle,
-    rgba(125, 125, 125, 0.1) 1px,
-    transparent 1px
-  );
+  background-image: radial-gradient(circle, rgba(125, 125, 125, 0.1) 1px, transparent 1px);
   background-size: 12px 12px;
   opacity: 1;
 }
@@ -99,11 +95,7 @@ body {
     rgba(251, 146, 60, 0.7),
     rgba(125, 125, 125, 0.1)
   );
-  mask-image: radial-gradient(
-    circle,
-    black 1px,
-    transparent 1px
-  );
+  mask-image: radial-gradient(circle, black 1px, transparent 1px);
   mask-size: 12px 12px;
   opacity: var(--cf-ai-spotlight-opacity);
   transition: opacity 200ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -395,10 +387,6 @@ th > button[aria-label='Resize column'] > span {
   }
 }
 
-.app-layer-frame {
-  box-shadow: 0 0 0 1.2px var(--color-kumo-line);
-}
-
 :root[data-mode='dark'] .app-main-shell {
   background: var(--app-main-bg);
 }
@@ -511,13 +499,7 @@ th > button[aria-label='Resize column'] > span {
   border: 0;
   background: transparent;
   font-family:
-    ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Monaco,
-    Consolas,
-    "Liberation Mono",
-    "Courier New",
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
     monospace !important;
   font-size: 13px !important;
   font-weight: 400;

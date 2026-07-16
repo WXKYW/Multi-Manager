@@ -208,6 +208,22 @@ func TestM365RoutesAreGoOwned(t *testing.T) {
 	if route.Owner != OwnerGo || route.Auth != AuthSession || route.ResponseMode != ResponseJSON {
 		t.Fatalf("expected session JSON go owner for m365 route, got owner=%s auth=%s response=%s", route.Owner, route.Auth, route.ResponseMode)
 	}
+
+	route, ok = Match("/api/m365/public/register")
+	if !ok {
+		t.Fatal("expected m365 public register route match")
+	}
+	if route.Owner != OwnerGo || route.Auth != AuthPublic || route.ResponseMode != ResponseJSON || route.Prefix != "/api/m365/public/register" {
+		t.Fatalf("expected public exact go owner for m365 public register, got prefix=%s owner=%s auth=%s response=%s", route.Prefix, route.Owner, route.Auth, route.ResponseMode)
+	}
+
+	route, ok = Match("/api/m365/public/invites/demo-code")
+	if !ok {
+		t.Fatal("expected m365 public invite route match")
+	}
+	if route.Owner != OwnerGo || route.Auth != AuthPublic || route.ResponseMode != ResponseJSON || route.Prefix != "/api/m365/public/invites/{code}" {
+		t.Fatalf("expected public pattern go owner for m365 public invite, got prefix=%s owner=%s auth=%s response=%s", route.Prefix, route.Owner, route.Auth, route.ResponseMode)
+	}
 }
 
 func TestCronRoutesAreGoOwned(t *testing.T) {

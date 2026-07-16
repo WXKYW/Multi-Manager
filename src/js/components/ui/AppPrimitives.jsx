@@ -7,9 +7,12 @@ import { LayerCard } from '@cloudflare/kumo';
 import { Info } from '../Icons.jsx';
 
 export const pageStackClass = 'flex w-full min-w-0 flex-col gap-3 sm:gap-4';
-export const pageToolbarClass = 'flex min-w-0 flex-col items-stretch gap-3 border-b border-kumo-line pb-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between [&>*]:min-w-0';
-export const sectionCardHeaderClass = 'flex min-h-[52px] items-center justify-between gap-3 border-b border-kumo-line bg-kumo-elevated px-4 py-2.5 sm:min-h-[56px] sm:flex-row sm:flex-wrap sm:items-center sm:py-3.5';
-export const sectionCardTitleClass = 'inline-flex min-w-0 max-w-full items-center gap-2 text-sm font-bold text-kumo-strong';
+export const pageToolbarClass =
+  'flex min-w-0 flex-col items-stretch gap-3 border-b border-kumo-line pb-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between [&>*]:min-w-0';
+export const sectionCardHeaderClass =
+  'flex min-h-[52px] items-center justify-between gap-3 border-b border-kumo-line bg-kumo-elevated px-4 py-2.5 sm:min-h-[56px] sm:flex-row sm:flex-wrap sm:items-center sm:py-3.5';
+export const sectionCardTitleClass =
+  'inline-flex min-w-0 max-w-full items-center gap-2 text-sm font-bold text-kumo-strong';
 export const iconButtonIconClass = 'h-3.5 w-3.5';
 export const actionIconClass = 'h-4 w-4';
 
@@ -83,7 +86,7 @@ export function AppCard({
     <LayerCard
       {...props}
       className={cx(
-        'app-layer-frame rounded-lg bg-kumo-base shadow-none ring-0',
+        'rounded-lg border border-kumo-line bg-kumo-base shadow-none ring-0',
         cardPaddingClass[padding] || cardPaddingClass.md,
         interactive && 'transition-colors hover:border-kumo-brand/60',
         className
@@ -131,7 +134,10 @@ export function SectionCard({
   return (
     <LayerCard
       {...props}
-      className={cx('app-layer-frame flex flex-col overflow-hidden p-0 shadow-none ring-0', className)}
+      className={cx(
+        'flex flex-col overflow-hidden rounded-lg border border-kumo-line bg-kumo-base p-0 shadow-none ring-0',
+        className
+      )}
     >
       <LayerCard.Secondary className={cx(sectionCardHeaderClass, headerClassName)}>
         <div className="flex min-w-0 flex-1 items-center gap-x-3 gap-y-1 sm:flex-row sm:flex-wrap sm:items-center">
@@ -144,18 +150,30 @@ export function SectionCard({
             )}
           </div>
           {description && (
-            <div className={cx('hidden min-w-0 flex-1 text-xs font-normal leading-5 text-kumo-subtle sm:block sm:basis-40 sm:truncate', descriptionClassName)}>
+            <div
+              className={cx(
+                'hidden min-w-0 flex-1 text-xs font-normal leading-5 text-kumo-subtle sm:block sm:basis-40 sm:truncate',
+                descriptionClassName
+              )}
+            >
               {description}
             </div>
           )}
         </div>
         {trailing.length > 0 && (
-          <div className={cx('ml-3 flex shrink-0 items-center justify-end gap-2 whitespace-nowrap sm:ml-auto sm:flex-wrap sm:whitespace-normal [&>*]:shrink-0', actionsClassName)}>
+          <div
+            className={cx(
+              'ml-3 flex shrink-0 items-center justify-end gap-2 whitespace-nowrap sm:ml-auto sm:flex-wrap sm:whitespace-normal [&>*]:shrink-0',
+              actionsClassName
+            )}
+          >
             {trailing}
           </div>
         )}
       </LayerCard.Secondary>
-      <LayerCard.Primary className={cx(cardPaddingClass[bodyPadding] || cardPaddingClass.md, bodyClassName)}>
+      <LayerCard.Primary
+        className={cx(cardPaddingClass[bodyPadding] || cardPaddingClass.md, bodyClassName)}
+      >
         {children}
       </LayerCard.Primary>
     </LayerCard>
@@ -173,9 +191,15 @@ export function InsetPanel({
   return (
     <LayerCard
       {...props}
-      className={cx('overflow-hidden rounded-lg border shadow-none', insetToneClass[tone] || insetToneClass.recessed, className)}
+      className={cx(
+        'overflow-hidden rounded-lg border shadow-none',
+        insetToneClass[tone] || insetToneClass.recessed,
+        className
+      )}
     >
-      <LayerCard.Primary className={cx(cardPaddingClass[padding] || cardPaddingClass.md, bodyClassName)}>
+      <LayerCard.Primary
+        className={cx(cardPaddingClass[padding] || cardPaddingClass.md, bodyClassName)}
+      >
         {children}
       </LayerCard.Primary>
     </LayerCard>
@@ -200,23 +224,13 @@ export function DataTableFrame({
   }
 
   return (
-    <AppCard
-      {...props}
-      padding="none"
-      className={frameClassName}
-    >
+    <AppCard {...props} padding="none" className={frameClassName}>
       {children}
     </AppCard>
   );
 }
 
-export function AppTable({
-  widths,
-  fitContent = false,
-  className = '',
-  style,
-  ...props
-}) {
+export function AppTable({ widths, fitContent = false, className = '', style, ...props }) {
   const minWidth = Array.isArray(widths)
     ? widths.reduce((total, width) => total + (Number(width) || 0), 0)
     : undefined;
@@ -226,9 +240,7 @@ export function AppTable({
       {...props}
       className={className}
       style={{
-        ...(minWidth
-          ? { minWidth, width: fitContent ? minWidth : '100%' }
-          : undefined),
+        ...(minWidth ? { minWidth, width: fitContent ? minWidth : '100%' } : undefined),
         ...style,
       }}
     />
@@ -248,15 +260,16 @@ export function ScrollableTable({
 }
 
 export function StatusBadge({ tone = 'neutral', children, className = '', ...props }) {
-  const variant = {
-    neutral: 'secondary',
-    brand: 'info',
-    info: 'info',
-    success: 'success',
-    warning: 'warning',
-    danger: 'error',
-    error: 'error',
-  }[tone] || 'secondary';
+  const variant =
+    {
+      neutral: 'secondary',
+      brand: 'info',
+      info: 'info',
+      success: 'success',
+      warning: 'warning',
+      danger: 'error',
+      error: 'error',
+    }[tone] || 'secondary';
 
   return (
     <Badge {...props} variant={variant} className={cx('shrink-0', className)}>
@@ -281,7 +294,11 @@ export function InlineStatusPill({ tone = 'neutral', children, className = '', .
   return (
     <span
       {...props}
-      className={cx('inline-flex items-center rounded px-2 py-0.5 text-[10px] font-bold', getStatusPillClass(tone), className)}
+      className={cx(
+        'inline-flex items-center rounded px-2 py-0.5 text-[10px] font-bold',
+        getStatusPillClass(tone),
+        className
+      )}
     >
       {children}
     </span>
@@ -297,10 +314,17 @@ export function EmptyState({
   card = true,
 }) {
   const content = (
-    <div className={cx('flex min-h-44 flex-col items-center justify-center p-6 text-center', className)}>
+    <div
+      className={cx(
+        'flex min-h-44 flex-col items-center justify-center p-6 text-center',
+        className
+      )}
+    >
       <Icon className="mb-3 h-8 w-8 text-kumo-subtle" />
       <div className="text-sm font-semibold text-kumo-strong">{title}</div>
-      {description && <div className="mt-1 max-w-sm text-xs leading-relaxed text-kumo-subtle">{description}</div>}
+      {description && (
+        <div className="mt-1 max-w-sm text-xs leading-relaxed text-kumo-subtle">{description}</div>
+      )}
       {action && <div className="mt-4">{action}</div>}
     </div>
   );
@@ -318,10 +342,18 @@ export function KeyValueGrid({
   valueClassName = '',
 }) {
   return (
-    <div className={cx('grid gap-3 text-sm', keyValueGridColumnsClass[columns] || keyValueGridColumnsClass[2], className)}>
-      {items.map((item) => (
+    <div
+      className={cx(
+        'grid gap-3 text-sm',
+        keyValueGridColumnsClass[columns] || keyValueGridColumnsClass[2],
+        className
+      )}
+    >
+      {items.map(item => (
         <div key={item.key || item.label} className={cx('min-w-0', itemClassName, item.className)}>
-          <div className={cx('text-xs text-kumo-subtle', labelClassName, item.labelClassName)}>{item.label}</div>
+          <div className={cx('text-xs text-kumo-subtle', labelClassName, item.labelClassName)}>
+            {item.label}
+          </div>
           <div className={cx('mt-1 min-w-0 text-kumo-strong', valueClassName, item.valueClassName)}>
             {item.value}
           </div>
@@ -344,7 +376,10 @@ export function ChartCard({ className = '', children }) {
   const [boundary, setBoundary] = useState(null);
   return (
     <LayerCard
-      className={cx('min-w-0 overflow-hidden rounded-lg border border-kumo-line/90 bg-kumo-base p-3 shadow-none', className)}
+      className={cx(
+        'min-w-0 overflow-hidden rounded-lg border border-kumo-line/90 bg-kumo-base p-3 shadow-none',
+        className
+      )}
     >
       <div ref={setBoundary} className="flex h-full min-w-0 flex-col">
         {typeof children === 'function' ? children(boundary) : children}
@@ -362,7 +397,10 @@ export function ChartWarmupSkeleton({ height = 120, bars = 5 }) {
     >
       <SkeletonLine className="h-3 w-1/3" />
       <SkeletonLine className="h-14 w-full rounded" />
-      <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${bars}, minmax(0, 1fr))` }}>
+      <div
+        className="grid gap-2"
+        style={{ gridTemplateColumns: `repeat(${bars}, minmax(0, 1fr))` }}
+      >
         {Array.from({ length: bars }).map((_, index) => (
           <SkeletonLine key={index} className="h-2 w-full" />
         ))}
