@@ -1,88 +1,31 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Badge,
-  ChartPalette,
-  ClipboardText,
-  Empty,
-  Grid,
-  LayerCard,
-  Tabs,
-  Text,
-  TimeseriesChart,
-} from '@cloudflare/kumo';
 import { Button } from '@cloudflare/kumo/components/button';
-import { Dialog } from '@cloudflare/kumo/components/dialog';
-import { Input } from '@cloudflare/kumo/components/input';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
-import { Select } from '@cloudflare/kumo/components/select';
-import { Switch } from '@cloudflare/kumo/components/switch';
-import { Table } from '@cloudflare/kumo/components/table';
-import * as echarts from 'echarts/core';
-import { LineChart } from 'echarts/charts';
-import { AriaComponent, GridComponent, TooltipComponent } from 'echarts/components';
-import { CanvasRenderer } from 'echarts/renderers';
-import { toast } from '../modules/toast.js';
-import { dialog } from '../modules/dialog.js';
-import { formatGitHubRepositoryDescription } from '../modules/githubEmoji.js';
+import { useCloudflareSpotlight } from '../hooks/useCloudflareSpotlight.js';
 import { useDraggableScroll } from '../hooks/useDraggableScroll.js';
-import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
-import useStore from '../store.js';
-import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
-import { AppTable, ChartBoundaryBox, DataTableFrame } from '../components/ui/AppPrimitives.jsx';
-import GitHubPublicPagesPanel from '../components/github/GitHubPublicPagesPanel.jsx';
+import { formatGitHubRepositoryDescription } from '../modules/githubEmoji.js';
 import {
-  Activity,
   AlertTriangle,
-  Bell,
-  Check,
-  Clock,
   ExternalLink,
   GitBranch,
   GitHubBrand,
   Globe,
-  Key,
-  Play,
-  PlayCircle,
-  Plus,
   RefreshCw,
-  Rocket,
-  Save,
-  Settings,
-  Star,
-  Trash,
-  TrendingUp,
-  Users,
-  X,
+  Shield,
 } from '../components/Icons.jsx';
 
-echarts.use([LineChart, GridComponent, TooltipComponent, AriaComponent, CanvasRenderer]);
+const normalizePublicPath = () => {
+  const path = window.location.pathname.replace(/\/+$/, '');
+  const match = path.match(/^\/(?:github|gh)\/([^/]+)$/);
+  return match ? decodeURIComponent(match[1]) : '';
+};
 
-const tabs = [
-  { value: 'repositories', label: <span className="inline-flex items-center gap-1.5"><GitBranch className="h-3.5 w-3.5" />仓库</span> },
-  { value: 'actions', label: <span className="inline-flex items-center gap-1.5"><PlayCircle className="h-3.5 w-3.5" />Actions</span> },
-  { value: 'trends', label: <span className="inline-flex items-center gap-1.5"><TrendingUp className="h-3.5 w-3.5" />趋势</span> },
-  { value: 'events', label: <span className="inline-flex items-center gap-1.5"><Bell className="h-3.5 w-3.5" />事件</span> },
-  { value: 'public-pages', label: <span className="inline-flex items-center gap-1.5"><Globe className="h-3.5 w-3.5" />公开页</span> },
-  { value: 'settings', label: <span className="inline-flex items-center gap-1.5"><Settings className="h-3.5 w-3.5" />设置</span> },
-];
-
-const tokenTypeOptions = [
-  { value: 'fine_grained', label: 'Fine-grained PAT' },
-  { value: 'classic', label: 'Classic PAT' },
-  { value: 'app', label: 'GitHub App' },
-];
-
-const fineGrainedTokenURL = 'https://github.com/settings/personal-access-tokens/new?name=API-Monitor&description=API-Monitor+GitHub+observability&expires_in=none&actions=write&administration=write&contents=write&issues=write&pull_requests=write&repository_hooks=write&workflows=write';
-
-const rangeOptions = [
-  { value: '7', label: '7 天' },
-  { value: '30', label: '30 天' },
-  { value: '90', label: '90 天' },
-  { value: '365', label: '365 天' },
-];
-
-const GITHUB_ACTIONS_TABLE_WIDTHS = [132, 220, 480, 132, 168, 124];
-const GITHUB_EVENTS_TABLE_WIDTHS = [420, 120, 140, 200];
+const statusPanelClass = {
+  success: 'border-kumo-success/45 bg-kumo-success/15 text-kumo-success',
+  danger: 'border-kumo-danger/45 bg-kumo-danger/15 text-kumo-danger',
+  warning: 'border-kumo-warning/45 bg-kumo-warning/15 text-kumo-warning',
+  neutral: 'border-kumo-interact/80 bg-kumo-base text-kumo-strong',
+};
 
 const statusTone = (status) => {
   const value = String(status || '').toLowerCase();
@@ -124,27 +67,16 @@ const statusLabel = (status) => ({
   info: '信息',
 }[String(status || '').toLowerCase()] || status || '未知');
 
-const tokenTestStatusLabel = (status) => ({
-  success: '权限通过',
-  warning: '权限不完整',
-  failed: 'Token 无效',
-  unknown: '未检测',
-}[String(status || '').toLowerCase()] || status || '未检测');
-
-const formatNumber = (value) => Number(value || 0).toLocaleString();
 const formatDateTime = (value) => {
-  if (!value) return '-';
+  if (!value) return '尚未更新';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleString();
-};
-
-const formatResetCountdown = (value, now) => {
-  const resetAt = new Date(value).getTime();
-  if (!Number.isFinite(resetAt)) return '';
-  const remainingMinutes = Math.max(0, Math.ceil((resetAt - now) / 60000));
-  if (remainingMinutes === 0) return '即将重置';
-  return `${Math.floor(remainingMinutes / 60)}时${remainingMinutes % 60}分后重置`;
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 };
 
 const formatActionDuration = (startedAt, finishedAt, now) => {
@@ -160,6 +92,8 @@ const formatActionDuration = (startedAt, finishedAt, now) => {
   if (minutes > 0) return `${minutes}分${seconds}秒`;
   return `${seconds}秒`;
 };
+
+const formatNumber = (value) => Number(value || 0).toLocaleString();
 
 const actionFlowStatusDotClass = (status) => {
   const value = String(status || '').toLowerCase();
@@ -951,11 +885,11 @@ const buildActionCanvasLayout = (workflow, jobs, now, focusedDefinitionIds = nul
     : null;
 
   const stageItems = groupedLayers.map((layer) => layer.map((definitions) => {
-      const id = definitions.length === 1 ? definitions[0].id : `group-${definitions.map((definition) => definition.id).join('-')}`;
-      const node = summarizeWorkflowGroup(definitions, graph.summaries);
-      const highlighted = highlightedVisualIds ? highlightedVisualIds.has(id) : null;
-      return { id, definitions, node, highlighted, height: actionFlowNodeHeight(node, false) };
-    }));
+    const id = definitions.length === 1 ? definitions[0].id : `group-${definitions.map((definition) => definition.id).join('-')}`;
+    const node = summarizeWorkflowGroup(definitions, graph.summaries);
+    const highlighted = highlightedVisualIds ? highlightedVisualIds.has(id) : null;
+    return { id, definitions, node, highlighted, height: actionFlowNodeHeight(node, false) };
+  }));
   const visualParents = new Map();
   const visualChildren = new Map();
   reducedDefinitionEdges.forEach((edge) => {
@@ -1187,44 +1121,6 @@ const buildActionCanvasLayout = (workflow, jobs, now, focusedDefinitionIds = nul
   return { graph, stages: resolvedStages, edges, width, height, hasFocus: Boolean(trace) };
 };
 
-const parseTimestamp = (value) => {
-  const time = new Date(value).getTime();
-  return Number.isFinite(time) ? time : Date.now();
-};
-
-const parseJSON = (value, fallback = {}) => {
-  if (!value) return fallback;
-  if (typeof value === 'object') return value;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return fallback;
-  }
-};
-
-function RepositoryMetric({ icon, label, value, detail }) {
-  return (
-    <LayerCard className="min-w-0 self-start px-3 py-2 shadow-none">
-      <div className="flex min-w-0 items-center gap-1.5 text-kumo-subtle">
-        {icon}
-        <Text variant="secondary" size="sm" truncate>{label}</Text>
-      </div>
-      <div className="mt-1 flex min-w-0 items-baseline justify-between gap-2">
-        <Text variant="heading3" as="span" truncate>{value}</Text>
-        {detail && <Text variant="secondary" size="xs" truncate>{detail}</Text>}
-      </div>
-    </LayerCard>
-  );
-}
-
-function FillEmpty({ title, description }) {
-  return (
-    <div className="flex items-center justify-center p-8">
-      <Empty title={title} description={description} />
-    </div>
-  );
-}
-
 function ActionStatusDot({ status, muted = false }) {
   return (
     <span
@@ -1307,7 +1203,7 @@ function ActionFlowNode({
               <ActionStatusDot status={node.status} muted={muted} />
               <div className="min-w-0">
                 <div className={`truncate text-sm font-semibold leading-6 ${strongTextClass}`} title={node.name}>{node.name}</div>
-              {node.matrix && <div className={`truncate text-xs leading-6 ${subtleTextClass}`}>{matrixSummary}</div>}
+                {node.matrix && <div className={`truncate text-xs leading-6 ${subtleTextClass}`}>{matrixSummary}</div>}
               </div>
             </div>
             <span className={`shrink-0 whitespace-nowrap text-xs font-medium leading-6 ${metaTextClass}`} title={`${statusLabel(node.status)} · ${node.duration}`}>
@@ -1634,1083 +1530,458 @@ function ActionFlowPlaceholder() {
   );
 }
 
-function RepositoryStat({ label, value }) {
+function ActionWorkflowLoadingState() {
   return (
-    <LayerCard className="min-w-0 p-2 text-center shadow-none">
-      <div className="truncate text-[10px] font-medium text-kumo-subtle">{label}</div>
-      <div className="truncate text-xs font-bold text-kumo-strong">{value}</div>
-    </LayerCard>
-  );
-}
-
-function PermissionChecks({ token }) {
-  const permissions = parseJSON(token.permissions_json);
-  const checks = Array.isArray(permissions.checks) ? permissions.checks : [];
-  const scopes = Array.isArray(permissions.scopes) ? permissions.scopes : [];
-  if (checks.length === 0 && scopes.length === 0 && !token.last_test_error) {
-    if (token.last_test_status === 'success' && token.last_test_at) {
-      return <Text variant="secondary" size="xs">基础认证通过。选择仓库后再次检测，可验证 Actions 和 Traffic 权限。检测时间：{formatDateTime(token.last_test_at)}</Text>;
-    }
-    return <Text variant="secondary" size="xs">尚未检测。点击“检测权限”验证 Token；选择仓库后可同时验证仓库权限。</Text>;
-  }
-  return (
-    <div className="grid gap-2">
-      {scopes.length > 0 && (
-        <div className="flex min-w-0 flex-wrap items-center gap-1 text-[11px] text-kumo-subtle">
-          <span>Classic scopes</span>
-          {scopes.map((scope) => <Badge key={scope} variant="neutral">{scope}</Badge>)}
-        </div>
-      )}
-      {checks.length > 0 && (
-        <div className="grid gap-1 sm:grid-cols-2">
-          {checks.map((check) => (
-            <div key={check.key || check.label} className="flex min-w-0 items-center justify-between gap-2 rounded-md border border-kumo-line px-2 py-1.5 text-[11px]">
-              <span className="min-w-0 truncate text-kumo-strong">{check.label}</span>
-              <div className="flex min-w-0 items-center gap-1">
-                <span className="hidden max-w-32 truncate text-kumo-subtle md:inline">{check.level}</span>
-                <Badge variant={check.status === 'success' ? 'success' : check.status === 'skipped' ? 'neutral' : 'danger'}>
-                  {check.status === 'success' ? '通过' : check.status === 'skipped' ? '跳过' : '失败'}
-                </Badge>
+    <div className="grid gap-3 rounded-md border border-kumo-line bg-kumo-base px-4 py-4">
+      <div className="flex items-center justify-between gap-3">
+        <SkeletonLine className="h-4 w-36" />
+        <SkeletonLine className="h-4 w-20" />
+      </div>
+      <SkeletonLine className="h-3 w-56" />
+      <div className="flex min-h-[220px] items-center justify-center rounded-md border border-kumo-line bg-kumo-recessed/15 px-6">
+        <div className="flex w-full max-w-4xl items-center justify-center gap-4 opacity-80">
+          {[0, 1, 2, 3].map((item) => (
+            <React.Fragment key={item}>
+              <div className="w-44 rounded-md border border-kumo-line bg-kumo-base p-3 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <SkeletonLine className="h-4 w-20" />
+                  <SkeletonLine className="h-4 w-10 rounded-full" />
+                </div>
+                <SkeletonLine className="mt-3 h-3 w-24" />
+                <SkeletonLine className="mt-3 h-3 w-28" />
               </div>
-            </div>
+              {item < 3 && <SkeletonLine className="h-1 w-10 shrink-0 rounded-full" />}
+            </React.Fragment>
           ))}
         </div>
-      )}
-      {token.last_test_error && <div className="truncate text-xs text-kumo-danger">{token.last_test_error}</div>}
+      </div>
     </div>
   );
 }
 
-function GitHubPage() {
-  const { theme } = useStore();
-  const isDarkMode = theme === 'dark';
-  const getAuthHeaders = useCallback(() => ({
-    'Content-Type': 'application/json',
-    'x-admin-password': localStorage.getItem('admin_password') || '',
-  }), []);
+function RepositoryStat({ label, value }) {
+  return (
+    <div className="min-w-0 rounded-md border border-kumo-interact/70 bg-kumo-recessed/35 px-2.5 py-1.5 text-center">
+      <div className="truncate text-[10px] font-medium uppercase tracking-[0.08em] text-kumo-subtle">{label}</div>
+      <div className="mt-0.5 truncate text-xs font-bold text-kumo-strong">{value}</div>
+    </div>
+  );
+}
 
-  const [activeTab, setActiveTab] = useState('repositories');
-  const [repoDialogOpen, setRepoDialogOpen] = useState(false);
-  const [repositories, setRepositories] = useState([]);
-  const [tokens, setTokens] = useState([]);
-  const [settings, setSettings] = useState(null);
-  const [collector, setCollector] = useState(null);
-  const [selectedRepoId, setSelectedRepoId] = useState(null);
-  const [trends, setTrends] = useState([]);
-  const [actions, setActions] = useState([]);
-  const [selectedActionRunId, setSelectedActionRunId] = useState(null);
-  const [collapsingActionRunId, setCollapsingActionRunId] = useState(null);
-  const [actionJobs, setActionJobs] = useState([]);
-  const [actionWorkflow, setActionWorkflow] = useState(null);
-  const [actionJobsLoading, setActionJobsLoading] = useState(false);
-  const [events, setEvents] = useState([]);
-  const [traffic, setTraffic] = useState([]);
-  const [contributors, setContributors] = useState([]);
-  const [workflows, setWorkflows] = useState([]);
-  const [branches, setBranches] = useState([]);
-  const [detailsRepoId, setDetailsRepoId] = useState(null);
+function RepositoryCard({ item, now, config, detailLoading = false }) {
+  const latestRun = item?.latest_run || null;
+  const workflowName = latestRun?.workflow_name || latestRun?.display_title || '最新 Workflow';
+  const actionStatus = latestRun?.conclusion || latestRun?.status || item?.latest_action_conclusion || item?.latest_action_status || 'unknown';
+  const actionTone = statusTone(actionStatus);
+  const jobs = Array.isArray(item?.jobs) ? item.jobs : [];
+  const canLinkRepo = config?.showRepoLinks !== false && item?.html_url;
+  const canLinkRun = latestRun?.html_url;
+  const hasStats = config?.showRepositoryStats !== false;
+  const showDescriptions = config?.showDescriptions !== false;
+  const runStartedAt = latestRun?.run_started_at || latestRun?.created_at || item?.latest_action_started_at || item?.latest_action_created_at;
+  const runUpdatedAt = latestRun?.updated_at || item?.latest_action_updated_at;
+  const runDuration = runStartedAt ? formatActionDuration(runStartedAt, runUpdatedAt, now) : '-';
+  const hasDetailPayload = Array.isArray(item?.jobs) || Boolean(item?.workflow) || Boolean(item?.workflow_error);
+  const showDetailLoading = detailLoading && !hasDetailPayload;
+
+  return (
+    <article className="public-github-card overflow-hidden rounded-lg border border-kumo-interact/75 bg-kumo-base">
+      <div className="border-b border-kumo-interact/65 px-4 py-2.5">
+        <div className="flex flex-col gap-2.5 md:flex-row md:items-start md:justify-between">
+          <div className="min-w-0">
+            <div className="flex min-w-0 items-start gap-2">
+              <GitHubBrand className="mt-0.5 h-4 w-4 shrink-0 text-kumo-brand" />
+              {canLinkRepo ? (
+                <a
+                  href={item.html_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block min-w-0 flex-1 truncate pb-px text-sm font-bold leading-5 text-kumo-strong decoration-current [text-underline-offset:3px] hover:text-kumo-brand hover:underline"
+                >
+                  {item.full_name}
+                </a>
+              ) : (
+                <div className="min-w-0 flex-1 truncate pb-px text-sm font-bold leading-5 text-kumo-strong">{item.full_name}</div>
+              )}
+            </div>
+            {showDescriptions && item.description && (
+              <div className="mt-0.5 line-clamp-2 break-words text-[12px] leading-5 text-kumo-subtle">
+                {formatGitHubRepositoryDescription(item.description)}
+              </div>
+            )}
+            <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-kumo-subtle">
+              <span className="inline-flex items-center gap-1">
+                <GitBranch className="h-3.5 w-3.5" />
+                {latestRun?.branch || item.default_branch || '默认分支'}
+              </span>
+              {latestRun?.actor && <span>{latestRun.actor}</span>}
+              {latestRun?.commit_sha && <span className="font-mono">{String(latestRun.commit_sha).slice(0, 8)}</span>}
+            </div>
+          </div>
+
+          <div className="flex shrink-0 flex-wrap items-center gap-1.5 md:justify-end md:self-start">
+            <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${item.private ? 'border-kumo-warning/35 bg-kumo-warning/10 text-kumo-warning' : 'border-kumo-success/35 bg-kumo-success/10 text-kumo-success'}`}>
+              {item.private ? '私有' : '公开'}
+            </span>
+            <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+              actionTone === 'success'
+                ? 'border-kumo-success/35 bg-kumo-success/10 text-kumo-success'
+                : actionTone === 'error'
+                ? 'border-kumo-danger/35 bg-kumo-danger/10 text-kumo-danger'
+                : actionTone === 'warning'
+                ? 'border-kumo-warning/35 bg-kumo-warning/10 text-kumo-warning'
+                : 'border-kumo-interact/80 bg-kumo-recessed/45 text-kumo-subtle'
+            }`}>
+              {statusLabel(actionStatus)}
+            </span>
+            <span className="rounded-full border border-kumo-interact/80 bg-kumo-recessed/45 px-2.5 py-1 text-[11px] text-kumo-subtle">
+              {runDuration}
+            </span>
+            {canLinkRun && (
+              <Button
+                size="sm"
+                variant="secondary"
+                shape="square"
+                icon={<ExternalLink className="h-3.5 w-3.5" />}
+                onClick={() => window.open(latestRun.html_url, '_blank', 'noopener,noreferrer')}
+                aria-label="打开运行详情"
+              />
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-3 px-4 py-3">
+        {hasStats && (
+          <div className="grid grid-cols-2 gap-1.5 md:grid-cols-4">
+            <RepositoryStat label="Stars" value={formatNumber(item.stars)} />
+            <RepositoryStat label="Forks" value={formatNumber(item.forks)} />
+            <RepositoryStat label="Issues" value={formatNumber(item.open_issues)} />
+            <RepositoryStat label="PR" value={formatNumber(item.open_pull_requests)} />
+          </div>
+        )}
+
+        <div className="grid gap-1.5 rounded-lg border border-kumo-interact/70 bg-kumo-recessed/25 px-3 py-2.5 text-[11px]">
+          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+            <div className="min-w-0 truncate font-semibold text-kumo-strong" title={workflowName}>{workflowName}</div>
+            <div className="shrink-0 whitespace-nowrap text-kumo-subtle">{runStartedAt ? formatDateTime(runStartedAt) : '暂无运行记录'}</div>
+          </div>
+          <div className="min-w-0 truncate text-kumo-subtle" title={latestRun?.commit_message || latestRun?.display_title || ''}>
+            {latestRun?.commit_message || latestRun?.display_title || '这个仓库还没有可展示的 workflow 运行记录。'}
+          </div>
+        </div>
+
+        {showDetailLoading ? (
+          <ActionWorkflowLoadingState />
+        ) : item.workflow_error && jobs.length === 0 ? (
+          <div className="rounded-md border border-kumo-warning/25 bg-kumo-warning/8 px-3 py-2.5 text-sm text-kumo-subtle">
+            {item.workflow_error}
+          </div>
+        ) : jobs.length === 0 ? (
+          <div className="rounded-md border border-kumo-interact/70 bg-kumo-recessed/20 px-3 py-2.5 text-sm text-kumo-subtle">
+            暂无 Job 进度数据
+          </div>
+        ) : (
+          <ActionWorkflowCanvas workflow={item.workflow} jobs={jobs} now={now} />
+        )}
+      </div>
+    </article>
+  );
+}
+
+const mergePublicRepositoriesWithExistingDetails = (repositories = [], previousRepositories = []) => {
+  const previousById = new Map(previousRepositories.map((repo) => [String(repo?.id), repo]));
+  return repositories.map((repo) => {
+    const previous = previousById.get(String(repo?.id));
+    if (!previous) return repo;
+    const nextRunID = String(repo?.latest_run?.run_id || '');
+    const previousRunID = String(previous?.latest_run?.run_id || '');
+    const canReuseDetail = nextRunID !== '' && nextRunID === previousRunID && (
+      Array.isArray(previous?.jobs) || previous?.workflow || previous?.workflow_error
+    );
+    if (!canReuseDetail) return repo;
+    return {
+      ...repo,
+      jobs: previous.jobs,
+      workflow: previous.workflow,
+      workflow_error: previous.workflow_error,
+    };
+  });
+};
+
+function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
+  const slug = useMemo(() => normalizePublicPath(), []);
+  const surfaceRef = useCloudflareSpotlight();
+  const [page, setPage] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState('');
   const [currentTime, setCurrentTime] = useState(() => Date.now());
-  const [saving, setSaving] = useState(false);
-  const [testingTokenId, setTestingTokenId] = useState(null);
-  const [refreshingRepositoryId, setRefreshingRepositoryId] = useState(null);
-  const [draggedRepositoryId, setDraggedRepositoryId] = useState(null);
-  const [rangeDays, setRangeDays] = useState('30');
-  const [repoForm, setRepoForm] = useState({ url: '', token_id: '', collect_interval_seconds: 900, retention_days: 90, webhook_enabled: false });
-  const [tokenForm, setTokenForm] = useState({ name: '', token: '', type: 'fine_grained', default_token: false });
-  const [dispatchForm, setDispatchForm] = useState({ workflowId: '', ref: '' });
-  const eventSourceRef = useRef(null);
-  const dispatchDefaultedRepoRef = useRef(null);
-  const actionJobsRef = useRef([]);
-  const actionCollapseTimerRef = useRef(null);
-
-  const selectedRepo = useMemo(
-    () => repositories.find((repo) => String(repo.id) === String(selectedRepoId)) || repositories[0] || null,
-    [repositories, selectedRepoId]
-  );
-  const canAttemptActionOperations = Boolean(
-    selectedRepo?.authenticated && selectedRepo?.can_operate_actions
-  );
-
-  const api = useCallback(async (path, options = {}) => {
-    const response = await fetch(path, {
-      ...options,
-      headers: {
-        ...getAuthHeaders(),
-        ...(options.headers || {}),
-      },
-    });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok || result.success === false) {
-      throw new Error(result.error || `请求失败: ${response.status}`);
-    }
-    return result.data !== undefined ? result.data : result;
-  }, [getAuthHeaders]);
-
-  const loadOverview = useCallback(async () => {
-    try {
-      const [overview, tokenList] = await Promise.all([
-        api('/api/github'),
-        api('/api/github/tokens'),
-      ]);
-      const repos = overview.repositories || [];
-      setRepositories(repos);
-      setTokens(tokenList || []);
-      setSettings(overview.settings || null);
-      setCollector(overview.collector || null);
-      setSelectedRepoId((current) => current || repos[0]?.id || null);
-    } catch (error) {
-      toast.error(error.message || '加载 GitHub 模块失败');
-    }
-  }, [api]);
-
-  const loadRepoDetails = useCallback(async (repoId = selectedRepo?.id) => {
-    if (!repoId) return;
-    try {
-      const [trendData, actionData, eventData, trafficData, contributorData, workflowData, branchData] = await Promise.all([
-        api(`/api/github/repositories/${repoId}/trends?days=${rangeDays}`),
-        api(`/api/github/repositories/${repoId}/actions/runs?limit=50`),
-        api(`/api/github/repositories/${repoId}/events?limit=100`),
-        api(`/api/github/repositories/${repoId}/traffic?limit=100`),
-        api(`/api/github/repositories/${repoId}/contributors?limit=100`),
-        api(`/api/github/repositories/${repoId}/actions/workflows`).catch(() => []),
-        api(`/api/github/repositories/${repoId}/branches`).catch(() => []),
-      ]);
-      setTrends(trendData.snapshots || []);
-      setActions(actionData || []);
-      setEvents(eventData || []);
-      setTraffic(trafficData || []);
-      setContributors(contributorData || []);
-      setWorkflows(workflowData || []);
-      setBranches(branchData || []);
-      setDetailsRepoId(String(repoId));
-    } catch (error) {
-      toast.error(error.message || '加载仓库详情失败');
-    }
-  }, [api, rangeDays, selectedRepo?.id]);
-
-  const loadActionJobs = useCallback(async (runId = selectedActionRunId, options = {}) => {
-    if (!selectedRepo?.id || !runId) return;
-    const showLoading = options.showLoading ?? actionJobsRef.current.length === 0;
-    if (showLoading) setActionJobsLoading(true);
-    try {
-      const run = actions.find((item) => String(item.run_id) === String(runId));
-      const params = new URLSearchParams();
-      if (run?.workflow_name) params.set('workflow_name', run.workflow_name);
-      if (run?.branch) params.set('branch', run.branch);
-      if (run?.commit_sha) params.set('commit_sha', run.commit_sha);
-      const detail = await api(`/api/github/repositories/${selectedRepo.id}/actions/runs/${runId}/jobs${params.toString() ? `?${params}` : ''}`);
-      const jobs = Array.isArray(detail) ? detail : detail?.jobs || [];
-      actionJobsRef.current = jobs;
-      setActionJobs(jobs);
-      setActionWorkflow(Array.isArray(detail) ? null : detail?.workflow || null);
-    } catch (error) {
-      if (showLoading) toast.error(error.message || '加载 Actions 流程失败');
-      if (actionJobsRef.current.length === 0) {
-        setActionJobs([]);
-        setActionWorkflow(null);
-      }
-    } finally {
-      if (showLoading) setActionJobsLoading(false);
-    }
-  }, [actions, api, selectedActionRunId, selectedRepo?.id]);
+  const [detailStatusByRepo, setDetailStatusByRepo] = useState({});
+  const pageRef = useRef(null);
+  const detailRequestSeqRef = useRef(0);
 
   useEffect(() => {
-    loadOverview();
-  }, [loadOverview]);
+    pageRef.current = page;
+  }, [page]);
+
+  const loadRepositoryDetails = useCallback(async (nextPage, previousRepositories = []) => {
+    const repositories = Array.isArray(nextPage?.repositories) ? nextPage.repositories : [];
+    if (!nextPage?.slug || repositories.length === 0) {
+      setDetailStatusByRepo({});
+      return;
+    }
+
+    const previousById = new Map(previousRepositories.map((repo) => [String(repo?.id), repo]));
+    const requestSeq = detailRequestSeqRef.current + 1;
+    detailRequestSeqRef.current = requestSeq;
+
+    const nextStatuses = {};
+    const targets = [];
+    repositories.forEach((repo) => {
+      const repoId = String(repo?.id || '');
+      const runID = String(repo?.latest_run?.run_id || '');
+      const previous = previousById.get(repoId);
+      const previousRunID = String(previous?.latest_run?.run_id || '');
+      const hasReusableDetail = runID !== '' && runID === previousRunID && (
+        Array.isArray(previous?.jobs) || previous?.workflow || previous?.workflow_error
+      );
+
+      if (!runID) {
+        nextStatuses[repoId] = 'idle';
+        return;
+      }
+      if (hasReusableDetail) {
+        nextStatuses[repoId] = 'loaded';
+        return;
+      }
+      nextStatuses[repoId] = 'loading';
+      targets.push(repo);
+    });
+    setDetailStatusByRepo(nextStatuses);
+
+    await Promise.allSettled(targets.map(async (repo) => {
+      const repoId = String(repo?.id || '');
+      try {
+        const response = await fetch(`/api/github/public/pages/${encodeURIComponent(nextPage.slug)}/repositories/${encodeURIComponent(repoId)}`);
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || result.success === false) {
+          throw new Error(result.error || 'Workflow 详情加载失败');
+        }
+        const detail = result.data || result;
+        if (detailRequestSeqRef.current !== requestSeq) return;
+        setPage((current) => {
+          if (!current || current.slug !== nextPage.slug) return current;
+          return {
+            ...current,
+            repositories: (Array.isArray(current.repositories) ? current.repositories : []).map((item) => (
+              String(item?.id) === repoId ? { ...item, ...detail } : item
+            )),
+          };
+        });
+        setDetailStatusByRepo((current) => ({ ...current, [repoId]: 'loaded' }));
+      } catch (detailError) {
+        if (detailRequestSeqRef.current !== requestSeq) return;
+        setPage((current) => {
+          if (!current || current.slug !== nextPage.slug) return current;
+          return {
+            ...current,
+            repositories: (Array.isArray(current.repositories) ? current.repositories : []).map((item) => (
+              String(item?.id) === repoId ? { ...item, workflow_error: detailError.message || 'Workflow 详情加载失败' } : item
+            )),
+          };
+        });
+        setDetailStatusByRepo((current) => ({ ...current, [repoId]: 'failed' }));
+      }
+    }));
+  }, []);
+
+  const load = useCallback(async ({ silent = false } = {}) => {
+    if (silent) setRefreshing(true);
+    else setLoading(true);
+    setError('');
+    try {
+      const endpoint = slug && !domainOnly
+        ? `/api/github/public/pages/${encodeURIComponent(slug)}?summary=1`
+        : `/api/github/public/page-by-domain?domain=${encodeURIComponent(window.location.host)}&summary=1`;
+      const response = await fetch(endpoint);
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.success === false) {
+        const nextError = new Error(result.error || 'GitHub 公开页不存在或未公开');
+        nextError.status = response.status;
+        throw nextError;
+      }
+      const previousRepositories = Array.isArray(pageRef.current?.repositories) ? pageRef.current.repositories : [];
+      const rawPage = result.data || result;
+      const mergedPage = {
+        ...rawPage,
+        repositories: mergePublicRepositoriesWithExistingDetails(
+          Array.isArray(rawPage?.repositories) ? rawPage.repositories : [],
+          previousRepositories,
+        ),
+      };
+      setPage(mergedPage);
+      void loadRepositoryDetails(mergedPage, previousRepositories);
+    } catch (err) {
+      if (!slug && domainOnly && err.status === 404 && onDomainNotFound) {
+        onDomainNotFound();
+        return;
+      }
+      setError(err.message || 'GitHub 公开页加载失败');
+      if (!silent) {
+        setPage(null);
+        detailRequestSeqRef.current += 1;
+        setDetailStatusByRepo({});
+      }
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [domainOnly, loadRepositoryDetails, onDomainNotFound, slug]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    if (!page?.title) return undefined;
+    const previousTitle = document.title;
+    document.title = page.title;
+    return () => {
+      document.title = previousTitle;
+    };
+  }, [page?.title]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setCurrentTime(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
 
-  useEffect(() => () => {
-    if (actionCollapseTimerRef.current) window.clearTimeout(actionCollapseTimerRef.current);
-  }, []);
-
   useEffect(() => {
-    loadRepoDetails();
-  }, [loadRepoDetails]);
+    if (!page?.cacheSeconds) return undefined;
+    const interval = window.setInterval(() => {
+      void load({ silent: true });
+    }, Math.max(30, Number(page.cacheSeconds) || 300) * 1000);
+    return () => window.clearInterval(interval);
+  }, [load, page?.cacheSeconds]);
 
-  useEffect(() => {
-    if (selectedActionRunId) void loadActionJobs(selectedActionRunId, { showLoading: actionJobsRef.current.length === 0 });
-  }, [actions, loadActionJobs, selectedActionRunId]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      void loadOverview();
-      void loadRepoDetails();
-    }, 60_000);
-    return () => window.clearInterval(timer);
-  }, [loadOverview, loadRepoDetails]);
-
-  useEffect(() => {
-    setWorkflows([]);
-    setBranches([]);
-    setDetailsRepoId(null);
-    setDispatchForm({ workflowId: '', ref: '' });
-    dispatchDefaultedRepoRef.current = null;
-    setSelectedActionRunId(null);
-    setCollapsingActionRunId(null);
-    actionJobsRef.current = [];
-    setActionJobs([]);
-    setActionWorkflow(null);
-  }, [selectedRepo?.id]);
-
-  useEffect(() => {
-    const source = new EventSource('/api/github/events/stream', { withCredentials: true });
-    eventSourceRef.current = source;
-    source.addEventListener('github', (event) => {
-      try {
-        const payload = JSON.parse(event.data);
-        if (payload.kind === 'repository_refresh' || payload.kind === 'repository_actions_refresh') {
-          if (String(payload.repository_id) === String(selectedRepo?.id)) {
-            void Promise.all([loadOverview(), loadRepoDetails(payload.repository_id)]);
-          }
-          return;
-        }
-        setEvents((current) => [payload, ...current].slice(0, 100));
-      } catch (error) {
-        console.warn('Failed to parse GitHub event stream payload:', error);
-      }
-    });
-    return () => {
-      source.close();
-      eventSourceRef.current = null;
-    };
-  }, [loadOverview, loadRepoDetails, selectedRepo?.id]);
-
-  const createToken = async () => {
-    if (!tokenForm.name.trim() || !tokenForm.token.trim()) {
-      toast.warning('请填写 Token 名称和 Token');
-      return;
-    }
-    setSaving(true);
-    try {
-      await api('/api/github/tokens', {
-        method: 'POST',
-        body: JSON.stringify(tokenForm),
-      });
-      toast.success('GitHub Token 已保存');
-      setTokenForm({ name: '', token: '', type: 'fine_grained', default_token: false });
-      await loadOverview();
-    } catch (error) {
-      toast.error(error.message || '保存 Token 失败');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const testToken = async (id) => {
-    setTestingTokenId(String(id));
-    try {
-      const suffix = selectedRepo?.id ? `?repositoryId=${encodeURIComponent(selectedRepo.id)}&bind=true` : '';
-      await api(`/api/github/tokens/${id}/test${suffix}`, { method: 'POST', body: '{}' });
-      if (selectedRepo?.id) {
-        await api(`/api/github/repositories/${selectedRepo.id}/refresh`, { method: 'POST', body: '{}' });
-      }
-      toast.success(selectedRepo?.id ? `Token 已检测并绑定到 ${selectedRepo.full_name}` : 'Token 基础权限检测完成');
-      await loadOverview();
-    } catch (error) {
-      toast.error(error.message || 'Token 权限检测失败');
-      await loadOverview();
-    } finally {
-      setTestingTokenId(null);
-    }
-  };
-
-  const deleteToken = async (token) => {
-    if (!(await dialog.deleteResource({ resourceType: 'GitHub Token', resourceName: token.name }))) return;
-    try {
-      await api(`/api/github/tokens/${token.id}`, { method: 'DELETE' });
-      toast.success('Token 已删除');
-      await loadOverview();
-    } catch (error) {
-      toast.error(error.message || '删除 Token 失败');
-    }
-  };
-
-  const createRepository = async () => {
-    if (!repoForm.url.trim()) {
-      toast.warning('请粘贴 GitHub 仓库 URL 或 owner/repo');
-      return;
-    }
-    setSaving(true);
-    try {
-      const payload = {
-        ...repoForm,
-        token_id: repoForm.token_id ? Number(repoForm.token_id) : null,
-        collect_interval_seconds: Number(repoForm.collect_interval_seconds) || 900,
-        retention_days: Number(repoForm.retention_days) || 90,
-      };
-      const repo = await api('/api/github/repositories', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
-      toast.success('仓库已添加，后台开始采集');
-      setRepoForm({ url: '', token_id: '', collect_interval_seconds: 900, retention_days: 90, webhook_enabled: false });
-      setRepoDialogOpen(false);
-      setSelectedRepoId(repo.id);
-      await loadOverview();
-    } catch (error) {
-      toast.error(error.message || '添加仓库失败');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const refreshRepository = async (id) => {
-    setRefreshingRepositoryId(String(id));
-    try {
-      await api(`/api/github/repositories/${id}/refresh`, { method: 'POST', body: '{}' });
-      toast.success('仓库刷新完成');
-      await loadOverview();
-      await loadRepoDetails(id);
-    } catch (error) {
-      toast.error(error.message || '刷新仓库失败');
-    } finally {
-      setRefreshingRepositoryId(null);
-    }
-  };
-
-  const saveRepositoryOrder = async (nextRepositories) => {
-    try {
-      const orderedIds = nextRepositories.map((repo) => repo.id);
-      const saved = await api('/api/github/repositories/reorder', {
-        method: 'POST',
-        body: JSON.stringify({ repository_ids: orderedIds }),
-      });
-      if (Array.isArray(saved)) setRepositories(saved);
-    } catch (error) {
-      toast.error(error.message || '仓库排序保存失败');
-      await loadOverview();
-    }
-  };
-
-  const handleRepositoryDragStart = (repo, event) => {
-    setDraggedRepositoryId(String(repo.id));
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/plain', String(repo.id));
-  };
-
-  const handleRepositoryDragOver = (event) => {
-    if (!draggedRepositoryId) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-  };
-
-  const handleRepositoryDrop = async (targetRepoId, event) => {
-    event.preventDefault();
-    const sourceId = draggedRepositoryId || event.dataTransfer.getData('text/plain');
-    setDraggedRepositoryId(null);
-    if (!sourceId || String(sourceId) === String(targetRepoId)) return;
-    const fromIndex = repositories.findIndex((repo) => String(repo.id) === String(sourceId));
-    const toIndex = repositories.findIndex((repo) => String(repo.id) === String(targetRepoId));
-    if (fromIndex < 0 || toIndex < 0) return;
-    const next = [...repositories];
-    const [moved] = next.splice(fromIndex, 1);
-    next.splice(toIndex, 0, moved);
-    setRepositories(next);
-    await saveRepositoryOrder(next);
-  };
-
-  const toggleActionRun = (run) => {
-    const runId = String(run.run_id);
-    if (actionCollapseTimerRef.current) {
-      window.clearTimeout(actionCollapseTimerRef.current);
-      actionCollapseTimerRef.current = null;
-    }
-    if (String(selectedActionRunId) === runId) {
-      setCollapsingActionRunId(runId);
-      setSelectedActionRunId(null);
-      actionCollapseTimerRef.current = window.setTimeout(() => {
-        setCollapsingActionRunId((current) => (current === runId ? null : current));
-        actionCollapseTimerRef.current = null;
-      }, 220);
-      return;
-    }
-    setCollapsingActionRunId(null);
-    actionJobsRef.current = [];
-    setActionJobs([]);
-    setActionWorkflow(null);
-    setSelectedActionRunId(run.run_id);
-  };
-
-  const updateRepositoryToken = async (value) => {
-    if (!selectedRepo?.id) return;
-    setSaving(true);
-    try {
-      await api(`/api/github/repositories/${selectedRepo.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ token_id: value ? Number(value) : null }),
-      });
-      await api(`/api/github/repositories/${selectedRepo.id}/refresh`, { method: 'POST', body: '{}' });
-      toast.success('仓库访问凭据已更新');
-      await loadOverview();
-      await loadRepoDetails(selectedRepo.id);
-    } catch (error) {
-      toast.error(error.message || '更新仓库访问凭据失败');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const deleteRepository = async (id) => {
-    const repo = repositories.find((item) => item.id === id);
-    if (!(await dialog.deleteResource({ resourceType: 'GitHub 仓库', resourceName: repo?.full_name || String(id) }))) return;
-    try {
-      await api(`/api/github/repositories/${id}?clean=false`, { method: 'DELETE' });
-      toast.success('仓库已删除');
-      setSelectedRepoId(null);
-      await loadOverview();
-    } catch (error) {
-      toast.error(error.message || '删除仓库失败');
-    }
-  };
-
-  const runCollector = async () => {
-    try {
-      await api('/api/github/collector/run', { method: 'POST', body: '{}' });
-      toast.success('后台采集已执行');
-      await loadOverview();
-      await loadRepoDetails();
-    } catch (error) {
-      toast.error(error.message || '执行采集失败');
-    }
-  };
-
-  const saveSettings = async () => {
-    setSaving(true);
-    try {
-      const next = await api('/api/github/settings', {
-        method: 'PUT',
-        body: JSON.stringify(settings),
-      });
-      setSettings(next);
-      toast.success('GitHub 设置已保存');
-    } catch (error) {
-      toast.error(error.message || '保存设置失败');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const actionOperation = async (runId, operation) => {
-    if (!selectedRepo) return;
-    try {
-      await api(`/api/github/repositories/${selectedRepo.id}/actions/runs/${runId}/${operation}`, {
-        method: 'POST',
-        body: '{}',
-      });
-      toast.success('Actions 操作已提交');
-      await loadRepoDetails(selectedRepo.id);
-    } catch (error) {
-      toast.error(error.message || 'Actions 操作失败');
-      await loadOverview();
-    }
-  };
-
-  const dispatchWorkflow = async () => {
-    if (!selectedRepo || !dispatchForm.workflowId.trim()) {
-      toast.warning('请填写 workflow ID 或文件名');
-      return;
-    }
-    try {
-      await api(`/api/github/repositories/${selectedRepo.id}/actions/workflows/${encodeURIComponent(dispatchForm.workflowId.trim())}/dispatch`, {
-        method: 'POST',
-        body: JSON.stringify({ ref: dispatchForm.ref || selectedRepo.default_branch }),
-      });
-      toast.success('Workflow dispatch 已提交');
-    } catch (error) {
-      toast.error(error.message || '触发 Workflow 失败');
-      await loadOverview();
-    }
-  };
-
-  const configureWebhook = async () => {
-    if (!selectedRepo) return;
-    setSaving(true);
-    try {
-      const result = await api(`/api/github/repositories/${selectedRepo.id}/webhook/configure`, {
-        method: 'POST',
-        body: JSON.stringify({ payload_url: `${window.location.origin}/api/github/webhook/${selectedRepo.id}` }),
-      });
-      toast.success(result.created ? 'GitHub Webhook 已自动创建' : 'GitHub Webhook 已自动更新');
-      await loadOverview();
-    } catch (error) {
-      toast.error(error.message || '自动配置 Webhook 失败');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const chartData = useMemo(() => {
-    const points = trends.map((point) => ({
-      ts: parseTimestamp(point.collected_at),
-      stars: Number(point.stars) || 0,
-      issues: Number(point.open_issues) || 0,
-      prs: Number(point.open_pull_requests) || 0,
-      commits: Number(point.commit_count) || 0,
-      successRate: point.actions_total ? Math.round((Number(point.actions_success || 0) / Number(point.actions_total || 1)) * 100) : 0,
-    }));
-    return [
-      { name: 'Stars', color: ChartPalette.semantic('Attention', isDarkMode), data: points.map((p) => [p.ts, p.stars]) },
-      { name: 'Issues', color: ChartPalette.semantic('Warning', isDarkMode), data: points.map((p) => [p.ts, p.issues]) },
-      { name: 'PR', color: ChartPalette.semantic('Info', isDarkMode), data: points.map((p) => [p.ts, p.prs]) },
-      { name: '提交', color: ChartPalette.semantic('Success', isDarkMode), data: points.map((p) => [p.ts, p.commits]) },
-      { name: 'Actions 成功率', color: ChartPalette.categorical(3, isDarkMode), data: points.map((p) => [p.ts, p.successRate]) },
-    ];
-  }, [isDarkMode, trends]);
-
-  const repoOptions = repositories.map((repo) => ({ value: String(repo.id), label: repo.full_name }));
-  const tokenOptions = [{ value: '', label: '默认/公开访问' }, ...tokens.map((token) => ({ value: String(token.id), label: token.name }))];
-  const workflowOptions = [
-    { value: '', label: workflows.length > 0 ? '选择 Workflow' : '未发现 Workflow' },
-    ...workflows
-      .filter((workflow) => !workflow.state || workflow.state === 'active')
-      .map((workflow) => ({
-        value: String(workflow.id || workflow.path),
-        label: workflow.name ? `${workflow.name} (${workflow.path})` : workflow.path,
-      })),
-  ];
-  const branchOptions = useMemo(() => {
-    const branchNames = branches.map((branch) => branch.name).filter(Boolean);
-    const availableBranchNames = selectedRepo?.default_branch && !branchNames.includes(selectedRepo.default_branch)
-      ? [selectedRepo.default_branch, ...branchNames]
-      : branchNames;
-    return availableBranchNames.map((name) => ({ value: name, label: name }));
-  }, [branches, selectedRepo?.default_branch]);
-
-  useEffect(() => {
-    if (branchOptions.length === 0) return;
-    setDispatchForm((current) => ({
-      ...current,
-      ref: branchOptions.some((branch) => branch.value === current.ref) ? current.ref : branchOptions[0].value,
-    }));
-  }, [selectedRepo?.id, branchOptions]);
-
-  useEffect(() => {
-    if (String(detailsRepoId) !== String(selectedRepo?.id)) return;
-    if (dispatchDefaultedRepoRef.current === String(selectedRepo?.id)) return;
-    const lastSuccessfulRun = actions.find((run) => String(run.conclusion || '').toLowerCase() === 'success');
-    if (!lastSuccessfulRun) return;
-    const runWorkflowName = String(lastSuccessfulRun.workflow_name || lastSuccessfulRun.display_title || '').toLowerCase();
-    const workflow = workflows.find((item) => (
-      String(item.name || '').toLowerCase() === runWorkflowName ||
-      String(item.path || '').toLowerCase() === runWorkflowName
-    ));
-    if (!workflow) return;
-    const workflowId = String(workflow.id || workflow.path);
-    const ref = branchOptions.some((branch) => branch.value === lastSuccessfulRun.branch)
-      ? lastSuccessfulRun.branch
-      : branchOptions[0]?.value || selectedRepo?.default_branch || '';
-    dispatchDefaultedRepoRef.current = String(selectedRepo?.id);
-    setDispatchForm((current) => (
-      current.workflowId === workflowId && current.ref === ref ? current : { workflowId, ref }
-    ));
-  }, [actions, branchOptions, detailsRepoId, selectedRepo?.default_branch, selectedRepo?.id, workflows]);
+  const repositories = Array.isArray(page?.repositories) ? page.repositories : [];
+  const failureCount = repositories.filter((repo) => statusTone(repo?.latest_run?.conclusion || repo?.latest_run?.status || repo?.latest_action_conclusion || repo?.latest_action_status) === 'error').length;
+  const warningCount = repositories.filter((repo) => statusTone(repo?.latest_run?.conclusion || repo?.latest_run?.status || repo?.latest_action_conclusion || repo?.latest_action_status) === 'warning').length;
+  const successCount = repositories.filter((repo) => statusTone(repo?.latest_run?.conclusion || repo?.latest_run?.status || repo?.latest_action_conclusion || repo?.latest_action_status) === 'success').length;
+  const neutralCount = Math.max(0, repositories.length - failureCount - warningCount - successCount);
+  const pageTone = repositories.length === 0 ? 'neutral' : failureCount > 0 ? 'danger' : warningCount > 0 ? 'warning' : 'success';
+  const summaryText = repositories.length === 0
+    ? '暂无公开仓库'
+    : failureCount > 0
+    ? `${failureCount} 个仓库的最新工作流存在失败`
+    : warningCount > 0
+    ? `${warningCount} 个仓库的最新工作流仍在运行或等待`
+    : '全部仓库的最新工作流状态正常';
+  const config = page?.config || {};
 
   return (
-    <div className="flex min-h-full w-full min-w-0 flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-kumo-line pb-3">
-        <Tabs
-          {...MODULE_TABS_PROPS}
-          value={activeTab}
-          onValueChange={(value) => setActiveTab(String(value))}
-          tabs={tabs}
-        />
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="primary" icon={<Play className="h-3.5 w-3.5" />} onClick={runCollector}>立即采集</Button>
-        </div>
-      </div>
-
-      {activeTab === 'repositories' && (
-        <div className="min-w-0">
-          <LayerCard className="p-0 shadow-none">
-            <LayerCard.Secondary className="flex min-h-14 flex-wrap items-center justify-between gap-2 border-b border-kumo-line px-4 py-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <GitBranch className="h-4 w-4 text-kumo-brand" />
-                <Text variant="body" size="sm" bold>仓库列表</Text>
-                <Badge variant="neutral">{repositories.length} 个仓库</Badge>
-                <Badge variant={collector?.running ? 'success' : 'neutral'}>
-                  {collector?.running ? '后台采集中' : '采集器待命'}
-                </Badge>
-              </div>
-              <Button size="sm" variant="primary" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => setRepoDialogOpen(true)}>添加仓库</Button>
-            </LayerCard.Secondary>
-            <LayerCard.Primary className="p-0">
-            {repositories.length === 0 ? (
-              <FillEmpty title="暂无 GitHub 仓库" description="粘贴仓库 URL 后即可开始观察指标、Actions 和趋势。" />
-            ) : (
-              <div className="grid items-start gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-                {repositories.map((repo) => {
-                  const isSelected = String(repo.id) === String(selectedRepo?.id);
-                  const actionStatus = repo.latest_action_conclusion || repo.latest_action_status || '未知';
-                  const collectStatus = repo.last_status || 'pending';
-                  const actionStartedAt = repo.latest_action_started_at || repo.latest_action_created_at;
-                  const actionDuration = formatActionDuration(actionStartedAt, repo.latest_action_updated_at, currentTime);
-                  return (
-                    <LayerCard
-                      key={repo.id}
-                      draggable
-                      onDragStart={(event) => handleRepositoryDragStart(repo, event)}
-                      onDragOver={handleRepositoryDragOver}
-                      onDrop={(event) => handleRepositoryDrop(repo.id, event)}
-                      onDragEnd={() => setDraggedRepositoryId(null)}
-                      className={`min-w-0 cursor-move p-0 shadow-none transition-[opacity,transform,border-color] duration-160 ${isSelected ? 'ring-1 ring-kumo-brand/50' : ''} ${draggedRepositoryId === String(repo.id) ? 'scale-[0.99] opacity-50' : ''}`}
-                    >
-                      <LayerCard.Primary className="grid gap-3 p-3">
-                        <div className="flex min-w-0 items-start justify-between gap-2">
-                          <Button type="button" variant="ghost" className="h-auto min-w-0 flex-1 !items-start !justify-start !px-0 text-left" onClick={() => setSelectedRepoId(repo.id)}>
-                            <span className="block min-w-0">
-                              <span className="block truncate text-sm font-bold text-kumo-strong">{repo.full_name}</span>
-                              <span className="block truncate text-[11px] text-kumo-subtle">{formatGitHubRepositoryDescription(repo.description, repo.html_url)}</span>
-                            </span>
-                          </Button>
-                          <div className="flex shrink-0 items-center gap-1">
-                            <Badge variant={repo.private ? 'warning' : 'success'}>{repo.private ? '私有' : '公开'}</Badge>
-                            <Badge variant={repo.owned_by_token || repo.can_operate_actions ? 'success' : 'neutral'}>
-                              {repo.owned_by_token ? '本人仓库' : repo.can_operate_actions ? '有写权限' : repo.authenticated ? '只读权限' : '未认证'}
-                            </Badge>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-2">
-                          <RepositoryStat label="Stars" value={formatNumber(repo.stars)} />
-                          <RepositoryStat label="Forks" value={formatNumber(repo.forks)} />
-                          <RepositoryStat label="Issues" value={formatNumber(repo.open_issues)} />
-                        </div>
-
-                        <div className="grid gap-2 text-[11px] text-kumo-subtle">
-                          <div className="flex min-w-0 items-center justify-between gap-2">
-                            <span>Actions</span>
-                            <div className="flex min-w-0 items-center justify-end gap-2">
-                              {actionStartedAt && <span className="min-w-0 truncate" title={formatDateTime(actionStartedAt)}>{formatDateTime(actionStartedAt)}</span>}
-                              <Badge variant={statusTone(actionStatus)}>{actionStartedAt ? `${statusLabel(actionStatus)} · ${actionDuration}` : statusLabel(actionStatus)}</Badge>
-                            </div>
-                          </div>
-                          <div className="flex min-w-0 items-center justify-between gap-2">
-                            <span>采集</span>
-                            <div className="flex min-w-0 items-center justify-end gap-2">
-                              <span className="min-w-0 truncate">{formatDateTime(repo.last_collected_at)}</span>
-                              <Badge variant={statusTone(collectStatus)}>{statusLabel(collectStatus)}</Badge>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center justify-end gap-1 border-t border-kumo-line pt-2">
-                          {repo.html_url && <Button size="sm" variant="ghost" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); window.open(repo.html_url, '_blank'); }} aria-label="打开 GitHub" />}
-                          <Button size="sm" variant="ghost" icon={<RefreshCw className={`h-3.5 w-3.5 ${refreshingRepositoryId === String(repo.id) ? 'animate-spin' : ''}`} />} onClick={(event) => { event.stopPropagation(); refreshRepository(repo.id); }} disabled={refreshingRepositoryId === String(repo.id)} aria-label="刷新仓库" />
-                          <Button size="sm" variant="ghost" icon={<Trash className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); deleteRepository(repo.id); }} aria-label="删除仓库" />
-                        </div>
-                      </LayerCard.Primary>
-                    </LayerCard>
-                  );
-                })}
-              </div>
-            )}
-            </LayerCard.Primary>
-          </LayerCard>
-        </div>
-      )}
-
-      {selectedRepo && ['actions', 'trends', 'events'].includes(activeTab) && (
-        <div className="flex min-w-0 flex-col gap-4">
-          <LayerCard className="p-0 shadow-none">
-            <LayerCard.Secondary className="flex min-h-14 flex-wrap items-center justify-between gap-3 border-b border-kumo-line px-4 py-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <GitHubBrand className="h-4 w-4 text-kumo-brand" />
-                <Text variant="body" size="sm" bold truncate>{selectedRepo.full_name}</Text>
-              </div>
-              <div className="flex flex-wrap items-end gap-2">
-                <Select
-                  size="sm"
-                  aria-label="仓库访问凭据"
-                  value={selectedRepo.token_id ? String(selectedRepo.token_id) : ''}
-                  onValueChange={updateRepositoryToken}
-                  items={tokenOptions}
-                  disabled={saving}
-                />
-                <Select
-                  size="sm"
-                  aria-label="选择 GitHub 仓库"
-                  value={String(selectedRepo.id)}
-                  onValueChange={setSelectedRepoId}
-                  items={repoOptions}
-                />
-                <Button size="sm" variant="secondary" icon={<RefreshCw className={`h-3.5 w-3.5 ${refreshingRepositoryId === String(selectedRepo.id) ? 'animate-spin' : ''}`} />} onClick={() => refreshRepository(selectedRepo.id)} disabled={refreshingRepositoryId === String(selectedRepo.id)}>刷新仓库</Button>
-              </div>
-            </LayerCard.Secondary>
-            <LayerCard.Primary className="p-4">
-              <Grid variant="6up" gap="sm" className="items-start xl:grid-cols-5">
-                <RepositoryMetric icon={<Star className="h-3.5 w-3.5" />} label="Stars" value={formatNumber(selectedRepo.stars)} />
-                <RepositoryMetric icon={<GitBranch className="h-3.5 w-3.5" />} label="Forks" value={formatNumber(selectedRepo.forks)} />
-                <RepositoryMetric icon={<Activity className="h-3.5 w-3.5" />} label="Issues / PR" value={`${formatNumber(selectedRepo.open_issues)} / ${formatNumber(selectedRepo.open_pull_requests)}`} />
-                <RepositoryMetric icon={<Rocket className="h-3.5 w-3.5" />} label="Latest Release" value={selectedRepo.latest_release || '-'} />
-                <RepositoryMetric icon={<Clock className="h-3.5 w-3.5" />} label="Rate Limit" value={selectedRepo.rate_limit_remaining ?? '-'} detail={selectedRepo.rate_limit_reset ? formatResetCountdown(selectedRepo.rate_limit_reset, currentTime) : ''} />
-              </Grid>
-            </LayerCard.Primary>
-          </LayerCard>
-
-          {activeTab === 'actions' && (
-            <LayerCard className="p-0 shadow-none">
-              <LayerCard.Secondary className="flex min-h-14 flex-wrap items-center justify-between gap-3 border-b border-kumo-line px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <Activity className="h-4 w-4 text-kumo-brand" />
-                  <Text variant="body" size="sm" bold>Actions 活动</Text>
-                </div>
-                {canAttemptActionOperations ? (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Select size="sm" className="w-64" aria-label="选择 Workflow" value={dispatchForm.workflowId} onValueChange={(value) => setDispatchForm((p) => ({ ...p, workflowId: value }))} items={workflowOptions} disabled={workflowOptions.length <= 1} />
-                    <Select size="sm" className="w-40" aria-label="选择触发分支" value={dispatchForm.ref} onValueChange={(value) => setDispatchForm((p) => ({ ...p, ref: value }))} items={branchOptions} disabled={branchOptions.length === 0} />
-                    <Button size="sm" variant="primary" icon={<Play className="h-3.5 w-3.5" />} onClick={dispatchWorkflow}>触发</Button>
-                  </div>
-                ) : (
-                  <Badge variant="neutral">{selectedRepo.authenticated ? '当前 Token 未获得仓库写权限' : '未配置 Token，仅观察'}</Badge>
-                )}
-              </LayerCard.Secondary>
-              <LayerCard.Primary className="p-0">
-              {actions.length === 0 ? <FillEmpty title="暂无 Actions 记录" description="等待后台采集或手动刷新仓库后显示 workflow 运行记录。" /> : (
-                <DataTableFrame variant="embedded" density="compact" className="min-w-0 overflow-x-auto overflow-y-visible scrollbar-thin">
-                  <AppTable layout="fixed" widths={GITHUB_ACTIONS_TABLE_WIDTHS}>
-                    <colgroup>
-                      <col style={{ width: GITHUB_ACTIONS_TABLE_WIDTHS[0] }} />
-                      <col style={{ width: GITHUB_ACTIONS_TABLE_WIDTHS[1] }} />
-                      <col style={{ width: GITHUB_ACTIONS_TABLE_WIDTHS[2] }} />
-                      <col style={{ width: GITHUB_ACTIONS_TABLE_WIDTHS[3] }} />
-                      <col style={{ width: GITHUB_ACTIONS_TABLE_WIDTHS[4] }} />
-                      <col style={{ width: GITHUB_ACTIONS_TABLE_WIDTHS[5] }} />
-                    </colgroup>
-                    <Table.Header sticky variant="compact">
-                      <Table.Row><Table.Head className="align-middle text-center">状态</Table.Head><Table.Head>Workflow</Table.Head><Table.Head className="align-middle">提交说明</Table.Head><Table.Head className="align-middle">分支</Table.Head><Table.Head className="align-middle text-center">时间</Table.Head><Table.Head className="align-middle text-center">操作</Table.Head></Table.Row>
-                    </Table.Header>
-                    <Table.Body>
-                      {actions.map((run) => {
-                        const isActionExpanded = String(selectedActionRunId) === String(run.run_id);
-                        const isActionVisible = isActionExpanded || String(collapsingActionRunId) === String(run.run_id);
-                        return (
-                        <React.Fragment key={run.run_id}>
-                        <Table.Row className="cursor-pointer" onClick={() => toggleActionRun(run)}>
-                          <Table.Cell className="align-middle text-center"><Badge variant={statusTone(run.conclusion || run.status)}>{`${statusLabel(run.conclusion || run.status)} · ${formatActionDuration(run.run_started_at || run.created_at, run.updated_at, currentTime)}`}</Badge></Table.Cell>
-                          <Table.Cell><div className="min-w-0 truncate font-bold text-kumo-strong" title={run.workflow_name || String(run.run_id)}>{run.workflow_name || run.run_id}</div><div className="min-w-0 truncate text-[11px] text-kumo-subtle" title={`${run.actor || '-'} · ${String(run.commit_sha || '').slice(0, 8)}`}>{run.actor} · {String(run.commit_sha || '').slice(0, 8)}</div></Table.Cell>
-                          <Table.Cell className="align-middle"><div className="truncate text-sm leading-6 text-kumo-strong" title={run.commit_message || run.display_title || ''}>{run.commit_message || run.display_title || '暂无提交说明'}</div></Table.Cell>
-                          <Table.Cell className="align-middle"><div className="min-w-0 truncate" title={run.branch || '-'}>{run.branch || '-'}</div></Table.Cell>
-                          <Table.Cell className="align-middle text-center"><div className="min-w-0 truncate text-sm leading-6 text-kumo-strong" title={formatDateTime(run.run_started_at || run.created_at)}>{formatDateTime(run.run_started_at || run.created_at)}</div></Table.Cell>
-                          <Table.Cell className="align-middle text-center">
-                            <div className="flex justify-center gap-1">
-                              {run.html_url && <Button size="sm" variant="ghost" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); window.open(run.html_url, '_blank'); }} aria-label="打开 Actions" />}
-                              {canAttemptActionOperations && (
-                                <>
-                                  <Button size="sm" variant="ghost" icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); actionOperation(run.run_id, 'rerun'); }} aria-label="重新运行" />
-                                  <Button size="sm" variant="ghost" icon={<Check className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); actionOperation(run.run_id, 'rerun-failed-jobs'); }} aria-label="重跑失败任务" />
-                                  <Button size="sm" variant="ghost" icon={<X className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); actionOperation(run.run_id, 'cancel'); }} aria-label="取消" />
-                                </>
-                              )}
-                            </div>
-                          </Table.Cell>
-                        </Table.Row>
-                        {isActionVisible && (
-                          <Table.Row>
-                            <Table.Cell colSpan={6} className="p-0">
-                              <AnimatedCollapse open={isActionExpanded}>
-                              <div className="bg-kumo-recessed/10 px-3 pb-3 pt-2">
-                                {actionJobsLoading ? (
-                                  <ActionFlowPlaceholder />
-                                ) : actionJobs.length === 0 ? (
-                                  <div className="flex h-[300px] items-center justify-center rounded-md border border-kumo-line bg-kumo-base">
-                                    <Text variant="secondary" size="sm">暂无 Job 进度数据</Text>
-                                  </div>
-                                ) : (
-                                  (() => {
-                                    return <ActionWorkflowCanvas workflow={actionWorkflow} jobs={actionJobs} now={currentTime} />;
-                                  })()
-                                )}
-                              </div>
-                              </AnimatedCollapse>
-                            </Table.Cell>
-                          </Table.Row>
-                        )}
-                        </React.Fragment>
-                      );
-                      })}
-                    </Table.Body>
-                  </AppTable>
-                </DataTableFrame>
-              )}
-              </LayerCard.Primary>
-            </LayerCard>
-          )}
-
-          {activeTab === 'trends' && (
-            <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(20rem,0.7fr)]">
-              <LayerCard className="p-0 shadow-none">
-                <LayerCard.Secondary className="flex min-h-14 items-center justify-between gap-3 border-b border-kumo-line px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <TrendingUp className="h-4 w-4 text-kumo-brand" />
-                    <Text variant="body" size="sm" bold>仓库趋势</Text>
-                  </div>
-                  <Select size="sm" aria-label="趋势时间范围" value={rangeDays} onValueChange={setRangeDays} items={rangeOptions} />
-                </LayerCard.Secondary>
-                <LayerCard.Primary className="p-4">
-                {trends.length >= 2 ? (
-                  <ChartBoundaryBox>
-                    {(tooltipBoundary) => (
-                      <TimeseriesChart
-                        echarts={echarts}
-                        isDarkMode={isDarkMode}
-                        type="line"
-                        data={chartData}
-                        height={320}
-                        xAxisName="时间"
-                        yAxisName="指标"
-                        xAxisTickCount={4}
-                        xAxisTickFormat={(value) => new Date(value).toLocaleDateString()}
-                        yAxisTickFormat={(value) => `${Math.round(value)}`}
-                        tooltipValueFormat={(value) => `${Math.round(value)}`}
-                        tooltipBoundary={tooltipBoundary ?? undefined}
-                        tooltipFollowCursor="x"
-                        ariaDescription="GitHub 仓库趋势"
-                      />
-                    )}
-                  </ChartBoundaryBox>
-                ) : <FillEmpty title="趋势数据不足" description="等待后台完成至少两次采集后显示曲线。" />}
-                </LayerCard.Primary>
-              </LayerCard>
-              <LayerCard className="self-start p-0 shadow-none">
-                <LayerCard.Secondary className="flex min-h-14 items-center gap-2 border-b border-kumo-line px-4 py-3">
-                  <Users className="h-4 w-4 text-kumo-brand" />
-                  <Text variant="body" size="sm" bold>流量与贡献者</Text>
-                </LayerCard.Secondary>
-                <LayerCard.Primary className="grid content-start gap-3 p-4">
-                  <RepositoryMetric label="访问量" value={formatNumber(traffic[0]?.views)} detail={`唯一访客 ${formatNumber(traffic[0]?.view_uniques)}`} />
-                  <RepositoryMetric label="克隆量" value={formatNumber(traffic[0]?.clones)} detail={`唯一克隆 ${formatNumber(traffic[0]?.clone_uniques)}`} />
-                  <RepositoryMetric label="贡献者" value={formatNumber(contributors.length)} detail={contributors.slice(0, 3).map((item) => item.login).join(', ') || '暂无贡献者数据'} />
-                </LayerCard.Primary>
-              </LayerCard>
+    <div ref={surfaceRef} className="cf-ai-background-surface public-github-page relative isolate min-h-screen text-kumo-default">
+      <div aria-hidden="true" className="cf-ai-background pointer-events-none absolute inset-0" />
+      <main className="relative z-10 mx-auto flex min-h-screen w-full max-w-[96rem] flex-col px-4 py-5 sm:px-6 lg:px-8">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-kumo-interact/80 bg-kumo-base text-kumo-brand">
+              <GitHubBrand className="h-4 w-4" />
             </div>
-          )}
-
-          {activeTab === 'events' && (
-            <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
-              <LayerCard className="p-0 shadow-none">
-                <LayerCard.Secondary className="flex min-h-14 items-center gap-2 border-b border-kumo-line px-4 py-3">
-                  <Bell className="h-4 w-4 text-kumo-brand" />
-                  <Text variant="body" size="sm" bold>事件与通知源</Text>
-                </LayerCard.Secondary>
-                <LayerCard.Primary className="p-0">
-                {events.length === 0 ? <FillEmpty title="暂无 GitHub 事件" description="Webhook 或后台采集触发后，事件会实时出现在这里。" /> : (
-                  <DataTableFrame variant="embedded" density="compact" className="min-w-0 overflow-x-auto overflow-y-visible scrollbar-thin">
-                    <AppTable layout="fixed" widths={GITHUB_EVENTS_TABLE_WIDTHS}>
-                      <colgroup>
-                        <col style={{ width: GITHUB_EVENTS_TABLE_WIDTHS[0] }} />
-                        <col style={{ width: GITHUB_EVENTS_TABLE_WIDTHS[1] }} />
-                        <col style={{ width: GITHUB_EVENTS_TABLE_WIDTHS[2] }} />
-                        <col style={{ width: GITHUB_EVENTS_TABLE_WIDTHS[3] }} />
-                      </colgroup>
-                      <Table.Header sticky variant="compact">
-                        <Table.Row><Table.Head>事件</Table.Head><Table.Head className="align-middle text-center">等级</Table.Head><Table.Head className="align-middle text-center">来源</Table.Head><Table.Head className="align-middle text-center">时间</Table.Head></Table.Row>
-                      </Table.Header>
-                      <Table.Body>
-                        {events.map((event, index) => (
-                          <Table.Row key={event.id || `${event.event_type}-${index}`}>
-                            <Table.Cell><div className="font-bold text-kumo-strong">{event.title || event.event_type}</div><div className="max-w-2xl truncate text-[11px] text-kumo-subtle">{event.message}</div></Table.Cell>
-                            <Table.Cell className="align-middle text-center"><Badge variant={statusTone(event.severity)}>{statusLabel(event.severity)}</Badge></Table.Cell>
-                            <Table.Cell className="align-middle text-center">{event.source || 'stream'}</Table.Cell>
-                            <Table.Cell className="align-middle text-center text-[11px] text-kumo-subtle">{formatDateTime(event.created_at)}</Table.Cell>
-                          </Table.Row>
-                        ))}
-                      </Table.Body>
-                    </AppTable>
-                  </DataTableFrame>
-                )}
-                </LayerCard.Primary>
-              </LayerCard>
-              <LayerCard className="self-start p-0 shadow-none">
-                <LayerCard.Secondary className="flex min-h-14 items-center justify-between gap-2 border-b border-kumo-line px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <Key className="h-4 w-4 text-kumo-brand" />
-                    <Text variant="body" size="sm" bold>Webhook 配置</Text>
-                  </div>
-                  <Button size="sm" variant="primary" icon={<Save className="h-3.5 w-3.5" />} onClick={configureWebhook} loading={saving}>自动配置</Button>
-                </LayerCard.Secondary>
-                <LayerCard.Primary className="grid content-start gap-4 p-4">
-                  <div className="grid gap-1">
-                    <Text variant="secondary" size="xs">Payload URL</Text>
-                    <ClipboardText size="sm" text={`${window.location.origin}/api/github/webhook/${selectedRepo.id}`} />
-                  </div>
-                  <div className="grid gap-1">
-                    <Text variant="secondary" size="xs">Secret</Text>
-                    <ClipboardText size="sm" text={selectedRepo.webhook_secret || '-'} />
-                  </div>
-                  <Text variant="secondary" size="xs">GitHub Webhook 选择 application/json，并启用 workflow_run、release、issues、pull_request、star 和 ping 事件。</Text>
-                </LayerCard.Primary>
-              </LayerCard>
+            <div className="min-w-0">
+              <div className="truncate text-base font-bold text-kumo-strong">{page?.title || 'GitHub 动态'}</div>
             </div>
-          )}
-        </div>
-      )}
-
-      {activeTab === 'public-pages' && (
-        <GitHubPublicPagesPanel repositories={repositories} />
-      )}
-
-      {activeTab === 'settings' && (
-        <div className="grid items-start gap-4 xl:grid-cols-2">
-          <LayerCard className="self-start p-0 shadow-none">
-            <LayerCard.Secondary className="flex min-h-14 flex-wrap items-center justify-between gap-2 border-b border-kumo-line px-4 py-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <Key className="h-4 w-4 text-kumo-brand" />
-                <Text variant="body" size="sm" bold>GitHub Token</Text>
-              </div>
-              <Button
-                size="sm"
-                variant="secondary"
-                icon={<ExternalLink className="h-3.5 w-3.5" />}
-                onClick={() => window.open(fineGrainedTokenURL, '_blank', 'noopener,noreferrer')}
-              >
-                打开 GitHub 创建页
-              </Button>
-            </LayerCard.Secondary>
-            <LayerCard.Primary className="grid gap-3 p-4">
-              <Input size="sm" label="Token 名称" value={tokenForm.name} onChange={(e) => setTokenForm((p) => ({ ...p, name: e.target.value }))} placeholder="生产账号" />
-              <Input size="sm" label="Token" value={tokenForm.token} onChange={(e) => setTokenForm((p) => ({ ...p, token: e.target.value }))} placeholder="github_pat_..." autoComplete="off" spellCheck={false} className="font-mono" />
-              <Grid variant="2up" gap="sm">
-                <Select size="sm" label="Token 类型" value={tokenForm.type} onValueChange={(value) => setTokenForm((p) => ({ ...p, type: value }))} items={tokenTypeOptions} />
-                <div className="flex h-full items-end">
-                  <Switch size="sm" label="设为默认" controlFirst={false} checked={tokenForm.default_token} onCheckedChange={(checked) => setTokenForm((p) => ({ ...p, default_token: Boolean(checked) }))} />
-                </div>
-              </Grid>
-              <Button size="sm" variant="primary" icon={<Save className="h-3.5 w-3.5" />} onClick={createToken} loading={saving}>保存 Token</Button>
-              {tokens.length > 0 && (
-                <div className="grid items-start gap-3 sm:grid-cols-2">
-                  {tokens.map((token) => (
-                    <LayerCard key={token.id} className="min-w-0 p-0 shadow-none">
-                      <LayerCard.Primary className="grid gap-3 p-3">
-                        <div className="flex min-w-0 items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <div className="flex min-w-0 flex-wrap items-center gap-2">
-                              <Text variant="body" size="sm" bold truncate>{token.name}</Text>
-                              {token.default_token && <Badge variant="success">默认</Badge>}
-                            </div>
-                            <Text variant="secondary" size="xs">{token.type}</Text>
-                          </div>
-                          <Badge variant={statusTone(token.last_test_status)}>{tokenTestStatusLabel(token.last_test_status)}</Badge>
-                        </div>
-                        <PermissionChecks token={token} />
-                        <div className="flex items-center justify-end gap-2 border-t border-kumo-line pt-2">
-                          <Button size="sm" variant="secondary" onClick={() => testToken(token.id)} loading={testingTokenId === String(token.id)}>
-                            {selectedRepo ? '检测并用于当前仓库' : '检测权限'}
-                          </Button>
-                          <Button size="sm" variant="ghost" icon={<Trash className="h-3.5 w-3.5" />} onClick={() => deleteToken(token)} aria-label="删除 Token" />
-                        </div>
-                      </LayerCard.Primary>
-                    </LayerCard>
-                  ))}
-                </div>
-              )}
-            </LayerCard.Primary>
-          </LayerCard>
-
-          <LayerCard className="self-start p-0 shadow-none">
-            <LayerCard.Secondary className="flex min-h-14 items-center justify-between gap-3 border-b border-kumo-line px-4 py-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <Settings className="h-4 w-4 text-kumo-brand" />
-                <Text variant="body" size="sm" bold>采集与保留</Text>
-              </div>
-              {settings && (
-                <Switch size="sm" label="启用后台采集" controlFirst={false} checked={settings.enabled} onCheckedChange={(checked) => setSettings((p) => ({ ...p, enabled: Boolean(checked) }))} />
-              )}
-            </LayerCard.Secondary>
-            <LayerCard.Primary className="p-4">
-            {settings ? (
-              <div className="grid gap-3">
-                <Input size="sm" label="默认采集间隔（秒）" type="number" min="60" value={settings.default_collect_interval_seconds} onChange={(e) => setSettings((p) => ({ ...p, default_collect_interval_seconds: Number(e.target.value) }))} />
-                <Input size="sm" label="默认保留天数" type="number" min="1" value={settings.default_retention_days} onChange={(e) => setSettings((p) => ({ ...p, default_retention_days: Number(e.target.value) }))} />
-                <Input size="sm" label="Rate Limit 低额度阈值" type="number" min="0" value={settings.rate_limit_low_threshold} onChange={(e) => setSettings((p) => ({ ...p, rate_limit_low_threshold: Number(e.target.value) }))} />
-                <Input size="sm" label="Star 激增阈值" type="number" min="1" value={settings.star_spike_threshold} onChange={(e) => setSettings((p) => ({ ...p, star_spike_threshold: Number(e.target.value) }))} />
-                <Button size="sm" variant="primary" icon={<Save className="h-3.5 w-3.5" />} onClick={saveSettings} loading={saving}>保存设置</Button>
-              </div>
-            ) : (
-              <FillEmpty title="设置加载中" />
-            )}
-            </LayerCard.Primary>
-          </LayerCard>
-        </div>
-      )}
-
-      {!selectedRepo && ['actions', 'trends', 'events'].includes(activeTab) && (
-        <LayerCard className="p-0 shadow-none">
-          <FillEmpty title="暂无仓库详情" description="请先添加或选择一个 GitHub 仓库。" />
-        </LayerCard>
-      )}
-
-      <Dialog.Root open={repoDialogOpen} onOpenChange={setRepoDialogOpen}>
-        <Dialog className="flex max-h-[min(calc(100dvh-2rem),34rem)] w-[min(calc(100vw-2rem),38rem)] flex-col overflow-hidden p-0">
-          <div className="border-b border-kumo-line bg-kumo-recessed/20 px-5 py-4">
-            <Dialog.Title className="text-base font-semibold text-kumo-strong">添加 GitHub 仓库</Dialog.Title>
-            <Dialog.Description className="mt-1 text-xs text-kumo-subtle">
-              支持 GitHub URL、owner/repo、公开仓库和私有仓库。
-            </Dialog.Description>
           </div>
-          <form
-            className="min-h-0 flex-1 overflow-y-auto"
-            onSubmit={(event) => {
-              event.preventDefault();
-              createRepository();
-            }}
-          >
-            <div className="grid gap-4 px-5 py-4">
-              <Input
-                size="sm"
-                label="GitHub 仓库"
-                value={repoForm.url}
-                onChange={(e) => setRepoForm((p) => ({ ...p, url: e.target.value }))}
-                placeholder="https://github.com/owner/repo 或 owner/repo"
-                autoFocus
-              />
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Select
-                  size="sm"
-                  label="访问凭据"
-                  value={repoForm.token_id}
-                  onValueChange={(value) => setRepoForm((p) => ({ ...p, token_id: value }))}
-                  items={tokenOptions}
-                />
-                <Input
-                  size="sm"
-                  label="采集间隔（秒）"
-                  type="number"
-                  min="60"
-                  value={repoForm.collect_interval_seconds}
-                  onChange={(e) => setRepoForm((p) => ({ ...p, collect_interval_seconds: e.target.value }))}
-                />
-                <Input
-                  size="sm"
-                  label="数据保留（天）"
-                  type="number"
-                  min="1"
-                  value={repoForm.retention_days}
-                  onChange={(e) => setRepoForm((p) => ({ ...p, retention_days: e.target.value }))}
-                />
-                <div className="flex h-full items-end">
-                  <Switch
-                    size="sm"
-                    label="启用 Webhook"
-                    controlFirst={false}
-                    checked={repoForm.webhook_enabled}
-                    onCheckedChange={(checked) => setRepoForm((p) => ({ ...p, webhook_enabled: Boolean(checked) }))}
-                  />
+          <Button size="sm" variant="secondary" onClick={() => load({ silent: true })} loading={refreshing} icon={<RefreshCw className="h-3.5 w-3.5" />}>
+            刷新
+          </Button>
+        </div>
+
+        {loading && !page && (
+          <div className="flex flex-col gap-3">
+            <section className="public-github-card rounded-lg border border-kumo-interact/80 bg-kumo-base px-4 py-3.5">
+              <div className="grid gap-3">
+                <SkeletonLine className="h-5 w-48" />
+                <SkeletonLine className="h-4 w-72" />
+              </div>
+            </section>
+            <ActionFlowPlaceholder />
+          </div>
+        )}
+
+        {!loading && error && !page && (
+          <div className="public-github-card flex flex-1 flex-col items-center justify-center rounded-lg border border-kumo-interact/80 bg-kumo-base p-10 text-center">
+            <AlertTriangle className="mb-3 h-9 w-9 text-kumo-warning" />
+            <h1 className="text-lg font-bold text-kumo-strong">无法显示 GitHub 公开页</h1>
+            <p className="mt-2 max-w-md text-sm leading-relaxed text-kumo-subtle">{error}</p>
+          </div>
+        )}
+
+        {page && (
+          <div className="flex flex-col gap-3">
+            <section className={`public-github-card rounded-lg border px-4 py-3 ${statusPanelClass[pageTone]}`}>
+              <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="flex items-center gap-2 text-base font-bold">
+                    <Globe className="h-4 w-4" />
+                    {summaryText}
+                  </div>
+                  {page.description && (
+                    <p className="mt-1.5 max-w-3xl text-[13px] leading-5 opacity-90">{page.description}</p>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 text-center text-[11px] sm:grid-cols-4">
+                  <div className="rounded-md border border-current/35 bg-kumo-base/60 px-2 py-1.5">
+                    <div className="tabular-nums text-sm font-bold">{repositories.length}</div>
+                    <div className="opacity-80">仓库</div>
+                  </div>
+                  <div className="rounded-md border border-current/35 bg-kumo-base/60 px-2 py-1.5">
+                    <div className="tabular-nums text-sm font-bold">{successCount}</div>
+                    <div className="opacity-80">正常</div>
+                  </div>
+                  <div className="rounded-md border border-current/35 bg-kumo-base/60 px-2 py-1.5">
+                    <div className="tabular-nums text-sm font-bold">{failureCount}</div>
+                    <div className="opacity-80">失败</div>
+                  </div>
+                  <div className="rounded-md border border-current/35 bg-kumo-base/60 px-2 py-1.5">
+                    <div className="tabular-nums text-sm font-bold">{warningCount + neutralCount}</div>
+                    <div className="opacity-80">其他</div>
+                  </div>
                 </div>
               </div>
-            </div>
-            <div className="flex justify-end gap-2 border-t border-kumo-line bg-kumo-recessed/25 px-5 py-3">
-              <Dialog.Close render={(props) => <Button type="button" size="sm" variant="secondary" {...props}>取消</Button>} />
-              <Button type="submit" size="sm" variant="primary" icon={<Plus className="h-3.5 w-3.5" />} loading={saving}>添加仓库</Button>
-            </div>
-          </form>
-        </Dialog>
-      </Dialog.Root>
+            </section>
+
+            {repositories.length === 0 ? (
+              <section className="public-github-card rounded-lg border border-kumo-interact/80 bg-kumo-base p-6 text-center text-sm text-kumo-subtle">
+                这个 GitHub 公开页还没有绑定仓库。
+              </section>
+            ) : (
+              <section className="grid gap-3">
+                {repositories.map((item) => (
+                  <RepositoryCard
+                    key={item.id || item.full_name}
+                    item={item}
+                    now={currentTime}
+                    config={config}
+                    detailLoading={detailStatusByRepo[String(item.id || '')] === 'loading'}
+                  />
+                ))}
+              </section>
+            )}
+
+            <footer className="flex flex-col gap-2 py-3 text-xs text-kumo-subtle sm:flex-row sm:items-center sm:justify-between">
+              <span className="inline-flex items-center gap-1">
+                <Shield className="h-3.5 w-3.5" />
+                由 API Monitor 提供
+              </span>
+              <span>最后更新：{formatDateTime(page.updatedAt || page.createdAt)}</span>
+            </footer>
+          </div>
+        )}
+      </main>
     </div>
   );
 }
 
-export default GitHubPage;
+export default PublicGitHubPage;

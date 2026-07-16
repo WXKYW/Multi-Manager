@@ -7,6 +7,7 @@ const PublicSharePage = lazy(() => import('./pages/PublicSharePage.jsx'));
 const PublicM365RegisterPage = lazy(() => import('./pages/PublicM365RegisterPage.jsx'));
 const PublicStatusPage = lazy(() => import('./pages/PublicStatusPage.jsx'));
 const PublicServerStatusPage = lazy(() => import('./pages/PublicServerStatusPage.jsx'));
+const PublicGitHubPage = lazy(() => import('./pages/PublicGitHubPage.jsx'));
 const VoidRoomPage = lazy(() => import('./pages/VoidRoomPage.jsx'));
 
 const isLocalHost = (host) => /^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(host || '');
@@ -23,6 +24,7 @@ const getPublicStatusRouteMode = () => {
   const path = window.location.pathname.replace(/\/+$/, '') || '/';
   if (/^\/(?:status|u)\/[^/]+$/.test(path)) return 'slug';
   if (/^\/(?:servers|s)\/[^/]+$/.test(path)) return 'server-slug';
+  if (/^\/(?:github|gh)\/[^/]+$/.test(path)) return 'github-slug';
   if (path === '/' && !isLocalHost(window.location.host)) return 'domain';
   return false;
 };
@@ -120,6 +122,10 @@ function App() {
     return <Suspense fallback={null}><PublicServerStatusPage /></Suspense>;
   }
 
+  if (publicStatusRouteMode === 'github-slug') {
+    return <Suspense fallback={null}><PublicGitHubPage /></Suspense>;
+  }
+
   if (publicStatusRouteMode === 'slug') {
     return (
       <Suspense fallback={null}>
@@ -157,6 +163,7 @@ function DomainPublicStatusResolver({ route, onRouteChange }) {
       const domain = window.location.host;
       const uptimeUrl = `/api/uptime/public/status-page-by-domain?domain=${encodeURIComponent(domain)}`;
       const serverUrl = `/api/server/public/status-page-by-domain?domain=${encodeURIComponent(domain)}`;
+      const githubUrl = `/api/github/public/page-by-domain?domain=${encodeURIComponent(domain)}`;
 
       try {
         const uptimeResponse = await fetch(uptimeUrl, { cache: 'no-store' });
@@ -172,6 +179,16 @@ function DomainPublicStatusResolver({ route, onRouteChange }) {
         const serverResponse = await fetch(serverUrl, { cache: 'no-store' });
         if (!cancelled && serverResponse.ok) {
           onRouteChange('server');
+          return;
+        }
+      } catch {
+        // Fall through to GitHub public page probing.
+      }
+
+      try {
+        const githubResponse = await fetch(githubUrl, { cache: 'no-store' });
+        if (!cancelled && githubResponse.ok) {
+          onRouteChange('github');
           return;
         }
       } catch {
@@ -199,6 +216,14 @@ function DomainPublicStatusResolver({ route, onRouteChange }) {
     return (
       <Suspense fallback={null}>
         <PublicServerStatusPage domainOnly />
+      </Suspense>
+    );
+  }
+
+  if (route === 'github') {
+    return (
+      <Suspense fallback={null}>
+        <PublicGitHubPage domainOnly />
       </Suspense>
     );
   }

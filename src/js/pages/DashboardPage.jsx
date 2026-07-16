@@ -15,6 +15,7 @@ import {
 import { CanvasRenderer } from 'echarts/renderers';
 import useStore from '../store.js';
 import { AppCard, ChartBoundaryBox, PageStack, SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { DASHBOARD_INVALIDATION_EVENT, readDashboardStatsInvalidatedAt } from '../modules/dashboardInvalidation.js';
 import { parseDashboardTrendTimestamp } from '../modules/dashboardMetrics.js';
 import {
   Cpu,
@@ -106,8 +107,10 @@ function useMediaQuery(query) {
 }
 
 function getInitialDashboardStats() {
-  const cached = dashboardStatsCache?.stats;
-  if (!cached) return DEFAULT_DASHBOARD_STATS;
+  const cachedSnapshot = dashboardStatsCache;
+  const invalidatedAt = readDashboardStatsInvalidatedAt();
+  if (!cachedSnapshot || cachedSnapshot.updatedAt < invalidatedAt) return DEFAULT_DASHBOARD_STATS;
+  const cached = cachedSnapshot.stats;
   return {
     ...DEFAULT_DASHBOARD_STATS,
     ...cached,
@@ -257,7 +260,9 @@ const getStatusPageUrl = (page) => {
   if (domain) return `https://${domain}`;
   const slug = encodeURIComponent(page?.slug || '');
   if (!slug) return '';
-  return page.kind === 'server' ? `/servers/${slug}` : `/status/${slug}`;
+  if (page.kind === 'server') return `/servers/${slug}`;
+  if (page.kind === 'github') return `/github/${slug}`;
+  return `/status/${slug}`;
 };
 
 function StatusPageShortcutCard({ page }) {
@@ -377,9 +382,12 @@ function DashboardPage({ onNavigate } = {}) {
   const [loading, setLoading] = useState(false);
 
   // 串联并行请求所有模块数据
-  const fetchDashboardStats = async (showLoading = true, { force = false } = {}) => {
+  const fetchDashboardStats = useCallback(async (showLoading = true, { force = false } = {}) => {
     const cached = dashboardStatsCache;
-    const cacheFresh = cached && Date.now() - cached.updatedAt < DASHBOARD_CACHE_TTL_MS;
+    const invalidatedAt = readDashboardStatsInvalidatedAt();
+    const cacheFresh = cached
+      && cached.updatedAt >= invalidatedAt
+      && Date.now() - cached.updatedAt < DASHBOARD_CACHE_TTL_MS;
 
     if (!force && cacheFresh) {
       setStats(cached.stats);
@@ -648,9 +656,10 @@ function DashboardPage({ onNavigate } = {}) {
       const normalize = (item, kind) => ({ ...item, kind });
       const enabled = (item) => item?.public !== false && item?.config?.showOnDashboard === true;
       try {
-        const [uptimeResult, serverResult] = await Promise.allSettled([
+        const [uptimeResult, serverResult, githubResult] = await Promise.allSettled([
           fetchJson('/api/uptime/status-pages'),
           fetchJson('/api/server/status-pages'),
+          fetchJson('/api/github/public-pages'),
         ]);
         const uptimePages = uptimeResult.status === 'fulfilled' && Array.isArray(uptimeResult.value?.data)
           ? uptimeResult.value.data.filter(enabled).map((item) => normalize(item, 'uptime'))
@@ -658,7 +667,10 @@ function DashboardPage({ onNavigate } = {}) {
         const serverPages = serverResult.status === 'fulfilled' && Array.isArray(serverResult.value?.data)
           ? serverResult.value.data.filter(enabled).map((item) => normalize(item, 'server'))
           : [];
-        const val = [...uptimePages, ...serverPages];
+        const githubPages = githubResult.status === 'fulfilled' && Array.isArray(githubResult.value?.data)
+          ? githubResult.value.data.filter(enabled).map((item) => normalize(item, 'github'))
+          : [];
+        const val = [...uptimePages, ...serverPages, ...githubPages];
         updateSegment('statusPages', val);
         return val;
       } catch (e) {
@@ -714,7 +726,7 @@ function DashboardPage({ onNavigate } = {}) {
 
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     const cached = dashboardStatsCache;
@@ -722,11 +734,24 @@ function DashboardPage({ onNavigate } = {}) {
       setStats(cached.stats);
     }
 
-    const cacheStale = !cached || Date.now() - cached.updatedAt > DASHBOARD_CACHE_TTL_MS;
+    const invalidatedAt = readDashboardStatsInvalidatedAt();
+    const cacheStale = !cached
+      || cached.updatedAt < invalidatedAt
+      || Date.now() - cached.updatedAt > DASHBOARD_CACHE_TTL_MS;
     if (cacheStale) {
       fetchDashboardStats(!cached);
     }
-  }, []);
+  }, [fetchDashboardStats]);
+
+  useEffect(() => {
+    const handleInvalidate = () => {
+      dashboardStatsCache = null;
+      dashboardStatsFetchPromise = null;
+      fetchDashboardStats(false, { force: true });
+    };
+    window.addEventListener(DASHBOARD_INVALIDATION_EVENT, handleInvalidate);
+    return () => window.removeEventListener(DASHBOARD_INVALIDATION_EVENT, handleInvalidate);
+  }, [fetchDashboardStats]);
 
   useEffect(() => {
     let stopped = false;

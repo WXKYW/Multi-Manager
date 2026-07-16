@@ -41,6 +41,7 @@ const getSourceModuleName = (module) => {
   const names = {
     uptime: '可用性监测',
     server: '主机实例',
+    github: 'GitHub',
     openai: 'OpenAI 接口',
     system: '系统设置',
     filebox: '文件柜',
@@ -82,6 +83,17 @@ const getEventTypeName = (type) => {
     logout: '登出',
     'playback.error': '播放错误',
     'proxy.blocked': '代理拦截',
+    action_failed: 'Actions 执行失败',
+    action_recovered: 'Actions 恢复正常',
+    release_published: '发布新版本',
+    star_spike: 'Star 激增',
+    issue_opened: '新增 Issue',
+    pull_request_opened: '新增拉取请求',
+    repository_unreachable: '仓库无法访问',
+    token_invalid: 'Token 已失效',
+    rate_limit_low: 'API 限额偏低',
+    webhook_delivery_failed: 'Webhook 投递失败',
+    webhook_ping: 'Webhook 连通成功',
     created: '已创建',
     updated: '已更新',
     deleted: '已删除',
@@ -95,6 +107,7 @@ const getEventTypeName = (type) => {
 const FALLBACK_EVENT_CATALOG = [
   { module: 'uptime', events: ['down', 'up', 'pending', 'resource.created', 'resource.deleted', 'ssl_expiry'] },
   { module: 'server', events: ['offline', 'online', 'cpu_high', 'memory_high', 'disk_high', 'traffic_high', 'traffic_normal'] },
+  { module: 'github', events: ['action_failed', 'action_recovered', 'release_published', 'star_spike', 'issue_opened', 'pull_request_opened', 'repository_unreachable', 'token_invalid', 'rate_limit_low', 'webhook_delivery_failed', 'webhook_ping'] },
   { module: 'system', events: ['database.backup', 'database.import', 'log.cleanup', 'migration.failed', 'cpu_high', 'memory_high', 'disk_high'] },
   { module: 'filebox', events: ['resource.created', 'resource.deleted', 'cleanup'] },
   { module: 'totp', events: ['resource.created', 'resource.updated', 'resource.deleted', 'security.revealed', 'backup.imported', 'backup.exported'] },
@@ -710,6 +723,11 @@ function NotificationPage() {
     return events.map(event => ({ value: event, label: getEventTypeName(event) }));
   }, [notificationEventCatalog, ruleForm.source_module]);
 
+  const ruleFilterItems = useMemo(() => ([
+    { value: '', label: '所有模块' },
+    ...catalogModuleItems,
+  ]), [catalogModuleItems]);
+
   return (
     <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4">
       {/* ==================== 顶部 Tab 导航 ==================== */}
@@ -853,11 +871,7 @@ function NotificationPage() {
               value={notificationRuleFilter}
               onValueChange={setNotificationRuleFilter}
               placeholder="所有模块"
-              items={[
-                { value: '', label: '所有模块' },
-                { value: 'uptime', label: 'Uptime 监测' },
-                { value: 'server', label: '主机实例' },
-              ]}
+              items={ruleFilterItems}
             />
 
             <Button

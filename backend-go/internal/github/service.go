@@ -85,6 +85,16 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "" && r.Method == http.MethodGet:
 		s.overview(w, r)
+	case len(parts) == 1 && parts[0] == "public-pages":
+		s.publicPages(w, r)
+	case len(parts) == 2 && parts[0] == "public-pages":
+		s.publicPageByID(w, r, parts[1])
+	case len(parts) == 5 && parts[0] == "public" && parts[1] == "pages" && parts[3] == "repositories" && r.Method == http.MethodGet:
+		s.publicPageRepositoryBySlug(w, r, parts[2], parts[4])
+	case len(parts) == 3 && parts[0] == "public" && parts[1] == "pages" && r.Method == http.MethodGet:
+		s.publicPageBySlug(w, r, parts[2])
+	case len(parts) == 2 && parts[0] == "public" && parts[1] == "page-by-domain" && r.Method == http.MethodGet:
+		s.publicPageByDomain(w, r)
 	case len(parts) == 1 && parts[0] == "tokens":
 		s.tokens(w, r)
 	case len(parts) == 2 && parts[0] == "tokens":
@@ -194,6 +204,309 @@ func (s *Service) overview(w http.ResponseWriter, r *http.Request) {
 	}
 	settings, _ := loadSettings(r.Context(), db)
 	response.OK(w, map[string]interface{}{"repositories": repos, "settings": settings, "collector": s.currentStatus()})
+}
+
+func (s *Service) publicPages(w http.ResponseWriter, r *http.Request) {
+	db, err := s.open(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer db.Close()
+
+	switch r.Method {
+	case http.MethodGet:
+		pages, err := listPublicPages(r.Context(), db)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		response.OK(w, pages)
+	case http.MethodPost:
+		payload, err := readObject(r)
+		if err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		page, ok, err := savePublicPage(r.Context(), db, 0, payload)
+		if err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if !ok {
+			response.Error(w, http.StatusNotFound, "公开页不存在")
+			return
+		}
+		response.OK(w, page)
+	default:
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (s *Service) publicPageByID(w http.ResponseWriter, r *http.Request, idText string) {
+	id, err := parseID(idText)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid public page id")
+		return
+	}
+	db, err := s.open(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer db.Close()
+
+	switch r.Method {
+	case http.MethodPut, http.MethodPatch:
+		payload, err := readObject(r)
+		if err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		page, ok, err := savePublicPage(r.Context(), db, id, payload)
+		if err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if !ok {
+			response.Error(w, http.StatusNotFound, "公开页不存在")
+			return
+		}
+		response.OK(w, page)
+	case http.MethodDelete:
+		result, err := db.ExecContext(r.Context(), `DELETE FROM github_public_pages WHERE id = ?`, id)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			response.Error(w, http.StatusNotFound, "公开页不存在")
+			return
+		}
+		response.OK(w, map[string]interface{}{"deleted": true})
+	default:
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func (s *Service) publicPageBySlug(w http.ResponseWriter, r *http.Request, slug string) {
+	db, err := s.open(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer db.Close()
+
+	page, ok, err := getPublicPageBySlug(r.Context(), db, slug, true)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !ok {
+		response.Error(w, http.StatusNotFound, "公开页不存在或未公开")
+		return
+	}
+
+	payload, err := s.publicPagePayload(r.Context(), db, page, !boolQuery(r, "summary", false))
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", clamp(page.CacheSeconds, 30, 86400)))
+	response.OK(w, payload)
+}
+
+func (s *Service) publicPageByDomain(w http.ResponseWriter, r *http.Request) {
+	db, err := s.open(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer db.Close()
+
+	domain := strings.TrimSpace(r.URL.Query().Get("domain"))
+	if domain == "" {
+		domain = r.Host
+	}
+
+	page, ok, err := getPublicPageByDomain(r.Context(), db, domain)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !ok {
+		response.Error(w, http.StatusNotFound, "公开页不存在或未公开")
+		return
+	}
+
+	payload, err := s.publicPagePayload(r.Context(), db, page, !boolQuery(r, "summary", false))
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", clamp(page.CacheSeconds, 30, 86400)))
+	response.OK(w, payload)
+}
+
+func (s *Service) publicPageRepositoryBySlug(w http.ResponseWriter, r *http.Request, slug, repoText string) {
+	db, err := s.open(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer db.Close()
+
+	page, ok, err := getPublicPageBySlug(r.Context(), db, slug, true)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !ok {
+		response.Error(w, http.StatusNotFound, "公开页不存在或未公开")
+		return
+	}
+
+	repoID, err := parseID(repoText)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid repository id")
+		return
+	}
+	if !containsInt64(page.RepositoryIDs, repoID) {
+		response.Error(w, http.StatusNotFound, "仓库未绑定到当前公开页")
+		return
+	}
+
+	item, _, latestRun, ok, err := s.publicRepositorySummaryItem(r.Context(), db, repoID)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !ok {
+		response.Error(w, http.StatusNotFound, "仓库不存在")
+		return
+	}
+	s.attachPublicRepositoryWorkflowDetail(r.Context(), db, item, latestRun)
+	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", clamp(page.CacheSeconds, 30, 86400)))
+	response.OK(w, item)
+}
+
+func (s *Service) publicPagePayload(ctx context.Context, db *sql.DB, page PublicPage, includeWorkflowDetails bool) (map[string]interface{}, error) {
+	repositories := make([]map[string]interface{}, 0, len(page.RepositoryIDs))
+	for _, repoID := range page.RepositoryIDs {
+		item, _, latestRun, ok, err := s.publicRepositorySummaryItem(ctx, db, repoID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			continue
+		}
+		if includeWorkflowDetails {
+			s.attachPublicRepositoryWorkflowDetail(ctx, db, item, latestRun)
+		}
+		repositories = append(repositories, item)
+	}
+
+	return map[string]interface{}{
+		"id":            page.ID,
+		"slug":          page.Slug,
+		"domain":        page.Domain,
+		"title":         page.Title,
+		"description":   page.Description,
+		"public":        page.Public,
+		"cacheSeconds":  page.CacheSeconds,
+		"config":        page.Config,
+		"repositoryIds": page.RepositoryIDs,
+		"repositories":  repositories,
+		"createdAt":     page.CreatedAt,
+		"updatedAt":     page.UpdatedAt,
+	}, nil
+}
+
+func (s *Service) publicRepositorySummaryItem(ctx context.Context, db *sql.DB, repoID int64) (map[string]interface{}, Repository, map[string]interface{}, bool, error) {
+	repo, ok, err := getRepository(ctx, db, repoID)
+	if err != nil {
+		return nil, Repository{}, nil, false, err
+	}
+	if !ok {
+		return nil, Repository{}, nil, false, nil
+	}
+
+	repoWithTiming := []Repository{repo}
+	attachLatestActionTiming(ctx, db, repoWithTiming)
+	repo = repoWithTiming[0]
+	latestRun, _, err := latestActionRunForRepository(ctx, db, repo.ID)
+	if err != nil {
+		return nil, Repository{}, nil, false, err
+	}
+
+	item := map[string]interface{}{
+		"id":                       repo.ID,
+		"owner":                    repo.Owner,
+		"name":                     repo.Name,
+		"full_name":                repo.FullName,
+		"html_url":                 repo.HTMLURL,
+		"description":              repo.Description,
+		"private":                  repo.Private,
+		"default_branch":           repo.DefaultBranch,
+		"language":                 repo.Language,
+		"stars":                    repo.Stars,
+		"forks":                    repo.Forks,
+		"watchers":                 repo.Watchers,
+		"open_issues":              repo.OpenIssues,
+		"open_pull_requests":       repo.OpenPullRequests,
+		"latest_release":           repo.LatestRelease,
+		"latest_release_url":       repo.LatestReleaseURL,
+		"latest_action_status":     repo.LatestActionStatus,
+		"latest_action_conclusion": repo.LatestActionConclusion,
+		"latest_action_started_at": repo.LatestActionStartedAt,
+		"latest_action_created_at": repo.LatestActionCreatedAt,
+		"latest_action_updated_at": repo.LatestActionUpdatedAt,
+		"latest_run":               latestRun,
+	}
+	return item, repo, latestRun, true, nil
+}
+
+func (s *Service) attachPublicRepositoryWorkflowDetail(ctx context.Context, db *sql.DB, item map[string]interface{}, latestRun map[string]interface{}) {
+	if item == nil || latestRun == nil {
+		return
+	}
+
+	repo := Repository{
+		ID:            int64Value(item["id"], 0),
+		Owner:         asString(item["owner"]),
+		Name:          asString(item["name"]),
+		DefaultBranch: asString(item["default_branch"]),
+		Private:       boolValue(item["private"], false),
+	}
+
+	token, err := s.tokenForRepository(ctx, db, repo)
+	if err != nil {
+		item["workflow_error"] = err.Error()
+		return
+	}
+
+	runID := int64Value(latestRun["run_id"], 0)
+	if runID <= 0 {
+		return
+	}
+
+	jobs, _, err := s.client.fetchWorkflowJobs(ctx, token, repo.Owner, repo.Name, runID)
+	if err != nil {
+		item["workflow_error"] = err.Error()
+		return
+	}
+
+	workflow := s.workflowLayoutForRun(
+		ctx,
+		token,
+		repo,
+		asString(latestRun["workflow_name"]),
+		asString(latestRun["branch"]),
+		asString(latestRun["commit_sha"]),
+	)
+	item["jobs"] = jobs.Jobs
+	item["workflow"] = workflow
 }
 
 func (s *Service) tokens(w http.ResponseWriter, r *http.Request) {

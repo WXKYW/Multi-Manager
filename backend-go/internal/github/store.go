@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -174,11 +175,26 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			auto_create_webhook_secret INTEGER DEFAULT 1,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
+		`CREATE TABLE IF NOT EXISTS github_public_pages (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			slug TEXT UNIQUE NOT NULL,
+			domain TEXT,
+			title TEXT NOT NULL,
+			description TEXT DEFAULT '',
+			public INTEGER DEFAULT 1,
+			cache_seconds INTEGER DEFAULT 300,
+			config_json TEXT DEFAULT '{}',
+			repository_ids_json TEXT DEFAULT '[]',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_github_snapshots_repo_time ON github_repository_snapshots(repository_id, collected_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_github_action_runs_repo_time ON github_action_runs(repository_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_github_events_repo_time ON github_events(repository_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_github_events_type ON github_events(event_type, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_github_repositories_enabled ON github_repositories(enabled, last_collected_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_github_public_pages_slug ON github_public_pages(slug, public)`,
+		`CREATE INDEX IF NOT EXISTS idx_github_public_pages_domain ON github_public_pages(domain, public)`,
 		`INSERT OR IGNORE INTO github_settings (id) VALUES (1)`,
 	}
 	for _, statement := range statements {
@@ -366,6 +382,8 @@ const repoSelect = `SELECT id, token_id, owner, name, full_name, html_url, descr
 	open_pull_requests, latest_release, latest_release_url, latest_action_status, latest_action_conclusion,
 	rate_limit_remaining, rate_limit_reset, display_order, created_at, updated_at FROM github_repositories`
 
+const publicPageSelect = `SELECT id, slug, domain, title, description, public, cache_seconds, config_json, repository_ids_json, created_at, updated_at FROM github_public_pages`
+
 func listRepositories(ctx context.Context, db *sql.DB, onlyEnabled bool) ([]Repository, error) {
 	query := repoSelect
 	if onlyEnabled {
@@ -419,6 +437,43 @@ func getRepository(ctx context.Context, db *sql.DB, id int64) (Repository, bool,
 		return Repository{}, false, err
 	}
 	return repo, true, nil
+}
+
+func latestActionRunForRepository(ctx context.Context, db *sql.DB, repositoryID int64) (map[string]interface{}, bool, error) {
+	row := db.QueryRowContext(ctx, `SELECT run_id, workflow_name, display_title, status, conclusion, event, branch, commit_sha, commit_message, actor, html_url,
+		run_started_at, created_at, updated_at, collected_at
+		FROM github_action_runs
+		WHERE repository_id = ?
+		ORDER BY COALESCE(run_started_at, created_at, collected_at) DESC
+		LIMIT 1`, repositoryID)
+
+	var runID int64
+	var workflowName, displayTitle, status, conclusion, event, branch, commitSHA, commitMessage, actor, htmlURL string
+	var startedAt, createdAt, updatedAt, collectedAt sql.NullString
+	if err := row.Scan(&runID, &workflowName, &displayTitle, &status, &conclusion, &event, &branch, &commitSHA, &commitMessage, &actor, &htmlURL, &startedAt, &createdAt, &updatedAt, &collectedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+
+	return map[string]interface{}{
+		"run_id":         runID,
+		"workflow_name":  workflowName,
+		"display_title":  displayTitle,
+		"status":         status,
+		"conclusion":     conclusion,
+		"event":          event,
+		"branch":         branch,
+		"commit_sha":     commitSHA,
+		"commit_message": commitMessage,
+		"actor":          actor,
+		"html_url":       htmlURL,
+		"run_started_at": nullString(startedAt),
+		"created_at":     nullString(createdAt),
+		"updated_at":     nullString(updatedAt),
+		"collected_at":   nullString(collectedAt),
+	}, true, nil
 }
 
 func getRepositoryByFullName(ctx context.Context, db *sql.DB, fullName string) (Repository, bool, error) {
@@ -562,4 +617,187 @@ func parseTags(raw interface{}) string {
 	default:
 		return strings.TrimSpace(fmt.Sprint(raw))
 	}
+}
+
+func scanPublicPage(scanner interface{ Scan(...interface{}) error }) (PublicPage, error) {
+	var page PublicPage
+	var domain sql.NullString
+	var isPublic int
+	var configJSON, repositoryIDsJSON string
+	if err := scanner.Scan(
+		&page.ID,
+		&page.Slug,
+		&domain,
+		&page.Title,
+		&page.Description,
+		&isPublic,
+		&page.CacheSeconds,
+		&configJSON,
+		&repositoryIDsJSON,
+		&page.CreatedAt,
+		&page.UpdatedAt,
+	); err != nil {
+		return PublicPage{}, err
+	}
+	page.Public = isPublic == 1
+	if domain.Valid {
+		page.Domain = domain.String
+	}
+	page.Config = map[string]interface{}{}
+	if strings.TrimSpace(configJSON) != "" {
+		_ = json.Unmarshal([]byte(configJSON), &page.Config)
+	}
+	_ = json.Unmarshal([]byte(firstNonEmpty(repositoryIDsJSON, "[]")), &page.RepositoryIDs)
+	if page.RepositoryIDs == nil {
+		page.RepositoryIDs = []int64{}
+	}
+	return page, nil
+}
+
+func listPublicPages(ctx context.Context, db *sql.DB) ([]PublicPage, error) {
+	rows, err := db.QueryContext(ctx, publicPageSelect+` ORDER BY created_at DESC, id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]PublicPage, 0)
+	for rows.Next() {
+		page, err := scanPublicPage(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, page)
+	}
+	return result, rows.Err()
+}
+
+func getPublicPage(ctx context.Context, db *sql.DB, id int64) (PublicPage, bool, error) {
+	page, err := scanPublicPage(db.QueryRowContext(ctx, publicPageSelect+` WHERE id = ?`, id))
+	if err == sql.ErrNoRows {
+		return PublicPage{}, false, nil
+	}
+	if err != nil {
+		return PublicPage{}, false, err
+	}
+	return page, true, nil
+}
+
+func getPublicPageBySlug(ctx context.Context, db *sql.DB, slug string, onlyPublic bool) (PublicPage, bool, error) {
+	query := publicPageSelect + ` WHERE slug = ?`
+	args := []interface{}{normalizeGitHubPublicSlug(slug, "github")}
+	if onlyPublic {
+		query += ` AND public = 1`
+	}
+	page, err := scanPublicPage(db.QueryRowContext(ctx, query, args...))
+	if err == sql.ErrNoRows {
+		return PublicPage{}, false, nil
+	}
+	if err != nil {
+		return PublicPage{}, false, err
+	}
+	return page, true, nil
+}
+
+func getPublicPageByDomain(ctx context.Context, db *sql.DB, domain string) (PublicPage, bool, error) {
+	page, err := scanPublicPage(db.QueryRowContext(ctx, publicPageSelect+` WHERE public = 1 AND lower(domain) = lower(?)`, normalizeGitHubPublicDomain(domain)))
+	if err == sql.ErrNoRows {
+		return PublicPage{}, false, nil
+	}
+	if err != nil {
+		return PublicPage{}, false, err
+	}
+	return page, true, nil
+}
+
+func savePublicPage(ctx context.Context, db *sql.DB, id int64, payload map[string]interface{}) (PublicPage, bool, error) {
+	current := PublicPage{
+		Public:        true,
+		CacheSeconds:  300,
+		Config:        map[string]interface{}{},
+		RepositoryIDs: []int64{},
+	}
+	if id > 0 {
+		var ok bool
+		var err error
+		current, ok, err = getPublicPage(ctx, db, id)
+		if err != nil {
+			return PublicPage{}, false, err
+		}
+		if !ok {
+			return PublicPage{}, false, nil
+		}
+	}
+
+	title := strings.TrimSpace(current.Title)
+	if _, exists := payload["title"]; exists || id == 0 {
+		title = strings.TrimSpace(firstNonEmpty(stringValue(payload, "title", ""), title, "GitHub 动态"))
+	}
+	slugSource := current.Slug
+	if _, exists := payload["slug"]; exists || id == 0 {
+		slugSource = stringValue(payload, "slug", "")
+	}
+	slug := normalizeGitHubPublicSlug(firstNonEmpty(slugSource, title, "github"), "github")
+	domain := normalizeGitHubPublicDomain(current.Domain)
+	if _, exists := payload["domain"]; exists || id == 0 {
+		domain = normalizeGitHubPublicDomain(stringValue(payload, "domain", ""))
+	}
+	description := strings.TrimSpace(current.Description)
+	if _, exists := payload["description"]; exists || id == 0 {
+		description = strings.TrimSpace(stringValue(payload, "description", ""))
+	}
+	cacheSeconds := clamp(intValue(payload, "cacheSeconds", current.CacheSeconds), 30, 86400)
+	isPublic := current.Public
+	if value, exists := payload["public"]; exists {
+		isPublic = boolValue(value, current.Public)
+	}
+
+	config := current.Config
+	if payloadConfig, ok := payload["config"].(map[string]interface{}); ok {
+		config = payloadConfig
+	}
+	if config == nil {
+		config = map[string]interface{}{}
+	}
+
+	repositoryIDs := current.RepositoryIDs
+	if ids := int64SliceValue(payload["repositoryIds"]); len(ids) > 0 {
+		repositoryIDs = ids
+	}
+	if len(repositoryIDs) == 0 {
+		return PublicPage{}, true, errors.New("repositoryIds is required")
+	}
+
+	configBody, err := json.Marshal(config)
+	if err != nil {
+		return PublicPage{}, true, err
+	}
+	repositoryBody, err := json.Marshal(repositoryIDs)
+	if err != nil {
+		return PublicPage{}, true, err
+	}
+
+	if id > 0 {
+		if _, err := db.ExecContext(ctx, `UPDATE github_public_pages
+			SET slug = ?, domain = ?, title = ?, description = ?, public = ?, cache_seconds = ?, config_json = ?, repository_ids_json = ?, updated_at = CURRENT_TIMESTAMP
+			WHERE id = ?`,
+			slug, nullEmpty(domain), title, description, boolInt(isPublic), cacheSeconds, string(configBody), string(repositoryBody), id); err != nil {
+			return PublicPage{}, true, err
+		}
+		page, ok, err := getPublicPage(ctx, db, id)
+		return page, ok, err
+	}
+
+	result, err := db.ExecContext(ctx, `INSERT INTO github_public_pages
+		(slug, domain, title, description, public, cache_seconds, config_json, repository_ids_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		slug, nullEmpty(domain), title, description, boolInt(isPublic), cacheSeconds, string(configBody), string(repositoryBody))
+	if err != nil {
+		return PublicPage{}, true, err
+	}
+	insertID, err := result.LastInsertId()
+	if err != nil {
+		return PublicPage{}, true, err
+	}
+	page, ok, err := getPublicPage(ctx, db, insertID)
+	return page, ok, err
 }

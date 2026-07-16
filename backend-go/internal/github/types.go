@@ -82,6 +82,20 @@ type Settings struct {
 	AutoCreateWebhookSecret bool `json:"auto_create_webhook_secret"`
 }
 
+type PublicPage struct {
+	ID            int64                  `json:"id"`
+	Slug          string                 `json:"slug"`
+	Domain        string                 `json:"domain,omitempty"`
+	Title         string                 `json:"title"`
+	Description   string                 `json:"description,omitempty"`
+	Public        bool                   `json:"public"`
+	CacheSeconds  int                    `json:"cacheSeconds"`
+	Config        map[string]interface{} `json:"config"`
+	RepositoryIDs []int64                `json:"repositoryIds"`
+	CreatedAt     string                 `json:"createdAt"`
+	UpdatedAt     string                 `json:"updatedAt"`
+}
+
 type Snapshot struct {
 	ID                  int64  `json:"id"`
 	RepositoryID        int64  `json:"repository_id"`

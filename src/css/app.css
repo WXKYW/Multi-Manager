@@ -419,11 +419,21 @@ th > button[aria-label='Resize column'] > span {
   background: var(--app-main-bg);
 }
 
+.public-github-page {
+  background: var(--app-main-bg);
+}
+
 .public-status-page {
   background: var(--app-main-bg);
 }
 
 .public-server-status-card {
+  box-shadow:
+    0 1px 2px color-mix(in oklab, var(--color-kumo-line) 38%, transparent),
+    0 10px 24px color-mix(in oklab, var(--color-kumo-canvas) 18%, transparent);
+}
+
+.public-github-card {
   box-shadow:
     0 1px 2px color-mix(in oklab, var(--color-kumo-line) 38%, transparent),
     0 10px 24px color-mix(in oklab, var(--color-kumo-canvas) 18%, transparent);
@@ -436,6 +446,12 @@ th > button[aria-label='Resize column'] > span {
 }
 
 :root[data-mode='dark'] .public-server-status-card {
+  box-shadow:
+    0 1px 0 color-mix(in oklab, var(--color-kumo-line) 82%, transparent),
+    0 12px 28px color-mix(in oklab, var(--color-kumo-canvas) 34%, transparent);
+}
+
+:root[data-mode='dark'] .public-github-card {
   box-shadow:
     0 1px 0 color-mix(in oklab, var(--color-kumo-line) 82%, transparent),
     0 12px 28px color-mix(in oklab, var(--color-kumo-canvas) 34%, transparent);

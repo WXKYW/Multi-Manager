@@ -170,6 +170,64 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func normalizeGitHubPublicSlug(value, fallback string) string {
+	text := strings.TrimSpace(strings.ToLower(firstNonEmpty(value, fallback)))
+	if text == "" {
+		text = strings.TrimSpace(strings.ToLower(fallback))
+	}
+	var builder strings.Builder
+	lastDash := false
+	for _, r := range text {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			builder.WriteRune(r)
+			lastDash = false
+		default:
+			if !lastDash && builder.Len() > 0 {
+				builder.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+	slug := strings.Trim(builder.String(), "-")
+	if slug == "" {
+		return strings.TrimSpace(strings.ToLower(fallback))
+	}
+	return slug
+}
+
+func normalizeGitHubPublicDomain(value string) string {
+	normalized := strings.TrimSpace(value)
+	normalized = strings.TrimPrefix(normalized, "https://")
+	normalized = strings.TrimPrefix(normalized, "http://")
+	normalized = strings.Split(normalized, "/")[0]
+	return strings.TrimSuffix(normalized, "/")
+}
+
+func int64SliceValue(value interface{}) []int64 {
+	items, ok := value.([]interface{})
+	if !ok {
+		return nil
+	}
+	result := make([]int64, 0, len(items))
+	for _, item := range items {
+		id := int64Value(item, 0)
+		if id > 0 {
+			result = append(result, id)
+		}
+	}
+	return result
+}
+
+func containsInt64(values []int64, target int64) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 func escapePathSegments(path string) string {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	for i, part := range parts {
@@ -192,6 +250,13 @@ func int64Query(r *http.Request, key string, fallback int64) int64 {
 		if n, err := strconv.ParseInt(value, 10, 64); err == nil {
 			return n
 		}
+	}
+	return fallback
+}
+
+func boolQuery(r *http.Request, key string, fallback bool) bool {
+	if value := strings.TrimSpace(r.URL.Query().Get(key)); value != "" {
+		return boolValue(value, fallback)
 	}
 	return fallback
 }

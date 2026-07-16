@@ -156,6 +156,11 @@ func Routes() []Route {
 		{Prefix: "/api/github/webhook/{repositoryId}", Module: "github-webhook", Owner: OwnerGo, Auth: AuthPublic, ResponseMode: ResponseJSON, Description: "GitHub webhook receiver", MatchMode: MatchPattern},
 		{Prefix: "/api/github/webhook", Module: "github-webhook", Owner: OwnerGo, Auth: AuthPublic, ResponseMode: ResponseJSON, Description: "GitHub webhook receiver by repository payload", MatchMode: MatchExact},
 		{Prefix: "/api/github/events/stream", Module: "github-events", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseStream, Description: "GitHub realtime event stream", MatchMode: MatchExact},
+		{Prefix: "/api/github/public-pages/{id}", Module: "github-public-pages", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "GitHub public page update/delete", MatchMode: MatchPattern},
+		{Prefix: "/api/github/public-pages", Module: "github-public-pages", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "GitHub public page list/create", MatchMode: MatchExact},
+		{Prefix: "/api/github/public/page-by-domain", Module: "github-public-pages", Owner: OwnerGo, Auth: AuthPublic, ResponseMode: ResponseJSON, Description: "GitHub public page lookup by domain", MatchMode: MatchExact},
+		{Prefix: "/api/github/public/pages/{slug}", Module: "github-public-pages", Owner: OwnerGo, Auth: AuthPublic, ResponseMode: ResponseJSON, Description: "GitHub public page by slug", MatchMode: MatchPattern},
+		{Prefix: "/api/github/public/pages/{slug}/repositories/{id}", Module: "github-public-pages", Owner: OwnerGo, Auth: AuthPublic, ResponseMode: ResponseJSON, Description: "GitHub public page repository details", MatchMode: MatchPattern},
 		{Prefix: "/api/github", Module: "github", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "GitHub repository observability and Actions operations"},
 
 		{Prefix: "/api/openai", Module: "openai", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "OpenAI endpoint manager and proxy"},
