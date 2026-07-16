@@ -1018,7 +1018,8 @@ mod unsupported {
         ) -> Result<(), String> {
             Err("remote desktop is only supported on Windows".to_string())
         }
-        pub async fn signal(&self, _payload: SignalPayload) -> Result<(), String> {
+        pub async fn signal(&self, payload: SignalPayload) -> Result<(), String> {
+            let _ = (payload.session_id, payload.signal);
             Ok(())
         }
         pub async fn stop(&self, _session_id: &str) {}

@@ -38,15 +38,17 @@ use clap::Parser;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn agent_capabilities() -> Vec<String> {
-    let mut capabilities = vec![
+    let capabilities = vec![
         "terminal_stream_v2".to_string(),
         "self_update_v1".to_string(),
     ];
     #[cfg(target_os = "windows")]
-    {
+    let capabilities = {
+        let mut capabilities = capabilities;
         capabilities.push("remote_desktop_v1".to_string());
         capabilities.push("remote_desktop_video_v2".to_string());
-    }
+        capabilities
+    };
     capabilities
 }
 
