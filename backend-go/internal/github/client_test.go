@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -103,6 +104,33 @@ func TestAPIClientFetchWorkflows(t *testing.T) {
 	}
 	if workflows.TotalCount != 1 || len(workflows.Workflows) != 1 || workflows.Workflows[0].Path != ".github/workflows/ci.yml" {
 		t.Fatalf("unexpected workflows: %#v", workflows)
+	}
+}
+
+func TestAPIClientFetchWorkflowFile(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/repos/openai/codex/contents/.github/workflows/ci.yml" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if r.URL.Query().Get("ref") != "dev/branch" {
+			t.Fatalf("unexpected query: %s", r.URL.RawQuery)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"path":     ".github/workflows/ci.yml",
+			"encoding": "base64",
+			"content":  base64.StdEncoding.EncodeToString([]byte("jobs:\n  build:\n    runs-on: ubuntu-latest\n")),
+		})
+	}))
+	defer server.Close()
+
+	client := newAPIClient()
+	client.baseURL = server.URL
+	raw, file, _, err := client.fetchWorkflowFile(context.Background(), "token", "openai", "codex", ".github/workflows/ci.yml", "dev/branch")
+	if err != nil {
+		t.Fatalf("fetch workflow file: %v", err)
+	}
+	if file.Path != ".github/workflows/ci.yml" || !strings.Contains(raw, "build") {
+		t.Fatalf("unexpected workflow file path=%q raw=%q", file.Path, raw)
 	}
 }
 

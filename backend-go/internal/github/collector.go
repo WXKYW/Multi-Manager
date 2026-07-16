@@ -9,7 +9,8 @@ import (
 )
 
 func (s *Service) collectorLoop() {
-	ticker := time.NewTicker(60 * time.Second)
+	ticker := time.NewTicker(10 * time.Second)
+	lastFullCollection := time.Time{}
 	defer func() {
 		ticker.Stop()
 		close(s.stopped)
@@ -18,12 +19,138 @@ func (s *Service) collectorLoop() {
 		select {
 		case <-s.stop:
 			return
-		case <-ticker.C:
+		case now := <-ticker.C:
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-			_ = s.collectOnce(ctx)
+			if lastFullCollection.IsZero() || now.Sub(lastFullCollection) >= time.Minute {
+				_ = s.collectOnce(ctx)
+				lastFullCollection = now
+			} else {
+				_ = s.monitorActionsOnce(ctx, now)
+			}
 			cancel()
 		}
 	}
+}
+
+func (s *Service) monitorActionsOnce(ctx context.Context, now time.Time) error {
+	db, err := s.open(ctx)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	settings, err := loadSettings(ctx, db)
+	if err != nil || !settings.Enabled {
+		return err
+	}
+	repositories, err := listRepositories(ctx, db, true)
+	if err != nil {
+		return err
+	}
+	for _, repo := range repositories {
+		if repo.RateLimitRemaining >= 0 && repo.RateLimitRemaining <= settings.RateLimitLowThreshold {
+			continue
+		}
+		token, err := s.tokenForRepository(ctx, db, repo)
+		if err != nil {
+			continue
+		}
+		if !s.shouldPollActions(repo, token != "", now) {
+			continue
+		}
+		s.recordActionPoll(repo.ID, now)
+		_ = s.refreshActionsRepositoryWithDB(ctx, db, repo, token, "actions_monitor")
+	}
+	return nil
+}
+
+func (s *Service) shouldPollActions(repo Repository, authenticated bool, now time.Time) bool {
+	s.actionPollMu.Lock()
+	lastPoll := s.actionLastPoll[repo.ID]
+	s.actionPollMu.Unlock()
+	active := false
+	switch strings.ToLower(repo.LatestActionStatus) {
+	case "queued", "in_progress", "requested", "waiting":
+		active = true
+	}
+	interval := time.Minute
+	if authenticated {
+		if active {
+			interval = 10 * time.Second
+		}
+	} else if active {
+		interval = time.Minute
+	} else {
+		interval = 5 * time.Minute
+	}
+	return lastPoll.IsZero() || now.Sub(lastPoll) >= interval
+}
+
+func (s *Service) recordActionPoll(repoID int64, at time.Time) {
+	s.actionPollMu.Lock()
+	defer s.actionPollMu.Unlock()
+	s.actionLastPoll[repoID] = at
+}
+
+func (s *Service) refreshActionsRepositoryByID(ctx context.Context, id int64, source string) error {
+	db, err := s.open(ctx)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	repo, ok, err := getRepository(ctx, db, id)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("仓库不存在")
+	}
+	token, err := s.tokenForRepository(ctx, db, repo)
+	if err != nil {
+		return err
+	}
+	return s.refreshActionsRepositoryWithDB(ctx, db, repo, token, source)
+}
+
+func (s *Service) refreshActionsRepositoryWithDB(ctx context.Context, db *sql.DB, repo Repository, token, source string) error {
+	runs, rate, err := s.client.fetchWorkflowRuns(ctx, token, repo.Owner, repo.Name, 50)
+	if err != nil {
+		return err
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	latestStatus := ""
+	latestConclusion := ""
+	for i, run := range runs.WorkflowRuns {
+		if i == 0 {
+			latestStatus = run.Status
+			latestConclusion = run.Conclusion
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO github_action_runs (
+			repository_id, run_id, workflow_name, display_title, status, conclusion, event, branch,
+			commit_sha, commit_message, actor, html_url, run_started_at, created_at, updated_at, collected_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+			repo.ID, run.ID, run.Name, run.DisplayTitle, run.Status, run.Conclusion, run.Event, run.Branch, run.SHA, run.HeadCommit.Message, run.Actor.Login, run.HTMLURL, nullEmpty(run.RunStartedAt), nullEmpty(run.CreatedAt), nullEmpty(run.UpdatedAt)); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE github_repositories SET latest_action_status = ?, latest_action_conclusion = ?, rate_limit_remaining = ?, rate_limit_reset = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		latestStatus, latestConclusion, rate.Remaining, timeOrNil(rate.Reset), repo.ID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.publish(map[string]interface{}{
+		"kind":          "repository_actions_refresh",
+		"repository_id": repo.ID,
+		"repository":    repo.FullName,
+		"source":        source,
+		"updated_at":    nowString(),
+	})
+	return nil
 }
 
 func (s *Service) currentStatus() CollectorStatus {
@@ -220,6 +347,13 @@ func (s *Service) refreshRepositoryWithDB(ctx context.Context, db *sql.DB, repo 
 		return err
 	}
 	s.evaluateEvents(ctx, db, prev, repo, settings, source)
+	s.publish(map[string]interface{}{
+		"kind":          "repository_refresh",
+		"repository_id": repo.ID,
+		"repository":    repo.FullName,
+		"source":        source,
+		"updated_at":    nowString(),
+	})
 	return nil
 }
 

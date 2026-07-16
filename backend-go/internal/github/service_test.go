@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
 	"github.com/iwvw/api-monitor/backend-go/internal/secure"
@@ -53,6 +54,67 @@ func TestVerifySignature(t *testing.T) {
 	}
 	if verifySignature(body, secret, "sha256=bad") {
 		t.Fatal("expected bad signature to be rejected")
+	}
+}
+
+func TestRefreshActionsPublishesCommittedUpdate(t *testing.T) {
+	githubAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/openai/codex/actions/runs" {
+			t.Fatalf("unexpected GitHub API path: %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"total_count": 1,
+			"workflow_runs": []map[string]interface{}{{
+				"id": 42, "name": "CI", "status": "in_progress", "head_branch": "main",
+				"run_started_at": "2026-07-16T00:00:00Z", "updated_at": "2026-07-16T00:01:00Z",
+			}},
+		})
+	}))
+	defer githubAPI.Close()
+
+	cfg := config.Config{DataDir: t.TempDir(), DBName: "test.db"}
+	service := New(cfg)
+	defer service.Stop()
+	service.client.baseURL = githubAPI.URL
+
+	db, err := service.open(t.Context())
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	result, err := db.Exec(`INSERT INTO github_repositories (owner, name, full_name) VALUES ('openai', 'codex', 'openai/codex')`)
+	if err != nil {
+		db.Close()
+		t.Fatalf("insert repository: %v", err)
+	}
+	repoID, _ := result.LastInsertId()
+	db.Close()
+
+	events, cancel := service.subscribe()
+	defer cancel()
+	if err := service.refreshActionsRepositoryByID(t.Context(), repoID, "test"); err != nil {
+		t.Fatalf("refresh actions: %v", err)
+	}
+
+	select {
+	case event := <-events:
+		if event["kind"] != "repository_actions_refresh" || event["repository_id"] != repoID {
+			t.Fatalf("unexpected refresh event: %#v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("missing repository actions refresh event")
+	}
+
+	db, err = service.open(t.Context())
+	if err != nil {
+		t.Fatalf("reopen database: %v", err)
+	}
+	defer db.Close()
+	var status string
+	if err := db.QueryRow(`SELECT latest_action_status FROM github_repositories WHERE id = ?`, repoID).Scan(&status); err != nil {
+		t.Fatalf("read repository action status: %v", err)
+	}
+	if status != "in_progress" {
+		t.Fatalf("unexpected latest action status: %q", status)
 	}
 }
 

@@ -3,6 +3,7 @@ package github
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -145,10 +146,38 @@ func (c *apiClient) fetchWorkflowRuns(ctx context.Context, token, owner, repo st
 	return result, rate, err
 }
 
+func (c *apiClient) fetchWorkflowJobs(ctx context.Context, token, owner, repo string, runID int64) (workflowJobResponse, rateLimitInfo, error) {
+	var result workflowJobResponse
+	rate, err := c.get(ctx, token, fmt.Sprintf("/repos/%s/%s/actions/runs/%d/jobs?per_page=100", url.PathEscape(owner), url.PathEscape(repo), runID), &result)
+	return result, rate, err
+}
+
 func (c *apiClient) fetchWorkflows(ctx context.Context, token, owner, repo string) (workflowListResponse, rateLimitInfo, error) {
 	var result workflowListResponse
 	rate, err := c.get(ctx, token, fmt.Sprintf("/repos/%s/%s/actions/workflows?per_page=100", url.PathEscape(owner), url.PathEscape(repo)), &result)
 	return result, rate, err
+}
+
+func (c *apiClient) fetchWorkflowFile(ctx context.Context, token, owner, repo, path, ref string) (string, workflowFileContentResponse, rateLimitInfo, error) {
+	var result workflowFileContentResponse
+	escapedPath := escapePathSegments(path)
+	apiPath := fmt.Sprintf("/repos/%s/%s/contents/%s", url.PathEscape(owner), url.PathEscape(repo), escapedPath)
+	if strings.TrimSpace(ref) != "" {
+		apiPath += "?ref=" + url.QueryEscape(strings.TrimSpace(ref))
+	}
+	rate, err := c.get(ctx, token, apiPath, &result)
+	if err != nil {
+		return "", result, rate, err
+	}
+	content := strings.ReplaceAll(result.Content, "\n", "")
+	if strings.EqualFold(result.Encoding, "base64") {
+		decoded, err := base64.StdEncoding.DecodeString(content)
+		if err != nil {
+			return "", result, rate, err
+		}
+		return string(decoded), result, rate, nil
+	}
+	return result.Content, result, rate, nil
 }
 
 func (c *apiClient) fetchBranches(ctx context.Context, token, owner, repo string) ([]branchResponse, rateLimitInfo, error) {
@@ -299,7 +328,7 @@ func (c *apiClient) configureWebhook(ctx context.Context, token, owner, repo, pa
 	payload := map[string]interface{}{
 		"name":   "web",
 		"active": true,
-		"events": []string{"workflow_run", "release", "issues", "pull_request", "star"},
+		"events": []string{"workflow_run", "workflow_job", "release", "issues", "pull_request", "star"},
 		"config": map[string]interface{}{
 			"url":          payloadURL,
 			"content_type": "json",

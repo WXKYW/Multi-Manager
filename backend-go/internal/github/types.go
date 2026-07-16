@@ -67,6 +67,7 @@ type Repository struct {
 	RateLimitRemaining     int     `json:"rate_limit_remaining"`
 	RateLimitReset         string  `json:"rate_limit_reset,omitempty"`
 	Authenticated          bool    `json:"authenticated"`
+	DisplayOrder           int     `json:"display_order"`
 	CreatedAt              string  `json:"created_at"`
 	UpdatedAt              string  `json:"updated_at"`
 }
@@ -156,6 +157,44 @@ type workflowRunResponse struct {
 	} `json:"workflow_runs"`
 }
 
+type workflowJobResponse struct {
+	TotalCount int `json:"total_count"`
+	Jobs       []struct {
+		ID          int64  `json:"id"`
+		Name        string `json:"name"`
+		Status      string `json:"status"`
+		Conclusion  string `json:"conclusion"`
+		StartedAt   string `json:"started_at"`
+		CompletedAt string `json:"completed_at"`
+		Steps       []struct {
+			Name        string `json:"name"`
+			Status      string `json:"status"`
+			Conclusion  string `json:"conclusion"`
+			StartedAt   string `json:"started_at"`
+			CompletedAt string `json:"completed_at"`
+		} `json:"steps"`
+	} `json:"jobs"`
+}
+
+type workflowJobsDetailResponse struct {
+	Jobs     interface{}             `json:"jobs"`
+	Workflow *workflowLayoutResponse `json:"workflow,omitempty"`
+}
+
+type workflowLayoutResponse struct {
+	Path   string                    `json:"path,omitempty"`
+	Ref    string                    `json:"ref,omitempty"`
+	Layers [][]workflowJobDefinition `json:"layers,omitempty"`
+	Error  string                    `json:"error,omitempty"`
+}
+
+type workflowJobDefinition struct {
+	ID     string   `json:"id"`
+	Name   string   `json:"name"`
+	Needs  []string `json:"needs"`
+	Matrix bool     `json:"matrix"`
+}
+
 type workflowListResponse struct {
 	TotalCount int `json:"total_count"`
 	Workflows  []struct {
@@ -168,6 +207,13 @@ type workflowListResponse struct {
 		CreatedAt string `json:"created_at"`
 		UpdatedAt string `json:"updated_at"`
 	} `json:"workflows"`
+}
+
+type workflowFileContentResponse struct {
+	Name     string `json:"name"`
+	Path     string `json:"path"`
+	Content  string `json:"content"`
+	Encoding string `json:"encoding"`
 }
 
 type branchResponse struct {

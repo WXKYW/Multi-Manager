@@ -61,6 +61,7 @@ import {
   Pause as PhPause,
   PencilSimple,
   Play as PhPlay,
+  PlayCircle as PhPlayCircle,
   Plugs,
   Plus as PhPlus,
   Power,
@@ -201,6 +202,7 @@ export const LayoutSidebar = createIcon(PhSidebar);
 export const Plus = createIcon(PhPlus);
 export const Trash = createIcon(PhTrash);
 export const Play = createIcon(PhPlay);
+export const PlayCircle = createIcon(PhPlayCircle);
 export const Pause = createIcon(PhPause);
 export const Folder = createIcon(PhFolder);
 export const FileText = createIcon(PhFileText);

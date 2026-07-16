@@ -30,23 +30,26 @@ type Service struct {
 	client   *apiClient
 	notifier Notifier
 
-	stop       chan struct{}
-	stopped    chan struct{}
-	statusMu   sync.Mutex
-	status     CollectorStatus
-	streamMu   sync.Mutex
-	streamNext int64
-	streams    map[int64]chan map[string]interface{}
+	stop           chan struct{}
+	stopped        chan struct{}
+	statusMu       sync.Mutex
+	status         CollectorStatus
+	streamMu       sync.Mutex
+	streamNext     int64
+	streams        map[int64]chan map[string]interface{}
+	actionPollMu   sync.Mutex
+	actionLastPoll map[int64]time.Time
 }
 
 func New(cfg config.Config) *Service {
 	s := &Service{
-		cfg:     cfg,
-		store:   database.New(cfg),
-		client:  newAPIClient(),
-		stop:    make(chan struct{}),
-		stopped: make(chan struct{}),
-		streams: map[int64]chan map[string]interface{}{},
+		cfg:            cfg,
+		store:          database.New(cfg),
+		client:         newAPIClient(),
+		stop:           make(chan struct{}),
+		stopped:        make(chan struct{}),
+		streams:        map[int64]chan map[string]interface{}{},
+		actionLastPoll: map[int64]time.Time{},
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -94,6 +97,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.repositories(w, r)
 	case len(parts) == 2 && parts[0] == "repositories" && parts[1] == "parse-url" && r.Method == http.MethodPost:
 		s.parseURL(w, r)
+	case len(parts) == 2 && parts[0] == "repositories" && parts[1] == "reorder" && r.Method == http.MethodPost:
+		s.reorderRepositories(w, r)
 	case len(parts) == 2 && parts[0] == "repositories":
 		s.repositoryByID(w, r, parts[1])
 	case len(parts) == 3 && parts[0] == "repositories" && parts[2] == "refresh" && r.Method == http.MethodPost:
@@ -104,6 +109,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.repositoryTrends(w, r, parts[1])
 	case len(parts) == 4 && parts[0] == "repositories" && parts[2] == "actions" && parts[3] == "runs" && r.Method == http.MethodGet:
 		s.repositoryActionRuns(w, r, parts[1])
+	case len(parts) == 6 && parts[0] == "repositories" && parts[2] == "actions" && parts[3] == "runs" && parts[5] == "jobs" && r.Method == http.MethodGet:
+		s.repositoryWorkflowJobs(w, r, parts[1], parts[4])
+	case len(parts) == 4 && parts[0] == "repositories" && parts[2] == "actions" && parts[3] == "refresh" && r.Method == http.MethodPost:
+		s.refreshRepositoryActions(w, r, parts[1])
 	case len(parts) == 4 && parts[0] == "repositories" && parts[2] == "actions" && parts[3] == "workflows" && r.Method == http.MethodGet:
 		s.repositoryWorkflows(w, r, parts[1])
 	case len(parts) == 3 && parts[0] == "repositories" && parts[2] == "branches" && r.Method == http.MethodGet:
@@ -477,9 +486,53 @@ func (s *Service) createRepository(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, _ := res.LastInsertId()
+	_, _ = db.ExecContext(r.Context(), `UPDATE github_repositories SET display_order = ? WHERE id = ? AND display_order = 0`, id, id)
 	go s.refreshRepositoryByID(context.Background(), id, "create")
 	repository, _, _ := getRepository(r.Context(), db, id)
 	response.OK(w, repository)
+}
+
+func (s *Service) reorderRepositories(w http.ResponseWriter, r *http.Request) {
+	payload, err := readObject(r)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	values, ok := payload["repository_ids"].([]interface{})
+	if !ok || len(values) == 0 {
+		response.Error(w, http.StatusBadRequest, "仓库顺序不能为空")
+		return
+	}
+	db, err := s.open(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer db.Close()
+	tx, err := db.BeginTx(r.Context(), nil)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer tx.Rollback()
+	seen := map[int64]bool{}
+	for index, value := range values {
+		id := int64Value(value, 0)
+		if id <= 0 || seen[id] {
+			continue
+		}
+		seen[id] = true
+		if _, err := tx.ExecContext(r.Context(), `UPDATE github_repositories SET display_order = ?, updated_at = updated_at WHERE id = ?`, index+1, id); err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	repos, _ := listRepositories(r.Context(), db, false)
+	response.OK(w, repos)
 }
 
 func (s *Service) repositoryByID(w http.ResponseWriter, r *http.Request, idText string) {
@@ -678,6 +731,99 @@ func (s *Service) repositoryActionRuns(w http.ResponseWriter, r *http.Request, i
 		runs = append(runs, map[string]interface{}{"run_id": runID, "workflow_name": workflow, "display_title": title, "status": status, "conclusion": conclusion, "event": event, "branch": branch, "commit_sha": sha, "commit_message": commitMessage, "actor": actor, "html_url": htmlURL, "run_started_at": nullString(started), "created_at": nullString(created), "updated_at": nullString(updated), "collected_at": nullString(collected)})
 	}
 	response.OK(w, runs)
+}
+
+func (s *Service) repositoryWorkflowJobs(w http.ResponseWriter, r *http.Request, idText, runText string) {
+	runID, err := parseID(runText)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid workflow run id")
+		return
+	}
+	repo, token, db, ok := s.repoAndTokenForRequest(w, r, idText)
+	if !ok {
+		return
+	}
+	defer db.Close()
+	jobs, _, err := s.client.fetchWorkflowJobs(r.Context(), token, repo.Owner, repo.Name, runID)
+	if err != nil {
+		response.Error(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	layout := s.workflowLayoutForRun(r.Context(), token, repo, r.URL.Query().Get("workflow_name"), r.URL.Query().Get("branch"), r.URL.Query().Get("commit_sha"))
+	response.OK(w, workflowJobsDetailResponse{Jobs: jobs.Jobs, Workflow: layout})
+}
+
+func (s *Service) workflowLayoutForRun(ctx context.Context, token string, repo Repository, workflowName, branch, commitSHA string) *workflowLayoutResponse {
+	ref := firstNonEmpty(commitSHA, branch, repo.DefaultBranch)
+	layout := &workflowLayoutResponse{Ref: ref}
+	workflows, _, err := s.client.fetchWorkflows(ctx, token, repo.Owner, repo.Name)
+	if err != nil {
+		layout.Error = err.Error()
+		return layout
+	}
+	var workflowPath string
+	for _, workflow := range workflows.Workflows {
+		if strings.EqualFold(strings.TrimSpace(workflow.Name), strings.TrimSpace(workflowName)) {
+			workflowPath = workflow.Path
+			break
+		}
+	}
+	if workflowPath == "" && len(workflows.Workflows) == 1 {
+		workflowPath = workflows.Workflows[0].Path
+	}
+	if workflowPath == "" {
+		layout.Error = "未找到匹配的 workflow yml"
+		return layout
+	}
+	layout.Path = workflowPath
+	raw, file, _, err := s.client.fetchWorkflowFile(ctx, token, repo.Owner, repo.Name, workflowPath, ref)
+	if err != nil && strings.TrimSpace(branch) != "" && !strings.EqualFold(strings.TrimSpace(ref), strings.TrimSpace(branch)) {
+		branchRaw, branchFile, _, branchErr := s.client.fetchWorkflowFile(ctx, token, repo.Owner, repo.Name, workflowPath, branch)
+		if branchErr == nil {
+			raw = branchRaw
+			file = branchFile
+			ref = branch
+			layout.Ref = ref
+			err = nil
+		}
+	}
+	if err != nil && strings.TrimSpace(repo.DefaultBranch) != "" && !strings.EqualFold(strings.TrimSpace(ref), strings.TrimSpace(repo.DefaultBranch)) {
+		defaultRaw, defaultFile, _, defaultErr := s.client.fetchWorkflowFile(ctx, token, repo.Owner, repo.Name, workflowPath, repo.DefaultBranch)
+		if defaultErr == nil {
+			raw = defaultRaw
+			file = defaultFile
+			ref = repo.DefaultBranch
+			layout.Ref = ref
+			err = nil
+		}
+	}
+	if err != nil {
+		layout.Error = err.Error()
+		return layout
+	}
+	if strings.TrimSpace(file.Path) != "" {
+		layout.Path = file.Path
+	}
+	layers, err := parseWorkflowLayout(raw)
+	if err != nil {
+		layout.Error = err.Error()
+		return layout
+	}
+	layout.Layers = layers
+	return layout
+}
+
+func (s *Service) refreshRepositoryActions(w http.ResponseWriter, r *http.Request, idText string) {
+	id, err := parseID(idText)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid repository id")
+		return
+	}
+	if err := s.refreshActionsRepositoryByID(r.Context(), id, "manual_actions_refresh"); err != nil {
+		response.Error(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	response.OK(w, map[string]interface{}{"repository_id": id, "status": "refreshed"})
 }
 
 func (s *Service) repositoryWorkflows(w http.ResponseWriter, r *http.Request, idText string) {

@@ -64,6 +64,7 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			latest_action_conclusion TEXT DEFAULT '',
 			rate_limit_remaining INTEGER DEFAULT -1,
 			rate_limit_reset DATETIME,
+			display_order INTEGER DEFAULT 0,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
@@ -193,6 +194,7 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 		{"github_tokens", "account_login", "TEXT DEFAULT ''"},
 		{"github_repositories", "owned_by_token", "INTEGER DEFAULT 0"},
 		{"github_repositories", "can_operate_actions", "INTEGER DEFAULT 0"},
+		{"github_repositories", "display_order", "INTEGER DEFAULT 0"},
 		{"github_action_runs", "commit_message", "TEXT DEFAULT ''"},
 	} {
 		if err := ensureGitHubColumn(ctx, db, column.table, column.name, column.definition); err != nil {
@@ -338,7 +340,7 @@ func scanRepository(scanner interface{ Scan(...interface{}) error }) (Repository
 		&r.Tags, &r.Note, &enabled, &notifyEnabled, &webhookEnabled, &r.WebhookSecret, &r.CollectInterval, &r.RetentionDays,
 		&r.LastStatus, &r.LastError, &lastCollectedAt, &r.LastEventFingerprint, &r.Stars, &r.Forks, &r.Watchers, &r.OpenIssues,
 		&r.OpenPullRequests, &r.LatestRelease, &r.LatestReleaseURL, &r.LatestActionStatus, &r.LatestActionConclusion, &r.RateLimitRemaining,
-		&rateLimitReset, &r.CreatedAt, &r.UpdatedAt)
+		&rateLimitReset, &r.DisplayOrder, &r.CreatedAt, &r.UpdatedAt)
 	if tokenID.Valid {
 		id := tokenID.Int64
 		r.TokenID = &id
@@ -362,14 +364,14 @@ const repoSelect = `SELECT id, token_id, owner, name, full_name, html_url, descr
 	tags, note, enabled, notify_enabled, webhook_enabled, webhook_secret, collect_interval_seconds, retention_days,
 	last_status, last_error, last_collected_at, last_event_fingerprint, stars, forks, watchers, open_issues,
 	open_pull_requests, latest_release, latest_release_url, latest_action_status, latest_action_conclusion,
-	rate_limit_remaining, rate_limit_reset, created_at, updated_at FROM github_repositories`
+	rate_limit_remaining, rate_limit_reset, display_order, created_at, updated_at FROM github_repositories`
 
 func listRepositories(ctx context.Context, db *sql.DB, onlyEnabled bool) ([]Repository, error) {
 	query := repoSelect
 	if onlyEnabled {
 		query += ` WHERE enabled = 1`
 	}
-	query += ` ORDER BY updated_at DESC, created_at DESC`
+	query += ` ORDER BY CASE WHEN display_order > 0 THEN display_order ELSE id END ASC, id ASC`
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err

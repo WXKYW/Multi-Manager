@@ -411,7 +411,6 @@ function WorkflowCanvas({ workflow, runs = [], selectedNodeId = '', onSelectNode
   const latestRun = runs.find((run) => run.workflow_id === workflow.id);
   const nodeStatus = Object.fromEntries((latestRun?.node_runs || []).map((run) => [run.node_id, run.status]));
   const validEdges = useMemo(() => getValidWorkflowEdges(nodes, edges), [nodes, edges]);
-  const looseLayout = validEdges.length === 0;
   const stages = useMemo(() => buildWorkflowFlowStages(nodes, edges), [nodes, edges]);
   const incomingEdges = useMemo(() => {
     const grouped = new Map();
@@ -421,35 +420,6 @@ function WorkflowCanvas({ workflow, runs = [], selectedNodeId = '', onSelectNode
     });
     return grouped;
   }, [validEdges]);
-  const previewGeometry = useMemo(() => {
-    if (!compact || nodes.length === 0) return null;
-    const nodeWidth = 200;
-    const nodeHeight = 76;
-    const padding = 24;
-    const positionedNodes = nodes.map((node, index) => ({
-      ...node,
-      __x: Number.isFinite(Number(node.x)) ? Number(node.x) : 60 + index * 190,
-      __y: Number.isFinite(Number(node.y)) ? Number(node.y) : 90,
-    }));
-    const minX = Math.min(...positionedNodes.map((node) => node.__x));
-    const minY = Math.min(...positionedNodes.map((node) => node.__y));
-    const maxX = Math.max(...positionedNodes.map((node) => node.__x + nodeWidth));
-    const maxY = Math.max(...positionedNodes.map((node) => node.__y + nodeHeight));
-    const normalizedNodes = positionedNodes.map((node) => ({
-      ...node,
-      __left: node.__x - minX + padding,
-      __top: node.__y - minY + padding,
-    }));
-    return {
-      nodeWidth,
-      nodeHeight,
-      scale: 0.6,
-      width: maxX - minX + padding * 2,
-      height: maxY - minY + padding * 2,
-      nodes: normalizedNodes,
-      nodeMap: new Map(normalizedNodes.map((node) => [node.id, node])),
-    };
-  }, [compact, nodes]);
 
   const renderNode = (node) => {
     const status = nodeStatus[node.id];
@@ -479,32 +449,21 @@ function WorkflowCanvas({ workflow, runs = [], selectedNodeId = '', onSelectNode
               onSelectNode(node.id);
             } : undefined}
             style={{ cursor: onSelectNode ? 'pointer' : 'default' }}
-            className={`relative flex flex-col overflow-hidden rounded-md border bg-kumo-base text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-kumo-brand/45 ${compact ? 'min-h-[76px] w-[min(13rem,calc(100vw-7rem))] px-2.5 py-2' : 'min-h-[108px] w-[15rem] px-4 py-3'} ${selected ? 'border-kumo-brand ring-2 ring-kumo-brand/25' : 'border-kumo-line hover:border-kumo-brand/50'} ${node.enabled === 0 ? 'opacity-60' : ''}`}
+            className={`flex flex-col rounded-md border bg-kumo-base text-left shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-kumo-brand/45 ${compact ? 'min-h-[76px] w-52 px-3 py-2.5' : 'min-h-[108px] w-60 px-4 py-3'} ${selected ? 'border-kumo-brand ring-2 ring-kumo-brand/25' : 'border-kumo-line hover:border-kumo-brand/50'} ${node.enabled === 0 ? 'opacity-60' : ''}`}
           >
-            <Flow.Anchor
-              type="end"
-              render={<span className={`absolute left-0 top-1/2 w-1 -translate-y-1/2 rounded-r-sm ${compact ? 'h-6' : 'h-7'} ${selected ? 'bg-kumo-brand' : 'bg-kumo-line'}`} />}
-            />
-            <Flow.Anchor
-              type="start"
-              render={<span className={`absolute right-0 top-1/2 w-1 -translate-y-1/2 rounded-l-sm ${compact ? 'h-6' : 'h-7'} ${selected ? 'bg-kumo-brand' : 'bg-kumo-line'}`} />}
-            />
-            <span className={`absolute inset-x-0 top-0 h-0.5 ${selected ? 'bg-kumo-brand' : 'bg-kumo-line'}`} />
             <span className={`flex min-w-0 items-start justify-between ${compact ? 'gap-2' : 'gap-3'}`}>
               <span className="min-w-0">
                 <span className="block truncate text-sm font-semibold text-kumo-strong">{node.name || node.id}</span>
-                <span className="mt-1 block truncate text-xs text-kumo-subtle">{workflowNodeTypeLabel(node)}</span>
+                <span className="mt-1 block truncate text-xs leading-5 text-kumo-subtle">{workflowNodeTypeLabel(node)}</span>
               </span>
-              <span className="shrink-0 rounded-[4px] border border-kumo-line bg-kumo-recessed px-1.5 py-0.5 text-[10px] font-medium text-kumo-subtle">
-                {workflowNodeKindLabel(node)}
-              </span>
+              <Badge variant="neutral">{workflowNodeKindLabel(node)}</Badge>
             </span>
-              <span className={`mt-auto flex min-w-0 items-center justify-between gap-2 ${compact ? 'pt-2.5' : 'pt-4'}`}>
+            <span className={`mt-auto flex min-w-0 items-center justify-between gap-2 ${compact ? 'pt-3' : 'pt-5'}`}>
               <Badge variant={statusBadgeVariant(status || (node.enabled === 0 ? 'skipped' : 'queued'))} appearance="dot">
                 {node.enabled === 0 ? '停用' : status ? statusLabel(status) : '待运行'}
               </Badge>
               {dependencyText && (
-                <span className="min-w-0 truncate rounded-[4px] bg-kumo-recessed px-1.5 py-0.5 text-[10px] text-kumo-subtle">
+                <span className="min-w-0 truncate text-xs text-kumo-subtle">
                   {dependencyText}
                 </span>
               )}
@@ -512,47 +471,6 @@ function WorkflowCanvas({ workflow, runs = [], selectedNodeId = '', onSelectNode
           </li>
         )}
       />
-    );
-  };
-
-  const renderPreviewNode = (node) => {
-    const status = nodeStatus[node.id];
-    const dependencies = incomingEdges.get(node.id) || [];
-    const dependencyText = dependencies.length > 1
-      ? `${dependencies.length} 条依赖`
-      : dependencies[0]
-        ? conditionLabel(dependencies[0].condition)
-        : '';
-
-    return (
-      <div
-        key={node.id}
-        className="absolute flex min-h-[76px] w-[200px] flex-col overflow-hidden rounded-md border border-kumo-line bg-kumo-base px-2.5 py-2 text-left"
-        style={{ left: node.__left, top: node.__top }}
-      >
-        <span className="absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-sm bg-kumo-line" />
-        <span className="absolute right-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-l-sm bg-kumo-line" />
-        <span className="absolute inset-x-0 top-0 h-0.5 bg-kumo-line" />
-        <span className="flex min-w-0 items-start justify-between gap-2">
-          <span className="min-w-0">
-            <span className="block truncate text-sm font-semibold text-kumo-strong">{node.name || node.id}</span>
-            <span className="mt-1 block truncate text-xs text-kumo-subtle">{workflowNodeTypeLabel(node)}</span>
-          </span>
-          <span className="shrink-0 rounded-[4px] border border-kumo-line bg-kumo-recessed px-1.5 py-0.5 text-[10px] font-medium text-kumo-subtle">
-            {workflowNodeKindLabel(node)}
-          </span>
-        </span>
-        <span className="mt-auto flex min-w-0 items-center justify-between gap-2 pt-2.5">
-          <Badge variant={statusBadgeVariant(status || (node.enabled === 0 ? 'skipped' : 'queued'))} appearance="dot">
-            {node.enabled === 0 ? '停用' : status ? statusLabel(status) : '待运行'}
-          </Badge>
-          {dependencyText && (
-            <span className="min-w-0 truncate rounded-[4px] bg-kumo-recessed px-1.5 py-0.5 text-[10px] text-kumo-subtle">
-              {dependencyText}
-            </span>
-          )}
-        </span>
-      </div>
     );
   };
 
@@ -564,62 +482,12 @@ function WorkflowCanvas({ workflow, runs = [], selectedNodeId = '', onSelectNode
     );
   }
 
-  if (compact && previewGeometry) {
-    const previewHeight = Math.max(150, Math.min(220, Math.ceil(previewGeometry.height * previewGeometry.scale)));
-    return (
-      <div
-        className="scheduler-workflow-canvas scheduler-workflow-canvas-compact scheduler-workflow-canvas-preview relative w-full overflow-visible rounded-md border border-kumo-line bg-kumo-recessed/20"
-        style={{ height: previewHeight }}
-      >
-        <div className="absolute inset-0 overflow-hidden rounded-[inherit]">
-          <div
-            className="absolute left-0 top-0"
-            style={{
-              width: previewGeometry.width,
-              height: previewGeometry.height,
-              transform: `scale(${previewGeometry.scale})`,
-              transformOrigin: 'left top',
-            }}
-          >
-            <svg
-              className="pointer-events-none absolute inset-0 overflow-visible"
-              width={previewGeometry.width}
-              height={previewGeometry.height}
-              aria-hidden="true"
-            >
-              {validEdges.map((edge, index) => {
-                const from = previewGeometry.nodeMap.get(edge.from);
-                const to = previewGeometry.nodeMap.get(edge.to);
-                if (!from || !to) return null;
-                const x1 = from.__left + previewGeometry.nodeWidth;
-                const y1 = from.__top + previewGeometry.nodeHeight / 2;
-                const x2 = to.__left;
-                const y2 = to.__top + previewGeometry.nodeHeight / 2;
-                const midX = x1 + Math.max(24, (x2 - x1) / 2);
-                return (
-                  <path
-                    key={`${edge.from}-${edge.to}-${index}`}
-                    d={`M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`}
-                    fill="none"
-                    stroke="color-mix(in oklab, var(--color-kumo-line) 84%, transparent)"
-                    strokeWidth="2"
-                  />
-                );
-              })}
-            </svg>
-            {previewGeometry.nodes.map((node) => renderPreviewNode(node))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <Flow
-      orientation={compact || looseLayout ? 'vertical' : 'horizontal'}
+      orientation="horizontal"
       align="center"
-      className={`scheduler-workflow-canvas ${compact ? 'scheduler-workflow-canvas-compact w-full' : ''} ${editor ? 'scheduler-workflow-canvas-editor' : ''} rounded-md border border-kumo-line bg-kumo-recessed/20`}
-      padding={compact ? { x: 18, y: 20 } : { x: 56, y: 64 }}
+      className={`scheduler-workflow-canvas ${compact ? 'min-h-40 w-full' : 'min-h-[360px]'} ${editor ? 'scheduler-workflow-canvas-editor' : ''} rounded-md border border-kumo-line bg-kumo-base`}
+      padding={compact ? { x: 24, y: 24 } : { x: 56, y: 64 }}
     >
       {stages.map((stage, index) => {
         if (stage.length === 1) return renderNode(stage[0]);
