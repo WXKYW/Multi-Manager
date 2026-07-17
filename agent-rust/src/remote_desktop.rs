@@ -105,6 +105,16 @@ mod windows_impl {
         timestamp: Duration,
     }
 
+    fn enqueue_encoded_sample(
+        tx: &tokio::sync::mpsc::Sender<EncodedVideoSample>,
+        sample: EncodedVideoSample,
+    ) -> bool {
+        match tx.try_send(sample) {
+            Ok(()) | Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => true,
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => false,
+        }
+    }
+
     #[derive(Default)]
     pub struct RemoteDesktopManager {
         sessions: tokio::sync::Mutex<HashMap<String, Session>>,
@@ -466,6 +476,9 @@ mod windows_impl {
         }
 
         stop.store(true, Ordering::Relaxed);
+        // Closing the receiver guarantees the capture worker can observe
+        // shutdown even if it is concurrently publishing the final frame.
+        drop(sample_rx);
         match encoder_task.await {
             Ok(Ok(())) => {}
             Ok(Err(message)) => {
@@ -593,13 +606,13 @@ mod windows_impl {
             }
 
             for sample in samples {
-                if sample_tx
-                    .blocking_send(EncodedVideoSample {
+                if !enqueue_encoded_sample(
+                    &sample_tx,
+                    EncodedVideoSample {
                         data: sample.data,
                         timestamp: sample.timestamp,
-                    })
-                    .is_err()
-                {
+                    },
+                ) {
                     return Ok(());
                 }
             }
@@ -894,6 +907,40 @@ mod windows_impl {
             assert_eq!(config.fps, 30);
             assert_eq!(config.bitrate, 28_000_000);
             assert_eq!(config.keyframe_interval, 30);
+        }
+
+        #[test]
+        fn full_encoded_queue_does_not_block_capture_worker() {
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            assert!(enqueue_encoded_sample(
+                &tx,
+                EncodedVideoSample {
+                    data: vec![1],
+                    timestamp: Duration::ZERO,
+                }
+            ));
+
+            let (done_tx, done_rx) = std::sync::mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                let keep_running = enqueue_encoded_sample(
+                    &tx,
+                    EncodedVideoSample {
+                        data: vec![2],
+                        timestamp: Duration::ZERO,
+                    },
+                );
+                let _ = done_tx.send(keep_running);
+            });
+
+            let completed = done_rx.recv_timeout(Duration::from_millis(100));
+            drop(rx);
+            worker.join().expect("capture worker should exit");
+
+            assert_eq!(
+                completed,
+                Ok(true),
+                "a full video queue must drop instead of blocking"
+            );
         }
 
         #[test]
