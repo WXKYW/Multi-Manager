@@ -23,6 +23,7 @@ mod windows_impl {
     use webrtc::ice_transport::ice_server::RTCIceServer;
     use webrtc::interceptor::registry::Registry;
     use webrtc::peer_connection::configuration::RTCConfiguration;
+    use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
     use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
     use webrtc::peer_connection::RTCPeerConnection;
     use webrtc::rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication;
@@ -42,6 +43,8 @@ mod windows_impl {
     const RTP_CLOCK_RATE: u128 = 90_000;
     const RTP_PACKET_MTU: usize = 1_200;
     const RTP_HEADER_SIZE: usize = 12;
+    const PEER_DISCONNECT_GRACE: Duration = Duration::from_secs(5);
+    const WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
 
     #[derive(Debug, Deserialize)]
     pub struct StartPayload {
@@ -75,6 +78,7 @@ mod windows_impl {
     struct Session {
         peer: Arc<RTCPeerConnection>,
         stop: Arc<AtomicBool>,
+        worker: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
     }
 
     #[derive(Clone, Copy, Default)]
@@ -85,7 +89,7 @@ mod windows_impl {
         height: u32,
     }
 
-    #[derive(Clone, Copy, PartialEq, Eq)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     struct StreamProfile {
         fps: u32,
         bitrate: u32,
@@ -94,8 +98,8 @@ mod windows_impl {
     impl Default for StreamProfile {
         fn default() -> Self {
             Self {
-                fps: TARGET_FPS,
-                bitrate: 12_000_000,
+                fps: 30,
+                bitrate: 6_000_000,
             }
         }
     }
@@ -117,7 +121,7 @@ mod windows_impl {
 
     #[derive(Default)]
     pub struct RemoteDesktopManager {
-        sessions: tokio::sync::Mutex<HashMap<String, Session>>,
+        sessions: Arc<tokio::sync::Mutex<HashMap<String, Session>>>,
     }
 
     impl RemoteDesktopManager {
@@ -161,6 +165,7 @@ mod windows_impl {
                 .map_err(|err| format!("create WebRTC peer: {err}"))?,
             );
             let stop = Arc::new(AtomicBool::new(false));
+            let worker = Arc::new(tokio::sync::Mutex::new(None));
             let stream_started = Arc::new(AtomicBool::new(false));
             let force_keyframe = Arc::new(AtomicBool::new(false));
             let geometry = Arc::new(Mutex::new(DesktopGeometry::default()));
@@ -218,6 +223,37 @@ mod windows_impl {
                 })
             }));
 
+            let sessions_for_peer_state = self.sessions.clone();
+            let session_id_for_peer_state = payload.session_id.clone();
+            peer.on_peer_connection_state_change(Box::new(move |state| {
+                let sessions = sessions_for_peer_state.clone();
+                let session_id = session_id_for_peer_state.clone();
+                Box::pin(async move {
+                    let Some(delay) = peer_shutdown_delay(state) else {
+                        return;
+                    };
+                    tokio::spawn(async move {
+                        if !delay.is_zero() {
+                            tokio::time::sleep(delay).await;
+                        }
+                        let should_shutdown = {
+                            let sessions = sessions.lock().await;
+                            sessions.get(&session_id).is_some_and(|session| {
+                                matches!(
+                                    session.peer.connection_state(),
+                                    RTCPeerConnectionState::Disconnected
+                                        | RTCPeerConnectionState::Failed
+                                        | RTCPeerConnectionState::Closed
+                                )
+                            })
+                        };
+                        if should_shutdown {
+                            remove_and_shutdown_session(&sessions, &session_id).await;
+                        }
+                    });
+                })
+            }));
+
             let session_id_for_channel = payload.session_id.clone();
             let outbound_for_channel = outbound.clone();
             let stop_for_channel = stop.clone();
@@ -227,6 +263,8 @@ mod windows_impl {
             let profile_for_channel = stream_profile.clone();
             let enigo_for_channel = enigo.clone();
             let track_for_channel = video_track.clone();
+            let worker_for_channel = worker.clone();
+            let sessions_for_channel = self.sessions.clone();
             peer.on_data_channel(Box::new(move |channel: Arc<RTCDataChannel>| {
                 let reliable = channel.label() == "remote-desktop";
                 if !reliable && channel.label() != "remote-pointer" {
@@ -241,6 +279,8 @@ mod windows_impl {
                 let profile = profile_for_channel.clone();
                 let enigo = enigo_for_channel.clone();
                 let video_track = track_for_channel.clone();
+                let worker = worker_for_channel.clone();
+                let sessions = sessions_for_channel.clone();
                 Box::pin(async move {
                     let input_enigo = enigo.clone();
                     let input_geometry = geometry.clone();
@@ -293,6 +333,7 @@ mod windows_impl {
                     let frame_outbound = outbound.clone();
                     let frame_track = video_track.clone();
                     let frame_force_keyframe = force_keyframe.clone();
+                    let frame_worker = worker.clone();
                     channel.on_open(Box::new(move || {
                         let stop = frame_stop.clone();
                         let started = frame_started.clone();
@@ -301,18 +342,26 @@ mod windows_impl {
                         let outbound = frame_outbound.clone();
                         let track = frame_track.clone();
                         let force_keyframe = frame_force_keyframe.clone();
+                        let worker = frame_worker.clone();
                         Box::pin(async move {
                             emit_signal(&outbound, &session_id, None, Some("connected")).await;
                             if !started.swap(true, Ordering::SeqCst) {
-                                tokio::spawn(stream_desktop(
+                                let handle = tokio::spawn(stream_desktop(
                                     track,
-                                    stop,
+                                    stop.clone(),
                                     geometry,
                                     profile,
                                     force_keyframe,
                                     outbound,
                                     session_id,
                                 ));
+                                let mut worker_slot = worker.lock().await;
+                                if stop.load(Ordering::Acquire) {
+                                    drop(worker_slot);
+                                    handle.abort();
+                                } else {
+                                    *worker_slot = Some(handle);
+                                }
                             }
                         })
                     }));
@@ -320,13 +369,16 @@ mod windows_impl {
                     let close_stop = stop.clone();
                     let close_session_id = session_id.clone();
                     let close_outbound = outbound.clone();
+                    let close_sessions = sessions.clone();
                     channel.on_close(Box::new(move || {
                         let stop = close_stop.clone();
                         let session_id = close_session_id.clone();
                         let outbound = close_outbound.clone();
+                        let sessions = close_sessions.clone();
                         Box::pin(async move {
                             stop.store(true, Ordering::Relaxed);
                             emit_signal(&outbound, &session_id, None, Some("closed")).await;
+                            remove_and_shutdown_session(&sessions, &session_id).await;
                         })
                     }));
                 })
@@ -337,23 +389,33 @@ mod windows_impl {
                 Session {
                     peer: peer.clone(),
                     stop,
+                    worker,
                 },
             );
 
-            peer.set_remote_description(payload.offer)
-                .await
-                .map_err(|err| format!("set WebRTC offer: {err}"))?;
-            let answer = peer
-                .create_answer(None)
-                .await
-                .map_err(|err| format!("create WebRTC answer: {err}"))?;
-            peer.set_local_description(answer)
-                .await
-                .map_err(|err| format!("set WebRTC answer: {err}"))?;
-            let answer = peer
-                .local_description()
-                .await
-                .ok_or_else(|| "WebRTC local answer missing".to_string())?;
+            let negotiation = async {
+                peer.set_remote_description(payload.offer)
+                    .await
+                    .map_err(|err| format!("set WebRTC offer: {err}"))?;
+                let answer = peer
+                    .create_answer(None)
+                    .await
+                    .map_err(|err| format!("create WebRTC answer: {err}"))?;
+                peer.set_local_description(answer)
+                    .await
+                    .map_err(|err| format!("set WebRTC answer: {err}"))?;
+                peer.local_description()
+                    .await
+                    .ok_or_else(|| "WebRTC local answer missing".to_string())
+            }
+            .await;
+            let answer = match negotiation {
+                Ok(answer) => answer,
+                Err(error) => {
+                    self.stop(&payload.session_id).await;
+                    return Err(error);
+                }
+            };
             emit_signal(
                 &outbound,
                 &payload.session_id,
@@ -389,11 +451,7 @@ mod windows_impl {
         }
 
         pub async fn stop(&self, session_id: &str) {
-            let session = self.sessions.lock().await.remove(session_id);
-            if let Some(session) = session {
-                session.stop.store(true, Ordering::Relaxed);
-                let _ = session.peer.close().await;
-            }
+            remove_and_shutdown_session(&self.sessions, session_id).await;
         }
 
         async fn stop_all(&self) {
@@ -405,8 +463,39 @@ mod windows_impl {
                     .collect::<Vec<_>>()
             };
             for session in sessions {
-                session.stop.store(true, Ordering::Relaxed);
-                let _ = session.peer.close().await;
+                shutdown_session(session).await;
+            }
+        }
+    }
+
+    fn peer_shutdown_delay(state: RTCPeerConnectionState) -> Option<Duration> {
+        match state {
+            RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed => Some(Duration::ZERO),
+            RTCPeerConnectionState::Disconnected => Some(PEER_DISCONNECT_GRACE),
+            _ => None,
+        }
+    }
+
+    async fn remove_and_shutdown_session(
+        sessions: &Arc<tokio::sync::Mutex<HashMap<String, Session>>>,
+        session_id: &str,
+    ) {
+        let session = sessions.lock().await.remove(session_id);
+        if let Some(session) = session {
+            shutdown_session(session).await;
+        }
+    }
+
+    async fn shutdown_session(session: Session) {
+        session.stop.store(true, Ordering::Release);
+        let _ = session.peer.close().await;
+        if let Some(mut worker) = session.worker.lock().await.take() {
+            if tokio::time::timeout(WORKER_SHUTDOWN_TIMEOUT, &mut worker)
+                .await
+                .is_err()
+            {
+                worker.abort();
+                let _ = worker.await;
             }
         }
     }
@@ -552,7 +641,12 @@ mod windows_impl {
             }
 
             let desired_profile = profile.lock().map(|item| *item).unwrap_or_default();
-            if !should_encode_frame(last_encoded_timestamp, frame.timestamp, desired_profile.fps) {
+            if !should_encode_next_frame(
+                last_encoded_timestamp,
+                frame.timestamp,
+                desired_profile.fps,
+                sample_tx.capacity() > 0,
+            ) {
                 continue;
             }
             last_encoded_timestamp = frame.timestamp;
@@ -646,6 +740,15 @@ mod windows_impl {
         // tolerance while still allowing 30 FPS profiles to downsample 60 Hz.
         last.is_zero()
             || current.saturating_sub(last) >= target.saturating_sub(Duration::from_millis(2))
+    }
+
+    fn should_encode_next_frame(
+        last: Duration,
+        current: Duration,
+        fps: u32,
+        queue_has_capacity: bool,
+    ) -> bool {
+        queue_has_capacity && should_encode_frame(last, current, fps)
     }
 
     fn capture_timestamp_to_rtp(base: u32, timestamp: Duration) -> u32 {
@@ -907,6 +1010,40 @@ mod windows_impl {
             assert_eq!(config.fps, 30);
             assert_eq!(config.bitrate, 28_000_000);
             assert_eq!(config.keyframe_interval, 30);
+        }
+
+        #[test]
+        fn mobile_safe_default_profile_limits_startup_pressure() {
+            assert_eq!(
+                StreamProfile::default(),
+                StreamProfile {
+                    fps: 30,
+                    bitrate: 6_000_000
+                }
+            );
+        }
+
+        #[test]
+        fn skips_encoding_when_the_latest_frame_queue_is_full() {
+            assert!(!should_encode_next_frame(
+                Duration::ZERO,
+                Duration::from_millis(16),
+                60,
+                false,
+            ));
+        }
+
+        #[test]
+        fn failed_peers_shutdown_immediately_while_disconnects_get_a_short_grace() {
+            assert_eq!(
+                peer_shutdown_delay(RTCPeerConnectionState::Failed),
+                Some(Duration::ZERO)
+            );
+            assert_eq!(
+                peer_shutdown_delay(RTCPeerConnectionState::Disconnected),
+                Some(PEER_DISCONNECT_GRACE)
+            );
+            assert_eq!(peer_shutdown_delay(RTCPeerConnectionState::Connected), None);
         }
 
         #[test]

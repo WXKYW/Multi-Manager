@@ -8,10 +8,12 @@ import {
   TOUCH_SCROLL_SLOP,
   TOUCH_TAP_MAX_MS,
   TOUCH_TAP_SLOP,
-  accelerateTrackpadDelta,
   consumeScrollDelta,
+  initialRemoteDesktopProfile,
   isDoubleTap,
   nextPinchTransform,
+  nextRemoteDesktopProfile,
+  normalizedTrackpadDelta,
   pointDistance,
   remoteCursorPoint,
 } from '../modules/remoteDesktopTouch.js';
@@ -69,6 +71,7 @@ export default function RemoteDesktopPage() {
   const [viewTransform, setViewTransform] = useState({ scale: 1, x: 0, y: 0 });
   const [surfaceSize, setSurfaceSize] = useState({ width: 1, height: 1 });
   const [controlEnabled, setControlEnabled] = useState(true);
+  const [touchInputMode, setTouchInputMode] = useState('trackpad');
   const [controlAcknowledged, setControlAcknowledged] = useState(false);
   const [stats, setStats] = useState({
     rtt: 0,
@@ -95,9 +98,14 @@ export default function RemoteDesktopPage() {
   const pendingLocalIceRef = useRef([]);
   const pendingRemoteIceRef = useRef([]);
   const previousVideoStatsRef = useRef(null);
-  const streamProfileRef = useRef({ fps: 60, bitrate: 12_000_000 });
+  const coarsePointerRef = useRef(
+    Boolean(window.matchMedia?.('(pointer: coarse)').matches || navigator.maxTouchPoints > 0),
+  );
+  const streamProfileRef = useRef(initialRemoteDesktopProfile(coarsePointerRef.current));
   const healthyIntervalsRef = useRef(0);
   const pointerFrameRef = useRef(0);
+  const absolutePointerFrameRef = useRef(0);
+  const pendingAbsolutePointerRef = useRef(null);
   const pendingRelativePointerRef = useRef({ x: 0, y: 0 });
   const pointerSequenceRef = useRef(0);
   const lastPointerAckRef = useRef(0);
@@ -154,6 +162,7 @@ export default function RemoteDesktopPage() {
       setState('connected');
       setError('');
       surfaceRef.current?.focus();
+      channel.send(JSON.stringify({ type: 'video-config', ...streamProfileRef.current }));
     };
     channel.onclose = () => {
       if (peer === peerRef.current && generation === connectionGenerationRef.current) setState('closed');
@@ -216,6 +225,7 @@ export default function RemoteDesktopPage() {
     pointerChannelRef.current = null;
     peerRef.current = null;
     previousVideoStatsRef.current = null;
+    pendingAbsolutePointerRef.current = null;
     pendingRelativePointerRef.current = { x: 0, y: 0 };
     pointerSequenceRef.current = 0;
     lastPointerAckRef.current = 0;
@@ -237,6 +247,8 @@ export default function RemoteDesktopPage() {
     setState('initializing');
     setError('');
     setControlAcknowledged(false);
+    streamProfileRef.current = initialRemoteDesktopProfile(coarsePointerRef.current);
+    healthyIntervalsRef.current = 0;
     lastSignalRef.current = 0;
     pendingLocalIceRef.current = [];
     pendingRemoteIceRef.current = [];
@@ -383,20 +395,18 @@ export default function RemoteDesktopPage() {
       const measuredRtt = Math.round(Number(pair?.currentRoundTripTime || 0) * 1000);
       const videoPixels = (videoRef.current?.videoWidth || 1920) * (videoRef.current?.videoHeight || 1080);
       const nativeBitrate = videoPixels > 3_686_400 ? 28_000_000 : videoPixels > 2_073_600 ? 18_000_000 : 12_000_000;
-      let nextProfile = streamProfileRef.current;
-      if (measuredLoss > 5 || measuredRtt > 120) {
-        healthyIntervalsRef.current = 0;
-        nextProfile = { fps: 30, bitrate: Math.min(8_000_000, nativeBitrate) };
-      } else if (measuredLoss > 2 || measuredRtt > 70 || measuredBufferMs > 55) {
-        healthyIntervalsRef.current = 0;
-        // A large jitter buffer can be caused by media-clock or decoder
-        // pressure. Reducing frame cadence feeds that failure mode; preserve
-        // interactive 60 FPS and reduce only the encoded size per second.
-        nextProfile = { fps: 60, bitrate: Math.min(8_000_000, nativeBitrate) };
-      } else {
-        healthyIntervalsRef.current += 1;
-        if (healthyIntervalsRef.current >= 4) nextProfile = { fps: 60, bitrate: nativeBitrate };
-      }
+      const adaptation = nextRemoteDesktopProfile({
+        loss: measuredLoss,
+        rtt: measuredRtt,
+        bufferMs: measuredBufferMs,
+        droppedFps: measuredDroppedFps,
+        nativeBitrate,
+        healthyIntervals: healthyIntervalsRef.current,
+        current: streamProfileRef.current,
+        coarsePointer: coarsePointerRef.current,
+      });
+      const nextProfile = adaptation.profile;
+      healthyIntervalsRef.current = adaptation.healthyIntervals;
       const currentProfile = streamProfileRef.current;
       if (nextProfile.fps !== currentProfile.fps || nextProfile.bitrate !== currentProfile.bitrate) {
         streamProfileRef.current = nextProfile;
@@ -453,7 +463,16 @@ export default function RemoteDesktopPage() {
   useEffect(() => () => {
     clearLongPress();
     if (pointerFrameRef.current) window.cancelAnimationFrame(pointerFrameRef.current);
+    if (absolutePointerFrameRef.current) window.cancelAnimationFrame(absolutePointerFrameRef.current);
   }, [clearLongPress]);
+
+  useEffect(() => {
+    const closeOnPageHide = () => {
+      closeSession();
+    };
+    window.addEventListener('pagehide', closeOnPageHide);
+    return () => window.removeEventListener('pagehide', closeOnPageHide);
+  }, [closeSession]);
 
   useEffect(() => {
     const handleKey = (event, action) => {
@@ -493,15 +512,22 @@ export default function RemoteDesktopPage() {
     };
   };
 
+  const scheduleAbsolutePointer = (position) => {
+    cursorPositionRef.current = position;
+    pendingAbsolutePointerRef.current = position;
+    if (absolutePointerFrameRef.current) return;
+    absolutePointerFrameRef.current = window.requestAnimationFrame(() => {
+      absolutePointerFrameRef.current = 0;
+      const latest = pendingAbsolutePointerRef.current;
+      pendingAbsolutePointerRef.current = null;
+      if (latest) sendControl({ type: 'pointer', ...latest });
+    });
+  };
+
   const handlePointerMove = (event) => {
     if (performance.now() < ignoreMouseUntilRef.current) return;
     const position = pointerPosition(event);
-    if (!position || pointerFrameRef.current) return;
-    cursorPositionRef.current = position;
-    pointerFrameRef.current = window.requestAnimationFrame(() => {
-      pointerFrameRef.current = 0;
-      sendControl({ type: 'pointer', ...position });
-    });
+    if (position) scheduleAbsolutePointer(position);
   };
 
   const handleMouse = (event, action) => {
@@ -516,11 +542,16 @@ export default function RemoteDesktopPage() {
   const moveRelativePointer = (deltaX, deltaY, elapsedMs = 16) => {
     const rect = surfaceRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const accelerated = accelerateTrackpadDelta(deltaX, deltaY, elapsedMs);
-    const normalizedDelta = {
-      x: accelerated.x / Math.max(1, rect.width),
-      y: accelerated.y / Math.max(1, rect.height),
-    };
+    const normalizedDelta = normalizedTrackpadDelta(
+      deltaX,
+      deltaY,
+      elapsedMs,
+      rect,
+      {
+        width: videoRef.current?.videoWidth || rect.width,
+        height: videoRef.current?.videoHeight || rect.height,
+      },
+    );
     const current = cursorPositionRef.current;
     const next = {
       x: Math.max(0, Math.min(1, current.x + normalizedDelta.x)),
@@ -593,9 +624,14 @@ export default function RemoteDesktopPage() {
         lastAt: now,
         moved: false,
         buttonDown: doubleTapDrag,
+        direct: touchInputMode === 'direct',
         startedAt: now,
       };
       touchGestureRef.current = gesture;
+      if (gesture.direct) {
+        const position = pointerPosition(touches[0]);
+        if (position) scheduleAbsolutePointer(position);
+      }
       if (doubleTapDrag) {
         lastTapRef.current = null;
         sendControl({ type: 'mouse', button: 0, action: 'down' });
@@ -644,7 +680,12 @@ export default function RemoteDesktopPage() {
       );
       gesture.moved ||= totalMovement >= TOUCH_TAP_SLOP;
       if (gesture.moved) clearLongPress();
-      moveRelativePointer(deltaX, deltaY, now - gesture.lastAt);
+      if (gesture.direct) {
+        const position = pointerPosition(touches[0]);
+        if (position) scheduleAbsolutePointer(position);
+      } else {
+        moveRelativePointer(deltaX, deltaY, now - gesture.lastAt);
+      }
       gesture.lastX = touches[0].clientX;
       gesture.lastY = touches[0].clientY;
       gesture.lastAt = now;
@@ -776,7 +817,7 @@ export default function RemoteDesktopPage() {
             {stateLabel(state)}
           </Badge>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2 overflow-x-auto [scrollbar-width:none]">
           <span className="hidden text-[11px] text-kumo-subtle md:inline">
             {stats.rtt ? `${stats.rtt} ms · ` : ''}{stats.fps ? `解码 ${stats.fps.toFixed(0)} FPS · ` : ''}
             {stats.receivedFps ? `接收 ${stats.receivedFps.toFixed(0)} FPS · ` : ''}
@@ -790,6 +831,13 @@ export default function RemoteDesktopPage() {
             {controlEnabled ? (controlAcknowledged ? '控制通道正常' : '控制已开启') : '仅观看'}
           </Button>
           <Button size="sm" variant="secondary" onClick={openSystemKeyboard}>键盘</Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => setTouchInputMode(mode => mode === 'trackpad' ? 'direct' : 'trackpad')}
+          >
+            {touchInputMode === 'trackpad' ? '触控板' : '直接指向'}
+          </Button>
           <Button size="sm" variant="secondary" onClick={toggleFillMode}>
             {fillMode === 'cover' ? '填满' : '适应'}
           </Button>
@@ -879,6 +927,9 @@ export default function RemoteDesktopPage() {
                   {controlEnabled ? '控制开启' : '仅观看'}
                 </Button>
                 <Button size="sm" variant="secondary" onClick={openSystemKeyboard}>键盘</Button>
+                <Button size="sm" variant="secondary" onClick={() => setTouchInputMode(mode => mode === 'trackpad' ? 'direct' : 'trackpad')}>
+                  {touchInputMode === 'trackpad' ? '触控板' : '直接指向'}
+                </Button>
                 <Button size="sm" variant="secondary" onClick={toggleFillMode}>
                   {fillMode === 'cover' ? '填满' : '适应'}
                 </Button>
@@ -899,7 +950,7 @@ export default function RemoteDesktopPage() {
         )}
         {virtualCursor.visible && (
           <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-kumo-line bg-kumo-base/80 px-2 py-1 text-[11px] text-kumo-subtle">
-            单指移动/轻点左键 · 双击按住或长按拖拽 · 双指轻点右键 · 双指拖动滚动 · 张合缩放
+            {touchInputMode === 'trackpad' ? '触控板：单指移动/轻点左键' : '直接指向：点到哪里移到哪里'} · 双击按住或长按拖拽 · 双指轻点右键 · 双指拖动滚动 · 张合缩放
           </div>
         )}
         {error && (

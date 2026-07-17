@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   accelerateTrackpadDelta,
   consumeScrollDelta,
+  initialRemoteDesktopProfile,
   isDoubleTap,
   nextPinchTransform,
+  nextRemoteDesktopProfile,
+  normalizedTrackpadDelta,
   remoteCursorPoint,
 } from './remoteDesktopTouch.js';
 
@@ -13,6 +16,41 @@ describe('remote desktop touch controls', () => {
     const fast = accelerateTrackpadDelta(24, 0, 16);
     expect(precise.x).toBeCloseTo(2, 3);
     expect(fast.x).toBeGreaterThan(40);
+  });
+
+  it('keeps trackpad sensitivity independent of the phone viewport width', () => {
+    const phone = normalizedTrackpadDelta(
+      12,
+      6,
+      16,
+      { width: 360, height: 720 },
+      { width: 1920, height: 1080 }
+    );
+    const tablet = normalizedTrackpadDelta(
+      12,
+      6,
+      16,
+      { width: 1024, height: 768 },
+      { width: 1920, height: 1080 }
+    );
+    expect(phone).toEqual(tablet);
+    expect(phone.x * 1920).toBeGreaterThan(12);
+  });
+
+  it('starts coarse-pointer clients in a reaction-first mobile profile', () => {
+    expect(initialRemoteDesktopProfile(true)).toEqual({ fps: 30, bitrate: 6_000_000 });
+    expect(initialRemoteDesktopProfile(false)).toEqual({ fps: 60, bitrate: 12_000_000 });
+  });
+
+  it('reduces frame cadence when the decoder jitter buffer grows', () => {
+    const next = nextRemoteDesktopProfile({
+      bufferMs: 90,
+      nativeBitrate: 12_000_000,
+      current: { fps: 60, bitrate: 12_000_000 },
+    });
+    expect(next.profile.fps).toBe(30);
+    expect(next.profile.bitrate).toBeLessThanOrEqual(6_000_000);
+    expect(next.healthyIntervals).toBe(0);
   });
 
   it('retains sub-threshold two-finger scroll movement', () => {
@@ -38,7 +76,7 @@ describe('remote desktop touch controls', () => {
       { x: 100, y: 200 },
       100,
       200,
-      { width: 400, height: 800 },
+      { width: 400, height: 800 }
     );
     expect(next).toEqual({ scale: 2, x: -100, y: -200 });
   });
@@ -49,7 +87,7 @@ describe('remote desktop touch controls', () => {
       { width: 400, height: 800 },
       { width: 1920, height: 1080 },
       'contain',
-      { scale: 2, x: -200, y: -400 },
+      { scale: 2, x: -200, y: -400 }
     );
     expect(point.x).toBeCloseTo(200);
     expect(point.y).toBeCloseTo(400);
