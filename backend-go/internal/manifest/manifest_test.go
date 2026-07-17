@@ -25,6 +25,16 @@ func TestMatchAgentLinuxInstallWithKey(t *testing.T) {
 	}
 }
 
+func TestGitHubPublicRealtimeStreamIsPublicAndStreaming(t *testing.T) {
+	route, ok := Match("/api/github/public/pages/status/stream")
+	if !ok {
+		t.Fatal("expected GitHub public realtime stream route")
+	}
+	if route.Owner != OwnerGo || route.Auth != AuthPublic || route.ResponseMode != ResponseStream {
+		t.Fatalf("unexpected public stream governance: owner=%s auth=%s response=%s", route.Owner, route.Auth, route.ResponseMode)
+	}
+}
+
 func TestManifestDoesNotExposeRetiredRoutes(t *testing.T) {
 	for _, route := range Routes() {
 		if route.Owner == OwnerRetired {

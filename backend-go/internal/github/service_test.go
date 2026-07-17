@@ -57,6 +57,31 @@ func TestVerifySignature(t *testing.T) {
 	}
 }
 
+func TestPublicPageEventPayloadOnlyExposesVisibleRepositoryIdentity(t *testing.T) {
+	visibleRepositories := map[int64]struct{}{42: {}}
+	payload, visible := publicPageEventPayload(visibleRepositories, map[string]interface{}{
+		"kind":          "repository_actions_refresh",
+		"repository_id": int64(42),
+		"token":         "must-not-leak",
+	})
+	if !visible {
+		t.Fatal("expected event for a public repository to be visible")
+	}
+	if payload["repository_id"] != int64(42) || payload["kind"] != "repository_actions_refresh" {
+		t.Fatalf("unexpected public event payload: %#v", payload)
+	}
+	if _, leaked := payload["token"]; leaked {
+		t.Fatalf("public event leaked private fields: %#v", payload)
+	}
+
+	if payload, visible := publicPageEventPayload(visibleRepositories, map[string]interface{}{
+		"kind":          "repository_refresh",
+		"repository_id": int64(7),
+	}); visible || payload != nil {
+		t.Fatalf("event for an unbound repository must stay private: %#v", payload)
+	}
+}
+
 func TestRefreshActionsPublishesCommittedUpdate(t *testing.T) {
 	githubAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/repos/openai/codex/actions/runs" {
@@ -115,6 +140,13 @@ func TestRefreshActionsPublishesCommittedUpdate(t *testing.T) {
 	}
 	if status != "in_progress" {
 		t.Fatalf("unexpected latest action status: %q", status)
+	}
+	item, _, _, ok, err := service.publicRepositorySummaryItem(t.Context(), db, repoID)
+	if err != nil || !ok {
+		t.Fatalf("read public repository summary: ok=%v err=%v", ok, err)
+	}
+	if asString(item["updated_at"]) == "" {
+		t.Fatalf("public repository summary must expose its data timestamp: %#v", item)
 	}
 }
 

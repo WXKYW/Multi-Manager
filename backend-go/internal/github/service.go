@@ -91,6 +91,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.publicPageByID(w, r, parts[1])
 	case len(parts) == 5 && parts[0] == "public" && parts[1] == "pages" && parts[3] == "repositories" && r.Method == http.MethodGet:
 		s.publicPageRepositoryBySlug(w, r, parts[2], parts[4])
+	case len(parts) == 4 && parts[0] == "public" && parts[1] == "pages" && parts[3] == "stream" && r.Method == http.MethodGet:
+		s.publicPageEventStream(w, r, parts[2])
 	case len(parts) == 3 && parts[0] == "public" && parts[1] == "pages" && r.Method == http.MethodGet:
 		s.publicPageBySlug(w, r, parts[2])
 	case len(parts) == 2 && parts[0] == "public" && parts[1] == "page-by-domain" && r.Method == http.MethodGet:
@@ -391,6 +393,74 @@ func (s *Service) publicPageRepositoryBySlug(w http.ResponseWriter, r *http.Requ
 	response.OK(w, item)
 }
 
+func (s *Service) publicPageEventStream(w http.ResponseWriter, r *http.Request, slug string) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		response.Error(w, http.StatusInternalServerError, "streaming unsupported")
+		return
+	}
+
+	db, err := s.open(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	page, found, pageErr := getPublicPageBySlug(r.Context(), db, slug, true)
+	db.Close()
+	if pageErr != nil {
+		response.Error(w, http.StatusInternalServerError, pageErr.Error())
+		return
+	}
+	if !found {
+		response.Error(w, http.StatusNotFound, "公开页不存在或未公开")
+		return
+	}
+
+	repositoryIDs := make(map[int64]struct{}, len(page.RepositoryIDs))
+	for _, repositoryID := range page.RepositoryIDs {
+		repositoryIDs[repositoryID] = struct{}{}
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	ch, cancel := s.subscribe()
+	defer cancel()
+	heartbeat := time.NewTicker(20 * time.Second)
+	defer heartbeat.Stop()
+	fmt.Fprintf(w, "event: hello\ndata: %s\n\n", jsonString(map[string]interface{}{"connected": true}))
+	flusher.Flush()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-heartbeat.C:
+			fmt.Fprint(w, ": keepalive\n\n")
+			flusher.Flush()
+		case event := <-ch:
+			payload, visible := publicPageEventPayload(repositoryIDs, event)
+			if !visible {
+				continue
+			}
+			fmt.Fprintf(w, "event: github\ndata: %s\n\n", jsonString(payload))
+			flusher.Flush()
+		}
+	}
+}
+
+func publicPageEventPayload(repositoryIDs map[int64]struct{}, event map[string]interface{}) (map[string]interface{}, bool) {
+	repositoryID := int64Value(event["repository_id"], 0)
+	if _, visible := repositoryIDs[repositoryID]; !visible {
+		return nil, false
+	}
+	return map[string]interface{}{
+		"kind":          asString(event["kind"]),
+		"repository_id": repositoryID,
+	}, true
+}
+
 func (s *Service) publicPagePayload(ctx context.Context, db *sql.DB, page PublicPage, includeWorkflowDetails bool) (map[string]interface{}, error) {
 	repositories := make([]map[string]interface{}, 0, len(page.RepositoryIDs))
 	for _, repoID := range page.RepositoryIDs {
@@ -463,6 +533,7 @@ func (s *Service) publicRepositorySummaryItem(ctx context.Context, db *sql.DB, r
 		"latest_action_created_at": repo.LatestActionCreatedAt,
 		"latest_action_updated_at": repo.LatestActionUpdatedAt,
 		"latest_run":               latestRun,
+		"updated_at":               repo.UpdatedAt,
 	}
 	return item, repo, latestRun, true, nil
 }

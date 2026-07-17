@@ -5,6 +5,11 @@ import { useCloudflareSpotlight } from '../hooks/useCloudflareSpotlight.js';
 import { useDraggableScroll } from '../hooks/useDraggableScroll.js';
 import { formatGitHubRepositoryDescription } from '../modules/githubEmoji.js';
 import {
+  getPublicGithubDataUpdatedAt,
+  getPublicGithubRefreshInterval,
+  mergePublicGithubRepositories,
+} from '../modules/githubPublicRealtime.js';
+import {
   AlertTriangle,
   ExternalLink,
   GitBranch,
@@ -1728,26 +1733,6 @@ function RepositoryCard({ item, now, config, detailLoading = false }) {
   );
 }
 
-const mergePublicRepositoriesWithExistingDetails = (repositories = [], previousRepositories = []) => {
-  const previousById = new Map(previousRepositories.map((repo) => [String(repo?.id), repo]));
-  return repositories.map((repo) => {
-    const previous = previousById.get(String(repo?.id));
-    if (!previous) return repo;
-    const nextRunID = String(repo?.latest_run?.run_id || '');
-    const previousRunID = String(previous?.latest_run?.run_id || '');
-    const canReuseDetail = nextRunID !== '' && nextRunID === previousRunID && (
-      Array.isArray(previous?.jobs) || previous?.workflow || previous?.workflow_error
-    );
-    if (!canReuseDetail) return repo;
-    return {
-      ...repo,
-      jobs: previous.jobs,
-      workflow: previous.workflow,
-      workflow_error: previous.workflow_error,
-    };
-  });
-};
-
 function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
   const slug = useMemo(() => normalizePublicPath(), []);
   const surfaceRef = useCloudflareSpotlight();
@@ -1759,19 +1744,19 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
   const [detailStatusByRepo, setDetailStatusByRepo] = useState({});
   const pageRef = useRef(null);
   const detailRequestSeqRef = useRef(0);
+  const loadRequestSeqRef = useRef(0);
 
   useEffect(() => {
     pageRef.current = page;
   }, [page]);
 
-  const loadRepositoryDetails = useCallback(async (nextPage, previousRepositories = []) => {
+  const loadRepositoryDetails = useCallback(async (nextPage) => {
     const repositories = Array.isArray(nextPage?.repositories) ? nextPage.repositories : [];
     if (!nextPage?.slug || repositories.length === 0) {
       setDetailStatusByRepo({});
       return;
     }
 
-    const previousById = new Map(previousRepositories.map((repo) => [String(repo?.id), repo]));
     const requestSeq = detailRequestSeqRef.current + 1;
     detailRequestSeqRef.current = requestSeq;
 
@@ -1780,10 +1765,8 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
     repositories.forEach((repo) => {
       const repoId = String(repo?.id || '');
       const runID = String(repo?.latest_run?.run_id || '');
-      const previous = previousById.get(repoId);
-      const previousRunID = String(previous?.latest_run?.run_id || '');
-      const hasReusableDetail = runID !== '' && runID === previousRunID && (
-        Array.isArray(previous?.jobs) || previous?.workflow || previous?.workflow_error
+      const hasReusableDetail = runID !== '' && (
+        Array.isArray(repo?.jobs) || repo?.workflow || repo?.workflow_error
       );
 
       if (!runID) {
@@ -1802,7 +1785,9 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
     await Promise.allSettled(targets.map(async (repo) => {
       const repoId = String(repo?.id || '');
       try {
-        const response = await fetch(`/api/github/public/pages/${encodeURIComponent(nextPage.slug)}/repositories/${encodeURIComponent(repoId)}`);
+        const response = await fetch(`/api/github/public/pages/${encodeURIComponent(nextPage.slug)}/repositories/${encodeURIComponent(repoId)}`, {
+          cache: 'no-store',
+        });
         const result = await response.json().catch(() => ({}));
         if (!response.ok || result.success === false) {
           throw new Error(result.error || 'Workflow 详情加载失败');
@@ -1836,6 +1821,8 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
   }, []);
 
   const load = useCallback(async ({ silent = false } = {}) => {
+    const requestSeq = loadRequestSeqRef.current + 1;
+    loadRequestSeqRef.current = requestSeq;
     if (silent) setRefreshing(true);
     else setLoading(true);
     setError('');
@@ -1843,8 +1830,9 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
       const endpoint = slug && !domainOnly
         ? `/api/github/public/pages/${encodeURIComponent(slug)}?summary=1`
         : `/api/github/public/page-by-domain?domain=${encodeURIComponent(window.location.host)}&summary=1`;
-      const response = await fetch(endpoint);
+      const response = await fetch(endpoint, { cache: 'no-store' });
       const result = await response.json().catch(() => ({}));
+      if (loadRequestSeqRef.current !== requestSeq) return;
       if (!response.ok || result.success === false) {
         const nextError = new Error(result.error || 'GitHub 公开页不存在或未公开');
         nextError.status = response.status;
@@ -1854,14 +1842,15 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
       const rawPage = result.data || result;
       const mergedPage = {
         ...rawPage,
-        repositories: mergePublicRepositoriesWithExistingDetails(
+        repositories: mergePublicGithubRepositories(
           Array.isArray(rawPage?.repositories) ? rawPage.repositories : [],
           previousRepositories,
         ),
       };
       setPage(mergedPage);
-      void loadRepositoryDetails(mergedPage, previousRepositories);
+      void loadRepositoryDetails(mergedPage);
     } catch (err) {
+      if (loadRequestSeqRef.current !== requestSeq) return;
       if (!slug && domainOnly && err.status === 404 && onDomainNotFound) {
         onDomainNotFound();
         return;
@@ -1873,8 +1862,10 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
         setDetailStatusByRepo({});
       }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (loadRequestSeqRef.current === requestSeq) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [domainOnly, loadRepositoryDetails, onDomainNotFound, slug]);
 
@@ -1897,14 +1888,36 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
   }, []);
 
   useEffect(() => {
-    if (!page?.cacheSeconds) return undefined;
     const interval = window.setInterval(() => {
       void load({ silent: true });
-    }, Math.max(30, Number(page.cacheSeconds) || 300) * 1000);
+    }, getPublicGithubRefreshInterval(page));
     return () => window.clearInterval(interval);
-  }, [load, page?.cacheSeconds]);
+  }, [load, page]);
+
+  useEffect(() => {
+    if (!page?.slug || typeof window.EventSource !== 'function') return undefined;
+    const source = new window.EventSource(`/api/github/public/pages/${encodeURIComponent(page.slug)}/stream`);
+    const refresh = () => {
+      void load({ silent: true });
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    source.addEventListener('github', refresh);
+    window.addEventListener('focus', refresh);
+    window.addEventListener('online', refresh);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      source.removeEventListener('github', refresh);
+      source.close();
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('online', refresh);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [load, page?.slug]);
 
   const repositories = Array.isArray(page?.repositories) ? page.repositories : [];
+  const dataUpdatedAt = getPublicGithubDataUpdatedAt(page);
   const failureCount = repositories.filter((repo) => statusTone(repo?.latest_run?.conclusion || repo?.latest_run?.status || repo?.latest_action_conclusion || repo?.latest_action_status) === 'error').length;
   const warningCount = repositories.filter((repo) => statusTone(repo?.latest_run?.conclusion || repo?.latest_run?.status || repo?.latest_action_conclusion || repo?.latest_action_status) === 'warning').length;
   const successCount = repositories.filter((repo) => statusTone(repo?.latest_run?.conclusion || repo?.latest_run?.status || repo?.latest_action_conclusion || repo?.latest_action_status) === 'success').length;
@@ -2014,7 +2027,7 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
                 <Shield className="h-3.5 w-3.5" />
                 由 API Monitor 提供
               </span>
-              <span>最后更新：{formatDateTime(page.updatedAt || page.createdAt)}</span>
+              <span>最后更新：{formatDateTime(dataUpdatedAt)}</span>
             </footer>
           </div>
         )}
