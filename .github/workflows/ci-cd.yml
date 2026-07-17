@@ -259,24 +259,6 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.6.1
-        with:
-          images: |
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
-            ${{ env.DOCKERHUB_REPO }}
-          tags: |
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/dev' }}
-            type=sha,prefix=
-            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '' }}
-          labels: |
-            org.opencontainers.image.title=API Monitor
-            org.opencontainers.image.description=API聚合监控面板
-            org.opencontainers.image.vendor=iwvw
-            maintainer=iwvw
-
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.13.0
@@ -289,7 +271,13 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:build-${{ github.run_id }}-${{ matrix.suffix }}
             ${{ env.DOCKERHUB_REPO }}:build-${{ github.run_id }}-${{ matrix.suffix }}
-          labels: ${{ steps.meta.outputs.labels }}
+          labels: |
+            org.opencontainers.image.title=API Monitor
+            org.opencontainers.image.description=API聚合监控面板
+            org.opencontainers.image.vendor=iwvw
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            maintainer=iwvw
           cache-from: type=gha,scope=${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
           build-args: |
@@ -339,18 +327,38 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract metadata
+      - name: Generate image tags
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.6.1
-        with:
-          images: |
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
-            ${{ env.DOCKERHUB_REPO }}
-          tags: |
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/dev' }}
-            type=sha,prefix=
-            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '' }}
+        shell: bash
+        env:
+          CUSTOM_TAG: ${{ github.event.inputs.tag }}
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: |
+          IMAGES=(
+            "$REGISTRY/$REPO_OWNER/$IMAGE_NAME"
+            "$DOCKERHUB_REPO"
+          )
+          TAG_NAMES=("${GITHUB_SHA::7}")
+
+          if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            TAG_NAMES+=("latest")
+          elif [ "$GITHUB_REF" = "refs/heads/dev" ]; then
+            TAG_NAMES+=("dev")
+          fi
+
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ -n "$CUSTOM_TAG" ]; then
+            TAG_NAMES+=("$CUSTOM_TAG")
+          fi
+
+          {
+            echo "tags<<EOF"
+            for image in "${IMAGES[@]}"; do
+              for tag in "${TAG_NAMES[@]}"; do
+                echo "$image:$tag"
+              done
+            done
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create and push manifest
         env:
