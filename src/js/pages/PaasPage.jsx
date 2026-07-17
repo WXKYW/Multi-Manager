@@ -869,11 +869,6 @@ function PaasPage() {
     });
 
     if (newImage === null || newImage.trim() === '') return;
-    const leaseNonce = await dialog.prompt({
-      message: '如果该 Machine 已被 lease，请输入 lease nonce；未 lease 可留空：',
-      defaultValue: '',
-    });
-    if (leaseNonce === null) return;
 
     toast.info('正在更新容器镜像，请稍候...');
     try {
@@ -883,7 +878,6 @@ function PaasPage() {
         body: JSON.stringify({
           accountId: account.id,
           image: newImage.trim(),
-          leaseNonce: leaseNonce.trim() || undefined,
         }),
       });
       const result = await response.json();
@@ -1970,10 +1964,10 @@ function PaasPage() {
                                           ) : null}
 
                                           <div className="flex flex-wrap justify-end gap-1">
-                                            <Button shape="square" size="sm" variant="ghost" aria-label="重启服务" onClick={() => restartKoyebService(account, app, service)} title={service.status === 'SUSPENDED' ? '启动服务' : '重启服务'} icon={<RefreshCw className="h-3.5 w-3.5" />} />
-                                            <Button shape="square" size="sm" variant="ghost" aria-label="重新部署服务" onClick={() => redeployKoyebService(account, app, service)} title="重新部署" icon={<Rocket className="h-3.5 w-3.5" />} />
-                                            <Button shape="square" size="sm" variant="ghost" aria-label="查看服务实例" onClick={() => fetchKoyebServiceInstances(account, service)} title="查看实例" icon={<Server className={`h-3.5 w-3.5 ${service.loadingInstances ? 'animate-spin' : ''}`} />} />
-                                            <Button shape="square" size="sm" variant="ghost" aria-label="查看服务日志" onClick={() => showKoyebServiceLogs(account, app, service)} title="查看日志" icon={<FileText className="h-3.5 w-3.5" />} />
+                                            <Button shape="square" size="sm" variant="secondary" aria-label="重启服务" onClick={() => restartKoyebService(account, app, service)} title={service.status === 'SUSPENDED' ? '启动服务' : '重启服务'} icon={<RefreshCw className="h-3.5 w-3.5" />} />
+                                            <Button shape="square" size="sm" variant="secondary" aria-label="重新部署服务" onClick={() => redeployKoyebService(account, app, service)} title="重新部署" icon={<Rocket className="h-3.5 w-3.5" />} />
+                                            <Button shape="square" size="sm" variant="secondary" aria-label="查看服务实例" onClick={() => fetchKoyebServiceInstances(account, service)} title="查看实例" icon={<Server className={`h-3.5 w-3.5 ${service.loadingInstances ? 'animate-spin' : ''}`} />} />
+                                            <Button shape="square" size="sm" variant="secondary" aria-label="查看服务日志" onClick={() => showKoyebServiceLogs(account, app, service)} title="查看日志" icon={<FileText className="h-3.5 w-3.5" />} />
                                           </div>
                                         </div>
                                       ))}
@@ -2196,12 +2190,12 @@ function PaasPage() {
                                 ) : null}
 
                                 <div className="flex flex-wrap justify-end gap-1">
-                                    <Button shape="square" size="sm" variant="ghost" aria-label="重启应用" onClick={() => redeployFlyApp(account, app)} title="重启应用" icon={<RefreshCw className="h-3.5 w-3.5" />} />
-                                    <Button shape="square" size="sm" variant="ghost" aria-label="更新容器镜像" onClick={() => updateFlyAppImage(account, app)} title="更新容器镜像" icon={<Rocket className="h-3.5 w-3.5" />} />
-                                    <Button shape="square" size="sm" variant="ghost" aria-label="创建机器" onClick={() => createFlyMachine(account, app)} title="创建机器" icon={<Plus className="h-3.5 w-3.5" />} />
-                                    <Button shape="square" size="sm" variant="ghost" aria-label="查看机器实例" onClick={() => fetchFlyMachines(account, app)} title="查看机器/实例" icon={<Server className={`h-3.5 w-3.5 ${app.loadingMachines ? 'animate-spin' : ''}`} />} />
-                                    <Button shape="square" size="sm" variant="ghost" aria-label="查看运行日志" onClick={() => showFlyAppLogs(account, app)} title="查看运行日志" icon={<FileText className="h-3.5 w-3.5" />} />
-                                    <Button shape="square" size="sm" variant="ghost" aria-label="查看应用配置" onClick={() => viewFlyConfig(account, app)} title="查看应用配置" icon={<Terminal className="h-3.5 w-3.5" />} />
+                                    <Button shape="square" size="sm" variant="secondary" aria-label="重启应用" onClick={() => redeployFlyApp(account, app)} title="重启应用" icon={<RefreshCw className="h-3.5 w-3.5" />} />
+                                    <Button shape="square" size="sm" variant="secondary" aria-label="更新容器镜像" onClick={() => updateFlyAppImage(account, app)} title="更新容器镜像" icon={<Rocket className="h-3.5 w-3.5" />} />
+                                    <Button shape="square" size="sm" variant="secondary" aria-label="创建机器" onClick={() => createFlyMachine(account, app)} title="创建机器" icon={<Plus className="h-3.5 w-3.5" />} />
+                                    <Button shape="square" size="sm" variant="secondary" aria-label="查看机器实例" onClick={() => fetchFlyMachines(account, app)} title="查看机器/实例" icon={<Server className={`h-3.5 w-3.5 ${app.loadingMachines ? 'animate-spin' : ''}`} />} />
+                                    <Button shape="square" size="sm" variant="secondary" aria-label="查看运行日志" onClick={() => showFlyAppLogs(account, app)} title="查看运行日志" icon={<FileText className="h-3.5 w-3.5" />} />
+                                    <Button shape="square" size="sm" variant="secondary" aria-label="查看应用配置" onClick={() => viewFlyConfig(account, app)} title="查看应用配置" icon={<Terminal className="h-3.5 w-3.5" />} />
                                     <Button shape="square" size="sm" variant="secondary-destructive" aria-label="删除 Fly 应用" onClick={() => deleteFlyApp(account, app)} title="删除应用" icon={<Trash className="h-3.5 w-3.5" />} />
                                 </div>
                               </LayerCard.Primary>

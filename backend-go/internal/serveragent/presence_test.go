@@ -90,6 +90,10 @@ func TestPresenceOfflineNotificationFiresOnce(t *testing.T) {
 	if len(events) != 1 || events[0] != "offline" {
 		t.Fatalf("events = %#v, want one offline", events)
 	}
+	refreshes := notifier.refreshSnapshot()
+	if len(refreshes) != 1 || refreshes[0] != "offline" {
+		t.Fatalf("refreshes = %#v, want one offline refresh", refreshes)
+	}
 }
 
 func TestPresenceRecoveryRequiresTwoSamples(t *testing.T) {

@@ -408,7 +408,7 @@ function TotpPage() {
   }, [totpAccounts]);
 
   const groupFilterTabs = useMemo(() => [
-    { value: GROUP_FILTER_ALL, label: '全部分组' },
+    { value: GROUP_FILTER_ALL, label: '总' },
     ...totpGroups.map((group) => ({
       value: String(group.id),
       label: group.name,
@@ -1335,29 +1335,29 @@ function TotpPage() {
                             {totpSettings.maskAccount ? maskEmail(account.account) : account.account}
                           </div>
                         </div>
-                        <div className="flex shrink-0 items-center gap-0.5 opacity-65 transition-opacity group-hover/card:opacity-100">
+                        <div className="flex shrink-0 items-center gap-1 opacity-65 transition-opacity group-hover/card:opacity-100">
                           <Button
                             shape="square" size="sm"
-                            variant="ghost"
+                            variant="secondary"
                             aria-label="编辑账号"
                             onClick={(e) => {
                               e.stopPropagation();
                               handleOpenEditAccount(account);
                             }}
-                            className="flex h-5 w-5 items-center justify-center text-kumo-subtle hover:text-kumo-strong sm:h-6 sm:w-6"
+                            className="flex h-5 w-5 items-center justify-center sm:h-6 sm:w-6"
                             title="编辑"
                           >
                             <Edit className="h-3 w-3" />
                           </Button>
                           <Button
                             shape="square" size="sm"
-                            variant="ghost"
+                            variant="secondary-destructive"
                             aria-label="删除账号"
                             onClick={(e) => {
                               e.stopPropagation();
                               handleDeleteAccount(account);
                             }}
-                            className="flex h-5 w-5 items-center justify-center text-kumo-subtle hover:text-kumo-danger sm:h-6 sm:w-6"
+                            className="flex h-5 w-5 items-center justify-center sm:h-6 sm:w-6"
                             title="删除"
                           >
                             <Trash className="h-3 w-3" />

@@ -345,7 +345,7 @@ th > button[aria-label='Resize column'] > span {
 
 .app-main-topbar {
   background-color: var(--app-main-surface);
-  box-sizing: content-box;
+  box-sizing: border-box;
   padding-top: env(safe-area-inset-top, 0px);
 }
 

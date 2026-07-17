@@ -56,6 +56,8 @@ const getEventTypeName = (type) => {
     up: '服务恢复 (Up)',
     offline: '主机离线',
     online: '主机上线',
+    interrupted: '连接中断',
+    degraded: '采集异常',
     cpu_high: 'CPU高负载',
     cpu_normal: 'CPU恢复正常',
     memory_high: '内存不足',
@@ -106,9 +108,9 @@ const getEventTypeName = (type) => {
 
 const FALLBACK_EVENT_CATALOG = [
   { module: 'uptime', events: ['down', 'up', 'pending', 'resource.created', 'resource.deleted', 'ssl_expiry'] },
-  { module: 'server', events: ['offline', 'online', 'cpu_high', 'memory_high', 'disk_high', 'traffic_high', 'traffic_normal'] },
+  { module: 'server', events: ['offline', 'online', 'interrupted', 'degraded', 'cpu_high', 'cpu_normal', 'memory_high', 'memory_normal', 'disk_high', 'disk_normal', 'traffic_high', 'traffic_normal'] },
   { module: 'github', events: ['action_failed', 'action_recovered', 'release_published', 'star_spike', 'issue_opened', 'pull_request_opened', 'repository_unreachable', 'token_invalid', 'rate_limit_low', 'webhook_delivery_failed', 'webhook_ping'] },
-  { module: 'system', events: ['database.backup', 'database.import', 'log.cleanup', 'migration.failed', 'cpu_high', 'memory_high', 'disk_high'] },
+  { module: 'system', events: ['database.backup', 'database.import', 'log.cleanup', 'migration.failed', 'cpu_high', 'cpu_normal', 'memory_high', 'memory_normal', 'disk_high', 'disk_normal'] },
   { module: 'filebox', events: ['resource.created', 'resource.deleted', 'cleanup'] },
   { module: 'totp', events: ['resource.created', 'resource.updated', 'resource.deleted', 'security.revealed', 'backup.imported', 'backup.exported'] },
 ];
@@ -132,6 +134,31 @@ const buildSampleEventData = (rule = {}) => ({
   threshold: 90,
   downDuration: '3 分钟',
 });
+
+const parseNotificationPreviewLine = (line = '') => {
+  const trimmed = line.trim();
+  if (!trimmed) return { empty: true };
+  const asciiIndex = trimmed.indexOf(':');
+  const chineseIndex = trimmed.indexOf('：');
+  const separator = asciiIndex < 0
+    ? chineseIndex
+    : (chineseIndex < 0 ? asciiIndex : Math.min(asciiIndex, chineseIndex));
+  if (separator <= 0) return { value: trimmed };
+  const label = trimmed.slice(0, separator).trim();
+  const rawValue = trimmed.slice(separator + 1).trim();
+  const statusIcons = {
+    在线: '🟢', 已恢复: '🟢', 成功: '🟢',
+    离线: '🔴', 故障: '🔴', 失败: '🔴',
+    中断: '🟠', 告警: '🟠', 警告: '🟠', 采集异常: '🟠',
+  };
+  return {
+    label,
+    value: label === '状态' && statusIcons[rawValue]
+      ? `${statusIcons[rawValue]} ${rawValue}`
+      : rawValue,
+    code: ['地址', '链接', '云端链接', 'URL', 'Host'].includes(label),
+  };
+};
 
 function NotificationPage() {
   const [notificationCurrentTab, setNotificationCurrentTab] = useState('channels'); // 'channels' | 'rules' | 'history' | 'settings'
@@ -174,6 +201,7 @@ function NotificationPage() {
       to: '',
       bot_token: '',
       chat_id: '',
+      proxy_url: '',
     }
   });
 
@@ -306,6 +334,7 @@ function NotificationPage() {
         to: '',
         bot_token: '',
         chat_id: '',
+        proxy_url: '',
       }
     });
     setChannelModalMode('add');
@@ -322,6 +351,7 @@ function NotificationPage() {
       to: '',
       bot_token: '',
       chat_id: '',
+      proxy_url: '',
     };
 
     let config = { ...defaultConfig };
@@ -365,6 +395,17 @@ function NotificationPage() {
       if (!config.bot_token || !config.chat_id) {
         toast.warning('请填写完整的 Telegram Bot 令牌与 Chat ID');
         return;
+      }
+      if (config.proxy_url) {
+        try {
+          const proxy = new URL(config.proxy_url);
+          if (!['http:', 'https:', 'socks5:', 'socks5h:'].includes(proxy.protocol)) {
+            throw new Error('unsupported proxy scheme');
+          }
+        } catch {
+          toast.warning('请输入有效的 HTTP、HTTPS 或 SOCKS5 代理地址');
+          return;
+        }
       }
     }
 
@@ -1444,6 +1485,21 @@ function NotificationPage() {
                     className="w-full font-mono"
                   />
                 </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-kumo-subtle">代理地址（可选）</label>
+                  <Input size="sm"
+                    aria-label="Telegram 代理地址"
+                    type="text"
+                    placeholder="例如：http://127.0.0.1:7890"
+                    value={channelForm.config.proxy_url || ''}
+                    onChange={(e) => setChannelForm(prev => ({
+                      ...prev,
+                      config: { ...prev.config, proxy_url: e.target.value }
+                    }))}
+                    className="w-full font-mono"
+                  />
+                </div>
               </>
             )}
 
@@ -1646,7 +1702,7 @@ function NotificationPage() {
               <label className="text-xs font-semibold text-kumo-subtle">自定义内容模板 (可选)</label>
               <Textarea
                 aria-label="自定义内容模板"
-                placeholder="例: 服务 {{monitorName}} 无法连通，出错原因: {{error}}"
+                placeholder={'状态: 故障\n监控项: {{monitorName}}\n地址: {{url}}\n错误原因: {{error}}\n时间: {{time}}'}
                 value={ruleForm.message_template}
                 onChange={(e) => setRuleForm(prev => ({ ...prev, message_template: e.target.value }))}
                 className="w-full min-h-16"
@@ -1654,15 +1710,26 @@ function NotificationPage() {
             </div>
 
             {templatePreview && (
-              <div className="rounded-lg border border-kumo-line bg-kumo-recessed/50 p-3">
-                <div className="text-[11px] font-bold text-kumo-strong">模板预览</div>
-                <div className="mt-2 rounded border border-kumo-line bg-kumo-base p-2 text-xs font-semibold text-kumo-strong">
-                  {templatePreview.title}
+              <div className="overflow-hidden rounded-lg border border-kumo-line bg-kumo-base">
+                <div className="h-1 bg-kumo-brand" />
+                <div className="p-3.5">
+                  <div className="text-[9px] font-bold uppercase text-kumo-brand">API Monitor</div>
+                  <div className="mt-1 text-xs font-bold text-kumo-strong">{templatePreview.title}</div>
+                  <div className="mt-3 max-h-36 space-y-1 overflow-y-auto border-l-2 border-kumo-brand bg-kumo-recessed/60 px-3 py-2">
+                    {(templatePreview.message || '').split('\n').map((line, index) => {
+                      const item = parseNotificationPreviewLine(line);
+                      if (item.empty) return <div key={`empty-${index}`} className="h-1.5" />;
+                      if (!item.label) return <div key={`line-${index}`} className="text-[11px] leading-relaxed text-kumo-subtle">{item.value}</div>;
+                      return (
+                        <div key={`${item.label}-${index}`} className="grid grid-cols-[88px_minmax(0,1fr)] gap-2 text-[11px] leading-relaxed">
+                          <span className="text-kumo-subtle">{item.label}</span>
+                          <span className={`min-w-0 break-words font-semibold text-kumo-strong ${item.code ? 'font-mono text-[10px]' : ''}`}>{item.value}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-                <div className="mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap rounded border border-kumo-line bg-kumo-base p-2 font-mono text-[11px] leading-relaxed text-kumo-subtle">
-                  {templatePreview.message}
-                </div>
-                <div className="mt-2 flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-1.5 px-3.5 pb-3.5">
                   {(templatePreview.variables || []).map((variable) => (
                     <span key={variable} className="rounded border border-kumo-line bg-kumo-base px-1.5 py-0.5 font-mono text-[9px] text-kumo-subtle">
                       {`{{${variable}}}`}

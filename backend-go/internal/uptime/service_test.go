@@ -23,8 +23,16 @@ func (f fakeAuth) IsAuthenticated(context.Context, *http.Request) (bool, error) 
 }
 
 type fakeNotifier struct {
-	mu     sync.Mutex
-	events []string
+	mu        sync.Mutex
+	events    []string
+	refreshes []string
+}
+
+func (f *fakeNotifier) RefreshLifecycle(_ context.Context, sourceModule, eventType string, _ map[string]interface{}) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.refreshes = append(f.refreshes, sourceModule+":"+eventType)
+	return nil
 }
 
 func (f *fakeNotifier) Trigger(_ context.Context, sourceModule, eventType string, _ map[string]interface{}) error {
@@ -38,6 +46,12 @@ func (f *fakeNotifier) snapshot() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string{}, f.events...)
+}
+
+func (f *fakeNotifier) refreshSnapshot() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string{}, f.refreshes...)
 }
 
 func testService(t *testing.T, authOK bool) (*Service, *fakeNotifier) {
@@ -273,6 +287,12 @@ func TestProbesAndStateNotifications(t *testing.T) {
 	state, _ := loadState(context.Background(), db, int64Value(monitor["id"], 0))
 	if state["state"] != stateDown {
 		t.Fatalf("expected down state, got %#v", state)
+	}
+	if _, err := service.check(context.Background(), db, monitor); err != nil {
+		t.Fatalf("continuing down check: %v", err)
+	}
+	if refreshes := notifier.refreshSnapshot(); len(refreshes) != 1 || refreshes[0] != "uptime:down" {
+		t.Fatalf("unexpected lifecycle refreshes: %#v", refreshes)
 	}
 
 	ok = true

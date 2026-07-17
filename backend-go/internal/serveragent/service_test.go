@@ -178,9 +178,17 @@ type capturedSocketEvent struct {
 }
 
 type recordingNotifier struct {
-	mu     sync.Mutex
-	events []string
-	data   []map[string]interface{}
+	mu        sync.Mutex
+	events    []string
+	data      []map[string]interface{}
+	refreshes []string
+}
+
+func (n *recordingNotifier) RefreshLifecycle(_ context.Context, _ string, eventType string, _ map[string]interface{}) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.refreshes = append(n.refreshes, eventType)
+	return nil
 }
 
 func (n *recordingNotifier) Trigger(_ context.Context, _ string, eventType string, eventData map[string]interface{}) error {
@@ -197,6 +205,12 @@ func (n *recordingNotifier) snapshot() ([]string, []map[string]interface{}) {
 	events := append([]string(nil), n.events...)
 	data := append([]map[string]interface{}(nil), n.data...)
 	return events, data
+}
+
+func (n *recordingNotifier) refreshSnapshot() []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]string(nil), n.refreshes...)
 }
 
 func (s *terminalCaptureSocket) WriteMessage(_ int, data []byte) error {

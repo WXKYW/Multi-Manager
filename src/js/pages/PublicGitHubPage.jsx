@@ -240,8 +240,10 @@ const ACTION_FLOW_PADDING_X = 28;
 const ACTION_FLOW_PADDING_Y = 28;
 const ACTION_FLOW_ROW_GAP = 38;
 const ACTION_FLOW_VIEWPORT_HEIGHT = 320;
+const ACTION_FLOW_MIN_VIEWPORT_HEIGHT = 112;
 const ACTION_FLOW_MIN_SCALE = 0.72;
 const ACTION_FLOW_BRANCH_INSET = 28;
+const PUBLIC_ACTION_PANEL_INSET_Y = 26;
 
 const workflowGroupName = (definitions) => {
   const names = definitions.map((definition) => String(definition.name || definition.id || '').trim()).filter(Boolean);
@@ -1105,7 +1107,7 @@ const buildActionCanvasLayout = (workflow, jobs, now, focusedDefinitionIds = nul
   });
   const width = ACTION_FLOW_PADDING_X * 2 + Math.max(1, groupedLayers.length) * ACTION_FLOW_CARD_WIDTH + Math.max(0, groupedLayers.length - 1) * ACTION_FLOW_STAGE_GAP;
   const height = Math.max(
-    ACTION_FLOW_VIEWPORT_HEIGHT,
+    ACTION_FLOW_MIN_VIEWPORT_HEIGHT,
     ACTION_FLOW_PADDING_Y + Math.max(
       0,
       ...stages.flatMap((stage) => stage.nodes.map((item) => item.rect.y + item.rect.height)),
@@ -1351,7 +1353,7 @@ function ActionWorkflowCanvas({ workflow, jobs, now }) {
     const scale = Math.min(1, Math.max(ACTION_FLOW_MIN_SCALE, naturalScale));
     const scaledWidth = layout.width * scale;
     const scaledBaseHeight = baseLayoutSize.height * scale;
-    const baseCanvasHeight = Math.max(ACTION_FLOW_VIEWPORT_HEIGHT, Math.ceil(scaledBaseHeight));
+    const baseCanvasHeight = Math.max(ACTION_FLOW_MIN_VIEWPORT_HEIGHT, Math.ceil(scaledBaseHeight));
     const canvasHeight = Math.max(baseCanvasHeight, Math.ceil(expandedCanvasHeight * scale));
     const overflowX = scaledWidth > width;
     const left = overflowX
@@ -1362,7 +1364,7 @@ function ActionWorkflowCanvas({ workflow, jobs, now }) {
       left,
       top: Math.max(0, (baseCanvasHeight - scaledBaseHeight) / 2),
       height: canvasHeight,
-      contentWidth: Math.max(Math.ceil(scaledWidth + left * 2 + 12), width),
+      contentWidth: overflowX ? Math.ceil(scaledWidth + left * 2 + 12) : width,
       overflowX,
     };
   }, [baseLayoutSize.height, baseLayoutSize.width, expandedCanvasHeight, layout.width, viewportSize.width]);
@@ -1380,7 +1382,7 @@ function ActionWorkflowCanvas({ workflow, jobs, now }) {
     });
     return [...points.values()];
   }, [hasExpandedNode, layout.edges]);
-  const canPanCanvas = (canvasFit.contentWidth - (viewportSize.width || 0)) > 1;
+  const canPanCanvas = canvasFit.overflowX;
   const { dragHandlers, isDragging } = useDraggableScroll(viewportRef, {
     disabled: hasExpandedNode || !canPanCanvas,
   });
@@ -1389,7 +1391,7 @@ function ActionWorkflowCanvas({ workflow, jobs, now }) {
     <div
       ref={viewportRef}
       {...dragHandlers}
-      className={`relative overflow-x-auto overflow-y-hidden rounded-md border border-kumo-line bg-kumo-base scrollbar-thin ${canPanCanvas ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : ''} ${isDragging ? 'select-none' : ''}`}
+      className={`relative overflow-x-auto overflow-y-hidden bg-transparent scrollbar-thin ${canPanCanvas ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : ''} ${isDragging ? 'select-none' : ''}`}
       style={{ height: canvasFit.height }}
     >
       {(layout.graph.fallback || workflow?.error) && (
@@ -1532,28 +1534,13 @@ function ActionFlowPlaceholder() {
 
 function ActionWorkflowLoadingState() {
   return (
-    <div className="grid gap-3 rounded-md border border-kumo-line bg-kumo-base px-4 py-4">
-      <div className="flex items-center justify-between gap-3">
-        <SkeletonLine className="h-4 w-36" />
-        <SkeletonLine className="h-4 w-20" />
-      </div>
-      <SkeletonLine className="h-3 w-56" />
-      <div className="flex min-h-[220px] items-center justify-center rounded-md border border-kumo-line bg-kumo-recessed/15 px-6">
-        <div className="flex w-full max-w-4xl items-center justify-center gap-4 opacity-80">
-          {[0, 1, 2, 3].map((item) => (
-            <React.Fragment key={item}>
-              <div className="w-44 rounded-md border border-kumo-line bg-kumo-base p-3 shadow-sm">
-                <div className="flex items-center justify-between gap-3">
-                  <SkeletonLine className="h-4 w-20" />
-                  <SkeletonLine className="h-4 w-10 rounded-full" />
-                </div>
-                <SkeletonLine className="mt-3 h-3 w-24" />
-                <SkeletonLine className="mt-3 h-3 w-28" />
-              </div>
-              {item < 3 && <SkeletonLine className="h-1 w-10 shrink-0 rounded-full" />}
-            </React.Fragment>
-          ))}
+    <div className="flex min-h-[112px] items-center justify-center bg-transparent px-6">
+      <div className="w-52 rounded-md border border-kumo-line bg-kumo-base p-3 opacity-80 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <SkeletonLine className="h-4 w-24" />
+          <SkeletonLine className="h-4 w-12 rounded-full" />
         </div>
+        <SkeletonLine className="mt-3 h-3 w-28" />
       </div>
     </div>
   );
@@ -1569,6 +1556,9 @@ function RepositoryStat({ label, value }) {
 }
 
 function RepositoryCard({ item, now, config, detailLoading = false }) {
+  const projectPanelRef = useRef(null);
+  const actionContentRef = useRef(null);
+  const [panelHeights, setPanelHeights] = useState({ project: 0, action: 0 });
   const latestRun = item?.latest_run || null;
   const workflowName = latestRun?.workflow_name || latestRun?.display_title || '最新 Workflow';
   const actionStatus = latestRun?.conclusion || latestRun?.status || item?.latest_action_conclusion || item?.latest_action_status || 'unknown';
@@ -1583,13 +1573,45 @@ function RepositoryCard({ item, now, config, detailLoading = false }) {
   const runDuration = runStartedAt ? formatActionDuration(runStartedAt, runUpdatedAt, now) : '-';
   const hasDetailPayload = Array.isArray(item?.jobs) || Boolean(item?.workflow) || Boolean(item?.workflow_error);
   const showDetailLoading = detailLoading && !hasDetailPayload;
+  const actionOverflows = panelHeights.project > 0
+    && panelHeights.action + PUBLIC_ACTION_PANEL_INSET_Y > panelHeights.project + 1;
+  const actionExpandedHeight = actionOverflows
+    ? panelHeights.action + PUBLIC_ACTION_PANEL_INSET_Y
+    : panelHeights.project;
+
+  useEffect(() => {
+    const projectPanel = projectPanelRef.current;
+    const actionContent = actionContentRef.current;
+    if (!projectPanel || !actionContent) return undefined;
+
+    const updateHeights = () => {
+      const next = {
+        project: Math.ceil(projectPanel.getBoundingClientRect().height),
+        action: Math.ceil(actionContent.getBoundingClientRect().height),
+      };
+      setPanelHeights((current) => (
+        current.project === next.project && current.action === next.action ? current : next
+      ));
+    };
+
+    updateHeights();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateHeights);
+      return () => window.removeEventListener('resize', updateHeights);
+    }
+    const observer = new ResizeObserver(updateHeights);
+    observer.observe(projectPanel);
+    observer.observe(actionContent);
+    return () => observer.disconnect();
+  }, [showDetailLoading, jobs.length, item.workflow_error]);
 
   return (
-    <article className="public-github-card overflow-hidden rounded-lg border border-kumo-interact/75 bg-kumo-base">
-      <div className="border-b border-kumo-interact/65 px-4 py-2.5">
-        <div className="flex flex-col gap-2.5 md:flex-row md:items-start md:justify-between">
-          <div className="min-w-0">
-            <div className="flex min-w-0 items-start gap-2">
+    <article className="grid gap-3 lg:grid-cols-[minmax(360px,0.82fr)_minmax(0,1.68fr)] lg:items-start">
+      <div ref={projectPanelRef} className="min-w-0 overflow-hidden rounded-lg border border-kumo-interact/75 bg-kumo-base">
+        <div className="border-b border-kumo-interact/65 px-4 py-2.5">
+          <div className="grid gap-1.5">
+            <div className="flex min-w-0 items-center justify-between gap-2">
+              <div className="flex min-w-0 items-start gap-2">
               <GitHubBrand className="mt-0.5 h-4 w-4 shrink-0 text-kumo-brand" />
               {canLinkRepo ? (
                 <a
@@ -1603,13 +1625,45 @@ function RepositoryCard({ item, now, config, detailLoading = false }) {
               ) : (
                 <div className="min-w-0 flex-1 truncate pb-px text-sm font-bold leading-5 text-kumo-strong">{item.full_name}</div>
               )}
+              </div>
+
+              <div className="flex shrink-0 items-center gap-1">
+                <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${item.private ? 'border-kumo-warning/35 bg-kumo-warning/10 text-kumo-warning' : 'border-kumo-success/35 bg-kumo-success/10 text-kumo-success'}`}>
+                  {item.private ? '私有' : '公开'}
+                </span>
+                <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                  actionTone === 'success'
+                    ? 'border-kumo-success/35 bg-kumo-success/10 text-kumo-success'
+                    : actionTone === 'error'
+                    ? 'border-kumo-danger/35 bg-kumo-danger/10 text-kumo-danger'
+                    : actionTone === 'warning'
+                    ? 'border-kumo-warning/35 bg-kumo-warning/10 text-kumo-warning'
+                    : 'border-kumo-interact/80 bg-kumo-recessed/45 text-kumo-subtle'
+                }`}>
+                  {statusLabel(actionStatus)}
+                </span>
+                <span className="rounded-full border border-kumo-interact/80 bg-kumo-recessed/45 px-2 py-0.5 text-[11px] text-kumo-subtle">
+                  {runDuration}
+                </span>
+                {canLinkRun && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    shape="square"
+                    icon={<ExternalLink className="h-3.5 w-3.5" />}
+                    onClick={() => window.open(latestRun.html_url, '_blank', 'noopener,noreferrer')}
+                    aria-label="打开运行详情"
+                  />
+                )}
+              </div>
             </div>
+
             {showDescriptions && item.description && (
-              <div className="mt-0.5 line-clamp-2 break-words text-[12px] leading-5 text-kumo-subtle">
+              <div className="truncate text-[12px] leading-5 text-kumo-subtle" title={formatGitHubRepositoryDescription(item.description)}>
                 {formatGitHubRepositoryDescription(item.description)}
               </div>
             )}
-            <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-kumo-subtle">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-kumo-subtle">
               <span className="inline-flex items-center gap-1">
                 <GitBranch className="h-3.5 w-3.5" />
                 {latestRun?.branch || item.default_branch || '默认分支'}
@@ -1618,71 +1672,56 @@ function RepositoryCard({ item, now, config, detailLoading = false }) {
               {latestRun?.commit_sha && <span className="font-mono">{String(latestRun.commit_sha).slice(0, 8)}</span>}
             </div>
           </div>
+        </div>
 
-          <div className="flex shrink-0 flex-wrap items-center gap-1.5 md:justify-end md:self-start">
-            <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${item.private ? 'border-kumo-warning/35 bg-kumo-warning/10 text-kumo-warning' : 'border-kumo-success/35 bg-kumo-success/10 text-kumo-success'}`}>
-              {item.private ? '私有' : '公开'}
-            </span>
-            <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
-              actionTone === 'success'
-                ? 'border-kumo-success/35 bg-kumo-success/10 text-kumo-success'
-                : actionTone === 'error'
-                ? 'border-kumo-danger/35 bg-kumo-danger/10 text-kumo-danger'
-                : actionTone === 'warning'
-                ? 'border-kumo-warning/35 bg-kumo-warning/10 text-kumo-warning'
-                : 'border-kumo-interact/80 bg-kumo-recessed/45 text-kumo-subtle'
-            }`}>
-              {statusLabel(actionStatus)}
-            </span>
-            <span className="rounded-full border border-kumo-interact/80 bg-kumo-recessed/45 px-2.5 py-1 text-[11px] text-kumo-subtle">
-              {runDuration}
-            </span>
-            {canLinkRun && (
-              <Button
-                size="sm"
-                variant="secondary"
-                shape="square"
-                icon={<ExternalLink className="h-3.5 w-3.5" />}
-                onClick={() => window.open(latestRun.html_url, '_blank', 'noopener,noreferrer')}
-                aria-label="打开运行详情"
-              />
-            )}
+        <div className={`grid min-w-0 gap-2 px-4 py-2.5 ${hasStats ? 'sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]' : ''}`}>
+          {hasStats && (
+            <div className="grid grid-cols-2 gap-1.5">
+              <RepositoryStat label="Stars" value={formatNumber(item.stars)} />
+              <RepositoryStat label="Forks" value={formatNumber(item.forks)} />
+              <RepositoryStat label="Issues" value={formatNumber(item.open_issues)} />
+              <RepositoryStat label="PR" value={formatNumber(item.open_pull_requests)} />
+            </div>
+          )}
+
+          <div className="grid content-start gap-1.5 rounded-lg border border-kumo-interact/70 bg-kumo-recessed/25 px-3 py-2 text-[11px]">
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+              <div className="min-w-0 truncate font-semibold text-kumo-strong" title={workflowName}>{workflowName}</div>
+              <div className="shrink-0 whitespace-nowrap text-kumo-subtle">{runStartedAt ? formatDateTime(runStartedAt) : '暂无运行记录'}</div>
+            </div>
+            <div className="min-w-0 truncate text-kumo-subtle" title={latestRun?.commit_message || latestRun?.display_title || ''}>
+              {latestRun?.commit_message || latestRun?.display_title || '这个仓库还没有可展示的 workflow 运行记录。'}
+            </div>
           </div>
         </div>
       </div>
 
-      <div className="grid gap-3 px-4 py-3">
-        {hasStats && (
-          <div className="grid grid-cols-2 gap-1.5 md:grid-cols-4">
-            <RepositoryStat label="Stars" value={formatNumber(item.stars)} />
-            <RepositoryStat label="Forks" value={formatNumber(item.forks)} />
-            <RepositoryStat label="Issues" value={formatNumber(item.open_issues)} />
-            <RepositoryStat label="PR" value={formatNumber(item.open_pull_requests)} />
-          </div>
-        )}
-
-        <div className="grid gap-1.5 rounded-lg border border-kumo-interact/70 bg-kumo-recessed/25 px-3 py-2.5 text-[11px]">
-          <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
-            <div className="min-w-0 truncate font-semibold text-kumo-strong" title={workflowName}>{workflowName}</div>
-            <div className="shrink-0 whitespace-nowrap text-kumo-subtle">{runStartedAt ? formatDateTime(runStartedAt) : '暂无运行记录'}</div>
-          </div>
-          <div className="min-w-0 truncate text-kumo-subtle" title={latestRun?.commit_message || latestRun?.display_title || ''}>
-            {latestRun?.commit_message || latestRun?.display_title || '这个仓库还没有可展示的 workflow 运行记录。'}
+      <div
+        className={`group relative min-w-0 overflow-visible rounded-lg border border-kumo-interact/45 bg-kumo-base/35 p-3 transition-[height,box-shadow,background-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[height] hover:bg-kumo-base/50 lg:h-[var(--public-action-panel-height)] ${actionOverflows ? 'lg:overflow-hidden lg:hover:h-[var(--public-action-expanded-height)] lg:hover:shadow-lg' : ''}`}
+        style={panelHeights.project > 0 ? {
+          '--public-action-panel-height': `${panelHeights.project}px`,
+          '--public-action-expanded-height': `${actionExpandedHeight}px`,
+        } : undefined}
+      >
+        <div className={`w-full min-w-0 lg:flex lg:h-full ${actionOverflows ? 'lg:items-start' : 'lg:items-center'}`}>
+          <div ref={actionContentRef} className="w-full min-w-0">
+          {showDetailLoading ? (
+            <ActionWorkflowLoadingState />
+          ) : item.workflow_error && jobs.length === 0 ? (
+            <div className="rounded-md border border-kumo-warning/25 bg-kumo-warning/8 px-3 py-2.5 text-sm text-kumo-subtle">
+              {item.workflow_error}
+            </div>
+          ) : jobs.length === 0 ? (
+            <div className="rounded-md border border-kumo-interact/70 bg-kumo-recessed/20 px-3 py-2.5 text-sm text-kumo-subtle">
+              暂无 Job 进度数据
+            </div>
+          ) : (
+            <ActionWorkflowCanvas workflow={item.workflow} jobs={jobs} now={now} />
+          )}
           </div>
         </div>
-
-        {showDetailLoading ? (
-          <ActionWorkflowLoadingState />
-        ) : item.workflow_error && jobs.length === 0 ? (
-          <div className="rounded-md border border-kumo-warning/25 bg-kumo-warning/8 px-3 py-2.5 text-sm text-kumo-subtle">
-            {item.workflow_error}
-          </div>
-        ) : jobs.length === 0 ? (
-          <div className="rounded-md border border-kumo-interact/70 bg-kumo-recessed/20 px-3 py-2.5 text-sm text-kumo-subtle">
-            暂无 Job 进度数据
-          </div>
-        ) : (
-          <ActionWorkflowCanvas workflow={item.workflow} jobs={jobs} now={now} />
+        {actionOverflows && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 hidden h-14 bg-gradient-to-t from-kumo-base/80 via-kumo-base/45 to-transparent opacity-100 backdrop-blur-[1.5px] transition-opacity duration-200 ease-out group-hover:opacity-0 lg:block" aria-hidden="true" />
         )}
       </div>
     </article>

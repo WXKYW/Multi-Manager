@@ -306,6 +306,7 @@ const ACTION_FLOW_PADDING_X = 28;
 const ACTION_FLOW_PADDING_Y = 28;
 const ACTION_FLOW_ROW_GAP = 38;
 const ACTION_FLOW_VIEWPORT_HEIGHT = 320;
+const ACTION_FLOW_MIN_VIEWPORT_HEIGHT = 112;
 const ACTION_FLOW_MIN_SCALE = 0.72;
 const ACTION_FLOW_BRANCH_INSET = 28;
 
@@ -1171,7 +1172,7 @@ const buildActionCanvasLayout = (workflow, jobs, now, focusedDefinitionIds = nul
   });
   const width = ACTION_FLOW_PADDING_X * 2 + Math.max(1, groupedLayers.length) * ACTION_FLOW_CARD_WIDTH + Math.max(0, groupedLayers.length - 1) * ACTION_FLOW_STAGE_GAP;
   const height = Math.max(
-    ACTION_FLOW_VIEWPORT_HEIGHT,
+    ACTION_FLOW_MIN_VIEWPORT_HEIGHT,
     ACTION_FLOW_PADDING_Y + Math.max(
       0,
       ...stages.flatMap((stage) => stage.nodes.map((item) => item.rect.y + item.rect.height)),
@@ -1455,7 +1456,7 @@ function ActionWorkflowCanvas({ workflow, jobs, now }) {
     const scale = Math.min(1, Math.max(ACTION_FLOW_MIN_SCALE, naturalScale));
     const scaledWidth = layout.width * scale;
     const scaledBaseHeight = baseLayoutSize.height * scale;
-    const baseCanvasHeight = Math.max(ACTION_FLOW_VIEWPORT_HEIGHT, Math.ceil(scaledBaseHeight));
+    const baseCanvasHeight = Math.max(ACTION_FLOW_MIN_VIEWPORT_HEIGHT, Math.ceil(scaledBaseHeight));
     const canvasHeight = Math.max(baseCanvasHeight, Math.ceil(expandedCanvasHeight * scale));
     const overflowX = scaledWidth > width;
     const left = overflowX
@@ -1466,7 +1467,7 @@ function ActionWorkflowCanvas({ workflow, jobs, now }) {
       left,
       top: Math.max(0, (baseCanvasHeight - scaledBaseHeight) / 2),
       height: canvasHeight,
-      contentWidth: Math.max(Math.ceil(scaledWidth + left * 2 + 12), width),
+      contentWidth: overflowX ? Math.ceil(scaledWidth + left * 2 + 12) : width,
       overflowX,
     };
   }, [baseLayoutSize.height, baseLayoutSize.width, expandedCanvasHeight, layout.width, viewportSize.width]);
@@ -1484,7 +1485,7 @@ function ActionWorkflowCanvas({ workflow, jobs, now }) {
     });
     return [...points.values()];
   }, [hasExpandedNode, layout.edges]);
-  const canPanCanvas = (canvasFit.contentWidth - (viewportSize.width || 0)) > 1;
+  const canPanCanvas = canvasFit.overflowX;
   const { dragHandlers, isDragging } = useDraggableScroll(viewportRef, {
     disabled: hasExpandedNode || !canPanCanvas,
   });

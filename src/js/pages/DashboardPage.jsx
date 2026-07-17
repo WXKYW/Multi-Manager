@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
-import { ChartPalette, Meter, TimeseriesChart } from '@cloudflare/kumo';
+import { Chart, ChartPalette, Meter } from '@cloudflare/kumo';
 import * as echarts from 'echarts/core';
 import { BarChart, LineChart } from 'echarts/charts';
 import {
@@ -14,7 +14,7 @@ import {
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import useStore from '../store.js';
-import { AppCard, ChartBoundaryBox, PageStack, SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { AppCard, PageStack, SectionCard } from '../components/ui/AppPrimitives.jsx';
 import { DASHBOARD_INVALIDATION_EVENT, readDashboardStatsInvalidatedAt } from '../modules/dashboardInvalidation.js';
 import { parseDashboardTrendTimestamp } from '../modules/dashboardMetrics.js';
 import {
@@ -30,7 +30,8 @@ import {
   FolderOpen,
   KoyebBrand,
   FlyIoBrand,
-  Clock
+  Clock,
+  GitHubBrand,
 } from '../components/Icons.jsx';
 
 const DEFAULT_DASHBOARD_STATS = {
@@ -120,6 +121,14 @@ function getInitialDashboardStats() {
 function formatDashboardTime(timestamp) {
   const date = new Date(timestamp);
   return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function formatDashboardAxisValue(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '-';
+  if (Math.abs(number) < 1000) return `${Math.round(number)}`;
+  const scaled = number / 1000;
+  return `${Number.isInteger(scaled) ? scaled : scaled.toFixed(1).replace(/\.0$/, '')}K`;
 }
 
 function clampPercent(value) {
@@ -265,18 +274,31 @@ const getStatusPageUrl = (page) => {
   return `/status/${slug}`;
 };
 
+const STATUS_PAGE_SHORTCUT_VISUALS = {
+  uptime: { icon: Activity, iconClassName: 'bg-kumo-success/10 text-kumo-success' },
+  server: { icon: Server, iconClassName: 'bg-kumo-info-tint text-kumo-info' },
+  github: { icon: GitHubBrand, iconClassName: 'bg-kumo-brand/10 text-kumo-brand' },
+};
+
 function StatusPageShortcutCard({ page }) {
   const url = getStatusPageUrl(page);
+  const visual = STATUS_PAGE_SHORTCUT_VISUALS[page.kind] || STATUS_PAGE_SHORTCUT_VISUALS.uptime;
+  const ShortcutIcon = visual.icon;
 
   return (
     <AppCard
       padding="none"
       interactive
       onClick={() => url && window.open(url, '_blank', 'noopener,noreferrer')}
-      className="group flex h-12 min-w-0 cursor-pointer items-center justify-between gap-2.5 px-3 sm:h-[52px] sm:px-3.5"
+      className="group flex h-11 min-w-0 cursor-pointer items-center justify-between gap-2.5 px-3 sm:h-12 sm:px-3.5"
     >
-      <span className="min-w-0 truncate text-sm font-semibold text-kumo-strong group-hover:text-kumo-brand">
-        {page.title || page.slug}
+      <span className="flex min-w-0 items-center gap-2.5">
+        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${visual.iconClassName}`}>
+          <ShortcutIcon aria-hidden="true" className="h-4 w-4 text-base leading-none" />
+        </span>
+        <span className="min-w-0 truncate text-sm font-semibold text-kumo-strong group-hover:text-kumo-brand">
+          {page.title || page.slug}
+        </span>
       </span>
       <ArrowRight className="h-3.5 w-3.5 shrink-0 text-kumo-subtle transition-transform group-hover:translate-x-0.5 group-hover:text-kumo-brand" />
     </AppCard>
@@ -849,14 +871,68 @@ function DashboardPage({ onNavigate } = {}) {
         .filter(([timestamp]) => Number.isFinite(timestamp)),
     },
   ], [apiTrend, isDarkMode]);
+  const apiTrendTimestamps = useMemo(() => (
+    [...new Set(apiTrendChartData.flatMap((series) => series.data.map(([timestamp]) => timestamp)))]
+      .sort((left, right) => left - right)
+  ), [apiTrendChartData]);
+  const apiTrendChartOptions = useMemo(() => ({
+    animation: false,
+    aria: {
+      enabled: true,
+      label: { description: '最近 7 天系统 API 调用量' },
+    },
+    backgroundColor: 'transparent',
+    grid: {
+      left: 8,
+      right: 8,
+      top: 8,
+      bottom: 4,
+      containLabel: true,
+    },
+    tooltip: {
+      trigger: 'axis',
+      confine: true,
+      valueFormatter: (value) => `${Math.round(Number(value) || 0)} 次`,
+    },
+    xAxis: {
+      type: 'category',
+      data: apiTrendTimestamps.map(formatDashboardTime),
+      boundaryGap: false,
+      axisLine: { show: false },
+      axisTick: { show: true, alignWithLabel: true },
+      axisLabel: { interval: 0, hideOverlap: false, margin: 8 },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: 'value',
+      splitNumber: 4,
+      axisTick: { show: true },
+      axisLabel: { formatter: formatDashboardAxisValue, margin: 8 },
+      splitLine: {
+        show: true,
+        lineStyle: { type: 'dashed', width: 1 },
+      },
+    },
+    series: apiTrendChartData.map((series) => {
+      const valuesByTimestamp = new Map(series.data);
+      return {
+        name: series.name,
+        type: 'line',
+        data: apiTrendTimestamps.map((timestamp) => valuesByTimestamp.get(timestamp) ?? 0),
+        showSymbol: true,
+        symbol: 'circle',
+        symbolSize: 4,
+        lineStyle: { color: series.color, width: 2 },
+        itemStyle: { color: series.color },
+        emphasis: { focus: 'series' },
+      };
+    }),
+  }), [apiTrendChartData, apiTrendTimestamps]);
 
   const hostCpuUsage = clampPercent(stats.host?.cpu?.usage);
   const hostMemoryUsage = clampPercent(stats.host?.memory?.usage);
   const hostDiskUsage = clampPercent(stats.host?.disk?.usage);
   const hostLoad = stats.host?.cpu?.loadAverage?.[0];
-  const hostHealthTone = Math.max(hostCpuUsage, hostMemoryUsage, hostDiskUsage) >= 90
-    ? 'text-kumo-warning bg-kumo-warning/10 border-kumo-warning/20'
-    : 'text-kumo-success bg-kumo-success/10 border-kumo-success/20';
   const serverBadgeClassName = stats.servers.total === 0
     ? 'text-kumo-subtle bg-kumo-recessed border-kumo-line'
     : stats.servers.online === stats.servers.total
@@ -966,47 +1042,30 @@ function DashboardPage({ onNavigate } = {}) {
           title="系统 API 调用趋势"
           icon={<Activity className="h-4 w-4 text-kumo-brand" />}
           meta={<Badge variant="neutral">最近 7 天</Badge>}
-          className="order-1 min-w-0"
+          className="order-1 hidden min-w-0 sm:flex"
           bodyClassName="flex min-h-0 flex-1 flex-col p-2.5 sm:p-5"
         >
-          <ChartBoundaryBox>
-            {(tooltipBoundary) => (
-              <>
-              <div className="min-w-0">
-                {loading || hasApiTrendCalls ? (
-                  <div className="min-w-0 overflow-hidden" style={{ height: apiChartHeight }}>
-                    <TimeseriesChart
-                      echarts={echarts}
-                      isDarkMode={isDarkMode}
-                      type="line"
-                      data={apiTrendChartData}
-                      height={apiChartHeight}
-                      xAxisName="时间"
-                      yAxisName="调用"
-                      xAxisTickCount={3}
-                      xAxisTickFormat={formatDashboardTime}
-                      yAxisTickFormat={(value) => `${Math.round(value)}`}
-                      tooltipValueFormat={(value) => `${Math.round(value)} 次`}
-                      tooltipBoundary={tooltipBoundary ?? undefined}
-                      tooltipFollowCursor="x"
-                      loading={loading && !hasApiTrendCalls}
-                      ariaDescription="最近 7 天系统 API 调用量"
-                    />
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-center text-center text-xs text-kumo-subtle" style={{ height: apiChartHeight }}>
-                    {apiTrendStatusText}
-                  </div>
-                )}
+          <div className="min-w-0 overflow-hidden" style={{ height: apiChartHeight }}>
+            {hasApiTrendCalls ? (
+              <Chart
+                echarts={echarts}
+                options={apiTrendChartOptions}
+                height={apiChartHeight}
+                isDarkMode={isDarkMode}
+              />
+            ) : loading ? (
+              <div className="flex h-full items-center justify-center text-xs text-kumo-subtle">加载中...</div>
+            ) : (
+              <div className="flex h-full items-center justify-center text-center text-xs text-kumo-subtle">
+                {apiTrendStatusText}
               </div>
-
-              <div className="mt-2 flex items-center gap-2 border-t border-kumo-line pt-2 text-[10px] text-kumo-subtle select-none sm:mt-3 sm:pt-3 sm:text-[11px]">
-                <span className="w-1.5 h-1.5 rounded-full bg-kumo-brand flex-shrink-0" />
-                <span>{apiTrendStatusText}</span>
-              </div>
-              </>
             )}
-          </ChartBoundaryBox>
+          </div>
+
+          <div className="mt-2 flex items-center gap-2 border-t border-kumo-line pt-2 text-[10px] text-kumo-subtle select-none sm:mt-3 sm:pt-3 sm:text-[11px]">
+            <span className="w-1.5 h-1.5 rounded-full bg-kumo-brand flex-shrink-0" />
+            <span>{apiTrendStatusText}</span>
+          </div>
         </SectionCard>
 
         {/* Right Column: Services & Tools List */}
@@ -1168,38 +1227,19 @@ function DashboardPage({ onNavigate } = {}) {
           className="order-4 min-w-0 xl:col-span-1 xl:row-start-2"
           bodyClassName="p-2.5 sm:p-5"
           meta={(
-            <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-              <span className={`w-fit rounded border px-2 py-0.5 text-[11px] font-semibold ${hostHealthTone}`}>
-                CPU {formatPercent(hostCpuUsage)}
-              </span>
-              <span className={`w-fit rounded border px-2 py-0.5 text-[11px] font-semibold ${hostHealthTone}`}>
-                MEM {formatPercent(hostMemoryUsage)}
-              </span>
-              <span className={`w-fit rounded border px-2 py-0.5 text-[11px] font-semibold ${hostHealthTone}`}>
-                DISK {formatPercent(hostDiskUsage)}
-              </span>
-            </div>
+            <span
+              className="w-fit rounded border border-kumo-success/20 bg-kumo-success/10 px-2 py-0.5 text-[11px] font-semibold text-kumo-success"
+              title="运行时间"
+              aria-label={`运行时间 ${formatDuration(stats.host?.uptime)}`}
+            >
+              {formatDuration(stats.host?.uptime)}
+            </span>
           )}
         >
           <div className="grid gap-2.5 md:grid-cols-3 md:gap-3 md:[&>*+*]:border-l md:[&>*+*]:border-kumo-line md:[&>*+*]:pl-4 md:[&>*:not(:last-child)]:pr-4">
-            <MiniMeter label="CPU" value={hostCpuUsage} detail={formatHostCpuDetail(stats.host?.cpu, hostCpuUsage)} tone="success" />
+            <MiniMeter label={`CPU (${Number.isFinite(hostLoad) ? hostLoad.toFixed(2) : '-'})`} value={hostCpuUsage} detail={formatHostCpuDetail(stats.host?.cpu, hostCpuUsage)} tone="success" />
             <MiniMeter label="内存" value={hostMemoryUsage} detail={`${formatBytes(stats.host?.memory?.used)} / ${formatBytes(stats.host?.memory?.total)}`} tone="info" />
-            <MiniMeter label="磁盘" value={hostDiskUsage} detail={`${formatBytes(stats.host?.disk?.used)} / ${formatBytes(stats.host?.disk?.total)}`} tone="brand" />
-          </div>
-
-          <div className="mt-2 grid gap-x-6 gap-y-1.5 border-t border-kumo-line pt-2 text-[11px] text-kumo-subtle sm:mt-4 sm:grid-cols-3 sm:gap-y-2 sm:pt-3 sm:text-xs">
-            <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2">
-              <span>运行时间</span>
-              <span className="truncate text-right font-semibold text-kumo-strong">{formatDuration(stats.host?.uptime)}</span>
-            </div>
-            <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2">
-              <span>负载</span>
-              <span className="truncate text-right font-mono font-semibold text-kumo-strong">{Number.isFinite(hostLoad) ? hostLoad.toFixed(2) : '-'}</span>
-            </div>
-            <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2">
-              <span>磁盘卷</span>
-              <span className="truncate text-right font-semibold text-kumo-strong">{stats.host?.disk?.root || '-'}</span>
-            </div>
+            <MiniMeter label={`磁盘 (${stats.host?.disk?.root || '-'})`} value={hostDiskUsage} detail={`${formatBytes(stats.host?.disk?.used)} / ${formatBytes(stats.host?.disk?.total)}`} tone="brand" />
           </div>
         </SectionCard>
 

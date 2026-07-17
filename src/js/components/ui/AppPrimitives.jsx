@@ -56,8 +56,18 @@ function withCompactCardActions(node) {
   }
 
   if (node.type === Button) {
+    const hasIconAndLabel = Boolean(node.props.icon && node.props.children);
+    const textLabel = typeof node.props.children === 'string' || typeof node.props.children === 'number'
+      ? String(node.props.children)
+      : undefined;
+
     return React.cloneElement(node, {
       size: 'sm',
+      ...(hasIconAndLabel ? {
+        className: cx(node.props.className, 'max-sm:!size-8 max-sm:!p-0'),
+        children: <span className="hidden sm:inline">{node.props.children}</span>,
+        'aria-label': node.props['aria-label'] || textLabel || node.props.title,
+      } : {}),
     });
   }
 

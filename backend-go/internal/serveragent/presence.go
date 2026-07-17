@@ -250,10 +250,16 @@ func (p *agentPresenceManager) check() {
 	now := time.Now()
 	var offlineIDs []string
 	var suspectIDs []string
+	type refreshTarget struct {
+		serverID string
+		status   string
+	}
+	var refreshTargets []refreshTarget
 
 	p.mu.Lock()
 	for serverID, rec := range p.records {
 		if rec.Status == agentPresenceOffline {
+			refreshTargets = append(refreshTargets, refreshTarget{serverID: serverID, status: "offline"})
 			continue
 		}
 		lastSignal := maxTime(rec.LastHeartbeat, rec.LastMetricsSeen, rec.LastConnect)
@@ -272,6 +278,8 @@ func (p *agentPresenceManager) check() {
 		if rec.Status == agentPresenceOnline && age >= p.cfg.suspectAfter {
 			rec.Status = agentPresenceSuspect
 			suspectIDs = append(suspectIDs, serverID)
+		} else if rec.Status == agentPresenceSuspect {
+			refreshTargets = append(refreshTargets, refreshTarget{serverID: serverID, status: "interrupted"})
 		}
 	}
 	p.mu.Unlock()
@@ -281,6 +289,9 @@ func (p *agentPresenceManager) check() {
 	}
 	for _, serverID := range offlineIDs {
 		p.applyOffline(serverID)
+	}
+	for _, target := range refreshTargets {
+		p.refreshNotification(target.serverID, target.status)
 	}
 }
 
@@ -409,6 +420,38 @@ func (p *agentPresenceManager) triggerNotification(ctx context.Context, serverID
 	if err := p.service.notifier.Trigger(ctx, "server", status, eventData); err != nil {
 		applog.Warn(ctx, "serveragent", "failed to trigger presence notification", "server_id", serverID, "status", status, "error", err.Error())
 	}
+}
+
+func (p *agentPresenceManager) refreshNotification(serverID, status string) {
+	updater, ok := p.service.notifier.(interface {
+		RefreshLifecycle(context.Context, string, string, map[string]interface{}) error
+	})
+	if !ok || p.notificationsSuppressed(serverID, time.Now()) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	db, err := p.service.open(ctx)
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	serverName, serverHost := p.serverIdentity(ctx, db, serverID)
+	eventData := map[string]interface{}{
+		"serverId": serverID, "serverName": serverName, "host": serverHost,
+		"hostname": serverName, "status": status,
+	}
+	p.mu.RLock()
+	rec := p.records[serverID]
+	if rec != nil {
+		lastActive := maxTime(rec.LastHeartbeat, rec.LastMetricsSeen, rec.LastConnect)
+		if !lastActive.IsZero() {
+			eventData["lastActive"] = lastActive.UTC().Format(time.RFC3339)
+			eventData["downDuration"] = time.Since(lastActive).Round(time.Second).String()
+		}
+	}
+	p.mu.RUnlock()
+	_ = updater.RefreshLifecycle(ctx, "server", status, eventData)
 }
 
 func (p *agentPresenceManager) serverIdentity(ctx context.Context, db *sql.DB, serverID string) (string, string) {

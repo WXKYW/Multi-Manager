@@ -711,7 +711,7 @@ function MainLayout() {
         {/* ==================== 2. 主页面区 (Main Panel) ==================== */}
         <div className="app-main-panel flex-1 flex flex-col h-full overflow-hidden">
           {/* 顶部导航 */}
-          <header className="app-main-topbar flex h-[58px] flex-shrink-0 items-center border-b border-kumo-line px-3 min-[450px]:px-4 md:px-6">
+          <header className="app-main-topbar box-border flex h-[58px] flex-shrink-0 items-center border-b border-kumo-line px-3 min-[450px]:px-4 md:px-6">
             <div className="flex h-full min-w-0 flex-1 items-center gap-3.5">
               <Sidebar.Trigger className="md:hidden" />
 
