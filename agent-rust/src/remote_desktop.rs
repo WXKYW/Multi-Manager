@@ -34,6 +34,8 @@ mod windows_impl {
     use win_native_media::encoder::mf_h264::MfH264Encoder;
     use win_native_media::{CaptureTarget, VideoConfig};
     use windows_sys::Win32::Foundation::{POINT, RECT};
+    use windows_sys::Win32::System::ProcessStatus::K32EmptyWorkingSet;
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
     use windows_sys::Win32::UI::Input::Pointer::{
         InitializeTouchInjection, InjectTouchInput, POINTER_FLAG_CANCELED, POINTER_FLAG_DOWN,
         POINTER_FLAG_INCONTACT, POINTER_FLAG_INRANGE, POINTER_FLAG_UP, POINTER_FLAG_UPDATE,
@@ -522,6 +524,12 @@ mod windows_impl {
                 let _ = worker.await;
             }
         }
+        // Media Foundation and D3D keep released frame pages resident for
+        // reuse. Once the capture worker is fully gone, return those pages to
+        // Windows so the Agent's active working set drops after disconnect.
+        unsafe {
+            let _ = K32EmptyWorkingSet(GetCurrentProcess());
+        }
     }
 
     async fn emit_signal(
@@ -646,7 +654,6 @@ mod windows_impl {
         let mut encoder: Option<MfH264Encoder> = None;
         let mut encoded_size = (0, 0);
         let mut encoded_profile = StreamProfile::default();
-        let mut prefer_hardware = true;
         let mut last_encoded_timestamp = Duration::ZERO;
         while !stop.load(Ordering::Relaxed) {
             let frame = match frames.recv_timeout(Duration::from_millis(250)) {
@@ -681,11 +688,7 @@ mod windows_impl {
             {
                 let config = video_config(frame.width, frame.height, desired_profile);
                 encoder = Some(
-                    MfH264Encoder::new_with(session.device(), config, prefer_hardware)
-                        .or_else(|_| {
-                            prefer_hardware = false;
-                            MfH264Encoder::new(session.device(), config)
-                        })
+                    MfH264Encoder::new(session.device(), config)
                         .map_err(|err| format!("create Media Foundation H.264 encoder: {err}"))?,
                 );
                 encoded_size = (frame.width, frame.height);
@@ -704,23 +707,10 @@ mod windows_impl {
                 frame.timestamp,
                 &mut samples,
             );
-            if let Err(hardware_error) = encode_result {
-                if prefer_hardware {
-                    prefer_hardware = false;
-                    let config = video_config(frame.width, frame.height, desired_profile);
-                    let mut software = MfH264Encoder::new(session.device(), config).map_err(|err| {
-                        format!("hardware H.264 failed ({hardware_error}); software fallback failed: {err}")
-                    })?;
-                    samples.clear();
-                    software
-                        .encode(&frame.texture, frame.timestamp, &mut samples)
-                        .map_err(|err| format!("Media Foundation H.264 encode failed: {err}"))?;
-                    encoder = Some(software);
-                } else {
-                    return Err(format!(
-                        "Media Foundation H.264 encode failed: {hardware_error}"
-                    ));
-                }
+            if let Err(encode_error) = encode_result {
+                return Err(format!(
+                    "Media Foundation H.264 encode failed: {encode_error}"
+                ));
             }
 
             for sample in samples {

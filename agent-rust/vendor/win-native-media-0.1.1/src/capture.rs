@@ -59,6 +59,12 @@ impl CaptureSession {
 
 impl Drop for CaptureSession {
     fn drop(&mut self) {
+        // The frame pool owns the event handler until the registration token is
+        // explicitly removed. Closing the pool alone leaves the callback state,
+        // D3D device, and its worker resources alive across capture sessions.
+        let _ = self
+            .frame_pool
+            .RemoveFrameArrived(self._frame_arrived_token);
         // Close is best-effort; if the session already tore down, ignore.
         let _ = self.session.Close();
         let _ = self.frame_pool.Close();

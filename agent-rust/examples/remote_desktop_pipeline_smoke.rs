@@ -26,8 +26,8 @@ fn main() {
         bitrate: 12_000_000,
         keyframe_interval: 60,
     };
-    let mut encoder = MfH264Encoder::new_with(session.device(), config, true)
-        .expect("create hardware Media Foundation H.264 encoder");
+    let mut encoder = MfH264Encoder::new(session.device(), config)
+        .expect("create software Media Foundation H.264 encoder");
     let started = Instant::now();
     let mut encode_elapsed = Duration::ZERO;
     let mut access_units = 0usize;
@@ -55,7 +55,7 @@ fn main() {
     let fps = FRAME_COUNT as f64 / elapsed.as_secs_f64();
     assert!(access_units > 0, "encoder produced no H.264 access units");
     println!(
-        "WGC + hardware MF H.264: {}x{}; {:.1} capture FPS; {:.2} ms encode; {} access units; {} bytes",
+        "WGC + software MF H.264: {}x{}; {:.1} capture FPS; {:.2} ms encode; {} access units; {} bytes",
         config.width,
         config.height,
         fps,

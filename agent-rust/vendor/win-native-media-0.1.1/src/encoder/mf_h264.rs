@@ -1,10 +1,9 @@
 //! Media Foundation H.264 encoder MFT.
 //!
-//! Enumerates a hardware H.264 encoder (software fallback), binds the shared
-//! capture D3D11 device via a DXGI device manager, negotiates types, and runs
-//! the async-or-sync MFT drain loop. Captured D3D11 textures are wrapped as
-//! DXGI-backed IMFSamples (no CPU readback). Output is emitted as Annex-B
-//! `EncodedSample`s.
+//! Enumerates a software H.264 encoder, negotiates types, and runs the MFT
+//! drain loop. The hardware implementation remains in place but is disabled:
+//! repeated sessions retain driver threads and handles, then eventually crash.
+//! Output is emitted as Annex-B `EncodedSample`s.
 //!
 //! Threading: MF requires MTA. `MfH264Encoder::new` calls `CoInitializeEx`
 //! (MTA) + `MFStartup` on the constructing thread; keep the encoder on one
@@ -16,7 +15,7 @@ use windows::core::{Interface, GUID, PCWSTR};
 use windows::Win32::Graphics::Direct3D11::ID3D11Device;
 use windows::Win32::Graphics::Direct3D11::ID3D11Texture2D;
 use windows::Win32::Media::MediaFoundation::*;
-use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
+use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 
 use super::{EncodedSample, ParameterSets};
 use crate::convert::Bgra2Nv12;
@@ -46,38 +45,71 @@ pub struct MfH264Encoder {
     /// samples come from here (MFT-owned NV12 textures) instead of textures we
     /// create — hardware MFTs reject foreign textures at ProcessInput.
     allocator: Option<IMFVideoSampleAllocatorEx>,
+    // Declared last so every MFT/DXGI field is released before MFShutdown and
+    // CoUninitialize run during field destruction.
+    _runtime: MediaFoundationRuntime,
+}
+
+struct MediaFoundationRuntime {
+    com_initialized: bool,
+    mf_started: bool,
+}
+
+impl MediaFoundationRuntime {
+    fn start() -> Result<Self> {
+        unsafe {
+            let mut runtime = Self {
+                com_initialized: CoInitializeEx(None, COINIT_MULTITHREADED).is_ok(),
+                mf_started: false,
+            };
+            MFStartup(MF_VERSION, MFSTARTUP_FULL)?;
+            runtime.mf_started = true;
+            Ok(runtime)
+        }
+    }
+}
+
+impl Drop for MediaFoundationRuntime {
+    fn drop(&mut self) {
+        unsafe {
+            if self.mf_started {
+                let _ = MFShutdown();
+            }
+            if self.com_initialized {
+                CoUninitialize();
+            }
+        }
+    }
 }
 
 impl MfH264Encoder {
     /// Create the encoder sharing `device`.
     ///
-    /// v1 uses the software (sync) H.264 MFT, which works reliably end-to-end.
-    /// The hardware (async) MFT for zero-copy NV12 texture input is available via
-    /// `new_with(.., true)` but its ProcessInput still rejects our
-    /// video-processor NV12 texture (E_UNEXPECTED) — the async D3D11-aware MFT
-    /// wants input textures from its own IMFVideoSampleAllocatorEx, not ones we
-    /// allocate. Finishing that (M2b) is required for 4K, where the software
-    /// path's per-frame GPU readback + CPU encode can't keep up. See
-    /// examples/m2b_hw_encode.rs.
-    // ponytail: software until the HW allocator path lands; upgrade to
-    // new_with(true) once ProcessInput accepts our textures.
+    /// Creates the software (sync) H.264 MFT by default.
     pub fn new(device: &ID3D11Device, cfg: VideoConfig) -> Result<Self> {
         Self::new_with(device, cfg, false)
     }
 
-    /// Create the encoder, explicitly choosing hardware or software.
+    /// Create the encoder, explicitly choosing hardware or software. Hardware
+    /// currently returns an error so callers safely fall back to software.
     pub fn new_with(
         device: &ID3D11Device,
         cfg: VideoConfig,
         prefer_hardware: bool,
     ) -> Result<Self> {
+        if prefer_hardware {
+            return Err(PipelineError::TypeNegotiation(
+                "hardware H.264 MFT disabled because repeated sessions retain driver resources"
+                    .into(),
+            ));
+        }
         unsafe {
-            // MF needs MTA. Ignore RPC_E_CHANGED_MODE if already initialized.
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-            MFStartup(MF_VERSION, MFSTARTUP_FULL)?;
+            // MF needs MTA. The guard balances both startup calls on successful
+            // construction and on every early-return error path.
+            let runtime = MediaFoundationRuntime::start()?;
 
             let device_manager = create_device_manager(device)?;
-            let (transform, activate) = enumerate_h264_encoder(prefer_hardware)?;
+            let transform = enumerate_h264_encoder(prefer_hardware)?;
             let (input_id, output_id) = stream_ids(&transform)?;
 
             // Detect async (hardware) MFT via attribute.
@@ -134,8 +166,6 @@ impl MfH264Encoder {
                 None
             };
 
-            drop(activate); // MFT is created; activate no longer needed.
-
             Ok(Self {
                 transform,
                 input_stream_id: input_id,
@@ -149,6 +179,7 @@ impl MfH264Encoder {
                 pending_input_requests: 0,
                 converter,
                 allocator,
+                _runtime: runtime,
             })
         }
     }
@@ -497,6 +528,12 @@ impl MfH264Encoder {
 impl Drop for MfH264Encoder {
     fn drop(&mut self) {
         unsafe {
+            // A session may close with samples still queued in the transform.
+            // Flush first so those frame-sized buffers are released before the
+            // transform and Media Foundation runtime are torn down.
+            let _ = self
+                .transform
+                .ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0);
             let _ = self
                 .transform
                 .ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0);
@@ -506,7 +543,6 @@ impl Drop for MfH264Encoder {
             // Release the D3D manager reference held by the MFT.
             let _ = self.transform.ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, 0);
             let _ = &self.device_manager;
-            let _ = MFShutdown();
         }
     }
 }
@@ -597,9 +633,9 @@ unsafe fn create_device_manager(device: &ID3D11Device) -> Result<IMFDXGIDeviceMa
     Ok(manager)
 }
 
-/// Enumerate H.264 video encoders, preferring hardware. Returns the created
-/// transform and its activation object.
-unsafe fn enumerate_h264_encoder(prefer_hardware: bool) -> Result<(IMFTransform, IMFActivate)> {
+/// Enumerate H.264 video encoders, preferring hardware, and return the created
+/// transform.
+unsafe fn enumerate_h264_encoder(prefer_hardware: bool) -> Result<IMFTransform> {
     let output_info = MFT_REGISTER_TYPE_INFO {
         guidMajorType: MFMediaType_Video,
         guidSubtype: MFVideoFormat_H264,
@@ -627,25 +663,31 @@ unsafe fn enumerate_h264_encoder(prefer_hardware: bool) -> Result<(IMFTransform,
     )?;
 
     if count == 0 || activates.is_null() {
+        if !activates.is_null() {
+            windows::Win32::System::Com::CoTaskMemFree(Some(activates as *const _));
+        }
         return Err(PipelineError::NoEncoderFound);
     }
 
-    let slice = std::slice::from_raw_parts(activates, count as usize);
+    let slice = std::slice::from_raw_parts_mut(activates, count as usize);
+    let owned_activations = slice
+        .iter_mut()
+        .filter_map(Option::take)
+        .collect::<Vec<_>>();
+    windows::Win32::System::Com::CoTaskMemFree(Some(activates as *const _));
+
     // Take the first (sorted best-first by SORTANDFILTER).
     let result = (|| {
-        for act in slice.iter().flatten() {
+        for act in &owned_activations {
             if let Ok(transform) = act.ActivateObject::<IMFTransform>() {
-                return Some((transform, act.clone()));
+                return Some(transform);
             }
         }
         None
     })();
 
-    // Free the CoTaskMemAlloc'd array (the IMFActivate refs we didn't clone are
-    // released when the slice's Option<IMFActivate> drop; but the array memory
-    // itself must be freed).
-    windows::Win32::System::Com::CoTaskMemFree(Some(activates as *const _));
-
+    // Dropping the owned activation list releases every COM reference returned
+    // by MFTEnumEx. The activated transform owns everything it still needs.
     result.ok_or(PipelineError::NoEncoderFound)
 }
 

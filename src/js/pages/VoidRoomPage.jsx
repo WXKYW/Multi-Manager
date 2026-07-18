@@ -33,10 +33,6 @@ const OWNER_STORAGE_PREFIX = 'void_owner_credentials:';
 const GUEST_STORAGE_PREFIX = 'void_guest_credentials:';
 const DEVICE_CLIENT_ID_KEY = 'void_device_client_id';
 
-function authHeaders() {
-  return { 'x-admin-password': localStorage.getItem('admin_password') || '' };
-}
-
 function roomIdFromPath() {
   const match = window.location.pathname.match(/^\/void\/([^/]+)$/);
   return match ? decodeURIComponent(match[1]).replace(/[^A-Z0-9]/gi, '').toUpperCase() : '';
@@ -44,24 +40,6 @@ function roomIdFromPath() {
 
 function roomURL(roomId, origin = window.location.origin) {
   return `${String(origin || window.location.origin).replace(/\/+$/g, '')}/void/${encodeURIComponent(roomId)}`;
-}
-
-function originHost(origin) {
-  try {
-    return new URL(origin).host;
-  } catch {
-    return String(origin || '').replace(/^https?:\/\//i, '');
-  }
-}
-
-function candidateLabel(label) {
-  return String(label || '').replace(/地址$/u, '').trim() || '入口';
-}
-
-function candidateTitle(candidate) {
-  const label = candidateLabel(candidate?.label);
-  const host = originHost(candidate?.origin);
-  return host ? `${label} · ${host}` : label;
 }
 
 function sortedParticipants(participants) {
@@ -198,9 +176,6 @@ function VoidRoomPage() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [sending, setSending] = useState(false);
   const [connectedPeers, setConnectedPeers] = useState({});
-  const [networkCandidates, setNetworkCandidates] = useState([]);
-  const [networkWarnings, setNetworkWarnings] = useState([]);
-  const [selectedOrigin, setSelectedOrigin] = useState(window.location.origin);
   const [qrCode, setQrCode] = useState('');
 
   const roleRef = useRef(role);
@@ -220,7 +195,7 @@ function VoidRoomPage() {
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   useEffect(() => { connectedPeersRef.current = connectedPeers; }, [connectedPeers]);
 
-  const activeLink = roomURL(roomId, selectedOrigin);
+  const activeLink = roomURL(roomId);
   const participantName = participant?.name || (role === 'owner' ? '房主' : deviceName());
   const clientId = useMemo(deviceClientId, []);
 
@@ -545,17 +520,6 @@ function VoidRoomPage() {
           setParticipant(owner);
           participantRef.current = owner;
           setStatus('等待设备加入');
-          try {
-            const candidatesRes = await axios.get('/api/filebox/void/network-candidates', { headers: authHeaders() });
-            const data = candidatesRes.data?.data || {};
-            const candidates = data.candidates || [];
-            setNetworkCandidates(candidates);
-            setNetworkWarnings(data.warnings || []);
-            const preferred = candidates.find((item) => !/localhost|127\.0\.0\.1/i.test(item.origin)) || candidates[0];
-            if (preferred?.origin) setSelectedOrigin(preferred.origin);
-          } catch {
-            setNetworkCandidates([{ label: '当前访问地址', origin: window.location.origin }]);
-          }
           startPolling();
           (roomData?.participants || [])
             .filter((item) => item.id && item.id !== 'owner' && item.online)
@@ -837,41 +801,6 @@ function VoidRoomPage() {
                     </div>
                     <ClipboardText text={activeLink} tooltip={{ text: '复制链接', copiedText: '链接已复制' }} labels={{ copyAction: '复制链接' }} />
                   </div>
-                  {networkCandidates.length > 0 && (
-                    <div className="min-w-0 overflow-hidden rounded-md border border-kumo-line">
-                      {networkCandidates.map((candidate) => (
-                        <Button
-                          key={candidate.origin}
-                          type="button"
-                          variant="ghost"
-                          onClick={() => setSelectedOrigin(candidate.origin)}
-                          title={candidateTitle(candidate)}
-                          className={cx(
-                            'flex h-auto w-full min-w-0 max-w-full justify-start gap-2 overflow-hidden rounded-none border-b border-kumo-line px-2.5 py-2 text-left text-xs transition-colors last:border-b-0',
-                            selectedOrigin === candidate.origin
-                              ? 'bg-kumo-brand/10 text-kumo-brand'
-                              : 'bg-kumo-base text-kumo-strong hover:bg-kumo-recessed/40'
-                          )}
-                        >
-                          <span
-                            className={cx(
-                              'shrink-0 rounded px-1.5 py-0.5 font-semibold',
-                              selectedOrigin === candidate.origin
-                                ? 'bg-kumo-brand/10 text-kumo-brand'
-                                : 'bg-kumo-recessed/55 text-kumo-strong'
-                            )}
-                          >
-                            {candidateLabel(candidate.label)}
-                          </span>
-                          <span className="min-w-0 flex-1 truncate font-mono">{originHost(candidate.origin)}</span>
-                          <span className={cx('h-2 w-2 shrink-0 rounded-full', selectedOrigin === candidate.origin ? 'bg-kumo-brand' : 'bg-kumo-line')} />
-                        </Button>
-                      ))}
-                    </div>
-                  )}
-                  {networkWarnings.map((warning) => (
-                    <div key={warning} className="rounded-md border border-kumo-warning/30 bg-kumo-warning/10 p-2 text-xs font-semibold text-kumo-warning">{warning}</div>
-                  ))}
                 </div>
               </SectionCard>
             )}
