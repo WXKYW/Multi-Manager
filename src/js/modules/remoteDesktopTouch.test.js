@@ -6,6 +6,7 @@ import {
   isDoubleTap,
   nextPinchTransform,
   nextRemoteDesktopProfile,
+  normalizedVideoPoint,
   normalizedTrackpadDelta,
   remoteCursorPoint,
 } from './remoteDesktopTouch.js';
@@ -91,5 +92,40 @@ describe('remote desktop touch controls', () => {
     );
     expect(point.x).toBeCloseTo(200);
     expect(point.y).toBeCloseTo(400);
+  });
+
+  it('maps direct touch through contain letterboxing and ignores black bars', () => {
+    const surface = { left: 10, top: 20, width: 400, height: 800 };
+    const video = { width: 1920, height: 1080 };
+    expect(normalizedVideoPoint({ x: 210, y: 420 }, surface, video, 'contain')).toEqual({
+      x: 0.5,
+      y: 0.5,
+    });
+    expect(normalizedVideoPoint({ x: 210, y: 100 }, surface, video, 'contain')).toBeNull();
+    expect(
+      normalizedVideoPoint({ x: 210, y: 100 }, surface, video, 'contain', undefined, true)
+    ).toEqual({ x: 0.5, y: 0 });
+  });
+
+  it('maps direct touch to the visible crop in cover mode', () => {
+    const point = normalizedVideoPoint(
+      { x: 0, y: 400 },
+      { left: 0, top: 0, width: 400, height: 800 },
+      { width: 1920, height: 1080 },
+      'cover'
+    );
+    expect(point.x).toBeCloseTo(0.359375, 5);
+    expect(point.y).toBeCloseTo(0.5, 5);
+  });
+
+  it('inverts local pan and zoom before mapping direct touch', () => {
+    const point = normalizedVideoPoint(
+      { x: 200, y: 400 },
+      { left: 0, top: 0, width: 400, height: 800 },
+      { width: 1920, height: 1080 },
+      'contain',
+      { scale: 2, x: -200, y: -400 }
+    );
+    expect(point).toEqual({ x: 0.5, y: 0.5 });
   });
 });

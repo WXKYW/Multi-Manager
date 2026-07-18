@@ -30,6 +30,11 @@ rand = "0.8"
 rtp = "0.8.0"
 webrtc = "0.8.0"
 win-native-media = { version = "0.1.1", path = "vendor/win-native-media-0.1.1" }
+windows-sys = { version = "0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_UI_Input_Pointer",
+  "Win32_UI_WindowsAndMessaging",
+] }
 
 [features]
 default = ["nvidia"]

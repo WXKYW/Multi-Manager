@@ -31,6 +31,42 @@ export function normalizedTrackpadDelta(deltaX, deltaY, elapsedMs, viewport, rem
   };
 }
 
+export function normalizedVideoPoint(
+  point,
+  surface,
+  video,
+  fillMode,
+  transform = { scale: 1, x: 0, y: 0 },
+  clampOutside = false
+) {
+  const surfaceWidth = Math.max(1, Number(surface?.width || 1));
+  const surfaceHeight = Math.max(1, Number(surface?.height || 1));
+  const videoWidth = Math.max(1, Number(video?.width || surfaceWidth));
+  const videoHeight = Math.max(1, Number(video?.height || surfaceHeight));
+  const fitScale =
+    fillMode === 'cover'
+      ? Math.max(surfaceWidth / videoWidth, surfaceHeight / videoHeight)
+      : Math.min(surfaceWidth / videoWidth, surfaceHeight / videoHeight);
+  const renderedWidth = videoWidth * fitScale;
+  const renderedHeight = videoHeight * fitScale;
+  const offsetX = (surfaceWidth - renderedWidth) / 2;
+  const offsetY = (surfaceHeight - renderedHeight) / 2;
+  const viewScale = Math.max(0.01, Number(transform?.scale || 1));
+  const clientX = Number(point?.clientX ?? point?.x ?? 0);
+  const clientY = Number(point?.clientY ?? point?.y ?? 0);
+  const localX = (clientX - Number(surface?.left || 0) - Number(transform?.x || 0)) / viewScale;
+  const localY = (clientY - Number(surface?.top || 0) - Number(transform?.y || 0)) / viewScale;
+  const normalizedX = (localX - offsetX) / renderedWidth;
+  const normalizedY = (localY - offsetY) / renderedHeight;
+  if (!clampOutside && (normalizedX < 0 || normalizedX > 1 || normalizedY < 0 || normalizedY > 1)) {
+    return null;
+  }
+  return {
+    x: clamp(normalizedX, 0, 1),
+    y: clamp(normalizedY, 0, 1),
+  };
+}
+
 export function initialRemoteDesktopProfile(coarsePointer) {
   return coarsePointer ? { fps: 30, bitrate: 6_000_000 } : { fps: 60, bitrate: 12_000_000 };
 }

@@ -2,7 +2,7 @@
 mod windows_impl {
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, OnceLock};
     use std::time::Duration;
 
     use bytes::Bytes;
@@ -33,6 +33,15 @@ mod windows_impl {
     use win_native_media::capture::{self, CaptureConfig};
     use win_native_media::encoder::mf_h264::MfH264Encoder;
     use win_native_media::{CaptureTarget, VideoConfig};
+    use windows_sys::Win32::Foundation::{POINT, RECT};
+    use windows_sys::Win32::UI::Input::Pointer::{
+        InitializeTouchInjection, InjectTouchInput, POINTER_FLAG_CANCELED, POINTER_FLAG_DOWN,
+        POINTER_FLAG_INCONTACT, POINTER_FLAG_INRANGE, POINTER_FLAG_UP, POINTER_FLAG_UPDATE,
+        POINTER_TOUCH_INFO, TOUCH_FEEDBACK_DEFAULT,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        PT_TOUCH, TOUCH_MASK_CONTACTAREA, TOUCH_MASK_ORIENTATION, TOUCH_MASK_PRESSURE,
+    };
 
     use crate::protocol::{format_event, EVENT_AGENT_REMOTE_DESKTOP_SIGNAL};
     use crate::OutboundQueues;
@@ -79,6 +88,14 @@ mod windows_impl {
         peer: Arc<RTCPeerConnection>,
         stop: Arc<AtomicBool>,
         worker: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
+        enigo: Arc<Mutex<Option<Enigo>>>,
+        touch_contact: Arc<Mutex<Option<ActiveTouchContact>>>,
+    }
+
+    #[derive(Clone, Copy)]
+    enum ActiveTouchContact {
+        Native { x: i32, y: i32 },
+        Mouse,
     }
 
     #[derive(Clone, Copy, Default)]
@@ -171,6 +188,7 @@ mod windows_impl {
             let geometry = Arc::new(Mutex::new(DesktopGeometry::default()));
             let stream_profile = Arc::new(Mutex::new(StreamProfile::default()));
             let enigo = Arc::new(Mutex::new(Enigo::new(&Settings::default()).ok()));
+            let touch_contact = Arc::new(Mutex::new(None));
             let video_track = Arc::new(TrackLocalStaticRTP::new(
                 RTCRtpCodecCapability {
                     mime_type: "video/H264".to_owned(),
@@ -262,6 +280,7 @@ mod windows_impl {
             let geometry_for_channel = geometry.clone();
             let profile_for_channel = stream_profile.clone();
             let enigo_for_channel = enigo.clone();
+            let touch_contact_for_channel = touch_contact.clone();
             let track_for_channel = video_track.clone();
             let worker_for_channel = worker.clone();
             let sessions_for_channel = self.sessions.clone();
@@ -278,6 +297,7 @@ mod windows_impl {
                 let geometry = geometry_for_channel.clone();
                 let profile = profile_for_channel.clone();
                 let enigo = enigo_for_channel.clone();
+                let touch_contact = touch_contact_for_channel.clone();
                 let video_track = track_for_channel.clone();
                 let worker = worker_for_channel.clone();
                 let sessions = sessions_for_channel.clone();
@@ -285,26 +305,27 @@ mod windows_impl {
                     let input_enigo = enigo.clone();
                     let input_geometry = geometry.clone();
                     let input_profile = profile.clone();
+                    let input_touch_contact = touch_contact.clone();
                     let input_ack_channel = channel.clone();
                     let input_ack_sent = Arc::new(AtomicBool::new(false));
                     channel.on_message(Box::new(move |message: DataChannelMessage| {
                         let enigo = input_enigo.clone();
                         let geometry = input_geometry.clone();
                         let profile = input_profile.clone();
+                        let touch_contact = input_touch_contact.clone();
                         let ack_channel = input_ack_channel.clone();
                         let ack_sent = input_ack_sent.clone();
                         Box::pin(async move {
                             if message.is_string {
                                 if let Ok(value) = serde_json::from_slice::<Value>(&message.data) {
-                                    let pointer_sequence = (value
-                                        .get("type")
-                                        .and_then(Value::as_str)
-                                        == Some("pointer-relative"))
-                                    .then(|| {
-                                        value.get("sequence").and_then(Value::as_u64).unwrap_or(0)
-                                            as u32
-                                    });
-                                    if handle_channel_message(value, &enigo, &geometry, &profile) {
+                                    let pointer_sequence = pointer_message_sequence(&value);
+                                    if handle_channel_message(
+                                        value,
+                                        &enigo,
+                                        &geometry,
+                                        &profile,
+                                        &touch_contact,
+                                    ) {
                                         if let Some(sequence) = pointer_sequence {
                                             if let Some(position) = pointer_position_message(
                                                 &enigo, &geometry, sequence,
@@ -390,6 +411,8 @@ mod windows_impl {
                     peer: peer.clone(),
                     stop,
                     worker,
+                    enigo,
+                    touch_contact,
                 },
             );
 
@@ -488,6 +511,7 @@ mod windows_impl {
 
     async fn shutdown_session(session: Session) {
         session.stop.store(true, Ordering::Release);
+        release_active_touch(&session.touch_contact, &session.enigo);
         let _ = session.peer.close().await;
         if let Some(mut worker) = session.worker.lock().await.take() {
             if tokio::time::timeout(WORKER_SHUTDOWN_TIMEOUT, &mut worker)
@@ -795,6 +819,7 @@ mod windows_impl {
         enigo: &Arc<Mutex<Option<Enigo>>>,
         geometry: &Arc<Mutex<DesktopGeometry>>,
         profile: &Arc<Mutex<StreamProfile>>,
+        touch_contact: &Arc<Mutex<Option<ActiveTouchContact>>>,
     ) -> bool {
         if value.get("type").and_then(Value::as_str) == Some("video-config") {
             let fps = value
@@ -812,13 +837,14 @@ mod windows_impl {
             }
             return true;
         }
-        handle_input(value, enigo, geometry)
+        handle_input(value, enigo, geometry, touch_contact)
     }
 
     fn handle_input(
         value: Value,
         enigo: &Arc<Mutex<Option<Enigo>>>,
         geometry: &Arc<Mutex<DesktopGeometry>>,
+        touch_contact: &Arc<Mutex<Option<ActiveTouchContact>>>,
     ) -> bool {
         let Ok(mut guard) = enigo.lock() else {
             return false;
@@ -828,34 +854,27 @@ mod windows_impl {
         };
         match value.get("type").and_then(Value::as_str).unwrap_or("") {
             "pointer" => {
-                let x = value
-                    .get("x")
-                    .and_then(Value::as_f64)
-                    .unwrap_or(0.0)
-                    .clamp(0.0, 1.0);
-                let y = value
-                    .get("y")
-                    .and_then(Value::as_f64)
-                    .unwrap_or(0.0)
-                    .clamp(0.0, 1.0);
                 let geometry = geometry.lock().map(|item| *item).unwrap_or_default();
-                let px = geometry.x + (x * geometry.width.saturating_sub(1) as f64).round() as i32;
-                let py = geometry.y + (y * geometry.height.saturating_sub(1) as f64).round() as i32;
+                let (px, py) = normalized_pointer_position(&value, geometry);
                 enigo.move_mouse(px, py, Coordinate::Abs).is_ok()
+            }
+            "pointer-contact" => {
+                let geometry = geometry.lock().map(|item| *item).unwrap_or_default();
+                handle_pointer_contact(enigo, &value, geometry)
+            }
+            "touch-contact" => {
+                let geometry = geometry.lock().map(|item| *item).unwrap_or_default();
+                handle_touch_contact(enigo, &value, geometry, touch_contact)
             }
             "pointer-relative" => {
                 let geometry = geometry.lock().map(|item| *item).unwrap_or_default();
                 let (dx, dy) = normalized_pointer_delta(&value, geometry);
                 (dx != 0 || dy != 0) && enigo.move_mouse(dx, dy, Coordinate::Rel).is_ok()
             }
+            "pointer-query" => true,
             "mouse" => {
-                let button = match value.get("button").and_then(Value::as_u64).unwrap_or(0) {
-                    1 => Button::Middle,
-                    2 => Button::Right,
-                    _ => Button::Left,
-                };
                 let direction = input_direction(value.get("action").and_then(Value::as_str));
-                enigo.button(button, direction).is_ok()
+                enigo.button(input_button(&value), direction).is_ok()
             }
             "wheel" => {
                 let x = value.get("deltaX").and_then(Value::as_f64).unwrap_or(0.0);
@@ -923,6 +942,184 @@ mod windows_impl {
             (dx * geometry.width.max(1) as f64).round() as i32,
             (dy * geometry.height.max(1) as f64).round() as i32,
         )
+    }
+
+    fn normalized_pointer_position(value: &Value, geometry: DesktopGeometry) -> (i32, i32) {
+        let x = value
+            .get("x")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0)
+            .clamp(0.0, 1.0);
+        let y = value
+            .get("y")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0)
+            .clamp(0.0, 1.0);
+        (
+            geometry.x + (x * geometry.width.saturating_sub(1) as f64).round() as i32,
+            geometry.y + (y * geometry.height.saturating_sub(1) as f64).round() as i32,
+        )
+    }
+
+    fn pointer_message_sequence(value: &Value) -> Option<u32> {
+        matches!(
+            value.get("type").and_then(Value::as_str),
+            Some("pointer-relative" | "pointer-query")
+        )
+        .then(|| value.get("sequence").and_then(Value::as_u64).unwrap_or(0) as u32)
+    }
+
+    fn input_button(value: &Value) -> Button {
+        match value.get("button").and_then(Value::as_u64).unwrap_or(0) {
+            1 => Button::Middle,
+            2 => Button::Right,
+            _ => Button::Left,
+        }
+    }
+
+    fn handle_pointer_contact(enigo: &mut Enigo, value: &Value, geometry: DesktopGeometry) -> bool {
+        let (px, py) = normalized_pointer_position(value, geometry);
+        if enigo.move_mouse(px, py, Coordinate::Abs).is_err() {
+            return false;
+        }
+        match value
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or("move")
+        {
+            "down" | "press" => enigo.button(input_button(value), Direction::Press).is_ok(),
+            "up" | "release" | "cancel" => enigo
+                .button(input_button(value), Direction::Release)
+                .is_ok(),
+            "click" => enigo.button(input_button(value), Direction::Click).is_ok(),
+            _ => true,
+        }
+    }
+
+    fn touch_pointer_flags(action: &str) -> u32 {
+        match action {
+            "down" | "press" => POINTER_FLAG_DOWN | POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT,
+            "up" | "release" => POINTER_FLAG_UP,
+            "cancel" => POINTER_FLAG_UP | POINTER_FLAG_CANCELED,
+            _ => POINTER_FLAG_UPDATE | POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT,
+        }
+    }
+
+    fn inject_touch_at(action: &str, x: i32, y: i32) -> bool {
+        static TOUCH_INJECTION_READY: OnceLock<bool> = OnceLock::new();
+        let ready = *TOUCH_INJECTION_READY
+            .get_or_init(|| unsafe { InitializeTouchInjection(1, TOUCH_FEEDBACK_DEFAULT) != 0 });
+        if !ready {
+            return false;
+        }
+        let mut contact = POINTER_TOUCH_INFO::default();
+        contact.pointerInfo.pointerType = PT_TOUCH;
+        contact.pointerInfo.pointerId = 1;
+        contact.pointerInfo.pointerFlags = touch_pointer_flags(action);
+        contact.pointerInfo.ptPixelLocation = POINT { x, y };
+        contact.touchMask = TOUCH_MASK_CONTACTAREA | TOUCH_MASK_ORIENTATION | TOUCH_MASK_PRESSURE;
+        contact.rcContact = RECT {
+            left: x.saturating_sub(2),
+            top: y.saturating_sub(2),
+            right: x.saturating_add(2),
+            bottom: y.saturating_add(2),
+        };
+        contact.orientation = 90;
+        contact.pressure = 32_000;
+        unsafe { InjectTouchInput(1, &contact) != 0 }
+    }
+
+    fn handle_touch_contact(
+        enigo: &mut Enigo,
+        value: &Value,
+        geometry: DesktopGeometry,
+        active_contact: &Arc<Mutex<Option<ActiveTouchContact>>>,
+    ) -> bool {
+        let action = value
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or("move");
+        let (x, y) = normalized_pointer_position(value, geometry);
+        let Ok(mut active) = active_contact.lock() else {
+            return false;
+        };
+        match action {
+            "down" | "press" => {
+                if let Some(previous) = active.take() {
+                    release_touch_mode(previous, enigo);
+                }
+                if inject_touch_at("down", x, y) {
+                    *active = Some(ActiveTouchContact::Native { x, y });
+                    true
+                } else if handle_pointer_contact(enigo, value, geometry) {
+                    *active = Some(ActiveTouchContact::Mouse);
+                    true
+                } else {
+                    false
+                }
+            }
+            "up" | "release" | "cancel" => {
+                let Some(previous) = active.take() else {
+                    return true;
+                };
+                match previous {
+                    ActiveTouchContact::Native {
+                        x: last_x,
+                        y: last_y,
+                    } => {
+                        let released = inject_touch_at(action, x, y);
+                        if !released {
+                            let _ = inject_touch_at("cancel", last_x, last_y);
+                        }
+                        released
+                    }
+                    ActiveTouchContact::Mouse => handle_pointer_contact(enigo, value, geometry),
+                }
+            }
+            _ => match *active {
+                Some(ActiveTouchContact::Native { .. }) => {
+                    if inject_touch_at("move", x, y) {
+                        *active = Some(ActiveTouchContact::Native { x, y });
+                        true
+                    } else {
+                        false
+                    }
+                }
+                Some(ActiveTouchContact::Mouse) => handle_pointer_contact(enigo, value, geometry),
+                None => false,
+            },
+        }
+    }
+
+    fn release_touch_mode(contact: ActiveTouchContact, enigo: &mut Enigo) {
+        match contact {
+            ActiveTouchContact::Native { x, y } => {
+                let _ = inject_touch_at("cancel", x, y);
+            }
+            ActiveTouchContact::Mouse => {
+                let _ = enigo.button(Button::Left, Direction::Release);
+            }
+        }
+    }
+
+    fn release_active_touch(
+        active_contact: &Arc<Mutex<Option<ActiveTouchContact>>>,
+        enigo: &Arc<Mutex<Option<Enigo>>>,
+    ) {
+        let active = active_contact
+            .lock()
+            .ok()
+            .and_then(|mut contact| contact.take());
+        let Some(active) = active else {
+            return;
+        };
+        if let Ok(mut guard) = enigo.lock() {
+            if let Some(enigo) = guard.as_mut() {
+                release_touch_mode(active, enigo);
+            } else if let ActiveTouchContact::Native { x, y } = active {
+                let _ = inject_touch_at("cancel", x, y);
+            }
+        }
     }
 
     fn pointer_position_message(
@@ -1105,6 +1302,61 @@ mod windows_impl {
             };
             let delta = normalized_pointer_delta(&json!({"dx": 0.25, "dy": -0.5}), geometry);
             assert_eq!(delta, (480, -540));
+        }
+
+        #[test]
+        fn normalized_direct_touch_maps_across_offset_desktop_geometry() {
+            let geometry = DesktopGeometry {
+                x: -1_920,
+                y: 100,
+                width: 1_920,
+                height: 1_080,
+            };
+            assert_eq!(
+                normalized_pointer_position(&json!({"x": 0.0, "y": 0.0}), geometry),
+                (-1_920, 100)
+            );
+            assert_eq!(
+                normalized_pointer_position(&json!({"x": 1.0, "y": 1.0}), geometry),
+                (-1, 1_179)
+            );
+            assert_eq!(
+                normalized_pointer_position(&json!({"x": 0.5, "y": 0.5}), geometry),
+                (-960, 640)
+            );
+        }
+
+        #[test]
+        fn pointer_queries_and_relative_moves_receive_position_sequences() {
+            assert_eq!(
+                pointer_message_sequence(&json!({"type": "pointer-query", "sequence": 7})),
+                Some(7)
+            );
+            assert_eq!(
+                pointer_message_sequence(&json!({"type": "pointer-relative", "sequence": 8})),
+                Some(8)
+            );
+            assert_eq!(
+                pointer_message_sequence(&json!({"type": "pointer", "sequence": 9})),
+                None
+            );
+        }
+
+        #[test]
+        fn direct_touch_contact_flags_follow_windows_pointer_lifecycle() {
+            assert_eq!(
+                touch_pointer_flags("down"),
+                POINTER_FLAG_DOWN | POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT
+            );
+            assert_eq!(
+                touch_pointer_flags("move"),
+                POINTER_FLAG_UPDATE | POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT
+            );
+            assert_eq!(touch_pointer_flags("up"), POINTER_FLAG_UP);
+            assert_eq!(
+                touch_pointer_flags("cancel"),
+                POINTER_FLAG_UP | POINTER_FLAG_CANCELED
+            );
         }
 
         #[test]

@@ -201,6 +201,7 @@ dependencies = [
  "webpki-roots 0.26.11",
  "webrtc",
  "win-native-media",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

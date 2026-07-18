@@ -14,6 +14,7 @@ import {
   nextPinchTransform,
   nextRemoteDesktopProfile,
   normalizedTrackpadDelta,
+  normalizedVideoPoint,
   pointDistance,
   remoteCursorPoint,
 } from '../modules/remoteDesktopTouch.js';
@@ -118,14 +119,28 @@ export default function RemoteDesktopPage() {
   const remoteInputRef = useRef(null);
   const remoteInputValueRef = useRef('');
 
-  const sendControl = useCallback((payload) => {
-    const highFrequency = payload.type === 'pointer' || payload.type === 'pointer-relative' || payload.type === 'wheel';
+  const sendControl = useCallback((payload, { reliable = false } = {}) => {
+    const highFrequency = payload.type === 'pointer'
+      || payload.type === 'pointer-relative'
+      || payload.type === 'wheel'
+      || ((payload.type === 'pointer-contact' || payload.type === 'touch-contact') && payload.action === 'move');
     const fastChannel = pointerChannelRef.current;
-    const channel = highFrequency && fastChannel?.readyState === 'open' ? fastChannel : channelRef.current;
-    if (!controlEnabled || channel?.readyState !== 'open') return;
-    if (highFrequency && channel.bufferedAmount > 16 * 1024) return;
+    const channel = !reliable && highFrequency && fastChannel?.readyState === 'open'
+      ? fastChannel
+      : channelRef.current;
+    if (!controlEnabled || channel?.readyState !== 'open') return false;
+    if (highFrequency && channel.bufferedAmount > 16 * 1024) return false;
     channel.send(JSON.stringify(payload));
+    return true;
   }, [controlEnabled]);
+
+  const requestPointerPosition = useCallback(() => {
+    pointerSequenceRef.current = (pointerSequenceRef.current + 1) >>> 0;
+    sendControl({
+      type: 'pointer-query',
+      sequence: pointerSequenceRef.current,
+    }, { reliable: true });
+  }, [sendControl]);
 
   const updateViewTransform = useCallback((next) => {
     viewTransformRef.current = next;
@@ -490,26 +505,35 @@ export default function RemoteDesktopPage() {
     };
   }, [controlEnabled, sendControl]);
 
-  const pointerPosition = (event) => {
+  useEffect(() => {
+    if (videoReady && touchInputMode === 'trackpad') requestPointerPosition();
+  }, [requestPointerPosition, touchInputMode, videoReady]);
+
+  const pointerPosition = (event, clampOutside = false) => {
     const rect = surfaceRef.current?.getBoundingClientRect();
     if (!rect) return null;
-    const transform = viewTransformRef.current;
     const video = videoRef.current;
-    const videoWidth = video?.videoWidth || rect.width;
-    const videoHeight = video?.videoHeight || rect.height;
-    const scale = fillMode === 'cover'
-      ? Math.max(rect.width / videoWidth, rect.height / videoHeight)
-      : Math.min(rect.width / videoWidth, rect.height / videoHeight);
-    const renderedWidth = videoWidth * scale;
-    const renderedHeight = videoHeight * scale;
-    const offsetX = (rect.width - renderedWidth) / 2;
-    const offsetY = (rect.height - renderedHeight) / 2;
-    const localX = (event.clientX - rect.left - transform.x) / transform.scale;
-    const localY = (event.clientY - rect.top - transform.y) / transform.scale;
-    return {
-      x: Math.max(0, Math.min(1, (localX - offsetX) / Math.max(1, renderedWidth))),
-      y: Math.max(0, Math.min(1, (localY - offsetY) / Math.max(1, renderedHeight))),
-    };
+    return normalizedVideoPoint(
+      event,
+      rect,
+      {
+        width: video?.videoWidth || rect.width,
+        height: video?.videoHeight || rect.height,
+      },
+      fillMode,
+      viewTransformRef.current,
+      clampOutside,
+    );
+  };
+
+  const flushAbsolutePointer = () => {
+    if (absolutePointerFrameRef.current) {
+      window.cancelAnimationFrame(absolutePointerFrameRef.current);
+      absolutePointerFrameRef.current = 0;
+    }
+    const latest = pendingAbsolutePointerRef.current;
+    pendingAbsolutePointerRef.current = null;
+    if (latest) sendControl({ type: 'pointer', ...latest });
   };
 
   const scheduleAbsolutePointer = (position) => {
@@ -518,10 +542,32 @@ export default function RemoteDesktopPage() {
     if (absolutePointerFrameRef.current) return;
     absolutePointerFrameRef.current = window.requestAnimationFrame(() => {
       absolutePointerFrameRef.current = 0;
-      const latest = pendingAbsolutePointerRef.current;
-      pendingAbsolutePointerRef.current = null;
-      if (latest) sendControl({ type: 'pointer', ...latest });
+      flushAbsolutePointer();
     });
+  };
+
+  const sendPointerContact = (position, action, button = 0) => {
+    if (!position) return false;
+    if (absolutePointerFrameRef.current) {
+      window.cancelAnimationFrame(absolutePointerFrameRef.current);
+      absolutePointerFrameRef.current = 0;
+      pendingAbsolutePointerRef.current = null;
+    }
+    cursorPositionRef.current = position;
+    setVirtualCursor({ ...position, visible: true });
+    return sendControl({ type: 'pointer-contact', ...position, button, action }, { reliable: true });
+  };
+
+  const sendTouchContact = (position, action) => {
+    if (!position) return false;
+    if (absolutePointerFrameRef.current) {
+      window.cancelAnimationFrame(absolutePointerFrameRef.current);
+      absolutePointerFrameRef.current = 0;
+      pendingAbsolutePointerRef.current = null;
+    }
+    cursorPositionRef.current = position;
+    setVirtualCursor({ ...position, visible: true });
+    return sendControl({ type: 'touch-contact', ...position, action }, { reliable: true });
   };
 
   const handlePointerMove = (event) => {
@@ -535,8 +581,26 @@ export default function RemoteDesktopPage() {
     event.preventDefault();
     surfaceRef.current?.focus();
     const position = pointerPosition(event);
-    if (position) sendControl({ type: 'pointer', ...position });
-    sendControl({ type: 'mouse', button: event.button, action });
+    if (position) sendPointerContact(position, action, event.button);
+  };
+
+  const flushRelativePointer = () => {
+    if (pointerFrameRef.current) {
+      window.cancelAnimationFrame(pointerFrameRef.current);
+      pointerFrameRef.current = 0;
+    }
+    const pending = pendingRelativePointerRef.current;
+    pendingRelativePointerRef.current = { x: 0, y: 0 };
+    if (!pending.x && !pending.y) return;
+    const latest = cursorPositionRef.current;
+    pointerSequenceRef.current = (pointerSequenceRef.current + 1) >>> 0;
+    setVirtualCursor({ ...latest, visible: true });
+    sendControl({
+      type: 'pointer-relative',
+      dx: pending.x,
+      dy: pending.y,
+      sequence: pointerSequenceRef.current,
+    }, { reliable: true });
   };
 
   const moveRelativePointer = (deltaX, deltaY, elapsedMs = 16) => {
@@ -563,17 +627,7 @@ export default function RemoteDesktopPage() {
     if (pointerFrameRef.current) return;
     pointerFrameRef.current = window.requestAnimationFrame(() => {
       pointerFrameRef.current = 0;
-      const latest = cursorPositionRef.current;
-      const pending = pendingRelativePointerRef.current;
-      pendingRelativePointerRef.current = { x: 0, y: 0 };
-      pointerSequenceRef.current = (pointerSequenceRef.current + 1) >>> 0;
-      setVirtualCursor({ ...latest, visible: true });
-      sendControl({
-        type: 'pointer-relative',
-        dx: pending.x,
-        dy: pending.y,
-        sequence: pointerSequenceRef.current,
-      });
+      flushRelativePointer();
     });
   };
 
@@ -598,7 +652,9 @@ export default function RemoteDesktopPage() {
 
   const releaseTouchDrag = (gesture) => {
     if (gesture?.buttonDown) {
-      sendControl({ type: 'mouse', button: 0, action: 'up' });
+      if (!gesture.direct) flushRelativePointer();
+      if (gesture.direct) sendTouchContact(gesture.position, 'up');
+      else sendPointerContact(cursorPositionRef.current, 'up');
       gesture.buttonDown = false;
     }
   };
@@ -611,10 +667,13 @@ export default function RemoteDesktopPage() {
     const { touches } = event;
     if (touches.length === 1) {
       clearLongPress();
-      setVirtualCursor(cursor => ({ ...cursor, visible: true }));
       const now = performance.now();
       const point = { at: now, x: touches[0].clientX, y: touches[0].clientY };
-      const doubleTapDrag = isDoubleTap(lastTapRef.current, point);
+      const direct = touchInputMode === 'direct';
+      const directPosition = direct ? pointerPosition(touches[0]) : null;
+      if (direct && !directPosition) return;
+      if (!direct) setVirtualCursor(cursor => ({ ...cursor, visible: true }));
+      const doubleTapDrag = !direct && isDoubleTap(lastTapRef.current, point);
       const gesture = {
         kind: 'pointer',
         startX: point.x,
@@ -623,24 +682,26 @@ export default function RemoteDesktopPage() {
         lastY: point.y,
         lastAt: now,
         moved: false,
-        buttonDown: doubleTapDrag,
-        direct: touchInputMode === 'direct',
+        buttonDown: direct || doubleTapDrag,
+        direct,
+        position: directPosition,
         startedAt: now,
       };
       touchGestureRef.current = gesture;
-      if (gesture.direct) {
-        const position = pointerPosition(touches[0]);
-        if (position) scheduleAbsolutePointer(position);
-      }
-      if (doubleTapDrag) {
+      if (direct) {
         lastTapRef.current = null;
-        sendControl({ type: 'mouse', button: 0, action: 'down' });
+        sendTouchContact(directPosition, 'down');
+      } else if (doubleTapDrag) {
+        lastTapRef.current = null;
+        flushRelativePointer();
+        sendPointerContact(cursorPositionRef.current, 'down');
         navigator.vibrate?.(8);
       } else {
         longPressTimerRef.current = window.setTimeout(() => {
           if (touchGestureRef.current !== gesture || gesture.moved || gesture.buttonDown) return;
           gesture.buttonDown = true;
-          sendControl({ type: 'mouse', button: 0, action: 'down' });
+          flushRelativePointer();
+          sendPointerContact(cursorPositionRef.current, 'down');
           navigator.vibrate?.(12);
         }, TOUCH_LONG_PRESS_MS);
       }
@@ -681,8 +742,11 @@ export default function RemoteDesktopPage() {
       gesture.moved ||= totalMovement >= TOUCH_TAP_SLOP;
       if (gesture.moved) clearLongPress();
       if (gesture.direct) {
-        const position = pointerPosition(touches[0]);
-        if (position) scheduleAbsolutePointer(position);
+        const position = pointerPosition(touches[0], true);
+        if (position) {
+          gesture.position = position;
+          sendTouchContact(position, 'move');
+        }
       } else {
         moveRelativePointer(deltaX, deltaY, now - gesture.lastAt);
       }
@@ -741,10 +805,16 @@ export default function RemoteDesktopPage() {
     if (!gesture || event.touches.length > 0) return;
     const now = performance.now();
     if (gesture.kind === 'pointer') {
-      if (gesture.buttonDown) {
+      if (gesture.direct) {
+        const finalTouch = event.changedTouches?.[0];
+        const finalPosition = finalTouch ? pointerPosition(finalTouch, true) : null;
+        if (finalPosition) gesture.position = finalPosition;
+        releaseTouchDrag(gesture);
+      } else if (gesture.buttonDown) {
         releaseTouchDrag(gesture);
       } else if (!gesture.moved && now - gesture.startedAt <= TOUCH_TAP_MAX_MS) {
-        sendControl({ type: 'mouse', button: 0, action: 'click' });
+        flushRelativePointer();
+        sendPointerContact(cursorPositionRef.current, 'click');
         lastTapRef.current = { at: now, x: gesture.startX, y: gesture.startY };
       }
     } else if (
@@ -753,7 +823,8 @@ export default function RemoteDesktopPage() {
       && gesture.maxMovement < TOUCH_TAP_SLOP
       && now - gesture.startedAt <= TOUCH_TAP_MAX_MS
     ) {
-      sendControl({ type: 'mouse', button: 2, action: 'click' });
+      flushRelativePointer();
+      sendPointerContact(cursorPositionRef.current, 'click', 2);
       navigator.vibrate?.(8);
     }
     touchGestureRef.current = null;
@@ -836,7 +907,7 @@ export default function RemoteDesktopPage() {
             variant="secondary"
             onClick={() => setTouchInputMode(mode => mode === 'trackpad' ? 'direct' : 'trackpad')}
           >
-            {touchInputMode === 'trackpad' ? '触控板' : '直接指向'}
+            {touchInputMode === 'trackpad' ? '触控板' : '直接触摸'}
           </Button>
           <Button size="sm" variant="secondary" onClick={toggleFillMode}>
             {fillMode === 'cover' ? '填满' : '适应'}
@@ -928,7 +999,7 @@ export default function RemoteDesktopPage() {
                 </Button>
                 <Button size="sm" variant="secondary" onClick={openSystemKeyboard}>键盘</Button>
                 <Button size="sm" variant="secondary" onClick={() => setTouchInputMode(mode => mode === 'trackpad' ? 'direct' : 'trackpad')}>
-                  {touchInputMode === 'trackpad' ? '触控板' : '直接指向'}
+                  {touchInputMode === 'trackpad' ? '触控板' : '直接触摸'}
                 </Button>
                 <Button size="sm" variant="secondary" onClick={toggleFillMode}>
                   {fillMode === 'cover' ? '填满' : '适应'}
@@ -950,7 +1021,7 @@ export default function RemoteDesktopPage() {
         )}
         {virtualCursor.visible && (
           <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-kumo-line bg-kumo-base/80 px-2 py-1 text-[11px] text-kumo-subtle">
-            {touchInputMode === 'trackpad' ? '触控板：单指移动/轻点左键' : '直接指向：点到哪里移到哪里'} · 双击按住或长按拖拽 · 双指轻点右键 · 双指拖动滚动 · 张合缩放
+            {touchInputMode === 'trackpad' ? '触控板：单指相对移动/轻点左键' : '直接触摸：触点绝对映射，按住即可拖拽'} · 双指轻点右键 · 双指拖动滚动 · 张合缩放
           </div>
         )}
         {error && (
