@@ -1,14 +1,18 @@
 package totp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
 )
@@ -22,6 +26,26 @@ type customBrandIconRecord struct {
 	ContentType string `json:"content_type"`
 	CreatedAt   string `json:"created_at"`
 }
+
+type remoteBrandIconAsset struct {
+	Data        []byte
+	FileName    string
+	ContentType string
+}
+
+type remoteBrandIconFetcher func(context.Context, string) (remoteBrandIconAsset, error)
+
+var blockedRemoteBrandIconNetworks = mustParseCIDRs(
+	"100.64.0.0/10",
+	"192.0.0.0/24",
+	"192.0.2.0/24",
+	"198.51.100.0/24",
+	"203.0.113.0/24",
+	"240.0.0.0/4",
+	"2001:db8::/32",
+)
+
+var syntheticProxyBrandIconNetwork = mustParseCIDR("198.18.0.0/15")
 
 func (s *Service) listCustomBrandIcons(w http.ResponseWriter, r *http.Request) {
 	records, err := s.loadCustomBrandIconRecords()
@@ -85,12 +109,6 @@ func (s *Service) uploadCustomBrandIcon(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	records, err := s.loadCustomBrandIconRecords()
-	if err != nil {
-		response.Error(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
 	baseName := strings.TrimSpace(r.FormValue("name"))
 	if baseName == "" {
 		baseName = strings.TrimSuffix(header.Filename, filepath.Ext(header.Filename))
@@ -98,11 +116,79 @@ func (s *Service) uploadCustomBrandIcon(w http.ResponseWriter, r *http.Request) 
 	if baseName == "" {
 		baseName = "自定义图标"
 	}
-	id := uniqueCustomBrandIconID(records, baseName)
 	color := strings.TrimSpace(r.FormValue("color"))
 	issuer := strings.TrimSpace(r.FormValue("issuer"))
+	result, err := s.saveCustomBrandIcon(data, baseName, issuer, color, ext, contentType)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.OK(w, result)
+}
+
+func (s *Service) importCustomBrandIconFromURL(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		URL    string `json:"url"`
+		Name   string `json:"name"`
+		Issuer string `json:"issuer"`
+		Color  string `json:"color"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8*1024))
+	if err := decoder.Decode(&input); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid import payload")
+		return
+	}
+	if err := validateRemoteBrandIconURL(input.URL); err != nil {
+		response.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	fetcher := s.remoteBrandIconFetcher
+	if fetcher == nil {
+		fetcher = downloadRemoteBrandIcon
+	}
+	asset, err := fetcher(r.Context(), strings.TrimSpace(input.URL))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	ext, contentType, err := detectCustomBrandIconFormat(asset.Data, asset.ContentType, asset.FileName)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if ext == ".svg" && !isSafeSVG(asset.Data) {
+		response.Error(w, http.StatusBadRequest, "unsupported svg")
+		return
+	}
+	baseName := strings.TrimSpace(input.Name)
+	if baseName == "" {
+		baseName = strings.TrimSuffix(asset.FileName, filepath.Ext(asset.FileName))
+	}
+	if baseName == "" {
+		baseName = "远程图标"
+	}
+	result, err := s.saveCustomBrandIcon(
+		asset.Data,
+		baseName,
+		strings.TrimSpace(input.Issuer),
+		strings.TrimSpace(input.Color),
+		ext,
+		contentType,
+	)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.OK(w, result)
+}
+
+func (s *Service) saveCustomBrandIcon(data []byte, baseName, issuer, color, ext, contentType string) (map[string]string, error) {
+	records, err := s.loadCustomBrandIconRecords()
+	if err != nil {
+		return nil, err
+	}
 	record := customBrandIconRecord{
-		ID:          id,
+		ID:          uniqueCustomBrandIconID(records, baseName),
 		Name:        baseName,
 		Issuer:      issuer,
 		Color:       color,
@@ -110,22 +196,20 @@ func (s *Service) uploadCustomBrandIcon(w http.ResponseWriter, r *http.Request) 
 		ContentType: contentType,
 		CreatedAt:   nowISO(),
 	}
-
 	if err := os.MkdirAll(s.customBrandIconDir(), 0o755); err != nil {
-		response.Error(w, http.StatusInternalServerError, "prepare icon storage failed")
-		return
+		return nil, fmt.Errorf("prepare icon storage: %w", err)
 	}
-	if err := writeFileAtomically(recordPathForCustomBrandIcon(s.customBrandIconDir(), record)+".tmp", recordPathForCustomBrandIcon(s.customBrandIconDir(), record), data); err != nil {
-		response.Error(w, http.StatusInternalServerError, err.Error())
-		return
+	path := recordPathForCustomBrandIcon(s.customBrandIconDir(), record)
+	if err := writeFileAtomically(path+".tmp", path, data); err != nil {
+		return nil, err
 	}
 	records = append(records, record)
 	if err := s.saveCustomBrandIconRecords(records); err != nil {
-		response.Error(w, http.StatusInternalServerError, err.Error())
-		return
+		_ = os.Remove(path)
+		return nil, err
 	}
 
-	response.OK(w, map[string]string{
+	return map[string]string{
 		"id":      record.ID,
 		"icon":    "custom:" + record.ID,
 		"name":    record.Name,
@@ -134,7 +218,151 @@ func (s *Service) uploadCustomBrandIcon(w http.ResponseWriter, r *http.Request) 
 		"source":  "custom",
 		"license": "User Upload",
 		"url":     "/api/totp/icons/custom-" + record.ID,
-	})
+	}, nil
+}
+
+func downloadRemoteBrandIcon(ctx context.Context, rawURL string) (remoteBrandIconAsset, error) {
+	if err := validateRemoteBrandIconURL(rawURL); err != nil {
+		return remoteBrandIconAsset{}, err
+	}
+	client := newRemoteBrandIconHTTPClient()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSpace(rawURL), nil)
+	if err != nil {
+		return remoteBrandIconAsset{}, fmt.Errorf("invalid image URL")
+	}
+	req.Header.Set("Accept", "image/svg+xml,image/png,image/jpeg,image/webp,image/gif;q=0.9,*/*;q=0.1")
+	res, err := client.Do(req)
+	if err != nil {
+		return remoteBrandIconAsset{}, fmt.Errorf("download image failed: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode < http.StatusOK || res.StatusCode >= http.StatusMultipleChoices {
+		return remoteBrandIconAsset{}, fmt.Errorf("download image failed with status %d", res.StatusCode)
+	}
+	const maxIconBytes = 600 * 1024
+	if res.ContentLength > maxIconBytes {
+		return remoteBrandIconAsset{}, fmt.Errorf("remote image exceeds 600 KB")
+	}
+	data, err := io.ReadAll(io.LimitReader(res.Body, maxIconBytes+1))
+	if err != nil {
+		return remoteBrandIconAsset{}, fmt.Errorf("read remote image failed: %w", err)
+	}
+	if len(data) == 0 {
+		return remoteBrandIconAsset{}, fmt.Errorf("remote image is empty")
+	}
+	if len(data) > maxIconBytes {
+		return remoteBrandIconAsset{}, fmt.Errorf("remote image exceeds 600 KB")
+	}
+	parsed, _ := url.Parse(res.Request.URL.String())
+	fileName := filepath.Base(parsed.Path)
+	if fileName == "." || fileName == "/" {
+		fileName = "remote-icon"
+	}
+	return remoteBrandIconAsset{
+		Data:        data,
+		FileName:    fileName,
+		ContentType: res.Header.Get("Content-Type"),
+	}, nil
+}
+
+func newRemoteBrandIconHTTPClient() *http.Client {
+	dialer := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 15 * time.Second}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = http.ProxyFromEnvironment
+	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, fmt.Errorf("invalid remote address")
+		}
+		addresses, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+		if err != nil || len(addresses) == 0 {
+			return nil, fmt.Errorf("resolve remote host failed")
+		}
+		publicAddresses := filterPublicRemoteBrandIconAddresses(addresses)
+		if len(publicAddresses) == 0 {
+			return nil, fmt.Errorf("private or reserved image host is not allowed")
+		}
+		var lastErr error
+		for _, address := range publicAddresses {
+			conn, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(address.IP.String(), port))
+			if dialErr == nil {
+				return conn, nil
+			}
+			lastErr = dialErr
+		}
+		return nil, lastErr
+	}
+	return &http.Client{
+		Transport: transport,
+		Timeout:   10 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("too many redirects")
+			}
+			return validateRemoteBrandIconURL(req.URL.String())
+		},
+	}
+}
+
+func validateRemoteBrandIconURL(rawURL string) error {
+	parsed, err := url.ParseRequestURI(strings.TrimSpace(rawURL))
+	if err != nil || parsed.Hostname() == "" {
+		return fmt.Errorf("invalid image URL")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("only http/https image URLs are supported")
+	}
+	if parsed.User != nil {
+		return fmt.Errorf("image URL credentials are not allowed")
+	}
+	if ip := net.ParseIP(parsed.Hostname()); ip != nil {
+		if syntheticProxyBrandIconNetwork.Contains(ip) || !isPublicRemoteBrandIconIP(ip) {
+			return fmt.Errorf("private or reserved image host is not allowed")
+		}
+	}
+	return nil
+}
+
+func isPublicRemoteBrandIconIP(ip net.IP) bool {
+	if ip == nil || !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+		return false
+	}
+	for _, network := range blockedRemoteBrandIconNetworks {
+		if network.Contains(ip) {
+			return false
+		}
+	}
+	return true
+}
+
+func filterPublicRemoteBrandIconAddresses(addresses []net.IPAddr) []net.IPAddr {
+	publicAddresses := make([]net.IPAddr, 0, len(addresses))
+	for _, address := range addresses {
+		if isPublicRemoteBrandIconIP(address.IP) {
+			publicAddresses = append(publicAddresses, address)
+		}
+	}
+	return publicAddresses
+}
+
+func mustParseCIDRs(values ...string) []*net.IPNet {
+	networks := make([]*net.IPNet, 0, len(values))
+	for _, value := range values {
+		_, network, err := net.ParseCIDR(value)
+		if err != nil {
+			panic(err)
+		}
+		networks = append(networks, network)
+	}
+	return networks
+}
+
+func mustParseCIDR(value string) *net.IPNet {
+	_, network, err := net.ParseCIDR(value)
+	if err != nil {
+		panic(err)
+	}
+	return network
 }
 
 func (s *Service) serveCustomBrandIcon(w http.ResponseWriter, r *http.Request, id string) {

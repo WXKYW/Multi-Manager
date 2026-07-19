@@ -447,7 +447,6 @@ func (p *agentPresenceManager) refreshNotification(serverID, status string) {
 		lastActive := maxTime(rec.LastHeartbeat, rec.LastMetricsSeen, rec.LastConnect)
 		if !lastActive.IsZero() {
 			eventData["lastActive"] = lastActive.UTC().Format(time.RFC3339)
-			eventData["downDuration"] = time.Since(lastActive).Round(time.Second).String()
 		}
 	}
 	p.mu.RUnlock()

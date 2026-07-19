@@ -222,6 +222,63 @@ func TestTelegramLifecycleMessagesForUptimeAndServer(t *testing.T) {
 	if calls[6].messageID == calls[3].messageID {
 		t.Fatalf("new server incident reused resolved message: %#v", calls[3:])
 	}
+
+	history, err := service.LoadHistory(ctx, "sent", 100)
+	if err != nil {
+		t.Fatalf("load lifecycle history: %v", err)
+	}
+	foundRefresh := false
+	foundServerResolve := false
+	for _, item := range history {
+		data := parseObject(item.Data)
+		switch stringValue(data["lifecycleMutation"]) {
+		case "refresh":
+			foundRefresh = true
+			changes := objectValue(data["lifecycleChanges"])
+			if changes["error"] == nil {
+				t.Fatalf("refresh history did not record changed error: %#v", data)
+			}
+		case "resolve":
+			if stringValue(data["serverId"]) == "srv-1" {
+				foundServerResolve = stringValue(data["downDuration"]) != ""
+			}
+		}
+	}
+	if !foundRefresh || !foundServerResolve {
+		t.Fatalf("lifecycle history missing refresh=%v serverResolve=%v: %#v", foundRefresh, foundServerResolve, history)
+	}
+}
+
+func TestNotificationMessageLifecyclePairs(t *testing.T) {
+	tests := []struct {
+		module, event, resourceKey, kind, phase string
+		data                                    map[string]interface{}
+	}{
+		{"uptime", "down", "7", "availability", "open", map[string]interface{}{"monitorId": 7}},
+		{"uptime", "up", "7", "availability", "resolve", map[string]interface{}{"monitorId": 7}},
+		{"server", "cpu_high", "srv-1", "cpu", "open", map[string]interface{}{"serverId": "srv-1"}},
+		{"server", "cpu_normal", "srv-1", "cpu", "resolve", map[string]interface{}{"serverId": "srv-1"}},
+		{"server", "memory_high", "srv-1", "memory", "open", map[string]interface{}{"serverId": "srv-1"}},
+		{"server", "disk_normal", "srv-1", "disk", "resolve", map[string]interface{}{"serverId": "srv-1"}},
+		{"server", "traffic_high", "srv-1", "traffic", "open", map[string]interface{}{"serverId": "srv-1"}},
+		{"system", "memory_normal", "local-host", "memory", "resolve", map[string]interface{}{}},
+		{"github", "action_failed", "42", "actions", "open", map[string]interface{}{"repositoryId": 42}},
+		{"github", "action_recovered", "42", "actions", "resolve", map[string]interface{}{"repositoryId": 42}},
+	}
+	for _, test := range tests {
+		t.Run(test.module+"/"+test.event, func(t *testing.T) {
+			lifecycle, ok := notificationMessageLifecycle(test.module, test.event, test.data)
+			if !ok || lifecycle.ResourceKey != test.resourceKey || lifecycle.Kind != test.kind || lifecycle.Phase != test.phase {
+				t.Fatalf("lifecycle = %#v ok=%v", lifecycle, ok)
+			}
+		})
+	}
+	if _, ok := notificationMessageLifecycle("github", "release_published", map[string]interface{}{"repositoryId": 42}); ok {
+		t.Fatal("one-shot release event should not be dynamic")
+	}
+	if got := formatNotificationDuration(25*time.Hour + 2*time.Minute + 3*time.Second); got != "1 天 1 小时 2 分钟 3 秒" {
+		t.Fatalf("formatted duration = %q", got)
+	}
 }
 
 func TestTelegramProxyConfigAndTransportErrorsHideToken(t *testing.T) {
@@ -552,6 +609,18 @@ func TestGlobalConfigMigrationAddsNewColumnsBeforeDefaultInsert(t *testing.T) {
 			default_channels TEXT,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
+		CREATE TABLE notification_message_state (
+			channel_id TEXT NOT NULL,
+			source_module TEXT NOT NULL,
+			resource_key TEXT NOT NULL,
+			lifecycle_kind TEXT NOT NULL,
+			chat_id TEXT NOT NULL,
+			message_id INTEGER NOT NULL,
+			event_type TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (channel_id, source_module, resource_key, lifecycle_kind)
+		);
 		INSERT INTO notification_global_config (
 			id, max_retry_times, retry_interval_seconds,
 			history_retention_days, enable_batch, batch_interval_seconds, default_channels
@@ -577,5 +646,13 @@ func TestGlobalConfigMigrationAddsNewColumnsBeforeDefaultInsert(t *testing.T) {
 	}
 	if cfg.MaxRetryTimes != 4 || cfg.GlobalRateLimitPerHr != 100 || cfg.EnableAutoEscalation {
 		t.Fatalf("unexpected migrated config: %#v", cfg)
+	}
+	db, err = service.open(ctx)
+	if err != nil {
+		t.Fatalf("open migrated notification db: %v", err)
+	}
+	defer db.Close()
+	if exists, err := hasColumn(ctx, db, "notification_message_state", "last_data"); err != nil || !exists {
+		t.Fatalf("notification_message_state.last_data migration exists=%v err=%v", exists, err)
 	}
 }

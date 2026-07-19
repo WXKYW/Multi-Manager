@@ -170,8 +170,9 @@ var svgRepoBrandIcons = []brandIconEntry{
 }
 
 type Service struct {
-	cfg   config.Config
-	store *database.Store
+	cfg                    config.Config
+	store                  *database.Store
+	remoteBrandIconFetcher remoteBrandIconFetcher
 }
 
 type Account struct {
@@ -243,7 +244,11 @@ type backupPayload struct {
 }
 
 func New(cfg config.Config) *Service {
-	return &Service{cfg: cfg, store: database.New(cfg)}
+	return &Service{
+		cfg:                    cfg,
+		store:                  database.New(cfg),
+		remoteBrandIconFetcher: downloadRemoteBrandIcon,
+	}
 }
 
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -368,6 +373,12 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		default:
 			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
+	case len(parts) == 3 && parts[0] == "icons" && parts[1] == "library" && parts[2] == "import-url":
+		if r.Method != http.MethodPost {
+			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		s.importCustomBrandIconFromURL(w, r)
 	case len(parts) == 2 && parts[0] == "icons":
 		if r.Method != http.MethodGet {
 			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")

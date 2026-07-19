@@ -77,6 +77,9 @@ type telegramMessageState struct {
 	Kind         string
 	ChatID       string
 	MessageID    int64
+	EventType    string
+	LastData     string
+	CreatedAt    string
 	UpdatedAt    string
 }
 
@@ -980,6 +983,13 @@ func (s *Service) Trigger(ctx context.Context, sourceModule, eventType string, e
 	}
 	loc, _ := s.systemLocation(ctx)
 	lifecycle, hasLifecycle := notificationMessageLifecycle(sourceModule, eventType, eventData)
+	if hasLifecycle {
+		var err error
+		eventData, err = s.enrichLifecycleEventData(ctx, sourceModule, eventType, lifecycle, eventData, time.Now())
+		if err != nil {
+			return err
+		}
+	}
 	for _, rule := range rules {
 		dryRun, err := s.DryRun(ctx, rule, eventData)
 		if err != nil {
@@ -1017,7 +1027,7 @@ func (s *Service) Trigger(ctx context.Context, sourceModule, eventType string, e
 					_ = s.upsertTelegramMessageState(ctx, telegramMessageState{
 						ChannelID: channel.ID, SourceModule: sourceModule, ResourceKey: lifecycle.ResourceKey,
 						Kind: lifecycle.Kind, ChatID: delivery.ChatID, MessageID: delivery.MessageID,
-					}, eventType)
+					}, eventType, eventData)
 				}
 				now := time.Now().In(loc).Format(time.RFC3339)
 				_ = s.updateHistoryStatus(ctx, logID, "sent", &now, nil)
@@ -1036,6 +1046,12 @@ func (s *Service) RefreshLifecycle(ctx context.Context, sourceModule, eventType 
 	if !ok || lifecycle.Phase != "open" {
 		return nil
 	}
+	var err error
+	eventData, err = s.enrichLifecycleEventData(ctx, sourceModule, eventType, lifecycle, eventData, time.Now())
+	if err != nil {
+		return err
+	}
+	eventData["lifecycleMutation"] = "refresh"
 	rules, err := s.loadEnabledRulesByEvent(ctx, sourceModule, eventType)
 	if err != nil {
 		return err
@@ -1068,7 +1084,8 @@ func (s *Service) RefreshLifecycle(ctx context.Context, sourceModule, eventType 
 			message := formatMessage(rule, eventData, loc)
 			config := decryptConfig(channel.ConfigRaw)
 			if err := s.editTelegram(ctx, config, state.ChatID, state.MessageID, title, message); err == nil {
-				_ = s.touchTelegramMessageState(ctx, state, eventType)
+				_ = s.touchTelegramMessageState(ctx, state, eventType, eventData)
+				_ = s.recordLifecycleRefreshHistory(ctx, rule, channel.ID, title, message, eventData, loc)
 				continue
 			}
 			delivery, sendErr := s.sendTelegram(ctx, config, title, message)
@@ -1078,10 +1095,120 @@ func (s *Service) RefreshLifecycle(ctx context.Context, sourceModule, eventType 
 			_ = s.upsertTelegramMessageState(ctx, telegramMessageState{
 				ChannelID: channel.ID, SourceModule: sourceModule, ResourceKey: lifecycle.ResourceKey,
 				Kind: lifecycle.Kind, ChatID: delivery.ChatID, MessageID: delivery.MessageID,
-			}, eventType)
+			}, eventType, eventData)
+			_ = s.recordLifecycleRefreshHistory(ctx, rule, channel.ID, title, message, eventData, loc)
 		}
 	}
 	return nil
+}
+
+func (s *Service) enrichLifecycleEventData(ctx context.Context, sourceModule, eventType string, lifecycle messageLifecycle, eventData map[string]interface{}, now time.Time) (map[string]interface{}, error) {
+	result := cloneNotificationData(eventData)
+	state, found, err := s.loadAnyTelegramMessageState(ctx, sourceModule, lifecycle.ResourceKey, lifecycle.Kind)
+	if err != nil {
+		return nil, err
+	}
+	startedAt := now.UTC()
+	previousData := map[string]interface{}{}
+	if found {
+		if parsed, ok := parseLifecycleStateTime(state.CreatedAt); ok {
+			startedAt = parsed
+		}
+		previousData = parseObject(state.LastData)
+		result["lifecyclePreviousEvent"] = state.EventType
+		if stringValue(result["downDuration"]) == "" {
+			result["downDuration"] = formatNotificationDuration(now.Sub(startedAt))
+		}
+	}
+	result["lifecycleKind"] = lifecycle.Kind
+	result["lifecyclePhase"] = lifecycle.Phase
+	result["lifecycleMutation"] = lifecycle.Phase
+	result["lifecycleResourceKey"] = lifecycle.ResourceKey
+	result["lifecycleStartedAt"] = startedAt.Format(time.RFC3339)
+	if len(previousData) > 0 {
+		result["lifecycleChanges"] = notificationDataChanges(previousData, eventData)
+	}
+	return result, nil
+}
+
+func (s *Service) recordLifecycleRefreshHistory(ctx context.Context, rule Rule, channelID, title, message string, eventData map[string]interface{}, loc *time.Location) error {
+	logID, err := s.createHistory(ctx, rule.ID, channelID, "pending", title, message, eventData, nil)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	if loc != nil {
+		now = now.In(loc)
+	}
+	formatted := now.Format(time.RFC3339)
+	return s.updateHistoryStatus(ctx, logID, "sent", &formatted, nil)
+}
+
+func cloneNotificationData(data map[string]interface{}) map[string]interface{} {
+	result := make(map[string]interface{}, len(data)+8)
+	for key, value := range data {
+		result[key] = value
+	}
+	return result
+}
+
+func notificationDataChanges(previous, current map[string]interface{}) map[string]interface{} {
+	changes := map[string]interface{}{}
+	keys := map[string]struct{}{}
+	for key := range previous {
+		if !strings.HasPrefix(key, "lifecycle") && key != "downDuration" {
+			keys[key] = struct{}{}
+		}
+	}
+	for key := range current {
+		if !strings.HasPrefix(key, "lifecycle") && key != "downDuration" {
+			keys[key] = struct{}{}
+		}
+	}
+	for key := range keys {
+		before, beforeOK := previous[key]
+		after, afterOK := current[key]
+		if beforeOK == afterOK && jsonString(before) == jsonString(after) {
+			continue
+		}
+		changes[key] = map[string]interface{}{"from": before, "to": after}
+	}
+	return changes
+}
+
+func parseLifecycleStateTime(value string) (time.Time, bool) {
+	for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05"} {
+		parsed, err := time.ParseInLocation(layout, value, time.UTC)
+		if err == nil {
+			return parsed.UTC(), true
+		}
+	}
+	return time.Time{}, false
+}
+
+func formatNotificationDuration(duration time.Duration) string {
+	if duration < 0 {
+		duration = 0
+	}
+	totalSeconds := int64(duration.Round(time.Second) / time.Second)
+	days := totalSeconds / 86400
+	hours := (totalSeconds % 86400) / 3600
+	minutes := (totalSeconds % 3600) / 60
+	seconds := totalSeconds % 60
+	parts := make([]string, 0, 4)
+	if days > 0 {
+		parts = append(parts, fmt.Sprintf("%d 天", days))
+	}
+	if hours > 0 {
+		parts = append(parts, fmt.Sprintf("%d 小时", hours))
+	}
+	if minutes > 0 {
+		parts = append(parts, fmt.Sprintf("%d 分钟", minutes))
+	}
+	if seconds > 0 || len(parts) == 0 {
+		parts = append(parts, fmt.Sprintf("%d 秒", seconds))
+	}
+	return strings.Join(parts, " ")
 }
 
 func (s *Service) loadEnabledRulesByEvent(ctx context.Context, sourceModule, eventType string) ([]Rule, error) {
@@ -1234,12 +1361,54 @@ func notificationMessageLifecycle(sourceModule, eventType string, eventData map[
 		case "traffic_normal":
 			lifecycle.Kind = "traffic"
 			lifecycle.Phase = "resolve"
+		case "cpu_high":
+			lifecycle.Kind = "cpu"
+			lifecycle.Phase = "open"
+		case "cpu_normal":
+			lifecycle.Kind = "cpu"
+			lifecycle.Phase = "resolve"
+		case "memory_high":
+			lifecycle.Kind = "memory"
+			lifecycle.Phase = "open"
+		case "memory_normal":
+			lifecycle.Kind = "memory"
+			lifecycle.Phase = "resolve"
+		case "disk_high":
+			lifecycle.Kind = "disk"
+			lifecycle.Phase = "open"
+		case "disk_normal":
+			lifecycle.Kind = "disk"
+			lifecycle.Phase = "resolve"
+		}
+	case "system":
+		lifecycle.ResourceKey = firstNonEmpty(stringValue(eventData["serverId"]), "local-host")
+		lifecycle.Kind, lifecycle.Phase = metricNotificationLifecycle(eventType)
+	case "github":
+		lifecycle.ResourceKey = stringValue(eventData["repositoryId"])
+		lifecycle.Kind = "actions"
+		switch eventType {
+		case "action_failed":
+			lifecycle.Phase = "open"
+		case "action_recovered":
+			lifecycle.Phase = "resolve"
 		}
 	}
 	if lifecycle.ResourceKey == "" || lifecycle.Kind == "" || lifecycle.Phase == "" {
 		return messageLifecycle{}, false
 	}
 	return lifecycle, true
+}
+
+func metricNotificationLifecycle(eventType string) (string, string) {
+	for _, metric := range []string{"cpu", "memory", "disk", "traffic"} {
+		switch eventType {
+		case metric + "_high":
+			return metric, "open"
+		case metric + "_normal":
+			return metric, "resolve"
+		}
+	}
+	return "", ""
 }
 
 func (s *Service) deliverLifecycleTelegram(ctx context.Context, channel storedChannel, cfg map[string]interface{}, sourceModule, eventType string, lifecycle messageLifecycle, title, message string) (deliveryResult, error) {
@@ -1249,7 +1418,7 @@ func (s *Service) deliverLifecycleTelegram(ctx context.Context, channel storedCh
 	}
 	if found {
 		if err := s.editTelegram(ctx, cfg, state.ChatID, state.MessageID, title, message); err == nil {
-			_ = s.touchTelegramMessageState(ctx, state, eventType)
+			_ = s.touchTelegramMessageState(ctx, state, eventType, nil)
 			return deliveryResult{ChatID: state.ChatID, MessageID: state.MessageID}, nil
 		}
 	}
@@ -1264,17 +1433,46 @@ func (s *Service) loadTelegramMessageState(ctx context.Context, channelID, sourc
 	defer db.Close()
 	state := telegramMessageState{}
 	err = db.QueryRowContext(ctx, `
-		SELECT channel_id, source_module, resource_key, lifecycle_kind, chat_id, message_id, updated_at
+		SELECT channel_id, source_module, resource_key, lifecycle_kind, chat_id, message_id,
+			event_type, COALESCE(last_data, '{}'), created_at, updated_at
 		FROM notification_message_state
 		WHERE channel_id = ? AND source_module = ? AND resource_key = ? AND lifecycle_kind = ?
 	`, channelID, sourceModule, resourceKey, kind).Scan(
-		&state.ChannelID, &state.SourceModule, &state.ResourceKey, &state.Kind, &state.ChatID, &state.MessageID, &state.UpdatedAt,
+		&state.ChannelID, &state.SourceModule, &state.ResourceKey, &state.Kind, &state.ChatID, &state.MessageID,
+		&state.EventType, &state.LastData, &state.CreatedAt, &state.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return telegramMessageState{}, false, nil
 	}
 	if err != nil {
 		return telegramMessageState{}, false, fmt.Errorf("load telegram message state: %w", err)
+	}
+	return state, true, nil
+}
+
+func (s *Service) loadAnyTelegramMessageState(ctx context.Context, sourceModule, resourceKey, kind string) (telegramMessageState, bool, error) {
+	db, err := s.open(ctx)
+	if err != nil {
+		return telegramMessageState{}, false, err
+	}
+	defer db.Close()
+	state := telegramMessageState{}
+	err = db.QueryRowContext(ctx, `
+		SELECT channel_id, source_module, resource_key, lifecycle_kind, chat_id, message_id,
+			event_type, COALESCE(last_data, '{}'), created_at, updated_at
+		FROM notification_message_state
+		WHERE source_module = ? AND resource_key = ? AND lifecycle_kind = ?
+		ORDER BY created_at ASC
+		LIMIT 1
+	`, sourceModule, resourceKey, kind).Scan(
+		&state.ChannelID, &state.SourceModule, &state.ResourceKey, &state.Kind, &state.ChatID, &state.MessageID,
+		&state.EventType, &state.LastData, &state.CreatedAt, &state.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return telegramMessageState{}, false, nil
+	}
+	if err != nil {
+		return telegramMessageState{}, false, fmt.Errorf("load telegram lifecycle state: %w", err)
 	}
 	return state, true, nil
 }
@@ -1289,7 +1487,7 @@ func telegramLifecycleRefreshDue(updatedAt string, now time.Time) bool {
 	return true
 }
 
-func (s *Service) upsertTelegramMessageState(ctx context.Context, state telegramMessageState, eventType string) error {
+func (s *Service) upsertTelegramMessageState(ctx context.Context, state telegramMessageState, eventType string, eventData map[string]interface{}) error {
 	db, err := s.open(ctx)
 	if err != nil {
 		return err
@@ -1297,31 +1495,36 @@ func (s *Service) upsertTelegramMessageState(ctx context.Context, state telegram
 	defer db.Close()
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO notification_message_state (
-			channel_id, source_module, resource_key, lifecycle_kind, chat_id, message_id, event_type
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
+			channel_id, source_module, resource_key, lifecycle_kind, chat_id, message_id, event_type, last_data
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(channel_id, source_module, resource_key, lifecycle_kind) DO UPDATE SET
 			chat_id = excluded.chat_id,
 			message_id = excluded.message_id,
 			event_type = excluded.event_type,
+			last_data = excluded.last_data,
 			updated_at = CURRENT_TIMESTAMP
-	`, state.ChannelID, state.SourceModule, state.ResourceKey, state.Kind, state.ChatID, state.MessageID, eventType)
+	`, state.ChannelID, state.SourceModule, state.ResourceKey, state.Kind, state.ChatID, state.MessageID, eventType, jsonString(eventData))
 	if err != nil {
 		return fmt.Errorf("save telegram message state: %w", err)
 	}
 	return nil
 }
 
-func (s *Service) touchTelegramMessageState(ctx context.Context, state telegramMessageState, eventType string) error {
+func (s *Service) touchTelegramMessageState(ctx context.Context, state telegramMessageState, eventType string, eventData map[string]interface{}) error {
 	db, err := s.open(ctx)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+	lastData := ""
+	if eventData != nil {
+		lastData = jsonString(eventData)
+	}
 	_, err = db.ExecContext(ctx, `
 		UPDATE notification_message_state
-		SET event_type = ?, updated_at = CURRENT_TIMESTAMP
+		SET event_type = ?, last_data = CASE WHEN ? = '' THEN last_data ELSE ? END, updated_at = CURRENT_TIMESTAMP
 		WHERE channel_id = ? AND source_module = ? AND resource_key = ? AND lifecycle_kind = ?
-	`, eventType, state.ChannelID, state.SourceModule, state.ResourceKey, state.Kind)
+	`, eventType, lastData, lastData, state.ChannelID, state.SourceModule, state.ResourceKey, state.Kind)
 	return err
 }
 
@@ -1761,6 +1964,7 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			chat_id TEXT NOT NULL,
 			message_id INTEGER NOT NULL,
 			event_type TEXT NOT NULL,
+			last_data TEXT DEFAULT '{}',
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (channel_id, source_module, resource_key, lifecycle_kind)
@@ -1816,6 +2020,7 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 		{"alert_rules", "quiet_until", "ALTER TABLE alert_rules ADD COLUMN quiet_until DATETIME"},
 		{"alert_state_tracking", "state_history", "ALTER TABLE alert_state_tracking ADD COLUMN state_history TEXT DEFAULT '[]'"},
 		{"alert_state_tracking", "is_flapping", "ALTER TABLE alert_state_tracking ADD COLUMN is_flapping INTEGER DEFAULT 0"},
+		{"notification_message_state", "last_data", "ALTER TABLE notification_message_state ADD COLUMN last_data TEXT DEFAULT '{}'"},
 		{"notification_global_config", "global_rate_limit_per_hour", "ALTER TABLE notification_global_config ADD COLUMN global_rate_limit_per_hour INTEGER DEFAULT 100"},
 		{"notification_global_config", "enable_auto_escalation", "ALTER TABLE notification_global_config ADD COLUMN enable_auto_escalation INTEGER DEFAULT 0"},
 		{"notification_global_config", "base_url", "ALTER TABLE notification_global_config ADD COLUMN base_url TEXT"},
@@ -1948,11 +2153,11 @@ func decryptConfig(raw string) map[string]interface{} {
 
 func eventCatalog() []map[string]interface{} {
 	return []map[string]interface{}{
-		{"module": "uptime", "events": []string{"down", "up", "pending", "resource.created", "resource.deleted", "ssl_expiry"}},
-		{"module": "server", "events": []string{"offline", "online", "interrupted", "degraded", "cpu_high", "cpu_normal", "memory_high", "memory_normal", "disk_high", "disk_normal", "traffic_high", "traffic_normal"}},
-		{"module": "system", "events": []string{"database.backup", "database.import", "log.cleanup", "migration.failed", "cpu_high", "cpu_normal", "memory_high", "memory_normal", "disk_high", "disk_normal"}},
+		{"module": "uptime", "events": []string{"down", "up", "pending", "resource.created", "resource.deleted", "ssl_expiry"}, "dynamic_events": []string{"down", "up"}},
+		{"module": "server", "events": []string{"offline", "online", "interrupted", "degraded", "cpu_high", "cpu_normal", "memory_high", "memory_normal", "disk_high", "disk_normal", "traffic_high", "traffic_normal"}, "dynamic_events": []string{"offline", "online", "interrupted", "degraded", "cpu_high", "cpu_normal", "memory_high", "memory_normal", "disk_high", "disk_normal", "traffic_high", "traffic_normal"}},
+		{"module": "system", "events": []string{"database.backup", "database.import", "log.cleanup", "migration.failed", "cpu_high", "cpu_normal", "memory_high", "memory_normal", "disk_high", "disk_normal"}, "dynamic_events": []string{"cpu_high", "cpu_normal", "memory_high", "memory_normal", "disk_high", "disk_normal"}},
 		{"module": "filebox", "events": []string{"resource.created", "resource.deleted", "cleanup"}},
-		{"module": "github", "events": []string{"action_failed", "action_recovered", "release_published", "star_spike", "issue_opened", "pull_request_opened", "repository_unreachable", "token_invalid", "rate_limit_low", "webhook_delivery_failed", "webhook_ping"}},
+		{"module": "github", "events": []string{"action_failed", "action_recovered", "release_published", "star_spike", "issue_opened", "pull_request_opened", "repository_unreachable", "token_invalid", "rate_limit_low", "webhook_delivery_failed", "webhook_ping"}, "dynamic_events": []string{"action_failed", "action_recovered"}},
 		{"module": "totp", "events": []string{"resource.created", "resource.updated", "resource.deleted", "security.revealed", "backup.imported", "backup.exported"}},
 	}
 }

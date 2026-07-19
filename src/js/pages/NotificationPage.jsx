@@ -107,10 +107,10 @@ const getEventTypeName = (type) => {
 };
 
 const FALLBACK_EVENT_CATALOG = [
-  { module: 'uptime', events: ['down', 'up', 'pending', 'resource.created', 'resource.deleted', 'ssl_expiry'] },
-  { module: 'server', events: ['offline', 'online', 'interrupted', 'degraded', 'cpu_high', 'cpu_normal', 'memory_high', 'memory_normal', 'disk_high', 'disk_normal', 'traffic_high', 'traffic_normal'] },
-  { module: 'github', events: ['action_failed', 'action_recovered', 'release_published', 'star_spike', 'issue_opened', 'pull_request_opened', 'repository_unreachable', 'token_invalid', 'rate_limit_low', 'webhook_delivery_failed', 'webhook_ping'] },
-  { module: 'system', events: ['database.backup', 'database.import', 'log.cleanup', 'migration.failed', 'cpu_high', 'cpu_normal', 'memory_high', 'memory_normal', 'disk_high', 'disk_normal'] },
+  { module: 'uptime', events: ['down', 'up', 'pending', 'resource.created', 'resource.deleted', 'ssl_expiry'], dynamic_events: ['down', 'up'] },
+  { module: 'server', events: ['offline', 'online', 'interrupted', 'degraded', 'cpu_high', 'cpu_normal', 'memory_high', 'memory_normal', 'disk_high', 'disk_normal', 'traffic_high', 'traffic_normal'], dynamic_events: ['offline', 'online', 'interrupted', 'degraded', 'cpu_high', 'cpu_normal', 'memory_high', 'memory_normal', 'disk_high', 'disk_normal', 'traffic_high', 'traffic_normal'] },
+  { module: 'github', events: ['action_failed', 'action_recovered', 'release_published', 'star_spike', 'issue_opened', 'pull_request_opened', 'repository_unreachable', 'token_invalid', 'rate_limit_low', 'webhook_delivery_failed', 'webhook_ping'], dynamic_events: ['action_failed', 'action_recovered'] },
+  { module: 'system', events: ['database.backup', 'database.import', 'log.cleanup', 'migration.failed', 'cpu_high', 'cpu_normal', 'memory_high', 'memory_normal', 'disk_high', 'disk_normal'], dynamic_events: ['cpu_high', 'cpu_normal', 'memory_high', 'memory_normal', 'disk_high', 'disk_normal'] },
   { module: 'filebox', events: ['resource.created', 'resource.deleted', 'cleanup'] },
   { module: 'totp', events: ['resource.created', 'resource.updated', 'resource.deleted', 'security.revealed', 'backup.imported', 'backup.exported'] },
 ];
@@ -158,6 +158,21 @@ const parseNotificationPreviewLine = (line = '') => {
       : rawValue,
     code: ['地址', '链接', '云端链接', 'URL', 'Host'].includes(label),
   };
+};
+
+const parseLifecycleHistoryMeta = (rawData) => {
+  try {
+    const data = typeof rawData === 'string' ? JSON.parse(rawData || '{}') : (rawData || {});
+    if (!data.lifecycleKind) return null;
+    return {
+      mutation: data.lifecycleMutation || data.lifecyclePhase || '',
+      kind: data.lifecycleKind,
+      duration: data.downDuration || '',
+      changedFields: Object.keys(data.lifecycleChanges || {}),
+    };
+  } catch (_) {
+    return null;
+  }
 };
 
 function NotificationPage() {
@@ -1078,6 +1093,10 @@ function NotificationPage() {
       {/* ==================== 事件目录 Tab ==================== */}
       {notificationCurrentTab === 'events' && (
         <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="col-span-full flex flex-wrap items-center gap-2 text-[10px] text-kumo-subtle">
+            <Badge className="border border-kumo-brand/25 bg-kumo-brand/10 text-kumo-brand">↻ 动态消息</Badge>
+            <span>同一 Telegram 消息会随告警打开、变化和恢复持续更新；每次变化仍会写入通知历史。</span>
+          </div>
           {notificationEventCatalog.map((item) => (
             <SectionCard
               key={item.module}
@@ -1088,14 +1107,25 @@ function NotificationPage() {
               bodyClassName="p-4"
             >
               <div className="flex flex-wrap gap-2">
-                {(item.events || []).map((eventName) => (
-                  <span
-                    key={`${item.module}-${eventName}`}
-                    className="rounded border border-kumo-line bg-kumo-recessed px-2 py-1 text-[10px] font-semibold text-kumo-subtle"
-                  >
-                    {getEventTypeName(eventName)}
-                  </span>
-                ))}
+                {(item.events || []).map((eventName) => {
+                  const isDynamic = (item.dynamic_events || []).includes(eventName);
+                  return isDynamic ? (
+                    <Badge
+                      key={`${item.module}-${eventName}`}
+                      title="支持 Telegram 动态消息"
+                      className="border border-kumo-brand/25 bg-kumo-brand/10 text-[10px] font-semibold text-kumo-brand"
+                    >
+                      ↻ {getEventTypeName(eventName)}
+                    </Badge>
+                  ) : (
+                    <span
+                      key={`${item.module}-${eventName}`}
+                      className="rounded border border-kumo-line bg-kumo-recessed px-2 py-1 text-[10px] font-semibold text-kumo-subtle"
+                    >
+                      {getEventTypeName(eventName)}
+                    </span>
+                  );
+                })}
               </div>
             </SectionCard>
           ))}
@@ -1189,6 +1219,31 @@ function NotificationPage() {
                         {new Date(log.created_at).toLocaleString()}
                       </span>
                     </div>
+                    {(() => {
+                      const lifecycleMeta = parseLifecycleHistoryMeta(log.data);
+                      if (!lifecycleMeta) return null;
+                      const mutationLabel = {
+                        open: '告警打开',
+                        refresh: '动态更新',
+                        resolve: '告警恢复',
+                      }[lifecycleMeta.mutation] || lifecycleMeta.mutation;
+                      return (
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          <Badge className="border border-kumo-brand/25 bg-kumo-brand/10 text-[9px] text-kumo-brand">
+                            ↻ {mutationLabel}
+                          </Badge>
+                          <span className="font-mono text-[9px] text-kumo-subtle">{lifecycleMeta.kind}</span>
+                          {lifecycleMeta.duration && (
+                            <span className="text-[9px] text-kumo-subtle">持续 {lifecycleMeta.duration}</span>
+                          )}
+                          {lifecycleMeta.changedFields.length > 0 && (
+                            <span className="text-[9px] text-kumo-subtle" title={lifecycleMeta.changedFields.join(', ')}>
+                              变化 {lifecycleMeta.changedFields.length} 项
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
                     {/* Message block */}
                     <AppCard padding="none" className="mt-2.5 whitespace-pre-wrap bg-kumo-recessed p-3 font-mono text-xs text-kumo-subtle">
                       {log.message}

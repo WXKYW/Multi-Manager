@@ -72,6 +72,17 @@ const normalizeSVGRepoIconRef = (value) => {
   return `svgrepo:${match[1]}-${match[2].replace(/^-+|-+$/g, '').toLowerCase()}`;
 };
 
+const normalizeRemoteBrandIconURL = (value) => {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  try {
+    const parsed = new URL(text);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : '';
+  } catch (_) {
+    return '';
+  }
+};
+
 const TotpBrandMark = ({ issuer, icon, color, size = 'card' }) => {
   const isHeader = size === 'header';
   const markColor = color || getIssuerColor(issuer);
@@ -521,6 +532,43 @@ function TotpPage() {
     return uploaded;
   }, [accountForm.color, accountForm.issuer, loadCustomBrandIcons]);
 
+  const importCustomBrandIconFromURL = useCallback(async (sourceURL) => {
+    const normalizedURL = normalizeRemoteBrandIconURL(sourceURL);
+    if (!normalizedURL) {
+      throw new Error('请粘贴有效的 http/https 图片链接');
+    }
+    const res = await fetch('/api/totp/icons/library/import-url', {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        url: normalizedURL,
+        name: String(accountForm.issuer || '').trim(),
+        issuer: String(accountForm.issuer || '').trim(),
+        color: normalizeHexColor(accountForm.color) || resolveFormColor(accountForm),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || '下载图标失败');
+    }
+    const uploaded = data.data || {};
+    const nextIcon = uploaded.icon || (uploaded.id ? `custom:${uploaded.id}` : '');
+    setAccountForm((prev) => ({
+      ...prev,
+      icon: nextIcon,
+      color: uploaded.color || prev.color,
+    }));
+    const nextLibrary = await loadCustomBrandIcons();
+    const customOptions = buildCustomBrandStyleOptions({
+      issuer: accountForm.issuer,
+      entries: nextLibrary,
+      fallbackColor: resolveFormColor(accountForm),
+    });
+    setBrandStyleOptions((prev) => mergeBrandStyleOptions(customOptions, prev));
+    setShowBrandStyleModal(true);
+    return uploaded;
+  }, [accountForm.color, accountForm.issuer, loadCustomBrandIcons]);
+
   const openBrandStylePicker = useCallback(async (baseOptions = null) => {
     const fallbackOptions = baseOptions || buildBrandStyleOptions({
       issuer: accountForm.issuer,
@@ -615,13 +663,20 @@ function TotpPage() {
                   : file.type === 'image/gif'
                     ? 'gif'
                     : 'png';
-          return new File([file], file.name || `clipboard-icon.${ext}`, { type: file.type || 'image/png' });
+          return {
+            type: 'file',
+            value: new File([file], file.name || `clipboard-icon.${ext}`, { type: file.type || 'image/png' }),
+          };
         }
       }
       if (item.kind === 'string' && item.type === 'text/plain') {
         const text = await new Promise((resolve) => item.getAsString(resolve));
         if (typeof text === 'string' && text.toLowerCase().includes('<svg')) {
-          return new File([text], 'clipboard-icon.svg', { type: 'image/svg+xml' });
+          return { type: 'file', value: new File([text], 'clipboard-icon.svg', { type: 'image/svg+xml' }) };
+        }
+        const sourceURL = normalizeRemoteBrandIconURL(text);
+        if (sourceURL) {
+          return { type: 'url', value: sourceURL };
         }
       }
     }
@@ -634,18 +689,23 @@ function TotpPage() {
     event.preventDefault();
     setCustomBrandIconUploading(true);
     try {
-      const file = await uploadCustomBrandIconFromClipboardItems(items);
-      if (!file) {
-        throw new Error('剪贴板里没有可用的图片或 SVG 图标');
+      const asset = await uploadCustomBrandIconFromClipboardItems(items);
+      if (!asset) {
+        throw new Error('剪贴板里没有可用的图片、SVG 图标或图片链接');
       }
-      await uploadCustomBrandIconAsset(file, 'clipboard-icon');
-      toast.success('已从剪贴板粘贴并应用图标');
+      if (asset.type === 'url') {
+        await importCustomBrandIconFromURL(asset.value);
+        toast.success('已从链接下载并应用图标');
+      } else {
+        await uploadCustomBrandIconAsset(asset.value, 'clipboard-icon');
+        toast.success('已从剪贴板粘贴并应用图标');
+      }
     } catch (error) {
       toast.error(error.message || '粘贴图标失败');
     } finally {
       setCustomBrandIconUploading(false);
     }
-  }, [uploadCustomBrandIconAsset, uploadCustomBrandIconFromClipboardItems]);
+  }, [importCustomBrandIconFromURL, uploadCustomBrandIconAsset, uploadCustomBrandIconFromClipboardItems]);
 
   const handlePasteBrandIconFromClipboard = useCallback(async () => {
     if (!navigator.clipboard?.read) {
@@ -656,35 +716,55 @@ function TotpPage() {
     try {
       const clipboardItems = await navigator.clipboard.read();
       let uploaded = false;
+      let clipboardText = '';
       for (const clipboardItem of clipboardItems) {
         const types = clipboardItem.types || [];
         const imageType = types.find((type) => ['image/svg+xml', 'image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(type));
-        if (!imageType) continue;
-        const blob = await clipboardItem.getType(imageType);
-        const ext = imageType === 'image/svg+xml'
-          ? 'svg'
-          : imageType === 'image/png'
-            ? 'png'
-            : imageType === 'image/jpeg'
-              ? 'jpg'
-              : imageType === 'image/webp'
-                ? 'webp'
-                : 'gif';
-        const file = new File([blob], `clipboard-icon.${ext}`, { type: imageType });
+        if (imageType) {
+          const blob = await clipboardItem.getType(imageType);
+          const ext = imageType === 'image/svg+xml'
+            ? 'svg'
+            : imageType === 'image/png'
+              ? 'png'
+              : imageType === 'image/jpeg'
+                ? 'jpg'
+                : imageType === 'image/webp'
+                  ? 'webp'
+                  : 'gif';
+          const file = new File([blob], `clipboard-icon.${ext}`, { type: imageType });
+          await uploadCustomBrandIconAsset(file, 'clipboard-icon');
+          uploaded = true;
+          break;
+        }
+        if (!clipboardText && types.includes('text/plain')) {
+          const textBlob = await clipboardItem.getType('text/plain');
+          clipboardText = await textBlob.text();
+        }
+      }
+      if (!uploaded && clipboardText.toLowerCase().includes('<svg')) {
+        const file = new File([clipboardText], 'clipboard-icon.svg', { type: 'image/svg+xml' });
         await uploadCustomBrandIconAsset(file, 'clipboard-icon');
         uploaded = true;
-        break;
+      }
+      let importedFromURL = false;
+      if (!uploaded) {
+        const sourceURL = normalizeRemoteBrandIconURL(clipboardText);
+        if (sourceURL) {
+          await importCustomBrandIconFromURL(sourceURL);
+          uploaded = true;
+          importedFromURL = true;
+        }
       }
       if (!uploaded) {
-        throw new Error('剪贴板里没有检测到可上传的图标');
+        throw new Error('剪贴板里没有检测到可上传的图标或图片链接');
       }
-      toast.success('已从剪贴板粘贴并应用图标');
+      toast.success(importedFromURL ? '已从链接下载并应用图标' : '已从剪贴板粘贴并应用图标');
     } catch (error) {
       toast.error(error.message || '读取剪贴板失败');
     } finally {
       setCustomBrandIconUploading(false);
     }
-  }, [uploadCustomBrandIconAsset]);
+  }, [importCustomBrandIconFromURL, uploadCustomBrandIconAsset]);
 
   const applyBrandStyleOption = (option) => {
     setAccountForm((prev) => ({
@@ -2110,7 +2190,7 @@ function TotpPage() {
 
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div className="text-[11px] text-kumo-subtle">
-              支持 `SVG / PNG / JPG / WebP / GIF`，也可直接粘贴剪贴板图片或 SVG。
+              支持 `SVG / PNG / JPG / WebP / GIF`，也可直接粘贴图片、SVG 源码或 http(s) 图片链接。
             </div>
             <div className="flex items-center gap-2">
               <input
@@ -2154,12 +2234,12 @@ function TotpPage() {
             onPaste={handleBrandLibraryPaste}
             className="mb-3 rounded-md border border-dashed border-kumo-line bg-kumo-recessed/15 px-3 py-2.5 text-[11px] text-kumo-subtle outline-none transition-colors focus:border-kumo-brand focus:ring-2 focus:ring-kumo-brand/20"
           >
-            选中这里后按 `Ctrl+V`，可以直接粘贴截图、复制的图标文件，或 SVG 源码。
+            选中这里后按 `Ctrl+V`，可以直接粘贴截图、图标文件、SVG 源码或图片链接，并自动下载应用。
           </div>
 
-          <div className="flex gap-2 overflow-x-auto pb-1">
+          <div className="grid grid-cols-1 items-start gap-2 sm:grid-cols-2 md:grid-cols-3">
             {!customBrandIconsLoading && brandStyleOptions.length === 0 && (
-              <div className="rounded-md border border-kumo-line bg-kumo-recessed/20 px-3 py-6 text-center text-xs text-kumo-subtle">
+              <div className="col-span-full rounded-md border border-kumo-line bg-kumo-recessed/20 px-3 py-6 text-center text-xs text-kumo-subtle">
                 当前还没有可选图标。
               </div>
             )}
@@ -2169,16 +2249,18 @@ function TotpPage() {
                 type="button"
                 variant="secondary"
                 onClick={() => applyBrandStyleOption(option)}
-                className="grid !h-auto min-w-[7.5rem] grid-cols-[auto_minmax(0,1fr)] items-center gap-2 px-3 py-2 text-left"
+                className="!h-auto min-w-0 w-full self-start px-3 py-2 text-left"
               >
-                <TotpBrandMark
-                  issuer={accountForm.issuer}
-                  icon={option.icon}
-                  color={option.color || resolveFormColor(accountForm)}
-                />
+                <span className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2">
+                  <TotpBrandMark
+                    issuer={accountForm.issuer}
+                    icon={option.icon}
+                    color={option.color || resolveFormColor(accountForm)}
+                  />
                   <span className="min-w-0">
                     <span className="block truncate text-xs font-semibold text-kumo-strong">{option.label}</span>
                     <span className="block truncate text-[11px] text-kumo-subtle">{option.caption}</span>
+                  </span>
                 </span>
               </Button>
             ))}
