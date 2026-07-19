@@ -9,6 +9,7 @@ import {
   normalizedVideoPoint,
   normalizedTrackpadDelta,
   remoteCursorPoint,
+  trackpadButtonMessage,
 } from './remoteDesktopTouch.js';
 
 describe('remote desktop touch controls', () => {
@@ -36,6 +37,19 @@ describe('remote desktop touch controls', () => {
     );
     expect(phone).toEqual(tablet);
     expect(phone.x * 1920).toBeGreaterThan(12);
+  });
+
+  it('sends trackpad buttons without absolute coordinates', () => {
+    expect(trackpadButtonMessage('click')).toEqual({
+      type: 'mouse',
+      action: 'click',
+      button: 0,
+    });
+    expect(trackpadButtonMessage('click', 2)).toEqual({
+      type: 'mouse',
+      action: 'click',
+      button: 2,
+    });
   });
 
   it('starts coarse-pointer clients in a reaction-first mobile profile', () => {

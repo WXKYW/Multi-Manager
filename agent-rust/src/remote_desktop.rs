@@ -952,10 +952,7 @@ mod windows_impl {
     }
 
     fn pointer_message_sequence(value: &Value) -> Option<u32> {
-        matches!(
-            value.get("type").and_then(Value::as_str),
-            Some("pointer-relative" | "pointer-query")
-        )
+        matches!(value.get("type").and_then(Value::as_str), Some("pointer-query"))
         .then(|| value.get("sequence").and_then(Value::as_u64).unwrap_or(0) as u32)
     }
 
@@ -1317,14 +1314,14 @@ mod windows_impl {
         }
 
         #[test]
-        fn pointer_queries_and_relative_moves_receive_position_sequences() {
+        fn only_pointer_queries_receive_position_sequences() {
             assert_eq!(
                 pointer_message_sequence(&json!({"type": "pointer-query", "sequence": 7})),
                 Some(7)
             );
             assert_eq!(
                 pointer_message_sequence(&json!({"type": "pointer-relative", "sequence": 8})),
-                Some(8)
+                None
             );
             assert_eq!(
                 pointer_message_sequence(&json!({"type": "pointer", "sequence": 9})),

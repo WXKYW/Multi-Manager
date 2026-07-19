@@ -31,6 +31,14 @@ export function normalizedTrackpadDelta(deltaX, deltaY, elapsedMs, viewport, rem
   };
 }
 
+export function trackpadButtonMessage(action, button = 0) {
+  return {
+    type: 'mouse',
+    action,
+    button,
+  };
+}
+
 export function normalizedVideoPoint(
   point,
   surface,

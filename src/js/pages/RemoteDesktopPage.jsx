@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
-import { ChevronUp, DesktopDisplay, Maximize2, Menu, RefreshCw, X } from '../components/Icons.jsx';
+import { ChevronUp, Cursor, DesktopDisplay, Maximize2, Menu, RefreshCw, X } from '../components/Icons.jsx';
 import {
   TOUCH_LONG_PRESS_MS,
   TOUCH_PINCH_SLOP,
@@ -17,6 +17,7 @@ import {
   normalizedVideoPoint,
   pointDistance,
   remoteCursorPoint,
+  trackpadButtonMessage,
 } from '../modules/remoteDesktopTouch.js';
 
 const ICE_SERVERS = [
@@ -558,6 +559,10 @@ export default function RemoteDesktopPage() {
     return sendControl({ type: 'pointer-contact', ...position, button, action }, { reliable: true });
   };
 
+  const sendTrackpadButton = (action, button = 0) => (
+    sendControl(trackpadButtonMessage(action, button), { reliable: true })
+  );
+
   const sendTouchContact = (position, action) => {
     if (!position) return false;
     if (absolutePointerFrameRef.current) {
@@ -593,13 +598,11 @@ export default function RemoteDesktopPage() {
     pendingRelativePointerRef.current = { x: 0, y: 0 };
     if (!pending.x && !pending.y) return;
     const latest = cursorPositionRef.current;
-    pointerSequenceRef.current = (pointerSequenceRef.current + 1) >>> 0;
     setVirtualCursor({ ...latest, visible: true });
     sendControl({
       type: 'pointer-relative',
       dx: pending.x,
       dy: pending.y,
-      sequence: pointerSequenceRef.current,
     }, { reliable: true });
   };
 
@@ -654,7 +657,7 @@ export default function RemoteDesktopPage() {
     if (gesture?.buttonDown) {
       if (!gesture.direct) flushRelativePointer();
       if (gesture.direct) sendTouchContact(gesture.position, 'up');
-      else sendPointerContact(cursorPositionRef.current, 'up');
+      else sendTrackpadButton('up');
       gesture.buttonDown = false;
     }
   };
@@ -694,14 +697,14 @@ export default function RemoteDesktopPage() {
       } else if (doubleTapDrag) {
         lastTapRef.current = null;
         flushRelativePointer();
-        sendPointerContact(cursorPositionRef.current, 'down');
+        sendTrackpadButton('down');
         navigator.vibrate?.(8);
       } else {
         longPressTimerRef.current = window.setTimeout(() => {
           if (touchGestureRef.current !== gesture || gesture.moved || gesture.buttonDown) return;
           gesture.buttonDown = true;
           flushRelativePointer();
-          sendPointerContact(cursorPositionRef.current, 'down');
+          sendTrackpadButton('down');
           navigator.vibrate?.(12);
         }, TOUCH_LONG_PRESS_MS);
       }
@@ -814,7 +817,7 @@ export default function RemoteDesktopPage() {
         releaseTouchDrag(gesture);
       } else if (!gesture.moved && now - gesture.startedAt <= TOUCH_TAP_MAX_MS) {
         flushRelativePointer();
-        sendPointerContact(cursorPositionRef.current, 'click');
+        sendTrackpadButton('click');
         lastTapRef.current = { at: now, x: gesture.startX, y: gesture.startY };
       }
     } else if (
@@ -824,7 +827,7 @@ export default function RemoteDesktopPage() {
       && now - gesture.startedAt <= TOUCH_TAP_MAX_MS
     ) {
       flushRelativePointer();
-      sendPointerContact(cursorPositionRef.current, 'click', 2);
+      sendTrackpadButton('click', 2);
       navigator.vibrate?.(8);
     }
     touchGestureRef.current = null;
@@ -959,12 +962,10 @@ export default function RemoteDesktopPage() {
           {virtualCursor.visible && (
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-1/2"
+              className="pointer-events-none absolute z-20 drop-shadow-[0_1px_1px_rgba(0,0,0,0.75)]"
               style={{ left: `${cursorDisplayPoint.x}px`, top: `${cursorDisplayPoint.y}px` }}
             >
-              <div className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-kumo-inverse bg-kumo-brand/70">
-                <div className="h-1.5 w-1.5 rounded-full bg-kumo-inverse" />
-              </div>
+              <Cursor size={18} weight="fill" className="text-kumo-brand" />
             </div>
           )}
         </div>

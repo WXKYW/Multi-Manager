@@ -25,6 +25,7 @@ import {
   Compass as PhCompass,
   Copy as PhCopy,
   Cpu as PhCpu,
+  Cursor as PhCursor,
   Cube,
   Database as PhDatabase,
   DotsThreeVertical,
@@ -249,6 +250,7 @@ export const Shuffle = createIcon(PhShuffle);
 export const Volume2 = createIcon(SpeakerHigh);
 export const VolumeX = createIcon(SpeakerSlash);
 export const Compass = createIcon(PhCompass);
+export const Cursor = createIcon(PhCursor);
 export const Home = createIcon(House);
 export const User = createIcon(PhUser);
 export const Maximize2 = createIcon(ArrowsOutSimple);
