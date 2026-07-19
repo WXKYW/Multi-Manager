@@ -9,6 +9,7 @@
 //! (MTA) + `MFStartup` on the constructing thread; keep the encoder on one
 //! thread. The pipeline runs it on a dedicated encode thread.
 
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use windows::core::{Interface, GUID, PCWSTR};
@@ -41,30 +42,39 @@ pub struct MfH264Encoder {
     pending_input_requests: u32,
     /// BGRA->NV12 converter, present only when the MFT requires NV12 input.
     converter: Option<Bgra2Nv12>,
+    /// Reused CPU NV12 frame buffer for the software encoder path.
+    cpu_nv12: Vec<u8>,
     /// Sample allocator for the hardware D3D11-aware MFT. When present, input
     /// samples come from here (MFT-owned NV12 textures) instead of textures we
     /// create — hardware MFTs reject foreign textures at ProcessInput.
     allocator: Option<IMFVideoSampleAllocatorEx>,
-    // Declared last so every MFT/DXGI field is released before MFShutdown and
-    // CoUninitialize run during field destruction.
+    // Declared last so COM is uninitialized after every MFT/DXGI field is
+    // released. Media Foundation itself is process-scoped and remains started
+    // until process exit, as required by the MF lifetime contract.
     _runtime: MediaFoundationRuntime,
 }
 
 struct MediaFoundationRuntime {
     com_initialized: bool,
-    mf_started: bool,
 }
 
 impl MediaFoundationRuntime {
     fn start() -> Result<Self> {
         unsafe {
-            let mut runtime = Self {
-                com_initialized: CoInitializeEx(None, COINIT_MULTITHREADED).is_ok(),
-                mf_started: false,
-            };
-            MFStartup(MF_VERSION, MFSTARTUP_FULL)?;
-            runtime.mf_started = true;
-            Ok(runtime)
+            let com_initialized = CoInitializeEx(None, COINIT_MULTITHREADED).is_ok();
+            static MF_STARTED: OnceLock<std::result::Result<(), i32>> = OnceLock::new();
+            let mf_result = MF_STARTED.get_or_init(|| {
+                MFStartup(MF_VERSION, MFSTARTUP_FULL).map_err(|error| error.code().0)
+            });
+            if let Err(code) = mf_result {
+                if com_initialized {
+                    CoUninitialize();
+                }
+                return Err(PipelineError::TypeNegotiation(
+                    format!("Media Foundation startup failed: HRESULT 0x{code:08x}").into(),
+                ));
+            }
+            Ok(Self { com_initialized })
         }
     }
 }
@@ -72,9 +82,6 @@ impl MediaFoundationRuntime {
 impl Drop for MediaFoundationRuntime {
     fn drop(&mut self) {
         unsafe {
-            if self.mf_started {
-                let _ = MFShutdown();
-            }
             if self.com_initialized {
                 CoUninitialize();
             }
@@ -178,6 +185,7 @@ impl MfH264Encoder {
                 started: false,
                 pending_input_requests: 0,
                 converter,
+                cpu_nv12: Vec::new(),
                 allocator,
                 _runtime: runtime,
             })
@@ -227,8 +235,8 @@ impl MfH264Encoder {
         // Hardware (async) path: wrap the GPU NV12 texture directly (zero-copy).
         let sample = match (self.converter.as_mut(), self.is_async) {
             (Some(conv), false) => {
-                let nv12_cpu = conv.convert_to_cpu(texture)?;
-                self.wrap_cpu_nv12(&nv12_cpu, timestamp)?
+                conv.convert_to_cpu_into(texture, &mut self.cpu_nv12)?;
+                self.wrap_cpu_nv12(&self.cpu_nv12, timestamp)?
             }
             (Some(_), true) => {
                 // Hardware path: get an MFT-owned NV12 sample from the allocator,

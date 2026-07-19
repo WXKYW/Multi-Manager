@@ -31,6 +31,11 @@ export function normalizedTrackpadDelta(deltaX, deltaY, elapsedMs, viewport, rem
   };
 }
 
+export function trackpadPixelDelta(deltaX, deltaY, elapsedMs) {
+  const accelerated = accelerateTrackpadDelta(deltaX, deltaY, elapsedMs);
+  return { x: accelerated.x, y: accelerated.y };
+}
+
 export function trackpadButtonMessage(action, button = 0) {
   return {
     type: 'mouse',

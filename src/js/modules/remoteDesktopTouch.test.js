@@ -10,6 +10,7 @@ import {
   normalizedTrackpadDelta,
   remoteCursorPoint,
   trackpadButtonMessage,
+  trackpadPixelDelta,
 } from './remoteDesktopTouch.js';
 
 describe('remote desktop touch controls', () => {
@@ -50,6 +51,11 @@ describe('remote desktop touch controls', () => {
       action: 'click',
       button: 2,
     });
+  });
+
+  it('sends integer trackpad deltas without remote geometry', () => {
+    expect(trackpadPixelDelta(2, -3, 16)).toEqual({ x: 2, y: -3 });
+    expect(trackpadPixelDelta(24, 0, 16).x).toBeGreaterThan(24);
   });
 
   it('starts coarse-pointer clients in a reaction-first mobile profile', () => {

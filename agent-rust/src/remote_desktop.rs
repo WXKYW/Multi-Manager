@@ -857,8 +857,7 @@ mod windows_impl {
                 handle_touch_contact(enigo, &value, geometry, touch_contact)
             }
             "pointer-relative" => {
-                let geometry = geometry.lock().map(|item| *item).unwrap_or_default();
-                let (dx, dy) = normalized_pointer_delta(&value, geometry);
+                let (dx, dy) = pointer_delta(&value);
                 (dx != 0 || dy != 0) && enigo.move_mouse(dx, dy, Coordinate::Rel).is_ok()
             }
             "pointer-query" => true,
@@ -917,21 +916,18 @@ mod windows_impl {
         }
     }
 
-    fn normalized_pointer_delta(value: &Value, geometry: DesktopGeometry) -> (i32, i32) {
+    fn pointer_delta(value: &Value) -> (i32, i32) {
         let dx = value
             .get("dx")
             .and_then(Value::as_f64)
             .unwrap_or(0.0)
-            .clamp(-1.0, 1.0);
+            .clamp(-4096.0, 4096.0);
         let dy = value
             .get("dy")
             .and_then(Value::as_f64)
             .unwrap_or(0.0)
-            .clamp(-1.0, 1.0);
-        (
-            (dx * geometry.width.max(1) as f64).round() as i32,
-            (dy * geometry.height.max(1) as f64).round() as i32,
-        )
+            .clamp(-4096.0, 4096.0);
+        (dx.round() as i32, dy.round() as i32)
     }
 
     fn normalized_pointer_position(value: &Value, geometry: DesktopGeometry) -> (i32, i32) {
@@ -1280,15 +1276,9 @@ mod windows_impl {
         }
 
         #[test]
-        fn normalized_touchpad_delta_scales_to_remote_desktop_pixels() {
-            let geometry = DesktopGeometry {
-                x: -1_920,
-                y: 0,
-                width: 1_920,
-                height: 1_080,
-            };
-            let delta = normalized_pointer_delta(&json!({"dx": 0.25, "dy": -0.5}), geometry);
-            assert_eq!(delta, (480, -540));
+        fn touchpad_delta_is_independent_of_desktop_geometry() {
+            assert_eq!(pointer_delta(&json!({"dx": 25, "dy": -12})), (25, -12));
+            assert_eq!(pointer_delta(&json!({"dx": 9999, "dy": -9999})), (4096, -4096));
         }
 
         #[test]

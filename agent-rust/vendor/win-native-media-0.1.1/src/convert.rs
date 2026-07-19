@@ -53,6 +53,21 @@ impl Bgra2Nv12 {
             let enumerator = video_device.CreateVideoProcessorEnumerator(&content_desc)?;
             let processor = video_device.CreateVideoProcessor(&enumerator, 0)?;
 
+            // WGC supplies full-range sRGB BGRA. Explicitly describe the
+            // conversion to studio-range BT.709 NV12 so the H.264 stream does
+            // not inherit driver-dependent color defaults.
+            if let Ok(context1) = video_context.cast::<ID3D11VideoContext1>() {
+                let _ = context1.VideoProcessorSetStreamColorSpace1(
+                    &processor,
+                    0,
+                    DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
+                );
+                let _ = context1.VideoProcessorSetOutputColorSpace1(
+                    &processor,
+                    DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709,
+                );
+            }
+
             // Create the reusable NV12 output texture.
             let nv12_desc = D3D11_TEXTURE2D_DESC {
                 Width: width,
@@ -110,6 +125,19 @@ impl Bgra2Nv12 {
     /// buffer (Y plane then interleaved UV), for the software encoder path.
     /// Returns (buffer, width, height). NV12 buffer size = w*h + w*h/2.
     pub fn convert_to_cpu(&mut self, bgra: &ID3D11Texture2D) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        self.convert_to_cpu_into(bgra, &mut out)?;
+        Ok(out)
+    }
+
+    /// Same conversion as `convert_to_cpu`, reusing the caller's allocation.
+    /// Remote desktop frames are large enough that allocating a new NV12 Vec
+    /// for every frame needlessly grows the process heap between sessions.
+    pub fn convert_to_cpu_into(
+        &mut self,
+        bgra: &ID3D11Texture2D,
+        out: &mut Vec<u8>,
+    ) -> Result<()> {
         self.convert(bgra)?;
         unsafe {
             let context = self.device.GetImmediateContext()?;
@@ -146,7 +174,8 @@ impl Bgra2Nv12 {
 
             // NV12: Y plane (h rows) then UV plane (h/2 rows), each row `pitch`
             // wide in the mapped texture but `w` wide when packed.
-            let mut out = Vec::with_capacity(w * h + w * h / 2);
+            out.clear();
+            out.reserve(w * h + w * h / 2);
             for row in 0..h {
                 let line = std::slice::from_raw_parts(src.add(row * pitch), w);
                 out.extend_from_slice(line);
@@ -158,7 +187,7 @@ impl Bgra2Nv12 {
                 out.extend_from_slice(line);
             }
             context.Unmap(staging, 0);
-            Ok(out)
+            Ok(())
         }
     }
 

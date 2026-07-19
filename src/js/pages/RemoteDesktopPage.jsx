@@ -18,6 +18,7 @@ import {
   pointDistance,
   remoteCursorPoint,
   trackpadButtonMessage,
+  trackpadPixelDelta,
 } from '../modules/remoteDesktopTouch.js';
 
 const ICE_SERVERS = [
@@ -539,6 +540,7 @@ export default function RemoteDesktopPage() {
 
   const scheduleAbsolutePointer = (position) => {
     cursorPositionRef.current = position;
+    setVirtualCursor({ ...position, visible: true });
     pendingAbsolutePointerRef.current = position;
     if (absolutePointerFrameRef.current) return;
     absolutePointerFrameRef.current = window.requestAnimationFrame(() => {
@@ -596,13 +598,15 @@ export default function RemoteDesktopPage() {
     }
     const pending = pendingRelativePointerRef.current;
     pendingRelativePointerRef.current = { x: 0, y: 0 };
-    if (!pending.x && !pending.y) return;
+    const dx = Math.round(pending.x);
+    const dy = Math.round(pending.y);
+    if (!dx && !dy) return;
     const latest = cursorPositionRef.current;
     setVirtualCursor({ ...latest, visible: true });
     sendControl({
       type: 'pointer-relative',
-      dx: pending.x,
-      dy: pending.y,
+      dx,
+      dy,
     }, { reliable: true });
   };
 
@@ -619,14 +623,15 @@ export default function RemoteDesktopPage() {
         height: videoRef.current?.videoHeight || rect.height,
       },
     );
+    const pixelDelta = trackpadPixelDelta(deltaX, deltaY, elapsedMs);
     const current = cursorPositionRef.current;
     const next = {
       x: Math.max(0, Math.min(1, current.x + normalizedDelta.x)),
       y: Math.max(0, Math.min(1, current.y + normalizedDelta.y)),
     };
     cursorPositionRef.current = next;
-    pendingRelativePointerRef.current.x += normalizedDelta.x;
-    pendingRelativePointerRef.current.y += normalizedDelta.y;
+    pendingRelativePointerRef.current.x += pixelDelta.x;
+    pendingRelativePointerRef.current.y += pixelDelta.y;
     if (pointerFrameRef.current) return;
     pointerFrameRef.current = window.requestAnimationFrame(() => {
       pointerFrameRef.current = 0;
@@ -881,7 +886,7 @@ export default function RemoteDesktopPage() {
 
   return (
     <div className="flex h-dvh min-h-0 flex-col bg-kumo-recessed text-kumo-default">
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-kumo-line bg-kumo-base px-3 py-2">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-kumo-line bg-kumo-base px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <DesktopDisplay className="h-5 w-5 text-kumo-brand" />
           <div className="min-w-0">
@@ -891,7 +896,7 @@ export default function RemoteDesktopPage() {
             {stateLabel(state)}
           </Badge>
         </div>
-        <div className="flex min-w-0 items-center gap-2 overflow-x-auto [scrollbar-width:none]">
+        <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2 md:w-auto">
           <span className="hidden text-[11px] text-kumo-subtle md:inline">
             {stats.rtt ? `${stats.rtt} ms · ` : ''}{stats.fps ? `解码 ${stats.fps.toFixed(0)} FPS · ` : ''}
             {stats.receivedFps ? `接收 ${stats.receivedFps.toFixed(0)} FPS · ` : ''}
@@ -1018,11 +1023,6 @@ export default function RemoteDesktopPage() {
                 />
               </div>
             )}
-          </div>
-        )}
-        {virtualCursor.visible && (
-          <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-kumo-line bg-kumo-base/80 px-2 py-1 text-[11px] text-kumo-subtle">
-            {touchInputMode === 'trackpad' ? '触控板：单指相对移动/轻点左键' : '直接触摸：触点绝对映射，按住即可拖拽'} · 双指轻点右键 · 双指拖动滚动 · 张合缩放
           </div>
         )}
         {error && (
