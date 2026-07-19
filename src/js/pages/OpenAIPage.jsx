@@ -26,6 +26,13 @@ import useStore from '../store.js';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
 import { renderMarkdown, formatDateTime } from '../modules/utils.js';
+import {
+  countModelHealthResults,
+  endpointModelIds,
+  modelHealthKey,
+  modelHealthTargets,
+  normalizeModelHealthRecord,
+} from '../modules/openaiModelHealth.js';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
 import {
   PageStack,
@@ -98,6 +105,10 @@ function formatAnalyticsDay(timestamp) {
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return '';
   return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function createHealthCheckProgress(total = 0, running = false) {
+  return { running, total, completed: 0, healthy: 0, degraded: 0, failed: 0 };
 }
 
 function OpenAIPage() {
@@ -632,125 +643,197 @@ function OpenAIPage() {
     }
   });
 
-  const saveModelHealth = health => {
-    setOpenaiModelHealth(health);
-    localStorage.setItem('openai_model_health_cache', JSON.stringify(health));
-  };
+  useEffect(() => {
+    localStorage.setItem('openai_model_health_cache', JSON.stringify(openaiModelHealth));
+  }, [openaiModelHealth]);
 
   const [modelHealthBatchLoading, setModelHealthBatchLoading] = useState(false);
+  const [healthCheckProgress, setHealthCheckProgress] = useState(() =>
+    createHealthCheckProgress()
+  );
   const [healthCheckModal, setHealthCheckModal] = useState(false);
   const [healthCheckForm, setHealthCheckForm] = useState({
-    useKey: 'single', // 'single' | 'all'
-    concurrency: false,
     timeout: 10,
   });
 
-  const testModelHealth = async (model, targetEndpointId = null) => {
-    const modelId = model.id;
-    saveModelHealth(prev => ({
-      ...prev,
-      [modelId]: { status: 'checking', loading: true, latency: null, checkedAt: Date.now() },
-    }));
+  const markModelsChecking = targets => {
+    const checkedAt = Date.now();
+    setOpenaiModelHealth(prev => {
+      const next = { ...prev };
+      targets.forEach(({ endpointId, modelId }) => {
+        next[modelHealthKey(endpointId, modelId)] = {
+          status: 'checking',
+          loading: true,
+          latency: null,
+          checkedAt,
+        };
+      });
+      return next;
+    });
+  };
+
+  const applyEndpointHealthResults = (endpointId, modelIds, records, fallbackError) => {
+    const recordsByModel = new Map(
+      (Array.isArray(records) ? records : []).map(record => [String(record?.model || '').trim(), record])
+    );
+    const results = modelIds.map(modelId =>
+      normalizeModelHealthRecord(recordsByModel.get(modelId), fallbackError)
+    );
+
+    setOpenaiModelHealth(prev => {
+      const next = { ...prev };
+      modelIds.forEach((modelId, index) => {
+        next[modelHealthKey(endpointId, modelId)] = results[index];
+      });
+      return next;
+    });
+
+    return results;
+  };
+
+  const testModelHealth = async (model, targetEndpointId) => {
+    const modelId = String(model?.id || '').trim();
+    if (!modelId || !targetEndpointId) return null;
+
+    markModelsChecking([{ endpointId: targetEndpointId, modelId }]);
 
     try {
-      const headers = { ...getAuthHeaders(), 'Content-Type': 'application/json' };
-      if (targetEndpointId) {
-        headers['x-endpoint-id'] = targetEndpointId;
-      }
-      const startTime = Date.now();
-      const response = await fetch('/api/openai/v1/chat/completions', {
+      const response = await fetch(
+        `/api/openai/endpoints/${encodeURIComponent(targetEndpointId)}/health-check`,
+        {
         method: 'POST',
-        headers,
+          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: modelId,
-          messages: [{ role: 'user', content: 'ping' }],
-          max_tokens: 5,
+            timeout: Math.max(1, Number(healthCheckForm.timeout) || 10) * 1000,
         }),
-      });
-
-      const latency = Date.now() - startTime;
-      if (response.ok) {
-        saveModelHealth(prev => ({
-          ...prev,
-          [modelId]: { status: 'healthy', loading: false, latency, checkedAt: Date.now() },
-        }));
-      } else {
-        saveModelHealth(prev => ({
-          ...prev,
-          [modelId]: {
-            status: 'error',
-            loading: false,
-            latency: null,
-            checkedAt: Date.now(),
-            error: `HTTP ${response.status}`,
-          },
-        }));
+        }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || `HTTP ${response.status}`);
       }
+
+      return applyEndpointHealthResults(targetEndpointId, [modelId], [data])[0];
     } catch (e) {
-      saveModelHealth(prev => ({
-        ...prev,
-        [modelId]: {
-          status: 'error',
-          loading: false,
-          latency: null,
-          checkedAt: Date.now(),
-          error: e.message,
-        },
-      }));
+      return applyEndpointHealthResults(targetEndpointId, [modelId], [], e.message)[0];
     }
   };
 
-  const startBatchHealthCheck = async () => {
-    setHealthCheckModal(false);
-    setModelHealthBatchLoading(true);
-    toast.info('已启动后台模型可用性健康检测，请稍候...');
+  const runEndpointHealthCheck = async (endpoint, trackProgress = false) => {
+    const modelIds = endpointModelIds(endpoint);
+    let results;
 
-    // Collect all unique models
-    const allModelsMap = new Map();
-    endpoints.forEach(ep => {
-      if (ep.enabled && ep.models) {
-        ep.models.forEach(m => {
-          const id = typeof m === 'string' ? m : m.id;
-          if (id) allModelsMap.set(id, ep.id);
-        });
+    try {
+      const response = await fetch(
+        `/api/openai/endpoints/${encodeURIComponent(endpoint.id)}/health-check-all`,
+        {
+          method: 'POST',
+          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            timeout: Math.max(1, Number(healthCheckForm.timeout) || 10) * 1000,
+            concurrency: Math.max(1, modelIds.length),
+          }),
+        }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || `HTTP ${response.status}`);
       }
-    });
+      results = applyEndpointHealthResults(
+        endpoint.id,
+        modelIds,
+        data.summary?.results,
+        '检测未返回结果'
+      );
+    } catch (error) {
+      results = applyEndpointHealthResults(endpoint.id, modelIds, [], error.message);
+    }
 
-    const modelsToCheck = Array.from(allModelsMap.entries()).map(([id, epId]) => ({ id, epId }));
-    if (modelsToCheck.length === 0) {
+    if (trackProgress) {
+      const counts = countModelHealthResults(results);
+      setHealthCheckProgress(prev => ({
+        ...prev,
+        completed: Math.min(prev.total, prev.completed + results.length),
+        healthy: prev.healthy + counts.healthy,
+        degraded: prev.degraded + counts.degraded,
+        failed: prev.failed + counts.failed,
+      }));
+    }
+
+    return results;
+  };
+
+  const startBatchHealthCheck = async () => {
+    const endpointTargets = endpoints.filter(
+      endpoint => endpoint.enabled && endpointModelIds(endpoint).length > 0
+    );
+    const targets = modelHealthTargets(endpointTargets);
+    if (targets.length === 0) {
       toast.warning('没有找到任何启用的端点或模型');
-      setModelHealthBatchLoading(false);
       return;
     }
 
-    if (healthCheckForm.concurrency) {
-      // Parallel execution
-      await Promise.all(modelsToCheck.map(m => testModelHealth(m, m.epId)));
-    } else {
-      // Sequential execution
-      for (const m of modelsToCheck) {
-        await testModelHealth(m, m.epId);
-      }
-    }
+    setHealthCheckModal(false);
+    setModelHealthBatchLoading(true);
+    setHealthCheckProgress(createHealthCheckProgress(targets.length, true));
+    setExpandedEndpoints(prev => ({
+      ...prev,
+      ...Object.fromEntries(endpointTargets.map(endpoint => [endpoint.id, true])),
+    }));
+    markModelsChecking(targets);
+    toast.info(`正在同时检测 ${targets.length} 个模型...`);
 
-    toast.success('所有模型可用性健康检测完成');
-    setModelHealthBatchLoading(false);
+    try {
+      const endpointResults = await Promise.all(
+        endpointTargets.map(endpoint => runEndpointHealthCheck(endpoint, true))
+      );
+      const results = endpointResults.flat();
+      const counts = countModelHealthResults(results);
+      setHealthCheckProgress({
+        running: false,
+        total: targets.length,
+        completed: results.length,
+        ...counts,
+      });
+
+      const message = `检测完成：可用 ${counts.healthy}，较慢 ${counts.degraded}，失败 ${counts.failed}`;
+      if (counts.failed > 0) toast.warning(message);
+      else toast.success(message);
+    } finally {
+      setModelHealthBatchLoading(false);
+    }
   };
 
   const openHealthCheckForEndpoint = async endpointId => {
     const ep = endpoints.find(e => e.id === endpointId);
-    if (!ep || !ep.models || ep.models.length === 0) {
+    const modelIds = endpointModelIds(ep);
+    if (!ep || modelIds.length === 0) {
       toast.warning('该端点无可用模型');
       return;
     }
+
     setModelHealthBatchLoading(true);
-    toast.info(`正在检测 ${ep.name || '端点'} 的所有模型...`);
-    for (const m of ep.models) {
-      const modelId = typeof m === 'string' ? m : m.id;
-      await testModelHealth({ id: modelId }, ep.id);
+    setExpandedEndpoints(prev => ({ ...prev, [ep.id]: true }));
+    setHealthCheckProgress(createHealthCheckProgress(modelIds.length, true));
+    markModelsChecking(modelIds.map(modelId => ({ endpointId: ep.id, modelId })));
+    toast.info(`正在同时检测 ${ep.name || '端点'} 的 ${modelIds.length} 个模型...`);
+
+    try {
+      const results = await runEndpointHealthCheck(ep, true);
+      const counts = countModelHealthResults(results);
+      setHealthCheckProgress({
+        running: false,
+        total: modelIds.length,
+        completed: results.length,
+        ...counts,
+      });
+      const message = `${ep.name || '端点'}：可用 ${counts.healthy}，较慢 ${counts.degraded}，失败 ${counts.failed}`;
+      if (counts.failed > 0) toast.warning(message);
+      else toast.success(message);
+    } finally {
+      setModelHealthBatchLoading(false);
     }
-    toast.success(`${ep.name || '端点'} 模型检测完成`);
-    setModelHealthBatchLoading(false);
   };
 
   // ==================== 3. Models List & Pinning ====================
@@ -2071,9 +2154,10 @@ function OpenAIPage() {
                 <Button
                   size="sm"
                   onClick={() => setHealthCheckModal(true)}
+                  disabled={modelHealthBatchLoading}
                   className="flex items-center gap-1.5"
                 >
-                  <Activity className={iconButtonIconClass} />
+                  <Activity className={cx(iconButtonIconClass, modelHealthBatchLoading && 'animate-pulse')} />
                   <span>健康检测</span>
                 </Button>
                 <Button
@@ -2091,6 +2175,35 @@ function OpenAIPage() {
           }
           bodyClassName="space-y-2.5"
         >
+            {healthCheckProgress.total > 0 && (
+              <div className="border border-kumo-line bg-kumo-recessed/20 px-3 py-2.5" role="status">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                  <span className="inline-flex items-center gap-1.5 font-semibold text-kumo-strong">
+                    <Activity className={cx('h-3.5 w-3.5', healthCheckProgress.running && 'animate-pulse')} />
+                    {healthCheckProgress.running
+                      ? `检测中 ${healthCheckProgress.completed}/${healthCheckProgress.total}`
+                      : '最近一次检测'}
+                  </span>
+                  <span className="text-kumo-success">可用 {healthCheckProgress.healthy}</span>
+                  <span className="text-kumo-warning">较慢 {healthCheckProgress.degraded}</span>
+                  <span className="text-kumo-danger">失败 {healthCheckProgress.failed}</span>
+                </div>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-kumo-line" aria-hidden="true">
+                  <div
+                    className={cx(
+                      'h-full rounded-full transition-all duration-300',
+                      healthCheckProgress.failed > 0 ? 'bg-kumo-warning' : 'bg-kumo-success'
+                    )}
+                    style={{
+                      width: `${Math.min(
+                        100,
+                        (healthCheckProgress.completed / Math.max(1, healthCheckProgress.total)) * 100
+                      )}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            )}
             {endpointsLoading ? (
               <div className="space-y-2.5">
                 {[...Array(2)].map((_, i) => (
@@ -2162,10 +2275,11 @@ function OpenAIPage() {
                             e.stopPropagation();
                             openHealthCheckForEndpoint(endpoint.id);
                           }}
+                          disabled={modelHealthBatchLoading}
                           className="text-kumo-subtle hover:text-kumo-strong"
                           title="模型健康检测"
                         >
-                          <Activity className={actionIconClass} />
+                          <Activity className={cx(actionIconClass, modelHealthBatchLoading && 'animate-pulse')} />
                         </Button>
                         <Button
                           shape="square"
@@ -2197,45 +2311,85 @@ function OpenAIPage() {
                             {endpoint.models.map(model => {
                               const modelId =
                                 typeof model === 'string' ? model.trim() : (model.id || '').trim();
-                              const health = openaiModelHealth[modelId];
+                              const health = openaiModelHealth[modelHealthKey(endpoint.id, modelId)];
+                              const healthLabel = health?.loading
+                                ? '检测中'
+                                : health?.status === 'healthy'
+                                  ? `${health.latency ?? '-'} ms`
+                                  : health?.status === 'degraded'
+                                    ? `${health.latency ?? '-'} ms · 较慢`
+                                    : health?.status === 'error'
+                                      ? '失败'
+                                      : '';
 
                               return (
                                 <AppCard
                                   key={modelId}
-                                  padding="sm"
-                                  className="flex items-center justify-between text-xs group"
+                                  padding="none"
+                                  className={cx(
+                                    'group flex items-center justify-between gap-2 p-2 text-xs',
+                                    health?.loading && 'border-kumo-brand/50 bg-kumo-brand/5',
+                                    health?.status === 'healthy' && 'border-kumo-success/35 bg-kumo-success/5',
+                                    health?.status === 'degraded' && 'border-kumo-warning/40 bg-kumo-warning/5',
+                                    health?.status === 'error' && 'border-kumo-danger/35 bg-kumo-danger/5'
+                                  )}
                                 >
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    {/* Health indicator dot */}
-                                    <div
+                                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                                    <button
+                                      type="button"
                                       onClick={() => testModelHealth({ id: modelId }, endpoint.id)}
-                                      className={`w-2 h-2 rounded-full cursor-pointer ${
-                                        health?.loading
-                                          ? 'bg-kumo-brand animate-pulse'
-                                          : health?.status === 'healthy'
-                                            ? 'bg-kumo-success'
-                                            : health?.status === 'error'
-                                              ? 'bg-kumo-danger'
-                                              : 'bg-kumo-subtle'
-                                      }`}
+                                      disabled={modelHealthBatchLoading}
+                                      className={cx(
+                                        'flex h-4 w-4 shrink-0 items-center justify-center rounded-full',
+                                        'text-kumo-subtle hover:text-kumo-brand disabled:cursor-not-allowed',
+                                        health?.loading && 'text-kumo-brand',
+                                        health?.status === 'healthy' && 'text-kumo-success',
+                                        health?.status === 'degraded' && 'text-kumo-warning',
+                                        health?.status === 'error' && 'text-kumo-danger'
+                                      )}
                                       title={
                                         health
-                                          ? `检测时间: ${formatDateTime(health.checkedAt)}\n延迟: ${health.latency || '-'}ms`
+                                          ? `${healthLabel}\n检测时间: ${formatDateTime(health.checkedAt)}${health.error ? `\n${health.error}` : ''}`
                                           : '点击测试模型健康'
                                       }
-                                    />
+                                    >
+                                      {health?.loading ? (
+                                        <Activity className="h-3.5 w-3.5 animate-spin" />
+                                      ) : health?.status === 'healthy' ? (
+                                        <Check className="h-3.5 w-3.5" />
+                                      ) : health?.status === 'degraded' ? (
+                                        <AlertTriangle className="h-3.5 w-3.5" />
+                                      ) : health?.status === 'error' ? (
+                                        <X className="h-3.5 w-3.5" />
+                                      ) : (
+                                        <Activity className="h-3.5 w-3.5" />
+                                      )}
+                                    </button>
                                     <span
                                       onClick={() => {
                                         selectEndpoint(endpoint.id);
                                         selectChatModel(modelId);
                                         setActiveTab('chat');
                                       }}
-                                      className="font-mono text-[11px] text-kumo-strong hover:text-kumo-brand cursor-pointer truncate"
+                                      className="min-w-0 truncate font-sans text-[13px] text-kumo-strong hover:text-kumo-brand cursor-pointer"
                                       title="点击进入对话"
                                     >
                                       {modelId}
                                     </span>
                                   </div>
+                                  {healthLabel && (
+                                    <span
+                                      className={cx(
+                                        'shrink-0 text-[10px] font-semibold',
+                                        health?.loading && 'text-kumo-brand',
+                                        health?.status === 'healthy' && 'text-kumo-success',
+                                        health?.status === 'degraded' && 'text-kumo-warning',
+                                        health?.status === 'error' && 'text-kumo-danger'
+                                      )}
+                                    >
+                                      {healthLabel}
+                                    </span>
+                                  )}
                                   <Button
                                     shape="square"
                                     size="sm"
@@ -2279,6 +2433,7 @@ function OpenAIPage() {
                 <Button
                   size="sm"
                   onClick={() => setHealthCheckModal(true)}
+                  disabled={modelHealthBatchLoading}
                   className="flex items-center gap-1"
                 >
                   <Activity className={iconButtonIconClass} />
@@ -2463,6 +2618,7 @@ function OpenAIPage() {
                             variant="ghost"
                             aria-label="健康检测"
                             onClick={() => openHealthCheckForEndpoint(endpoint.id)}
+                            disabled={modelHealthBatchLoading}
                             className="hover:text-kumo-brand text-kumo-subtle"
                             title="健康检测"
                           >
@@ -2909,7 +3065,7 @@ function OpenAIPage() {
             模型健康检测
           </Dialog.Title>
           <Dialog.Description className="text-xs text-kumo-subtle mb-4">
-            设置健康检测参数，批量发送轻量请求测试连接可用性与延迟。
+            向所有启用端点同时发送轻量请求，测试每个模型的可用性与延迟。
           </Dialog.Description>
 
           <div className="space-y-4">
@@ -2919,46 +3075,13 @@ function OpenAIPage() {
                 警告
               </p>
               <p>
-                健康检测需要向 API
-                发送真实请求，按令牌或次数收费的模型可能会产生小额账单，请谨慎使用。
+                所有模型会同时收到真实请求，可能产生小额账单，也可能触发供应商并发或速率限制。
               </p>
             </div>
 
             <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-kumo-strong">使用密钥</span>
-              <div className="flex border border-kumo-line rounded bg-kumo-recessed p-0.5">
-                <Button
-                  size="sm"
-                  variant={healthCheckForm.useKey === 'single' ? 'secondary' : 'ghost'}
-                  onClick={() => setHealthCheckForm({ ...healthCheckForm, useKey: 'single' })}
-                  className={`px-3 py-1 text-[10px] font-semibold ${
-                    healthCheckForm.useKey === 'single' ? 'text-kumo-strong' : 'text-kumo-subtle'
-                  }`}
-                >
-                  单个
-                </Button>
-                <Button
-                  size="sm"
-                  variant={healthCheckForm.useKey === 'all' ? 'secondary' : 'ghost'}
-                  onClick={() => setHealthCheckForm({ ...healthCheckForm, useKey: 'all' })}
-                  className={`px-3 py-1 text-[10px] font-semibold ${
-                    healthCheckForm.useKey === 'all' ? 'text-kumo-strong' : 'text-kumo-subtle'
-                  }`}
-                >
-                  所有
-                </Button>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-kumo-strong">并发检测</span>
-              <Switch
-                checked={healthCheckForm.concurrency}
-                onCheckedChange={checked =>
-                  setHealthCheckForm({ ...healthCheckForm, concurrency: checked })
-                }
-                size="sm"
-              />
+              <span className="font-semibold text-kumo-strong">检测方式</span>
+              <InlineStatusPill tone="info">全部模型同时检测</InlineStatusPill>
             </div>
 
             <div className="flex items-center justify-between text-xs">
@@ -2988,8 +3111,13 @@ function OpenAIPage() {
                   </Button>
                 )}
               />
-              <Button size="sm" variant="primary" onClick={startBatchHealthCheck}>
-                开始检测
+              <Button
+                size="sm"
+                variant="primary"
+                disabled={modelHealthBatchLoading}
+                onClick={startBatchHealthCheck}
+              >
+                {modelHealthBatchLoading ? '检测中...' : '开始检测'}
               </Button>
             </div>
           </div>

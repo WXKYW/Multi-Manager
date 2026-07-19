@@ -2,6 +2,10 @@
 @import 'tailwindcss';
 @import '@cloudflare/kumo/styles/tailwind';
 
+@theme inline {
+  --font-mono: var(--font-sans);
+}
+
 /* ==================== Base Resets ==================== */
 html {
   font-size: 16px;
