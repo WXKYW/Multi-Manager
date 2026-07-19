@@ -6,6 +6,14 @@ const ACTIVE_ACTION_STATUSES = new Set([
   'pending',
 ]);
 
+export function hasPublicGithubWorkflowDetail(repository) {
+  return Array.isArray(repository?.jobs) || Boolean(repository?.workflow) || Boolean(repository?.workflow_error);
+}
+
+export function shouldLoadPublicGithubRepositoryDetail(repository) {
+  return String(repository?.latest_run?.run_id || '') !== '' && !hasPublicGithubWorkflowDetail(repository);
+}
+
 export function getPublicGithubRefreshInterval(page) {
   const repositories = Array.isArray(page?.repositories) ? page.repositories : [];
   const hasActiveWorkflow = repositories.some(repository => {
@@ -66,7 +74,7 @@ export function mergePublicGithubRepositories(repositories = [], previousReposit
       runID !== '' &&
       runID === String(previous?.latest_run?.run_id || '') &&
       publicGithubRunRevision(repository) === publicGithubRunRevision(previous) &&
-      (Array.isArray(previous?.jobs) || previous?.workflow || previous?.workflow_error);
+      hasPublicGithubWorkflowDetail(previous);
     if (!canReuseDetail) return repository;
     return {
       ...repository,

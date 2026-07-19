@@ -7,7 +7,9 @@ import { formatGitHubRepositoryDescription } from '../modules/githubEmoji.js';
 import {
   getPublicGithubDataUpdatedAt,
   getPublicGithubRefreshInterval,
+  hasPublicGithubWorkflowDetail,
   mergePublicGithubRepositories,
+  shouldLoadPublicGithubRepositoryDetail,
 } from '../modules/githubPublicRealtime.js';
 import {
   AlertTriangle,
@@ -23,6 +25,15 @@ const normalizePublicPath = () => {
   const path = window.location.pathname.replace(/\/+$/, '');
   const match = path.match(/^\/(?:github|gh)\/([^/]+)$/);
   return match ? decodeURIComponent(match[1]) : '';
+};
+
+const parsePublicGithubStreamPayload = (event) => {
+  if (!event?.data) return {};
+  try {
+    return JSON.parse(event.data);
+  } catch {
+    return {};
+  }
 };
 
 const statusPanelClass = {
@@ -1743,88 +1754,120 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const [detailStatusByRepo, setDetailStatusByRepo] = useState({});
   const pageRef = useRef(null);
-  const detailRequestSeqRef = useRef(0);
+  const detailRequestSeqRef = useRef({});
   const loadRequestSeqRef = useRef(0);
 
   useEffect(() => {
     pageRef.current = page;
   }, [page]);
 
+  const refreshRepositoryDetail = useCallback(async (pageSlug, repositoryID, { markLoading = true } = {}) => {
+    const repoId = String(repositoryID || '');
+    if (!pageSlug || !repoId) return;
+
+    const nextRequestSeq = (detailRequestSeqRef.current[repoId] || 0) + 1;
+    detailRequestSeqRef.current = { ...detailRequestSeqRef.current, [repoId]: nextRequestSeq };
+
+    if (markLoading) {
+      setDetailStatusByRepo((current) => ({ ...current, [repoId]: 'loading' }));
+    }
+
+    try {
+      const response = await fetch(`/api/github/public/pages/${encodeURIComponent(pageSlug)}/repositories/${encodeURIComponent(repoId)}`, {
+        cache: 'no-store',
+      });
+      const result = await response.json().catch(() => ({}));
+      if (detailRequestSeqRef.current[repoId] !== nextRequestSeq) return;
+      if (!response.ok || result.success === false) {
+        throw new Error(result.error || 'Workflow 详情加载失败');
+      }
+
+      const detail = result.data || result;
+      setPage((current) => {
+        if (!current || current.slug !== pageSlug) return current;
+        const repositories = Array.isArray(current.repositories) ? current.repositories : [];
+        let changed = false;
+        const nextRepositories = repositories.map((item) => {
+          if (String(item?.id || '') !== repoId) return item;
+          changed = true;
+          return { ...item, ...detail };
+        });
+        return changed ? { ...current, repositories: nextRepositories } : current;
+      });
+      setDetailStatusByRepo((current) => ({ ...current, [repoId]: 'loaded' }));
+    } catch (detailError) {
+      if (detailRequestSeqRef.current[repoId] !== nextRequestSeq) return;
+      setPage((current) => {
+        if (!current || current.slug !== pageSlug) return current;
+        const repositories = Array.isArray(current.repositories) ? current.repositories : [];
+        let changed = false;
+        const nextRepositories = repositories.map((item) => {
+          if (String(item?.id || '') !== repoId) return item;
+          changed = true;
+          return {
+            ...item,
+            workflow_error: detailError.message || 'Workflow 详情加载失败',
+          };
+        });
+        return changed ? { ...current, repositories: nextRepositories } : current;
+      });
+      setDetailStatusByRepo((current) => ({ ...current, [repoId]: 'failed' }));
+    }
+  }, []);
+
   const loadRepositoryDetails = useCallback(async (nextPage) => {
     const repositories = Array.isArray(nextPage?.repositories) ? nextPage.repositories : [];
     if (!nextPage?.slug || repositories.length === 0) {
+      detailRequestSeqRef.current = {};
       setDetailStatusByRepo({});
       return;
     }
-
-    const requestSeq = detailRequestSeqRef.current + 1;
-    detailRequestSeqRef.current = requestSeq;
 
     const nextStatuses = {};
     const targets = [];
     repositories.forEach((repo) => {
       const repoId = String(repo?.id || '');
-      const runID = String(repo?.latest_run?.run_id || '');
-      const hasReusableDetail = runID !== '' && (
-        Array.isArray(repo?.jobs) || repo?.workflow || repo?.workflow_error
-      );
-
-      if (!runID) {
+      if (!String(repo?.latest_run?.run_id || '')) {
         nextStatuses[repoId] = 'idle';
         return;
       }
-      if (hasReusableDetail) {
+      if (hasPublicGithubWorkflowDetail(repo)) {
         nextStatuses[repoId] = 'loaded';
         return;
       }
       nextStatuses[repoId] = 'loading';
-      targets.push(repo);
+      targets.push(repoId);
     });
     setDetailStatusByRepo(nextStatuses);
 
-    await Promise.allSettled(targets.map(async (repo) => {
-      const repoId = String(repo?.id || '');
-      try {
-        const response = await fetch(`/api/github/public/pages/${encodeURIComponent(nextPage.slug)}/repositories/${encodeURIComponent(repoId)}`, {
-          cache: 'no-store',
-        });
-        const result = await response.json().catch(() => ({}));
-        if (!response.ok || result.success === false) {
-          throw new Error(result.error || 'Workflow 详情加载失败');
-        }
-        const detail = result.data || result;
-        if (detailRequestSeqRef.current !== requestSeq) return;
-        setPage((current) => {
-          if (!current || current.slug !== nextPage.slug) return current;
-          return {
-            ...current,
-            repositories: (Array.isArray(current.repositories) ? current.repositories : []).map((item) => (
-              String(item?.id) === repoId ? { ...item, ...detail } : item
-            )),
-          };
-        });
-        setDetailStatusByRepo((current) => ({ ...current, [repoId]: 'loaded' }));
-      } catch (detailError) {
-        if (detailRequestSeqRef.current !== requestSeq) return;
-        setPage((current) => {
-          if (!current || current.slug !== nextPage.slug) return current;
-          return {
-            ...current,
-            repositories: (Array.isArray(current.repositories) ? current.repositories : []).map((item) => (
-              String(item?.id) === repoId ? { ...item, workflow_error: detailError.message || 'Workflow 详情加载失败' } : item
-            )),
-          };
-        });
-        setDetailStatusByRepo((current) => ({ ...current, [repoId]: 'failed' }));
-      }
-    }));
-  }, []);
+    await Promise.allSettled(targets.map((repoId) => (
+      refreshRepositoryDetail(nextPage.slug, repoId, { markLoading: false })
+    )));
+  }, [refreshRepositoryDetail]);
 
-  const load = useCallback(async ({ silent = false } = {}) => {
+  const syncRepositories = useCallback(async ({
+    pageSlug,
+    repositories,
+    markLoading = false,
+    onlyMissingDetail = false,
+  }) => {
+    if (!pageSlug) return;
+    const targets = (Array.isArray(repositories) ? repositories : [])
+      .map((repo) => ({ repoId: String(repo?.id || ''), repo }))
+      .filter(({ repoId, repo }) => repoId && (!onlyMissingDetail || shouldLoadPublicGithubRepositoryDetail(repo)));
+
+    if (targets.length === 0) return;
+
+    await Promise.allSettled(targets.map(({ repoId }) => (
+      refreshRepositoryDetail(pageSlug, repoId, { markLoading })
+    )));
+  }, [refreshRepositoryDetail]);
+
+  const loadSummary = useCallback(async ({ silent = false, showRefreshing = silent } = {}) => {
     const requestSeq = loadRequestSeqRef.current + 1;
     loadRequestSeqRef.current = requestSeq;
-    if (silent) setRefreshing(true);
-    else setLoading(true);
+    if (!silent) setLoading(true);
+    else if (showRefreshing) setRefreshing(true);
     setError('');
     try {
       const endpoint = slug && !domainOnly
@@ -1848,7 +1891,7 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
         ),
       };
       setPage(mergedPage);
-      void loadRepositoryDetails(mergedPage);
+      return mergedPage;
     } catch (err) {
       if (loadRequestSeqRef.current !== requestSeq) return;
       if (!slug && domainOnly && err.status === 404 && onDomainNotFound) {
@@ -1858,16 +1901,23 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
       setError(err.message || 'GitHub 公开页加载失败');
       if (!silent) {
         setPage(null);
-        detailRequestSeqRef.current += 1;
+        detailRequestSeqRef.current = {};
         setDetailStatusByRepo({});
       }
     } finally {
       if (loadRequestSeqRef.current === requestSeq) {
-        setLoading(false);
-        setRefreshing(false);
+        if (!silent) setLoading(false);
+        if (showRefreshing) setRefreshing(false);
       }
     }
-  }, [domainOnly, loadRepositoryDetails, onDomainNotFound, slug]);
+    return null;
+  }, [domainOnly, onDomainNotFound, slug]);
+
+  const load = useCallback(async ({ silent = false, showRefreshing = silent } = {}) => {
+    const nextPage = await loadSummary({ silent, showRefreshing });
+    if (!nextPage) return;
+    void loadRepositoryDetails(nextPage);
+  }, [loadRepositoryDetails, loadSummary]);
 
   useEffect(() => {
     load();
@@ -1888,33 +1938,39 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
   }, []);
 
   useEffect(() => {
+    if (typeof window.EventSource === 'function') return undefined;
     const interval = window.setInterval(() => {
-      void load({ silent: true });
+      void loadSummary({ silent: true, showRefreshing: false }).then((nextPage) => {
+        const currentPage = nextPage || pageRef.current;
+        if (!currentPage?.slug) return;
+        void syncRepositories({
+          pageSlug: currentPage.slug,
+          repositories: currentPage.repositories,
+        });
+      });
     }, getPublicGithubRefreshInterval(page));
     return () => window.clearInterval(interval);
-  }, [load, page]);
+  }, [loadSummary, page, syncRepositories]);
 
   useEffect(() => {
     if (!page?.slug || typeof window.EventSource !== 'function') return undefined;
     const source = new window.EventSource(`/api/github/public/pages/${encodeURIComponent(page.slug)}/stream`);
-    const refresh = () => {
-      void load({ silent: true });
+    const refreshRepository = (event) => {
+      const payload = parsePublicGithubStreamPayload(event);
+      const kind = String(payload?.kind || '');
+      const repoId = String(payload?.repository_id || '');
+      if (!repoId || !['repository_refresh', 'repository_actions_refresh'].includes(kind)) return;
+      void Promise.all([
+        loadSummary({ silent: true, showRefreshing: false }),
+        refreshRepositoryDetail(page.slug, repoId, { markLoading: false }),
+      ]);
     };
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible') refresh();
-    };
-    source.addEventListener('github', refresh);
-    window.addEventListener('focus', refresh);
-    window.addEventListener('online', refresh);
-    document.addEventListener('visibilitychange', refreshWhenVisible);
+    source.addEventListener('github', refreshRepository);
     return () => {
-      source.removeEventListener('github', refresh);
+      source.removeEventListener('github', refreshRepository);
       source.close();
-      window.removeEventListener('focus', refresh);
-      window.removeEventListener('online', refresh);
-      document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
-  }, [load, page?.slug]);
+  }, [loadSummary, page?.slug, refreshRepositoryDetail]);
 
   const repositories = Array.isArray(page?.repositories) ? page.repositories : [];
   const dataUpdatedAt = getPublicGithubDataUpdatedAt(page);

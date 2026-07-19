@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   getPublicGithubDataUpdatedAt,
   getPublicGithubRefreshInterval,
+  hasPublicGithubWorkflowDetail,
   mergePublicGithubRepositories,
+  shouldLoadPublicGithubRepositoryDetail,
 } from './githubPublicRealtime.js';
 
 describe('GitHub public page realtime helpers', () => {
@@ -78,5 +80,25 @@ describe('GitHub public page realtime helpers', () => {
     ];
 
     expect(mergePublicGithubRepositories(next, previous)[0].jobs).toEqual(previous[0].jobs);
+  });
+
+  it('detects whether a repository already has workflow detail payload', () => {
+    expect(hasPublicGithubWorkflowDetail({ jobs: [] })).toBe(true);
+    expect(hasPublicGithubWorkflowDetail({ workflow: { layers: [] } })).toBe(true);
+    expect(hasPublicGithubWorkflowDetail({ workflow_error: 'failed' })).toBe(true);
+    expect(hasPublicGithubWorkflowDetail({ latest_run: { run_id: 42 } })).toBe(false);
+  });
+
+  it('loads workflow details only when a run exists and detail is missing', () => {
+    expect(shouldLoadPublicGithubRepositoryDetail({
+      latest_run: { run_id: 42 },
+    })).toBe(true);
+    expect(shouldLoadPublicGithubRepositoryDetail({
+      latest_run: { run_id: 42 },
+      jobs: [],
+    })).toBe(false);
+    expect(shouldLoadPublicGithubRepositoryDetail({
+      latest_run: {},
+    })).toBe(false);
   });
 });
