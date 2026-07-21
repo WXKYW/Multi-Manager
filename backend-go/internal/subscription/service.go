@@ -1757,7 +1757,7 @@ func (s *Service) updateSettings(w http.ResponseWriter, r *http.Request, db *sql
 }
 
 func (s *Service) listServers(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	rows, err := db.QueryContext(r.Context(), `SELECT id, name, host, COALESCE(resolved_country, ''), COALESCE(country, ''), traffic_limit_bytes, COALESCE(cached_info, '{}'), COALESCE(status,'unknown'), COALESCE(last_check_time,'') FROM server_accounts ORDER BY order_index ASC, created_at DESC`)
+	rows, err := db.QueryContext(r.Context(), `SELECT id, name, host, COALESCE(resolved_country, ''), COALESCE(country, ''), COALESCE(traffic_limit_bytes, 0), COALESCE(cached_info, '{}'), COALESCE(status,'unknown'), COALESCE(last_check_time,'') FROM server_accounts ORDER BY order_index ASC, created_at DESC`)
 	if err != nil {
 		response.OK(w, []map[string]interface{}{})
 		return
@@ -1767,16 +1767,46 @@ func (s *Service) listServers(w http.ResponseWriter, r *http.Request, db *sql.DB
 	for rows.Next() {
 		var id, name, host, location, country, cached, status, lastSeen string
 		var limit int64
-		_ = rows.Scan(&id, &name, &host, &location, &country, &limit, &cached, &status, &lastSeen)
+		if err := rows.Scan(&id, &name, &host, &location, &country, &limit, &cached, &status, &lastSeen); err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		info := map[string]interface{}{}
 		_ = json.Unmarshal([]byte(cached), &info)
-		platform := strings.ToLower(firstNonEmpty(fmt.Sprint(info["platform"]), fmt.Sprint(info["os"])))
-		if platform != "" && !strings.Contains(platform, "linux") {
+		platform := firstNonEmpty(jsonString(info, "platform"), jsonString(info, "os"))
+		platformVersion := firstNonEmpty(jsonString(info, "platform_version"), jsonString(info, "platformVersion"))
+		if !isLinuxPlatform(platform, platformVersion) {
 			continue
 		}
-		items = append(items, map[string]interface{}{"id": id, "name": name, "host": host, "location": firstNonEmpty(fmt.Sprint(info["location"]), fmt.Sprint(info["region"]), location), "country_code": firstNonEmpty(fmt.Sprint(info["country_code"]), fmt.Sprint(info["country"]), country, location), "uptime": info["uptime"], "traffic_limit_bytes": limit, "status": status, "last_seen": lastSeen, "platform": platform, "agent_version": firstNonEmpty(fmt.Sprint(info["agent_version"]), fmt.Sprint(info["version"]))})
+		items = append(items, map[string]interface{}{"id": id, "name": name, "host": host, "location": firstNonEmpty(jsonString(info, "location"), jsonString(info, "region"), location), "country_code": firstNonEmpty(jsonString(info, "country_code"), jsonString(info, "country"), country, location), "uptime": info["uptime"], "traffic_limit_bytes": limit, "status": status, "last_seen": lastSeen, "platform": platform, "platform_version": platformVersion, "agent_version": firstNonEmpty(jsonString(info, "agent_version"), jsonString(info, "version"))})
 	}
 	response.OK(w, items)
+}
+
+func jsonString(values map[string]interface{}, key string) string {
+	value, ok := values[key]
+	if !ok || value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
+}
+
+func isLinuxPlatform(platform, platformVersion string) bool {
+	value := strings.ToLower(strings.TrimSpace(platform + " " + platformVersion))
+	if value == "" {
+		// Older Agent records did not persist a platform. Keep them manageable;
+		// explicit non-Linux platforms below are still rejected.
+		return true
+	}
+	if strings.Contains(value, "windows") || strings.Contains(value, "darwin") || strings.Contains(value, "macos") || strings.Contains(value, "freebsd") {
+		return false
+	}
+	for _, marker := range []string{"linux", "ubuntu", "debian", "centos", "rhel", "red hat", "fedora", "rocky", "alma", "alpine", "arch", "opensuse", "sles", "oracle linux", "amzn", "amazon linux"} {
+		if strings.Contains(value, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) exportAll(w http.ResponseWriter, r *http.Request, db *sql.DB) {

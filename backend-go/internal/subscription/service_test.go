@@ -17,6 +17,82 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func TestIsLinuxPlatformRecognizesDistributions(t *testing.T) {
+	tests := []struct {
+		platform string
+		version  string
+		want     bool
+	}{
+		{platform: "Linux", version: "Ubuntu 24.04 LTS", want: true},
+		{platform: "Ubuntu", want: true},
+		{platform: "Debian GNU/Linux", want: true},
+		{platform: "", version: "Alpine Linux v3.20", want: true},
+		{platform: "", version: "", want: true},
+		{platform: "Windows", version: "11", want: false},
+		{platform: "Darwin", version: "15", want: false},
+	}
+	for _, test := range tests {
+		if got := isLinuxPlatform(test.platform, test.version); got != test.want {
+			t.Errorf("isLinuxPlatform(%q, %q) = %v, want %v", test.platform, test.version, got, test.want)
+		}
+	}
+}
+
+func TestJSONServerMetadataDoesNotTurnMissingValuesIntoNilText(t *testing.T) {
+	values := map[string]interface{}{"platform": nil, "os": "Ubuntu"}
+	if got := jsonString(values, "platform"); got != "" {
+		t.Fatalf("platform = %q, want empty", got)
+	}
+	if got := firstNonEmpty(jsonString(values, "platform"), jsonString(values, "os")); got != "Ubuntu" {
+		t.Fatalf("fallback platform = %q, want Ubuntu", got)
+	}
+}
+
+func TestListServersIncludesLinuxDistributionsAndPreservesPlatform(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE server_accounts (id TEXT PRIMARY KEY, name TEXT NOT NULL, host TEXT NOT NULL, username TEXT, auth_type TEXT, cached_info TEXT, resolved_country TEXT, country TEXT, traffic_limit_bytes INTEGER, status TEXT, last_check_time TEXT, order_index INTEGER DEFAULT 0, created_at TEXT DEFAULT CURRENT_TIMESTAMP)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []struct{ id, name, cached string }{
+		{"ubuntu", "Ubuntu 主机", `{"platform":"Ubuntu","platform_version":"24.04"}`},
+		{"debian", "Debian 主机", `{"platform":"Debian GNU/Linux","platform_version":"12"}`},
+		{"windows", "Windows 主机", `{"platform":"Windows","platform_version":"11"}`},
+	} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO server_accounts (id,name,host,username,auth_type,cached_info) VALUES (?,?,?,'root','password',?)`, row.id, row.name, row.id+".example.com", row.cached); err != nil {
+			t.Fatal(err)
+		}
+		var saved string
+		if err := db.QueryRowContext(ctx, `SELECT cached_info FROM server_accounts WHERE id=?`, row.id).Scan(&saved); err != nil || saved != row.cached {
+			t.Fatalf("cached_info for %s = %q, err=%v", row.id, saved, err)
+		}
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/subscription/servers", nil)
+	New(config.Config{}).listServers(recorder, request, db)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"name":"Ubuntu 主机"`) || !strings.Contains(body, `"platform":"Ubuntu"`) || !strings.Contains(body, `"platform_version":"24.04"`) {
+		t.Fatalf("Ubuntu host or platform metadata missing: %s", body)
+	}
+	if !strings.Contains(body, `"name":"Debian 主机"`) {
+		t.Fatalf("Debian host missing: %s", body)
+	}
+	if strings.Contains(body, `"name":"Windows 主机"`) {
+		t.Fatalf("Windows host must not be included: %s", body)
+	}
+}
+
 func TestLoadSubscriptionsDoesNotQueryWhileRowsOpen(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()

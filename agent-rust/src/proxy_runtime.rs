@@ -202,11 +202,21 @@ fn ensure_runtime(request: &ReconcileRequest, runtime: &str) -> Result<PathBuf, 
         .join(runtime)
         .join(&request.runtime_version);
     let binary = version_dir.join(runtime);
-    if binary.exists() {
+    if binary.is_file()
+        && Command::new(&binary)
+            .arg("version")
+            .output()
+            .is_ok_and(|out| out.status.success())
+    {
         return Ok(binary);
     }
     fs::create_dir_all(&version_dir).map_err(|err| format!("create runtime directory: {err}"))?;
+    let _ = fs::remove_file(&binary);
     let archive = version_dir.join("runtime.tar.gz");
+    let extract_dir = version_dir.join("extracting");
+    let _ = fs::remove_dir_all(&extract_dir);
+    fs::create_dir_all(&extract_dir)
+        .map_err(|err| format!("create runtime extraction directory: {err}"))?;
     run(
         Command::new("curl")
             .args([
@@ -234,24 +244,62 @@ fn ensure_runtime(request: &ReconcileRequest, runtime: &str) -> Result<PathBuf, 
         let _ = fs::remove_file(&archive);
         return Err("proxy runtime SHA-256 verification failed".to_string());
     }
+    // Upstream archives do not guarantee a stable number of leading path
+    // components. Extract into an isolated directory, then locate the sole
+    // expected executable instead of assuming `--strip-components=1` works.
     run(
         Command::new("tar")
-            .args(["-xzf"])
+            .args(["--extract", "--gzip", "--file"])
             .arg(&archive)
-            .arg("--strip-components=1")
-            .arg("--wildcards")
-            .arg("*/sing-box")
-            .arg("-C")
-            .arg(&version_dir),
-        "extract sing-box",
+            .args(["--directory"])
+            .arg(&extract_dir)
+            .args(["--no-same-owner", "--no-same-permissions"]),
+        "extract sing-box archive",
     )?;
-    set_file_mode(&binary, 0o755)?;
+    let extracted_binary = find_runtime_binary(&extract_dir, runtime)?;
+    let candidate = version_dir.join(format!(".{runtime}.download"));
+    fs::copy(&extracted_binary, &candidate)
+        .map_err(|err| format!("stage {runtime} binary: {err}"))?;
+    set_file_mode(&candidate, 0o755)?;
+    fs::rename(&candidate, &binary).map_err(|err| format!("activate {runtime} binary: {err}"))?;
     run(
         Command::new(&binary).arg("version"),
         "verify sing-box executable",
     )?;
     let _ = fs::remove_file(&archive);
+    let _ = fs::remove_dir_all(&extract_dir);
     Ok(binary)
+}
+
+#[cfg(unix)]
+fn find_runtime_binary(root: &Path, runtime: &str) -> Result<PathBuf, String> {
+    let mut pending = vec![root.to_path_buf()];
+    let mut matches = Vec::new();
+    while let Some(dir) = pending.pop() {
+        for entry in
+            fs::read_dir(&dir).map_err(|err| format!("read extracted runtime directory: {err}"))?
+        {
+            let entry = entry.map_err(|err| format!("read extracted runtime entry: {err}"))?;
+            let path = entry.path();
+            let kind = entry
+                .file_type()
+                .map_err(|err| format!("read extracted runtime type: {err}"))?;
+            if kind.is_dir() {
+                pending.push(path);
+            } else if kind.is_file() && entry.file_name().to_string_lossy() == runtime {
+                matches.push(path);
+            }
+        }
+    }
+    match matches.len() {
+        1 => Ok(matches.remove(0)),
+        0 => Err(format!(
+            "{runtime} archive does not contain the expected executable"
+        )),
+        _ => Err(format!(
+            "{runtime} archive contains multiple executable candidates"
+        )),
+    }
 }
 
 #[cfg(unix)]
@@ -526,5 +574,21 @@ mod tests {
     #[test]
     fn rejects_unsafe_node_ids() {
         assert!(validate_node_id("../../bad").is_err());
+    }
+
+    #[test]
+    fn finds_binary_with_variable_archive_root_depth() {
+        let root = std::env::temp_dir().join(format!(
+            "api-monitor-proxy-runtime-test-{}",
+            std::process::id()
+        ));
+        let nested = root.join("sing-box-1.13.14-linux-amd64");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("sing-box"), b"test binary").unwrap();
+        assert_eq!(
+            find_runtime_binary(&root, "sing-box").unwrap(),
+            nested.join("sing-box")
+        );
+        let _ = fs::remove_dir_all(root);
     }
 }

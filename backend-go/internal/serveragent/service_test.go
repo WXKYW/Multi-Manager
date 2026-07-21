@@ -1931,6 +1931,12 @@ func TestAgentQuickInstallCreatesHostFromName(t *testing.T) {
 	if !strings.Contains(resLinux.Body.String(), `SERVER_URL="http://189.1.217.109:3010"`) {
 		t.Fatalf("linux install script should use http server url: %s", resLinux.Body.String())
 	}
+	if !strings.Contains(resLinux.Body.String(), `TARGET_HOST_NAME="edge-agent"`) || !strings.Contains(resLinux.Body.String(), `cat >/dev/null || true`) {
+		t.Fatalf("linux installer should preserve the host label and drain its curl pipe after detached upgrade: %s", resLinux.Body.String())
+	}
+	if strings.Contains(resLinux.Body.String(), "Debian 12+ is required") || strings.Contains(resLinux.Body.String(), "unsupported managed host distribution") {
+		t.Fatalf("agent installer must not impose distribution-version policy: %s", resLinux.Body.String())
+	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/server/agent/install/win/"+serverID+"/"+agentKey+"?protocol=http", nil)
 	req.Host = "189.1.217.109:3010"

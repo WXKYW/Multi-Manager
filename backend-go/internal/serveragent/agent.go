@@ -268,9 +268,10 @@ SERVER_URL="%s://%s"
 AGENT_DOWNLOAD_BASE_URL="%s"
 SERVER_ID="%s"
 AGENT_KEY="%s"
+TARGET_HOST_NAME="%s"
 
 echo "Installing API Monitor Agent..."
-echo "Target host: %s"
+echo "Target host: $TARGET_HOST_NAME"
 echo "Server: $SERVER_URL"
 
 if [ "$(id -u)" -eq 0 ]; then
@@ -288,6 +289,10 @@ if [ "${API_MONITOR_AGENT_INSTALL_DETACHED:-0}" != "1" ] && command -v systemd-r
     echo "Detected running Agent service. Scheduling detached installer via systemd-run..."
     $SUDO systemd-run --unit="api-monitor-agent-install-$(date +%%s)" --collect --quiet /bin/sh -c "export API_MONITOR_AGENT_INSTALL_DETACHED=1; curl -fsSL '$INSTALL_SCRIPT_URL' | bash"
     echo "Detached installer scheduled. The current Agent terminal may disconnect; installation will continue in systemd."
+    # This script is commonly invoked through a curl-to-shell pipeline. Do not close stdin
+    # immediately after scheduling the detached update: doing so makes curl
+    # report error 23 (write body failed) even though the systemd job exists.
+    cat >/dev/null || true
     exit 0
 fi
 
@@ -308,18 +313,10 @@ case $ARCH in
         ;;
 esac
 
-if [ ! -r /etc/os-release ] || ! command -v systemctl >/dev/null 2>&1; then
-    echo "Error: managed host requires a supported systemd Linux distribution"
+if ! command -v systemctl >/dev/null 2>&1 || [ ! -d /run/systemd/system ]; then
+    echo "Error: API Monitor Agent requires a Linux host running systemd"
     exit 1
 fi
-. /etc/os-release
-MAJOR_VERSION="${VERSION_ID%%%%.*}"
-case "$ID" in
-    debian) [ "$MAJOR_VERSION" -ge 12 ] || { echo "Error: Debian 12+ is required"; exit 1; } ;;
-    ubuntu) [ "$MAJOR_VERSION" -ge 22 ] || { echo "Error: Ubuntu 22.04+ is required"; exit 1; } ;;
-    almalinux|rocky) [ "$MAJOR_VERSION" -ge 9 ] || { echo "Error: AlmaLinux/Rocky Linux 9+ is required"; exit 1; } ;;
-    *) echo "Error: unsupported managed host distribution: $ID $VERSION_ID"; exit 1 ;;
-esac
 
 for REQUIRED_COMMAND in curl sha256sum tar; do
     command -v "$REQUIRED_COMMAND" >/dev/null 2>&1 || { echo "Error: $REQUIRED_COMMAND is required"; exit 1; }
@@ -445,8 +442,8 @@ echo ""
 		agentDownloadBaseURL,
 		accountID,
 		agentKey,
-		proto, url.QueryEscape(serverBaseURL),
 		name,
+		proto, url.QueryEscape(serverBaseURL),
 	)
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
