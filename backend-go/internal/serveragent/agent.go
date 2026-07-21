@@ -220,7 +220,7 @@ func appendInstallProtocol(rawURL, proto string) string {
 
 // getAgentInstallScript 生成 Agent 安装脚本
 func (s *Service) getAgentInstallScriptWithKey(w http.ResponseWriter, r *http.Request, db *sql.DB, accountID string, agentKey string) {
-	storedKey, err := s.getOrGenerateAgentKey(r.Context(), db)
+	storedKey, err := s.getOrGenerateAgentKeyForServer(r.Context(), db, accountID)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "Failed to get agent key: "+err.Error())
 		return
@@ -245,7 +245,7 @@ func (s *Service) getAgentInstallScript(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	agentKey, err := s.getOrGenerateAgentKey(r.Context(), db)
+	agentKey, err := s.getOrGenerateAgentKeyForServer(r.Context(), db, accountID)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "Failed to get agent key: "+err.Error())
 		return
@@ -308,15 +308,53 @@ case $ARCH in
         ;;
 esac
 
+if [ ! -r /etc/os-release ] || ! command -v systemctl >/dev/null 2>&1; then
+    echo "Error: managed host requires a supported systemd Linux distribution"
+    exit 1
+fi
+. /etc/os-release
+MAJOR_VERSION="${VERSION_ID%%%%.*}"
+case "$ID" in
+    debian) [ "$MAJOR_VERSION" -ge 12 ] || { echo "Error: Debian 12+ is required"; exit 1; } ;;
+    ubuntu) [ "$MAJOR_VERSION" -ge 22 ] || { echo "Error: Ubuntu 22.04+ is required"; exit 1; } ;;
+    almalinux|rocky) [ "$MAJOR_VERSION" -ge 9 ] || { echo "Error: AlmaLinux/Rocky Linux 9+ is required"; exit 1; } ;;
+    *) echo "Error: unsupported managed host distribution: $ID $VERSION_ID"; exit 1 ;;
+esac
+
+for REQUIRED_COMMAND in curl sha256sum tar; do
+    command -v "$REQUIRED_COMMAND" >/dev/null 2>&1 || { echo "Error: $REQUIRED_COMMAND is required"; exit 1; }
+done
+
 AGENT_URL="$AGENT_DOWNLOAD_BASE_URL/agent-linux-$AGENT_ARCH"
+CHECKSUM_URL="$AGENT_URL.sha256"
 echo "Downloading Agent..."
 TMP_AGENT="$(mktemp /tmp/api-monitor-agent.XXXXXX)"
-trap 'rm -f "$TMP_AGENT"' EXIT
+TMP_CHECKSUM="$(mktemp /tmp/api-monitor-agent-checksum.XXXXXX)"
+trap 'rm -f "$TMP_AGENT" "$TMP_CHECKSUM"' EXIT
 $SUDO curl -fsSL -o "$TMP_AGENT" "$AGENT_URL" || {
     echo "Error: failed to download Agent binary"
     echo "URL: $AGENT_URL"
     exit 1
 }
+
+if $SUDO curl -fsSL -o "$TMP_CHECKSUM" "$CHECKSUM_URL"; then
+    EXPECTED_SHA256="$(awk '{print $1}' "$TMP_CHECKSUM")"
+    if command -v sha256sum >/dev/null 2>&1; then
+        ACTUAL_SHA256="$(sha256sum "$TMP_AGENT" | awk '{print $1}')"
+    elif command -v shasum >/dev/null 2>&1; then
+        ACTUAL_SHA256="$(shasum -a 256 "$TMP_AGENT" | awk '{print $1}')"
+    else
+        echo "Error: sha256sum or shasum is required"
+        exit 1
+    fi
+    [ "$EXPECTED_SHA256" = "$ACTUAL_SHA256" ] || {
+        echo "Error: Agent checksum verification failed"
+        exit 1
+    }
+else
+    echo "Error: signed release checksum is unavailable"
+    exit 1
+fi
 
 $SUDO chmod +x "$TMP_AGENT"
 
@@ -325,6 +363,10 @@ $SUDO "$TMP_AGENT" --version || {
     exit 1
 }
 
+PREVIOUS_AGENT="$INSTALL_DIR/api-monitor-agent.previous"
+if [ -f "$INSTALL_DIR/api-monitor-agent" ]; then
+    $SUDO cp -f "$INSTALL_DIR/api-monitor-agent" "$PREVIOUS_AGENT"
+fi
 if systemctl list-unit-files api-monitor-agent.service >/dev/null 2>&1; then
     echo "Removing old Agent installation..."
     $SUDO systemctl stop api-monitor-agent 2>/dev/null || true
@@ -372,6 +414,11 @@ $SUDO systemctl is-active --quiet api-monitor-agent || {
     echo "Error: api-monitor-agent failed to start"
     $SUDO systemctl status api-monitor-agent --no-pager || true
     $SUDO journalctl -u api-monitor-agent -n 50 --no-pager || true
+    if [ -f "$PREVIOUS_AGENT" ]; then
+        echo "Rolling back Agent binary..."
+        $SUDO install -m 0755 "$PREVIOUS_AGENT" "$INSTALL_DIR/api-monitor-agent"
+        $SUDO systemctl restart api-monitor-agent || true
+    fi
     exit 1
 }
 
@@ -463,8 +510,8 @@ func (s *Service) handleAgentHeartbeat(w http.ResponseWriter, r *http.Request, d
 	}
 
 	providedKey := strings.TrimPrefix(authHeader, "Bearer ")
-	expectedKey, err := s.getOrGenerateAgentKey(r.Context(), db)
-	if err != nil || providedKey != expectedKey {
+	err := s.validateAgentKeyForServer(r.Context(), db, req.ServerID, providedKey)
+	if err != nil {
 		response.Error(w, http.StatusUnauthorized, "Invalid agent key")
 		return
 	}

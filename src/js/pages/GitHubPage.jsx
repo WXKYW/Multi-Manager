@@ -24,6 +24,7 @@ import { CanvasRenderer } from 'echarts/renderers';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
 import { formatGitHubRepositoryDescription } from '../modules/githubEmoji.js';
+import { normalizeWorkflowJobName, workflowJobMatchesDefinition } from '../modules/githubWorkflowJobs.js';
 import { useDraggableScroll } from '../hooks/useDraggableScroll.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import useStore from '../store.js';
@@ -72,7 +73,22 @@ const tokenTypeOptions = [
   { value: 'app', label: 'GitHub App' },
 ];
 
-const fineGrainedTokenURL = 'https://github.com/settings/personal-access-tokens/new?name=API-Monitor&description=API-Monitor+GitHub+observability&expires_in=none&actions=write&administration=write&contents=write&issues=write&pull_requests=write&repository_hooks=write&workflows=write';
+const fineGrainedTokenURL = (resourceOwner = '') => {
+  const params = new URLSearchParams({
+    name: 'API-Monitor',
+    description: 'API-Monitor GitHub observability',
+    expires_in: 'none',
+    actions: 'write',
+    administration: 'read',
+    contents: 'read',
+    issues: 'read',
+    pull_requests: 'read',
+    webhooks: 'write',
+    workflows: 'write',
+  });
+  if (resourceOwner) params.set('target_name', resourceOwner);
+  return `https://github.com/settings/personal-access-tokens/new?${params.toString()}`;
+};
 
 const rangeOptions = [
   { value: '7', label: '7 天' },
@@ -190,43 +206,6 @@ const actionFlowStatusMetaClass = (status, muted = false) => {
 const workflowJobStep = (job) => {
   const steps = Array.isArray(job?.steps) ? job.steps : [];
   return steps.find((step) => step.status === 'in_progress') || null;
-};
-
-const normalizeWorkflowJobName = (value) => String(value || '').trim().toLowerCase();
-const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-const workflowTemplatePattern = (value) => String(value || '')
-  .split(/\$\{\{[^}]+}}/g)
-  .map((part) => escapeRegExp(part).replace(/\s+/g, '\\s+'))
-  .join('.*');
-
-const workflowMatrixJobMatches = (jobName, definition) => {
-  if (!definition?.matrix) return false;
-  const id = normalizeWorkflowJobName(definition.id);
-  if (id === 'pytest-full') return /^run tests python .*\(\d+\)/.test(jobName);
-  if (id === 'pytest-partial') return jobName.startsWith('run tests python ') && !/^run tests python .*\(\d+\)/.test(jobName);
-  if (id === 'pytest-mariadb') return jobName.startsWith('run mariadb:') || jobName.startsWith('run mysql:');
-  if (id === 'pytest-postgres') return jobName.startsWith('run postgres:');
-  if (id === 'lint-hadolint') return jobName.startsWith('check dockerfile') || jobName.startsWith('check script/hassfest/dockerfile');
-  if (id === 'base') return jobName.startsWith('prepare dependencies');
-  if (id === 'audit-licenses') return jobName.startsWith('audit licenses');
-  const template = workflowTemplatePattern(definition.name);
-  if (!template) return false;
-  return new RegExp(`^${template}$`, 'i').test(jobName);
-};
-
-const workflowJobMatchesDefinition = (job, definition) => {
-  const jobName = normalizeWorkflowJobName(job?.name);
-  const id = normalizeWorkflowJobName(definition?.id);
-  const name = normalizeWorkflowJobName(definition?.name);
-  if (!jobName) return false;
-  if (workflowMatrixJobMatches(jobName, definition)) return true;
-  return [id, name].some((value) => value && (
-    jobName === value ||
-    jobName.startsWith(`${value} (`) ||
-    jobName.startsWith(`${value} / `) ||
-    jobName.startsWith(`${value}:`)
-  ));
 };
 
 const workflowJobPriority = (value) => ({
@@ -2138,7 +2117,7 @@ function GitHubPage() {
       toast.success(result.created ? 'GitHub Webhook 已自动创建' : 'GitHub Webhook 已自动更新');
       await loadOverview();
     } catch (error) {
-      toast.error(error.message || '自动配置 Webhook 失败');
+      toast.error(error.message || '自动配置 Webhook 失败：请确认 Token 的 Resource owner、仓库范围和 Webhooks: write 权限');
     } finally {
       setSaving(false);
     }
@@ -2566,12 +2545,15 @@ function GitHubPage() {
                 size="sm"
                 variant="secondary"
                 icon={<ExternalLink className="h-3.5 w-3.5" />}
-                onClick={() => window.open(fineGrainedTokenURL, '_blank', 'noopener,noreferrer')}
+                onClick={() => window.open(fineGrainedTokenURL(selectedRepo?.owner || ''), '_blank', 'noopener,noreferrer')}
               >
                 打开 GitHub 创建页
               </Button>
             </LayerCard.Secondary>
             <LayerCard.Primary className="grid gap-3 p-4">
+              <Text variant="secondary" size="xs">
+                组织仓库请在 GitHub 创建页将 Resource owner 设为仓库所属组织，并等待组织审批；仓库 Webhook 使用的是仓库级 Webhooks: read/write，不需要额外申请组织级 Webhooks 权限。
+              </Text>
               <Input size="sm" label="Token 名称" value={tokenForm.name} onChange={(e) => setTokenForm((p) => ({ ...p, name: e.target.value }))} placeholder="生产账号" />
               <Input size="sm" label="Token" value={tokenForm.token} onChange={(e) => setTokenForm((p) => ({ ...p, token: e.target.value }))} placeholder="github_pat_..." autoComplete="off" spellCheck={false} className="font-mono" />
               <Grid variant="2up" gap="sm">

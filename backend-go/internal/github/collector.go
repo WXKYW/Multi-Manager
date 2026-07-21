@@ -74,7 +74,7 @@ func (s *Service) shouldPollActions(repo Repository, authenticated bool, now tim
 	}
 	interval := time.Minute
 	if authenticated {
-		if active {
+		if active || !repo.WebhookEnabled {
 			interval = 10 * time.Second
 		}
 	} else if active {
@@ -436,7 +436,20 @@ func (s *Service) handleWebhookEvent(ctx context.Context, db *sql.DB, repo Repos
 	case "ping":
 		s.emitRepositoryEvent(ctx, db, repo, "webhook_ping", "info", "GitHub Webhook 已连接", fmt.Sprintf("%s webhook ping 成功", repo.FullName), "webhook", payload)
 	}
+	if webhookUsesActionsRefresh(eventType) {
+		go s.refreshActionsRepositoryByID(context.Background(), repo.ID, "webhook")
+		return
+	}
 	go s.refreshRepositoryByID(context.Background(), repo.ID, "webhook")
+}
+
+func webhookUsesActionsRefresh(eventType string) bool {
+	switch strings.ToLower(strings.TrimSpace(eventType)) {
+	case "workflow_run", "workflow_job":
+		return true
+	default:
+		return false
+	}
 }
 
 func mergeRate(a, b rateLimitInfo) rateLimitInfo {

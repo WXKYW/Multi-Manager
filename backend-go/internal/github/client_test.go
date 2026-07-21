@@ -208,3 +208,35 @@ func TestAPIClientConfigureWebhookUpdatesMatchingHook(t *testing.T) {
 		t.Fatalf("unexpected webhook result id=%d created=%v updated=%v err=%v", hookID, created, updated, err)
 	}
 }
+
+func TestProbeRepositoryPermissionsChecksWebhookRead(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/openai/codex":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"full_name": "openai/codex"})
+		case "/repos/openai/codex/actions/runs":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"total_count": 0, "workflow_runs": []interface{}{}})
+		case "/repos/openai/codex/traffic/views", "/repos/openai/codex/traffic/clones":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"count": 0, "uniques": 0})
+		case "/repos/openai/codex/hooks":
+			http.Error(w, `{"message":"Resource not accessible by personal access token"}`, http.StatusForbidden)
+		default:
+			t.Fatalf("unexpected request: %s", r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	client := newAPIClient()
+	client.baseURL = server.URL
+	checks := client.probeRepositoryPermissions(context.Background(), "token", Repository{Owner: "openai", Name: "codex"})
+	var webhookCheck map[string]interface{}
+	for _, check := range checks {
+		if check["key"] == "webhooks_read" {
+			webhookCheck = check
+			break
+		}
+	}
+	if webhookCheck == nil || webhookCheck["status"] != "failed" {
+		t.Fatalf("expected failed webhook permission check, got %#v", checks)
+	}
+}

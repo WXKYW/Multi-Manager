@@ -948,7 +948,10 @@ mod windows_impl {
     }
 
     fn pointer_message_sequence(value: &Value) -> Option<u32> {
-        matches!(value.get("type").and_then(Value::as_str), Some("pointer-query"))
+        matches!(
+            value.get("type").and_then(Value::as_str),
+            Some("pointer-query")
+        )
         .then(|| value.get("sequence").and_then(Value::as_u64).unwrap_or(0) as u32)
     }
 
@@ -1278,7 +1281,10 @@ mod windows_impl {
         #[test]
         fn touchpad_delta_is_independent_of_desktop_geometry() {
             assert_eq!(pointer_delta(&json!({"dx": 25, "dy": -12})), (25, -12));
-            assert_eq!(pointer_delta(&json!({"dx": 9999, "dy": -9999})), (4096, -4096));
+            assert_eq!(
+                pointer_delta(&json!({"dx": 9999, "dy": -9999})),
+                (4096, -4096)
+            );
         }
 
         #[test]

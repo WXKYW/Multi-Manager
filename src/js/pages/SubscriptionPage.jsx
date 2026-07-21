@@ -19,14 +19,45 @@ import CountryFlag from '../components/CountryFlag.jsx';
 import { Copy, Download, Edit, Plus, RefreshCw, Save, Star, Trash, X } from '../components/Icons.jsx';
 
 const API = '/api/subscription';
+const INTERNAL_API = '/api/server/agent/proxy/nodes';
+const LOAD_TIMEOUT_MS = 8000;
+const INITIAL_SKELETON_MS = 900;
+
+const emptyInternalNodeForm = { server_id: '', name: '', protocol: 'vless-reality', public_host: '', server_name: 'www.cloudflare.com', certificate_pem: '', private_key_pem: '', enabled: true };
+
+const getInstanceCountryCode = (server) => {
+  const direct = String(server?.country_code || server?.countryCode || server?.resolved_country || '').trim();
+  if (/^[a-z]{2}$/i.test(direct)) return direct.toUpperCase();
+  const location = String(server?.location || '').trim();
+  if (/^[a-z]{2}$/i.test(location)) return location.toUpperCase();
+  const known = { singapore: 'SG', japan: 'JP', germany: 'DE', france: 'FR', 'hong kong': 'HK', london: 'GB' };
+  return known[location.toLowerCase()] || '';
+};
+
+const getInstanceLocationLabel = (server) => getInstanceCountryCode(server) || String(server?.location || '—');
+
+const countryFlagEmoji = (countryCode) => {
+  const code = String(countryCode || '').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(code)) return '';
+  return String.fromCodePoint(...code.split('').map((letter) => 127397 + letter.charCodeAt(0)));
+};
+
+const formatInstanceUptime = (value) => {
+  const text = String(value || '').trim();
+  if (!text) return '-';
+  const dayMatch = text.match(/(\d+)\s*(?:d|天)/i);
+  if (dayMatch) return `${dayMatch[1]}天`;
+  return /(?:h|m|s|时|分|秒)/i.test(text) ? '0天' : text;
+};
 
 const emptySubscriptionForm = {
   profile_id: '',
+  plan_id: '',
   name: '',
   remark: '',
   enabled: true,
   template_id: 'builtin_mihomo_default',
-  traffic_source: 'manual',
+  traffic_source: 'panel',
   traffic_server_id: '',
   upstream_url: '',
   upstream_enabled: false,
@@ -40,6 +71,13 @@ const emptySubscriptionForm = {
   rate_limit_enabled: true,
   rate_limit_per_minute: 30,
   node_filter_ids: [],
+  include_internal_nodes: true,
+  include_external_nodes: false,
+};
+
+const emptyPlanForm = {
+  name: '', remark: '', enabled: true, total_bytes: 0, cycle_type: 'monthly', cycle_day: 1,
+  rate_limit_enabled: true, rate_limit_per_minute: 30, node_ids: [], include_internal_nodes: true, include_external_nodes: false,
 };
 
 const emptyProfileForm = {
@@ -78,6 +116,9 @@ const emptyNodeForm = {
   location: '',
   tags: '',
   traffic_server_id: '',
+  ownership: 'external',
+  management: 'unmanaged',
+  traffic_reporting: 'unavailable',
   enabled: true,
   stable: false,
   sort_order: 0,
@@ -740,12 +781,18 @@ function TrafficSizeInput({ label, value, onChange }) {
 
 function SubscriptionPage() {
   const publicApiUrl = useStore((state) => state.publicApiUrl);
-  const [activeTab, setActiveTab] = useState('profiles');
+  const [activeTab, setActiveTab] = useState('instances');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [profiles, setProfiles] = useState([]);
+  const [plans, setPlans] = useState([]);
   const [subscriptions, setSubscriptions] = useState([]);
   const [nodes, setNodes] = useState([]);
+  const [internalNodes, setInternalNodes] = useState([]);
+	const [selectedInternalHosts, setSelectedInternalHosts] = useState(new Set());
+	const [internalNodeModalOpen, setInternalNodeModalOpen] = useState(false);
+	const [internalNodeForm, setInternalNodeForm] = useState(emptyInternalNodeForm);
+	const [editingInternalNodeId, setEditingInternalNodeId] = useState(null);
   const [templates, setTemplates] = useState([]);
   const [logs, setLogs] = useState([]);
   const [servers, setServers] = useState([]);
@@ -754,6 +801,11 @@ function SubscriptionPage() {
   const [subscriptionModalOpen, setSubscriptionModalOpen] = useState(false);
   const [subscriptionForm, setSubscriptionForm] = useState(emptySubscriptionForm);
   const [editingSubscriptionId, setEditingSubscriptionId] = useState(null);
+  const [planModalOpen, setPlanModalOpen] = useState(false);
+  const [planForm, setPlanForm] = useState(emptyPlanForm);
+  const [editingPlanId, setEditingPlanId] = useState(null);
+  const [planNodeTypeFilter, setPlanNodeTypeFilter] = useState('all');
+  const [planNodeSourceFilter, setPlanNodeSourceFilter] = useState('all');
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [profileForm, setProfileForm] = useState(emptyProfileForm);
   const [editingProfileId, setEditingProfileId] = useState(null);
@@ -775,6 +827,7 @@ function SubscriptionPage() {
   const [editingTemplateId, setEditingTemplateId] = useState(null);
   const [templateSubscriptionId, setTemplateSubscriptionId] = useState('');
   const [templateBindingId, setTemplateBindingId] = useState('');
+  const loadGenerationRef = useRef(0);
 
   const publicBase = useMemo(
     () => normalizePublicBase(publicApiUrl, typeof window === 'undefined' ? '' : window.location.origin),
@@ -782,33 +835,51 @@ function SubscriptionPage() {
   );
 
   const loadAll = async () => {
+    const generation = ++loadGenerationRef.current;
     setLoading(true);
-    try {
-      const [profilesRes, subsRes, nodesRes, templatesRes, logsRes, serversRes, settingsRes] = await Promise.all([
-        fetch(`${API}/profiles`, { headers: getAuthHeaders() }),
-        fetch(`${API}/subscriptions`, { headers: getAuthHeaders() }),
-        fetch(`${API}/nodes`, { headers: getAuthHeaders() }),
-        fetch(`${API}/templates`, { headers: getAuthHeaders() }),
-        fetch(`${API}/logs?limit=200`, { headers: getAuthHeaders() }),
-        fetch(`${API}/servers`, { headers: getAuthHeaders() }),
-        fetch(`${API}/settings`, { headers: getAuthHeaders() }),
-      ]);
-      const [profilesData, subsData, nodesData, templatesData, logsData, serversData, settingsData] = await Promise.all([
-        profilesRes.json(),
-        subsRes.json(), nodesRes.json(), templatesRes.json(), logsRes.json(), serversRes.json(), settingsRes.json(),
-      ]);
-      setProfiles(profilesData.data || []);
-      setSubscriptions(subsData.data || []);
-      setNodes(nodesData.data || []);
-      setTemplates(templatesData.data || []);
-      setLogs(logsData.data || []);
-      setServers(serversData.data || []);
-      setSettings(settingsData.data || {});
-    } catch (error) {
-      console.error(error);
-      toast.error('载入节点数据失败');
-    } finally {
-      setLoading(false);
+    const loadJSON = async (url) => {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), LOAD_TIMEOUT_MS);
+      try {
+        const response = await fetch(url, { headers: getAuthHeaders(), signal: controller.signal, cache: 'no-store' });
+        if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
+        return await response.json();
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    };
+
+    const resources = [
+      [`${API}/profiles`, setProfiles, []],
+      [`${API}/plans`, setPlans, []],
+      [`${API}/subscriptions`, setSubscriptions, []],
+      [`${API}/nodes`, setNodes, []],
+      [INTERNAL_API, setInternalNodes, []],
+      [`${API}/templates`, setTemplates, []],
+      [`${API}/logs?limit=200`, setLogs, []],
+      [`${API}/servers`, setServers, []],
+      [`${API}/settings`, setSettings, {}],
+    ];
+    const requests = resources.map(([url, setter, fallback]) => loadJSON(url)
+      .then((payload) => {
+        if (loadGenerationRef.current === generation) setter(payload.data ?? fallback);
+        return true;
+      })
+      .catch((error) => {
+        console.warn(`Subscription resource unavailable: ${url}`, error);
+        return false;
+      }));
+
+    // A slow optional resource must never own the whole page's loading state.
+    await Promise.race([
+      Promise.allSettled([requests[4], requests[7]]),
+      new Promise((resolve) => window.setTimeout(resolve, INITIAL_SKELETON_MS)),
+    ]);
+    if (loadGenerationRef.current === generation) setLoading(false);
+
+    const results = await Promise.all(requests);
+    if (loadGenerationRef.current === generation && results.some((success) => !success)) {
+      toast.warning(`${results.filter((success) => !success).length} 项数据暂时无法载入，其余内容已显示`);
     }
   };
 
@@ -816,11 +887,153 @@ function SubscriptionPage() {
     loadAll();
   }, []);
 
+  const createInternalNode = async () => {
+    const selectedIDs = [...selectedInternalHosts];
+    const targetServerIDs = selectedIDs.length > 0 ? selectedIDs : [internalNodeForm.server_id].filter(Boolean);
+    if (targetServerIDs.length === 0) {
+      toast.warning('请选择目标实例');
+      return;
+    }
+    setSaving(true);
+    try {
+      const results = await Promise.all(targetServerIDs.map(async (serverID) => {
+        const server = servers.find((item) => item.id === serverID);
+        const customName = internalNodeForm.name.trim();
+        const protocolLabel = internalNodeForm.protocol === 'hysteria2' ? 'HY2' : 'VLESS';
+        const flag = countryFlagEmoji(getInstanceCountryCode(server));
+        const generatedName = `${flag ? `${flag} ` : ''}${server?.name || serverID} ${protocolLabel}`;
+        const namedNode = customName
+          ? `${flag && !customName.startsWith(flag) ? `${flag} ` : ''}${targetServerIDs.length > 1 ? `${customName}-${server?.name || serverID}` : customName}`
+          : generatedName;
+        const payload = {
+          ...internalNodeForm,
+          server_id: serverID,
+          name: namedNode,
+          public_host: server?.host || '',
+        };
+        const res = await fetch(INTERNAL_API, { method: 'POST', headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const data = await res.json();
+        if (!res.ok || data.success === false) throw new Error(`${servers.find((server) => server.id === serverID)?.name || serverID}: ${data.error || data.message || '部署失败'}`);
+        return data;
+      }));
+      toast.success(`已向 ${results.length} 台主机下发部署`);
+      setInternalNodeModalOpen(false);
+      setInternalNodeForm(emptyInternalNodeForm);
+      setSelectedInternalHosts(new Set());
+      await loadAll();
+    } catch (error) { toast.error(error.message); } finally { setSaving(false); }
+  };
+
+  const reconcileInternalNode = async (node) => {
+    const res = await fetch(`${INTERNAL_API}/${node.id}/reconcile`, { method: 'POST', headers: getAuthHeaders() });
+    const data = await res.json();
+    if (!res.ok || data.success === false) return toast.error(data.error || data.message || '重新部署失败');
+    toast.success('节点状态已同步'); await loadAll();
+  };
+
+  const deleteInternalNode = async (node) => {
+    if (!(await dialog.deleteResource({ resourceType: '内部节点', resourceName: node.name }))) return;
+    const res = await fetch(`${INTERNAL_API}/${node.id}`, { method: 'DELETE', headers: getAuthHeaders() });
+    const data = await res.json();
+    if (!res.ok || data.success === false) return toast.error(data.error || data.message || '卸载失败');
+    toast.success('内部节点已卸载'); await loadAll();
+  };
+
+  const reconcileInternalNodes = async (managed) => {
+    setSaving(true);
+    try {
+      const results = await Promise.all(managed.map(async (node) => {
+        const res = await fetch(`${INTERNAL_API}/${node.id}/reconcile`, { method: 'POST', headers: getAuthHeaders() });
+        const data = await res.json();
+        if (!res.ok || data.success === false) throw new Error(data.error || data.message || `${node.name} 重新部署失败`);
+        return data;
+      }));
+      toast.success(`已重新部署 ${results.length} 个节点`);
+      await loadAll();
+    } catch (error) {
+      toast.error(error.message || '重新部署失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const uninstallInternalNodes = async (server, managed) => {
+    if (!(await dialog.deleteResource({ resourceType: '实例代理服务', resourceName: `${server.name}（${managed.length} 个节点）` }))) return;
+    setSaving(true);
+    try {
+      await Promise.all(managed.map(async (node) => {
+        const res = await fetch(`${INTERNAL_API}/${node.id}`, { method: 'DELETE', headers: getAuthHeaders() });
+        const data = await res.json();
+        if (!res.ok || data.success === false) throw new Error(data.error || data.message || `${node.name} 卸载失败`);
+      }));
+      toast.success(`已卸载 ${managed.length} 个节点`);
+      await loadAll();
+    } catch (error) {
+      toast.error(error.message || '卸载失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleInternalNodeEnabled = async (node, enabled) => {
+    try {
+      const res = await fetch(`${INTERNAL_API}/${node.id}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ enabled }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.success === false) throw new Error(data.error || data.message || '更新失败');
+      toast.success(enabled ? '内部节点已启用' : '内部节点已停用');
+      await loadAll();
+    } catch (error) {
+      toast.error(error.message || '更新失败');
+    }
+  };
+
+  const toggleInternalHost = (serverID, checked) => setSelectedInternalHosts((previous) => {
+    const next = new Set(previous); if (checked) next.add(serverID); else next.delete(serverID); return next;
+  });
+
+  const startInternalDeployment = (serverID = '') => {
+    setEditingInternalNodeId(null);
+    const nextSelection = serverID ? new Set([serverID]) : new Set(selectedInternalHosts);
+    if (serverID) setSelectedInternalHosts(nextSelection);
+    const selected = serverID || [...nextSelection][0] || '';
+    setInternalNodeForm((prev) => ({ ...emptyInternalNodeForm, server_id: selected, protocol: prev.protocol || 'vless-reality', public_host: servers.find((server) => server.id === selected)?.host || '' }));
+    setInternalNodeModalOpen(true);
+  };
+
+  const openEditInternalNode = (node) => {
+    setEditingInternalNodeId(node.id);
+    setSelectedInternalHosts(new Set([node.server_id]));
+    setInternalNodeForm({ ...emptyInternalNodeForm, ...node, server_name: node.server_name || 'www.cloudflare.com' });
+    setInternalNodeModalOpen(true);
+  };
+
+  const saveInternalNode = async () => {
+    if (!internalNodeForm.name.trim()) return toast.warning('请输入节点名称');
+    setSaving(true);
+    try {
+      const res = await fetch(`${INTERNAL_API}/${editingInternalNodeId}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ name: internalNodeForm.name.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.success === false) throw new Error(data.error || data.message || '保存失败');
+      setInternalNodeModalOpen(false);
+      setEditingInternalNodeId(null);
+      toast.success('节点名称已更新');
+      await loadAll();
+    } catch (error) {
+      toast.error(error.message || '保存失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const templateItems = useMemo(() => templates.map((item) => ({ value: item.id, label: item.name })), [templates]);
-  const serverItems = useMemo(() => [
-    { value: '', label: '不绑定主机' },
-    ...servers.map((item) => ({ value: item.id, label: `${item.name} (${item.host})` })),
-  ], [servers]);
   const serverNameById = useMemo(() => {
     const map = new Map();
     servers.forEach((item) => map.set(String(item.id), item.name || item.host || item.id));
@@ -866,6 +1079,18 @@ function SubscriptionPage() {
     [subscriptions]
   );
   const subscriptionItems = useMemo(() => exportSubscriptions.map((item) => ({ value: item.id, label: item.name })), [exportSubscriptions]);
+  const planItems = useMemo(() => plans.filter((item) => item.enabled).map((item) => ({ value: item.id, label: item.name })), [plans]);
+  const planCandidateNodes = useMemo(() => [
+    ...internalNodes.map((node) => ({ ...node, source_group: 'internal', display_type: node.protocol === 'vless-reality' ? 'vless' : node.protocol })),
+    ...nodes.map((node) => ({ ...node, source_group: 'external', display_type: String(node.type || 'unknown').toLowerCase() })),
+  ], [internalNodes, nodes]);
+  const planNodeTypeItems = useMemo(() => [{ value: 'all', label: '全部类型' }, ...Array.from(new Set(planCandidateNodes.map((node) => node.display_type))).sort().map((value) => ({ value, label: value.toUpperCase() }))], [planCandidateNodes]);
+  const visiblePlanNodes = useMemo(() => planCandidateNodes.filter((node) => (
+    (planNodeTypeFilter === 'all' || node.display_type === planNodeTypeFilter)
+    && (planNodeSourceFilter === 'all' || node.source_group === planNodeSourceFilter)
+  )), [planCandidateNodes, planNodeSourceFilter, planNodeTypeFilter]);
+  const visiblePlanNodeIDs = useMemo(() => visiblePlanNodes.map((node) => node.id), [visiblePlanNodes]);
+  const allVisiblePlanNodesSelected = visiblePlanNodeIDs.length > 0 && visiblePlanNodeIDs.every((id) => planForm.node_ids.includes(id));
   const profileItems = useMemo(() => nodeLibraries.map((item) => ({ value: item.id, label: `${item.name} (${item.nodeCount})` })), [nodeLibraries]);
   const nodeLibraryItems = profileItems;
   const selectedNodeLibrary = useMemo(
@@ -887,15 +1112,8 @@ function SubscriptionPage() {
     }
   }, [exportSubscriptions, templateSubscriptionId]);
   const visibleNodes = useMemo(
-    () => {
-      if (!selectedNodeLibrary) return nodes;
-      const profileID = selectedNodeLibrary.id;
-      return nodes.filter((item) => {
-        const nodeProfileID = profileKeyOf(item);
-        return nodeProfileID === profileID;
-      });
-    },
-    [nodes, selectedNodeLibrary]
+    () => nodes,
+    [nodes]
   );
   const protocolItems = useMemo(() => {
     const counts = new Map();
@@ -938,9 +1156,22 @@ function SubscriptionPage() {
   }, [exportSubscriptions, selectedNodeLibrary]);
   const subscriptionSourceNodes = useMemo(() => {
     const profileID = subscriptionForm.profile_id || selectedNodeLibrary?.id || '';
-    if (!profileID) return [];
-    return nodes.filter((item) => profileKeyOf(item) === profileID);
-  }, [nodes, selectedNodeLibrary, subscriptionForm.profile_id]);
+    const external = subscriptionForm.include_external_nodes && profileID
+      ? nodes.filter((item) => profileKeyOf(item) === profileID).map((item) => ({ ...item, source_group: 'external' }))
+      : [];
+    const managed = subscriptionForm.include_internal_nodes
+      ? internalNodes.filter((item) => item.enabled && item.publishable && item.apply_status === 'running').map((item) => ({
+          ...item,
+          type: item.protocol === 'vless-reality' ? 'vless' : item.protocol,
+          server: item.public_host,
+          port: item.assigned_port,
+          ownership: 'self',
+          management: 'agent',
+          source_group: 'internal',
+        }))
+      : [];
+    return [...managed, ...external];
+  }, [nodes, internalNodes, selectedNodeLibrary, subscriptionForm.profile_id, subscriptionForm.include_external_nodes, subscriptionForm.include_internal_nodes]);
   const subscriptionSelectedNodeIDs = useMemo(
     () => new Set(Array.isArray(subscriptionForm.node_filter_ids) ? subscriptionForm.node_filter_ids : []),
     [subscriptionForm.node_filter_ids]
@@ -970,13 +1201,49 @@ function SubscriptionPage() {
     setSubscriptionForm({
       ...emptySubscriptionForm,
       profile_id: profileID,
+      plan_id: planItems[0]?.value || '',
       name: `${library?.name || '节点库'} 订阅 ${linkIndex}`,
       template_id: settings?.default_template_id || 'builtin_mihomo_default',
       rate_limit_enabled: settings?.default_rate_limit_enabled ?? true,
       rate_limit_per_minute: settings?.default_rate_limit_per_minute || 30,
       node_filter_ids: [],
+      include_internal_nodes: true,
+      include_external_nodes: false,
     });
     setSubscriptionModalOpen(true);
+  };
+
+  const openCreatePlan = () => {
+    setEditingPlanId(null);
+    setPlanForm({ ...emptyPlanForm, node_ids: [] });
+    setPlanNodeTypeFilter('all'); setPlanNodeSourceFilter('all');
+    setPlanModalOpen(true);
+  };
+
+  const openEditPlan = (plan) => {
+    setEditingPlanId(plan.id);
+    setPlanForm({ ...emptyPlanForm, ...plan, node_ids: Array.isArray(plan.node_ids) ? plan.node_ids : [] });
+    setPlanNodeTypeFilter('all'); setPlanNodeSourceFilter('all');
+    setPlanModalOpen(true);
+  };
+
+  const savePlan = async () => {
+    if (!planForm.name.trim()) return toast.warning('请输入套餐名称');
+    setSaving(true);
+    try {
+      const res = await fetch(editingPlanId ? `${API}/plans/${editingPlanId}` : `${API}/plans`, { method: editingPlanId ? 'PUT' : 'POST', headers: getAuthHeaders(), body: JSON.stringify(planForm) });
+      const data = await res.json();
+      if (!res.ok || data.success === false) throw new Error(data.error || '保存失败');
+      setPlanModalOpen(false); await loadAll(); toast.success('套餐已保存');
+    } catch (error) { toast.error(error.message); } finally { setSaving(false); }
+  };
+
+  const deletePlan = async (plan) => {
+    if (!(await dialog.deleteResource({ resourceType: '套餐', resourceName: plan.name }))) return;
+    const res = await fetch(`${API}/plans/${plan.id}`, { method: 'DELETE', headers: getAuthHeaders() });
+    const data = await res.json();
+    if (!res.ok || data.success === false) return toast.error(data.error || '删除失败');
+    await loadAll(); toast.success('套餐已删除');
   };
 
   const openEditSubscription = (sub) => {
@@ -1023,8 +1290,10 @@ function SubscriptionPage() {
         headers: getAuthHeaders(),
         body: JSON.stringify({
           ...subscriptionForm,
-          traffic_source: subscriptionForm.traffic_source || 'manual',
-          traffic_server_id: subscriptionForm.traffic_source === 'server' ? subscriptionForm.traffic_server_id || '' : '',
+          traffic_source: 'panel',
+          traffic_server_id: '',
+          manual_upload_bytes: 0,
+          manual_download_bytes: 0,
         }),
       });
       const data = await res.json();
@@ -1171,9 +1440,9 @@ function SubscriptionPage() {
   };
 
   const openImportModal = (subId = '') => {
-    const targetId = subId || nodeSubscriptionId || '';
+    const targetId = subId || nodeSubscriptionId || nodeLibraryItems[0]?.value || '';
     if (!targetId) {
-      toast.warning('请先选择节点库');
+      toast.warning('外部节点导入空间尚未初始化');
       return;
     }
     setImportSubscriptionId(targetId);
@@ -1199,7 +1468,7 @@ function SubscriptionPage() {
 
   const commitImport = async (replace = false) => {
     if (!importSubscriptionId) {
-      toast.warning('请选择节点库');
+      toast.warning('请选择导入目标');
       return;
     }
     if (!importSourceURL.trim() && !importText.trim()) {
@@ -1413,7 +1682,6 @@ function SubscriptionPage() {
   const renderProfiles = () => (
     <SectionCard
       title={`节点库 (${nodeLibraries.length})`}
-      description="节点库负责接管原始节点来源；订阅链接从节点库生成。"
       className="h-full min-h-0"
       bodyPadding="none"
       bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
@@ -1428,7 +1696,7 @@ function SubscriptionPage() {
               <Table.Head className="text-center">节点</Table.Head>
               <Table.Head className="text-center">对外订阅</Table.Head>
               <Table.Head className="text-center">状态</Table.Head>
-              <Table.Head className="text-right">操作</Table.Head>
+              <Table.Head className="text-center">操作</Table.Head>
             </Table.Row>
           </Table.Header>
           <Table.Body>
@@ -1451,8 +1719,8 @@ function SubscriptionPage() {
                 <Table.Cell className="text-center">
                   <Badge variant={profile.enabled !== false ? 'success' : 'secondary'} appearance="dot">{profile.enabled !== false ? '启用' : '停用'}</Badge>
                 </Table.Cell>
-                <Table.Cell className="text-right">
-                  <div className="inline-flex gap-2">
+                <Table.Cell className="text-center">
+                  <div className="inline-flex items-center justify-center gap-2">
                     <Button size="sm" shape="square" variant="secondary" aria-label="编辑节点库" title="编辑节点库" onClick={() => openEditProfile(profile)} icon={<Edit className="h-3.5 w-3.5" />} />
                     <Button size="sm" shape="square" variant="secondary-destructive" aria-label="删除节点库" title="删除节点库" onClick={() => deleteProfile(profile)} icon={<Trash className="h-3.5 w-3.5" />} />
                   </div>
@@ -1469,11 +1737,10 @@ function SubscriptionPage() {
   );
 
   const renderSubscriptions = () => {
-    const currentSubscriptions = selectedNodeLibrary ? selectedLibrarySubscriptions : [];
+    const currentSubscriptions = exportSubscriptions;
     return (
       <SectionCard
         title={`订阅管理 (${currentSubscriptions.length})`}
-        description="选择一个节点库，然后生成和管理它对外提供的订阅链接。"
         className="h-full min-h-0"
         bodyPadding="none"
         bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
@@ -1481,15 +1748,7 @@ function SubscriptionPage() {
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
             <span className="rounded border border-kumo-info/20 bg-kumo-info/10 px-1.5 py-0.5 text-[11px] font-semibold text-kumo-info">{visibleNodes.length} 个节点</span>
             <span className="rounded border border-kumo-badge-purple/20 bg-kumo-badge-purple/10 px-1.5 py-0.5 text-[11px] font-semibold text-kumo-badge-purple">{currentSubscriptions.length} 个订阅</span>
-            <Select
-              size="sm"
-              aria-label="节点库"
-              value={nodeSubscriptionId}
-              onValueChange={(value) => setNodeSubscriptionId(String(value))}
-              items={nodeLibraryItems}
-              className="w-56 min-w-0"
-            />
-            <Button size="sm" variant="primary" onClick={() => openCreateSubscription()} disabled={!selectedNodeLibrary || visibleNodes.length === 0}><Plus className="h-3.5 w-3.5" />生成订阅</Button>
+            <Button size="sm" variant="primary" onClick={() => openCreateSubscription()} disabled={plans.length === 0}><Plus className="h-3.5 w-3.5" />生成订阅</Button>
           </div>
         )}
       >
@@ -1501,7 +1760,7 @@ function SubscriptionPage() {
                 <Table.Head className="text-center">状态</Table.Head>
                 <Table.Head>流量</Table.Head>
                 <Table.Head>访问</Table.Head>
-                <Table.Head className="text-right">操作</Table.Head>
+                <Table.Head className="text-center">操作</Table.Head>
               </Table.Row>
             </Table.Header>
             <Table.Body>
@@ -1514,7 +1773,8 @@ function SubscriptionPage() {
                     <Table.Cell>
                       <div className="truncate text-sm font-semibold text-kumo-strong">{sub.name}</div>
                       <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
-                        <span className="rounded border border-kumo-info/20 bg-kumo-info/10 px-1.5 py-0.5 text-[10px] font-semibold text-kumo-info">{sub.node_count || visibleNodes.length || 0} 个节点</span>
+                        <span className="rounded border border-kumo-info/20 bg-kumo-info/10 px-1.5 py-0.5 text-[10px] font-semibold text-kumo-info">{sub.node_count || 0} 个节点</span>
+                        <Badge variant="secondary">{plans.find((plan) => plan.id === sub.plan_id)?.name || '未绑定套餐'}</Badge>
                         <span className="truncate font-mono text-[10px] text-kumo-subtle" title={sub.id}>{sub.id}</span>
                       </div>
                     </Table.Cell>
@@ -1533,8 +1793,8 @@ function SubscriptionPage() {
                       <div className="text-xs font-semibold text-kumo-strong">{sub.access_count_today || 0} 次</div>
                       <div className="mt-1 text-[11px] text-kumo-subtle">{formatTime(sub.last_access_at)}</div>
                     </Table.Cell>
-                    <Table.Cell className="text-right">
-                      <div className="inline-flex gap-2">
+                    <Table.Cell className="text-center">
+                      <div className="inline-flex items-center justify-center gap-2">
                         <Button size="sm" shape="square" variant="secondary" aria-label="复制订阅链接" title="复制订阅链接" onClick={() => copyText(link, '订阅链接已复制')} icon={<Copy className="h-3.5 w-3.5" />} />
                         <Button size="sm" shape="square" variant="secondary" aria-label="编辑订阅链接" title="编辑订阅链接" onClick={() => openEditSubscription(sub)} icon={<Edit className="h-3.5 w-3.5" />} />
                         <Button size="sm" shape="square" variant="secondary" aria-label="重置链接" title="重置链接" onClick={() => resetToken(sub)} icon={<RefreshCw className="h-3.5 w-3.5" />} />
@@ -1545,7 +1805,7 @@ function SubscriptionPage() {
                 );
               })}
               {currentSubscriptions.length === 0 && (
-                <Table.Row><Table.Cell colSpan={5} className="p-8 text-center text-kumo-subtle">当前节点库还没有订阅链接。选择有节点的节点库后点击生成订阅。</Table.Cell></Table.Row>
+                <Table.Row><Table.Cell colSpan={5} className="p-8 text-center text-kumo-subtle">暂无订阅。请先创建套餐，再生成订阅。</Table.Cell></Table.Row>
               )}
             </Table.Body>
           </AppTable>
@@ -1554,10 +1814,60 @@ function SubscriptionPage() {
     );
   };
 
+  const renderPlans = () => (
+    <SectionCard title={`套餐管理 (${plans.length})`} className="h-full min-h-0" bodyPadding="none" bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden" actions={<Button size="sm" variant="primary" onClick={openCreatePlan}><Plus className="h-3.5 w-3.5" />新建套餐</Button>}>
+      <div className="min-h-0 flex-1 overflow-auto scrollbar-thin">
+        <AppTable layout="fixed" widths={[260, 180, 160, 180, 120, 132]}>
+          <Table.Header sticky variant="compact"><Table.Row><Table.Head>套餐</Table.Head><Table.Head>总额度</Table.Head><Table.Head className="text-center">重置</Table.Head><Table.Head>节点范围</Table.Head><Table.Head className="text-center">订阅</Table.Head><Table.Head className="text-center">操作</Table.Head></Table.Row></Table.Header>
+          <Table.Body>
+            {plans.map((plan) => <Table.Row key={plan.id} onDoubleClick={() => openEditPlan(plan)} className="cursor-pointer">
+              <Table.Cell><div className="font-semibold text-kumo-strong">{plan.name}</div><div className="mt-1 truncate text-[11px] text-kumo-subtle">{plan.remark || plan.id}</div></Table.Cell>
+              <Table.Cell>{plan.total_bytes > 0 ? formatBytes(plan.total_bytes) : '不限'}</Table.Cell>
+              <Table.Cell className="text-center">{plan.cycle_type === 'monthly' ? `每月 ${plan.cycle_day} 日` : plan.cycle_type === 'custom' ? '自定义' : '不重置'}</Table.Cell>
+              <Table.Cell><div className="flex flex-wrap gap-1"><Badge variant="info">内部 {plan.node_ids?.filter((id) => internalNodes.some((node) => node.id === id)).length || (plan.include_internal_nodes ? internalNodes.length : 0)}</Badge>{plan.include_external_nodes && <Badge variant="secondary">外部节点不计量</Badge>}</div></Table.Cell>
+              <Table.Cell className="text-center">{plan.subscription_count || 0}</Table.Cell>
+              <Table.Cell className="text-center"><div className="inline-flex justify-center gap-2"><Button size="sm" shape="square" variant="secondary" onClick={() => openEditPlan(plan)} icon={<Edit className="h-3.5 w-3.5" />} aria-label="编辑套餐" /><Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deletePlan(plan)} icon={<Trash className="h-3.5 w-3.5" />} aria-label="删除套餐" /></div></Table.Cell>
+            </Table.Row>)}
+            {plans.length === 0 && <Table.Row><Table.Cell colSpan={6} className="p-8 text-center text-kumo-subtle">暂无套餐。套餐统一定义节点范围、额度和重置规则。</Table.Cell></Table.Row>}
+          </Table.Body>
+        </AppTable>
+      </div>
+    </SectionCard>
+  );
+
   const renderNodes = () => (
+    <div className="grid min-h-0 gap-3 lg:grid-rows-[auto_minmax(0,1fr)]">
+    <SectionCard
+      title={`本机节点 (${internalNodes.length})`}
+      className="min-h-0 max-h-[22rem]"
+      bodyPadding="none"
+      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
+      actions={<Button size="sm" variant="primary" disabled={servers.length === 0} onClick={() => startInternalDeployment()}><Plus className="h-3.5 w-3.5" />部署节点</Button>}
+    >
+      <DataTableFrame variant="embedded" className="min-h-0 flex-1 overflow-auto scrollbar-thin">
+        <AppTable layout="fixed" widths={[92, 248, 104, 280, 172, 144]}>
+          <Table.Header sticky variant="compact"><Table.Row><Table.Head className="text-center">状态</Table.Head><Table.Head>节点名称</Table.Head><Table.Head className="text-center">类型</Table.Head><Table.Head>连接</Table.Head><Table.Head>主机 / 延迟</Table.Head><Table.Head className="text-center">操作</Table.Head></Table.Row></Table.Header>
+          <Table.Body>
+            {internalNodes.map((node) => {
+              const server = servers.find((item) => item.id === node.server_id);
+              const protocol = node.protocol === 'vless-reality' ? 'vless' : node.protocol;
+              const connectionTags = [node.transport, node.protocol === 'vless-reality' ? 'reality' : 'tls', node.runtime].filter(Boolean);
+              return <Table.Row key={node.id} onDoubleClick={() => openEditInternalNode(node)} className="cursor-pointer">
+                <Table.Cell className="text-center"><Switch size="sm" aria-label={node.enabled ? '停用内部节点' : '启用内部节点'} checked={!!node.enabled} onCheckedChange={(checked) => toggleInternalNodeEnabled(node, checked)} /></Table.Cell>
+                <Table.Cell><div className="truncate text-sm font-bold text-kumo-strong">{node.name}</div><div className="mt-1 flex flex-wrap gap-1"><Badge variant="success">自有</Badge><Badge variant="info">Agent 托管</Badge><Badge variant={node.publishable ? 'success' : node.apply_status === 'failed' ? 'destructive' : 'warning'}>{node.publishable ? '可发布' : node.apply_status === 'failed' ? '部署失败' : '同步中'}</Badge></div></Table.Cell>
+                <Table.Cell className="text-center"><Badge variant={nodeTypeBadgeVariant(protocol)} className="uppercase">{node.protocol === 'vless-reality' ? 'VLESS' : 'HYSTERIA2'}</Badge></Table.Cell>
+                <Table.Cell><div className="truncate font-mono text-xs text-kumo-strong">{node.public_host || '-'}:{node.assigned_port || '-'}</div><div className="mt-1 flex min-w-0 flex-wrap gap-1">{connectionTags.map((tag) => <span key={tag} className={`inline-flex rounded-[3px] border px-1.5 py-0.5 font-mono text-[10px] leading-4 ${nodeNetworkTagClass({ key: tag === 'tls' ? 'tls' : 'network', tone: tag })}`}>{tag}</span>)}</div></Table.Cell>
+                <Table.Cell><div className="flex min-w-0 flex-col items-start gap-1"><span className="inline-flex max-w-full rounded-[3px] border border-kumo-info/25 bg-kumo-info/10 px-1.5 py-0.5 text-[10px] font-semibold leading-4 text-kumo-info"><span className="truncate">{server?.name || node.server_name || node.server_id}</span></span><span className={`inline-flex rounded-[3px] border px-1.5 py-0.5 text-[10px] font-semibold leading-4 ${latencyChipClass(0)}`}>{server?.status === 'online' ? '等待节点延迟' : '主机离线'}</span></div></Table.Cell>
+                <Table.Cell className="text-center"><div className="inline-flex items-center justify-center gap-2"><Button size="sm" shape="square" variant="secondary" aria-label={`编辑 ${node.name}`} title={`编辑 ${node.name}`} onClick={() => openEditInternalNode(node)} icon={<Edit className="h-3.5 w-3.5" />} /><Button size="sm" shape="square" variant="secondary" aria-label={`同步 ${node.name}`} title={`同步 ${node.name}`} onClick={() => reconcileInternalNode(node)} icon={<RefreshCw className="h-3.5 w-3.5" />} /><Button size="sm" shape="square" variant="secondary-destructive" aria-label={`卸载 ${node.name}`} title={`卸载 ${node.name}`} onDoubleClick={() => deleteInternalNode(node)} icon={<Trash className="h-3.5 w-3.5" />} /></div></Table.Cell>
+              </Table.Row>;
+            })}
+            {internalNodes.length === 0 && <Table.Row><Table.Cell colSpan={6} className="p-6 text-center text-kumo-subtle">暂无本机节点。请先选择 Linux 主机部署节点。</Table.Cell></Table.Row>}
+          </Table.Body>
+        </AppTable>
+      </DataTableFrame>
+    </SectionCard>
     <SectionCard
       title={`节点列表 (${filteredNodes.length})`}
-      description={visibleNodes.length === filteredNodes.length ? '先导入节点并维护节点库，订阅链接会从这里选择节点源。' : `已从 ${visibleNodes.length} 个节点中过滤。`}
       className="h-full min-h-0"
       headerClassName="flex-wrap items-center gap-y-2 [&>div:last-child]:ml-0 [&>div:last-child]:w-full [&>div:last-child]:justify-start sm:[&>div:last-child]:ml-auto sm:[&>div:last-child]:w-auto sm:[&>div:last-child]:justify-end"
       bodyPadding="none"
@@ -1582,32 +1892,16 @@ function SubscriptionPage() {
               className="w-full sm:w-36"
             />
           )}
-          <Select
-            size="sm"
-            aria-label="节点库"
-            value={nodeSubscriptionId}
-            onValueChange={(value) => setNodeSubscriptionId(String(value))}
-            items={nodeLibraryItems}
-            className="w-full min-w-0 sm:w-56"
-          />
-          <Button size="sm" variant="secondary" onClick={() => selectedNodeLibrary && refreshProfileUpstream(selectedNodeLibrary)} disabled={!selectedNodeLibrary || !selectedNodeLibrary.upstream_url}>
+          <Button size="sm" variant="secondary" onClick={() => selectedNodeLibrary && refreshProfileUpstream(selectedNodeLibrary)} disabled={!selectedNodeLibrary?.upstream_url}>
             <RefreshCw className="h-3.5 w-3.5" />
             拉取来源
           </Button>
-          <Button size="sm" shape="square" variant="primary" onClick={() => openImportModal()} disabled={!selectedNodeLibrary} aria-label="导入节点" title="导入节点" icon={<Download className="h-3.5 w-3.5" />} />
+          <Button size="sm" variant="primary" onClick={() => openImportModal()} disabled={nodeLibraryItems.length === 0} aria-label="导入外部节点" title="导入外部节点"><Download className="h-3.5 w-3.5" />导入外部节点</Button>
         </div>
       )}
     >
       <DataTableFrame variant="embedded" className="min-h-0 flex-1 overflow-auto scrollbar-thin">
-        <AppTable layout="fixed" widths={[92, 248, 104, 300, 172, 116]}>
-          <colgroup>
-            <col style={{ width: '9%' }} />
-            <col style={{ width: '24%' }} />
-            <col style={{ width: '10%' }} />
-            <col style={{ width: '29%' }} />
-            <col style={{ width: '17%' }} />
-            <col style={{ width: '11%' }} />
-          </colgroup>
+        <AppTable layout="fixed" widths={[92, 248, 104, 280, 172, 144]}>
           <Table.Header sticky variant="compact">
             <Table.Row>
               <Table.Head className="text-center">状态</Table.Head>
@@ -1615,7 +1909,7 @@ function SubscriptionPage() {
               <Table.Head className="text-center">类型</Table.Head>
               <Table.Head>连接</Table.Head>
               <Table.Head>主机 / 延迟</Table.Head>
-              <Table.Head className="text-right">操作</Table.Head>
+              <Table.Head className="text-center">操作</Table.Head>
             </Table.Row>
           </Table.Header>
           <Table.Body>
@@ -1636,6 +1930,10 @@ function SubscriptionPage() {
                       <NodeFlag node={node} />
                       {node.stable && <Star className="h-3.5 w-3.5 text-kumo-warning" />}
                       <span className="truncate text-sm font-bold text-kumo-strong">{node.name}</span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      <Badge variant={node.ownership === 'self' ? 'success' : 'secondary'}>{node.ownership === 'self' ? '自有' : '外部'}</Badge>
+                      <Badge variant={node.management === 'agent' ? 'info' : 'secondary'}>{node.management === 'agent' ? 'Agent 托管' : '未托管'}</Badge>
                     </div>
                   </Table.Cell>
                   <Table.Cell className="text-center">
@@ -1662,8 +1960,8 @@ function SubscriptionPage() {
                   <Table.Cell>
                     <NodeHostQuality node={node} serverNameById={serverNameById} />
                   </Table.Cell>
-                  <Table.Cell className="text-right">
-                    <div className="inline-flex gap-2">
+                  <Table.Cell className="text-center">
+                    <div className="inline-flex items-center justify-center gap-2">
                       <Button size="sm" shape="square" variant="secondary" aria-label="编辑节点" title="编辑节点" onClick={() => openEditNode(node)} icon={<Edit className="h-3.5 w-3.5" />} />
                       <Button
                         size="sm"
@@ -1686,6 +1984,56 @@ function SubscriptionPage() {
             {filteredNodes.length === 0 && (
               <Table.Row><Table.Cell colSpan={6} className="p-8 text-center text-kumo-subtle">{visibleNodes.length === 0 ? '暂无节点。' : '没有符合筛选条件的节点。'}</Table.Cell></Table.Row>
             )}
+          </Table.Body>
+        </AppTable>
+      </DataTableFrame>
+    </SectionCard></div>
+  );
+
+  const renderInstanceManagement = () => (
+    <SectionCard
+      title={`Linux 主机 (${servers.length})`}
+      className="min-h-0"
+      bodyPadding="none"
+      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
+      actions={<Button size="sm" variant="primary" disabled={selectedInternalHosts.size === 0} onClick={() => startInternalDeployment()}><Plus className="h-3.5 w-3.5" />批量部署 ({selectedInternalHosts.size})</Button>}
+    >
+      <DataTableFrame variant="embedded" className="max-h-[calc(100dvh-15rem)] min-h-0 overflow-auto scrollbar-thin">
+        <AppTable layout="fixed" widths={[48, 104, 220, 120, 90, 140, 200, 150, 120]} className="text-xs [&_td]:border-kumo-interact/45 [&_th]:border-kumo-interact/50">
+          <Table.Header sticky variant="compact">
+            <Table.Row>
+              <Table.CheckHead checked={servers.length > 0 && selectedInternalHosts.size === servers.length} indeterminate={selectedInternalHosts.size > 0 && selectedInternalHosts.size < servers.length} onCheckedChange={(checked) => setSelectedInternalHosts(checked ? new Set(servers.map((server) => server.id)) : new Set())} />
+              <Table.Head className="text-center">状态</Table.Head>
+              <Table.Head className="text-left">名称</Table.Head>
+              <Table.Head className="text-center">位置</Table.Head>
+              <Table.Head className="text-center">在线</Table.Head>
+              <Table.Head className="text-center">Agent 版本</Table.Head>
+              <Table.Head className="text-center">代理服务</Table.Head>
+              <Table.Head className="text-center">节点类型</Table.Head>
+              <Table.Head className="text-center">操作</Table.Head>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
+            {servers.map((server) => {
+              const managed = internalNodes.filter((node) => node.server_id === server.id);
+              const running = managed.filter((node) => node.publishable && node.apply_status === 'running');
+              const countryCode = getInstanceCountryCode(server);
+              const locationLabel = getInstanceLocationLabel(server);
+              return (
+                <Table.Row key={server.id}>
+                  <Table.CheckCell checked={selectedInternalHosts.has(server.id)} onCheckedChange={(checked) => toggleInternalHost(server.id, checked)} />
+                  <Table.Cell className="text-center"><Badge variant={server.status === 'online' ? 'success' : server.status === 'offline' ? 'destructive' : 'secondary'} appearance="dot">{server.status === 'online' ? '在线' : server.status === 'offline' ? '离线' : '未知'}</Badge></Table.Cell>
+                  <Table.Cell><div className="flex min-w-0 items-center gap-2"><i className={`si si-linux shrink-0 text-base leading-none ${server.status === 'online' ? 'si--color' : 'text-kumo-subtle opacity-60 grayscale'}`} /><span className={`truncate font-bold ${server.status === 'online' ? 'text-kumo-strong' : 'text-kumo-subtle'}`} title={server.name}>{server.name}</span></div></Table.Cell>
+                  <Table.Cell className="text-center"><div className="mx-auto flex w-[64px] items-center justify-center gap-1.5">{countryCode && <CountryFlag preferSvg countryCode={countryCode} className="h-3.5 w-5 shrink-0 !rounded-[2px] text-sm" />}<span className="truncate font-semibold uppercase text-kumo-strong" title={server.location || locationLabel}>{locationLabel}</span></div></Table.Cell>
+                  <Table.Cell className="text-center"><span className="font-semibold tabular-nums text-kumo-strong">{formatInstanceUptime(server.uptime)}</span></Table.Cell>
+                  <Table.Cell className="text-center"><span className="font-mono text-xs">{server.agent_version && server.agent_version !== '<nil>' ? server.agent_version : '未报告'}</span></Table.Cell>
+                  <Table.Cell className="text-center">{managed.length > 0 ? <Badge variant={running.length > 0 ? 'success' : 'warning'}>sing-box 1.13.14</Badge> : <Badge variant="secondary">未部署</Badge>}</Table.Cell>
+                  <Table.Cell className="text-center"><div className="flex flex-wrap justify-center gap-1">{managed.map((node) => <Badge key={node.id} variant={node.protocol === 'hysteria2' ? 'orange' : 'blue'}>{node.protocol === 'hysteria2' ? 'HY2' : 'VLESS'}</Badge>)}{managed.length === 0 && <span className="text-xs text-kumo-subtle">—</span>}</div></Table.Cell>
+                  <Table.Cell className="text-center"><div className="inline-flex items-center justify-center gap-2">{managed.length === 0 ? <Button size="sm" variant="secondary" onClick={() => startInternalDeployment(server.id)} disabled={server.status !== 'online'}>部署节点</Button> : <><Button size="sm" variant="secondary" onClick={() => reconcileInternalNodes(managed)} disabled={server.status !== 'online' || saving}>重新部署</Button><Button size="sm" variant="secondary-destructive" onClick={() => uninstallInternalNodes(server, managed)} disabled={saving}>卸载</Button></>}</div></Table.Cell>
+                </Table.Row>
+              );
+            })}
+            {servers.length === 0 && <Table.Row><Table.Cell colSpan={9} className="p-6 text-center text-kumo-subtle">没有可管理的 Linux 主机。请先在主机实例中部署 Agent。</Table.Cell></Table.Row>}
           </Table.Body>
         </AppTable>
       </DataTableFrame>
@@ -1733,7 +2081,7 @@ function SubscriptionPage() {
               <Table.Head>类型</Table.Head>
               <Table.Head>连接</Table.Head>
               <Table.Head>主机 / 延迟</Table.Head>
-              <Table.Head>状态 / 操作</Table.Head>
+              <Table.Head className="text-center">状态 / 操作</Table.Head>
             </Table.Row>
           </Table.Header>
           <Table.Body>
@@ -1763,7 +2111,6 @@ function SubscriptionPage() {
     <div className="grid gap-3">
       <SectionCard
         title="模板转换"
-        description="为对外订阅指定输出模板；Mihomo/Clash、Raw URI、Base64 订阅都从这里选择。"
         actions={<Button size="sm" variant="primary" onClick={saveTemplateBinding} loading={saving} disabled={!selectedTemplateSubscription}><Save className="h-3.5 w-3.5" />保存转换</Button>}
       >
         <div className="grid gap-4 sm:grid-cols-2">
@@ -1870,10 +2217,10 @@ function SubscriptionPage() {
           value={activeTab}
           onValueChange={(value) => setActiveTab(String(value))}
           tabs={[
-            { value: 'profiles', label: '节点库' },
-            { value: 'nodes', label: '节点' },
+            { value: 'instances', label: '实例管理' },
+            { value: 'nodes', label: '节点管理' },
+            { value: 'plans', label: '套餐管理' },
             { value: 'subscriptions', label: '订阅管理' },
-            { value: 'templates', label: '模板' },
           ]}
         />
       </PageToolbar>
@@ -1881,13 +2228,54 @@ function SubscriptionPage() {
       <div className="min-w-0">
         {loading && nodeLibraries.length === 0 ? renderNodesSkeleton() : (
           <div className="min-w-0">
-            {activeTab === 'profiles' && renderProfiles()}
             {activeTab === 'nodes' && renderNodes()}
+            {activeTab === 'instances' && renderInstanceManagement()}
+            {activeTab === 'plans' && renderPlans()}
             {activeTab === 'subscriptions' && renderSubscriptions()}
-            {activeTab === 'templates' && renderTemplates()}
           </div>
         )}
       </div>
+
+      <Dialog.Root open={planModalOpen} onOpenChange={setPlanModalOpen}>
+        <Dialog size="lg" className="flex max-h-[min(calc(100dvh-2rem),48rem)] w-[calc(100vw-1rem)] max-w-[min(76rem,calc(100vw-2rem))] flex-col overflow-hidden p-0">
+          <div className="border-b border-kumo-line px-5 py-4"><Dialog.Title>{editingPlanId ? '编辑套餐' : '新建套餐'}</Dialog.Title><Dialog.Description>统一定义订阅额度、重置规则和可使用节点。</Dialog.Description></div>
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5 scrollbar-thin">
+            <div className="grid gap-3 sm:grid-cols-2"><Input size="sm" label="套餐名称" value={planForm.name} onChange={(e) => setPlanForm((prev) => ({ ...prev, name: e.target.value }))} /><Input size="sm" label="备注" value={planForm.remark} onChange={(e) => setPlanForm((prev) => ({ ...prev, remark: e.target.value }))} /></div>
+            <div className="grid items-end gap-3 md:grid-cols-[minmax(16rem,1.2fr)_minmax(12rem,.8fr)_minmax(10rem,.7fr)]"><TrafficSizeInput label="订阅总额度（0 为不限）" value={planForm.total_bytes} onChange={(value) => setPlanForm((prev) => ({ ...prev, total_bytes: value }))} /><Select size="sm" label="重置周期" value={planForm.cycle_type} onValueChange={(value) => setPlanForm((prev) => ({ ...prev, cycle_type: String(value) }))} items={[{ value: 'monthly', label: '每月重置' }, { value: 'none', label: '不重置' }]} /><Input size="sm" label="每月重置日" type="number" min="1" max="31" value={planForm.cycle_day} disabled={planForm.cycle_type !== 'monthly'} onChange={(e) => setPlanForm((prev) => ({ ...prev, cycle_day: Number(e.target.value) || 1 }))} /></div>
+            <div className="grid items-end gap-3 md:grid-cols-[minmax(18rem,1fr)_auto]"><Input size="sm" label="订阅请求限制（次/分钟）" type="number" min="1" value={planForm.rate_limit_per_minute} onChange={(e) => setPlanForm((prev) => ({ ...prev, rate_limit_per_minute: Number(e.target.value) || 30 }))} /><div className="flex min-h-8 flex-wrap items-center gap-x-6 gap-y-2"><Switch size="sm" label="启用套餐" checked={planForm.enabled} onCheckedChange={(checked) => setPlanForm((prev) => ({ ...prev, enabled: checked }))} /><Switch size="sm" label="启用请求限制" checked={planForm.rate_limit_enabled} onCheckedChange={(checked) => setPlanForm((prev) => ({ ...prev, rate_limit_enabled: checked }))} /></div></div>
+            <div className="border-t border-kumo-line pt-4">
+              <div className="mb-2 flex flex-wrap items-end justify-between gap-2"><div className="flex flex-wrap items-end gap-2"><div><Label className="text-xs font-semibold text-kumo-subtle">套餐节点</Label><div className="mt-1 text-[11px] text-kumo-subtle">类型与来源筛选同时生效</div></div><Select size="sm" aria-label="节点类型筛选" value={planNodeTypeFilter} onValueChange={(value) => setPlanNodeTypeFilter(String(value))} items={planNodeTypeItems} className="w-36" /><Select size="sm" aria-label="节点来源筛选" value={planNodeSourceFilter} onValueChange={(value) => setPlanNodeSourceFilter(String(value))} items={[{ value: 'all', label: '全部来源' }, { value: 'internal', label: 'Agent 节点' }, { value: 'external', label: '外部节点' }]} className="w-36" /></div><div className="flex items-center gap-2"><Badge variant="secondary">已选 {planForm.node_ids.length}</Badge><Button size="sm" variant="secondary" disabled={visiblePlanNodeIDs.length === 0} onClick={() => setPlanForm((prev) => ({ ...prev, node_ids: allVisiblePlanNodesSelected ? prev.node_ids.filter((id) => !visiblePlanNodeIDs.includes(id)) : [...new Set([...prev.node_ids, ...visiblePlanNodeIDs])], include_internal_nodes: !allVisiblePlanNodesSelected && visiblePlanNodes.some((node) => node.source_group === 'internal') ? true : prev.include_internal_nodes, include_external_nodes: !allVisiblePlanNodesSelected && visiblePlanNodes.some((node) => node.source_group === 'external') ? true : prev.include_external_nodes }))}>{allVisiblePlanNodesSelected ? '取消当前全部' : '全选当前结果'}</Button></div></div>
+              <div className="max-h-72 overflow-auto rounded-md border border-kumo-line p-2 scrollbar-thin"><div className="grid gap-1 sm:grid-cols-2 lg:grid-cols-3">{visiblePlanNodes.map((node) => <label key={`${node.source_group}-${node.id}`} className="flex min-w-0 items-center gap-2 rounded px-2 py-1.5 hover:bg-kumo-recessed"><Checkbox checked={planForm.node_ids.includes(node.id)} onCheckedChange={(checked) => setPlanForm((prev) => ({ ...prev, node_ids: checked ? [...new Set([...prev.node_ids, node.id])] : prev.node_ids.filter((id) => id !== node.id), include_internal_nodes: checked && node.source_group === 'internal' ? true : prev.include_internal_nodes, include_external_nodes: checked && node.source_group === 'external' ? true : prev.include_external_nodes }))} /><span className="min-w-0 flex-1 truncate text-xs font-semibold">{node.name}</span><Badge variant={node.source_group === 'internal' ? 'info' : 'secondary'}>{node.source_group === 'internal' ? 'Agent' : '外部'}</Badge><Badge variant={nodeTypeBadgeVariant(node.display_type)}>{node.display_type || '-'}</Badge></label>)}{visiblePlanNodes.length === 0 && <div className="p-5 text-center text-xs text-kumo-subtle sm:col-span-2 lg:col-span-3">没有符合类型与来源条件的节点</div>}</div></div><div className="mt-2 text-[11px] text-kumo-subtle">内部节点纳入 Agent 计量；外部节点仅参与分发，不统计流量或执行额度限制。</div>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 border-t border-kumo-line bg-kumo-recessed/25 px-5 py-3"><Dialog.Close render={(props) => <Button size="sm" variant="secondary" {...props}>取消</Button>} /><Button size="sm" variant="primary" loading={saving} onClick={savePlan}><Save className="h-3.5 w-3.5" />保存套餐</Button></div>
+        </Dialog>
+      </Dialog.Root>
+
+      <Dialog.Root open={internalNodeModalOpen} onOpenChange={setInternalNodeModalOpen}>
+        <Dialog size="lg" className="w-[calc(100vw-1rem)] max-w-3xl p-0">
+          <div className="border-b border-kumo-line px-5 py-4"><Dialog.Title>{editingInternalNodeId ? '编辑内部节点' : '部署内部节点'}</Dialog.Title><Dialog.Description>{editingInternalNodeId ? '节点名称可以独立修改，实例、协议和连接参数仍由 Agent 自动管理。' : '面板通过已安装的主机 Agent 自动安装 sing-box、分配端口并发布订阅连接。'}</Dialog.Description></div>
+          <div className="grid gap-3 p-5 sm:grid-cols-2">
+            {!editingInternalNodeId && <div className="sm:col-span-2">
+              <div className="flex items-center justify-between gap-2"><Label className="text-xs font-semibold text-kumo-subtle">目标实例</Label><Badge variant="secondary">已选 {selectedInternalHosts.size} / {servers.length}</Badge></div>
+              <div className="mt-1.5 max-h-44 overflow-auto rounded-md border border-kumo-line bg-kumo-recessed/20 p-1.5 scrollbar-thin">
+                <div className="grid gap-1 sm:grid-cols-2">
+                  {servers.map((server) => {
+                    const checked = selectedInternalHosts.has(server.id);
+                    return <label key={server.id} className="flex min-w-0 items-center gap-2 rounded px-2 py-1.5 hover:bg-kumo-base/60"><Checkbox checked={checked} disabled={server.status !== 'online'} onCheckedChange={(value) => { const next = new Set(selectedInternalHosts); if (value) next.add(server.id); else next.delete(server.id); setSelectedInternalHosts(next); const first = [...next][0] || ''; setInternalNodeForm((prev) => ({ ...prev, server_id: first, public_host: servers.find((item) => item.id === first)?.host || '' })); }} aria-label={`选择 ${server.name}`} /><span className="min-w-0 flex-1 truncate text-xs font-semibold text-kumo-strong">{server.name}</span><Badge variant={server.status === 'online' ? 'success' : 'secondary'} appearance="dot">{server.status === 'online' ? '在线' : '离线'}</Badge></label>;
+                  })}
+                  {servers.length === 0 && <div className="p-3 text-center text-xs text-kumo-subtle sm:col-span-2">暂无 Linux 实例</div>}
+                </div>
+              </div>
+            </div>}
+            <Select size="sm" label="节点协议" disabled={!!editingInternalNodeId} value={internalNodeForm.protocol} onValueChange={(value) => setInternalNodeForm((prev) => ({ ...prev, protocol: String(value) }))} items={[{ value: 'vless-reality', label: 'VLESS REALITY' }, { value: 'hysteria2', label: 'Hysteria2' }]} />
+            <Input size="sm" label={editingInternalNodeId ? '节点名称' : selectedInternalHosts.size > 1 ? '节点名称前缀（可选）' : '节点名称（可选）'} placeholder="留空则自动添加国家图标并按实例名称生成" value={internalNodeForm.name} onChange={(event) => setInternalNodeForm((prev) => ({ ...prev, name: event.target.value }))} />
+            {!editingInternalNodeId && internalNodeForm.protocol === 'vless-reality' && <Input size="sm" label="REALITY 握手站点（可选）" placeholder="默认 www.cloudflare.com" value={internalNodeForm.server_name} onChange={(event) => setInternalNodeForm((prev) => ({ ...prev, server_name: event.target.value }))} />}
+            {!editingInternalNodeId && internalNodeForm.protocol === 'hysteria2' && <div className="flex min-h-8 items-center rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 text-xs text-kumo-subtle">TLS 证书、私钥、SNI 和端口将自动生成并配置。</div>}
+          </div>
+          <div className="flex justify-end gap-2 border-t border-kumo-line px-5 py-4"><Button size="sm" variant="secondary" onClick={() => setInternalNodeModalOpen(false)}>取消</Button><Button size="sm" variant="primary" loading={saving} onClick={editingInternalNodeId ? saveInternalNode : createInternalNode}>{editingInternalNodeId ? '保存' : '部署节点'}</Button></div>
+        </Dialog>
+      </Dialog.Root>
 
       <Dialog.Root open={profileModalOpen} onOpenChange={setProfileModalOpen}>
         <Dialog size="lg" className="flex max-h-[min(calc(100dvh-2rem),42rem)] w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] flex-col overflow-hidden p-0 sm:w-[min(calc(100vw-3rem),64rem)]">
@@ -1966,9 +2354,7 @@ function SubscriptionPage() {
                 <Dialog.Title className="min-w-0 truncate text-base font-semibold text-kumo-strong">
                   {editingSubscriptionId ? '编辑对外订阅' : '创建对外订阅'}
                 </Dialog.Title>
-                <Dialog.Description className="mt-0.5 truncate text-xs text-kumo-subtle">
-                  选择节点库作为来源，并设置对外订阅的流量额度和周期限制。
-                </Dialog.Description>
+                <Dialog.Description className="mt-0.5 truncate text-xs text-kumo-subtle">配置订阅包含的节点、额度与访问策略。</Dialog.Description>
               </div>
               <Dialog.Close
                 aria-label="关闭"
@@ -1995,81 +2381,7 @@ function SubscriptionPage() {
                     <div className="min-w-0">
                       <Input size="sm" label="名称" value={subscriptionForm.name} onChange={(e) => setSubscriptionForm((prev) => ({ ...prev, name: e.target.value }))} className="w-full min-w-0" />
                     </div>
-                    <div className="min-w-0">
-                      <Select size="sm" label="节点来源" value={subscriptionForm.profile_id || selectedNodeLibrary?.id || ''} onValueChange={(value) => setSubscriptionForm((prev) => ({ ...prev, profile_id: String(value), node_filter_ids: [] }))} items={profileItems} className="w-full min-w-0" />
-                    </div>
-                  </div>
-                </section>
-
-                <section className="space-y-3 border-t border-kumo-line pt-4">
-                  <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-                    <div className="text-[11px] font-bold uppercase tracking-wide text-kumo-subtle">使用节点</div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant="secondary">{subscriptionSelectedNodeIDs.size || subscriptionSourceNodes.length} / {subscriptionSourceNodes.length}</Badge>
-                      <Button size="sm" variant="secondary" onClick={selectAllSubscriptionNodes} disabled={subscriptionSourceNodes.length === 0}>全选</Button>
-                      <Button size="sm" variant="secondary" onClick={clearSubscriptionNodes} disabled={subscriptionSelectedNodeIDs.size === 0}>全部节点</Button>
-                    </div>
-                  </div>
-                  <div className="max-h-56 overflow-auto rounded-md border border-kumo-line bg-kumo-recessed/20 p-2 scrollbar-thin">
-                    <div className="grid min-w-0 gap-1 sm:grid-cols-2 lg:grid-cols-3">
-                      {subscriptionSourceNodes.map((node) => {
-                        const useAll = subscriptionSelectedNodeIDs.size === 0;
-                        const checked = useAll || subscriptionSelectedNodeIDs.has(node.id);
-                        return (
-                          <label key={node.id} className="flex min-w-0 items-center gap-2 rounded border border-transparent px-2 py-1.5 hover:border-kumo-line hover:bg-kumo-base/60">
-                            <Checkbox
-                              checked={checked}
-                              onCheckedChange={(value) => setSubscriptionNodeFilter(node.id, !!value)}
-                              aria-label={`选择 ${node.name}`}
-                            />
-                            <span className="min-w-0 flex-1 truncate text-xs font-semibold text-kumo-strong">{node.name}</span>
-                            <Badge variant={nodeTypeBadgeVariant(node.type)} className="uppercase">{node.type || '-'}</Badge>
-                          </label>
-                        );
-                      })}
-                      {subscriptionSourceNodes.length === 0 && (
-                        <div className="px-2 py-4 text-center text-xs text-kumo-subtle sm:col-span-2 lg:col-span-3">暂无节点</div>
-                      )}
-                    </div>
-                  </div>
-                </section>
-
-                <section className="space-y-3 border-t border-kumo-line pt-4">
-                  <div className="text-[11px] font-bold uppercase tracking-wide text-kumo-subtle">流量额度</div>
-                  <div className="grid min-w-0 items-end gap-3 lg:grid-cols-[minmax(15rem,0.9fr)_minmax(0,3fr)]">
-                    <div className="min-w-0">
-                      <Select
-                        size="sm"
-                        label="流量来源"
-                        value={subscriptionForm.traffic_source || 'manual'}
-                        onValueChange={(value) => setSubscriptionForm((prev) => ({
-                          ...prev,
-                          traffic_source: String(value),
-                          traffic_server_id: String(value) === 'server' ? prev.traffic_server_id : '',
-                        }))}
-                        items={[
-                          { value: 'manual', label: '手动记录' },
-                          { value: 'node_servers', label: '节点绑定主机' },
-                          { value: 'server', label: '指定主机' },
-                          { value: 'upstream', label: '上游订阅' },
-                        ]}
-                        className="w-full min-w-0"
-                      />
-                    </div>
-                    <div className="grid min-w-0 items-end gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(13.5rem,100%),1fr))]">
-                    {subscriptionForm.traffic_source === 'server' && (
-                      <Select size="sm" label="统计主机" value={subscriptionForm.traffic_server_id || ''} onValueChange={(value) => setSubscriptionForm((prev) => ({ ...prev, traffic_server_id: String(value) }))} items={serverItems} className="w-full min-w-0" />
-                    )}
-                    {subscriptionForm.traffic_source !== 'upstream' && (
-                      <TrafficSizeInput label="总流量" value={subscriptionForm.total_bytes || 0} onChange={(bytes) => setSubscriptionForm((prev) => ({ ...prev, total_bytes: bytes }))} />
-                    )}
-                    {(subscriptionForm.traffic_source || 'manual') === 'manual' && (
-                      <>
-                        <TrafficSizeInput label="手动上传" value={subscriptionForm.manual_upload_bytes || 0} onChange={(bytes) => setSubscriptionForm((prev) => ({ ...prev, manual_upload_bytes: bytes }))} />
-                        <TrafficSizeInput label="手动下载" value={subscriptionForm.manual_download_bytes || 0} onChange={(bytes) => setSubscriptionForm((prev) => ({ ...prev, manual_download_bytes: bytes }))} />
-                      </>
-                    )}
-                    </div>
+                    <div className="min-w-0"><Select size="sm" label="套餐" value={subscriptionForm.plan_id || ''} onValueChange={(value) => setSubscriptionForm((prev) => ({ ...prev, plan_id: String(value) }))} items={planItems} className="w-full min-w-0" /></div>
                   </div>
                 </section>
 
@@ -2079,22 +2391,13 @@ function SubscriptionPage() {
                     <div className="min-w-0">
                       <Input size="sm" label="过期日期" type="date" value={subscriptionForm.expire_at || ''} onChange={(e) => setSubscriptionForm((prev) => ({ ...prev, expire_at: e.target.value }))} className="w-full min-w-0" />
                     </div>
-                    <div className="min-w-0">
-                      <Select size="sm" label="周期" value={subscriptionForm.cycle_type || 'none'} onValueChange={(value) => setSubscriptionForm((prev) => ({ ...prev, cycle_type: String(value) }))} items={[{ value: 'none', label: '不重置' }, { value: 'monthly', label: '每月重置' }, { value: 'custom', label: '自定义周期' }]} className="w-full min-w-0" />
-                    </div>
-                    <div className="min-w-0">
-                      <Input size="sm" label="每月重置日" type="number" min="1" max="31" value={subscriptionForm.cycle_day || 1} onChange={(e) => setSubscriptionForm((prev) => ({ ...prev, cycle_day: Number(e.target.value) || 1 }))} className="w-full min-w-0" />
-                    </div>
-                    <div className="min-w-0">
-                      <Input size="sm" label="限流（次/分钟）" type="number" value={subscriptionForm.rate_limit_per_minute || 30} onChange={(e) => setSubscriptionForm((prev) => ({ ...prev, rate_limit_per_minute: Number(e.target.value) || 30 }))} className="w-full min-w-0" />
-                    </div>
+                    <div className="flex items-end text-xs text-kumo-subtle">额度、节点范围、重置周期及请求限制均由套餐统一管理。</div>
                   </div>
                 </section>
 
                 <section className="space-y-3 border-t border-kumo-line pt-4">
                   <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
                     <Switch size="sm" label="启用链接" controlFirst={false} checked={!!subscriptionForm.enabled} onCheckedChange={(checked) => setSubscriptionForm((prev) => ({ ...prev, enabled: checked }))} />
-                    <Switch size="sm" label="启用限流" controlFirst={false} checked={!!subscriptionForm.rate_limit_enabled} onCheckedChange={(checked) => setSubscriptionForm((prev) => ({ ...prev, rate_limit_enabled: checked }))} />
                   </div>
                 </section>
               </div>
@@ -2151,9 +2454,9 @@ function SubscriptionPage() {
                 </section>
 
                 <section className="min-w-0 space-y-3 border-t border-kumo-line pt-4">
-                  <div className="text-[11px] font-bold uppercase tracking-wide text-kumo-subtle">管理属性</div>
+                  <div className="text-[11px] font-bold uppercase tracking-wide text-kumo-subtle">外部节点属性</div>
                   <div className="grid min-w-0 items-end gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(14rem,100%),1fr))]">
-                    <Select size="sm" label="绑定主机" value={nodeForm.traffic_server_id || ''} onValueChange={(value) => setNodeForm((prev) => ({ ...prev, traffic_server_id: String(value) }))} items={serverItems} className="w-full min-w-0" />
+                    <div className="rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 py-2 text-xs text-kumo-subtle">外部导入 · 未托管 · 不参与可信流量统计</div>
                     <Input size="sm" label="排序" type="number" value={nodeForm.sort_order || 0} onChange={(e) => setNodeForm((prev) => ({ ...prev, sort_order: Number(e.target.value) || 0 }))} className="w-full min-w-0" />
                     <div className="grid min-h-8 min-w-0 gap-3 rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 py-2 sm:grid-cols-2">
                       <Switch size="sm" label="启用节点" controlFirst={false} checked={!!nodeForm.enabled} onCheckedChange={(checked) => setNodeForm((prev) => ({ ...prev, enabled: checked }))} />
@@ -2210,7 +2513,7 @@ function SubscriptionPage() {
             <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-5 py-4 scrollbar-thin">
               <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,0.6fr)] lg:items-stretch">
                 <div className="space-y-3">
-                  <Select size="sm" label="导入到节点库" value={importSubscriptionId} onValueChange={(value) => setImportSubscriptionId(String(value))} items={nodeLibraryItems} />
+                  <div className="rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 py-2 text-xs text-kumo-subtle">外部节点导入后直接进入节点管理，不统计流量或应用额度限制。</div>
                   <Input size="sm" label="原始订阅 URL" placeholder="https://example.com/sub.yaml" value={importSourceURL} onChange={(e) => setImportSourceURL(e.target.value)} />
                   <InputArea label="节点链接 / YAML / Base64 内容" className="min-h-56 w-full font-mono text-xs lg:min-h-72" placeholder="可粘贴 vmess/vless/trojan/ss/hysteria2 链接、Base64 订阅内容，或 Clash/Mihomo YAML 的 proxies 内容。" value={importText} onChange={(e) => setImportText(e.target.value)} />
                 </div>

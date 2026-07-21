@@ -55,6 +55,7 @@ type Service struct {
 type Subscription struct {
 	ID                    string           `json:"id"`
 	ProfileID             string           `json:"profile_id"`
+	PlanID                string           `json:"plan_id"`
 	Name                  string           `json:"name"`
 	Remark                string           `json:"remark"`
 	Enabled               bool             `json:"enabled"`
@@ -81,6 +82,8 @@ type Subscription struct {
 	RateLimitEnabled      bool             `json:"rate_limit_enabled"`
 	RateLimitPerMinute    int              `json:"rate_limit_per_minute"`
 	NodeFilterIDs         []string         `json:"node_filter_ids,omitempty"`
+	IncludeInternalNodes  bool             `json:"include_internal_nodes"`
+	IncludeExternalNodes  bool             `json:"include_external_nodes"`
 	CreatedAt             string           `json:"created_at"`
 	UpdatedAt             string           `json:"updated_at"`
 	NodeCount             int              `json:"node_count"`
@@ -127,26 +130,29 @@ type NodeLibrary struct {
 }
 
 type Node struct {
-	ID              string           `json:"id"`
-	SubscriptionID  string           `json:"subscription_id"`
-	ProfileID       string           `json:"profile_id"`
-	Name            string           `json:"name"`
-	Type            string           `json:"type"`
-	Server          string           `json:"server"`
-	Port            int              `json:"port"`
-	CountryCode     string           `json:"country_code,omitempty"`
-	Location        string           `json:"location,omitempty"`
-	Tags            string           `json:"tags,omitempty"`
-	TrafficServerID string           `json:"traffic_server_id,omitempty"`
-	Enabled         bool             `json:"enabled"`
-	Stable          bool             `json:"stable"`
-	SortOrder       int              `json:"sort_order"`
-	Raw             string           `json:"raw,omitempty"`
-	ConfigJSON      string           `json:"config_json,omitempty"`
-	Source          string           `json:"source,omitempty"`
-	CreatedAt       string           `json:"created_at"`
-	UpdatedAt       string           `json:"updated_at"`
-	Quality         []QualitySummary `json:"quality,omitempty"`
+	ID               string           `json:"id"`
+	SubscriptionID   string           `json:"subscription_id"`
+	ProfileID        string           `json:"profile_id"`
+	Name             string           `json:"name"`
+	Type             string           `json:"type"`
+	Server           string           `json:"server"`
+	Port             int              `json:"port"`
+	CountryCode      string           `json:"country_code,omitempty"`
+	Location         string           `json:"location,omitempty"`
+	Tags             string           `json:"tags,omitempty"`
+	TrafficServerID  string           `json:"traffic_server_id,omitempty"`
+	Ownership        string           `json:"ownership"`
+	Management       string           `json:"management"`
+	TrafficReporting string           `json:"traffic_reporting"`
+	Enabled          bool             `json:"enabled"`
+	Stable           bool             `json:"stable"`
+	SortOrder        int              `json:"sort_order"`
+	Raw              string           `json:"raw,omitempty"`
+	ConfigJSON       string           `json:"config_json,omitempty"`
+	Source           string           `json:"source,omitempty"`
+	CreatedAt        string           `json:"created_at"`
+	UpdatedAt        string           `json:"updated_at"`
+	Quality          []QualitySummary `json:"quality,omitempty"`
 }
 
 type Template struct {
@@ -162,13 +168,14 @@ type Template struct {
 }
 
 type TrafficInfo struct {
-	Upload   int64   `json:"upload"`
-	Download int64   `json:"download"`
-	Total    int64   `json:"total"`
-	Expire   int64   `json:"expire"`
-	Percent  float64 `json:"percent"`
-	Source   string  `json:"source"`
-	Status   string  `json:"status"`
+	Upload         int64   `json:"upload"`
+	Download       int64   `json:"download"`
+	Total          int64   `json:"total"`
+	Expire         int64   `json:"expire"`
+	Percent        float64 `json:"percent"`
+	Source         string  `json:"source"`
+	Status         string  `json:"status"`
+	MeteringStatus string  `json:"metering_status"`
 }
 
 type QualitySummary struct {
@@ -186,6 +193,24 @@ type Settings struct {
 	DefaultRateLimitPerMin  int    `json:"default_rate_limit_per_minute"`
 	DefaultRefreshHours     int    `json:"default_refresh_hours"`
 	GeoIPEnabled            bool   `json:"geoip_enabled"`
+}
+
+type Plan struct {
+	ID                   string   `json:"id"`
+	Name                 string   `json:"name"`
+	Remark               string   `json:"remark"`
+	Enabled              bool     `json:"enabled"`
+	TotalBytes           int64    `json:"total_bytes"`
+	CycleType            string   `json:"cycle_type"`
+	CycleDay             int      `json:"cycle_day"`
+	RateLimitEnabled     bool     `json:"rate_limit_enabled"`
+	RateLimitPerMinute   int      `json:"rate_limit_per_minute"`
+	NodeIDs              []string `json:"node_ids"`
+	IncludeInternalNodes bool     `json:"include_internal_nodes"`
+	IncludeExternalNodes bool     `json:"include_external_nodes"`
+	SubscriptionCount    int      `json:"subscription_count"`
+	CreatedAt            string   `json:"created_at"`
+	UpdatedAt            string   `json:"updated_at"`
 }
 
 func New(cfg config.Config) *Service {
@@ -307,6 +332,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		default:
 			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
+	case len(parts) == 1 && parts[0] == "plans":
+		s.handlePlans(w, r, db, "")
+	case len(parts) == 2 && parts[0] == "plans":
+		s.handlePlans(w, r, db, parts[1])
 	case len(parts) == 2 && parts[0] == "profiles":
 		switch r.Method {
 		case http.MethodGet:
@@ -506,6 +535,9 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			template_id TEXT DEFAULT 'builtin_mihomo_default',
 			traffic_source TEXT DEFAULT 'manual',
 			traffic_server_id TEXT,
+			ownership TEXT DEFAULT 'external',
+			management TEXT DEFAULT 'unmanaged',
+			traffic_reporting TEXT DEFAULT 'unavailable',
 			total_bytes INTEGER DEFAULT 0,
 			manual_upload_bytes INTEGER DEFAULT 0,
 			manual_download_bytes INTEGER DEFAULT 0,
@@ -569,6 +601,22 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			created_at TEXT DEFAULT (datetime('now')),
 			updated_at TEXT DEFAULT (datetime('now'))
 		)`,
+		`CREATE TABLE IF NOT EXISTS subscription_plans (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			remark TEXT DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			total_bytes INTEGER NOT NULL DEFAULT 0,
+			cycle_type TEXT NOT NULL DEFAULT 'monthly',
+			cycle_day INTEGER NOT NULL DEFAULT 1,
+			rate_limit_enabled INTEGER NOT NULL DEFAULT 1,
+			rate_limit_per_minute INTEGER NOT NULL DEFAULT 30,
+			node_ids TEXT NOT NULL DEFAULT '',
+			include_internal_nodes INTEGER NOT NULL DEFAULT 1,
+			include_external_nodes INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT DEFAULT (datetime('now')),
+			updated_at TEXT DEFAULT (datetime('now'))
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_subscription_subscriptions_token ON subscription_subscriptions(public_token)`,
 		`CREATE INDEX IF NOT EXISTS idx_subscription_upstreams_profile ON subscription_upstreams(profile_id)`,
 		`CREATE TABLE IF NOT EXISTS subscription_nodes (
@@ -610,6 +658,16 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			expire_at INTEGER DEFAULT 0,
 			created_at TEXT DEFAULT (datetime('now'))
 		)`,
+		`CREATE TABLE IF NOT EXISTS managed_proxy_nodes (
+			id TEXT PRIMARY KEY, server_id TEXT NOT NULL, name TEXT NOT NULL,
+			protocol TEXT NOT NULL, runtime TEXT NOT NULL DEFAULT 'sing-box',
+			public_host TEXT NOT NULL, assigned_port INTEGER NOT NULL DEFAULT 0,
+			transport TEXT NOT NULL, config_encrypted TEXT NOT NULL,
+			client_uri_encrypted TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
+			enabled INTEGER NOT NULL DEFAULT 1, publishable INTEGER NOT NULL DEFAULT 0,
+			apply_status TEXT NOT NULL DEFAULT 'pending', last_error TEXT NOT NULL DEFAULT '',
+			created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_subscription_access_logs_subscription ON subscription_access_logs(subscription_id, created_at)`,
 	}
 	for _, statement := range statements {
@@ -620,13 +678,31 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 	if err := ensureColumn(ctx, db, "subscription_subscriptions", "profile_id", "ALTER TABLE subscription_subscriptions ADD COLUMN profile_id TEXT"); err != nil {
 		return err
 	}
+	if err := ensureColumn(ctx, db, "subscription_subscriptions", "plan_id", "ALTER TABLE subscription_subscriptions ADD COLUMN plan_id TEXT DEFAULT ''"); err != nil {
+		return err
+	}
 	if err := ensureColumn(ctx, db, "subscription_nodes", "profile_id", "ALTER TABLE subscription_nodes ADD COLUMN profile_id TEXT"); err != nil {
 		return err
 	}
 	if err := ensureColumn(ctx, db, "subscription_nodes", "traffic_server_id", "ALTER TABLE subscription_nodes ADD COLUMN traffic_server_id TEXT"); err != nil {
 		return err
 	}
+	for _, column := range []struct{ name, sql string }{
+		{"ownership", "ALTER TABLE subscription_nodes ADD COLUMN ownership TEXT DEFAULT 'external'"},
+		{"management", "ALTER TABLE subscription_nodes ADD COLUMN management TEXT DEFAULT 'unmanaged'"},
+		{"traffic_reporting", "ALTER TABLE subscription_nodes ADD COLUMN traffic_reporting TEXT DEFAULT 'unavailable'"},
+	} {
+		if err := ensureColumn(ctx, db, "subscription_nodes", column.name, column.sql); err != nil {
+			return err
+		}
+	}
 	if err := ensureColumn(ctx, db, "subscription_subscriptions", "node_filter_ids", "ALTER TABLE subscription_subscriptions ADD COLUMN node_filter_ids TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "subscription_subscriptions", "include_external_nodes", "ALTER TABLE subscription_subscriptions ADD COLUMN include_external_nodes INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "subscription_subscriptions", "include_internal_nodes", "ALTER TABLE subscription_subscriptions ADD COLUMN include_internal_nodes INTEGER DEFAULT 1"); err != nil {
 		return err
 	}
 	if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_subscription_subscriptions_profile ON subscription_subscriptions(profile_id)`); err != nil {
@@ -690,6 +766,134 @@ func ensureColumn(ctx context.Context, db *sql.DB, tableName, columnName, alterS
 		return fmt.Errorf("add %s.%s: %w", tableName, columnName, err)
 	}
 	return nil
+}
+
+func (s *Service) handlePlans(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {
+	switch r.Method {
+	case http.MethodGet:
+		if id != "" {
+			plans, err := loadPlans(r.Context(), db, id)
+			if err != nil || len(plans) == 0 {
+				response.Error(w, http.StatusNotFound, "套餐不存在")
+				return
+			}
+			response.OK(w, plans[0])
+			return
+		}
+		plans, err := loadPlans(r.Context(), db, "")
+		if err != nil {
+			response.Error(w, 500, err.Error())
+			return
+		}
+		response.OK(w, plans)
+	case http.MethodPost, http.MethodPut:
+		var input Plan
+		if !decodeJSON(w, r, &input) {
+			return
+		}
+		input.Name = strings.TrimSpace(input.Name)
+		if input.Name == "" {
+			response.Error(w, 400, "套餐名称不能为空")
+			return
+		}
+		if input.CycleDay < 1 || input.CycleDay > 31 {
+			input.CycleDay = 1
+		}
+		input.CycleType = normalizeCycleType(input.CycleType)
+		if input.RateLimitPerMinute <= 0 {
+			input.RateLimitPerMinute = defaultLimitPerMin
+		}
+		if id == "" {
+			id = randomID("plan")
+		}
+		_, err := db.ExecContext(r.Context(), `INSERT INTO subscription_plans
+			(id,name,remark,enabled,total_bytes,cycle_type,cycle_day,rate_limit_enabled,rate_limit_per_minute,node_ids,include_internal_nodes,include_external_nodes,updated_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,datetime('now')) ON CONFLICT(id) DO UPDATE SET
+			name=excluded.name,remark=excluded.remark,enabled=excluded.enabled,total_bytes=excluded.total_bytes,
+			cycle_type=excluded.cycle_type,cycle_day=excluded.cycle_day,rate_limit_enabled=excluded.rate_limit_enabled,
+			rate_limit_per_minute=excluded.rate_limit_per_minute,node_ids=excluded.node_ids,
+			include_internal_nodes=excluded.include_internal_nodes,include_external_nodes=excluded.include_external_nodes,updated_at=datetime('now')`,
+			id, input.Name, input.Remark, boolToInt(input.Enabled), maxInt64(0, input.TotalBytes), input.CycleType, input.CycleDay,
+			boolToInt(input.RateLimitEnabled), input.RateLimitPerMinute, encodeNodeFilterIDs(input.NodeIDs), boolToInt(input.IncludeInternalNodes), boolToInt(input.IncludeExternalNodes))
+		if err != nil {
+			response.Error(w, 500, err.Error())
+			return
+		}
+		plans, _ := loadPlans(r.Context(), db, id)
+		response.OK(w, plans[0])
+	case http.MethodDelete:
+		if id == "" {
+			response.Error(w, 400, "套餐 ID 不能为空")
+			return
+		}
+		var count int
+		_ = db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM subscription_subscriptions WHERE plan_id=?`, id).Scan(&count)
+		if count > 0 {
+			response.Error(w, 409, "套餐仍有订阅使用，无法删除")
+			return
+		}
+		result, err := db.ExecContext(r.Context(), `DELETE FROM subscription_plans WHERE id=?`, id)
+		if err != nil {
+			response.Error(w, 500, err.Error())
+			return
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			response.Error(w, 404, "套餐不存在")
+			return
+		}
+		response.OK(w, map[string]bool{"deleted": true})
+	default:
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+func loadPlans(ctx context.Context, db *sql.DB, id string) ([]Plan, error) {
+	where, args := "", []interface{}{}
+	if id != "" {
+		where, args = " WHERE p.id=?", append(args, id)
+	}
+	rows, err := db.QueryContext(ctx, `SELECT p.id,p.name,COALESCE(p.remark,''),p.enabled,p.total_bytes,p.cycle_type,p.cycle_day,
+		p.rate_limit_enabled,p.rate_limit_per_minute,COALESCE(p.node_ids,''),p.include_internal_nodes,p.include_external_nodes,
+		p.created_at,p.updated_at,(SELECT COUNT(*) FROM subscription_subscriptions s WHERE s.plan_id=p.id)
+		FROM subscription_plans p`+where+` ORDER BY p.updated_at DESC`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	plans := []Plan{}
+	for rows.Next() {
+		var p Plan
+		var enabled, rateEnabled, includeInternal, includeExternal int
+		var nodeIDs string
+		if err := rows.Scan(&p.ID, &p.Name, &p.Remark, &enabled, &p.TotalBytes, &p.CycleType, &p.CycleDay, &rateEnabled, &p.RateLimitPerMinute, &nodeIDs, &includeInternal, &includeExternal, &p.CreatedAt, &p.UpdatedAt, &p.SubscriptionCount); err != nil {
+			return nil, err
+		}
+		p.Enabled, p.RateLimitEnabled = enabled == 1, rateEnabled == 1
+		p.IncludeInternalNodes, p.IncludeExternalNodes = includeInternal == 1, includeExternal == 1
+		p.NodeIDs = decodeNodeFilterIDs(nodeIDs)
+		plans = append(plans, p)
+	}
+	return plans, rows.Err()
+}
+
+func applyPlanToSubscription(ctx context.Context, db *sql.DB, sub *Subscription) {
+	if sub == nil || strings.TrimSpace(sub.PlanID) == "" {
+		return
+	}
+	plans, err := loadPlans(ctx, db, sub.PlanID)
+	if err != nil || len(plans) == 0 {
+		return
+	}
+	p := plans[0]
+	sub.TotalBytes = p.TotalBytes
+	sub.CycleType = p.CycleType
+	sub.CycleDay = p.CycleDay
+	sub.RateLimitEnabled = p.RateLimitEnabled
+	sub.RateLimitPerMinute = p.RateLimitPerMinute
+	sub.NodeFilterIDs = append([]string(nil), p.NodeIDs...)
+	sub.IncludeInternalNodes = p.IncludeInternalNodes
+	sub.IncludeExternalNodes = p.IncludeExternalNodes
 }
 
 func ensureDefaultNodeLibrary(ctx context.Context, db *sql.DB) error {
@@ -934,6 +1138,15 @@ func (s *Service) createSubscription(w http.ResponseWriter, r *http.Request, db 
 		response.Error(w, http.StatusBadRequest, "订阅名称不能为空")
 		return
 	}
+	if strings.TrimSpace(input.PlanID) == "" {
+		response.Error(w, http.StatusBadRequest, "请选择套餐")
+		return
+	}
+	if plans, err := loadPlans(r.Context(), db, input.PlanID); err != nil || len(plans) == 0 || !plans[0].Enabled {
+		response.Error(w, http.StatusBadRequest, "所选套餐不存在或已停用")
+		return
+	}
+	applyPlanToSubscription(r.Context(), db, &input)
 	settings, _ := loadSettings(r.Context(), db)
 	id := randomID("sub")
 	profileID := firstNonEmpty(input.ProfileID, id)
@@ -958,15 +1171,15 @@ func (s *Service) createSubscription(w http.ResponseWriter, r *http.Request, db 
 	input.Enabled = effectiveEnabled
 	input.RateLimitEnabled = effectiveRateLimitEnabled
 	_, err := db.ExecContext(r.Context(), `INSERT INTO subscription_subscriptions (
-		id, profile_id, name, remark, enabled, public_token, template_id, traffic_source, traffic_server_id,
+		id, profile_id, plan_id, name, remark, enabled, public_token, template_id, traffic_source, traffic_server_id,
 		upstream_url, upstream_enabled, upstream_refresh_hours, total_bytes, manual_upload_bytes,
 		manual_download_bytes, expire_at, cycle_type, cycle_day, cycle_start, cycle_end,
-		rate_limit_enabled, rate_limit_per_minute, node_filter_ids, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-		id, profileID, input.Name, input.Remark, boolToInt(effectiveEnabled), token, templateID, trafficSource, nullString(input.TrafficServerID),
+		rate_limit_enabled, rate_limit_per_minute, node_filter_ids, include_internal_nodes, include_external_nodes, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+		id, profileID, input.PlanID, input.Name, input.Remark, boolToInt(effectiveEnabled), token, templateID, trafficSource, nullString(input.TrafficServerID),
 		nullString(input.UpstreamURL), boolToInt(input.UpstreamEnabled), refreshHours, input.TotalBytes, input.ManualUploadBytes,
 		input.ManualDownloadBytes, nullString(input.ExpireAt), cycleType, cycleDay, nullString(input.CycleStart), nullString(input.CycleEnd),
-		boolToInt(effectiveRateLimitEnabled), limitPerMin, encodeNodeFilterIDs(input.NodeFilterIDs))
+		boolToInt(effectiveRateLimitEnabled), limitPerMin, encodeNodeFilterIDs(input.NodeFilterIDs), boolToInt(input.IncludeInternalNodes), boolToInt(input.IncludeExternalNodes))
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -997,6 +1210,15 @@ func (s *Service) updateSubscription(w http.ResponseWriter, r *http.Request, db 
 		response.Error(w, http.StatusBadRequest, "订阅名称不能为空")
 		return
 	}
+	if strings.TrimSpace(input.PlanID) == "" {
+		response.Error(w, http.StatusBadRequest, "请选择套餐")
+		return
+	}
+	if plans, err := loadPlans(r.Context(), db, input.PlanID); err != nil || len(plans) == 0 || !plans[0].Enabled {
+		response.Error(w, http.StatusBadRequest, "所选套餐不存在或已停用")
+		return
+	}
+	applyPlanToSubscription(r.Context(), db, &input)
 	cycleDay := input.CycleDay
 	if cycleDay <= 0 {
 		cycleDay = 1
@@ -1008,15 +1230,15 @@ func (s *Service) updateSubscription(w http.ResponseWriter, r *http.Request, db 
 	refreshHours := intDefault(input.UpstreamRefreshHours, defaultRefreshHours)
 	limitPerMin := intDefault(input.RateLimitPerMinute, defaultLimitPerMin)
 	_, err := db.ExecContext(r.Context(), `UPDATE subscription_subscriptions SET
-		profile_id = ?, name = ?, remark = ?, enabled = ?, template_id = ?, traffic_source = ?, traffic_server_id = ?,
+		profile_id = ?, plan_id = ?, name = ?, remark = ?, enabled = ?, template_id = ?, traffic_source = ?, traffic_server_id = ?,
 		upstream_url = ?, upstream_enabled = ?, upstream_refresh_hours = ?, total_bytes = ?,
 		manual_upload_bytes = ?, manual_download_bytes = ?, expire_at = ?, cycle_type = ?, cycle_day = ?,
-		cycle_start = ?, cycle_end = ?, rate_limit_enabled = ?, rate_limit_per_minute = ?, node_filter_ids = ?, updated_at = datetime('now')
+		cycle_start = ?, cycle_end = ?, rate_limit_enabled = ?, rate_limit_per_minute = ?, node_filter_ids = ?, include_internal_nodes = ?, include_external_nodes = ?, updated_at = datetime('now')
 		WHERE id = ?`,
-		profileID, input.Name, input.Remark, boolToInt(input.Enabled), templateID, trafficSource, nullString(input.TrafficServerID),
+		profileID, input.PlanID, input.Name, input.Remark, boolToInt(input.Enabled), templateID, trafficSource, nullString(input.TrafficServerID),
 		nullString(input.UpstreamURL), boolToInt(input.UpstreamEnabled), refreshHours, input.TotalBytes,
 		input.ManualUploadBytes, input.ManualDownloadBytes, nullString(input.ExpireAt), cycleType, cycleDay,
-		nullString(input.CycleStart), nullString(input.CycleEnd), boolToInt(input.RateLimitEnabled), limitPerMin, encodeNodeFilterIDs(input.NodeFilterIDs), id)
+		nullString(input.CycleStart), nullString(input.CycleEnd), boolToInt(input.RateLimitEnabled), limitPerMin, encodeNodeFilterIDs(input.NodeFilterIDs), boolToInt(input.IncludeInternalNodes), boolToInt(input.IncludeExternalNodes), id)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1245,13 +1467,37 @@ func (s *Service) updateNode(w http.ResponseWriter, r *http.Request, db *sql.DB,
 	}
 	rawEnc, _ := secure.SecureEncrypt(node.Raw)
 	cfgEnc, _ := secure.SecureEncrypt(node.ConfigJSON)
-	_, err := db.ExecContext(r.Context(), `UPDATE subscription_nodes SET name = ?, type = ?, server = ?, port = ?, country_code = ?, location = ?, tags = ?, traffic_server_id = ?, enabled = ?, stable = ?, sort_order = ?, raw_encrypted = CASE WHEN ? = '' THEN raw_encrypted ELSE ? END, config_encrypted = CASE WHEN ? = '' THEN config_encrypted ELSE ? END, updated_at = datetime('now') WHERE id = ?`,
-		node.Name, node.Type, node.Server, node.Port, node.CountryCode, node.Location, node.Tags, nullString(node.TrafficServerID), boolToInt(node.Enabled), boolToInt(node.Stable), node.SortOrder, node.Raw, rawEnc, node.ConfigJSON, cfgEnc, id)
+	// subscription_nodes are imported external nodes by definition. Internal
+	// nodes live in managed_proxy_nodes and cannot be converted by editing.
+	ownership, management, reporting, trafficServerID := "external", "unmanaged", "unavailable", ""
+	_, err := db.ExecContext(r.Context(), `UPDATE subscription_nodes SET name = ?, type = ?, server = ?, port = ?, country_code = ?, location = ?, tags = ?, traffic_server_id = ?, ownership = ?, management = ?, traffic_reporting = ?, enabled = ?, stable = ?, sort_order = ?, raw_encrypted = CASE WHEN ? = '' THEN raw_encrypted ELSE ? END, config_encrypted = CASE WHEN ? = '' THEN config_encrypted ELSE ? END, updated_at = datetime('now') WHERE id = ?`,
+		node.Name, node.Type, node.Server, node.Port, node.CountryCode, node.Location, node.Tags, nullString(trafficServerID), ownership, management, reporting, boolToInt(node.Enabled), boolToInt(node.Stable), node.SortOrder, node.Raw, rawEnc, node.ConfigJSON, cfgEnc, id)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	response.OK(w, map[string]bool{"updated": true})
+}
+
+func normalizeNodeOwnership(value string) string {
+	if strings.EqualFold(strings.TrimSpace(value), "self") {
+		return "self"
+	}
+	return "external"
+}
+
+func normalizeNodeManagement(value, ownership string) string {
+	if ownership == "self" && strings.EqualFold(strings.TrimSpace(value), "agent") {
+		return "agent"
+	}
+	return "unmanaged"
+}
+
+func normalizeNodeTrafficReporting(value, management string) string {
+	if management == "agent" && strings.EqualFold(strings.TrimSpace(value), "trusted") {
+		return "trusted"
+	}
+	return "unavailable"
 }
 
 func (s *Service) deleteNode(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {
@@ -1511,7 +1757,7 @@ func (s *Service) updateSettings(w http.ResponseWriter, r *http.Request, db *sql
 }
 
 func (s *Service) listServers(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	rows, err := db.QueryContext(r.Context(), `SELECT id, name, host, COALESCE(resolved_country, ''), traffic_limit_bytes, COALESCE(cached_info, '{}') FROM server_accounts ORDER BY order_index ASC, created_at DESC`)
+	rows, err := db.QueryContext(r.Context(), `SELECT id, name, host, COALESCE(resolved_country, ''), COALESCE(country, ''), traffic_limit_bytes, COALESCE(cached_info, '{}'), COALESCE(status,'unknown'), COALESCE(last_check_time,'') FROM server_accounts ORDER BY order_index ASC, created_at DESC`)
 	if err != nil {
 		response.OK(w, []map[string]interface{}{})
 		return
@@ -1519,10 +1765,16 @@ func (s *Service) listServers(w http.ResponseWriter, r *http.Request, db *sql.DB
 	defer rows.Close()
 	items := []map[string]interface{}{}
 	for rows.Next() {
-		var id, name, host, location, cached string
+		var id, name, host, location, country, cached, status, lastSeen string
 		var limit int64
-		_ = rows.Scan(&id, &name, &host, &location, &limit, &cached)
-		items = append(items, map[string]interface{}{"id": id, "name": name, "host": host, "location": location, "traffic_limit_bytes": limit})
+		_ = rows.Scan(&id, &name, &host, &location, &country, &limit, &cached, &status, &lastSeen)
+		info := map[string]interface{}{}
+		_ = json.Unmarshal([]byte(cached), &info)
+		platform := strings.ToLower(firstNonEmpty(fmt.Sprint(info["platform"]), fmt.Sprint(info["os"])))
+		if platform != "" && !strings.Contains(platform, "linux") {
+			continue
+		}
+		items = append(items, map[string]interface{}{"id": id, "name": name, "host": host, "location": firstNonEmpty(fmt.Sprint(info["location"]), fmt.Sprint(info["region"]), location), "country_code": firstNonEmpty(fmt.Sprint(info["country_code"]), fmt.Sprint(info["country"]), country, location), "uptime": info["uptime"], "traffic_limit_bytes": limit, "status": status, "last_seen": lastSeen, "platform": platform, "agent_version": firstNonEmpty(fmt.Sprint(info["agent_version"]), fmt.Sprint(info["version"]))})
 	}
 	response.OK(w, items)
 }
@@ -1574,8 +1826,19 @@ func (s *Service) servePublicSubscription(w http.ResponseWriter, r *http.Request
 		response.Error(w, statusCode, errMsg)
 		return
 	}
-	nodes, _ := loadNodes(r.Context(), db, firstNonEmpty(sub.ProfileID, sub.ID), true)
-	nodes = filterNodesByIDs(nodes, sub.NodeFilterIDs)
+	nodes := []Node{}
+	if sub.IncludeInternalNodes {
+		nodes, _ = loadManagedSubscriptionNodes(r.Context(), db)
+		nodes = filterNodesByIDsForSource(nodes, sub.NodeFilterIDs)
+	}
+	if sub.IncludeExternalNodes {
+		externalProfileID := firstNonEmpty(sub.ProfileID, sub.ID)
+		if sub.PlanID != "" {
+			externalProfileID = ""
+		}
+		external, _ := loadNodes(r.Context(), db, externalProfileID, true)
+		nodes = append(nodes, filterNodesByIDsForSource(external, sub.NodeFilterIDs)...)
+	}
 	traffic = sub.Traffic
 	blocked := traffic.Status == "expired" || traffic.Status == "exhausted"
 	if blocked {
@@ -1600,6 +1863,59 @@ func (s *Service) servePublicSubscription(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(body))
 	success = true
+}
+
+func loadManagedSubscriptionNodes(ctx context.Context, db *sql.DB) ([]Node, error) {
+	rows, err := db.QueryContext(ctx, `SELECT id,name,protocol,public_host,assigned_port,client_uri_encrypted,created_at,updated_at FROM managed_proxy_nodes WHERE enabled=1 AND publishable=1 AND apply_status='running' ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	nodes := []Node{}
+	for rows.Next() {
+		var id, name, protocol, host, encrypted, createdAt, updatedAt string
+		var port int
+		if err := rows.Scan(&id, &name, &protocol, &host, &port, &encrypted, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		raw := secure.SecureDecrypt(encrypted)
+		node := parseURI(raw, len(nodes)+1)
+		node.ID = id
+		node.Name = name
+		node.Server = host
+		node.Port = port
+		node.Raw = raw
+		node.Enabled = true
+		node.Stable = true
+		node.Ownership = "self"
+		node.Management = "agent"
+		node.TrafficReporting = "trusted"
+		node.Source = "internal"
+		node.CreatedAt = createdAt
+		node.UpdatedAt = updatedAt
+		nodes = append(nodes, node)
+	}
+	return nodes, rows.Err()
+}
+
+func filterNodesByIDsForSource(nodes []Node, ids []string) []Node {
+	if len(ids) == 0 {
+		return nodes
+	}
+	available := make(map[string]struct{}, len(nodes))
+	for _, node := range nodes {
+		available[node.ID] = struct{}{}
+	}
+	selected := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := available[id]; ok {
+			selected = append(selected, id)
+		}
+	}
+	if len(selected) == 0 {
+		return []Node{}
+	}
+	return filterNodesByIDs(nodes, selected)
 }
 
 func subscriptionProfileTitle(sub Subscription) string {
@@ -1721,21 +2037,23 @@ func loadSubscriptions(ctx context.Context, db *sql.DB, id string) ([]Subscripti
 		where = "WHERE id = ?"
 		args = append(args, id)
 	}
-	rows, err := db.QueryContext(ctx, `SELECT id, COALESCE(profile_id, id), name, COALESCE(remark, ''), enabled, public_token, COALESCE(template_id, ''), COALESCE(traffic_source, 'manual'), COALESCE(traffic_server_id, ''), COALESCE(upstream_url, ''), upstream_enabled, COALESCE(upstream_refresh_hours, 24), COALESCE(upstream_status, ''), COALESCE(upstream_last_error, ''), COALESCE(upstream_last_refresh_at, ''), total_bytes, manual_upload_bytes, manual_download_bytes, COALESCE(expire_at, ''), COALESCE(cycle_type, 'none'), COALESCE(cycle_day, 1), COALESCE(cycle_start, ''), COALESCE(cycle_end, ''), baseline_upload_bytes, baseline_download_bytes, rate_limit_enabled, COALESCE(rate_limit_per_minute, 30), COALESCE(node_filter_ids, ''), created_at, updated_at FROM subscription_subscriptions `+where+` ORDER BY updated_at DESC`, args...)
+	rows, err := db.QueryContext(ctx, `SELECT id, COALESCE(profile_id, id), COALESCE(plan_id, ''), name, COALESCE(remark, ''), enabled, public_token, COALESCE(template_id, ''), COALESCE(traffic_source, 'manual'), COALESCE(traffic_server_id, ''), COALESCE(upstream_url, ''), upstream_enabled, COALESCE(upstream_refresh_hours, 24), COALESCE(upstream_status, ''), COALESCE(upstream_last_error, ''), COALESCE(upstream_last_refresh_at, ''), total_bytes, manual_upload_bytes, manual_download_bytes, COALESCE(expire_at, ''), COALESCE(cycle_type, 'none'), COALESCE(cycle_day, 1), COALESCE(cycle_start, ''), COALESCE(cycle_end, ''), baseline_upload_bytes, baseline_download_bytes, rate_limit_enabled, COALESCE(rate_limit_per_minute, 30), COALESCE(node_filter_ids, ''), COALESCE(include_internal_nodes,1), COALESCE(include_external_nodes,0), created_at, updated_at FROM subscription_subscriptions `+where+` ORDER BY updated_at DESC`, args...)
 	if err != nil {
 		return nil, err
 	}
 	items := []Subscription{}
 	for rows.Next() {
 		var sub Subscription
-		var enabled, upstreamEnabled, rateEnabled int
+		var enabled, upstreamEnabled, rateEnabled, includeInternal, includeExternal int
 		var nodeFilterIDs string
-		if err := rows.Scan(&sub.ID, &sub.ProfileID, &sub.Name, &sub.Remark, &enabled, &sub.PublicToken, &sub.TemplateID, &sub.TrafficSource, &sub.TrafficServerID, &sub.UpstreamURL, &upstreamEnabled, &sub.UpstreamRefreshHours, &sub.UpstreamStatus, &sub.UpstreamLastError, &sub.UpstreamLastRefreshAt, &sub.TotalBytes, &sub.ManualUploadBytes, &sub.ManualDownloadBytes, &sub.ExpireAt, &sub.CycleType, &sub.CycleDay, &sub.CycleStart, &sub.CycleEnd, &sub.BaselineUploadBytes, &sub.BaselineDownloadBytes, &rateEnabled, &sub.RateLimitPerMinute, &nodeFilterIDs, &sub.CreatedAt, &sub.UpdatedAt); err != nil {
+		if err := rows.Scan(&sub.ID, &sub.ProfileID, &sub.PlanID, &sub.Name, &sub.Remark, &enabled, &sub.PublicToken, &sub.TemplateID, &sub.TrafficSource, &sub.TrafficServerID, &sub.UpstreamURL, &upstreamEnabled, &sub.UpstreamRefreshHours, &sub.UpstreamStatus, &sub.UpstreamLastError, &sub.UpstreamLastRefreshAt, &sub.TotalBytes, &sub.ManualUploadBytes, &sub.ManualDownloadBytes, &sub.ExpireAt, &sub.CycleType, &sub.CycleDay, &sub.CycleStart, &sub.CycleEnd, &sub.BaselineUploadBytes, &sub.BaselineDownloadBytes, &rateEnabled, &sub.RateLimitPerMinute, &nodeFilterIDs, &includeInternal, &includeExternal, &sub.CreatedAt, &sub.UpdatedAt); err != nil {
 			return nil, err
 		}
 		sub.Enabled = enabled == 1
 		sub.UpstreamEnabled = upstreamEnabled == 1
 		sub.RateLimitEnabled = rateEnabled == 1
+		sub.IncludeInternalNodes = includeInternal == 1
+		sub.IncludeExternalNodes = includeExternal == 1
 		sub.NodeFilterIDs = decodeNodeFilterIDs(nodeFilterIDs)
 		items = append(items, sub)
 	}
@@ -1746,7 +2064,18 @@ func loadSubscriptions(ctx context.Context, db *sql.DB, id string) ([]Subscripti
 		return nil, err
 	}
 	for i := range items {
-		_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_nodes WHERE COALESCE(profile_id, subscription_id) = ?`, firstNonEmpty(items[i].ProfileID, items[i].ID)).Scan(&items[i].NodeCount)
+		// Store.Open intentionally limits SQLite to one connection. Applying a plan
+		// while the subscription cursor is still open would wait forever for that
+		// same connection, blocking both list and create/update responses.
+		applyPlanToSubscription(ctx, db, &items[i])
+		if items[i].IncludeInternalNodes {
+			_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM managed_proxy_nodes WHERE enabled=1 AND publishable=1 AND apply_status='running'`).Scan(&items[i].NodeCount)
+		}
+		if items[i].IncludeExternalNodes {
+			var externalCount int
+			_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_nodes WHERE COALESCE(profile_id, subscription_id) = ? AND enabled=1`, firstNonEmpty(items[i].ProfileID, items[i].ID)).Scan(&externalCount)
+			items[i].NodeCount += externalCount
+		}
 		_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_access_logs WHERE subscription_id = ? AND date(created_at) = date('now')`, items[i].ID).Scan(&items[i].AccessCountToday)
 		_ = db.QueryRowContext(ctx, `SELECT COALESCE(MAX(created_at), '') FROM subscription_access_logs WHERE subscription_id = ?`, items[i].ID).Scan(&items[i].LastAccessAt)
 		items[i].Traffic = computeTraffic(ctx, db, items[i])
@@ -1771,7 +2100,7 @@ func loadNodes(ctx context.Context, db *sql.DB, subscriptionID string, decrypt b
 		where = "WHERE COALESCE(profile_id, subscription_id) = ?"
 		args = append(args, subscriptionID)
 	}
-	rows, err := db.QueryContext(ctx, `SELECT id, subscription_id, COALESCE(profile_id, subscription_id), name, COALESCE(type, ''), COALESCE(server, ''), COALESCE(port, 0), COALESCE(country_code, ''), COALESCE(location, ''), COALESCE(tags, ''), COALESCE(traffic_server_id, ''), enabled, stable, sort_order, COALESCE(raw_encrypted, ''), COALESCE(config_encrypted, ''), created_at, updated_at FROM subscription_nodes `+where+` ORDER BY COALESCE(profile_id, subscription_id) ASC, sort_order ASC, created_at ASC`, args...)
+	rows, err := db.QueryContext(ctx, `SELECT id, subscription_id, COALESCE(profile_id, subscription_id), name, COALESCE(type, ''), COALESCE(server, ''), COALESCE(port, 0), COALESCE(country_code, ''), COALESCE(location, ''), COALESCE(tags, ''), COALESCE(traffic_server_id, ''), COALESCE(ownership, 'external'), COALESCE(management, 'unmanaged'), COALESCE(traffic_reporting, 'unavailable'), enabled, stable, sort_order, COALESCE(raw_encrypted, ''), COALESCE(config_encrypted, ''), created_at, updated_at FROM subscription_nodes `+where+` ORDER BY COALESCE(profile_id, subscription_id) ASC, sort_order ASC, created_at ASC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1779,7 +2108,7 @@ func loadNodes(ctx context.Context, db *sql.DB, subscriptionID string, decrypt b
 	for rows.Next() {
 		var node Node
 		var enabled, stable int
-		if err := rows.Scan(&node.ID, &node.SubscriptionID, &node.ProfileID, &node.Name, &node.Type, &node.Server, &node.Port, &node.CountryCode, &node.Location, &node.Tags, &node.TrafficServerID, &enabled, &stable, &node.SortOrder, &node.Raw, &node.ConfigJSON, &node.CreatedAt, &node.UpdatedAt); err != nil {
+		if err := rows.Scan(&node.ID, &node.SubscriptionID, &node.ProfileID, &node.Name, &node.Type, &node.Server, &node.Port, &node.CountryCode, &node.Location, &node.Tags, &node.TrafficServerID, &node.Ownership, &node.Management, &node.TrafficReporting, &enabled, &stable, &node.SortOrder, &node.Raw, &node.ConfigJSON, &node.CreatedAt, &node.UpdatedAt); err != nil {
 			return nil, err
 		}
 		node.Enabled = enabled == 1
@@ -1824,9 +2153,19 @@ func insertNode(ctx context.Context, tx *sql.Tx, node Node) error {
 		return err
 	}
 	fingerprint := nodeFingerprint(node)
-	_, err = tx.ExecContext(ctx, `INSERT INTO subscription_nodes (id, subscription_id, profile_id, name, type, server, port, country_code, location, tags, traffic_server_id, enabled, stable, sort_order, raw_encrypted, config_encrypted, fingerprint, source, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-		node.ID, node.SubscriptionID, node.ProfileID, node.Name, node.Type, node.Server, node.Port, node.CountryCode, node.Location, node.Tags, nullString(node.TrafficServerID), boolToInt(node.Enabled || !strings.EqualFold(node.Name, "__disabled__")), boolToInt(node.Stable), node.SortOrder, rawEnc, cfgEnc, fingerprint, firstNonEmpty(node.Source, "manual"))
+	ownership := normalizeNodeOwnership(node.Ownership)
+	if strings.TrimSpace(node.Ownership) == "" && node.TrafficServerID != "" {
+		ownership = "self"
+	}
+	management := normalizeNodeManagement(node.Management, ownership)
+	reporting := normalizeNodeTrafficReporting(node.TrafficReporting, management)
+	trafficServerID := node.TrafficServerID
+	if ownership != "self" {
+		trafficServerID = ""
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO subscription_nodes (id, subscription_id, profile_id, name, type, server, port, country_code, location, tags, traffic_server_id, ownership, management, traffic_reporting, enabled, stable, sort_order, raw_encrypted, config_encrypted, fingerprint, source, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+		node.ID, node.SubscriptionID, node.ProfileID, node.Name, node.Type, node.Server, node.Port, node.CountryCode, node.Location, node.Tags, nullString(trafficServerID), ownership, management, reporting, boolToInt(node.Enabled || !strings.EqualFold(node.Name, "__disabled__")), boolToInt(node.Stable), node.SortOrder, rawEnc, cfgEnc, fingerprint, firstNonEmpty(node.Source, "manual"))
 	return err
 }
 
@@ -1956,7 +2295,14 @@ func loadSettings(ctx context.Context, db *sql.DB) (Settings, error) {
 }
 
 func computeTraffic(ctx context.Context, db *sql.DB, sub Subscription) TrafficInfo {
-	info := TrafficInfo{Total: sub.TotalBytes, Source: sub.TrafficSource, Status: "active"}
+	_ = ctx
+	_ = db
+	// A subscription quota is a panel-owned policy. Host NIC counters and a
+	// node's aggregate proxy counters cannot be attributed to one subscription,
+	// so reporting either as subscription usage would be misleading. Accurate
+	// usage becomes available only after managed nodes have per-subscription
+	// credentials and report counters for those identities.
+	info := TrafficInfo{Total: sub.TotalBytes, Source: "panel", Status: "active", MeteringStatus: "unavailable"}
 	if sub.ExpireAt != "" {
 		if t, err := parseTime(sub.ExpireAt); err == nil {
 			info.Expire = t.Unix()
@@ -1964,38 +2310,6 @@ func computeTraffic(ctx context.Context, db *sql.DB, sub Subscription) TrafficIn
 				info.Status = "expired"
 			}
 		}
-	}
-	switch sub.TrafficSource {
-	case "server":
-		up, down := serverTraffic(ctx, db, sub.TrafficServerID)
-		info.Upload = maxInt64(0, up-sub.BaselineUploadBytes)
-		info.Download = maxInt64(0, down-sub.BaselineDownloadBytes)
-		if info.Total <= 0 {
-			var limit int64
-			_ = db.QueryRowContext(ctx, `SELECT traffic_limit_bytes FROM server_accounts WHERE id = ?`, sub.TrafficServerID).Scan(&limit)
-			info.Total = limit
-		}
-	case "node_servers":
-		up, down, total := nodeServerTraffic(ctx, db, sub)
-		info.Upload = maxInt64(0, up-sub.BaselineUploadBytes)
-		info.Download = maxInt64(0, down-sub.BaselineDownloadBytes)
-		if info.Total <= 0 {
-			info.Total = total
-		}
-	case "upstream":
-		var raw string
-		profileID := firstNonEmpty(sub.ProfileID, sub.ID)
-		_ = db.QueryRowContext(ctx, `SELECT COALESCE(userinfo, '') FROM subscription_upstreams WHERE profile_id = ? AND COALESCE(userinfo, '') != '' ORDER BY updated_at DESC LIMIT 1`, profileID).Scan(&raw)
-		if raw == "" {
-			_ = db.QueryRowContext(ctx, `SELECT COALESCE(upstream_userinfo, '') FROM subscription_subscriptions WHERE id = ?`, sub.ID).Scan(&raw)
-		}
-		if parsed := parseUserInfo(raw); parsed.Total > 0 {
-			info = parsed
-			info.Source = "upstream"
-		}
-	default:
-		info.Upload = sub.ManualUploadBytes
-		info.Download = sub.ManualDownloadBytes
 	}
 	used := info.Upload + info.Download
 	if info.Total > 0 {
@@ -2627,6 +2941,20 @@ func uriToClashMap(node Node) map[string]interface{} {
 		if strings.EqualFold(query.Get("security"), "tls") {
 			m["tls"] = true
 		}
+		if strings.EqualFold(query.Get("security"), "reality") {
+			m["tls"] = true
+			m["flow"] = firstNonEmpty(query.Get("flow"), "xtls-rprx-vision")
+			reality := map[string]interface{}{}
+			if value := firstNonEmpty(query.Get("pbk"), query.Get("public-key")); value != "" {
+				reality["public-key"] = value
+			}
+			if value := firstNonEmpty(query.Get("sid"), query.Get("short-id")); value != "" {
+				reality["short-id"] = value
+			}
+			if len(reality) > 0 {
+				m["reality-opts"] = reality
+			}
+		}
 		if value := firstNonEmpty(query.Get("sni"), query.Get("servername")); value != "" {
 			m["servername"] = value
 			m["sni"] = value
@@ -2961,7 +3289,7 @@ func subscriptionFromProfile(input NodeLibrary) Subscription {
 
 func normalizeTrafficSource(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "server", "node_servers", "upstream":
+	case "panel", "server", "node_servers", "upstream":
 		return strings.ToLower(strings.TrimSpace(value))
 	default:
 		return "manual"

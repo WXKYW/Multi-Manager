@@ -14,6 +14,7 @@ import {
 import { CanvasRenderer } from 'echarts/renderers';
 import { io } from 'socket.io-client';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
+import PublicOverviewStats from '../components/public/PublicOverviewStats.jsx';
 import { useCloudflareSpotlight } from '../hooks/useCloudflareSpotlight.js';
 import useStore from '../store.js';
 import {
@@ -56,9 +57,9 @@ const toneClass = {
 };
 
 const statusPanelClass = {
-  success: 'border-kumo-success/45 bg-kumo-success/15 text-kumo-success',
-  danger: 'border-kumo-danger/45 bg-kumo-danger/15 text-kumo-danger',
-  warning: 'border-kumo-warning/45 bg-kumo-warning/15 text-kumo-warning',
+  success: 'border-kumo-success/45 bg-kumo-base text-kumo-success',
+  danger: 'border-kumo-danger/45 bg-kumo-base text-kumo-danger',
+  warning: 'border-kumo-warning/45 bg-kumo-base text-kumo-warning',
   neutral: 'border-kumo-interact/80 bg-kumo-base text-kumo-strong',
 };
 
@@ -224,6 +225,7 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [expandedMonitorId, setExpandedMonitorId] = useState(null);
+  const [monitorFilter, setMonitorFilter] = useState('all');
 
   const load = async () => {
     setLoading(true);
@@ -302,6 +304,13 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
   const downCount = monitors.filter((item) => getStateMeta(item.state).tone === 'danger').length;
   const warningCount = monitors.filter((item) => getStateMeta(item.state).tone === 'warning').length;
   const operationalCount = monitors.length - downCount - warningCount;
+  const visibleMonitors = monitorFilter === 'up'
+    ? monitors.filter((item) => getStateMeta(item.state).tone === 'success')
+    : monitorFilter === 'down'
+      ? monitors.filter((item) => getStateMeta(item.state).tone === 'danger')
+      : monitorFilter === 'warning'
+        ? monitors.filter((item) => getStateMeta(item.state).tone === 'warning')
+        : monitors;
   const pageConfig = page?.config || {};
   const hideTargets = !!pageConfig.hideTargets;
   const linkMonitorNames = !!pageConfig.linkMonitorNames;
@@ -356,24 +365,16 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
                     <p className="mt-2 max-w-2xl text-sm leading-relaxed opacity-90">{page.description}</p>
                   )}
                 </div>
-                <div className="grid grid-cols-4 gap-2 text-center text-xs">
-                  <div className="rounded-md border border-current/35 bg-kumo-base/60 px-2.5 py-1.5">
-                    <div className="tabular-nums text-sm font-bold">{monitors.length}</div>
-                    <div className="opacity-80">监测项</div>
-                  </div>
-                  <div className="rounded-md border border-current/35 bg-kumo-base/60 px-2.5 py-1.5">
-                    <div className="tabular-nums text-sm font-bold">{operationalCount}</div>
-                    <div className="opacity-80">正常</div>
-                  </div>
-                  <div className="rounded-md border border-current/35 bg-kumo-base/60 px-2.5 py-1.5">
-                    <div className="tabular-nums text-sm font-bold">{downCount}</div>
-                    <div className="opacity-80">故障</div>
-                  </div>
-                  <div className="rounded-md border border-current/35 bg-kumo-base/60 px-2.5 py-1.5">
-                    <div className="tabular-nums text-sm font-bold">{warningCount}</div>
-                    <div className="opacity-80">关注</div>
-                  </div>
-                </div>
+                <PublicOverviewStats
+                  activeKey={monitorFilter}
+                  onChange={setMonitorFilter}
+                  items={[
+                    { key: 'all', label: '监测项', value: monitors.length },
+                    { key: 'up', label: '正常', value: operationalCount },
+                    { key: 'down', label: '故障', value: downCount },
+                    { key: 'warning', label: '关注', value: warningCount },
+                  ]}
+                />
               </div>
             </section>
 
@@ -386,7 +387,7 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
                 <div className="p-8 text-center text-sm text-kumo-subtle">这个状态页还没有绑定监测目标。</div>
               ) : (
                 <div className="divide-y divide-kumo-interact/60">
-                  {monitors.map((monitor) => {
+                  {visibleMonitors.map((monitor) => {
                     const meta = getStateMeta(monitor.state);
                     const isExpanded = expandedMonitorId === monitor.id;
                     const heartbeats = Array.isArray(monitor.heartbeats) ? monitor.heartbeats.map(normalizeHeartbeat) : [];
@@ -465,6 +466,7 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
                       </div>
                     );
                   })}
+                  {visibleMonitors.length === 0 && <div className="p-8 text-center text-sm text-kumo-subtle">当前筛选没有匹配的监测项。</div>}
                 </div>
               )}
             </section>

@@ -88,12 +88,8 @@ func (s *Service) validateAgentConnection(ctx context.Context, serverID, key str
 	}
 	defer db.Close()
 
-	expectedKey, err := s.getOrGenerateAgentKey(ctx, db)
-	if err != nil {
+	if err := s.validateAgentKeyForServer(ctx, db, serverID, key); err != nil {
 		return err
-	}
-	if key != expectedKey {
-		return errors.New("invalid agent key")
 	}
 
 	var exists int
@@ -757,6 +753,59 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (server_id) REFERENCES server_accounts(id) ON DELETE CASCADE
 		)`,
+		`CREATE TABLE IF NOT EXISTS server_agent_credentials (
+			server_id TEXT PRIMARY KEY,
+			secret_encrypted TEXT NOT NULL,
+			created_at TEXT DEFAULT (datetime('now')),
+			updated_at TEXT DEFAULT (datetime('now'))
+		)`,
+		`CREATE TABLE IF NOT EXISTS server_proxy_desired_state (
+			server_id TEXT PRIMARY KEY,
+			revision INTEGER NOT NULL DEFAULT 1,
+			runtime TEXT NOT NULL,
+			config_encrypted TEXT NOT NULL,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			applied_revision INTEGER NOT NULL DEFAULT 0,
+			apply_status TEXT NOT NULL DEFAULT 'pending',
+			last_error TEXT NOT NULL DEFAULT '',
+			assigned_port INTEGER NOT NULL DEFAULT 0,
+			transport TEXT NOT NULL DEFAULT 'tcp',
+			updated_at TEXT DEFAULT (datetime('now'))
+		)`,
+		`CREATE TABLE IF NOT EXISTS server_proxy_traffic_reports (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			server_id TEXT NOT NULL,
+			boot_id TEXT NOT NULL,
+			sequence INTEGER NOT NULL,
+			node_id TEXT NOT NULL,
+			upload_bytes INTEGER NOT NULL DEFAULT 0,
+			download_bytes INTEGER NOT NULL DEFAULT 0,
+			reported_at TEXT DEFAULT (datetime('now')),
+			UNIQUE(server_id, boot_id, sequence, node_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS managed_proxy_nodes (
+			id TEXT PRIMARY KEY,
+			server_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			protocol TEXT NOT NULL CHECK(protocol IN ('vless-reality', 'hysteria2')),
+			runtime TEXT NOT NULL DEFAULT 'sing-box',
+			public_host TEXT NOT NULL,
+			assigned_port INTEGER NOT NULL DEFAULT 0,
+			transport TEXT NOT NULL CHECK(transport IN ('tcp', 'udp')),
+			config_encrypted TEXT NOT NULL,
+			client_uri_encrypted TEXT NOT NULL,
+			revision INTEGER NOT NULL DEFAULT 1,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			publishable INTEGER NOT NULL DEFAULT 0,
+			apply_status TEXT NOT NULL DEFAULT 'pending',
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at TEXT DEFAULT (datetime('now')),
+			updated_at TEXT DEFAULT (datetime('now')),
+			FOREIGN KEY (server_id) REFERENCES server_accounts(id) ON DELETE CASCADE
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_managed_proxy_node_name_server ON managed_proxy_nodes(server_id, name)`,
+		`CREATE INDEX IF NOT EXISTS idx_managed_proxy_nodes_server ON managed_proxy_nodes(server_id, updated_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_proxy_traffic_server_time ON server_proxy_traffic_reports(server_id, reported_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS server_network_quality_targets (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT NOT NULL UNIQUE,
@@ -841,6 +890,17 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 }
 
 func migrateColumns(ctx context.Context, db *sql.DB) error {
+	proxyFields := []struct{ Name, SQL string }{
+		{"assigned_port", "ALTER TABLE server_proxy_desired_state ADD COLUMN assigned_port INTEGER NOT NULL DEFAULT 0"},
+		{"transport", "ALTER TABLE server_proxy_desired_state ADD COLUMN transport TEXT NOT NULL DEFAULT 'tcp'"},
+	}
+	for _, f := range proxyFields {
+		if exists, err := hasColumn(ctx, db, "server_proxy_desired_state", f.Name); err == nil && !exists {
+			if _, err := db.ExecContext(ctx, f.SQL); err != nil {
+				return fmt.Errorf("migrate managed proxy %s: %w", f.Name, err)
+			}
+		}
+	}
 	if exists, err := hasColumn(ctx, db, "server_monitor_config", "metrics_retention_days"); err == nil && !exists {
 		_, _ = db.ExecContext(ctx, `ALTER TABLE server_monitor_config ADD COLUMN metrics_retention_days INTEGER DEFAULT 30`)
 	}

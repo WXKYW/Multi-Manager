@@ -23,7 +23,7 @@ func (s *Service) getWindowsAgentInstallScript(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	storedKey, err := s.getOrGenerateAgentKey(r.Context(), db)
+	storedKey, err := s.getOrGenerateAgentKeyForServer(r.Context(), db, accountID)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "Failed to get agent key: "+err.Error())
 		return

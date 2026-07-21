@@ -6,6 +6,7 @@ mod collector;
 mod docker;
 mod file_manager;
 mod protocol;
+mod proxy_runtime;
 mod pty;
 mod remote_desktop;
 
@@ -38,10 +39,13 @@ use clap::Parser;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn agent_capabilities() -> Vec<String> {
-    let capabilities = vec![
+    #[allow(unused_mut)]
+    let mut capabilities = vec![
         "terminal_stream_v2".to_string(),
         "self_update_v1".to_string(),
     ];
+    #[cfg(target_os = "linux")]
+    capabilities.push("proxy_runtime_v1".to_string());
     #[cfg(target_os = "windows")]
     let capabilities = {
         let mut capabilities = capabilities;
@@ -1057,6 +1061,15 @@ async fn run_client(
                                             }
                                         }
                                     }
+                                    50 => match proxy_runtime::reconcile(&task.data) {
+                                        Ok(out) => {
+                                            successful = true;
+                                            res_data = out;
+                                        }
+                                        Err(err) => {
+                                            res_data = err;
+                                        }
+                                    },
                                     5 => {
                                         // UPGRADE
                                         match handle_upgrade(&task.id, &task.data, &config_task)

@@ -282,12 +282,23 @@ func (c *apiClient) probeRepositoryPermissions(ctx context.Context, token string
 	_, _, err = c.fetchTraffic(ctx, token, repo.Owner, repo.Name)
 	addCheck("administration_read", "流量统计", "Administration: read", err)
 
+	var hooks []webhookResponse
+	_, err = c.get(ctx, token, fmt.Sprintf("/repos/%s/%s/hooks?per_page=1", url.PathEscape(repo.Owner), url.PathEscape(repo.Name)), &hooks)
+	addCheck("webhooks_read", "Webhook 读取", "Webhooks: read", err)
+
 	checks = append(checks, map[string]interface{}{
 		"key":     "actions_write",
 		"label":   "Actions 操作",
 		"level":   "Actions: write",
 		"status":  "skipped",
 		"message": "为避免触发工作流，写权限不自动探测；请按权限清单配置。",
+	})
+	checks = append(checks, map[string]interface{}{
+		"key":     "webhooks_write",
+		"label":   "Webhook 配置",
+		"level":   "Webhooks: write",
+		"status":  "skipped",
+		"message": "写权限不执行破坏性探测；使用“自动配置”进行验证。",
 	})
 	return checks
 }

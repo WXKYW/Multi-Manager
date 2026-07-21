@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import io from 'socket.io-client';
-import { Meter, Tabs } from '@cloudflare/kumo';
+import { Banner, Meter, Tabs } from '@cloudflare/kumo';
 import { Button } from '@cloudflare/kumo/components/button';
 import { AlertTriangle, Globe, RefreshCw, Server, Shield } from '../components/Icons.jsx';
 import CountryFlag from '../components/CountryFlag.jsx';
+import PublicOverviewStats from '../components/public/PublicOverviewStats.jsx';
 import ServerLocationMap from '../components/server/ServerLocationMap.jsx';
 import { useCloudflareSpotlight } from '../hooks/useCloudflareSpotlight.js';
 import { FLOW_UNIT_BADGE_CLASS, getFlowUnitClassName } from '../modules/flowUnits.js';
@@ -493,12 +494,13 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [fetchedAt, setFetchedAt] = useState('');
-  const [, setWsConnected] = useState(false);
+  const [wsConnected, setWsConnected] = useState(false);
   const [wideColumns, setWideColumns] = useState(() => {
     const stored = window.localStorage?.getItem('publicServerStatusColumns');
     return stored === '4' ? 4 : 3;
   });
   const [mapOpen, setMapOpen] = useState(false);
+  const [serverFilter, setServerFilter] = useState('all');
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (silent) {
@@ -620,6 +622,18 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
   const serverGridClass = wideColumns === 4
     ? 'grid gap-3 md:grid-cols-2 2xl:grid-cols-4'
     : 'grid gap-3 md:grid-cols-2 xl:grid-cols-3';
+  const onlineCount = servers.filter(server => server?.online).length;
+  const offlineCount = Math.max(0, servers.length - onlineCount);
+  const visibleServers = serverFilter === 'online'
+    ? servers.filter((server) => server?.online)
+    : serverFilter === 'offline'
+      ? servers.filter((server) => !server?.online)
+      : servers;
+  const overviewText = servers.length === 0
+    ? '暂无公开主机'
+    : offlineCount > 0
+      ? `${offlineCount} 台主机离线`
+      : '全部主机在线';
 
   return (
     <div ref={surfaceRef} className="cf-ai-background-surface public-server-status-page relative isolate min-h-screen text-kumo-default">
@@ -676,10 +690,28 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
 
         {!initialLoading && page && (
           <div className="flex flex-col gap-4">
+            <Banner
+              variant={servers.length === 0 ? 'secondary' : offlineCount > 0 ? 'error' : 'default'}
+              icon={<Server className="size-4" />}
+              title={overviewText}
+              className="items-center !bg-kumo-base"
+              action={(
+                <PublicOverviewStats
+                  activeKey={serverFilter}
+                  onChange={setServerFilter}
+                  items={[
+                    { key: 'all', label: '主机', value: servers.length },
+                    { key: 'online', label: '在线', value: onlineCount },
+                    { key: 'offline', label: '离线', value: offlineCount },
+                    { label: '连接', value: wsConnected ? '实时' : '重连' },
+                  ]}
+                />
+              )}
+            />
             {mapOpen ? (
               <ServerLocationMap
                 echarts={echarts}
-                servers={servers}
+                servers={visibleServers}
                 resolveStatus={(server) => (server?.online ? 'online' : 'offline')}
                 height="calc(100vh - 160px)"
               />
@@ -689,7 +721,8 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
                   <div className="rounded-lg border border-kumo-line bg-kumo-base p-8 text-center text-sm text-kumo-subtle">这个状态页还没有绑定主机。</div>
                 ) : (
                   <div className={serverGridClass}>
-                    {servers.map((server) => <ServerCard key={server.id} server={server} />)}
+                    {visibleServers.map((server) => <ServerCard key={server.id} server={server} />)}
+                    {visibleServers.length === 0 && <div className="col-span-full rounded-lg border border-kumo-line bg-kumo-base p-8 text-center text-sm text-kumo-subtle">当前筛选没有匹配的主机。</div>}
                   </div>
                 )}
               </section>

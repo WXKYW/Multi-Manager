@@ -43,6 +43,45 @@ func TestParseRepoInputRejectsNonGitHubURL(t *testing.T) {
 	}
 }
 
+func TestAuthenticatedActionsPollingStaysNearRealtime(t *testing.T) {
+	service := &Service{actionLastPoll: map[int64]time.Time{}}
+	repo := Repository{ID: 1, LatestActionStatus: "completed"}
+	now := time.Now()
+	service.actionLastPoll[repo.ID] = now.Add(-9 * time.Second)
+	if service.shouldPollActions(repo, true, now) {
+		t.Fatal("authenticated repository polled before the 10 second interval")
+	}
+	service.actionLastPoll[repo.ID] = now.Add(-10 * time.Second)
+	if !service.shouldPollActions(repo, true, now) {
+		t.Fatal("authenticated repository should poll every 10 seconds")
+	}
+}
+
+func TestWorkflowWebhookUsesActionsRefresh(t *testing.T) {
+	for _, eventType := range []string{"workflow_run", "workflow_job"} {
+		if !webhookUsesActionsRefresh(eventType) {
+			t.Fatalf("%s should use the lightweight Actions refresh", eventType)
+		}
+	}
+	if webhookUsesActionsRefresh("release") {
+		t.Fatal("release webhook should use the full repository refresh")
+	}
+}
+
+func TestPublicRealtimeResponsesDisableCaching(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	setPublicPageCacheControl(recorder, PublicPage{CacheSeconds: 300}, true)
+	if got := recorder.Header().Get("Cache-Control"); got != "no-store, max-age=0" {
+		t.Fatalf("unexpected realtime cache policy: %q", got)
+	}
+
+	recorder = httptest.NewRecorder()
+	setPublicPageCacheControl(recorder, PublicPage{CacheSeconds: 300}, false)
+	if got := recorder.Header().Get("Cache-Control"); got != "public, max-age=300" {
+		t.Fatalf("unexpected full page cache policy: %q", got)
+	}
+}
+
 func TestVerifySignature(t *testing.T) {
 	body := []byte(`{"zen":"Keep it logically awesome."}`)
 	secret := "secret"
@@ -222,6 +261,8 @@ func TestTokenTestCanBindRepositoryCredential(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{"total_count": 0, "workflow_runs": []interface{}{}})
 		case "/repos/iwvw/API-Monitor/traffic/views", "/repos/iwvw/API-Monitor/traffic/clones":
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{"count": 0, "uniques": 0})
+		case "/repos/iwvw/API-Monitor/hooks":
+			_ = json.NewEncoder(w).Encode([]interface{}{})
 		default:
 			t.Fatalf("unexpected GitHub API path: %s", r.URL.Path)
 		}

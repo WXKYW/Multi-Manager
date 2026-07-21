@@ -1716,6 +1716,125 @@ func TestAgentSocketAuthenticationRequiresValidServerAndKey(t *testing.T) {
 	}
 }
 
+func TestAgentCredentialsAreScopedPerServer(t *testing.T) {
+	service, db := testService(t)
+	for _, id := range []string{"agent-a", "agent-b"} {
+		if _, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type) VALUES (?, ?, '0.0.0.0', 'agent', 'password')`, id, id); err != nil {
+			t.Fatalf("insert account %s: %v", id, err)
+		}
+	}
+	keyA, err := service.getOrGenerateAgentKeyForServer(context.Background(), db, "agent-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyB, err := service.getOrGenerateAgentKeyForServer(context.Background(), db, "agent-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keyA == keyB {
+		t.Fatal("different servers must not share an agent credential")
+	}
+	if err := service.validateAgentKeyForServer(context.Background(), db, "agent-a", keyA); err != nil {
+		t.Fatalf("own credential rejected: %v", err)
+	}
+	if err := service.validateAgentKeyForServer(context.Background(), db, "agent-a", keyB); err == nil {
+		t.Fatal("credential from another server must be rejected")
+	}
+}
+
+func TestProxyTrafficReportsAreIdempotent(t *testing.T) {
+	service, db := testService(t)
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type) VALUES ('proxy-agent', 'proxy-agent', '0.0.0.0', 'agent', 'password')`); err != nil {
+		t.Fatal(err)
+	}
+	key, err := service.getOrGenerateAgentKeyForServer(context.Background(), db, "proxy-agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := `{"boot_id":"boot-1","sequence":1,"node_id":"node-1","upload_bytes":100,"download_bytes":200}`
+	for attempt := 0; attempt < 2; attempt++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/server/agent/proxy/proxy-agent/traffic", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+key)
+		res := httptest.NewRecorder()
+		service.ServeHTTP(res, req)
+		if res.Code != http.StatusOK {
+			t.Fatalf("attempt %d status=%d body=%s", attempt, res.Code, res.Body.String())
+		}
+	}
+	var count int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM server_proxy_traffic_reports WHERE server_id = 'proxy-agent'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("traffic report count=%d, want 1", count)
+	}
+}
+
+func TestManagedProxyBindingUsesHighPortsAndProtocolTransport(t *testing.T) {
+	tests := []struct {
+		name      string
+		config    string
+		wantPort  int
+		transport string
+	}{
+		{"vless default allocation", `{"inbounds":[{"port":443,"protocol":"vless"}]}`, 0, "tcp"},
+		{"vless retained high port", `{"inbounds":[{"port":50001,"protocol":"vless"}]}`, 50001, "tcp"},
+		{"hysteria2 udp", `{"inbounds":[{"listen_port":443,"type":"hysteria2"}]}`, 0, "udp"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			port, transport, err := managedProxyBinding(test.config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if port != test.wantPort || transport != test.transport {
+				t.Fatalf("binding=(%d,%s), want=(%d,%s)", port, transport, test.wantPort, test.transport)
+			}
+		})
+	}
+}
+
+func TestManagedProxyBindingRejectsMultipleInbounds(t *testing.T) {
+	if _, _, err := managedProxyBinding(`{"inbounds":[{},{}]}`); err == nil {
+		t.Fatal("multiple inbounds should be rejected because one managed node owns one port")
+	}
+}
+
+func TestManagedProxyNodesRouteIsNotCapturedAsLegacyServerID(t *testing.T) {
+	service, _ := testService(t)
+	res := perform(service, http.MethodGet, "/api/server/agent/proxy/nodes", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("managed node list route status=%d body=%s", res.Code, res.Body.String())
+	}
+	payload := decodePayload(t, res)
+	if _, ok := payload["data"].([]interface{}); !ok {
+		t.Fatalf("managed node list should return an array: %#v", payload)
+	}
+}
+
+func TestGeneratedRealityNodeHasMihomoCompatibleFields(t *testing.T) {
+	config, raw, transport, err := generateManagedNode("mnode-test", "Tokyo", "vless-reality", "edge.example.com", "www.cloudflare.com", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transport != "tcp" {
+		t.Fatalf("transport=%s", transport)
+	}
+	var root map[string]interface{}
+	if err := json.Unmarshal([]byte(config), &root); err != nil {
+		t.Fatal(err)
+	}
+	inbound := root["inbounds"].([]interface{})[0].(map[string]interface{})
+	reality := inbound["tls"].(map[string]interface{})["reality"].(map[string]interface{})
+	shortIDs := reality["short_id"].([]interface{})
+	if len(shortIDs) != 1 || len(shortIDs[0].(string)) != 8 {
+		t.Fatalf("invalid short IDs: %#v", shortIDs)
+	}
+	if !strings.Contains(raw, "security=reality") || !strings.Contains(raw, "flow=xtls-rprx-vision") || !strings.Contains(raw, "pbk=") || !strings.Contains(raw, "sid=") {
+		t.Fatalf("invalid client URI: %s", raw)
+	}
+}
+
 func TestAgentQuickInstallCreatesHostFromName(t *testing.T) {
 	service, db := testService(t)
 

@@ -1,11 +1,12 @@
-import { toast } from './toast.js';
-
 const THEME_META_SELECTOR = 'meta[name="theme-color"]';
 const LIGHT_TITLEBAR = '#f8f7f4';
 const DARK_TITLEBAR = '#050505';
+const UPDATE_CHANNEL = 'api-monitor-app-updates';
+const RELOADED_VERSION_KEY = 'api-monitor-reloaded-version';
+const UPDATE_SIGNAL_KEY = 'api-monitor-update-signal';
 
-let updateToastId = null;
 let refreshingForUpdate = false;
+let updateChannel = null;
 
 const isStandalone = () =>
   window.matchMedia?.('(display-mode: standalone)').matches ||
@@ -75,50 +76,32 @@ const watchTitlebarColor = () => {
   }
 };
 
-const reloadForUpdate = () => {
+const reloadForUpdate = (version = 'controller-change') => {
   if (refreshingForUpdate) return;
+  if (window.sessionStorage.getItem(RELOADED_VERSION_KEY) === version) return;
+
   refreshingForUpdate = true;
+  window.sessionStorage.setItem(RELOADED_VERSION_KEY, version);
 
   window.location.reload();
 };
 
-const showUpdateAvailableToast = (registration) => {
-  const waitingWorker = registration?.waiting;
-  if (!waitingWorker || updateToastId) return;
+const handleVersionMessage = (message, shouldFanOut = true) => {
+  if (!['APP_UPDATED', 'APP_VERSION'].includes(message?.type) || !message.version) return;
 
-  updateToastId = toast.show({
-    type: 'info',
-    isManual: true,
-    title: '发现新版本',
-    description: '应用已在后台完成更新，刷新后即可使用新版。',
-    duration: 0,
-    actions: [
-      {
-        children: '立即更新',
-        size: 'sm',
-        onClick: () => {
-          toast.remove(updateToastId);
-          updateToastId = null;
-          waitingWorker.postMessage({ type: 'SKIP_WAITING' });
-        },
-      },
-      {
-        children: '稍后',
-        size: 'sm',
-        variant: 'secondary',
-        onClick: () => {
-          toast.remove(updateToastId);
-          updateToastId = null;
-        },
-      },
-    ],
-  });
+  if (shouldFanOut) {
+    updateChannel?.postMessage(message);
+    try {
+      window.localStorage.setItem(UPDATE_SIGNAL_KEY, JSON.stringify(message));
+    } catch {
+      // Storage can be unavailable in private/locked-down browser contexts.
+    }
+  }
+  reloadForUpdate(message.version);
 };
 
 const watchServiceWorkerUpdates = (registration) => {
-  if (registration.waiting && navigator.serviceWorker.controller) {
-    showUpdateAvailableToast(registration);
-  }
+  registration.waiting?.postMessage({ type: 'SKIP_WAITING' });
 
   registration.addEventListener('updatefound', () => {
     const worker = registration.installing;
@@ -126,7 +109,7 @@ const watchServiceWorkerUpdates = (registration) => {
 
     worker.addEventListener('statechange', () => {
       if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-        showUpdateAvailableToast(registration);
+        worker.postMessage({ type: 'SKIP_WAITING' });
       }
     });
   });
@@ -142,11 +125,36 @@ const registerServiceWorker = () => {
   if (!('serviceWorker' in navigator)) return;
   if (!window.isSecureContext && window.location.hostname !== 'localhost') return;
 
-  navigator.serviceWorker.addEventListener('controllerchange', reloadForUpdate);
+  const hadControllerAtStartup = Boolean(navigator.serviceWorker.controller);
+
+  if ('BroadcastChannel' in window) {
+    updateChannel = new window.BroadcastChannel(UPDATE_CHANNEL);
+    updateChannel.addEventListener('message', (event) => handleVersionMessage(event.data, false));
+  }
+
+  window.addEventListener('storage', (event) => {
+    if (event.key !== UPDATE_SIGNAL_KEY || !event.newValue) return;
+    try {
+      handleVersionMessage(JSON.parse(event.newValue), false);
+    } catch {
+      // Ignore malformed values written by an older application version.
+    }
+  });
+
+  navigator.serviceWorker.addEventListener('message', (event) => handleVersionMessage(event.data));
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadControllerAtStartup || refreshingForUpdate) return;
+
+    const controller = navigator.serviceWorker.controller;
+    if (controller) {
+      controller.postMessage({ type: 'GET_APP_VERSION' });
+      window.setTimeout(() => reloadForUpdate(), 250);
+    }
+  });
 
   window.addEventListener('load', () => {
     navigator.serviceWorker
-      .register('/sw.js', { scope: '/' })
+      .register('/sw.js', { scope: '/', updateViaCache: 'none' })
       .then((registration) => {
         watchServiceWorkerUpdates(registration);
       })

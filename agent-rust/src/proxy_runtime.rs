@@ -1,0 +1,530 @@
+#[cfg(unix)]
+use serde::{Deserialize, Serialize};
+#[cfg(unix)]
+use std::fs;
+#[cfg(unix)]
+use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, UdpSocket};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
+use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::process::{Command, Stdio};
+
+#[cfg(unix)]
+const STATE_ROOT: &str = "/var/lib/api-monitor/proxy/nodes";
+#[cfg(unix)]
+const CONFIG_ROOT: &str = "/etc/api-monitor/proxy/nodes";
+#[cfg(unix)]
+const RUNTIME_ROOT: &str = "/opt/api-monitor/proxy/versions";
+
+#[cfg(unix)]
+#[derive(Debug, Deserialize)]
+pub struct ReconcileRequest {
+    pub node_id: String,
+    pub revision: u64,
+    pub runtime: String,
+    pub runtime_version: String,
+    pub asset_url_amd64: String,
+    pub asset_sha256_amd64: String,
+    pub asset_url_arm64: String,
+    pub asset_sha256_arm64: String,
+    pub config: String,
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub remove: bool,
+    #[serde(default)]
+    pub requested_port: u16,
+    #[serde(default = "default_port_min")]
+    pub port_min: u16,
+    #[serde(default = "default_port_max")]
+    pub port_max: u16,
+    #[serde(default = "default_transport")]
+    pub transport: String,
+}
+
+#[cfg(unix)]
+#[derive(Debug, Serialize, Deserialize)]
+struct AppliedState {
+    revision: u64,
+    runtime: String,
+    assigned_port: u16,
+    #[serde(default = "default_transport")]
+    transport: String,
+}
+
+#[cfg(unix)]
+fn default_port_min() -> u16 {
+    45654
+}
+#[cfg(unix)]
+fn default_port_max() -> u16 {
+    55654
+}
+#[cfg(unix)]
+fn default_transport() -> String {
+    "tcp".to_string()
+}
+
+#[cfg(unix)]
+pub fn reconcile(raw: &str) -> Result<String, String> {
+    let request: ReconcileRequest =
+        serde_json::from_str(raw).map_err(|err| format!("invalid proxy desired state: {err}"))?;
+    validate_supported_host()?;
+    validate_node_id(&request.node_id)?;
+    let runtime = normalize_runtime(&request.runtime)?;
+    let transport = normalize_transport(&request.transport)?;
+    if request.revision == 0 || request.port_min < 1024 || request.port_min > request.port_max {
+        return Err("invalid managed proxy revision or port range".to_string());
+    }
+
+    let unit = unit_name(&request.node_id);
+    let state_dir = PathBuf::from(STATE_ROOT).join(&request.node_id);
+    let config_dir = PathBuf::from(CONFIG_ROOT).join(&request.node_id);
+    let applied_path = state_dir.join("applied.json");
+    if request.remove {
+        if let Some(state) = read_applied_state(&applied_path) {
+            remove_firewall_port(state.assigned_port, &state.transport);
+        }
+        let _ = systemctl(&["disable", "--now", &unit]);
+        let _ = fs::remove_file(format!("/etc/systemd/system/{unit}"));
+        let _ = fs::remove_dir_all(&state_dir);
+        let _ = fs::remove_dir_all(&config_dir);
+        systemctl(&["daemon-reload"])?;
+        return Ok(
+            serde_json::json!({"node_id": request.node_id, "status": "removed"}).to_string(),
+        );
+    }
+
+    let binary = ensure_runtime(&request, runtime)?;
+    fs::create_dir_all(&state_dir).map_err(|err| format!("create proxy state directory: {err}"))?;
+    fs::create_dir_all(&config_dir)
+        .map_err(|err| format!("create proxy config directory: {err}"))?;
+    set_file_mode(&state_dir, 0o700)?;
+    set_file_mode(&config_dir, 0o700)?;
+
+    let previous_state = read_applied_state(&applied_path);
+    if previous_state
+        .as_ref()
+        .map(|state| state.revision)
+        .unwrap_or(0)
+        >= request.revision
+    {
+        let state = previous_state.unwrap();
+        return Ok(serde_json::json!({
+            "node_id": request.node_id, "revision": state.revision, "runtime": runtime,
+            "assigned_port": state.assigned_port, "transport": state.transport,
+            "status": "already_applied"
+        })
+        .to_string());
+    }
+
+    let assigned_port = if previous_state.as_ref().is_some_and(|state| {
+        state.assigned_port == request.requested_port && state.transport == transport
+    }) {
+        request.requested_port
+    } else {
+        find_available_port(
+            request.requested_port,
+            request.port_min,
+            request.port_max,
+            transport,
+        )?
+    };
+    let effective_config = rewrite_inbound_port(&request.config, assigned_port)?;
+    let candidate = config_dir.join(format!("candidate-{}.json", request.revision));
+    atomic_write(&candidate, effective_config.as_bytes(), 0o600)?;
+    validate_config(runtime, &binary, &candidate)?;
+
+    let active = config_dir.join("config.json");
+    let previous = config_dir.join("previous.json");
+    if active.exists() {
+        fs::copy(&active, &previous).map_err(|err| format!("backup active proxy config: {err}"))?;
+        set_file_mode(&previous, 0o600)?;
+    }
+    fs::rename(&candidate, &active).map_err(|err| format!("activate proxy config: {err}"))?;
+    install_unit(&unit, runtime, &binary, &active)?;
+    ensure_firewall_port(assigned_port, transport)?;
+
+    let apply_result = if request.enabled {
+        systemctl(&["enable", "--now", &unit])?;
+        systemctl(&["restart", &unit]).and_then(|_| systemctl(&["is-active", "--quiet", &unit]))
+    } else {
+        systemctl(&["disable", "--now", &unit])
+    };
+    if let Err(error) = apply_result {
+        remove_firewall_port(assigned_port, transport);
+        if previous.exists() {
+            let _ = fs::copy(&previous, &active);
+            let _ = systemctl(&["restart", &unit]);
+        }
+        return Err(format!(
+            "apply proxy revision {}: {error}",
+            request.revision
+        ));
+    }
+
+    let state = serde_json::to_vec_pretty(&AppliedState {
+        revision: request.revision,
+        runtime: runtime.to_string(),
+        assigned_port,
+        transport: transport.to_string(),
+    })
+    .map_err(|err| format!("serialize applied proxy state: {err}"))?;
+    atomic_write(&applied_path, &state, 0o600)?;
+    Ok(serde_json::json!({
+        "node_id": request.node_id, "revision": request.revision, "runtime": runtime,
+        "assigned_port": assigned_port, "transport": transport, "config": effective_config,
+        "status": if request.enabled { "running" } else { "stopped" }
+    })
+    .to_string())
+}
+
+#[cfg(unix)]
+fn ensure_runtime(request: &ReconcileRequest, runtime: &str) -> Result<PathBuf, String> {
+    if request.runtime_version.is_empty() {
+        return Err("runtime_version is required".to_string());
+    }
+    let arch = std::env::consts::ARCH;
+    let (url, sha256) = match arch {
+        "x86_64" => (&request.asset_url_amd64, &request.asset_sha256_amd64),
+        "aarch64" => (&request.asset_url_arm64, &request.asset_sha256_arm64),
+        _ => return Err(format!("unsupported managed proxy architecture: {arch}")),
+    };
+    if !url.starts_with("https://")
+        || sha256.len() != 64
+        || !sha256.bytes().all(|b| b.is_ascii_hexdigit())
+    {
+        return Err("runtime asset must use HTTPS and a SHA-256 digest".to_string());
+    }
+    let version_dir = PathBuf::from(RUNTIME_ROOT)
+        .join(runtime)
+        .join(&request.runtime_version);
+    let binary = version_dir.join(runtime);
+    if binary.exists() {
+        return Ok(binary);
+    }
+    fs::create_dir_all(&version_dir).map_err(|err| format!("create runtime directory: {err}"))?;
+    let archive = version_dir.join("runtime.tar.gz");
+    run(
+        Command::new("curl")
+            .args([
+                "--fail",
+                "--location",
+                "--proto",
+                "=https",
+                "--tlsv1.2",
+                "--output",
+            ])
+            .arg(&archive)
+            .arg(url),
+        "download proxy runtime",
+    )?;
+    let output = Command::new("sha256sum")
+        .arg(&archive)
+        .output()
+        .map_err(|err| format!("run sha256sum: {err}"))?;
+    let actual = String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !output.status.success() || actual != sha256.to_ascii_lowercase() {
+        let _ = fs::remove_file(&archive);
+        return Err("proxy runtime SHA-256 verification failed".to_string());
+    }
+    run(
+        Command::new("tar")
+            .args(["-xzf"])
+            .arg(&archive)
+            .arg("--strip-components=1")
+            .arg("--wildcards")
+            .arg("*/sing-box")
+            .arg("-C")
+            .arg(&version_dir),
+        "extract sing-box",
+    )?;
+    set_file_mode(&binary, 0o755)?;
+    run(
+        Command::new(&binary).arg("version"),
+        "verify sing-box executable",
+    )?;
+    let _ = fs::remove_file(&archive);
+    Ok(binary)
+}
+
+#[cfg(unix)]
+fn install_unit(unit: &str, runtime: &str, binary: &Path, config: &Path) -> Result<(), String> {
+    let exec = if runtime == "xray" {
+        format!("{} run -config {}", binary.display(), config.display())
+    } else {
+        format!("{} run -c {}", binary.display(), config.display())
+    };
+    let content = format!("[Unit]\nDescription=API Monitor managed proxy node\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart={exec}\nRestart=on-failure\nRestartSec=3s\nNoNewPrivileges=true\nPrivateTmp=true\nProtectHome=true\nProtectSystem=strict\nReadWritePaths=/var/lib/api-monitor/proxy /etc/api-monitor/proxy\nLimitNOFILE=1048576\n\n[Install]\nWantedBy=multi-user.target\n");
+    atomic_write(
+        Path::new("/etc/systemd/system").join(unit).as_path(),
+        content.as_bytes(),
+        0o644,
+    )?;
+    systemctl(&["daemon-reload"])
+}
+
+#[cfg(unix)]
+fn ensure_firewall_port(port: u16, transport: &str) -> Result<(), String> {
+    let rule = format!("{port}/{transport}");
+    if Command::new("firewall-cmd")
+        .arg("--state")
+        .output()
+        .is_ok_and(|out| out.status.success())
+    {
+        run(
+            Command::new("firewall-cmd").args(["--permanent", "--add-port", &rule]),
+            "open firewalld managed proxy port",
+        )?;
+        return run(
+            Command::new("firewall-cmd").arg("--reload"),
+            "reload firewalld",
+        );
+    }
+    if Command::new("ufw")
+        .arg("status")
+        .output()
+        .is_ok_and(|out| out.status.success())
+    {
+        return run(
+            Command::new("ufw").args(["allow", &rule, "comment", "API Monitor managed proxy"]),
+            "open ufw managed proxy port",
+        );
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn remove_firewall_port(port: u16, transport: &str) {
+    let rule = format!("{port}/{transport}");
+    if Command::new("firewall-cmd")
+        .arg("--state")
+        .output()
+        .is_ok_and(|out| out.status.success())
+    {
+        let _ = Command::new("firewall-cmd")
+            .args(["--permanent", "--remove-port", &rule])
+            .status();
+        let _ = Command::new("firewall-cmd").arg("--reload").status();
+    } else if Command::new("ufw")
+        .arg("status")
+        .output()
+        .is_ok_and(|out| out.status.success())
+    {
+        let _ = Command::new("ufw")
+            .args(["--force", "delete", "allow", &rule])
+            .status();
+    }
+}
+
+#[cfg(unix)]
+fn validate_node_id(value: &str) -> Result<(), String> {
+    if value.len() < 3
+        || value.len() > 80
+        || !value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        Err("invalid managed proxy node_id".to_string())
+    } else {
+        Ok(())
+    }
+}
+#[cfg(unix)]
+fn normalize_runtime(value: &str) -> Result<&'static str, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "xray" | "sing-box" | "singbox" => Ok("sing-box"),
+        _ => Err("managed proxy runtime must be sing-box".to_string()),
+    }
+}
+#[cfg(unix)]
+fn normalize_transport(value: &str) -> Result<&'static str, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "" | "tcp" => Ok("tcp"),
+        "udp" => Ok("udp"),
+        _ => Err("managed proxy transport must be tcp or udp".to_string()),
+    }
+}
+#[cfg(unix)]
+fn find_available_port(requested: u16, min: u16, max: u16, transport: &str) -> Result<u16, String> {
+    let start = if requested >= min && requested <= max {
+        requested
+    } else {
+        min
+    };
+    let span = u32::from(max) - u32::from(min) + 1;
+    for offset in 0..span {
+        let port = min + (((u32::from(start) - u32::from(min) + offset) % span) as u16);
+        let addr = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port);
+        let available = if transport == "udp" {
+            UdpSocket::bind(addr).is_ok()
+        } else {
+            TcpListener::bind(addr).is_ok()
+        };
+        if available {
+            return Ok(port);
+        }
+    }
+    Err(format!(
+        "no available {transport} port in managed range {min}-{max}"
+    ))
+}
+
+#[cfg(unix)]
+fn os_release_value(key: &str) -> Option<String> {
+    fs::read_to_string("/etc/os-release")
+        .ok()?
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once('=')?;
+            (name == key).then(|| value.trim_matches('"').to_string())
+        })
+}
+
+#[cfg(unix)]
+fn validate_supported_host() -> Result<(), String> {
+    if !Path::new("/run/systemd/system").exists() {
+        return Err("managed proxy deployment requires systemd".to_string());
+    }
+    let id = os_release_value("ID").unwrap_or_default();
+    let version = os_release_value("VERSION_ID").unwrap_or_default();
+    let major = version
+        .split('.')
+        .next()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(0);
+    let supported = match id.as_str() {
+        "debian" => major >= 12,
+        "ubuntu" => major >= 22,
+        "almalinux" | "rocky" => major >= 9,
+        _ => false,
+    };
+    if supported {
+        Ok(())
+    } else {
+        Err(format!("unsupported managed proxy host: {id} {version}"))
+    }
+}
+#[cfg(unix)]
+fn rewrite_inbound_port(config: &str, port: u16) -> Result<String, String> {
+    let mut root: serde_json::Value =
+        serde_json::from_str(config).map_err(|err| format!("invalid proxy config: {err}"))?;
+    let inbounds = root
+        .get_mut("inbounds")
+        .and_then(|v| v.as_array_mut())
+        .ok_or_else(|| "managed proxy config must contain an inbounds array".to_string())?;
+    if inbounds.len() != 1 {
+        return Err("managed proxy config must contain exactly one inbound".to_string());
+    }
+    let inbound = inbounds[0]
+        .as_object_mut()
+        .ok_or_else(|| "managed proxy inbound must be an object".to_string())?;
+    let key = if inbound.contains_key("listen_port") || inbound.get("type").is_some() {
+        "listen_port"
+    } else {
+        "port"
+    };
+    inbound.remove(if key == "port" { "listen_port" } else { "port" });
+    inbound.insert(key.to_string(), serde_json::Value::from(port));
+    serde_json::to_string(&root).map_err(|err| format!("serialize proxy config: {err}"))
+}
+#[cfg(unix)]
+fn validate_config(runtime: &str, binary: &Path, path: &Path) -> Result<(), String> {
+    let mut command = Command::new(binary);
+    let _ = runtime;
+    command.args(["check", "-c"]);
+    let output = command
+        .arg(path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|err| format!("start {runtime} validation: {err}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+#[cfg(unix)]
+fn unit_name(node_id: &str) -> String {
+    format!("api-monitor-proxy@{node_id}.service")
+}
+#[cfg(unix)]
+fn systemctl(args: &[&str]) -> Result<(), String> {
+    run(
+        Command::new("systemctl").args(args),
+        &format!("systemctl {}", args.join(" ")),
+    )
+}
+#[cfg(unix)]
+fn run(command: &mut Command, label: &str) -> Result<(), String> {
+    let output = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|err| format!("{label}: {err}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "{label}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))
+    }
+}
+#[cfg(unix)]
+fn read_applied_state(path: &Path) -> Option<AppliedState> {
+    fs::read(path)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+}
+#[cfg(unix)]
+fn atomic_write(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, bytes).map_err(|err| format!("write {}: {err}", tmp.display()))?;
+    set_file_mode(&tmp, mode)?;
+    fs::rename(&tmp, path).map_err(|err| format!("commit {}: {err}", path.display()))
+}
+#[cfg(unix)]
+fn set_file_mode(path: &Path, mode: u32) -> Result<(), String> {
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))
+        .map_err(|err| format!("set permissions on {}: {err}", path.display()))
+}
+
+#[cfg(not(unix))]
+pub fn reconcile(_raw: &str) -> Result<String, String> {
+    Err("proxy runtime management is supported on Linux only".to_string())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    #[test]
+    fn rewrites_xray_and_sing_box_ports() {
+        let x = rewrite_inbound_port(r#"{"inbounds":[{"port":443,"protocol":"vless"}]}"#, 45654)
+            .unwrap();
+        let s = rewrite_inbound_port(
+            r#"{"inbounds":[{"type":"hysteria2","listen_port":443}]}"#,
+            45655,
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&x).unwrap()["inbounds"][0]["port"],
+            45654
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&s).unwrap()["inbounds"][0]["listen_port"],
+            45655
+        );
+    }
+    #[test]
+    fn rejects_unsafe_node_ids() {
+        assert!(validate_node_id("../../bad").is_err());
+    }
+}

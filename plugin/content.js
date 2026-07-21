@@ -160,13 +160,33 @@ async function showCodePicker(input) {
   picker.style.width = `${Math.max(rect.width, 240)}px`;
   
   const listCont = picker.querySelector('#api-2fa-list');
-  safeSendMessage({ type: 'GET_ACCOUNTS', domain: window.location.hostname }, (response) => {
+  safeSendMessage({ type: 'GET_ACCOUNTS', frameHostname: window.location.hostname }, (response) => {
     if (!response || !response.success) { 
       listCont.innerHTML = `<div class="error"><p>${response?.error || '获取失败'}</p></div>`; return; 
     }
-    allAccounts = response.matched?.length > 0 ? response.matched : response.data;
-    if (!allAccounts || allAccounts.length === 0) { 
-      listCont.innerHTML = '<div class="empty">📭 暂无账号</div>'; return; 
+    allAccounts = Array.isArray(response.matched) ? response.matched : [];
+    if (allAccounts.length === 0) {
+      const availableAccounts = Array.isArray(response.data) ? response.data : [];
+      if (availableAccounts.length === 0) {
+        listCont.innerHTML = '<div class="empty">暂无账号</div>';
+        return;
+      }
+      const hostname = response.matchContext?.hostname || window.location.hostname;
+      listCont.replaceChildren();
+      const emptyState = document.createElement('div');
+      emptyState.className = 'empty';
+      emptyState.textContent = hostname ? `未找到与 ${hostname} 匹配的账号` : '未找到匹配账号';
+      const showAllButton = document.createElement('button');
+      showAllButton.className = 'api-monitor-2fa-show-all';
+      showAllButton.type = 'button';
+      showAllButton.textContent = '显示全部账号';
+      showAllButton.addEventListener('click', () => {
+        allAccounts = availableAccounts;
+        renderPickerList(listCont, allAccounts, input);
+      });
+      emptyState.appendChild(showAllButton);
+      listCont.appendChild(emptyState);
+      return;
     }
     renderPickerList(listCont, allAccounts, input);
   });

@@ -1,6 +1,6 @@
 # API Monitor AI Context
 
-Last updated: 2026-07-07
+Last updated: 2026-07-22
 
 This is the first file an AI maintainer should read before changing API Monitor. It records the current architecture, non-negotiable rules, high-risk files, and safe maintenance commands.
 
@@ -11,6 +11,7 @@ This is the first file an AI maintainer should read before changing API Monitor.
 - Backend: Go single-process backend in `backend-go/`, with routes governed by `backend-go/internal/manifest/manifest.go`.
 - Persistence: SQLite remains the only durable store. Do not replace it unless there is an explicit product decision.
 - Agent: Rust agent in `agent-rust/`, connected through the Go backend's Engine.IO/Socket.IO-compatible server.
+- Managed proxy runtime: Linux-only Agent capability that reconciles versioned Xray/sing-box desired state. See `docs/adr/0001-managed-proxy-runtime.md`.
 - Runtime data: data, backups, uploads, secrets, and local environment files are intentionally ignored and must be protected.
 
 Normal development should assume the Go backend owns the active route surface. Node sidecar-era Express/module documentation is historical unless a current file explicitly says otherwise.
@@ -36,6 +37,8 @@ Touch these files only for focused reasons. Avoid broad formatting or opportunis
 - Every backend route change must be represented in the Go route manifest and pass route governance.
 - Do not delete or rewrite `.env`, `data/`, `backup/`, `backend-go/data/`, `backend-go/internal/server/data/`, `node_modules/`, or `public/` by default.
 - Do not replace SQLite, split into microservices, or perform a large architecture rewrite unless explicitly requested.
+- Never combine machine NIC traffic, managed-node raw traffic, subscriber usage, or imported external-node traffic into one total.
+- Managed internal proxy nodes use panel-assigned ports in the inclusive range `45654-55654`; never assume port 443. Allocation is unique per server, Agent bind-checked before apply, and does not alter imported external-node ports.
 - Do not optimize performance proactively when current performance is acceptable. Prefer governance, clarity, and low-risk locality improvements.
 - Do not revert existing uncommitted user or AI changes unless explicitly asked.
 
@@ -130,4 +133,3 @@ For giant files, split only when a related change justifies it. Use this order:
 5. Page container.
 
 Keep each step independently verifiable.
-

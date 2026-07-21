@@ -1962,3 +1962,9 @@ func (s *Service) runAgentTaskAndWait(serverID string, taskType int, command str
 func (s *Service) RunCommandTaskAndWait(serverID string, command string, timeout time.Duration) (string, error) {
 	return s.runAgentTaskAndWait(serverID, 1, command, timeout)
 }
+
+// RunProxyRuntimeTaskAndWait exposes a structured, non-shell task seam for the
+// managed proxy module. Callers cannot vary the task type or timeout.
+func (s *Service) RunProxyRuntimeTaskAndWait(serverID, desiredState string) (string, error) {
+	return s.runAgentTaskAndWait(serverID, 50, desiredState, 3*time.Minute)
+}

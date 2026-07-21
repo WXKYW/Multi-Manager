@@ -310,12 +310,13 @@ func (s *Service) publicPageBySlug(w http.ResponseWriter, r *http.Request, slug 
 		return
 	}
 
-	payload, err := s.publicPagePayload(r.Context(), db, page, !boolQuery(r, "summary", false))
+	summary := boolQuery(r, "summary", false)
+	payload, err := s.publicPagePayload(r.Context(), db, page, !summary)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", clamp(page.CacheSeconds, 30, 86400)))
+	setPublicPageCacheControl(w, page, summary)
 	response.OK(w, payload)
 }
 
@@ -342,12 +343,13 @@ func (s *Service) publicPageByDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload, err := s.publicPagePayload(r.Context(), db, page, !boolQuery(r, "summary", false))
+	summary := boolQuery(r, "summary", false)
+	payload, err := s.publicPagePayload(r.Context(), db, page, !summary)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", clamp(page.CacheSeconds, 30, 86400)))
+	setPublicPageCacheControl(w, page, summary)
 	response.OK(w, payload)
 }
 
@@ -389,8 +391,16 @@ func (s *Service) publicPageRepositoryBySlug(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	s.attachPublicRepositoryWorkflowDetail(r.Context(), db, item, latestRun)
-	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", clamp(page.CacheSeconds, 30, 86400)))
+	setPublicPageCacheControl(w, page, true)
 	response.OK(w, item)
+}
+
+func setPublicPageCacheControl(w http.ResponseWriter, page PublicPage, realtime bool) {
+	if realtime {
+		w.Header().Set("Cache-Control", "no-store, max-age=0")
+		return
+	}
+	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", clamp(page.CacheSeconds, 30, 86400)))
 }
 
 func (s *Service) publicPageEventStream(w http.ResponseWriter, r *http.Request, slug string) {
@@ -1266,7 +1276,11 @@ func (s *Service) configureRepositoryWebhook(w http.ResponseWriter, r *http.Requ
 	hookID, created, _, err := s.client.configureWebhook(r.Context(), token, repo.Owner, repo.Name, payloadURL, secret)
 	s.auditOperation(r.Context(), db, repo.ID, "webhook_configure", payloadURL, payload, map[string]interface{}{"hook_id": hookID, "created": created}, err)
 	if err != nil {
-		response.Error(w, http.StatusBadGateway, err.Error())
+		message := err.Error()
+		if webhookPermissionDenied(err) {
+			message = fmt.Sprintf("Token 无权管理 %s 的 Webhook。Fine-grained PAT 需要将 Resource owner 设为 %s、授权当前仓库并开启 Webhooks: read and write；若组织要求审批，还需等待组织管理员批准。", repo.FullName, repo.Owner)
+		}
+		response.Error(w, http.StatusBadGateway, message)
 		return
 	}
 	if _, err := db.ExecContext(r.Context(), `UPDATE github_repositories SET webhook_enabled = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, repo.ID); err != nil {
@@ -1274,6 +1288,16 @@ func (s *Service) configureRepositoryWebhook(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	response.OK(w, map[string]interface{}{"hook_id": hookID, "created": created, "payload_url": payloadURL})
+}
+
+func webhookPermissionDenied(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "resource not accessible by personal access token") ||
+		strings.Contains(message, "requires webhooks") ||
+		strings.Contains(message, "must have webhooks")
 }
 
 func (s *Service) repositoryTraffic(w http.ResponseWriter, r *http.Request, idText string) {

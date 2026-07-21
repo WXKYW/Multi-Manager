@@ -48,37 +48,20 @@ async function fetchTotpAccounts() {
   }
 }
 
-// 根据域名匹配账号
-function matchAccountsByDomain(accounts, domain) {
-  if (!accounts || !domain) return [];
-
-  const domainParts = domain.toLowerCase().split('.');
-  // 简单但更健壮的主域名提取 (处理 .com.cn 等常见多级后缀)
-  let mainDomain = domainParts.slice(-2).join('.');
-  if (domainParts.length >= 3 && ['com', 'net', 'org', 'edu', 'gov'].includes(domainParts[domainParts.length - 2])) {
-      mainDomain = domainParts.slice(-3).join('.');
-  }
-  
-  const searchTerms = [domain, mainDomain, ...domainParts.filter(p => p.length > 2 && !['com', 'net', 'org', 'www'].includes(p))];
-
-  return accounts.filter(account => {
-    const issuer = (account.issuer || '').toLowerCase().replace(/\s/g, '');
-    const accountName = (account.account || '').toLowerCase();
-
-    return searchTerms.some(term => 
-        issuer.includes(term) || 
-        term.includes(issuer) || 
-        accountName.includes(term)
-    );
-  });
-}
+importScripts('domain-matcher.js');
 
 // 监听来自 content script 和 popup 的消息
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'GET_ACCOUNTS') {
     fetchTotpAccounts().then(result => {
-      if (result.success && message.domain) {
-        result.matched = matchAccountsByDomain(result.data, message.domain);
+      if (result.success && sender.tab) {
+        const match = ApiMonitorDomainMatcher.matchAccounts(result.data, {
+          tabUrl: sender.tab.url,
+          frameUrl: sender.url,
+          frameHostname: message.frameHostname,
+        });
+        result.matched = match.matches;
+        result.matchContext = match.context;
       }
       sendResponse(result);
     });

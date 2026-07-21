@@ -3,7 +3,9 @@ import { Button } from '@cloudflare/kumo/components/button';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { useCloudflareSpotlight } from '../hooks/useCloudflareSpotlight.js';
 import { useDraggableScroll } from '../hooks/useDraggableScroll.js';
+import PublicOverviewStats from '../components/public/PublicOverviewStats.jsx';
 import { formatGitHubRepositoryDescription } from '../modules/githubEmoji.js';
+import { normalizeWorkflowJobName, workflowJobMatchesDefinition } from '../modules/githubWorkflowJobs.js';
 import {
   getPublicGithubDataUpdatedAt,
   getPublicGithubRefreshInterval,
@@ -37,9 +39,9 @@ const parsePublicGithubStreamPayload = (event) => {
 };
 
 const statusPanelClass = {
-  success: 'border-kumo-success/45 bg-kumo-success/15 text-kumo-success',
-  danger: 'border-kumo-danger/45 bg-kumo-danger/15 text-kumo-danger',
-  warning: 'border-kumo-warning/45 bg-kumo-warning/15 text-kumo-warning',
+  success: 'border-kumo-success/45 bg-kumo-base text-kumo-success',
+  danger: 'border-kumo-danger/45 bg-kumo-base text-kumo-danger',
+  warning: 'border-kumo-warning/45 bg-kumo-base text-kumo-warning',
   neutral: 'border-kumo-interact/80 bg-kumo-base text-kumo-strong',
 };
 
@@ -140,43 +142,6 @@ const actionFlowStatusMetaClass = (status, muted = false) => {
 const workflowJobStep = (job) => {
   const steps = Array.isArray(job?.steps) ? job.steps : [];
   return steps.find((step) => step.status === 'in_progress') || null;
-};
-
-const normalizeWorkflowJobName = (value) => String(value || '').trim().toLowerCase();
-const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-const workflowTemplatePattern = (value) => String(value || '')
-  .split(/\$\{\{[^}]+}}/g)
-  .map((part) => escapeRegExp(part).replace(/\s+/g, '\\s+'))
-  .join('.*');
-
-const workflowMatrixJobMatches = (jobName, definition) => {
-  if (!definition?.matrix) return false;
-  const id = normalizeWorkflowJobName(definition.id);
-  if (id === 'pytest-full') return /^run tests python .*\(\d+\)/.test(jobName);
-  if (id === 'pytest-partial') return jobName.startsWith('run tests python ') && !/^run tests python .*\(\d+\)/.test(jobName);
-  if (id === 'pytest-mariadb') return jobName.startsWith('run mariadb:') || jobName.startsWith('run mysql:');
-  if (id === 'pytest-postgres') return jobName.startsWith('run postgres:');
-  if (id === 'lint-hadolint') return jobName.startsWith('check dockerfile') || jobName.startsWith('check script/hassfest/dockerfile');
-  if (id === 'base') return jobName.startsWith('prepare dependencies');
-  if (id === 'audit-licenses') return jobName.startsWith('audit licenses');
-  const template = workflowTemplatePattern(definition.name);
-  if (!template) return false;
-  return new RegExp(`^${template}$`, 'i').test(jobName);
-};
-
-const workflowJobMatchesDefinition = (job, definition) => {
-  const jobName = normalizeWorkflowJobName(job?.name);
-  const id = normalizeWorkflowJobName(definition?.id);
-  const name = normalizeWorkflowJobName(definition?.name);
-  if (!jobName) return false;
-  if (workflowMatrixJobMatches(jobName, definition)) return true;
-  return [id, name].some((value) => value && (
-    jobName === value ||
-    jobName.startsWith(`${value} (`) ||
-    jobName.startsWith(`${value} / `) ||
-    jobName.startsWith(`${value}:`)
-  ));
 };
 
 const workflowJobPriority = (value) => ({
@@ -1737,7 +1702,7 @@ function RepositoryCard({ item, now, config, detailLoading = false }) {
           </div>
         </div>
         {actionOverflows && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 hidden h-14 bg-gradient-to-t from-kumo-base/80 via-kumo-base/45 to-transparent opacity-100 backdrop-blur-[1.5px] transition-opacity duration-200 ease-out group-hover:opacity-0 lg:block" aria-hidden="true" />
+          <div className="pointer-events-none absolute inset-x-px bottom-px hidden h-12 rounded-b-lg bg-gradient-to-t from-kumo-base/95 via-kumo-base/55 to-transparent opacity-100 transition-opacity duration-300 ease-out group-hover:opacity-0 lg:block" aria-hidden="true" />
         )}
       </div>
     </article>
@@ -1753,6 +1718,7 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
   const [error, setError] = useState('');
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const [detailStatusByRepo, setDetailStatusByRepo] = useState({});
+  const [repositoryFilter, setRepositoryFilter] = useState('all');
   const pageRef = useRef(null);
   const detailRequestSeqRef = useRef({});
   const loadRequestSeqRef = useRef(0);
@@ -1985,6 +1951,13 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
   const warningCount = repositories.filter((repo) => statusTone(repo?.latest_run?.conclusion || repo?.latest_run?.status || repo?.latest_action_conclusion || repo?.latest_action_status) === 'warning').length;
   const successCount = repositories.filter((repo) => statusTone(repo?.latest_run?.conclusion || repo?.latest_run?.status || repo?.latest_action_conclusion || repo?.latest_action_status) === 'success').length;
   const neutralCount = Math.max(0, repositories.length - failureCount - warningCount - successCount);
+  const visibleRepositories = repositoryFilter === 'success'
+    ? repositories.filter((repo) => statusTone(repo?.latest_run?.conclusion || repo?.latest_run?.status || repo?.latest_action_conclusion || repo?.latest_action_status) === 'success')
+    : repositoryFilter === 'failure'
+      ? repositories.filter((repo) => statusTone(repo?.latest_run?.conclusion || repo?.latest_run?.status || repo?.latest_action_conclusion || repo?.latest_action_status) === 'error')
+      : repositoryFilter === 'other'
+        ? repositories.filter((repo) => !['success', 'error'].includes(statusTone(repo?.latest_run?.conclusion || repo?.latest_run?.status || repo?.latest_action_conclusion || repo?.latest_action_status)))
+        : repositories;
   const pageTone = repositories.length === 0 ? 'neutral' : failureCount > 0 ? 'danger' : warningCount > 0 ? 'warning' : 'success';
   const summaryText = repositories.length === 0
     ? '暂无公开仓库'
@@ -2046,24 +2019,16 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
                     <p className="mt-1.5 max-w-3xl text-[13px] leading-5 opacity-90">{page.description}</p>
                   )}
                 </div>
-                <div className="grid grid-cols-2 gap-1.5 text-center text-[11px] sm:grid-cols-4">
-                  <div className="rounded-md border border-current/35 bg-kumo-base/60 px-2 py-1.5">
-                    <div className="tabular-nums text-sm font-bold">{repositories.length}</div>
-                    <div className="opacity-80">仓库</div>
-                  </div>
-                  <div className="rounded-md border border-current/35 bg-kumo-base/60 px-2 py-1.5">
-                    <div className="tabular-nums text-sm font-bold">{successCount}</div>
-                    <div className="opacity-80">正常</div>
-                  </div>
-                  <div className="rounded-md border border-current/35 bg-kumo-base/60 px-2 py-1.5">
-                    <div className="tabular-nums text-sm font-bold">{failureCount}</div>
-                    <div className="opacity-80">失败</div>
-                  </div>
-                  <div className="rounded-md border border-current/35 bg-kumo-base/60 px-2 py-1.5">
-                    <div className="tabular-nums text-sm font-bold">{warningCount + neutralCount}</div>
-                    <div className="opacity-80">其他</div>
-                  </div>
-                </div>
+                <PublicOverviewStats
+                  activeKey={repositoryFilter}
+                  onChange={setRepositoryFilter}
+                  items={[
+                    { key: 'all', label: '仓库', value: repositories.length },
+                    { key: 'success', label: '正常', value: successCount },
+                    { key: 'failure', label: '失败', value: failureCount },
+                    { key: 'other', label: '其他', value: warningCount + neutralCount },
+                  ]}
+                />
               </div>
             </section>
 
@@ -2073,7 +2038,7 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
               </section>
             ) : (
               <section className="grid gap-3">
-                {repositories.map((item) => (
+                {visibleRepositories.map((item) => (
                   <RepositoryCard
                     key={item.id || item.full_name}
                     item={item}
@@ -2082,6 +2047,9 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
                     detailLoading={detailStatusByRepo[String(item.id || '')] === 'loading'}
                   />
                 ))}
+                {visibleRepositories.length === 0 && (
+                  <div className="rounded-lg border border-kumo-interact/70 bg-kumo-base p-6 text-center text-sm text-kumo-subtle">当前筛选没有匹配的仓库。</div>
+                )}
               </section>
             )}
 

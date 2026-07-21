@@ -31,8 +31,14 @@ func TestLoadSubscriptionsDoesNotQueryWhileRowsOpen(t *testing.T) {
 	if err := ensureSchema(ctx, db); err != nil {
 		t.Fatalf("ensure schema: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO subscription_subscriptions (id, name, public_token, enabled) VALUES ('sub_test', '测试订阅', 'token_test', 1)`); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO subscription_subscriptions (id, name, public_token, enabled, include_internal_nodes, include_external_nodes) VALUES ('sub_test', '测试订阅', 'token_test', 1, 0, 1)`); err != nil {
 		t.Fatalf("insert subscription: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO subscription_plans (id, name, total_bytes, cycle_type, cycle_day, rate_limit_enabled, rate_limit_per_minute, include_internal_nodes, include_external_nodes) VALUES ('plan_test', '测试套餐', 4096, 'monthly', 6, 1, 20, 0, 1)`); err != nil {
+		t.Fatalf("insert plan: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE subscription_subscriptions SET plan_id = 'plan_test' WHERE id = 'sub_test'`); err != nil {
+		t.Fatalf("bind plan: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO subscription_nodes (id, subscription_id, name, enabled) VALUES ('node_test', 'sub_test', '测试节点', 1)`); err != nil {
 		t.Fatalf("insert node: %v", err)
@@ -57,6 +63,9 @@ func TestLoadSubscriptionsDoesNotQueryWhileRowsOpen(t *testing.T) {
 	}
 	if items[0].AccessCountToday != 1 {
 		t.Fatalf("AccessCountToday = %d, want 1", items[0].AccessCountToday)
+	}
+	if items[0].TotalBytes != 4096 || items[0].CycleDay != 6 {
+		t.Fatalf("plan policy was not applied: %#v", items[0])
 	}
 }
 
@@ -95,6 +104,35 @@ func TestLoadNodesDoesNotQueryQualityWhileRowsOpen(t *testing.T) {
 	}
 	if len(nodes) != 1 || nodes[0].TrafficServerID != "server_one" {
 		t.Fatalf("nodes = %#v, want bound server id preserved", nodes)
+	}
+}
+
+func TestImportedNodeDefaultsToExternalUnmanagedTrafficUnavailable(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := insertNode(ctx, tx, Node{ID: "external", SubscriptionID: "profile", Name: "external", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := loadNodes(ctx, db, "profile", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 1 || nodes[0].Ownership != "external" || nodes[0].Management != "unmanaged" || nodes[0].TrafficReporting != "unavailable" {
+		t.Fatalf("unexpected imported node classification: %#v", nodes)
 	}
 }
 
@@ -739,7 +777,7 @@ func TestDeleteProfileBlocksWhenNodesOrLinksExist(t *testing.T) {
 	}
 }
 
-func TestComputeTrafficReadsUpstreamInfoFromProfile(t *testing.T) {
+func TestComputeTrafficDoesNotApplyExternalUpstreamUsageToSubscription(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -757,8 +795,47 @@ func TestComputeTrafficReadsUpstreamInfoFromProfile(t *testing.T) {
 	}
 
 	info := computeTraffic(ctx, db, Subscription{ID: "link_one", ProfileID: "profile_one", TrafficSource: "upstream"})
-	if info.Upload != 11 || info.Download != 22 || info.Total != 100 || info.Expire != 1234 {
+	if info.Upload != 0 || info.Download != 0 || info.Total != 0 || info.Source != "panel" || info.MeteringStatus != "unavailable" {
 		t.Fatalf("traffic = %#v", info)
+	}
+}
+
+func TestPlanOverridesSubscriptionPolicy(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.ExecContext(ctx, `INSERT INTO subscription_plans(id,name,total_bytes,cycle_type,cycle_day,rate_limit_enabled,rate_limit_per_minute,node_ids,include_internal_nodes,include_external_nodes) VALUES('plan_one','基础套餐',1000,'monthly',8,1,12,'["internal_one","external_one"]',1,1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub := Subscription{PlanID: "plan_one", TotalBytes: 9, CycleType: "none", NodeFilterIDs: []string{"wrong"}}
+	applyPlanToSubscription(ctx, db, &sub)
+	if sub.TotalBytes != 1000 || sub.CycleType != "monthly" || sub.CycleDay != 8 || sub.RateLimitPerMinute != 12 || len(sub.NodeFilterIDs) != 2 || !sub.IncludeInternalNodes || !sub.IncludeExternalNodes {
+		t.Fatalf("plan policy not applied: %#v", sub)
+	}
+}
+
+func TestExternalNodeTrafficIsNotPartOfPlanUsage(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	info := computeTraffic(ctx, db, Subscription{PlanID: "plan_one", TotalBytes: 2048, IncludeExternalNodes: true, TrafficSource: "upstream", ManualUploadBytes: 999})
+	if info.Upload != 0 || info.Download != 0 || info.Total != 2048 || info.Source != "panel" {
+		t.Fatalf("external usage leaked into plan traffic: %#v", info)
 	}
 }
 
@@ -876,14 +953,14 @@ func TestComputeTrafficFromNodeBoundServers(t *testing.T) {
 		t.Fatalf("commit tx: %v", err)
 	}
 
-	info := computeTraffic(ctx, db, Subscription{ID: "link_one", ProfileID: "profile_one", TrafficSource: "node_servers"})
-	if info.Upload != 4000 || info.Download != 6000 || info.Total != 30000 || info.Source != "node_servers" {
-		t.Fatalf("traffic = %#v, want upload 4000 download 6000 total 30000", info)
+	info := computeTraffic(ctx, db, Subscription{ID: "link_one", ProfileID: "profile_one", TrafficSource: "node_servers", TotalBytes: 50000})
+	if info.Upload != 0 || info.Download != 0 || info.Total != 50000 || info.Source != "panel" || info.MeteringStatus != "unavailable" {
+		t.Fatalf("traffic = %#v, host NIC totals must not be treated as subscription usage", info)
 	}
 
-	filtered := computeTraffic(ctx, db, Subscription{ID: "link_one", ProfileID: "profile_one", TrafficSource: "node_servers", NodeFilterIDs: []string{"node_two"}})
-	if filtered.Upload != 3000 || filtered.Download != 4000 || filtered.Total != 20000 || filtered.Source != "node_servers" {
-		t.Fatalf("filtered traffic = %#v, want upload 3000 download 4000 total 20000", filtered)
+	filtered := computeTraffic(ctx, db, Subscription{ID: "link_one", ProfileID: "profile_one", TrafficSource: "node_servers", NodeFilterIDs: []string{"node_two"}, TotalBytes: 50000})
+	if filtered.Upload != 0 || filtered.Download != 0 || filtered.Total != 50000 || filtered.Source != "panel" || filtered.MeteringStatus != "unavailable" {
+		t.Fatalf("filtered traffic = %#v, node filters must not turn host NIC totals into subscription usage", filtered)
 	}
 }
 

@@ -143,6 +143,10 @@ COPY --from=go-builder --chown=appuser:appuser /app/backend-go/api-monitor /app/
 COPY --from=agent-builder --chown=appuser:appuser /app/agent-rust/agent-linux-amd64 /app/dist/agent/
 COPY --from=agent-builder --chown=appuser:appuser /app/agent-rust/agent-linux-arm64 /app/dist/agent/
 COPY --from=agent-builder --chown=appuser:appuser /app/agent-rust/agent-windows-amd64.exe /app/dist/agent/
+RUN cd /app/dist/agent && \
+    sha256sum agent-linux-amd64 | awk '{print $1}' > agent-linux-amd64.sha256 && \
+    sha256sum agent-linux-arm64 | awk '{print $1}' > agent-linux-arm64.sha256 && \
+    sha256sum agent-windows-amd64.exe | awk '{print $1}' > agent-windows-amd64.exe.sha256
 
 # 4. 复制 2FA 浏览器插件目录
 COPY --chown=appuser:appuser plugin /app/plugin

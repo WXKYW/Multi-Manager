@@ -23,7 +23,7 @@ func (s *Service) getAgentInstallCommand(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	agentKey, err := s.getOrGenerateAgentKey(r.Context(), db)
+	agentKey, err := s.getOrGenerateAgentKeyForServer(r.Context(), db, accountID)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "Failed to get agent key: "+err.Error())
 		return

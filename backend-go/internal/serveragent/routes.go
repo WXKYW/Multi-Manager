@@ -35,7 +35,7 @@ func (s *Service) handleAgentRoutes(w http.ResponseWriter, r *http.Request, db *
 			response.Error(w, http.StatusBadRequest, "account_id required")
 			return
 		}
-		key, err := s.getOrGenerateAgentKey(r.Context(), db)
+		key, err := s.getOrGenerateAgentKeyForServer(r.Context(), db, accountID)
 		if err != nil {
 			response.Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -99,6 +99,21 @@ func (s *Service) handleAgentRoutes(w http.ResponseWriter, r *http.Request, db *
 	case len(subparts) == 2 && subparts[0] == "connection-info" && r.Method == http.MethodGet:
 		accountID := subparts[1]
 		s.handleAgentConnectionInfo(w, r, db, accountID)
+
+	case len(subparts) == 2 && subparts[0] == "proxy" && subparts[1] == "nodes":
+		s.handleManagedProxyNodes(w, r, db, "")
+	case len(subparts) == 3 && subparts[0] == "proxy" && subparts[1] == "nodes":
+		s.handleManagedProxyNodes(w, r, db, subparts[2])
+	case len(subparts) == 4 && subparts[0] == "proxy" && subparts[1] == "nodes" && subparts[3] == "reconcile" && r.Method == http.MethodPost:
+		s.reconcileManagedProxyNode(w, r, db, subparts[2])
+	case len(subparts) == 2 && subparts[0] == "proxy" && r.Method == http.MethodGet:
+		s.getProxyDesiredState(w, r, db, subparts[1])
+	case len(subparts) == 2 && subparts[0] == "proxy" && r.Method == http.MethodPut:
+		s.putProxyDesiredState(w, r, db, subparts[1])
+	case len(subparts) == 3 && subparts[0] == "proxy" && subparts[2] == "reconcile" && r.Method == http.MethodPost:
+		s.reconcileProxyDesiredState(w, r, db, subparts[1])
+	case len(subparts) == 3 && subparts[0] == "proxy" && subparts[2] == "traffic" && r.Method == http.MethodPost:
+		s.recordProxyTraffic(w, r, db, subparts[1])
 
 	// POST /api/server/agent/uninstall/{id}
 	case len(subparts) == 2 && subparts[0] == "uninstall" && r.Method == http.MethodPost:
