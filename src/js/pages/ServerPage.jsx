@@ -34,6 +34,7 @@ import { canOpenTerminal, hasSshEndpoint, isAgentServer, resolveTerminalProtocol
 import { canOpenRemoteDesktop, remoteDesktopPath } from '../modules/remoteDesktop.js';
 import { readSftpFile, writeSftpFile } from '../modules/server-sftp.js';
 import { formatDockerContainerPorts } from '../modules/docker-format.js';
+import { summarizeDockerContainers } from '../modules/dockerSummary.js';
 import {
   buildAgentInstallCommand,
   buildAgentInstallEndpoint,
@@ -7920,8 +7921,7 @@ function ServerPage() {
                         const coreText = physicalCores && logicalCores && physicalCores !== logicalCores
                           ? `${physicalCores}核 / ${logicalCores}线程`
                           : `${physicalCores || '-'}核`;
-                        const dockerContainers = server.info?.docker?.containers || [];
-                        const runningContainers = dockerContainers.filter(c => getDockerContainerState(c) === 'running').length;
+                        const dockerSummary = summarizeDockerContainers(server.info?.docker, getDockerContainerState);
                         const lifecycle = getServerLifecycle(server);
                         const networkQuality = networkQualityByServer[server.id] || {};
                         const networkQualitySeries = isExpanded ? buildNetworkQualitySeries(networkQuality, isDarkMode) : [];
@@ -7996,7 +7996,7 @@ function ServerPage() {
                                     )}
                                     {isCompactColumnVisible('load') && (
                                       <Table.Cell className="!px-[2px] !py-1.5 text-center whitespace-nowrap">
-                                        <code className={`rounded-md bg-kumo-recessed/50 px-1.5 py-1 font-mono text-[10px] ${rowMuted ? 'text-kumo-subtle' : 'text-kumo-strong'} ${COMPACT_INLINE_BOX_CLASS}`}>
+                                        <code className={`rounded-md bg-kumo-recessed/50 px-2 py-1 font-mono text-xs font-semibold ${rowMuted ? 'text-kumo-subtle' : 'text-kumo-strong'} ${COMPACT_INLINE_BOX_CLASS}`}>
                                           {getPrimaryLoadValue(server.info?.cpu?.Load)}
                                         </code>
                                       </Table.Cell>
@@ -8114,10 +8114,10 @@ function ServerPage() {
                                     <>
                                       <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(154px,1fr))]">
                                         <DenseDetailChip label="核心" value={coreText} />
-                                        <DenseDetailChip label="CPU 温度" value={cpuTemp > 0 ? `${Math.round(cpuTemp)}°C` : '-'} valueClassName={getTempColorClass(cpuTemp)} />
+                                        <DenseDetailChip label="Agent 版本" value={server.info?.agentVersion || '未报告'} valueClassName="font-mono text-kumo-strong" />
                                         <DenseDetailChip label="内存" value={`${server.info?.memory?.Used || '-'} / ${server.info?.memory?.Total || '-'}`} />
                                         <DenseDetailChip label="连接" value={server.info?.network?.connections || 0} />
-                                        <DenseDetailChip label="Docker" value={server.info?.docker?.installed ? `${runningContainers}/${dockerContainers.length} 运行` : '未安装'} />
+                                        <DenseDetailChip label="Docker" value={server.info?.docker?.installed ? `${dockerSummary.running}/${dockerSummary.total} 运行` : '未安装'} />
                                         <DenseDetailChip label="生命周期" value={lifecycle.expiresAt ? `${lifecycle.label} / ${Math.round(lifecycle.remainingPercent)}%` : '永久'} valueClassName={lifecycle.toneClass} />
                                         <DenseDetailChip label="模式" value={getServerMonitorModeLabel(server)} />
                                       </div>
@@ -8296,11 +8296,12 @@ function ServerPage() {
                   ));
                   const tx = parseSpeed(server.info?.network?.tx_speed);
                   const rx = parseSpeed(server.info?.network?.rx_speed);
-                  const dockerContainers = server.info?.docker?.containers || [];
+                  const dockerSummary = summarizeDockerContainers(server.info?.docker, getDockerContainerState);
+                  const dockerContainers = dockerSummary.containers;
                   const dockerExpanded = expandedDockerPanels.includes(server.id);
-                  const runningContainers = dockerContainers.filter(c => getDockerContainerState(c) === 'running').length;
-                  const pausedContainers = dockerContainers.filter(c => getDockerContainerState(c) === 'paused').length;
-                  const stoppedContainers = Math.max(0, dockerContainers.length - runningContainers - pausedContainers);
+                  const runningContainers = dockerSummary.running;
+                  const pausedContainers = dockerSummary.paused;
+                  const stoppedContainers = dockerSummary.stopped;
                   const lifecycle = getServerLifecycle(server);
                   const canDrag = !serverSearchText.trim() && serverStatusFilter === 'all' && !isExpanded;
                   const txTotal = getByteParts(server.info?.network?.tx_total);
@@ -8701,9 +8702,9 @@ function ServerPage() {
                                     >
                                       <span className="text-xs font-bold text-kumo-strong">Docker 容器</span>
                                       <span className="flex min-w-0 items-center gap-1.5">
-                                        <Badge variant="success" appearance="dot">{runningContainers || server.info.docker.runningCount || 0} 运行</Badge>
+                                        <Badge variant="success" appearance="dot">{runningContainers} 运行</Badge>
                                         {pausedContainers > 0 && <Badge variant="warning" appearance="dot">{pausedContainers} 暂停</Badge>}
-                                        {(stoppedContainers > 0 || server.info.docker.stoppedCount > 0) && <Badge variant="error" appearance="dot">{stoppedContainers || server.info.docker.stoppedCount} 停止</Badge>}
+                                        {stoppedContainers > 0 && <Badge variant="error" appearance="dot">{stoppedContainers} 停止</Badge>}
                                         {dockerExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                                       </span>
                                     </Button>
