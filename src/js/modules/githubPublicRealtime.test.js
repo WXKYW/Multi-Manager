@@ -45,7 +45,7 @@ describe('GitHub public page realtime helpers', () => {
     ).toBe('2026-07-17T00:00:00Z');
   });
 
-  it('reloads workflow details when the same run receives a newer collection', () => {
+  it('keeps the previous workflow frame while a newer collection loads in the background', () => {
     const previous = [
       {
         id: 1,
@@ -61,7 +61,11 @@ describe('GitHub public page realtime helpers', () => {
       },
     ];
 
-    expect(mergePublicGithubRepositories(next, previous)[0]).not.toHaveProperty('jobs');
+    expect(mergePublicGithubRepositories(next, previous)[0]).toMatchObject({
+      latest_run: { collected_at: '2026-07-18T00:00:10Z' },
+      jobs: previous[0].jobs,
+      workflow: previous[0].workflow,
+    });
   });
 
   it('keeps workflow details when the run revision is unchanged', () => {
@@ -80,6 +84,34 @@ describe('GitHub public page realtime helpers', () => {
     ];
 
     expect(mergePublicGithubRepositories(next, previous)[0].jobs).toEqual(previous[0].jobs);
+  });
+
+  it('replaces the retained frame when refreshed workflow details arrive', () => {
+    const previous = [{
+      id: 1,
+      latest_run: { run_id: 42 },
+      jobs: [{ id: 1, status: 'in_progress' }],
+      workflow: { nodes: ['old'] },
+    }];
+    const next = [{
+      id: 1,
+      latest_run: { run_id: 43 },
+      jobs: [{ id: 2, status: 'queued' }],
+      workflow: { nodes: ['new'] },
+    }];
+
+    expect(mergePublicGithubRepositories(next, previous)[0]).toEqual(next[0]);
+  });
+
+  it('clears the previous workflow frame when there is no latest run', () => {
+    const previous = [{
+      id: 1,
+      latest_run: { run_id: 42 },
+      jobs: [{ id: 1, status: 'completed' }],
+    }];
+    const next = [{ id: 1, latest_run: null }];
+
+    expect(mergePublicGithubRepositories(next, previous)[0]).toEqual(next[0]);
   });
 
   it('detects whether a repository already has workflow detail payload', () => {

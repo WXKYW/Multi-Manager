@@ -1,14 +1,18 @@
 package openai
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
+	_ "modernc.org/sqlite"
 )
 
 func TestOpenAINormalization(t *testing.T) {
@@ -33,6 +37,244 @@ func TestOpenAINormalization(t *testing.T) {
 		if res != tc.expected {
 			t.Errorf("normalizeBaseURL(%q) = %q; want %q", tc.input, res, tc.expected)
 		}
+	}
+}
+
+func TestEnsureSchemaMigratesGatewayAnalyticsKeyColumn(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`CREATE TABLE openai_gateway_analytics (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		endpoint_id TEXT,
+		model TEXT NOT NULL,
+		status_code INTEGER NOT NULL,
+		latency_ms INTEGER NOT NULL,
+		prompt_tokens INTEGER DEFAULT 0,
+		completion_tokens INTEGER DEFAULT 0,
+		total_tokens INTEGER DEFAULT 0,
+		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ensureSchema(context.Background(), db); err != nil {
+		t.Fatalf("ensureSchema failed: %v", err)
+	}
+
+	rows, err := db.Query("PRAGMA table_info(openai_gateway_analytics)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	foundGatewayKeyID := false
+	foundRoute := false
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, primaryKey int
+		var defaultValue interface{}
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			t.Fatal(err)
+		}
+		if name == "gateway_key_id" {
+			foundGatewayKeyID = true
+		}
+		if name == "route" {
+			foundRoute = true
+		}
+	}
+	if !foundGatewayKeyID {
+		t.Fatal("gateway_key_id column was not added")
+	}
+	if !foundRoute {
+		t.Fatal("route column was not added")
+	}
+}
+
+func TestAnalyticsLogsRespectDaysFilter(t *testing.T) {
+	service := New(config.Config{
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+	db, err := service.open(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`
+		INSERT INTO openai_gateway_analytics (endpoint_id, model, status_code, latency_ms, timestamp)
+		VALUES
+			('recent', 'recent-model', 200, 10, ?),
+			('old', 'old-model', 200, 20, ?)
+	`, time.Now().AddDate(0, 0, -1).Format("2006-01-02 15:04:05"), time.Now().AddDate(0, 0, -30).Format("2006-01-02 15:04:05"))
+	if err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	db.Close()
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/openai/analytics/logs?days=7&page=1&pageSize=20", nil)
+	service.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("logs status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+
+	var result struct {
+		Total   int `json:"total"`
+		Records []struct {
+			Model string `json:"model"`
+		} `json:"records"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 1 || len(result.Records) != 1 || result.Records[0].Model != "recent-model" {
+		t.Fatalf("unexpected filtered logs: %+v", result)
+	}
+}
+
+func TestRecordAnalyticsSurvivesCancelledRequestContext(t *testing.T) {
+	service := New(config.Config{DataDir: t.TempDir(), DBName: "data.db"})
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = context.WithValue(ctx, gatewayKeyContextKey{}, gatewayKeyIdentity{ID: "key-1", Name: "client"})
+	cancel()
+
+	service.RecordAnalytics(ctx, "chat.completions", "endpoint-1", "model-1", http.StatusBadGateway, 42, 0, 0, 0)
+
+	db, err := service.open(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var route, gatewayKeyID string
+	if err := db.QueryRow("SELECT route, gateway_key_id FROM openai_gateway_analytics LIMIT 1").Scan(&route, &gatewayKeyID); err != nil {
+		t.Fatal(err)
+	}
+	if route != "chat.completions" || gatewayKeyID != "key-1" {
+		t.Fatalf("unexpected analytics identity: route=%q gateway_key_id=%q", route, gatewayKeyID)
+	}
+}
+
+func TestEnsureSchemaMigratesGatewayKeyCipherColumn(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`CREATE TABLE openai_gateway_keys (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		key_hash TEXT NOT NULL UNIQUE,
+		key_prefix TEXT NOT NULL,
+		key_suffix TEXT NOT NULL,
+		enabled INTEGER DEFAULT 1,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		last_used DATETIME,
+		expires_at DATETIME,
+		request_count INTEGER DEFAULT 0
+	)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureSchema(context.Background(), db); err != nil {
+		t.Fatalf("ensureSchema failed: %v", err)
+	}
+
+	rows, err := db.Query("PRAGMA table_info(openai_gateway_keys)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	found := false
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, primaryKey int
+		var defaultValue interface{}
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			t.Fatal(err)
+		}
+		if name == "key_cipher" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("key_cipher column was not added")
+	}
+}
+
+func TestGatewayKeyIsStoredAndListedAsPlaintext(t *testing.T) {
+	service := New(config.Config{
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	createRecorder := httptest.NewRecorder()
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/openai/keys", strings.NewReader(`{"name":"desktop client"}`))
+	service.ServeHTTP(createRecorder, createRequest)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("create gateway key status = %d, body = %s", createRecorder.Code, createRecorder.Body.String())
+	}
+	var created struct {
+		APIKey string `json:"apiKey"`
+	}
+	mustDecode(t, createRecorder.Body.String(), &created)
+
+	db, err := service.open(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var stored string
+	if err := db.QueryRow("SELECT key_cipher FROM openai_gateway_keys LIMIT 1").Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != created.APIKey {
+		t.Fatalf("gateway key was not stored as plaintext: stored=%q created=%q", stored, created.APIKey)
+	}
+
+	listRecorder := httptest.NewRecorder()
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/openai/keys", nil)
+	service.ServeHTTP(listRecorder, listRequest)
+	var listed []GatewayKey
+	mustDecode(t, listRecorder.Body.String(), &listed)
+	if len(listed) != 1 || listed[0].APIKey != created.APIKey {
+		t.Fatalf("gateway key list did not return plaintext: %+v", listed)
+	}
+}
+
+func TestGetModelsListIncludesEnabledEndpointPendingVerification(t *testing.T) {
+	service := New(config.Config{
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+	db, err := service.open(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`
+		INSERT INTO openai_endpoints (id, name, base_url, api_key, status, enabled, models)
+		VALUES ('pending', 'Pending endpoint', 'https://example.com/v1', 'encrypted-placeholder', 'unknown', 1, '["pending-model"]')
+	`)
+	db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	models, err := service.GetModelsList(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || models[0]["id"] != "pending-model" {
+		t.Fatalf("unexpected models: %+v", models)
 	}
 }
 

@@ -1145,11 +1145,63 @@ func TestOpenAIServerRouting(t *testing.T) {
 		t.Fatalf("authenticated openai endpoints status = %d body=%s", res.Code, res.Body.String())
 	}
 
-	// 2. GET /v1/models is public
+	// 2. OpenAI-compatible routes require a managed gateway key.
 	req = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	res = httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("v1 models without key status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/openai/keys", strings.NewReader(`{"name":"test client"}`))
+	req.AddCookie(cookie)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("create gateway key status = %d body=%s", res.Code, res.Body.String())
+	}
+	var keyPayload struct {
+		APIKey string `json:"apiKey"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &keyPayload); err != nil || keyPayload.APIKey == "" {
+		t.Fatalf("decode gateway key: %v body=%s", err, res.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/openai/keys", nil)
+	req.AddCookie(cookie)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
 	if res.Code != http.StatusOK {
-		t.Fatalf("v1 models status = %d body=%s", res.Code, res.Body.String())
+		t.Fatalf("list gateway keys status = %d body=%s", res.Code, res.Body.String())
+	}
+	var listedKeys []struct {
+		APIKey string `json:"apiKey"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &listedKeys); err != nil || len(listedKeys) != 1 || listedKeys[0].APIKey != keyPayload.APIKey {
+		t.Fatalf("listed gateway key is not recoverable: %v body=%s", err, res.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer "+keyPayload.APIKey)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("v1 models with key status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/openai/analytics/logs?days=1&page=1&pageSize=20", nil)
+	req.AddCookie(cookie)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("analytics logs status = %d body=%s", res.Code, res.Body.String())
+	}
+	var analyticsPayload struct {
+		Records []struct {
+			Route string `json:"route"`
+		} `json:"records"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &analyticsPayload); err != nil || len(analyticsPayload.Records) == 0 || analyticsPayload.Records[0].Route != "models" {
+		t.Fatalf("models request was not recorded in analytics: %v body=%s", err, res.Body.String())
 	}
 }

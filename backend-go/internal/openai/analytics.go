@@ -11,22 +11,27 @@ import (
 )
 
 // RecordAnalytics saves a gateway proxy metric to the SQLite database
-func (s *Service) RecordAnalytics(endpointID, model string, statusCode int, latencyMs int64, promptTokens, completionTokens, totalTokens int) {
-	ctx := context.Background()
-	db, err := s.open(ctx)
+func (s *Service) RecordAnalytics(ctx context.Context, route, endpointID, model string, statusCode int, latencyMs int64, promptTokens, completionTokens, totalTokens int) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	gatewayKey := gatewayKeyFromContext(ctx)
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	db, err := s.open(writeCtx)
 	if err != nil {
-		applog.Error(ctx, "openai", "Failed to open db for recording analytics", "error", err.Error())
+		applog.Error(writeCtx, "openai", "Failed to open db for recording analytics", "error", err.Error())
 		return
 	}
 	defer db.Close()
 
-	_, err = db.ExecContext(ctx, `
-		INSERT INTO openai_gateway_analytics (endpoint_id, model, status_code, latency_ms, prompt_tokens, completion_tokens, total_tokens)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, endpointID, model, statusCode, latencyMs, promptTokens, completionTokens, totalTokens)
+	_, err = db.ExecContext(writeCtx, `
+		INSERT INTO openai_gateway_analytics (endpoint_id, gateway_key_id, route, model, status_code, latency_ms, prompt_tokens, completion_tokens, total_tokens)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, endpointID, gatewayKey.ID, route, model, statusCode, latencyMs, promptTokens, completionTokens, totalTokens)
 
 	if err != nil {
-		applog.Error(ctx, "openai", "Failed to insert gateway analytics", "error", err.Error())
+		applog.Error(writeCtx, "openai", "Failed to insert gateway analytics", "error", err.Error())
 	}
 }
 
@@ -48,7 +53,7 @@ func (s *Service) getAnalyticsSummary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	timeFilter := time.Now().AddDate(0, 0, -days).Format("2006-01-02 15:04:05")
+	timeFilter := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02 15:04:05")
 
 	var totalRequests int
 	var avgLatency float64
@@ -101,7 +106,7 @@ func (s *Service) getAnalyticsCharts(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	timeFilter := time.Now().AddDate(0, 0, -days).Format("2006-01-02 15:04:05")
+	timeFilter := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02 15:04:05")
 
 	// 1. Daily trends
 	rows, err := db.QueryContext(ctx, `
@@ -137,15 +142,16 @@ func (s *Service) getAnalyticsCharts(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 2. Model distribution (Token share)
+	// 2. Model distribution by both request count and token usage.
 	rowsModels, err := db.QueryContext(ctx, `
 		SELECT 
-			model, 
+			model,
+			COUNT(*) as count,
 			COALESCE(SUM(total_tokens), 0) as tokens
 		FROM openai_gateway_analytics
 		WHERE timestamp >= ?
 		GROUP BY model
-		ORDER BY tokens DESC
+		ORDER BY count DESC, tokens DESC
 	`, timeFilter)
 
 	if err != nil {
@@ -156,13 +162,14 @@ func (s *Service) getAnalyticsCharts(w http.ResponseWriter, r *http.Request) {
 
 	type ModelShare struct {
 		Model  string `json:"model"`
+		Count  int    `json:"count"`
 		Tokens int    `json:"tokens"`
 	}
 
 	modelShares := []ModelShare{}
 	for rowsModels.Next() {
 		var m ModelShare
-		if err := rowsModels.Scan(&m.Model, &m.Tokens); err == nil {
+		if err := rowsModels.Scan(&m.Model, &m.Count, &m.Tokens); err == nil {
 			modelShares = append(modelShares, m)
 		}
 	}
@@ -185,6 +192,7 @@ func (s *Service) getAnalyticsLogs(w http.ResponseWriter, r *http.Request) {
 
 	pageStr := r.URL.Query().Get("page")
 	pageSizeStr := r.URL.Query().Get("pageSize")
+	daysStr := r.URL.Query().Get("days")
 
 	page := 1
 	pageSize := 20
@@ -193,14 +201,19 @@ func (s *Service) getAnalyticsLogs(w http.ResponseWriter, r *http.Request) {
 		page = p
 	}
 	if ps, err := strconv.Atoi(pageSizeStr); err == nil && ps > 0 {
-		pageSize = ps
+		pageSize = min(ps, 100)
+	}
+	days := 7
+	if d, err := strconv.Atoi(daysStr); err == nil && d > 0 {
+		days = d
 	}
 
 	offset := (page - 1) * pageSize
+	timeFilter := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02 15:04:05")
 
 	// Get total count
 	var total int
-	err = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM openai_gateway_analytics").Scan(&total)
+	err = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM openai_gateway_analytics WHERE timestamp >= ?", timeFilter).Scan(&total)
 	if err != nil {
 		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -210,7 +223,9 @@ func (s *Service) getAnalyticsLogs(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT 
 			g.id,
+			g.route,
 			COALESCE(e.name, 'unknown') as endpoint_name,
+			COALESCE(k.name, '未识别密钥') as gateway_key_name,
 			g.model,
 			g.status_code,
 			g.latency_ms,
@@ -220,9 +235,11 @@ func (s *Service) getAnalyticsLogs(w http.ResponseWriter, r *http.Request) {
 			g.timestamp
 		FROM openai_gateway_analytics g
 		LEFT JOIN openai_endpoints e ON g.endpoint_id = e.id
+		LEFT JOIN openai_gateway_keys k ON g.gateway_key_id = k.id
+		WHERE g.timestamp >= ?
 		ORDER BY g.timestamp DESC
 		LIMIT ? OFFSET ?
-	`, pageSize, offset)
+	`, timeFilter, pageSize, offset)
 
 	if err != nil {
 		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -232,7 +249,9 @@ func (s *Service) getAnalyticsLogs(w http.ResponseWriter, r *http.Request) {
 
 	type LogRecord struct {
 		ID               int    `json:"id"`
+		Route            string `json:"route"`
 		EndpointName     string `json:"endpointName"`
+		GatewayKeyName   string `json:"gatewayKeyName"`
 		Model            string `json:"model"`
 		StatusCode       int    `json:"statusCode"`
 		LatencyMs        int64  `json:"latencyMs"`
@@ -247,7 +266,9 @@ func (s *Service) getAnalyticsLogs(w http.ResponseWriter, r *http.Request) {
 		var rec LogRecord
 		if err := rows.Scan(
 			&rec.ID,
+			&rec.Route,
 			&rec.EndpointName,
+			&rec.GatewayKeyName,
 			&rec.Model,
 			&rec.StatusCode,
 			&rec.LatencyMs,

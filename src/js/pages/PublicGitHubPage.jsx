@@ -1916,8 +1916,15 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
   const load = useCallback(async ({ silent = false, showRefreshing = silent } = {}) => {
     const nextPage = await loadSummary({ silent, showRefreshing });
     if (!nextPage) return;
+    if (silent) {
+      void syncRepositories({
+        pageSlug: nextPage.slug,
+        repositories: nextPage.repositories,
+      });
+      return;
+    }
     void loadRepositoryDetails(nextPage);
-  }, [loadRepositoryDetails, loadSummary]);
+  }, [loadRepositoryDetails, loadSummary, syncRepositories]);
 
   useEffect(() => {
     load();
@@ -1960,10 +1967,10 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
       const kind = String(payload?.kind || '');
       const repoId = String(payload?.repository_id || '');
       if (!repoId || !['repository_refresh', 'repository_actions_refresh'].includes(kind)) return;
-      void Promise.all([
-        loadSummary({ silent: true, showRefreshing: false }),
-        refreshRepositoryDetail(page.slug, repoId, { markLoading: false }),
-      ]);
+      void loadSummary({ silent: true, showRefreshing: false }).then((nextPage) => {
+        if (!nextPage) return;
+        return refreshRepositoryDetail(nextPage.slug, repoId, { markLoading: false });
+      });
     };
     source.addEventListener('github', refreshRepository);
     return () => {

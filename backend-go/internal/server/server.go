@@ -228,6 +228,20 @@ func (s *Server) serveSystemControlRoute(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) authorizeGoRoute(w http.ResponseWriter, r *http.Request, route manifest.Route) bool {
+	if route.Auth == manifest.AuthAPIKey && route.Module == "openai-compatible" {
+		authorizedRequest, err := s.openai.AuthorizeGatewayRequest(r)
+		if err != nil {
+			response.JSON(w, http.StatusUnauthorized, map[string]interface{}{
+				"error": map[string]string{
+					"message": err.Error(),
+					"type":    "authentication_error",
+				},
+			})
+			return false
+		}
+		*r = *authorizedRequest
+		return true
+	}
 	if route.Auth != manifest.AuthSession {
 		return true
 	}
@@ -482,10 +496,12 @@ func (s *Server) applySecurityHeaders(w http.ResponseWriter) {
 func (s *Server) serveV1Route(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	method := r.Method
+	startedAt := time.Now()
 
 	// 1. Models endpoint
 	if method == http.MethodGet && (path == "/v1/models" || path == "/v1/model") {
-		s.serveV1Models(w, r)
+		statusCode := s.serveV1Models(w, r)
+		s.openai.RecordAnalytics(r.Context(), "models", "", "", statusCode, time.Since(startedAt).Milliseconds(), 0, 0, 0)
 		return
 	}
 
@@ -496,14 +512,18 @@ func (s *Server) serveV1Route(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.Error(w, http.StatusNotFound, "v1 endpoint not found")
+	s.openai.RecordAnalytics(r.Context(), strings.TrimPrefix(path, "/v1/"), "", "", http.StatusNotFound, time.Since(startedAt).Milliseconds(), 0, 0, 0)
 }
 
-func (s *Server) serveV1Models(w http.ResponseWriter, r *http.Request) {
+func (s *Server) serveV1Models(w http.ResponseWriter, r *http.Request) int {
 	ctx := r.Context()
 	var mergedModels []map[string]interface{}
 
 	if oaiModels, err := s.openai.GetModelsList(ctx); err == nil {
 		mergedModels = append(mergedModels, oaiModels...)
+	} else {
+		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return http.StatusInternalServerError
 	}
 
 	sort.Slice(mergedModels, func(i, j int) bool {
@@ -516,4 +536,5 @@ func (s *Server) serveV1Models(w http.ResponseWriter, r *http.Request) {
 		"object": "list",
 		"data":   mergedModels,
 	})
+	return http.StatusOK
 }

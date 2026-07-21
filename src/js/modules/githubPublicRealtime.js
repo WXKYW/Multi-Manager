@@ -49,19 +49,6 @@ export function getPublicGithubDataUpdatedAt(page) {
   return latestValue;
 }
 
-function publicGithubRunRevision(repository) {
-  const run = repository?.latest_run || {};
-  return [
-    run.run_id || '',
-    run.collected_at || '',
-    run.updated_at || '',
-    run.status || repository?.latest_action_status || '',
-    run.conclusion || repository?.latest_action_conclusion || '',
-  ]
-    .map(String)
-    .join('|');
-}
-
 export function mergePublicGithubRepositories(repositories = [], previousRepositories = []) {
   const previousById = new Map(
     previousRepositories.map(repository => [String(repository?.id), repository])
@@ -69,11 +56,9 @@ export function mergePublicGithubRepositories(repositories = [], previousReposit
   return repositories.map(repository => {
     const previous = previousById.get(String(repository?.id));
     if (!previous) return repository;
-    const runID = String(repository?.latest_run?.run_id || '');
     const canReuseDetail =
-      runID !== '' &&
-      runID === String(previous?.latest_run?.run_id || '') &&
-      publicGithubRunRevision(repository) === publicGithubRunRevision(previous) &&
+      String(repository?.latest_run?.run_id || '') !== '' &&
+      !hasPublicGithubWorkflowDetail(repository) &&
       hasPublicGithubWorkflowDetail(previous);
     if (!canReuseDetail) return repository;
     return {
