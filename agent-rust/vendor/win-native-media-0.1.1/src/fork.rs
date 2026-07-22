@@ -146,7 +146,7 @@ mod tests {
     fn distribute_returns_false_when_all_consumers_gone() {
         let (mut fork, rx) = Fork::new(true, false, 2);
         drop(rx); // both receivers dropped
-        // First distribute detects the hangup and returns false.
+                  // First distribute detects the hangup and returns false.
         assert!(!fork.distribute(sample(false)));
     }
 }

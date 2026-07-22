@@ -1083,7 +1083,7 @@ function SchedulerPage() {
               <div className="overflow-x-auto">
                 <Table layout="fixed" className="min-w-[1080px]">
                   <colgroup><col className="w-[220px]" /><col className="w-[104px]" /><col className="w-[128px]" /><col className="w-[190px]" /><col className="w-[180px]" /><col className="w-[180px]" /><col className="w-[160px]" /></colgroup>
-                  <Table.Header><Table.Row><Table.Head>任务</Table.Head><Table.Head>状态</Table.Head><Table.Head>类型</Table.Head><Table.Head>周期</Table.Head><Table.Head>下次运行</Table.Head><Table.Head>最近结果</Table.Head><Table.Head>操作</Table.Head></Table.Row></Table.Header>
+                  <Table.Header><Table.Row><Table.Head>任务</Table.Head><Table.Head>状态</Table.Head><Table.Head>类型</Table.Head><Table.Head>周期</Table.Head><Table.Head>下次运行</Table.Head><Table.Head>最近结果</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row></Table.Header>
                   <Table.Body>
                     {tasks.map((task) => (
                       <Table.Row key={task.id}>
@@ -1182,7 +1182,7 @@ function SchedulerPage() {
               <div className="overflow-x-auto">
                 <Table layout="fixed" className="min-w-[920px]">
                   <colgroup><col /><col className="w-[110px]" /><col className="w-[130px]" /><col className="w-[180px]" /><col className="w-[120px]" /><col className="w-[128px]" /></colgroup>
-                  <Table.Header><Table.Row><Table.Head>运行对象</Table.Head><Table.Head>状态</Table.Head><Table.Head>触发方式</Table.Head><Table.Head>开始时间</Table.Head><Table.Head>耗时</Table.Head><Table.Head>操作</Table.Head></Table.Row></Table.Header>
+                  <Table.Header><Table.Row><Table.Head>运行对象</Table.Head><Table.Head>状态</Table.Head><Table.Head>触发方式</Table.Head><Table.Head>开始时间</Table.Head><Table.Head>耗时</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row></Table.Header>
                   <Table.Body>
                     {runs.map((run) => (
                       <Table.Row key={run.id}>

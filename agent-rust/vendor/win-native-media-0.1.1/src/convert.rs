@@ -133,11 +133,7 @@ impl Bgra2Nv12 {
     /// Same conversion as `convert_to_cpu`, reusing the caller's allocation.
     /// Remote desktop frames are large enough that allocating a new NV12 Vec
     /// for every frame needlessly grows the process heap between sessions.
-    pub fn convert_to_cpu_into(
-        &mut self,
-        bgra: &ID3D11Texture2D,
-        out: &mut Vec<u8>,
-    ) -> Result<()> {
+    pub fn convert_to_cpu_into(&mut self, bgra: &ID3D11Texture2D, out: &mut Vec<u8>) -> Result<()> {
         self.convert(bgra)?;
         unsafe {
             let context = self.device.GetImmediateContext()?;
@@ -287,12 +283,8 @@ impl Bgra2Nv12 {
             };
 
             let mut streams = [stream];
-            self.video_context.VideoProcessorBlt(
-                &self.processor,
-                output_view,
-                0,
-                &streams,
-            )?;
+            self.video_context
+                .VideoProcessorBlt(&self.processor, output_view, 0, &streams)?;
             let _ = std::mem::ManuallyDrop::take(&mut streams[0].pInputSurface);
             let _ = std::mem::ManuallyDrop::take(&mut streams[0].pInputSurfaceRight);
             Ok(())

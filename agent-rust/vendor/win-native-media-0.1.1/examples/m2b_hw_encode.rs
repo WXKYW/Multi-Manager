@@ -22,7 +22,10 @@ fn main() {
     };
 
     let (session, rx) = capture::start(
-        CaptureConfig { target: CaptureTarget::Monitor(0), capture_cursor: true },
+        CaptureConfig {
+            target: CaptureTarget::Monitor(0),
+            capture_cursor: true,
+        },
         4,
     )
     .expect("capture");
@@ -71,6 +74,10 @@ fn main() {
     println!("  keyframes:       {keyframes}");
     println!(
         "  RESULT: {}",
-        if samples.len() > 0 && bytes > 0 { "OK (hardware zero-copy encode works)" } else { "FAIL" }
+        if samples.len() > 0 && bytes > 0 {
+            "OK (hardware zero-copy encode works)"
+        } else {
+            "FAIL"
+        }
     );
 }

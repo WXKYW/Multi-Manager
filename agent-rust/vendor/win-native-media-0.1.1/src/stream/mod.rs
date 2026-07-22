@@ -77,8 +77,11 @@ impl RtmpPublisher {
         };
 
         // Announce our chunk size.
-        me.send_control(msg_type::SET_CHUNK_SIZE, chunk::set_chunk_size_payload(OUT_CHUNK_SIZE as u32))
-            .await?;
+        me.send_control(
+            msg_type::SET_CHUNK_SIZE,
+            chunk::set_chunk_size_payload(OUT_CHUNK_SIZE as u32),
+        )
+        .await?;
 
         me.send_connect(&app).await?;
         me.expect_result("connect").await?;
@@ -216,7 +219,8 @@ impl RtmpPublisher {
 
     async fn send_sequence_header(&mut self) -> Result<()> {
         let body = flv::avc_sequence_header(&self.params);
-        self.send_media(CSID_VIDEO, msg_type::VIDEO, 0, body).await?;
+        self.send_media(CSID_VIDEO, msg_type::VIDEO, 0, body)
+            .await?;
         self.seq_header_sent = true;
         Ok(())
     }
@@ -270,9 +274,13 @@ impl RtmpPublisher {
         self.out.clear();
         chunk::write_message(&mut self.out, &msg, OUT_CHUNK_SIZE);
         if std::env::var("RTMP_DEBUG").is_ok() {
-            eprintln!("[rtmp] send type={} csid={} len={} first16={:02x?}",
-                msg.type_id, msg.chunk_stream_id, msg.payload.len(),
-                &self.out[..self.out.len().min(16)]);
+            eprintln!(
+                "[rtmp] send type={} csid={} len={} first16={:02x?}",
+                msg.type_id,
+                msg.chunk_stream_id,
+                msg.payload.len(),
+                &self.out[..self.out.len().min(16)]
+            );
         }
         self.stream.write_all(&self.out).await?;
         Ok(())
@@ -297,7 +305,9 @@ impl RtmpPublisher {
     async fn expect_result(&mut self, ctx: &str) -> Result<()> {
         let reply = self.read_command_reply().await?;
         if reply.command == "_error" {
-            return Err(PipelineError::Rtmp(format!("{ctx}: server returned _error")));
+            return Err(PipelineError::Rtmp(format!(
+                "{ctx}: server returned _error"
+            )));
         }
         Ok(())
     }
@@ -402,7 +412,8 @@ fn parse_rtmp_url(url: &str) -> Result<(String, u16, String)> {
     let (host, port) = match authority.split_once(':') {
         Some((h, p)) => (
             h.to_string(),
-            p.parse().map_err(|_| PipelineError::Rtmp(format!("bad port in {url}")))?,
+            p.parse()
+                .map_err(|_| PipelineError::Rtmp(format!("bad port in {url}")))?,
         ),
         None => (authority.to_string(), 1935u16),
     };

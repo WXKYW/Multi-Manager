@@ -2790,7 +2790,7 @@ function M365Page() {
                     <Table.Head className="!px-3 !py-2">登录账号</Table.Head>
                     <Table.Head className="!px-3 !py-2">邮箱</Table.Head>
                     <Table.Head className="!px-3 !py-2">许可证</Table.Head>
-                    <Table.Head className="!px-3 !py-2 text-right">操作</Table.Head>
+                    <Table.Head className="app-table-action !px-3 !py-2">操作</Table.Head>
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
@@ -3042,7 +3042,7 @@ function M365Page() {
                           <Table.Row>
                             <Table.Head>成员</Table.Head>
                             <Table.Head>邮箱</Table.Head>
-                            <Table.Head className="text-right">操作</Table.Head>
+                            <Table.Head className="app-table-action">操作</Table.Head>
                           </Table.Row>
                         </Table.Header>
                         <Table.Body>

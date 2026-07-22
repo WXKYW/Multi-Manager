@@ -37,11 +37,7 @@ pub struct Mp4Recorder {
 
 impl Mp4Recorder {
     /// Create a video-only MP4 recorder. Convenience wrapper over `with_audio`.
-    pub fn new(
-        path: impl AsRef<Path>,
-        cfg: &VideoConfig,
-        params: &ParameterSets,
-    ) -> Result<Self> {
+    pub fn new(path: impl AsRef<Path>, cfg: &VideoConfig, params: &ParameterSets) -> Result<Self> {
         Self::with_audio(path, cfg, params, &[])
     }
 
@@ -59,11 +55,8 @@ impl Mp4Recorder {
 
             let url = to_wide(path.as_ref());
             let attrs = create_mp4_attributes()?;
-            let writer = MFCreateSinkWriterFromURL(
-                windows::core::PCWSTR(url.as_ptr()),
-                None,
-                &attrs,
-            )?;
+            let writer =
+                MFCreateSinkWriterFromURL(windows::core::PCWSTR(url.as_ptr()), None, &attrs)?;
 
             // Video stream (pass-through H.264).
             let target_type = build_h264_type(cfg, params)?;
@@ -133,8 +126,7 @@ impl Mp4Recorder {
     pub fn write(&mut self, sample: &EncodedSample) -> Result<()> {
         unsafe {
             let mf_sample = self.build_sample(sample)?;
-            self.writer
-                .WriteSample(self.stream_index, &mf_sample)?;
+            self.writer.WriteSample(self.stream_index, &mf_sample)?;
         }
         Ok(())
     }
@@ -187,19 +179,13 @@ unsafe fn create_mp4_attributes() -> Result<IMFAttributes> {
     let mut attrs: Option<IMFAttributes> = None;
     MFCreateAttributes(&mut attrs, 1)?;
     let attrs = attrs.unwrap();
-    attrs.SetGUID(
-        &MF_TRANSCODE_CONTAINERTYPE,
-        &MFTranscodeContainerType_MPEG4,
-    )?;
+    attrs.SetGUID(&MF_TRANSCODE_CONTAINERTYPE, &MFTranscodeContainerType_MPEG4)?;
     Ok(attrs)
 }
 
 /// Build the H.264 media type describing the stored stream. Sets the sequence
 /// header (SPS/PPS as an AVCC-style blob) if provided so the sink can write avcC.
-unsafe fn build_h264_type(
-    cfg: &VideoConfig,
-    params: &ParameterSets,
-) -> Result<IMFMediaType> {
+unsafe fn build_h264_type(cfg: &VideoConfig, params: &ParameterSets) -> Result<IMFMediaType> {
     let mt = MFCreateMediaType()?;
     mt.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)?;
     mt.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_H264)?;
@@ -208,15 +194,9 @@ unsafe fn build_h264_type(
         &MF_MT_FRAME_SIZE,
         ((cfg.width as u64) << 32) | cfg.height as u64,
     )?;
-    mt.SetUINT64(
-        &MF_MT_FRAME_RATE,
-        ((cfg.fps as u64) << 32) | 1,
-    )?;
+    mt.SetUINT64(&MF_MT_FRAME_RATE, ((cfg.fps as u64) << 32) | 1)?;
     mt.SetUINT64(&MF_MT_PIXEL_ASPECT_RATIO, (1u64 << 32) | 1)?;
-    mt.SetUINT32(
-        &MF_MT_INTERLACE_MODE,
-        MFVideoInterlace_Progressive.0 as u32,
-    )?;
+    mt.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)?;
 
     if !params.sps.is_empty() && !params.pps.is_empty() {
         let seq_header = build_avcc(&params.sps, &params.pps);
@@ -239,7 +219,7 @@ unsafe fn build_aac_type(track: &super::mux::AudioTrack) -> Result<IMFMediaType>
     mt.SetUINT32(&MF_MT_AUDIO_NUM_CHANNELS, track.channels as u32)?;
     mt.SetUINT32(&MF_MT_AUDIO_AVG_BYTES_PER_SECOND, track.bitrate / 8)?;
     mt.SetUINT32(&MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, 0x29)?; // AAC-LC
-    // HEAACWAVEINFO tail: 12 bytes of fields (wPayloadType=0, etc.) + ASC.
+                                                                    // HEAACWAVEINFO tail: 12 bytes of fields (wPayloadType=0, etc.) + ASC.
     let mut user_data = vec![0u8; 12];
     user_data.extend_from_slice(&track.asc);
     mt.SetBlob(&MF_MT_USER_DATA, &user_data)?;
@@ -285,7 +265,7 @@ mod tests {
         assert_eq!(avcc[1], 0x64); // profile from sps[1]
         assert_eq!(avcc[3], 0x1f); // level from sps[3]
         assert_eq!(avcc[5], 0xe1); // one SPS
-        // SPS length prefix at offset 6..8
+                                   // SPS length prefix at offset 6..8
         assert_eq!(&avcc[6..8], &(sps.len() as u16).to_be_bytes());
         // PPS count byte immediately after SPS
         let pps_count_off = 8 + sps.len();

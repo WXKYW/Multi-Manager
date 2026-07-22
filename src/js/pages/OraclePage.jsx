@@ -1194,7 +1194,7 @@ function OraclePage() {
                   <Table.Head>Region</Table.Head>
                   <Table.Head>默认 Compartment</Table.Head>
                   <Table.Head>验证状态</Table.Head>
-                  <Table.Head className="text-right">操作</Table.Head>
+                  <Table.Head className="app-table-action">操作</Table.Head>
                 </Table.Row>
               </Table.Header>
               <Table.Body>
@@ -1599,7 +1599,7 @@ function ResourceList({ title, icon, items, columns, onCopy, embedded = false, l
         <Table.Header variant="compact">
           <Table.Row>
             {columns.map((column) => <Table.Head key={column}>{columnLabel(column)}</Table.Head>)}
-            {renderActions ? <Table.Head className="text-right">操作</Table.Head> : null}
+            {renderActions ? <Table.Head className="app-table-action">操作</Table.Head> : null}
           </Table.Row>
         </Table.Header>
         <Table.Body>
@@ -1615,7 +1615,7 @@ function ResourceList({ title, icon, items, columns, onCopy, embedded = false, l
         <Table.Header variant="compact">
           <Table.Row>
             {columns.map((column) => <Table.Head key={column}>{columnLabel(column)}</Table.Head>)}
-            {renderActions ? <Table.Head className="text-right">操作</Table.Head> : null}
+            {renderActions ? <Table.Head className="app-table-action">操作</Table.Head> : null}
           </Table.Row>
         </Table.Header>
         <Table.Body>

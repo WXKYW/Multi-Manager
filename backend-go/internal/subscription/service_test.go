@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
+	"github.com/iwvw/api-monitor/backend-go/internal/secure"
 	"gopkg.in/yaml.v3"
 	_ "modernc.org/sqlite"
 )
@@ -35,6 +36,53 @@ func TestIsLinuxPlatformRecognizesDistributions(t *testing.T) {
 		if got := isLinuxPlatform(test.platform, test.version); got != test.want {
 			t.Errorf("isLinuxPlatform(%q, %q) = %v, want %v", test.platform, test.version, got, test.want)
 		}
+	}
+}
+
+func TestManagedSubscriptionNodesApplyPreferredAddress(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	raw := "vless://00000000-0000-4000-8000-000000000001@origin.example.com:443?security=tls&type=ws&sni=origin.example.com&host=origin.example.com&path=%2Fedge#node"
+	encrypted, err := secure.SecureEncrypt(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO managed_proxy_preferences(id,name,address,port,enabled,is_default) VALUES('pref','优选','saas.sin.fan',443,1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO managed_proxy_nodes(id,server_id,name,protocol,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted,enabled,publishable,apply_status,access_mode,tunnel_hostname) VALUES('managed-one','server-one','节点一','vless-reality','origin.example.com',45654,'tcp','',?,1,1,'running','cloudflare_tunnel','origin.example.com')`, encrypted); err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := loadManagedSubscriptionNodes(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 1 || !strings.Contains(nodes[0].Raw, "@saas.sin.fan:443") {
+		t.Fatalf("preferred address was not published: %#v", nodes)
+	}
+	if !strings.Contains(nodes[0].Raw, "sni=origin.example.com") {
+		t.Fatalf("Tunnel SNI must remain owned hostname: %s", nodes[0].Raw)
+	}
+}
+
+func TestPublishedNodeNamesAreUnique(t *testing.T) {
+	nodes := ensureUniquePublishedNodeNames([]Node{
+		{Name: "🇸🇬 新加坡", Raw: "vless://a@example.com:443#old", ConfigJSON: `{"name":"old","type":"vless"}`},
+		{Name: "🇸🇬 新加坡", Raw: "trojan://b@example.net:443#old", ConfigJSON: `{"name":"old","type":"trojan"}`},
+	})
+	if nodes[0].Name != "🇸🇬 新加坡" || nodes[1].Name != "🇸🇬 新加坡 · 2" {
+		t.Fatalf("unexpected published names: %#v", nodes)
+	}
+	if !strings.Contains(nodes[1].Raw, "%C2%B7%202") || !strings.Contains(nodes[1].ConfigJSON, "新加坡 · 2") {
+		t.Fatalf("renamed node was not propagated: %#v", nodes[1])
 	}
 }
 

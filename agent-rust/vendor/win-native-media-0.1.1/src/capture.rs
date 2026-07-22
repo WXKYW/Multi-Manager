@@ -165,10 +165,7 @@ struct FrameState {
 struct AgileDevice(IDirect3DDevice);
 unsafe impl Send for AgileDevice {}
 
-fn on_frame_arrived(
-    pool: &Direct3D11CaptureFramePool,
-    state: &std::sync::Arc<Mutex<FrameState>>,
-) {
+fn on_frame_arrived(pool: &Direct3D11CaptureFramePool, state: &std::sync::Arc<Mutex<FrameState>>) {
     let mut guard = match state.lock() {
         Ok(g) => g,
         Err(_) => return,
@@ -186,8 +183,7 @@ fn on_frame_arrived(
         Ok(s) => s,
         Err(_) => return,
     };
-    if content_size.Width != guard.last_size.Width
-        || content_size.Height != guard.last_size.Height
+    if content_size.Width != guard.last_size.Width || content_size.Height != guard.last_size.Height
     {
         let _ = pool.Recreate(
             &guard.device.0,
@@ -271,7 +267,9 @@ fn create_d3d_device() -> Result<ID3D11Device> {
     // the immediate context from different threads.
     use windows::Win32::Graphics::Direct3D11::ID3D11Multithread;
     if let Ok(mt) = device.cast::<ID3D11Multithread>() {
-        unsafe { let _ = mt.SetMultithreadProtected(true); };
+        unsafe {
+            let _ = mt.SetMultithreadProtected(true);
+        };
     }
 
     Ok(device)
@@ -293,8 +291,7 @@ fn create_capture_item(target: CaptureTarget) -> Result<GraphicsCaptureItem> {
     match target {
         CaptureTarget::Monitor(index) => {
             let hmon = monitor_at_index(index)?;
-            let item: GraphicsCaptureItem =
-                unsafe { interop.CreateForMonitor(hmon)? };
+            let item: GraphicsCaptureItem = unsafe { interop.CreateForMonitor(hmon)? };
             Ok(item)
         }
         CaptureTarget::Window(hwnd) => {
@@ -307,9 +304,9 @@ fn create_capture_item(target: CaptureTarget) -> Result<GraphicsCaptureItem> {
 
 /// Resolve a monitor index into an `HMONITOR` by enumerating display monitors.
 fn monitor_at_index(index: usize) -> Result<HMONITOR> {
-    use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, HDC};
     use windows::core::BOOL;
     use windows::Win32::Foundation::{LPARAM, RECT};
+    use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, HDC};
 
     struct Collector {
         monitors: Vec<HMONITOR>,

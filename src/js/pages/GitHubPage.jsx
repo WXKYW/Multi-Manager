@@ -2361,7 +2361,7 @@ function GitHubPage() {
                       <col style={{ width: GITHUB_ACTIONS_TABLE_WIDTHS[5] }} />
                     </colgroup>
                     <Table.Header sticky variant="compact">
-                      <Table.Row><Table.Head className="align-middle text-center">状态</Table.Head><Table.Head>Workflow</Table.Head><Table.Head className="align-middle">提交说明</Table.Head><Table.Head className="align-middle">分支</Table.Head><Table.Head className="align-middle text-center">时间</Table.Head><Table.Head className="align-middle text-center">操作</Table.Head></Table.Row>
+                      <Table.Row><Table.Head className="align-middle text-center">状态</Table.Head><Table.Head>Workflow</Table.Head><Table.Head className="align-middle">提交说明</Table.Head><Table.Head className="align-middle">分支</Table.Head><Table.Head className="align-middle text-center">时间</Table.Head><Table.Head className="app-table-action align-middle">操作</Table.Head></Table.Row>
                     </Table.Header>
                     <Table.Body>
                       {actions.map((run) => {

@@ -169,6 +169,9 @@ func (s *Service) EnsureManagedTunnelDNS(ctx context.Context, accountID, zoneID,
 	var result map[string]interface{}
 	if len(records) > 0 {
 		existing := objectValue(records[0])
+		if err := validateManagedTunnelDNSOwnership(existing, content); err != nil {
+			return ManagedTunnelDNS{}, err
+		}
 		recordID := stringValue(existing["id"], "")
 		payload, err := s.cfRequest(ctx, http.MethodPut, "/zones/"+url.PathEscape(zoneID)+"/dns_records/"+url.PathEscape(recordID), auth, dnsRecordBody(body, true))
 		if err != nil {
@@ -182,6 +185,18 @@ func (s *Service) EnsureManagedTunnelDNS(ctx context.Context, accountID, zoneID,
 		}
 	}
 	return ManagedTunnelDNS{ID: stringValue(result["id"], ""), Name: stringValue(result["name"], hostname), Content: stringValue(result["content"], content)}, nil
+}
+
+func validateManagedTunnelDNSOwnership(record map[string]interface{}, desiredContent string) error {
+	comment := strings.TrimSpace(stringValue(record["comment"], ""))
+	content := strings.TrimSpace(stringValue(record["content"], ""))
+	if comment != "Managed by API Monitor" {
+		return fmt.Errorf("DNS hostname is already used by a record not owned by API Monitor")
+	}
+	if !strings.EqualFold(content, strings.TrimSpace(desiredContent)) {
+		return fmt.Errorf("DNS hostname is owned by another API Monitor Tunnel")
+	}
+	return nil
 }
 
 func (s *Service) ManagedTunnelToken(ctx context.Context, accountID, tunnelID string) (string, error) {

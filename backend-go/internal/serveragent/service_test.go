@@ -15,6 +15,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
+	"github.com/iwvw/api-monitor/backend-go/internal/secure"
 )
 
 func testService(t *testing.T) (*Service, *sql.DB) {
@@ -1859,19 +1860,57 @@ func TestFailedManagedProxyNodeCanBeDeletedWithoutAgentCleanup(t *testing.T) {
 	}
 
 	res := perform(service, http.MethodDelete, "/api/server/agent/proxy/nodes/failed-node", "")
-	if res.Code != http.StatusOK {
+	if res.Code != http.StatusAccepted {
 		t.Fatalf("delete failed node status=%d body=%s", res.Code, res.Body.String())
 	}
 	var count int
-	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM managed_proxy_nodes WHERE id='failed-node'`).Scan(&count); err != nil {
-		t.Fatal(err)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM managed_proxy_nodes WHERE id='failed-node'`).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count == 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	if count != 0 {
 		t.Fatalf("failed node was not deleted, count=%d", count)
 	}
 }
 
-func TestManagedProxyReconcileAdvancesRevision(t *testing.T) {
+func TestManagedProxyNodeListResolvesPreferredAddressWithoutNestedQueryDeadlock(t *testing.T) {
+	service, db := testService(t)
+	ctx := context.Background()
+	encrypted, err := secure.SecureEncrypt("vless://user@origin.example:45654?security=tls#edge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []struct {
+		query string
+		args  []interface{}
+	}{
+		{`INSERT INTO server_accounts (id,name,host,username,auth_type) VALUES ('preferred-host','edge','192.0.2.80','agent','password')`, nil},
+		{`INSERT INTO managed_proxy_preferences (id,name,address,port,enabled,is_default) VALUES ('preferred-one','优选','saas.sin.fan',443,1,1)`, nil},
+		{`INSERT INTO managed_proxy_nodes (id,server_id,name,protocol,runtime,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted,enabled,publishable,apply_status,access_mode) VALUES ('preferred-node','preferred-host','edge','vless-reality','sing-box','origin.example',45654,'tcp','{}',?,1,1,'running','cloudflare_tunnel')`, []interface{}{encrypted}},
+	} {
+		if _, err := db.ExecContext(ctx, statement.query, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result := make(chan *httptest.ResponseRecorder, 1)
+	go func() { result <- perform(service, http.MethodGet, "/api/server/agent/proxy/nodes", "") }()
+	select {
+	case response := <-result:
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "saas.sin.fan:443") {
+			t.Fatalf("node list status=%d body=%s", response.Code, response.Body.String())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("managed node list deadlocked while resolving preferred address")
+	}
+}
+
+func TestManagedProxyReconcileDoesNotAdvanceRevisionWhileAgentOffline(t *testing.T) {
 	service, db := testService(t)
 	if _, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id,name,host,username,auth_type,status) VALUES ('proxy-reconcile-host','edge','192.0.2.11','agent','password','online')`); err != nil {
 		t.Fatal(err)
@@ -1888,8 +1927,8 @@ func TestManagedProxyReconcileAdvancesRevision(t *testing.T) {
 	if err := db.QueryRowContext(context.Background(), `SELECT revision FROM managed_proxy_nodes WHERE id='reconcile-node'`).Scan(&revision); err != nil {
 		t.Fatal(err)
 	}
-	if revision != 2 {
-		t.Fatalf("stored revision=%d, want 2", revision)
+	if revision != 1 {
+		t.Fatalf("stored revision=%d, want 1", revision)
 	}
 }
 

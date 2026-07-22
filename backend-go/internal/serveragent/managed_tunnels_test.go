@@ -42,3 +42,14 @@ func TestResolveManagedNodeClientURIPrecedence(t *testing.T) {
 		t.Fatalf("custom node address not applied: %s", got)
 	}
 }
+
+func TestRewriteTunnelClientURIKeepsPreferredAddressAndMigratesSNI(t *testing.T) {
+	raw := "vless://id@saas.sin.fan:443?security=tls&type=ws&sni=old.example.com&host=old.example.com#node"
+	got, err := rewriteTunnelClientURI(raw, "old.example.com", "new.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "@saas.sin.fan:443") || !strings.Contains(got, "sni=new.example.com") || !strings.Contains(got, "host=new.example.com") {
+		t.Fatalf("unexpected migrated URI: %s", got)
+	}
+}

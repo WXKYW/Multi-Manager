@@ -94,16 +94,13 @@ impl AacEncoder {
             return Ok(());
         }
         unsafe {
-            self.transform.ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, 0)?;
+            self.transform
+                .ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, 0)?;
         }
         self.pull(out)
     }
 
-    unsafe fn make_input_sample(
-        &self,
-        pcm16: &[u8],
-        timestamp: Duration,
-    ) -> Result<IMFSample> {
+    unsafe fn make_input_sample(&self, pcm16: &[u8], timestamp: Duration) -> Result<IMFSample> {
         let buffer = MFCreateMemoryBuffer(pcm16.len() as u32)?;
         let mut ptr: *mut u8 = std::ptr::null_mut();
         buffer.Lock(&mut ptr, None, None)?;
@@ -143,8 +140,7 @@ impl AacEncoder {
                 let mut buffers = [output];
                 match self.transform.ProcessOutput(0, &mut buffers, &mut status) {
                     Ok(()) => {
-                        if let Some(sample) =
-                            std::mem::ManuallyDrop::take(&mut buffers[0].pSample)
+                        if let Some(sample) = std::mem::ManuallyDrop::take(&mut buffers[0].pSample)
                         {
                             self.emit(&sample, out)?;
                         }
@@ -215,10 +211,7 @@ unsafe fn set_input_pcm(t: &IMFTransform, sample_rate: u32, channels: u16) -> Re
     mt.SetUINT32(&MF_MT_AUDIO_NUM_CHANNELS, channels as u32)?;
     let block_align = 2 * channels as u32;
     mt.SetUINT32(&MF_MT_AUDIO_BLOCK_ALIGNMENT, block_align)?;
-    mt.SetUINT32(
-        &MF_MT_AUDIO_AVG_BYTES_PER_SECOND,
-        sample_rate * block_align,
-    )?;
+    mt.SetUINT32(&MF_MT_AUDIO_AVG_BYTES_PER_SECOND, sample_rate * block_align)?;
     t.SetInputType(0, &mt, 0)
         .map_err(|e| PipelineError::TypeNegotiation(format!("aac input: {e}")))?;
     Ok(())

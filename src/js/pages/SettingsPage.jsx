@@ -1374,7 +1374,7 @@ function SettingsPage() {
                 <Table.Header>
                   <Table.Row>
                     <Table.Head>时间</Table.Head>
-                    <Table.Head>操作</Table.Head>
+                    <Table.Head className="app-table-action">操作</Table.Head>
                     <Table.Head>对象</Table.Head>
                     <Table.Head>Trace</Table.Head>
                   </Table.Row>

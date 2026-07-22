@@ -102,6 +102,8 @@ func (s *Service) handleAgentRoutes(w http.ResponseWriter, r *http.Request, db *
 
 	case len(subparts) == 2 && subparts[0] == "proxy" && subparts[1] == "nodes":
 		s.handleManagedProxyNodes(w, r, db, "")
+	case len(subparts) >= 2 && subparts[0] == "proxy" && subparts[1] == "runtimes":
+		s.handleManagedProxyRuntimeRoutes(w, r, db, subparts[2:])
 	case len(subparts) >= 2 && subparts[0] == "proxy" && subparts[1] == "tunnels":
 		s.handleManagedTunnelRoutes(w, r, db, subparts[2:])
 	case len(subparts) >= 2 && subparts[0] == "proxy" && subparts[1] == "preferred-addresses":
@@ -111,11 +113,11 @@ func (s *Service) handleAgentRoutes(w http.ResponseWriter, r *http.Request, db *
 	case len(subparts) == 4 && subparts[0] == "proxy" && subparts[1] == "nodes" && subparts[3] == "reconcile" && r.Method == http.MethodPost:
 		s.reconcileManagedProxyNode(w, r, db, subparts[2], true)
 	case len(subparts) == 2 && subparts[0] == "proxy" && r.Method == http.MethodGet:
-		s.getProxyDesiredState(w, r, db, subparts[1])
+		response.Error(w, http.StatusGone, "旧版单节点代理入口已停用，请使用实例管理和本机节点接口")
 	case len(subparts) == 2 && subparts[0] == "proxy" && r.Method == http.MethodPut:
-		s.putProxyDesiredState(w, r, db, subparts[1])
+		response.Error(w, http.StatusGone, "旧版单节点代理入口已停用，请使用实例管理和本机节点接口")
 	case len(subparts) == 3 && subparts[0] == "proxy" && subparts[2] == "reconcile" && r.Method == http.MethodPost:
-		s.reconcileProxyDesiredState(w, r, db, subparts[1])
+		response.Error(w, http.StatusGone, "旧版代理调和入口已停用，请使用本机节点重新部署")
 	case len(subparts) == 3 && subparts[0] == "proxy" && subparts[2] == "traffic" && r.Method == http.MethodPost:
 		s.recordProxyTraffic(w, r, db, subparts[1])
 
@@ -221,6 +223,14 @@ func (s *Service) handleTasksRoutes(w http.ResponseWriter, r *http.Request, db *
 	if len(subparts) == 2 && subparts[1] == "stream" && r.Method == http.MethodGet {
 		taskID := subparts[0]
 		s.streamTask(w, r, s.taskRegistry, taskID)
+		return
+	}
+	if len(subparts) == 1 && r.Method == http.MethodGet {
+		if task, ok := s.taskRegistry.Get(subparts[0]); ok {
+			response.OK(w, task.Snapshot())
+		} else {
+			response.Error(w, http.StatusNotFound, "task not found")
+		}
 		return
 	}
 

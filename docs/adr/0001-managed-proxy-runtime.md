@@ -17,6 +17,20 @@ sing-box is a replaceable data-plane process managed by the Agent;
 they are not additional management Agents and require no separate panel
 enrollment. Normal lifecycle operations must not depend on interactive SSH.
 
+The control plane is deliberately split into separate lifecycle layers:
+
+1. Instance management installs, upgrades, verifies, or removes the pinned
+   sing-box runtime. It does not create a subscriber-facing node.
+2. Node management targets only instances whose runtime is ready, then creates
+   protocol credentials, assigns a port, writes a per-node configuration, and
+   reconciles the corresponding systemd unit.
+3. Cloudflare Tunnel is an optional access path for a managed node. It owns
+   cloudflared, the Named Tunnel, DNS record, and ingress routes; it is not a
+   second proxy runtime.
+
+Every orchestration operation is asynchronous and exposes replayable stage
+progress. Reconnecting after completion must still return the terminal result.
+
 The panel stores desired state. The Agent validates a versioned candidate,
 applies it atomically, verifies runtime health, and rolls back on failure. The
 proxy data plane continues running when the panel or Agent is unavailable.

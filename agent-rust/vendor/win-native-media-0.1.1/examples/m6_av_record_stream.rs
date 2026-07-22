@@ -23,13 +23,14 @@ const RUN_SECS: u64 = 8;
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
     let mut args = std::env::args().skip(1);
-    let url = args.next().unwrap_or_else(|| "rtmp://localhost:1935/live".into());
+    let url = args
+        .next()
+        .unwrap_or_else(|| "rtmp://localhost:1935/live".into());
     let key = args.next().unwrap_or_else(|| "test".into());
 
     let vcfg = VideoConfig {
@@ -42,7 +43,10 @@ async fn main() {
 
     // --- start captures ---
     let (session, vrx) = capture::start(
-        CaptureConfig { target: CaptureTarget::Monitor(0), capture_cursor: true },
+        CaptureConfig {
+            target: CaptureTarget::Monitor(0),
+            capture_cursor: true,
+        },
         8,
     )
     .expect("video capture");
@@ -56,9 +60,9 @@ async fn main() {
 
     // AAC encoders: one per MP4 track (loopback, mic) + one for the RTMP mix.
     let mut aac_loop = AacEncoder::new(sr, ch, 128_000).expect("aac loop");
-    let mut aac_mic = mic.as_ref().map(|(c, _)| {
-        AacEncoder::new(c.sample_rate, c.channels, 128_000).expect("aac mic")
-    });
+    let mut aac_mic = mic
+        .as_ref()
+        .map(|(c, _)| AacEncoder::new(c.sample_rate, c.channels, 128_000).expect("aac mic"));
     let mut aac_mix = AacEncoder::new(sr, ch, 128_000).expect("aac mix");
 
     // --- warm up video encoder for SPS/PPS ---
@@ -70,19 +74,25 @@ async fn main() {
             venc.encode(&f.texture, f.timestamp, &mut out).expect("enc");
             vfed += 1;
             vpending.extend(out);
-        } else { break; }
+        } else {
+            break;
+        }
     }
     let vparams = venc.parameter_sets().clone();
 
     // --- build MP4 with video + audio tracks (loopback track 0, mic track 1) ---
     let mut audio_tracks = vec![AudioTrack {
-        sample_rate: sr, channels: ch,
-        asc: aac_loop.audio_specific_config().to_vec(), bitrate: 128_000,
+        sample_rate: sr,
+        channels: ch,
+        asc: aac_loop.audio_specific_config().to_vec(),
+        bitrate: 128_000,
     }];
     if let Some(a) = &aac_mic {
         audio_tracks.push(AudioTrack {
-            sample_rate: sr, channels: ch,
-            asc: a.audio_specific_config().to_vec(), bitrate: 128_000,
+            sample_rate: sr,
+            channels: ch,
+            asc: a.audio_specific_config().to_vec(),
+            bitrate: 128_000,
         });
     }
     let mut recorder =
@@ -90,13 +100,23 @@ async fn main() {
 
     // --- connect RTMP, send both sequence headers ---
     let mut pubr = RtmpPublisher::connect(
-        StreamConfig { url: url.clone(), stream_key: key.clone() },
-        vcfg, vparams.clone(),
-    ).await.expect("rtmp");
+        StreamConfig {
+            url: url.clone(),
+            stream_key: key.clone(),
+        },
+        vcfg,
+        vparams.clone(),
+    )
+    .await
+    .expect("rtmp");
     pubr.send_audio_sequence_header(aac_mix.audio_specific_config())
-        .await.expect("aac seqhdr");
+        .await
+        .expect("aac seqhdr");
 
-    for s in &vpending { let _ = pubr.send_video(s).await; recorder.write(s).expect("rec v"); }
+    for s in &vpending {
+        let _ = pubr.send_video(s).await;
+        recorder.write(s).expect("rec v");
+    }
 
     // --- main loop: pump video + audio for RUN_SECS ---
     let deadline = std::time::Instant::now() + Duration::from_secs(RUN_SECS);
@@ -118,8 +138,15 @@ async fn main() {
         // loopback audio -> MP4 track 0 + hold for mixing
         while let Ok(buf) = loop_rx.try_recv() {
             let mut out = Vec::new();
-            aac_loop.encode(&buf.data, buf.timestamp, &mut out).expect("aac loop");
-            for f in &out { recorder.write_audio(0, &f.data, f.timestamp).expect("rec a0"); counts.mp4_loop += 1; }
+            aac_loop
+                .encode(&buf.data, buf.timestamp, &mut out)
+                .expect("aac loop");
+            for f in &out {
+                recorder
+                    .write_audio(0, &f.data, f.timestamp)
+                    .expect("rec a0");
+                counts.mp4_loop += 1;
+            }
             last_loop_pcm = buf.data.clone();
 
             // mix with the most recent mic buffer (or silence) for RTMP
@@ -132,24 +159,42 @@ async fn main() {
             if let (Some(enc), Some(m)) = (aac_mic.as_mut(), &mic_data) {
                 let mut mo = Vec::new();
                 enc.encode(&m.data, m.timestamp, &mut mo).expect("aac mic");
-                for f in &mo { recorder.write_audio(1, &f.data, f.timestamp).expect("rec a1"); counts.mp4_mic += 1; }
+                for f in &mo {
+                    recorder
+                        .write_audio(1, &f.data, f.timestamp)
+                        .expect("rec a1");
+                    counts.mp4_mic += 1;
+                }
             }
             // mixed -> RTMP
             let mut xo = Vec::new();
-            aac_mix.encode(&mixed, buf.timestamp, &mut xo).expect("aac mix");
-            for f in &xo { let _ = pubr.send_audio(&f.data, f.timestamp).await; counts.rtmp_audio += 1; }
+            aac_mix
+                .encode(&mixed, buf.timestamp, &mut xo)
+                .expect("aac mix");
+            for f in &xo {
+                let _ = pubr.send_audio(&f.data, f.timestamp).await;
+                counts.rtmp_audio += 1;
+            }
         }
     }
     let _ = last_loop_pcm;
 
     // drain + finalize
-    let mut vt = Vec::new(); let _ = venc.drain(&mut vt);
-    for s in &vt { let _ = pubr.send_video(s).await; recorder.write(s).ok(); }
+    let mut vt = Vec::new();
+    let _ = venc.drain(&mut vt);
+    for s in &vt {
+        let _ = pubr.send_video(s).await;
+        recorder.write(s).ok();
+    }
     recorder.finalize().expect("finalize");
 
-    drop(session); drop(loop_cap); drop(mic);
+    drop(session);
+    drop(loop_cap);
+    drop(mic);
 
-    let mp4 = std::fs::metadata("test_av.mp4").map(|m| m.len()).unwrap_or(0);
+    let mp4 = std::fs::metadata("test_av.mp4")
+        .map(|m| m.len())
+        .unwrap_or(0);
     println!("--- M6 A/V result ---");
     println!("  video frames:      {}", counts.video);
     println!("  MP4 loopback AAC:  {}", counts.mp4_loop);
@@ -158,7 +203,9 @@ async fn main() {
     println!("  test_av.mp4:       {mp4} bytes");
     let ok = counts.video > 0 && counts.mp4_loop > 0 && counts.rtmp_audio > 0 && mp4 > 0;
     println!("  RESULT: {}", if ok { "OK" } else { "FAIL" });
-    if !ok { std::process::exit(1); }
+    if !ok {
+        std::process::exit(1);
+    }
 }
 
 #[derive(Default)]

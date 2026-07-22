@@ -15,8 +15,7 @@ use media_pipeline::AudioSource;
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -45,9 +44,7 @@ fn main() {
     }
 }
 
-fn run_source(
-    source: AudioSource,
-) -> media_pipeline::Result<(usize, usize, Vec<u8>, u32, u16)> {
+fn run_source(source: AudioSource) -> media_pipeline::Result<(usize, usize, Vec<u8>, u32, u16)> {
     let (cap, rx) = capture::start(source, 32)?;
     let sr = cap.sample_rate;
     let ch = cap.channels;

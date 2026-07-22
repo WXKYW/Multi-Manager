@@ -294,18 +294,9 @@ impl MfH264Encoder {
         Ok(())
     }
 
-    fn wrap_texture(
-        &self,
-        texture: &ID3D11Texture2D,
-        timestamp: Duration,
-    ) -> Result<IMFSample> {
+    fn wrap_texture(&self, texture: &ID3D11Texture2D, timestamp: Duration) -> Result<IMFSample> {
         unsafe {
-            let buffer = MFCreateDXGISurfaceBuffer(
-                &ID3D11Texture2D::IID,
-                texture,
-                0,
-                false,
-            )?;
+            let buffer = MFCreateDXGISurfaceBuffer(&ID3D11Texture2D::IID, texture, 0, false)?;
             // The hardware encoder needs a correct current length. A DXGI
             // surface buffer's GetMaxLength is unreliable for NV12; the real
             // packed size comes from IMF2DBuffer::GetContiguousLength. Set that
@@ -381,11 +372,7 @@ impl MfH264Encoder {
         }
     }
 
-    fn encode_sync(
-        &mut self,
-        sample: IMFSample,
-        out: &mut Vec<EncodedSample>,
-    ) -> Result<()> {
+    fn encode_sync(&mut self, sample: IMFSample, out: &mut Vec<EncodedSample>) -> Result<()> {
         unsafe {
             self.transform
                 .ProcessInput(self.input_stream_id, &sample, 0)?;
@@ -400,11 +387,7 @@ impl MfH264Encoder {
         Ok(())
     }
 
-    fn encode_async(
-        &mut self,
-        sample: IMFSample,
-        out: &mut Vec<EncodedSample>,
-    ) -> Result<()> {
+    fn encode_async(&mut self, sample: IMFSample, out: &mut Vec<EncodedSample>) -> Result<()> {
         let gen = self
             .event_gen
             .clone()
@@ -445,15 +428,13 @@ impl MfH264Encoder {
     /// produced, Ok(false) if the MFT needs more input, Err on real failure.
     fn pull_output(&mut self, out: &mut Vec<EncodedSample>) -> Result<bool> {
         unsafe {
-            let stream_info = self
-                .transform
-                .GetOutputStreamInfo(self.output_stream_id)?;
+            let stream_info = self.transform.GetOutputStreamInfo(self.output_stream_id)?;
 
             // For encoders the MFT usually allocates output samples itself
             // (MFT_OUTPUT_STREAM_PROVIDES_SAMPLES). If not, we must allocate.
             let provides_samples = (stream_info.dwFlags
-                & (MFT_OUTPUT_STREAM_PROVIDES_SAMPLES.0
-                    | MFT_OUTPUT_STREAM_CAN_PROVIDE_SAMPLES.0) as u32)
+                & (MFT_OUTPUT_STREAM_PROVIDES_SAMPLES.0 | MFT_OUTPUT_STREAM_CAN_PROVIDE_SAMPLES.0)
+                    as u32)
                 != 0;
 
             let mut output = MFT_OUTPUT_DATA_BUFFER::default();
@@ -467,9 +448,7 @@ impl MfH264Encoder {
 
             let mut status: u32 = 0;
             let mut buffers = [output];
-            let hr = self
-                .transform
-                .ProcessOutput(0, &mut buffers, &mut status);
+            let hr = self.transform.ProcessOutput(0, &mut buffers, &mut status);
 
             match hr {
                 Ok(()) => {
@@ -498,11 +477,7 @@ impl MfH264Encoder {
         }
     }
 
-    fn emit_sample(
-        &mut self,
-        sample: &IMFSample,
-        out: &mut Vec<EncodedSample>,
-    ) -> Result<()> {
+    fn emit_sample(&mut self, sample: &IMFSample, out: &mut Vec<EncodedSample>) -> Result<()> {
         unsafe {
             let is_keyframe = sample
                 .GetUINT32(&MFSampleExtension_CleanPoint)
@@ -539,9 +514,7 @@ impl Drop for MfH264Encoder {
             // A session may close with samples still queued in the transform.
             // Flush first so those frame-sized buffers are released before the
             // transform and Media Foundation runtime are torn down.
-            let _ = self
-                .transform
-                .ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0);
+            let _ = self.transform.ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0);
             let _ = self
                 .transform
                 .ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0);
@@ -549,7 +522,9 @@ impl Drop for MfH264Encoder {
                 .transform
                 .ProcessMessage(MFT_MESSAGE_NOTIFY_END_STREAMING, 0);
             // Release the D3D manager reference held by the MFT.
-            let _ = self.transform.ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, 0);
+            let _ = self
+                .transform
+                .ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, 0);
             let _ = &self.device_manager;
         }
     }
@@ -562,13 +537,36 @@ unsafe fn configure_low_latency(transform: &IMFTransform, cfg: &VideoConfig) {
         return;
     };
     let settings = [
-        (&CODECAPI_AVEncCommonLowLatency, windows::Win32::System::Variant::VARIANT::from(true)),
-        (&CODECAPI_AVEncCommonRealTime, windows::Win32::System::Variant::VARIANT::from(true)),
-        (&CODECAPI_AVEncCommonMeanBitRate, windows::Win32::System::Variant::VARIANT::from(cfg.bitrate)),
-        (&CODECAPI_AVEncCommonRateControlMode, windows::Win32::System::Variant::VARIANT::from(eAVEncCommonRateControlMode_LowDelayVBR.0 as u32)),
-        (&CODECAPI_AVEncMPVGOPSize, windows::Win32::System::Variant::VARIANT::from(cfg.keyframe_interval)),
-        (&CODECAPI_AVEncVideoMaxKeyframeDistance, windows::Win32::System::Variant::VARIANT::from(cfg.keyframe_interval)),
-        (&CODECAPI_AVEncMPVDefaultBPictureCount, windows::Win32::System::Variant::VARIANT::from(0u32)),
+        (
+            &CODECAPI_AVEncCommonLowLatency,
+            windows::Win32::System::Variant::VARIANT::from(true),
+        ),
+        (
+            &CODECAPI_AVEncCommonRealTime,
+            windows::Win32::System::Variant::VARIANT::from(true),
+        ),
+        (
+            &CODECAPI_AVEncCommonMeanBitRate,
+            windows::Win32::System::Variant::VARIANT::from(cfg.bitrate),
+        ),
+        (
+            &CODECAPI_AVEncCommonRateControlMode,
+            windows::Win32::System::Variant::VARIANT::from(
+                eAVEncCommonRateControlMode_LowDelayVBR.0 as u32,
+            ),
+        ),
+        (
+            &CODECAPI_AVEncMPVGOPSize,
+            windows::Win32::System::Variant::VARIANT::from(cfg.keyframe_interval),
+        ),
+        (
+            &CODECAPI_AVEncVideoMaxKeyframeDistance,
+            windows::Win32::System::Variant::VARIANT::from(cfg.keyframe_interval),
+        ),
+        (
+            &CODECAPI_AVEncMPVDefaultBPictureCount,
+            windows::Win32::System::Variant::VARIANT::from(0u32),
+        ),
     ];
     for (key, value) in settings {
         let _ = codec.SetValue(key, &value);
@@ -605,10 +603,7 @@ unsafe fn create_input_allocator(
     set_frame_size(&nv12_type, cfg.width, cfg.height)?;
     set_ratio(&nv12_type, &MF_MT_FRAME_RATE, cfg.fps, 1)?;
     set_ratio(&nv12_type, &MF_MT_PIXEL_ASPECT_RATIO, 1, 1)?;
-    nv12_type.SetUINT32(
-        &MF_MT_INTERLACE_MODE,
-        MFVideoInterlace_Progressive.0 as u32,
-    )?;
+    nv12_type.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)?;
 
     // Attributes controlling the allocated textures' bind flags: RENDER_TARGET
     // (video processor writes) + VIDEO_ENCODER (hardware encoder input).
@@ -650,13 +645,9 @@ unsafe fn enumerate_h264_encoder(prefer_hardware: bool) -> Result<IMFTransform> 
     };
 
     let flags = if prefer_hardware {
-        MFT_ENUM_FLAG_HARDWARE
-            | MFT_ENUM_FLAG_TRANSCODE_ONLY
-            | MFT_ENUM_FLAG_SORTANDFILTER
+        MFT_ENUM_FLAG_HARDWARE | MFT_ENUM_FLAG_TRANSCODE_ONLY | MFT_ENUM_FLAG_SORTANDFILTER
     } else {
-        MFT_ENUM_FLAG_SYNCMFT
-            | MFT_ENUM_FLAG_TRANSCODE_ONLY
-            | MFT_ENUM_FLAG_SORTANDFILTER
+        MFT_ENUM_FLAG_SYNCMFT | MFT_ENUM_FLAG_TRANSCODE_ONLY | MFT_ENUM_FLAG_SORTANDFILTER
     };
 
     let mut activates: *mut Option<IMFActivate> = std::ptr::null_mut();
@@ -730,10 +721,7 @@ unsafe fn set_output_type(
     set_frame_size(&media_type, cfg.width, cfg.height)?;
     set_ratio(&media_type, &MF_MT_FRAME_RATE, cfg.fps, 1)?;
     set_ratio(&media_type, &MF_MT_PIXEL_ASPECT_RATIO, 1, 1)?;
-    media_type.SetUINT32(
-        &MF_MT_INTERLACE_MODE,
-        MFVideoInterlace_Progressive.0 as u32,
-    )?;
+    media_type.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)?;
     // Match the profile browsers advertise for WebRTC H.264. Main-profile
     // bitstreams labeled as constrained baseline may negotiate but then fail
     // at the decoder on Safari and some Android hardware.
@@ -778,10 +766,7 @@ unsafe fn set_input_type(
         set_frame_size(&media_type, cfg.width, cfg.height)?;
         set_ratio(&media_type, &MF_MT_FRAME_RATE, cfg.fps, 1)?;
         set_ratio(&media_type, &MF_MT_PIXEL_ASPECT_RATIO, 1, 1)?;
-        let _ = media_type.SetUINT32(
-            &MF_MT_INTERLACE_MODE,
-            MFVideoInterlace_Progressive.0 as u32,
-        );
+        let _ = media_type.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32);
         match transform.SetInputType(input_id, &media_type, 0) {
             Ok(()) => return Ok(format),
             Err(e) => last_err = Some(e),

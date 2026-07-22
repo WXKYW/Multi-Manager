@@ -17,9 +17,7 @@ use crate::encoder::EncodedSample;
 use crate::fork::Fork;
 use crate::mux::{AudioTrack, Mp4Recorder};
 use crate::stream::RtmpPublisher;
-use crate::{
-    AudioSource, CaptureTarget, PipelineError, Result, StreamConfig, VideoConfig,
-};
+use crate::{AudioSource, CaptureTarget, PipelineError, Result, StreamConfig, VideoConfig};
 
 /// Recording configuration.
 #[derive(Clone, Debug)]
@@ -46,7 +44,11 @@ pub struct AudioConfig {
 
 impl Default for AudioConfig {
     fn default() -> Self {
-        Self { loopback: true, microphone: true, bitrate: 128_000 }
+        Self {
+            loopback: true,
+            microphone: true,
+            bitrate: 128_000,
+        }
     }
 }
 
@@ -356,7 +358,11 @@ fn record_consumer(
     }
 
     // Track indices: loopback first (0) if present, then mic.
-    let loop_track = if loop_enc.is_some() { Some(0usize) } else { None };
+    let loop_track = if loop_enc.is_some() {
+        Some(0usize)
+    } else {
+        None
+    };
     let mic_track = if mic_enc.is_some() {
         Some(if loop_track.is_some() { 1 } else { 0 })
     } else {

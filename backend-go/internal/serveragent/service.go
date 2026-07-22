@@ -111,6 +111,7 @@ func (s *Service) validateAgentConnection(ctx context.Context, serverID, key str
 func New(cfg config.Config) *Service {
 	registry := NewConnectionRegistry()
 	taskRegistry := NewTaskRegistry()
+	store := database.New(cfg)
 	agentBatches := NewAgentBatchManager()
 	metricsHub := NewMetricsHub()
 	ptyHub := newPtyDataHub()
@@ -119,7 +120,7 @@ func New(cfg config.Config) *Service {
 
 	s := &Service{
 		cfg:                           cfg,
-		store:                         database.New(cfg),
+		store:                         store,
 		taskRegistry:                  taskRegistry,
 		agentBatches:                  agentBatches,
 		engineIO:                      engineIO,
@@ -181,6 +182,10 @@ func New(cfg config.Config) *Service {
 					s.presence.recordConnect(serverID, transport)
 				}
 				go s.refreshAccountLocationFromAgentIfMissing(serverID)
+				go func(id string) {
+					time.Sleep(2 * time.Second)
+					s.reconcileManagedProxyFacts(id)
+				}(serverID)
 			}
 		},
 		// onMessage: 接收 Agent 消息
@@ -440,8 +445,18 @@ func New(cfg config.Config) *Service {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if db, err := s.store.Open(ctx); err == nil {
-		_ = ensureSchema(ctx, db)
+		if schemaErr := ensureSchema(ctx, db); schemaErr != nil {
+			applog.Error(context.Background(), "serveragent", "ensure schema failed", "error", schemaErr.Error())
+		}
 		db.Close()
+	} else {
+		applog.Error(context.Background(), "serveragent", "open database during startup failed", "error", err.Error())
+	}
+	taskPersistence := newSQLiteTaskPersistence(store)
+	if err := taskPersistence.Ensure(ctx); err != nil {
+		applog.Error(context.Background(), "serveragent", "ensure task persistence failed", "error", err.Error())
+	} else if err := taskRegistry.AttachPersistence(ctx, taskPersistence); err != nil {
+		applog.Error(context.Background(), "serveragent", "restore task persistence failed", "error", err.Error())
 	}
 
 	s.initTargetsCache()
@@ -451,6 +466,7 @@ func New(cfg config.Config) *Service {
 		s.presence.start()
 	}
 	go s.startMetricsCollectorLoop()
+	go s.startManagedProxyFactsLoop()
 
 	return s
 }
@@ -805,7 +821,27 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			publishable INTEGER NOT NULL DEFAULT 0,
 			apply_status TEXT NOT NULL DEFAULT 'pending',
 			last_error TEXT NOT NULL DEFAULT '',
+			observed_status TEXT NOT NULL DEFAULT 'unknown',
+			observed_revision INTEGER NOT NULL DEFAULT 0,
+			observed_port INTEGER NOT NULL DEFAULT 0,
+			observed_at TEXT,
+			health_status TEXT NOT NULL DEFAULT 'unknown',
 			created_at TEXT DEFAULT (datetime('now')),
+			updated_at TEXT DEFAULT (datetime('now')),
+			FOREIGN KEY (server_id) REFERENCES server_accounts(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS managed_proxy_runtimes (
+			server_id TEXT PRIMARY KEY,
+			runtime TEXT NOT NULL DEFAULT 'sing-box',
+			version TEXT NOT NULL DEFAULT '',
+			desired_status TEXT NOT NULL DEFAULT 'running',
+			apply_status TEXT NOT NULL DEFAULT 'not_installed',
+			last_stage TEXT NOT NULL DEFAULT '',
+			last_error TEXT NOT NULL DEFAULT '',
+			observed_status TEXT NOT NULL DEFAULT 'unknown',
+			observed_version TEXT NOT NULL DEFAULT '',
+			observed_at TEXT,
+			installed_at TEXT,
 			updated_at TEXT DEFAULT (datetime('now')),
 			FOREIGN KEY (server_id) REFERENCES server_accounts(id) ON DELETE CASCADE
 		)`,
@@ -845,6 +881,18 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 		)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_managed_proxy_node_name_server ON managed_proxy_nodes(server_id, name)`,
 		`CREATE INDEX IF NOT EXISTS idx_managed_proxy_nodes_server ON managed_proxy_nodes(server_id, updated_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS trg_managed_proxy_node_port_insert
+			BEFORE INSERT ON managed_proxy_nodes
+			WHEN NEW.assigned_port > 0 AND EXISTS (
+				SELECT 1 FROM managed_proxy_nodes WHERE server_id=NEW.server_id AND assigned_port=NEW.assigned_port
+			)
+			BEGIN SELECT RAISE(ABORT, 'managed proxy port already reserved'); END`,
+		`CREATE TRIGGER IF NOT EXISTS trg_managed_proxy_node_port_update
+			BEFORE UPDATE OF server_id,assigned_port ON managed_proxy_nodes
+			WHEN NEW.assigned_port > 0 AND EXISTS (
+				SELECT 1 FROM managed_proxy_nodes WHERE server_id=NEW.server_id AND assigned_port=NEW.assigned_port AND id<>NEW.id
+			)
+			BEGIN SELECT RAISE(ABORT, 'managed proxy port already reserved'); END`,
 		`CREATE INDEX IF NOT EXISTS idx_managed_proxy_preferences_order ON managed_proxy_preferences(enabled DESC, is_default DESC, sort_order ASC)`,
 		`CREATE INDEX IF NOT EXISTS idx_proxy_traffic_server_time ON server_proxy_traffic_reports(server_id, reported_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS server_network_quality_targets (
@@ -921,6 +969,11 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("ensure server schema: %w", err)
 		}
 	}
+	// Existing managed nodes are evidence that the sing-box runtime was
+	// already installed before the runtime inventory was introduced.
+	if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO managed_proxy_runtimes(server_id,runtime,version,desired_status,apply_status,last_stage,last_error,installed_at,updated_at) SELECT DISTINCT server_id,'sing-box','','running','running','legacy_detected','',datetime('now'),datetime('now') FROM managed_proxy_nodes WHERE apply_status='running'`); err != nil {
+		return fmt.Errorf("backfill managed proxy runtime inventory: %w", err)
+	}
 
 	// Dynamic column migrations check
 	if err := migrateColumns(ctx, db); err != nil {
@@ -949,11 +1002,28 @@ func migrateColumns(ctx context.Context, db *sql.DB) error {
 		{"connect_address", "ALTER TABLE managed_proxy_nodes ADD COLUMN connect_address TEXT NOT NULL DEFAULT ''"},
 		{"connect_port", "ALTER TABLE managed_proxy_nodes ADD COLUMN connect_port INTEGER NOT NULL DEFAULT 0"},
 		{"tunnel_hostname", "ALTER TABLE managed_proxy_nodes ADD COLUMN tunnel_hostname TEXT NOT NULL DEFAULT ''"},
+		{"observed_status", "ALTER TABLE managed_proxy_nodes ADD COLUMN observed_status TEXT NOT NULL DEFAULT 'unknown'"},
+		{"observed_revision", "ALTER TABLE managed_proxy_nodes ADD COLUMN observed_revision INTEGER NOT NULL DEFAULT 0"},
+		{"observed_port", "ALTER TABLE managed_proxy_nodes ADD COLUMN observed_port INTEGER NOT NULL DEFAULT 0"},
+		{"observed_at", "ALTER TABLE managed_proxy_nodes ADD COLUMN observed_at TEXT"},
+		{"health_status", "ALTER TABLE managed_proxy_nodes ADD COLUMN health_status TEXT NOT NULL DEFAULT 'unknown'"},
 	}
 	for _, f := range nodeFields {
 		if exists, err := hasColumn(ctx, db, "managed_proxy_nodes", f.Name); err == nil && !exists {
 			if _, err := db.ExecContext(ctx, f.SQL); err != nil {
 				return fmt.Errorf("migrate managed proxy node %s: %w", f.Name, err)
+			}
+		}
+	}
+	runtimeFields := []struct{ Name, SQL string }{
+		{"observed_status", "ALTER TABLE managed_proxy_runtimes ADD COLUMN observed_status TEXT NOT NULL DEFAULT 'unknown'"},
+		{"observed_version", "ALTER TABLE managed_proxy_runtimes ADD COLUMN observed_version TEXT NOT NULL DEFAULT ''"},
+		{"observed_at", "ALTER TABLE managed_proxy_runtimes ADD COLUMN observed_at TEXT"},
+	}
+	for _, f := range runtimeFields {
+		if exists, err := hasColumn(ctx, db, "managed_proxy_runtimes", f.Name); err == nil && !exists {
+			if _, err := db.ExecContext(ctx, f.SQL); err != nil {
+				return fmt.Errorf("migrate managed proxy runtime %s: %w", f.Name, err)
 			}
 		}
 	}

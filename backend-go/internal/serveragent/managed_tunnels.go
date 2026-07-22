@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -43,6 +44,7 @@ type managedTunnelState struct {
 	LastError     string `json:"last_error"`
 	CreatedAt     string `json:"created_at"`
 	UpdatedAt     string `json:"updated_at"`
+	NodeCount     int    `json:"node_count"`
 }
 
 type preferredAddress struct {
@@ -92,7 +94,7 @@ func (s *Service) handlePreferredAddressRoutes(w http.ResponseWriter, r *http.Re
 }
 
 func (s *Service) listManagedTunnels(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	rows, err := db.QueryContext(r.Context(), `SELECT t.server_id,COALESCE(a.name,''),t.account_id,t.zone_id,t.zone_name,t.tunnel_id,t.tunnel_name,t.hostname,t.dns_record_id,t.revision,t.desired_status,t.apply_status,t.last_stage,t.last_error,t.created_at,t.updated_at FROM managed_proxy_tunnels t LEFT JOIN server_accounts a ON a.id=t.server_id ORDER BY t.updated_at DESC`)
+	rows, err := db.QueryContext(r.Context(), `SELECT t.server_id,COALESCE(a.name,''),t.account_id,t.zone_id,t.zone_name,t.tunnel_id,t.tunnel_name,t.hostname,t.dns_record_id,t.revision,t.desired_status,t.apply_status,t.last_stage,t.last_error,t.created_at,t.updated_at,(SELECT COUNT(*) FROM managed_proxy_nodes n WHERE n.server_id=t.server_id AND n.access_mode='cloudflare_tunnel') FROM managed_proxy_tunnels t LEFT JOIN server_accounts a ON a.id=t.server_id ORDER BY t.updated_at DESC`)
 	if err != nil {
 		response.Error(w, 500, err.Error())
 		return
@@ -101,7 +103,7 @@ func (s *Service) listManagedTunnels(w http.ResponseWriter, r *http.Request, db 
 	items := []managedTunnelState{}
 	for rows.Next() {
 		var item managedTunnelState
-		if err := rows.Scan(&item.ServerID, &item.ServerName, &item.AccountID, &item.ZoneID, &item.ZoneName, &item.TunnelID, &item.TunnelName, &item.Hostname, &item.DNSRecordID, &item.Revision, &item.DesiredStatus, &item.ApplyStatus, &item.LastStage, &item.LastError, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ServerID, &item.ServerName, &item.AccountID, &item.ZoneID, &item.ZoneName, &item.TunnelID, &item.TunnelName, &item.Hostname, &item.DNSRecordID, &item.Revision, &item.DesiredStatus, &item.ApplyStatus, &item.LastStage, &item.LastError, &item.CreatedAt, &item.UpdatedAt, &item.NodeCount); err != nil {
 			response.Error(w, 500, err.Error())
 			return
 		}
@@ -158,7 +160,13 @@ func (s *Service) deployManagedTunnel(w http.ResponseWriter, r *http.Request, db
 		response.Error(w, 404, "server not found")
 		return
 	}
-	task := s.taskRegistry.Create(serverID, "proxy.tunnel.deploy", input.Hostname)
+	if !s.requireAgentCapability(w, serverID, "cloudflared_runtime_v1") {
+		return
+	}
+	task, ok := s.createExclusiveProxyTask(w, serverID, "proxy.tunnel.deploy", input.Hostname)
+	if !ok {
+		return
+	}
 	go s.runManagedTunnelDeploy(task.ID, serverID, serverName, input.AccountID, input.ZoneID, input.Hostname)
 	response.JSON(w, http.StatusAccepted, map[string]interface{}{"success": true, "data": map[string]interface{}{"task_id": task.ID, "status": task.Status}})
 }
@@ -213,6 +221,7 @@ func (s *Service) runManagedTunnelDeploy(taskID, serverID, serverName, accountID
 	}
 
 	createdTunnel := false
+	oldHostname, oldRecordID := state.Hostname, state.DNSRecordID
 	if state.TunnelID == "" {
 		progress(18, "create_tunnel", "正在创建 Named Tunnel")
 		tunnelName := "api-monitor-" + shortStableID(serverID)
@@ -234,6 +243,16 @@ func (s *Service) runManagedTunnelDeploy(taskID, serverID, serverName, accountID
 			_ = s.cloudflare.DeleteManagedTunnelDNS(context.Background(), accountID, zoneID, state.DNSRecordID)
 			_ = s.cloudflare.DeleteManagedTunnel(context.Background(), accountID, state.TunnelID)
 			_, _ = db.ExecContext(context.Background(), `UPDATE managed_proxy_tunnels SET tunnel_id='',tunnel_name='',dns_record_id='',token_encrypted='',apply_status='failed',last_stage=?,last_error=?,updated_at=datetime('now') WHERE server_id=?`, stage, cause.Error(), serverID)
+		} else if state.TunnelID != "" {
+			if oldHostname != "" {
+				if oldIngress, loadErr := loadTunnelIngress(context.Background(), db, serverID, oldHostname); loadErr == nil {
+					_ = s.cloudflare.ConfigureManagedTunnel(context.Background(), accountID, state.TunnelID, oldIngress)
+				}
+			}
+			if state.DNSRecordID != "" && state.DNSRecordID != oldRecordID {
+				_ = s.cloudflare.DeleteManagedTunnelDNS(context.Background(), accountID, zoneID, state.DNSRecordID)
+			}
+			_, _ = db.ExecContext(context.Background(), `UPDATE managed_proxy_tunnels SET hostname=?,dns_record_id=?,apply_status='failed',last_stage=?,last_error=?,updated_at=datetime('now') WHERE server_id=?`, oldHostname, oldRecordID, stage, cause.Error(), serverID)
 		}
 		fail(stage, cause)
 	}
@@ -255,12 +274,8 @@ func (s *Service) runManagedTunnelDeploy(taskID, serverID, serverName, accountID
 		rollback("configure_dns", err)
 		return
 	}
-	oldRecordID := state.DNSRecordID
 	state.DNSRecordID = dns.ID
 	_, _ = db.ExecContext(ctx, `UPDATE managed_proxy_tunnels SET dns_record_id=?,hostname=?,zone_name=?,updated_at=datetime('now') WHERE server_id=?`, dns.ID, hostname, preflight.ZoneName, serverID)
-	if oldRecordID != "" && oldRecordID != dns.ID {
-		_ = s.cloudflare.DeleteManagedTunnelDNS(ctx, accountID, zoneID, oldRecordID)
-	}
 
 	progress(58, "retrieve_token", "正在获取主机专用 Tunnel 令牌")
 	token, err := s.cloudflare.ManagedTunnelToken(ctx, accountID, state.TunnelID)
@@ -300,8 +315,85 @@ func (s *Service) runManagedTunnelDeploy(taskID, serverID, serverName, accountID
 		fail("verify_connector", errors.New("cloudflared started but Cloudflare did not report an active connector; retry after checking host egress"))
 		return
 	}
+	if oldHostname != "" && oldHostname != hostname {
+		progress(94, "migrate_nodes", "正在切换关联节点的 Tunnel 域名")
+		if err := migrateManagedTunnelHostname(ctx, db, serverID, oldHostname, hostname); err != nil {
+			rollback("migrate_nodes", err)
+			return
+		}
+	}
+	if oldRecordID != "" && oldRecordID != state.DNSRecordID {
+		if err := s.cloudflare.DeleteManagedTunnelDNS(ctx, accountID, zoneID, oldRecordID); err != nil {
+			rollback("remove_old_dns", err)
+			return
+		}
+	}
 	_, _ = db.ExecContext(ctx, `UPDATE managed_proxy_tunnels SET apply_status='running',last_stage='completed',last_error='',updated_at=datetime('now') WHERE server_id=?`, serverID)
 	s.taskRegistry.Complete(taskID, fmt.Sprintf("Named Tunnel %s is connected", hostname))
+}
+
+func rewriteTunnelClientURI(raw, oldHostname, newHostname string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", fmt.Errorf("parse Tunnel client URI: %w", err)
+	}
+	if strings.EqualFold(parsed.Hostname(), strings.TrimSpace(oldHostname)) {
+		port := parsed.Port()
+		if port == "" {
+			port = "443"
+		}
+		parsed.Host = net.JoinHostPort(newHostname, port)
+	}
+	query := parsed.Query()
+	query.Set("sni", newHostname)
+	query.Set("host", newHostname)
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
+}
+
+func migrateManagedTunnelHostname(ctx context.Context, db *sql.DB, serverID, oldHostname, newHostname string) error {
+	rows, err := db.QueryContext(ctx, `SELECT id,client_uri_encrypted FROM managed_proxy_nodes WHERE server_id=? AND access_mode='cloudflare_tunnel'`, serverID)
+	if err != nil {
+		return err
+	}
+	type update struct{ id, encrypted string }
+	updates := []update{}
+	for rows.Next() {
+		var id, encrypted string
+		if err := rows.Scan(&id, &encrypted); err != nil {
+			rows.Close()
+			return err
+		}
+		rewritten, err := rewriteTunnelClientURI(secure.SecureDecrypt(encrypted), oldHostname, newHostname)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		encoded, err := secure.SecureEncrypt(rewritten)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		updates = append(updates, update{id: id, encrypted: encoded})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, item := range updates {
+		if _, err := tx.ExecContext(ctx, `UPDATE managed_proxy_nodes SET public_host=?,tunnel_hostname=?,client_uri_encrypted=?,updated_at=datetime('now') WHERE id=?`, newHostname, newHostname, item.encrypted, item.id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func cloudflaredTaskPayload(operation, token string) map[string]interface{} {
@@ -357,7 +449,22 @@ func (s *Service) uninstallManagedTunnel(w http.ResponseWriter, r *http.Request,
 		}
 		return
 	}
-	task := s.taskRegistry.Create(serverID, "proxy.tunnel.uninstall", serverID)
+	var nodeCount int
+	if err := db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM managed_proxy_nodes WHERE server_id=? AND access_mode='cloudflare_tunnel'`, serverID).Scan(&nodeCount); err != nil {
+		response.Error(w, 500, err.Error())
+		return
+	}
+	if nodeCount > 0 && r.URL.Query().Get("cascade") != "1" {
+		response.Error(w, http.StatusConflict, fmt.Sprintf("该 Tunnel 仍关联 %d 个节点；确认级联删除后请使用 cascade=1", nodeCount))
+		return
+	}
+	if !s.requireAgentCapability(w, serverID, "cloudflared_runtime_v1") {
+		return
+	}
+	task, ok := s.createExclusiveProxyTask(w, serverID, "proxy.tunnel.uninstall", serverID)
+	if !ok {
+		return
+	}
 	go s.runManagedTunnelUninstall(task.ID, serverID)
 	response.JSON(w, http.StatusAccepted, map[string]interface{}{"success": true, "data": map[string]interface{}{"task_id": task.ID, "status": task.Status}})
 }

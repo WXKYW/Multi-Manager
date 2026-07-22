@@ -2540,7 +2540,7 @@ function OpenAIPage() {
                               <Table.Head className="!px-2 !py-1.5 text-center">健康</Table.Head>
                               <Table.Head className="!px-2 !py-1.5 text-right">延迟</Table.Head>
                               <Table.Head className="!px-2 !py-1.5">最近检测</Table.Head>
-                              <Table.Head className="!px-2 !py-1.5 text-center">操作</Table.Head>
+                              <Table.Head className="app-table-action !px-2 !py-1.5">操作</Table.Head>
                             </Table.Row>
                           </Table.Header>
                           <Table.Body>
@@ -2724,7 +2724,7 @@ function OpenAIPage() {
                   <Table.Head>最近使用</Table.Head>
                   <Table.Head>过期时间</Table.Head>
                   <Table.Head className="text-right">请求数</Table.Head>
-                  <Table.Head className="text-center">操作</Table.Head>
+                  <Table.Head className="app-table-action">操作</Table.Head>
                 </Table.Row>
               </Table.Header>
               <Table.Body>

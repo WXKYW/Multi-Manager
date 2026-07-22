@@ -843,6 +843,24 @@ table td > * {
   min-width: 0;
 }
 
+/* Keep operation headers and their row actions on the same visual axis. */
+.app-table-action {
+  text-align: center !important;
+}
+
+table:has(th.app-table-action) tbody > tr > td:last-child {
+  text-align: center !important;
+}
+
+table:has(th.app-table-action) tbody > tr > td:last-child button,
+table:has(th.app-table-action) tbody > tr > td:last-child a[role='button'] {
+  display: inline-flex !important;
+}
+
+table:has(th.app-table-action) tbody > tr > td:last-child .justify-end {
+  justify-content: center !important;
+}
+
 /* Hidden scrollbar compatibility for legacy scrollbar-thin usages */
 .scrollbar-thin::-webkit-scrollbar {
   width: 0;

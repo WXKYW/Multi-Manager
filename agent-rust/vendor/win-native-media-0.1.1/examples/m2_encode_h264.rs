@@ -18,8 +18,7 @@ const FRAMES_TO_ENCODE: usize = 60;
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -41,8 +40,7 @@ fn main() {
     .expect("start capture");
 
     // The encoder must share the capture device (zero-copy texture handoff).
-    let mut encoder =
-        MfH264Encoder::new(session.device(), cfg).expect("create encoder");
+    let mut encoder = MfH264Encoder::new(session.device(), cfg).expect("create encoder");
 
     let mut samples: Vec<EncodedSample> = Vec::new();
     let mut encoded = 0usize;
@@ -300,11 +298,7 @@ impl<'a> BitReader<'a> {
     /// Signed Exp-Golomb.
     fn se(&mut self) -> Option<i32> {
         let k = self.ue()? as i64;
-        let val = if k % 2 == 1 {
-            (k + 1) / 2
-        } else {
-            -(k / 2)
-        };
+        let val = if k % 2 == 1 { (k + 1) / 2 } else { -(k / 2) };
         Some(val as i32)
     }
 }

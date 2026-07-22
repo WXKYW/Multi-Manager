@@ -2293,7 +2293,7 @@ function PaasPage() {
                     <Table.Head>备注</Table.Head>
                     <Table.Head>邮箱 / 标识</Table.Head>
                     <Table.Head className="text-right">余额</Table.Head>
-                    <Table.Head className="text-right">操作</Table.Head>
+                    <Table.Head className="app-table-action">操作</Table.Head>
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>

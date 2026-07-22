@@ -1917,6 +1917,10 @@ func stringFromAny(value interface{}) string {
 }
 
 func (s *Service) runAgentTaskAndWait(serverID string, taskType int, command string, timeout time.Duration) (string, error) {
+	return s.runAgentTaskAndWaitMode(serverID, taskType, command, timeout, false)
+}
+
+func (s *Service) runAgentTaskAndWaitMode(serverID string, taskType int, command string, timeout time.Duration, transient bool) (string, error) {
 	conn, ok := s.registry.Get(serverID)
 	if !ok {
 		return "", fmt.Errorf("agent offline")
@@ -1928,7 +1932,16 @@ func (s *Service) runAgentTaskAndWait(serverID string, taskType int, command str
 	} else if taskType == 50 {
 		taskTypeName = "proxy.runtime"
 	}
-	task := s.taskRegistry.Create(serverID, taskTypeName, command)
+	displayCommand := command
+	if taskType == 50 || taskType == 51 {
+		displayCommand = "structured managed-runtime payload"
+	}
+	var task *Task
+	if transient {
+		task = s.taskRegistry.CreateTransient(serverID, taskTypeName, displayCommand)
+	} else {
+		task = s.taskRegistry.Create(serverID, taskTypeName, displayCommand)
+	}
 	eventCh := task.Subscribe()
 
 	err := conn.SendEvent("dashboard:task", map[string]interface{}{
@@ -1938,6 +1951,7 @@ func (s *Service) runAgentTaskAndWait(serverID string, taskType int, command str
 		"timeout": int(timeout.Seconds()),
 	})
 	if err != nil {
+		s.taskRegistry.Fail(task.ID, err.Error())
 		return "", err
 	}
 
@@ -1960,6 +1974,7 @@ func (s *Service) runAgentTaskAndWait(serverID string, taskType int, command str
 				return "", fmt.Errorf("%s", event.Error)
 			}
 		case <-timer.C:
+			s.taskRegistry.Fail(task.ID, "task timeout")
 			return "", fmt.Errorf("task timeout")
 		}
 	}
@@ -1973,6 +1988,10 @@ func (s *Service) RunCommandTaskAndWait(serverID string, command string, timeout
 // managed proxy module. Callers cannot vary the task type or timeout.
 func (s *Service) RunProxyRuntimeTaskAndWait(serverID, desiredState string) (string, error) {
 	return s.runAgentTaskAndWait(serverID, 50, desiredState, 3*time.Minute)
+}
+
+func (s *Service) runProxyRuntimeProbeAndWait(serverID, desiredState string) (string, error) {
+	return s.runAgentTaskAndWaitMode(serverID, 50, desiredState, 30*time.Second, true)
 }
 
 func (s *Service) RunCloudflaredTaskAndWait(serverID, desiredState string) (string, error) {

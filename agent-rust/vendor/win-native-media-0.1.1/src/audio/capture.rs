@@ -6,9 +6,9 @@
 //! 32-bit float, 48 kHz, stereo) is converted to interleaved 16-bit PCM, which
 //! the AAC encoder accepts.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use windows::Win32::Media::Audio::*;
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED,
@@ -75,8 +75,7 @@ fn probe_format(source: AudioSource) -> Result<(u32, u16)> {
 }
 
 unsafe fn activate_client(source: AudioSource) -> Result<IAudioClient> {
-    let enumerator: IMMDeviceEnumerator =
-        CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+    let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
     let (data_flow, _role) = match source {
         // Loopback captures the render endpoint.
         AudioSource::SystemLoopback => (eRender, eConsole),
@@ -136,13 +135,7 @@ fn capture_loop(
             let mut data_ptr: *mut u8 = std::ptr::null_mut();
             let mut num_frames: u32 = 0;
             let mut flags: u32 = 0;
-            capture.GetBuffer(
-                &mut data_ptr,
-                &mut num_frames,
-                &mut flags,
-                None,
-                None,
-            )?;
+            capture.GetBuffer(&mut data_ptr, &mut num_frames, &mut flags, None, None)?;
 
             let silent = (flags & AUDCLNT_BUFFERFLAGS_SILENT.0 as u32) != 0;
             let frame_bytes = (bits / 8) as usize * channels as usize;
@@ -196,12 +189,8 @@ fn to_pcm16(raw: &[u8], is_float: bool, bits: u16, _channels: u16) -> Vec<u8> {
         let n = raw.len() / 4;
         let mut out = Vec::with_capacity(n * 2);
         for i in 0..n {
-            let f = f32::from_le_bytes([
-                raw[i * 4],
-                raw[i * 4 + 1],
-                raw[i * 4 + 2],
-                raw[i * 4 + 3],
-            ]);
+            let f =
+                f32::from_le_bytes([raw[i * 4], raw[i * 4 + 1], raw[i * 4 + 2], raw[i * 4 + 3]]);
             let clamped = f.clamp(-1.0, 1.0);
             let s = (clamped * 32767.0) as i16;
             out.extend_from_slice(&s.to_le_bytes());

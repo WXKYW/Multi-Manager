@@ -630,7 +630,7 @@ function FileboxPage() {
                   <Table.Head>分享码</Table.Head>
                   <Table.Head>下载次数</Table.Head>
                   <Table.Head>到期</Table.Head>
-                  <Table.Head>操作</Table.Head>
+                  <Table.Head className="app-table-action">操作</Table.Head>
                 </Table.Row>
               </Table.Header>
               <Table.Body>

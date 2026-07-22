@@ -21,6 +21,8 @@ const RUNTIME_ROOT: &str = "/opt/api-monitor/proxy/versions";
 #[cfg(unix)]
 #[derive(Debug, Deserialize)]
 pub struct ReconcileRequest {
+    #[serde(default)]
+    pub operation: String,
     pub node_id: String,
     pub revision: u64,
     pub runtime: String,
@@ -36,6 +38,8 @@ pub struct ReconcileRequest {
     pub remove: bool,
     #[serde(default)]
     pub requested_port: u16,
+    #[serde(default)]
+    pub excluded_ports: Vec<u16>,
     #[serde(default = "default_port_min")]
     pub port_min: u16,
     #[serde(default = "default_port_max")]
@@ -75,6 +79,70 @@ pub fn reconcile(raw: &str) -> Result<String, String> {
     validate_node_id(&request.node_id)?;
     let runtime = normalize_runtime(&request.runtime)?;
     let transport = normalize_transport(&request.transport)?;
+    match request.operation.as_str() {
+        "install_runtime" => {
+            let binary = ensure_runtime(&request, runtime)?;
+            return Ok(serde_json::json!({
+                "status": "installed", "runtime": runtime,
+                "version": request.runtime_version, "binary": binary
+            })
+            .to_string());
+        }
+        "status_runtime" => {
+            let binary = PathBuf::from(RUNTIME_ROOT)
+                .join(runtime)
+                .join(&request.runtime_version)
+                .join(runtime);
+            let installed = binary.is_file()
+                && Command::new(&binary)
+                    .arg("version")
+                    .output()
+                    .is_ok_and(|out| out.status.success());
+            return Ok(serde_json::json!({
+                "status": if installed { "installed" } else { "not_installed" },
+                "installed": installed,
+                "runtime": runtime, "version": if installed { request.runtime_version.as_str() } else { "" },
+                "binary": binary
+            }).to_string());
+        }
+        "status_node" => {
+            let unit = unit_name(&request.node_id);
+            let state_dir = PathBuf::from(STATE_ROOT).join(&request.node_id);
+            let config = PathBuf::from(CONFIG_ROOT)
+                .join(&request.node_id)
+                .join("config.json");
+            let state = read_applied_state(&state_dir.join("applied.json"));
+            let active = unit_is_active(&unit);
+            let status = match (&state, active, config.is_file()) {
+                (None, false, false) => "missing",
+                (Some(_), true, true) => "running",
+                (Some(_), false, true) => "stopped",
+                _ => "drifted",
+            };
+            return Ok(serde_json::json!({
+                "node_id": request.node_id, "status": status, "service_active": active,
+                "revision": state.as_ref().map(|value| value.revision).unwrap_or(0),
+                "assigned_port": state.as_ref().map(|value| value.assigned_port).unwrap_or(0),
+                "transport": state.as_ref().map(|value| value.transport.as_str()).unwrap_or(""),
+                "config_present": config.is_file()
+            })
+            .to_string());
+        }
+        "remove_runtime" => {
+            if has_managed_node_units()? {
+                return Err(
+                    "remove managed nodes before uninstalling the proxy runtime".to_string()
+                );
+            }
+            let root = PathBuf::from(RUNTIME_ROOT).join(runtime);
+            if root.exists() {
+                fs::remove_dir_all(&root).map_err(|err| format!("remove proxy runtime: {err}"))?;
+            }
+            return Ok(serde_json::json!({"status": "removed", "runtime": runtime}).to_string());
+        }
+        "" | "reconcile_node" => {}
+        _ => return Err("unsupported proxy runtime operation".to_string()),
+    }
     if request.revision == 0 || request.port_min < 1024 || request.port_min > request.port_max {
         return Err("invalid managed proxy revision or port range".to_string());
     }
@@ -105,12 +173,12 @@ pub fn reconcile(raw: &str) -> Result<String, String> {
     set_file_mode(&config_dir, 0o700)?;
 
     let previous_state = read_applied_state(&applied_path);
-    if previous_state
-        .as_ref()
-        .map(|state| state.revision)
-        .unwrap_or(0)
-        >= request.revision
-    {
+    if previous_state.as_ref().is_some_and(|state| {
+        state.revision == request.revision
+            && state.assigned_port == request.requested_port
+            && state.transport == transport
+            && unit_is_active(&unit) == request.enabled
+    }) {
         let state = previous_state.unwrap();
         return Ok(serde_json::json!({
             "node_id": request.node_id, "revision": state.revision, "runtime": runtime,
@@ -118,6 +186,14 @@ pub fn reconcile(raw: &str) -> Result<String, String> {
             "status": "already_applied"
         })
         .to_string());
+    }
+    if previous_state
+        .as_ref()
+        .is_some_and(|state| state.revision > request.revision)
+    {
+        return Err(
+            "host revision is newer than panel desired state; refusing downgrade".to_string(),
+        );
     }
 
     let assigned_port = if previous_state.as_ref().is_some_and(|state| {
@@ -130,6 +206,7 @@ pub fn reconcile(raw: &str) -> Result<String, String> {
             request.port_min,
             request.port_max,
             transport,
+            &request.excluded_ports,
         )?
     };
     let effective_config = rewrite_inbound_port(&request.config, assigned_port)?;
@@ -145,7 +222,7 @@ pub fn reconcile(raw: &str) -> Result<String, String> {
     }
     fs::rename(&candidate, &active).map_err(|err| format!("activate proxy config: {err}"))?;
     install_unit(&unit, runtime, &binary, &active)?;
-    ensure_firewall_port(assigned_port, transport)?;
+    let firewall_adapter = ensure_firewall_port(assigned_port, transport)?;
 
     let apply_result = if request.enabled {
         systemctl(&["enable", "--now", &unit])?;
@@ -176,9 +253,26 @@ pub fn reconcile(raw: &str) -> Result<String, String> {
     Ok(serde_json::json!({
         "node_id": request.node_id, "revision": request.revision, "runtime": runtime,
         "assigned_port": assigned_port, "transport": transport, "config": effective_config,
+        "firewall_adapter": firewall_adapter,
         "status": if request.enabled { "running" } else { "stopped" }
     })
     .to_string())
+}
+
+#[cfg(unix)]
+fn has_managed_node_units() -> Result<bool, String> {
+    let entries = fs::read_dir("/etc/systemd/system")
+        .map_err(|err| format!("inspect managed proxy services: {err}"))?;
+    for entry in entries {
+        let name = entry
+            .map_err(|err| format!("inspect managed proxy service entry: {err}"))?
+            .file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("api-monitor-proxy@") && name.ends_with(".service") {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 #[cfg(unix)]
@@ -211,6 +305,9 @@ fn ensure_runtime(request: &ReconcileRequest, runtime: &str) -> Result<PathBuf, 
         return Ok(binary);
     }
     fs::create_dir_all(&version_dir).map_err(|err| format!("create runtime directory: {err}"))?;
+    for dependency in ["curl", "tar", "sha256sum"] {
+        ensure_command(dependency)?;
+    }
     let _ = fs::remove_file(&binary);
     let archive = version_dir.join("runtime.tar.gz");
     let extract_dir = version_dir.join("extracting");
@@ -222,6 +319,13 @@ fn ensure_runtime(request: &ReconcileRequest, runtime: &str) -> Result<PathBuf, 
             .args([
                 "--fail",
                 "--location",
+                "--retry",
+                "3",
+                "--retry-all-errors",
+                "--connect-timeout",
+                "15",
+                "--max-time",
+                "300",
                 "--proto",
                 "=https",
                 "--tlsv1.2",
@@ -319,7 +423,7 @@ fn install_unit(unit: &str, runtime: &str, binary: &Path, config: &Path) -> Resu
 }
 
 #[cfg(unix)]
-fn ensure_firewall_port(port: u16, transport: &str) -> Result<(), String> {
+fn ensure_firewall_port(port: u16, transport: &str) -> Result<String, String> {
     let rule = format!("{port}/{transport}");
     if Command::new("firewall-cmd")
         .arg("--state")
@@ -330,22 +434,26 @@ fn ensure_firewall_port(port: u16, transport: &str) -> Result<(), String> {
             Command::new("firewall-cmd").args(["--permanent", "--add-port", &rule]),
             "open firewalld managed proxy port",
         )?;
-        return run(
+        run(
             Command::new("firewall-cmd").arg("--reload"),
             "reload firewalld",
-        );
+        )?;
+        return Ok("firewalld".to_string());
     }
     if Command::new("ufw")
         .arg("status")
         .output()
         .is_ok_and(|out| out.status.success())
     {
-        return run(
+        run(
             Command::new("ufw").args(["allow", &rule, "comment", "API Monitor managed proxy"]),
             "open ufw managed proxy port",
-        );
+        )?;
+        return Ok("ufw".to_string());
     }
-    Ok(())
+    // No active supported firewall means there is no rule to mutate. Report it
+    // explicitly so the control plane can distinguish this from a managed rule.
+    Ok("none".to_string())
 }
 
 #[cfg(unix)]
@@ -400,7 +508,13 @@ fn normalize_transport(value: &str) -> Result<&'static str, String> {
     }
 }
 #[cfg(unix)]
-fn find_available_port(requested: u16, min: u16, max: u16, transport: &str) -> Result<u16, String> {
+fn find_available_port(
+    requested: u16,
+    min: u16,
+    max: u16,
+    transport: &str,
+    excluded_ports: &[u16],
+) -> Result<u16, String> {
     let start = if requested >= min && requested <= max {
         requested
     } else {
@@ -409,6 +523,9 @@ fn find_available_port(requested: u16, min: u16, max: u16, transport: &str) -> R
     let span = u32::from(max) - u32::from(min) + 1;
     for offset in 0..span {
         let port = min + (((u32::from(start) - u32::from(min) + offset) % span) as u16);
+        if excluded_ports.contains(&port) {
+            continue;
+        }
         let addr = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port);
         let available = if transport == "udp" {
             UdpSocket::bind(addr).is_ok()
@@ -430,6 +547,25 @@ fn validate_supported_host() -> Result<(), String> {
         return Err("managed proxy deployment requires systemd".to_string());
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn unit_is_active(unit: &str) -> bool {
+    Command::new("systemctl")
+        .args(["is-active", "--quiet", unit])
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+#[cfg(unix)]
+fn ensure_command(name: &str) -> Result<(), String> {
+    Command::new("sh")
+        .args(["-c", &format!("command -v -- {name} >/dev/null 2>&1")])
+        .status()
+        .map_err(|err| format!("check required command {name}: {err}"))?
+        .success()
+        .then_some(())
+        .ok_or_else(|| format!("required command is unavailable: {name}"))
 }
 #[cfg(unix)]
 fn rewrite_inbound_port(config: &str, port: u16) -> Result<String, String> {

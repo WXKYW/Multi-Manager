@@ -284,7 +284,7 @@ function AliyunPage() {
               <Table.Head className="relative pr-6">记录数<Table.ResizeHandle onMouseDown={(event) => startDnsResize(1, event)} /></Table.Head>
               <Table.Head className="relative pr-6">状态<Table.ResizeHandle onMouseDown={(event) => startDnsResize(2, event)} /></Table.Head>
               <Table.Head className="relative pr-6">备注<Table.ResizeHandle onMouseDown={(event) => startDnsResize(3, event)} /></Table.Head>
-              <Table.Head className="text-right">操作</Table.Head>
+              <Table.Head className="app-table-action">操作</Table.Head>
             </Table.Row>
           </Table.Header>
           <Table.Body>
@@ -320,7 +320,7 @@ function AliyunPage() {
                 <Table.Head>公网 / 内网</Table.Head>
                 <Table.Head>规格</Table.Head>
                 <Table.Head>{kind === 'ecs' ? '操作系统' : '到期时间'}</Table.Head>
-                <Table.Head className="text-right">操作</Table.Head>
+                <Table.Head className="app-table-action">操作</Table.Head>
               </Table.Row>
             </Table.Header>
             <Table.Body>
@@ -374,7 +374,7 @@ function AliyunPage() {
               <Table.Head className="relative pr-6">AccessKey ID<Table.ResizeHandle onMouseDown={(event) => startAccountsResize(1, event)} /></Table.Head>
               <Table.Head className="relative pr-6">默认地域<Table.ResizeHandle onMouseDown={(event) => startAccountsResize(2, event)} /></Table.Head>
               <Table.Head className="relative pr-6">描述<Table.ResizeHandle onMouseDown={(event) => startAccountsResize(3, event)} /></Table.Head>
-              <Table.Head className="text-right">操作</Table.Head>
+              <Table.Head className="app-table-action">操作</Table.Head>
             </Table.Row>
           </Table.Header>
           <Table.Body>

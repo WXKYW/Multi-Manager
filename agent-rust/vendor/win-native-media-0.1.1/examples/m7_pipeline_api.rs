@@ -17,8 +17,7 @@ use media_pipeline::{
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -50,7 +49,10 @@ async fn main() {
         stream: if record_only {
             None
         } else {
-            Some(StreamConfig { url: url.clone(), stream_key: key.clone() })
+            Some(StreamConfig {
+                url: url.clone(),
+                stream_key: key.clone(),
+            })
         },
         audio: Some(media_pipeline::AudioConfig::default()),
     };
@@ -76,7 +78,9 @@ async fn main() {
         pipeline.is_streaming()
     );
 
-    let mp4 = std::fs::metadata("test_pipeline.mp4").map(|m| m.len()).unwrap_or(0);
+    let mp4 = std::fs::metadata("test_pipeline.mp4")
+        .map(|m| m.len())
+        .unwrap_or(0);
     let data = std::fs::read("test_pipeline.mp4").unwrap_or_default();
     let has_moov = data.windows(4).any(|w| w == b"moov");
 

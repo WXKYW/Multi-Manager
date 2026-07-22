@@ -22,13 +22,14 @@ const FRAMES: usize = 300; // ~10s of capture
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
     let mut args = std::env::args().skip(1);
-    let url = args.next().unwrap_or_else(|| "rtmp://localhost:1935/live".into());
+    let url = args
+        .next()
+        .unwrap_or_else(|| "rtmp://localhost:1935/live".into());
     let key = args.next().unwrap_or_else(|| "test".into());
 
     let cfg = VideoConfig {

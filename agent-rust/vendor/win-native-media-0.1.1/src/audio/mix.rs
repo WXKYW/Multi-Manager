@@ -40,7 +40,10 @@ mod tests {
     #[test]
     fn sums_and_clips() {
         // 20000 + 20000 = 40000 -> clip to 32767; -20000 + -20000 -> -32768.
-        let a = [20000i16, -20000].iter().flat_map(|s| s.to_le_bytes()).collect::<Vec<_>>();
+        let a = [20000i16, -20000]
+            .iter()
+            .flat_map(|s| s.to_le_bytes())
+            .collect::<Vec<_>>();
         let b = a.clone();
         let mixed = as_i16(&mix_pcm16(&a, &b));
         assert_eq!(mixed[0], 32767);
@@ -49,8 +52,14 @@ mod tests {
 
     #[test]
     fn zero_pads_shorter_source() {
-        let a = [1000i16, 2000].iter().flat_map(|s| s.to_le_bytes()).collect::<Vec<_>>();
-        let b = [500i16].iter().flat_map(|s| s.to_le_bytes()).collect::<Vec<_>>();
+        let a = [1000i16, 2000]
+            .iter()
+            .flat_map(|s| s.to_le_bytes())
+            .collect::<Vec<_>>();
+        let b = [500i16]
+            .iter()
+            .flat_map(|s| s.to_le_bytes())
+            .collect::<Vec<_>>();
         let mixed = as_i16(&mix_pcm16(&a, &b));
         assert_eq!(mixed, vec![1500, 2000]); // second sample: 2000 + 0
     }

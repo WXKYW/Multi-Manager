@@ -17,8 +17,7 @@ const FRAMES: usize = 120; // ~4s at 30fps
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -112,12 +111,8 @@ fn validate_mp4(path: &str) {
 fn find_box(data: &[u8], fourcc: &[u8; 4]) -> Option<usize> {
     let mut pos = 0;
     while pos + 8 <= data.len() {
-        let size = u32::from_be_bytes([
-            data[pos],
-            data[pos + 1],
-            data[pos + 2],
-            data[pos + 3],
-        ]) as usize;
+        let size =
+            u32::from_be_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
         let typ = &data[pos + 4..pos + 8];
         if typ == fourcc {
             return Some(pos);

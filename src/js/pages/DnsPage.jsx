@@ -1925,7 +1925,7 @@ function DnsPage() {
                       <Table.Head className="!px-2.5 !py-1.5 text-center">状态</Table.Head>
                       <Table.Head className="!px-2.5 !py-1.5 text-center">类型</Table.Head>
                       <Table.Head className="!px-2.5 !py-1.5 text-center">NS</Table.Head>
-                      <Table.Head className="!px-2 !py-1.5 text-center">操作</Table.Head>
+                      <Table.Head className="app-table-action !px-2 !py-1.5">操作</Table.Head>
                     </Table.Row>
                   </Table.Header>
                   <Table.Body>
@@ -2253,7 +2253,7 @@ function DnsPage() {
                           {renderResizeHead('TTL', 4, startRecordResize, 'center')}
                           {renderResizeHead('代理', 5, startRecordResize, 'center')}
                           {renderResizeHead('更新时间', 6, startRecordResize, 'center')}
-                          <Table.Head className="!px-2 !py-1.5 text-center">操作</Table.Head>
+                          <Table.Head className="app-table-action !px-2 !py-1.5">操作</Table.Head>
                         </Table.Row>
                       </Table.Header>
                       <Table.Body>
@@ -2344,7 +2344,7 @@ function DnsPage() {
                     <Table.Head className="relative pr-6">名称<Table.ResizeHandle onMouseDown={(e) => startWorkerResize(0, e)} onTouchStart={(e) => startWorkerResize(0, e)} /></Table.Head>
                     <Table.Head className="relative pr-6">创建时间<Table.ResizeHandle onMouseDown={(e) => startWorkerResize(1, e)} onTouchStart={(e) => startWorkerResize(1, e)} /></Table.Head>
                     <Table.Head className="relative pr-6">更新时间<Table.ResizeHandle onMouseDown={(e) => startWorkerResize(2, e)} onTouchStart={(e) => startWorkerResize(2, e)} /></Table.Head>
-                    <Table.Head className="text-right">操作</Table.Head>
+                    <Table.Head className="app-table-action">操作</Table.Head>
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
@@ -2394,7 +2394,7 @@ function DnsPage() {
                     <Table.Head className="relative pr-6">访问地址<Table.ResizeHandle onMouseDown={(e) => startPageResize(1, e)} onTouchStart={(e) => startPageResize(1, e)} /></Table.Head>
                     <Table.Head className="relative pr-6">生产分支<Table.ResizeHandle onMouseDown={(e) => startPageResize(2, e)} onTouchStart={(e) => startPageResize(2, e)} /></Table.Head>
                     <Table.Head className="relative pr-6">最新部署<Table.ResizeHandle onMouseDown={(e) => startPageResize(3, e)} onTouchStart={(e) => startPageResize(3, e)} /></Table.Head>
-                    <Table.Head className="text-right">操作</Table.Head>
+                    <Table.Head className="app-table-action">操作</Table.Head>
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
@@ -2631,7 +2631,7 @@ function DnsPage() {
                               <Table.Head className="relative pr-6">名称<Table.ResizeHandle onMouseDown={(e) => startR2Resize(1, e)} onTouchStart={(e) => startR2Resize(1, e)} /></Table.Head>
                               <Table.Head className="relative pr-6">大小<Table.ResizeHandle onMouseDown={(e) => startR2Resize(2, e)} onTouchStart={(e) => startR2Resize(2, e)} /></Table.Head>
                               <Table.Head className="relative pr-6">修改时间<Table.ResizeHandle onMouseDown={(e) => startR2Resize(3, e)} onTouchStart={(e) => startR2Resize(3, e)} /></Table.Head>
-                              <Table.Head className="text-right">操作</Table.Head>
+                              <Table.Head className="app-table-action">操作</Table.Head>
                             </Table.Row>
                           </Table.Header>
                           <Table.Body>
@@ -2719,7 +2719,7 @@ function DnsPage() {
                     <Table.Head className="relative pr-6">状态<Table.ResizeHandle onMouseDown={(e) => startTunnelResize(1, e)} onTouchStart={(e) => startTunnelResize(1, e)} /></Table.Head>
                     <Table.Head className="relative pr-6">连接<Table.ResizeHandle onMouseDown={(e) => startTunnelResize(2, e)} onTouchStart={(e) => startTunnelResize(2, e)} /></Table.Head>
                     <Table.Head className="relative pr-6">创建时间<Table.ResizeHandle onMouseDown={(e) => startTunnelResize(3, e)} onTouchStart={(e) => startTunnelResize(3, e)} /></Table.Head>
-                    <Table.Head className="text-right">操作</Table.Head>
+                    <Table.Head className="app-table-action">操作</Table.Head>
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
@@ -2776,7 +2776,7 @@ function DnsPage() {
                     <Table.Head className="relative pr-6">记录数<Table.ResizeHandle onMouseDown={(e) => startTemplateResize(1, e)} onTouchStart={(e) => startTemplateResize(1, e)} /></Table.Head>
                     <Table.Head className="relative pr-6">描述<Table.ResizeHandle onMouseDown={(e) => startTemplateResize(2, e)} onTouchStart={(e) => startTemplateResize(2, e)} /></Table.Head>
                     <Table.Head className="relative pr-6">更新时间<Table.ResizeHandle onMouseDown={(e) => startTemplateResize(3, e)} onTouchStart={(e) => startTemplateResize(3, e)} /></Table.Head>
-                    <Table.Head className="text-right">操作</Table.Head>
+                    <Table.Head className="app-table-action">操作</Table.Head>
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
@@ -2830,7 +2830,7 @@ function DnsPage() {
                       <Table.Head className="relative pr-6">Account ID<Table.ResizeHandle onMouseDown={(e) => startAccountResize(2, e)} onTouchStart={(e) => startAccountResize(2, e)} /></Table.Head>
                       <Table.Head className="relative pr-6">令牌<Table.ResizeHandle onMouseDown={(e) => startAccountResize(3, e)} onTouchStart={(e) => startAccountResize(3, e)} /></Table.Head>
                       <Table.Head className="relative pr-6">最后使用<Table.ResizeHandle onMouseDown={(e) => startAccountResize(4, e)} onTouchStart={(e) => startAccountResize(4, e)} /></Table.Head>
-                      <Table.Head className="text-right">操作</Table.Head>
+                      <Table.Head className="app-table-action">操作</Table.Head>
                     </Table.Row>
                   </Table.Header>
                   <Table.Body>
@@ -3072,7 +3072,7 @@ function DnsPage() {
                     <Table.Row>
                       <Table.Head>规则</Table.Head>
                       <Table.Head>Worker</Table.Head>
-                      <Table.Head className="text-right">操作</Table.Head>
+                      <Table.Head className="app-table-action">操作</Table.Head>
                     </Table.Row>
                   </Table.Header>
                   <Table.Body>
@@ -3107,7 +3107,7 @@ function DnsPage() {
               <LayerCard className="overflow-x-auto p-0">
                 <Table>
                   <Table.Header variant="compact">
-                    <Table.Row><Table.Head>域名</Table.Head><Table.Head>环境</Table.Head><Table.Head>Zone</Table.Head><Table.Head className="text-right">操作</Table.Head></Table.Row>
+                    <Table.Row><Table.Head>域名</Table.Head><Table.Head>环境</Table.Head><Table.Head>Zone</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row>
                   </Table.Header>
                   <Table.Body>
                     {workerDomainState.domains.length === 0 ? (
@@ -3144,7 +3144,7 @@ function DnsPage() {
               <LayerCard className="overflow-x-auto p-0">
                 <Table>
                   <Table.Header variant="compact">
-                    <Table.Row><Table.Head>地址</Table.Head><Table.Head>环境</Table.Head><Table.Head>状态</Table.Head><Table.Head>创建时间</Table.Head><Table.Head className="text-right">操作</Table.Head></Table.Row>
+                    <Table.Row><Table.Head>地址</Table.Head><Table.Head>环境</Table.Head><Table.Head>状态</Table.Head><Table.Head>创建时间</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row>
                   </Table.Header>
                   <Table.Body>
                     {pagesDeployState.deployments.length === 0 ? (
@@ -3179,7 +3179,7 @@ function DnsPage() {
               <LayerCard className="overflow-x-auto p-0">
                 <Table>
                   <Table.Header variant="compact">
-                    <Table.Row><Table.Head>域名</Table.Head><Table.Head>状态</Table.Head><Table.Head>验证状态</Table.Head><Table.Head>创建时间</Table.Head><Table.Head className="text-right">操作</Table.Head></Table.Row>
+                    <Table.Row><Table.Head>域名</Table.Head><Table.Head>状态</Table.Head><Table.Head>验证状态</Table.Head><Table.Head>创建时间</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row>
                   </Table.Header>
                   <Table.Body>
                     {pagesDomainState.domains.length === 0 ? (
@@ -3384,7 +3384,7 @@ function DnsPage() {
               <LayerCard className="overflow-x-auto p-0">
                 <Table>
                   <Table.Header variant="compact">
-                    <Table.Row><Table.Head>客户端</Table.Head><Table.Head>版本</Table.Head><Table.Head>架构</Table.Head><Table.Head>边缘节点</Table.Head><Table.Head>连接时间</Table.Head><Table.Head className="text-right">操作</Table.Head></Table.Row>
+                    <Table.Row><Table.Head>客户端</Table.Head><Table.Head>版本</Table.Head><Table.Head>架构</Table.Head><Table.Head>边缘节点</Table.Head><Table.Head>连接时间</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row>
                   </Table.Header>
                   <Table.Body>
                     {tunnelConnectionState.connections.length === 0 ? (

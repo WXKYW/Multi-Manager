@@ -617,6 +617,14 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			created_at TEXT DEFAULT (datetime('now')),
 			updated_at TEXT DEFAULT (datetime('now'))
 		)`,
+		`CREATE TABLE IF NOT EXISTS subscription_plan_nodes (
+			plan_id TEXT NOT NULL,
+			node_id TEXT NOT NULL,
+			source TEXT NOT NULL CHECK(source IN ('internal','external')),
+			created_at TEXT DEFAULT (datetime('now')),
+			PRIMARY KEY(plan_id,node_id,source)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_subscription_plan_nodes_node ON subscription_plan_nodes(node_id,source)`,
 		`CREATE INDEX IF NOT EXISTS idx_subscription_subscriptions_token ON subscription_subscriptions(public_token)`,
 		`CREATE INDEX IF NOT EXISTS idx_subscription_upstreams_profile ON subscription_upstreams(profile_id)`,
 		`CREATE TABLE IF NOT EXISTS subscription_nodes (
@@ -668,7 +676,19 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			apply_status TEXT NOT NULL DEFAULT 'pending', last_error TEXT NOT NULL DEFAULT '',
 			created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
 		)`,
+		`CREATE TABLE IF NOT EXISTS managed_proxy_preferences (
+			id TEXT PRIMARY KEY, name TEXT NOT NULL, address TEXT NOT NULL,
+			port INTEGER NOT NULL DEFAULT 443, enabled INTEGER NOT NULL DEFAULT 1,
+			is_default INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0,
+			last_status TEXT NOT NULL DEFAULT 'unknown', last_latency_ms INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '', checked_at TEXT,
+			created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_subscription_access_logs_subscription ON subscription_access_logs(subscription_id, created_at)`,
+		`CREATE TRIGGER IF NOT EXISTS trg_subscription_plan_nodes_managed_delete AFTER DELETE ON managed_proxy_nodes
+			BEGIN DELETE FROM subscription_plan_nodes WHERE node_id=OLD.id AND source='internal'; END`,
+		`CREATE TRIGGER IF NOT EXISTS trg_subscription_plan_nodes_external_delete AFTER DELETE ON subscription_nodes
+			BEGIN DELETE FROM subscription_plan_nodes WHERE node_id=OLD.id AND source='external'; END`,
 	}
 	for _, statement := range statements {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
@@ -693,6 +713,23 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 		{"traffic_reporting", "ALTER TABLE subscription_nodes ADD COLUMN traffic_reporting TEXT DEFAULT 'unavailable'"},
 	} {
 		if err := ensureColumn(ctx, db, "subscription_nodes", column.name, column.sql); err != nil {
+			return err
+		}
+	}
+	for _, column := range []struct{ name, sql string }{
+		{"access_mode", "ALTER TABLE managed_proxy_nodes ADD COLUMN access_mode TEXT NOT NULL DEFAULT 'direct'"},
+		{"tunnel_path", "ALTER TABLE managed_proxy_nodes ADD COLUMN tunnel_path TEXT NOT NULL DEFAULT ''"},
+		{"preferred_address_id", "ALTER TABLE managed_proxy_nodes ADD COLUMN preferred_address_id TEXT NOT NULL DEFAULT ''"},
+		{"connect_address", "ALTER TABLE managed_proxy_nodes ADD COLUMN connect_address TEXT NOT NULL DEFAULT ''"},
+		{"connect_port", "ALTER TABLE managed_proxy_nodes ADD COLUMN connect_port INTEGER NOT NULL DEFAULT 0"},
+		{"tunnel_hostname", "ALTER TABLE managed_proxy_nodes ADD COLUMN tunnel_hostname TEXT NOT NULL DEFAULT ''"},
+		{"observed_status", "ALTER TABLE managed_proxy_nodes ADD COLUMN observed_status TEXT NOT NULL DEFAULT 'unknown'"},
+		{"observed_revision", "ALTER TABLE managed_proxy_nodes ADD COLUMN observed_revision INTEGER NOT NULL DEFAULT 0"},
+		{"observed_port", "ALTER TABLE managed_proxy_nodes ADD COLUMN observed_port INTEGER NOT NULL DEFAULT 0"},
+		{"observed_at", "ALTER TABLE managed_proxy_nodes ADD COLUMN observed_at TEXT"},
+		{"health_status", "ALTER TABLE managed_proxy_nodes ADD COLUMN health_status TEXT NOT NULL DEFAULT 'unknown'"},
+	} {
+		if err := ensureColumn(ctx, db, "managed_proxy_nodes", column.name, column.sql); err != nil {
 			return err
 		}
 	}
@@ -736,6 +773,40 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 		FROM subscription_subscriptions
 		WHERE COALESCE(profile_id, '') != '' AND COALESCE(upstream_url, '') != ''`); err != nil {
 		return fmt.Errorf("seed subscription upstreams: %w", err)
+	}
+	if err := migratePlanNodeRelations(ctx, db); err != nil {
+		return err
+	}
+	return nil
+}
+
+func migratePlanNodeRelations(ctx context.Context, db *sql.DB) error {
+	rows, err := db.QueryContext(ctx, `SELECT id,COALESCE(node_ids,'') FROM subscription_plans WHERE COALESCE(node_ids,'')<>''`)
+	if err != nil {
+		return err
+	}
+	type legacyPlan struct{ id, nodeIDs string }
+	legacy := []legacyPlan{}
+	for rows.Next() {
+		var item legacyPlan
+		if err := rows.Scan(&item.id, &item.nodeIDs); err != nil {
+			rows.Close()
+			return err
+		}
+		legacy = append(legacy, item)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, plan := range legacy {
+		var relationCount int
+		_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_plan_nodes WHERE plan_id=?`, plan.id).Scan(&relationCount)
+		if relationCount > 0 {
+			continue
+		}
+		if err := replacePlanNodeRelations(ctx, db, nil, plan.id, decodeNodeFilterIDs(plan.nodeIDs)); err != nil {
+			return fmt.Errorf("migrate plan node relations: %w", err)
+		}
 	}
 	return nil
 }
@@ -806,7 +877,13 @@ func (s *Service) handlePlans(w http.ResponseWriter, r *http.Request, db *sql.DB
 		if id == "" {
 			id = randomID("plan")
 		}
-		_, err := db.ExecContext(r.Context(), `INSERT INTO subscription_plans
+		tx, err := db.BeginTx(r.Context(), nil)
+		if err != nil {
+			response.Error(w, 500, err.Error())
+			return
+		}
+		defer tx.Rollback()
+		_, err = tx.ExecContext(r.Context(), `INSERT INTO subscription_plans
 			(id,name,remark,enabled,total_bytes,cycle_type,cycle_day,rate_limit_enabled,rate_limit_per_minute,node_ids,include_internal_nodes,include_external_nodes,updated_at)
 			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,datetime('now')) ON CONFLICT(id) DO UPDATE SET
 			name=excluded.name,remark=excluded.remark,enabled=excluded.enabled,total_bytes=excluded.total_bytes,
@@ -816,6 +893,14 @@ func (s *Service) handlePlans(w http.ResponseWriter, r *http.Request, db *sql.DB
 			id, input.Name, input.Remark, boolToInt(input.Enabled), maxInt64(0, input.TotalBytes), input.CycleType, input.CycleDay,
 			boolToInt(input.RateLimitEnabled), input.RateLimitPerMinute, encodeNodeFilterIDs(input.NodeIDs), boolToInt(input.IncludeInternalNodes), boolToInt(input.IncludeExternalNodes))
 		if err != nil {
+			response.Error(w, 500, err.Error())
+			return
+		}
+		if err := replacePlanNodeRelations(r.Context(), db, tx, id, input.NodeIDs); err != nil {
+			response.Error(w, 400, err.Error())
+			return
+		}
+		if err := tx.Commit(); err != nil {
 			response.Error(w, 500, err.Error())
 			return
 		}
@@ -832,7 +917,14 @@ func (s *Service) handlePlans(w http.ResponseWriter, r *http.Request, db *sql.DB
 			response.Error(w, 409, "套餐仍有订阅使用，无法删除")
 			return
 		}
-		result, err := db.ExecContext(r.Context(), `DELETE FROM subscription_plans WHERE id=?`, id)
+		tx, err := db.BeginTx(r.Context(), nil)
+		if err != nil {
+			response.Error(w, 500, err.Error())
+			return
+		}
+		defer tx.Rollback()
+		_, _ = tx.ExecContext(r.Context(), `DELETE FROM subscription_plan_nodes WHERE plan_id=?`, id)
+		result, err := tx.ExecContext(r.Context(), `DELETE FROM subscription_plans WHERE id=?`, id)
 		if err != nil {
 			response.Error(w, 500, err.Error())
 			return
@@ -840,6 +932,10 @@ func (s *Service) handlePlans(w http.ResponseWriter, r *http.Request, db *sql.DB
 		affected, _ := result.RowsAffected()
 		if affected == 0 {
 			response.Error(w, 404, "套餐不存在")
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			response.Error(w, 500, err.Error())
 			return
 		}
 		response.OK(w, map[string]bool{"deleted": true})
@@ -860,8 +956,8 @@ func loadPlans(ctx context.Context, db *sql.DB, id string) ([]Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	plans := []Plan{}
+	legacyNodeIDs := []string{}
 	for rows.Next() {
 		var p Plan
 		var enabled, rateEnabled, includeInternal, includeExternal int
@@ -873,8 +969,75 @@ func loadPlans(ctx context.Context, db *sql.DB, id string) ([]Plan, error) {
 		p.IncludeInternalNodes, p.IncludeExternalNodes = includeInternal == 1, includeExternal == 1
 		p.NodeIDs = decodeNodeFilterIDs(nodeIDs)
 		plans = append(plans, p)
+		legacyNodeIDs = append(legacyNodeIDs, nodeIDs)
 	}
-	return plans, rows.Err()
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for i := range plans {
+		nodeRows, err := db.QueryContext(ctx, `SELECT node_id FROM subscription_plan_nodes WHERE plan_id=? ORDER BY created_at,node_id`, plans[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		relations := []string{}
+		for nodeRows.Next() {
+			var nodeID string
+			if err := nodeRows.Scan(&nodeID); err != nil {
+				nodeRows.Close()
+				return nil, err
+			}
+			relations = append(relations, nodeID)
+		}
+		nodeRows.Close()
+		if len(relations) > 0 || strings.TrimSpace(legacyNodeIDs[i]) == "" {
+			plans[i].NodeIDs = relations
+		}
+	}
+	return plans, nil
+}
+
+type planNodeExecutor interface {
+	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
+}
+
+func replacePlanNodeRelations(ctx context.Context, db *sql.DB, tx *sql.Tx, planID string, nodeIDs []string) error {
+	var executor planNodeExecutor = db
+	if tx != nil {
+		executor = tx
+	}
+	if _, err := executor.ExecContext(ctx, `DELETE FROM subscription_plan_nodes WHERE plan_id=?`, planID); err != nil {
+		return err
+	}
+	seen := map[string]struct{}{}
+	for _, rawID := range nodeIDs {
+		nodeID := strings.TrimSpace(rawID)
+		if nodeID == "" {
+			continue
+		}
+		if _, duplicate := seen[nodeID]; duplicate {
+			continue
+		}
+		seen[nodeID] = struct{}{}
+		source := ""
+		var exists int
+		if err := executor.QueryRowContext(ctx, `SELECT 1 FROM managed_proxy_nodes WHERE id=?`, nodeID).Scan(&exists); err == nil {
+			source = "internal"
+		} else if err := executor.QueryRowContext(ctx, `SELECT 1 FROM subscription_nodes WHERE id=?`, nodeID).Scan(&exists); err == nil {
+			source = "external"
+		}
+		if source == "" {
+			return fmt.Errorf("节点 %s 不存在或已被删除", nodeID)
+		}
+		if _, err := executor.ExecContext(ctx, `INSERT INTO subscription_plan_nodes(plan_id,node_id,source) VALUES(?,?,?)`, planID, nodeID, source); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func applyPlanToSubscription(ctx context.Context, db *sql.DB, sub *Subscription) {
@@ -1858,7 +2021,13 @@ func (s *Service) servePublicSubscription(w http.ResponseWriter, r *http.Request
 	}
 	nodes := []Node{}
 	if sub.IncludeInternalNodes {
-		nodes, _ = loadManagedSubscriptionNodes(r.Context(), db)
+		nodes, err = loadManagedSubscriptionNodes(r.Context(), db)
+		if err != nil {
+			statusCode = http.StatusInternalServerError
+			errMsg = "load managed nodes: " + err.Error()
+			response.Error(w, statusCode, errMsg)
+			return
+		}
 		nodes = filterNodesByIDsForSource(nodes, sub.NodeFilterIDs)
 	}
 	if sub.IncludeExternalNodes {
@@ -1866,9 +2035,16 @@ func (s *Service) servePublicSubscription(w http.ResponseWriter, r *http.Request
 		if sub.PlanID != "" {
 			externalProfileID = ""
 		}
-		external, _ := loadNodes(r.Context(), db, externalProfileID, true)
+		external, loadErr := loadNodes(r.Context(), db, externalProfileID, true)
+		if loadErr != nil {
+			statusCode = http.StatusInternalServerError
+			errMsg = "load external nodes: " + loadErr.Error()
+			response.Error(w, statusCode, errMsg)
+			return
+		}
 		nodes = append(nodes, filterNodesByIDsForSource(external, sub.NodeFilterIDs)...)
 	}
+	nodes = ensureUniquePublishedNodeNames(nodes)
 	traffic = sub.Traffic
 	blocked := traffic.Status == "expired" || traffic.Status == "exhausted"
 	if blocked {
@@ -1896,24 +2072,53 @@ func (s *Service) servePublicSubscription(w http.ResponseWriter, r *http.Request
 }
 
 func loadManagedSubscriptionNodes(ctx context.Context, db *sql.DB) ([]Node, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id,name,protocol,public_host,assigned_port,client_uri_encrypted,created_at,updated_at FROM managed_proxy_nodes WHERE enabled=1 AND publishable=1 AND apply_status='running' ORDER BY created_at ASC`)
+	rows, err := db.QueryContext(ctx, `SELECT id,name,protocol,public_host,assigned_port,client_uri_encrypted,COALESCE(access_mode,'direct'),COALESCE(preferred_address_id,''),COALESCE(connect_address,''),COALESCE(connect_port,0),COALESCE(tunnel_hostname,''),created_at,updated_at FROM managed_proxy_nodes WHERE enabled=1 AND publishable=1 AND apply_status='running' ORDER BY created_at ASC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	nodes := []Node{}
+	type managedRow struct {
+		id, name, protocol, host, encrypted, accessMode, preferredID, connectAddress, tunnelHostname, createdAt, updatedAt string
+		port, connectPort                                                                                                  int
+	}
+	managedRows := []managedRow{}
 	for rows.Next() {
-		var id, name, protocol, host, encrypted, createdAt, updatedAt string
-		var port int
-		if err := rows.Scan(&id, &name, &protocol, &host, &port, &encrypted, &createdAt, &updatedAt); err != nil {
+		var item managedRow
+		if err := rows.Scan(&item.id, &item.name, &item.protocol, &item.host, &item.port, &item.encrypted, &item.accessMode, &item.preferredID, &item.connectAddress, &item.connectPort, &item.tunnelHostname, &item.createdAt, &item.updatedAt); err != nil {
 			return nil, err
 		}
-		raw := secure.SecureDecrypt(encrypted)
+		managedRows = append(managedRows, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	nodes := make([]Node, 0, len(managedRows))
+	for _, item := range managedRows {
+		raw := secure.SecureDecrypt(item.encrypted)
+		if item.accessMode == "cloudflare_tunnel" {
+			address, port := strings.TrimSpace(item.connectAddress), item.connectPort
+			if address == "" && item.preferredID != "" {
+				_ = db.QueryRowContext(ctx, `SELECT address,port FROM managed_proxy_preferences WHERE id=? AND enabled=1`, item.preferredID).Scan(&address, &port)
+			}
+			if address == "" {
+				_ = db.QueryRowContext(ctx, `SELECT address,port FROM managed_proxy_preferences WHERE enabled=1 AND is_default=1 ORDER BY sort_order ASC,created_at ASC LIMIT 1`).Scan(&address, &port)
+			}
+			if address == "" {
+				address = item.tunnelHostname
+			}
+			if port == 0 {
+				port = 443
+			}
+			raw = replacePublishedURIAddress(raw, address, port)
+		}
 		node := parseURI(raw, len(nodes)+1)
-		node.ID = id
-		node.Name = name
-		node.Server = host
-		node.Port = port
+		node.ID = item.id
+		node.Name = item.name
+		node.Server = item.host
+		node.Port = item.port
 		node.Raw = raw
 		node.Enabled = true
 		node.Stable = true
@@ -1921,11 +2126,54 @@ func loadManagedSubscriptionNodes(ctx context.Context, db *sql.DB) ([]Node, erro
 		node.Management = "agent"
 		node.TrafficReporting = "trusted"
 		node.Source = "internal"
-		node.CreatedAt = createdAt
-		node.UpdatedAt = updatedAt
+		node.CreatedAt = item.createdAt
+		node.UpdatedAt = item.updatedAt
 		nodes = append(nodes, node)
 	}
-	return nodes, rows.Err()
+	return nodes, nil
+}
+
+func replacePublishedURIAddress(raw, address string, port int) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || strings.TrimSpace(address) == "" || port < 1 || port > 65535 {
+		return raw
+	}
+	parsed.Host = net.JoinHostPort(strings.TrimSpace(address), strconv.Itoa(port))
+	return parsed.String()
+}
+
+func ensureUniquePublishedNodeNames(nodes []Node) []Node {
+	seen := make(map[string]int, len(nodes))
+	for i := range nodes {
+		base := strings.TrimSpace(nodes[i].Name)
+		if base == "" {
+			base = firstNonEmpty(nodes[i].Server, "未命名节点")
+		}
+		key := strings.ToLower(base)
+		seen[key]++
+		name := base
+		if seen[key] > 1 {
+			name = fmt.Sprintf("%s · %d", base, seen[key])
+		}
+		if nodes[i].Name == name {
+			continue
+		}
+		nodes[i].Name = name
+		if parsed, err := url.Parse(nodes[i].Raw); err == nil && parsed.Scheme != "" {
+			parsed.Fragment = name
+			nodes[i].Raw = parsed.String()
+		}
+		if strings.TrimSpace(nodes[i].ConfigJSON) != "" {
+			var config map[string]interface{}
+			if json.Unmarshal([]byte(nodes[i].ConfigJSON), &config) == nil {
+				config["name"] = name
+				if encoded, err := json.Marshal(config); err == nil {
+					nodes[i].ConfigJSON = string(encoded)
+				}
+			}
+		}
+	}
+	return nodes
 }
 
 func filterNodesByIDsForSource(nodes []Node, ids []string) []Node {

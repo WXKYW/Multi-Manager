@@ -235,7 +235,7 @@ export function BackupPanel({ embedded = false } = {}) {
           ) : (
             <div className="max-h-80 overflow-auto">
             <Table layout="fixed" className={embedded ? 'min-w-[560px]' : 'min-w-[720px]'}>
-              <Table.Header><Table.Row><Table.Head>文件</Table.Head><Table.Head>大小</Table.Head><Table.Head>时间</Table.Head><Table.Head>操作</Table.Head></Table.Row></Table.Header>
+              <Table.Header><Table.Row><Table.Head>文件</Table.Head><Table.Head>大小</Table.Head><Table.Head>时间</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row></Table.Header>
               <Table.Body>
                 {records.map((record) => (
                   <Table.Row key={record.id}>

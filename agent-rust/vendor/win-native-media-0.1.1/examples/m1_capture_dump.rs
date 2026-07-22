@@ -20,8 +20,7 @@ const FRAMES_TO_DUMP: usize = 10;
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -100,26 +99,19 @@ fn save_frame_bmp(
 
         let w = desc.Width as usize;
         let h = desc.Height as usize;
-        let src = std::slice::from_raw_parts(
-            mapped.pData as *const u8,
-            mapped.RowPitch as usize * h,
-        );
+        let src =
+            std::slice::from_raw_parts(mapped.pData as *const u8, mapped.RowPitch as usize * h);
 
         let result = write_bmp(path, w, h, src, mapped.RowPitch as usize);
         context.Unmap(&staging, 0);
-        result.map_err(|e| windows::core::Error::new(windows::core::HRESULT(-1), format!("{e}")))?;
+        result
+            .map_err(|e| windows::core::Error::new(windows::core::HRESULT(-1), format!("{e}")))?;
     }
     Ok(())
 }
 
 /// Minimal bottom-up 24-bit BMP writer from BGRA source rows.
-fn write_bmp(
-    path: &str,
-    w: usize,
-    h: usize,
-    bgra: &[u8],
-    row_pitch: usize,
-) -> std::io::Result<()> {
+fn write_bmp(path: &str, w: usize, h: usize, bgra: &[u8], row_pitch: usize) -> std::io::Result<()> {
     let row_bytes = w * 3;
     let padding = (4 - (row_bytes % 4)) % 4;
     let padded_row = row_bytes + padding;

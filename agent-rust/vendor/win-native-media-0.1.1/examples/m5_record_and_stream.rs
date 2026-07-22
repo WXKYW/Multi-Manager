@@ -21,13 +21,14 @@ const FRAMES: usize = 300;
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
     let mut args = std::env::args().skip(1);
-    let url = args.next().unwrap_or_else(|| "rtmp://localhost:1935/live".into());
+    let url = args
+        .next()
+        .unwrap_or_else(|| "rtmp://localhost:1935/live".into());
     let key = args.next().unwrap_or_else(|| "test".into());
 
     let cfg = VideoConfig {
@@ -55,7 +56,9 @@ fn main() {
     while encoder.parameter_sets().sps.is_empty() && fed < 60 {
         if let Ok(frame) = rx.recv_timeout(Duration::from_secs(5)) {
             let mut out = Vec::new();
-            encoder.encode(&frame.texture, frame.timestamp, &mut out).expect("encode");
+            encoder
+                .encode(&frame.texture, frame.timestamp, &mut out)
+                .expect("encode");
             fed += 1;
             warmup.append(&mut out);
         } else {
@@ -98,7 +101,10 @@ fn main() {
             .expect("rt");
         rt.block_on(async move {
             let mut pubr = RtmpPublisher::connect(
-                StreamConfig { url, stream_key: key },
+                StreamConfig {
+                    url,
+                    stream_key: key,
+                },
                 str_cfg,
                 str_params,
             )
@@ -155,7 +161,9 @@ fn main() {
     let recorded = record_thread.join().expect("record join");
     let streamed = stream_thread.join().expect("stream join");
 
-    let mp4_len = std::fs::metadata("test_fork.mp4").map(|m| m.len()).unwrap_or(0);
+    let mp4_len = std::fs::metadata("test_fork.mp4")
+        .map(|m| m.len())
+        .unwrap_or(0);
 
     println!("--- M5 fork result ---");
     println!("  frames encoded:     {fed}");

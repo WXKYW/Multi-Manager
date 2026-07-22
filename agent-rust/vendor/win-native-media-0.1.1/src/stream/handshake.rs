@@ -16,7 +16,7 @@ pub async fn handshake(stream: &mut TcpStream) -> Result<()> {
     // --- send C0 + C1 ---
     let mut c0c1 = Vec::with_capacity(1 + HANDSHAKE_SIZE);
     c0c1.push(RTMP_VERSION); // C0
-    // C1: time(4)=0, zero(4)=0, then random.
+                             // C1: time(4)=0, zero(4)=0, then random.
     c0c1.extend_from_slice(&[0u8; 8]);
     let mut rng = SimpleRng::new();
     c0c1.extend((0..HANDSHAKE_SIZE - 8).map(|_| rng.next_u8()));

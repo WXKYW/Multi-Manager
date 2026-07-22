@@ -193,9 +193,9 @@ func Routes() []Route {
 		{Prefix: "/api/server/agent/batch-upgrade", Module: "server-agent", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Create Agent batch upgrade task", MatchMode: MatchExact},
 		{Prefix: "/api/server/agent/batch/{id}", Module: "server-agent", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Agent batch task status", MatchMode: MatchPattern},
 		{Prefix: "/api/server/agent/connection-info/{id}", Module: "server-agent", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Agent connection status info", MatchMode: MatchPattern},
-		{Prefix: "/api/server/agent/proxy/{id}/reconcile", Module: "server-agent-proxy", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Reconcile managed proxy runtime", MatchMode: MatchPattern},
+		{Prefix: "/api/server/agent/proxy/{id}/reconcile", Module: "server-agent-proxy-legacy", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Retired legacy proxy reconcile endpoint (410)", MatchMode: MatchPattern},
 		{Prefix: "/api/server/agent/proxy/{id}/traffic", Module: "server-agent-proxy", Owner: OwnerGo, Auth: AuthAgent, ResponseMode: ResponseJSON, Description: "Idempotent managed proxy traffic report", MatchMode: MatchPattern},
-		{Prefix: "/api/server/agent/proxy/{id}", Module: "server-agent-proxy", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Managed proxy desired state", MatchMode: MatchPattern},
+		{Prefix: "/api/server/agent/proxy/{id}", Module: "server-agent-proxy-legacy", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Retired legacy proxy desired-state endpoint (410)", MatchMode: MatchPattern},
 		{Prefix: "/api/server/agent/proxy/nodes/{id}/reconcile", Module: "server-agent-proxy", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Reconcile one internal proxy node", MatchMode: MatchPattern},
 		{Prefix: "/api/server/agent/proxy/nodes/{id}", Module: "server-agent-proxy", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Internal proxy node", MatchMode: MatchPattern},
 		{Prefix: "/api/server/agent/proxy/nodes", Module: "server-agent-proxy", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Internal proxy nodes", MatchMode: MatchExact},
@@ -206,6 +206,8 @@ func Routes() []Route {
 		{Prefix: "/api/server/agent/proxy/preferred-addresses/{id}/check", Module: "server-agent-tunnels", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Preferred address health check", MatchMode: MatchPattern},
 		{Prefix: "/api/server/agent/proxy/preferred-addresses/{id}", Module: "server-agent-tunnels", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Preferred address update/delete", MatchMode: MatchPattern},
 		{Prefix: "/api/server/agent/proxy/preferred-addresses", Module: "server-agent-tunnels", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Preferred address list/create", MatchMode: MatchExact},
+		{Prefix: "/api/server/agent/proxy/runtimes/{id}/{action}", Module: "server-agent-proxy-runtime", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Managed proxy runtime lifecycle", MatchMode: MatchPattern},
+		{Prefix: "/api/server/agent/proxy/runtimes", Module: "server-agent-proxy-runtime", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Managed proxy runtime inventory", MatchMode: MatchExact},
 		{Prefix: "/api/server/agent/uninstall/{id}", Module: "server-agent", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Agent uninstall", MatchMode: MatchPattern},
 		{Prefix: "/api/server/remote-desktop/sessions/{id}/signals", Module: "server-remote-desktop", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Remote desktop WebRTC signaling", MatchMode: MatchPattern},
 		{Prefix: "/api/server/remote-desktop/sessions/{id}", Module: "server-remote-desktop", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Remote desktop session", MatchMode: MatchPattern},
@@ -260,6 +262,7 @@ func Routes() []Route {
 		{Prefix: "/api/server/network-quality/{id}", Module: "server-metrics", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Network quality", MatchMode: MatchPattern},
 
 		{Prefix: "/api/server/tasks/{id}/stream", Module: "server-tasks", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseStream, Description: "Task SSE stream", MatchMode: MatchPattern},
+		{Prefix: "/api/server/tasks/{id}", Module: "server-tasks", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Task status", MatchMode: MatchPattern},
 		{Prefix: "/api/server/tasks", Module: "server-tasks", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Task management", MatchMode: MatchExact},
 
 		// Terminal and Socket.IO / Engine.IO routes

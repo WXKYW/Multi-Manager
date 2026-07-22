@@ -9657,7 +9657,7 @@ function ServerPage() {
                                     <Table.Head className="relative p-2.5">镜像仓库<Table.ResizeHandle onMouseDown={(e) => startImagesResize(0, e)} /></Table.Head>
                                     <Table.Head className="relative p-2.5">标签<Table.ResizeHandle onMouseDown={(e) => startImagesResize(1, e)} /></Table.Head>
                                     <Table.Head className="relative p-2.5">大小<Table.ResizeHandle onMouseDown={(e) => startImagesResize(2, e)} /></Table.Head>
-                                    <Table.Head className="relative p-2.5 text-right">操作<Table.ResizeHandle onMouseDown={(e) => startImagesResize(4, e)} /></Table.Head>
+                                    <Table.Head className="app-table-action relative p-2.5">操作<Table.ResizeHandle onMouseDown={(e) => startImagesResize(4, e)} /></Table.Head>
                                   </Table.Row>
                                 </Table.Header>
                                 <Table.Body>
@@ -9800,7 +9800,7 @@ function ServerPage() {
                                     <Table.Head className="relative p-2.5">ID<Table.ResizeHandle onMouseDown={(e) => startNetworksResize(1, e)} /></Table.Head>
                                     <Table.Head className="relative p-2.5">驱动<Table.ResizeHandle onMouseDown={(e) => startNetworksResize(2, e)} /></Table.Head>
                                     <Table.Head className="relative p-2.5">范围<Table.ResizeHandle onMouseDown={(e) => startNetworksResize(3, e)} /></Table.Head>
-                                    <Table.Head className="relative p-2.5 text-right">操作<Table.ResizeHandle onMouseDown={(e) => startNetworksResize(5, e)} /></Table.Head>
+                                    <Table.Head className="app-table-action relative p-2.5">操作<Table.ResizeHandle onMouseDown={(e) => startNetworksResize(5, e)} /></Table.Head>
                                   </Table.Row>
                                 </Table.Header>
                                 <Table.Body>
@@ -9928,7 +9928,7 @@ function ServerPage() {
                                     <Table.Head className="relative p-2.5">名称<Table.ResizeHandle onMouseDown={(e) => startVolumesResize(0, e)} /></Table.Head>
                                     <Table.Head className="relative p-2.5">驱动<Table.ResizeHandle onMouseDown={(e) => startVolumesResize(1, e)} /></Table.Head>
                                     <Table.Head className="relative p-2.5">范围<Table.ResizeHandle onMouseDown={(e) => startVolumesResize(2, e)} /></Table.Head>
-                                    <Table.Head className="relative p-2.5 text-right">操作<Table.ResizeHandle onMouseDown={(e) => startVolumesResize(4, e)} /></Table.Head>
+                                    <Table.Head className="app-table-action relative p-2.5">操作<Table.ResizeHandle onMouseDown={(e) => startVolumesResize(4, e)} /></Table.Head>
                                   </Table.Row>
                                 </Table.Header>
                                 <Table.Body>
@@ -10302,7 +10302,7 @@ function ServerPage() {
                         <Table.Row>
                           <Table.Head className="text-left">名称</Table.Head>
                           <Table.Head className="text-center">用户</Table.Head>
-                          <Table.Head className="text-center">操作</Table.Head>
+                          <Table.Head className="app-table-action">操作</Table.Head>
                         </Table.Row>
                       </Table.Header>
                       <Table.Body>
@@ -10396,7 +10396,7 @@ function ServerPage() {
                           <Table.Head className="text-center">名称</Table.Head>
                           <Table.Head className="text-center">节点地址</Table.Head>
                           <Table.Head className="text-center">状态</Table.Head>
-                          <Table.Head className="text-center">操作</Table.Head>
+                          <Table.Head className="app-table-action">操作</Table.Head>
                         </Table.Row>
                       </Table.Header>
                       <Table.Body>

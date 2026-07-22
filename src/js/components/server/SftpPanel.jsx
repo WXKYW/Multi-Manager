@@ -343,7 +343,7 @@ export default function SftpPanel({ serverId, serverName, initialPath = '.', onC
                       <Table.Head className="w-[12%]">大小</Table.Head>
                       <Table.Head className="w-[18%]">最后修改</Table.Head>
                       <Table.Head className="w-[15%]">权限</Table.Head>
-                      <Table.Head className="text-right">操作</Table.Head>
+                      <Table.Head className="app-table-action">操作</Table.Head>
                     </Table.Row>
                   </Table.Header>
                   <Table.Body>
