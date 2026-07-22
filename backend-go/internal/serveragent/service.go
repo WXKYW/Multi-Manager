@@ -1023,6 +1023,9 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 	if err := migrateColumns(ctx, db); err != nil {
 		return err
 	}
+	if err := repairLegacyTunnelSubscriberFlow(ctx, db); err != nil {
+		return err
+	}
 
 	return nil
 }

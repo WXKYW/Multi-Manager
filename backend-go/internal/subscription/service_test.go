@@ -129,6 +129,69 @@ func TestDefaultMihomoOutputUsesClientCompatibleFingerprintAndUniqueNames(t *tes
 	}
 }
 
+func TestMihomoOutputUsesManagedNodeNameOverStaleConfigName(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	nodes := []Node{
+		{Name: "🇭🇰 香港月抛", Type: "vless", Server: "one.example.com", Port: 443, ConfigJSON: `{"name":"旧节点名","type":"vless","server":"one.example.com","port":443,"uuid":"one"}`, Enabled: true},
+		{Name: "🇭🇰 香港", Type: "vless", Server: "two.example.com", Port: 443, ConfigJSON: `{"name":"旧节点名","type":"vless","server":"two.example.com","port":443,"uuid":"two"}`, Enabled: true},
+	}
+	body, _, err := renderOutput(ctx, db, Subscription{Name: "测试"}, nodes, "clash", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output struct {
+		Proxies []map[string]interface{} `yaml:"proxies"`
+	}
+	if err := yaml.Unmarshal([]byte(body), &output); err != nil {
+		t.Fatalf("invalid mihomo yaml: %v", err)
+	}
+	if len(output.Proxies) != 2 {
+		t.Fatalf("proxy count = %d, want 2", len(output.Proxies))
+	}
+	if output.Proxies[0]["name"] != "🇭🇰 香港月抛" || output.Proxies[1]["name"] != "🇭🇰 香港" {
+		t.Fatalf("managed names were not propagated: %#v", output.Proxies)
+	}
+}
+
+func TestMihomoOutputFallsBackToRawURIWhenStoredConfigIsIncomplete(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	nodes := []Node{{
+		Name:       "🇯🇵 CF ET",
+		Type:       "vless",
+		Server:     "saas.sin.fan",
+		Port:       443,
+		Raw:        "vless://0119068b-0148-47bf-875b-2145040b8174@saas.sin.fan:443?security=tls&type=ws&path=%2Fvless-argo%3Fed%3D2560#%F0%9F%87%AF%F0%9F%87%B5%20CF%20ET",
+		ConfigJSON: `{"name":"🇯🇵 CF ET","type":"vless","server":"saas.sin.fan","port":443}`,
+		Enabled:    true,
+	}}
+	body, _, err := renderOutput(ctx, db, Subscription{Name: "测试"}, nodes, "clash", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(body, "0119068b-0148-47bf-875b-2145040b8174") {
+		t.Fatalf("raw URI credentials were not used for incomplete config:\n%s", body)
+	}
+	if err := validateMihomoOutput(body); err != nil {
+		t.Fatalf("fallback output is invalid: %v\n%s", err, body)
+	}
+}
+
 func TestMihomoOutputFallsBackWhenCustomTemplateDuplicatesGeneratedProxyName(t *testing.T) {
 	ctx := context.Background()
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -164,6 +227,39 @@ proxy-groups:
 	}
 	if err := validateMihomoOutput(body); err != nil {
 		t.Fatalf("fallback output remains invalid: %v\n%s", err, body)
+	}
+}
+
+func TestMihomoOutputFallsBackWhenPersistedBuiltinTemplateReferencesRemovedNode(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	stale := `proxies:
+{{ proxies_yaml }}
+proxy-groups:
+  - name: 手动
+    type: select
+    proxies:
+      - 🇯🇵 已删除节点`
+	if _, err := db.Exec(`INSERT INTO subscription_templates(id,name,format,content,builtin) VALUES('builtin_stale','旧内置模板','clash',?,1)`, stale); err != nil {
+		t.Fatal(err)
+	}
+	nodes := []Node{{Name: "🇭🇰 香港", Type: "vless", Server: "node.example.com", Port: 443, ConfigJSON: `{"name":"🇭🇰 香港","type":"vless","server":"node.example.com","port":443,"uuid":"node"}`, Enabled: true}}
+	body, _, err := renderOutput(ctx, db, Subscription{Name: "测试", TemplateID: "builtin_stale"}, nodes, "clash", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(body, "🇯🇵 已删除节点") {
+		t.Fatalf("stale persisted template was not replaced:\n%s", body)
+	}
+	if err := validateMihomoOutput(body); err != nil {
+		t.Fatalf("fallback output is invalid: %v\n%s", err, body)
 	}
 }
 

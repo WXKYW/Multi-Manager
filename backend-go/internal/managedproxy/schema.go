@@ -23,6 +23,7 @@ const NodeTableDDL = `CREATE TABLE IF NOT EXISTS managed_proxy_nodes (
 	client_uri_encrypted TEXT NOT NULL,
 	revision INTEGER NOT NULL DEFAULT 1,
 	enabled INTEGER NOT NULL DEFAULT 1,
+	stable INTEGER NOT NULL DEFAULT 0,
 	publishable INTEGER NOT NULL DEFAULT 0,
 	apply_status TEXT NOT NULL DEFAULT 'pending',
 	last_error TEXT NOT NULL DEFAULT '',
@@ -58,6 +59,7 @@ var nodeColumnMigrations = []struct {
 	{"observed_port", "ALTER TABLE managed_proxy_nodes ADD COLUMN observed_port INTEGER NOT NULL DEFAULT 0"},
 	{"observed_at", "ALTER TABLE managed_proxy_nodes ADD COLUMN observed_at TEXT"},
 	{"health_status", "ALTER TABLE managed_proxy_nodes ADD COLUMN health_status TEXT NOT NULL DEFAULT 'unknown'"},
+	{"stable", "ALTER TABLE managed_proxy_nodes ADD COLUMN stable INTEGER NOT NULL DEFAULT 0"},
 }
 
 func EnsureNodeColumns(ctx context.Context, db *sql.DB) error {

@@ -2668,19 +2668,19 @@ func (s *Service) servePublicSubscription(w http.ResponseWriter, r *http.Request
 }
 
 func loadManagedSubscriptionNodes(ctx context.Context, db *sql.DB, sub Subscription) ([]Node, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id,server_id,name,protocol,public_host,assigned_port,client_uri_encrypted,COALESCE(access_mode,'direct'),COALESCE(preferred_address_id,''),COALESCE(connect_address,''),COALESCE(connect_port,0),COALESCE(tunnel_hostname,''),created_at,updated_at FROM managed_proxy_nodes WHERE enabled=1 AND publishable=1 AND apply_status='running' ORDER BY created_at ASC`)
+	rows, err := db.QueryContext(ctx, `SELECT id,server_id,name,protocol,public_host,assigned_port,client_uri_encrypted,COALESCE(access_mode,'direct'),COALESCE(preferred_address_id,''),COALESCE(connect_address,''),COALESCE(connect_port,0),COALESCE(tunnel_hostname,''),COALESCE(stable,0),created_at,updated_at FROM managed_proxy_nodes WHERE enabled=1 AND publishable=1 AND apply_status='running' ORDER BY created_at ASC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	type managedRow struct {
 		id, serverID, name, protocol, host, encrypted, accessMode, preferredID, connectAddress, tunnelHostname, createdAt, updatedAt string
-		port, connectPort                                                                                                            int
+		port, connectPort, stable                                                                                                    int
 	}
 	managedRows := []managedRow{}
 	for rows.Next() {
 		var item managedRow
-		if err := rows.Scan(&item.id, &item.serverID, &item.name, &item.protocol, &item.host, &item.port, &item.encrypted, &item.accessMode, &item.preferredID, &item.connectAddress, &item.connectPort, &item.tunnelHostname, &item.createdAt, &item.updatedAt); err != nil {
+		if err := rows.Scan(&item.id, &item.serverID, &item.name, &item.protocol, &item.host, &item.port, &item.encrypted, &item.accessMode, &item.preferredID, &item.connectAddress, &item.connectPort, &item.tunnelHostname, &item.stable, &item.createdAt, &item.updatedAt); err != nil {
 			return nil, err
 		}
 		managedRows = append(managedRows, item)
@@ -2721,7 +2721,7 @@ func loadManagedSubscriptionNodes(ctx context.Context, db *sql.DB, sub Subscript
 		node.Enabled = true
 		// A running managed node is publishable, but that alone is not evidence
 		// that it belongs in the operator-curated stable group.
-		node.Stable = false
+		node.Stable = item.stable == 1
 		node.Ownership = "self"
 		node.Management = "agent"
 		node.TrafficReporting = "trusted"
@@ -3516,7 +3516,14 @@ func renderOutput(ctx context.Context, db *sql.DB, sub Subscription, nodes []Nod
 		body := renderTemplate(tpl, sub, nodes)
 		if err := validateMihomoOutput(body); err != nil {
 			if !usingCustomTemplate {
-				return "", "", fmt.Errorf("内置 Mihomo 模板输出无效: %w", err)
+				// Built-in templates are persisted for stable IDs. An older
+				// record can retain removed node names, so fall back to the
+				// current embedded template instead of breaking the feed.
+				body = renderTemplate(loadDefaultMihomoTemplate(), sub, nodes)
+				if fallbackErr := validateMihomoOutput(body); fallbackErr != nil {
+					return "", "", fmt.Errorf("内置 Mihomo 模板输出无效，且当前模板回退失败: %w", fallbackErr)
+				}
+				return body, "text/yaml; charset=utf-8", nil
 			}
 			body = renderTemplate(loadDefaultMihomoTemplate(), sub, nodes)
 			if fallbackErr := validateMihomoOutput(body); fallbackErr != nil {
@@ -3901,6 +3908,10 @@ func proxiesYAML(nodes []Node, indent int) string {
 		if len(proxy) == 0 {
 			continue
 		}
+		// The node management record is authoritative for the published name.
+		// ConfigJSON may retain the original URI name after a node is renamed;
+		// exporting that stale value can create duplicate Mihomo proxy names.
+		proxy["name"] = node.Name
 		encoded, err := yaml.Marshal([]interface{}{proxy})
 		if err != nil {
 			continue
@@ -3963,16 +3974,41 @@ func nodeProxyConfig(node Node) map[string]interface{} {
 		var parsed interface{}
 		if json.Unmarshal([]byte(cfg), &parsed) == nil {
 			if proxy, ok := normalizeStringMap(parsed).(map[string]interface{}); ok {
-				return proxy
+				if proxyConfigComplete(proxy) {
+					return proxy
+				}
 			}
 		}
 		if yaml.Unmarshal([]byte(cfg), &parsed) == nil {
 			if proxy, ok := normalizeStringMap(parsed).(map[string]interface{}); ok {
-				return proxy
+				if proxyConfigComplete(proxy) {
+					return proxy
+				}
 			}
 		}
 	}
 	return uriToClashMap(node)
+}
+
+func proxyConfigComplete(proxy map[string]interface{}) bool {
+	typ := strings.ToLower(strings.TrimSpace(stringVal(proxy["type"])))
+	server := strings.TrimSpace(stringVal(proxy["server"]))
+	port := int(floatVal(proxy["port"]))
+	if typ == "" || server == "" || port <= 0 {
+		return false
+	}
+	switch typ {
+	case "vless", "vmess":
+		return strings.TrimSpace(stringVal(proxy["uuid"])) != ""
+	case "trojan", "hysteria2", "tuic":
+		return strings.TrimSpace(stringVal(proxy["password"])) != ""
+	case "ss":
+		return strings.TrimSpace(stringVal(proxy["cipher"])) != "" && strings.TrimSpace(stringVal(proxy["password"])) != ""
+	case "http", "socks5", "socks":
+		return true
+	default:
+		return false
+	}
 }
 
 func rawURIList(nodes []Node) string {
@@ -4767,6 +4803,8 @@ func trafficUsedBytesForMode(rxTotal, txTotal float64, mode string) int64 {
 
 func stringVal(value interface{}) string {
 	switch v := value.(type) {
+	case nil:
+		return ""
 	case string:
 		return v
 	case json.Number:

@@ -66,6 +66,28 @@ func TestBindManagedNodeSubscribersWritesOnlyActiveVLESSUsers(t *testing.T) {
 	}
 }
 
+func TestBindManagedNodeSubscribersWritesVLESSWebSocketUsersWithoutRealityFlow(t *testing.T) {
+	db, nodeID := seedSubscriberBindingTest(t, "vless-ws-tunnel")
+	raw := `{"inbounds":[{"type":"vless","listen_port":45654,"users":[{"uuid":"bootstrap","flow":"xtls-rprx-vision"}]}]}`
+	encoded, count, err := bindManagedNodeSubscribers(context.Background(), db, nodeID, "vless-ws-tunnel", raw)
+	if err != nil || count != 1 {
+		t.Fatalf("count=%d err=%v", count, err)
+	}
+	var root map[string]interface{}
+	if err := json.Unmarshal([]byte(encoded), &root); err != nil {
+		t.Fatal(err)
+	}
+	inbound := root["inbounds"].([]interface{})[0].(map[string]interface{})
+	users := inbound["users"].([]interface{})
+	user := users[0].(map[string]interface{})
+	if user["name"] != "active" || user["uuid"] != "11111111-1111-4111-8111-111111111111" {
+		t.Fatalf("unexpected users: %#v", users)
+	}
+	if _, exists := user["flow"]; exists {
+		t.Fatalf("websocket user must not contain reality flow: %#v", user)
+	}
+}
+
 func TestBindManagedNodeSubscribersWritesHY2Passwords(t *testing.T) {
 	db, nodeID := seedSubscriberBindingTest(t, "hysteria2")
 	raw := `{"inbounds":[{"type":"hysteria2","listen_port":45654,"users":[{"password":"bootstrap"}]}]}`
