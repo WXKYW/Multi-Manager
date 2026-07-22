@@ -18,12 +18,18 @@ type managedNodeFact struct {
 	Status       string `json:"status"`
 	Revision     int64  `json:"revision"`
 	AssignedPort int    `json:"assigned_port"`
+	StatsPort    int    `json:"stats_port"`
 }
 
-func (s *Service) startManagedProxyFactsLoop() {
+func (s *Service) startManagedProxyFactsLoop(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
-	for range ticker.C {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
 		for _, connection := range s.registry.List() {
 			serverID := strings.TrimSpace(connection.ServerID)
 			if serverID == "" {
@@ -111,7 +117,7 @@ func (s *Service) reconcileManagedProxyFacts(serverID string) {
 			} else if node.enabled == 0 && (fact.Status == "stopped" || fact.Status == "missing") {
 				applyStatus, lastError = "stopped", ""
 			}
-			_, _ = db.ExecContext(ctx, `UPDATE managed_proxy_nodes SET observed_status=?,observed_revision=?,observed_port=?,observed_at=datetime('now'),apply_status=?,publishable=CASE WHEN access_mode='cloudflare_tunnel' AND NOT EXISTS(SELECT 1 FROM managed_proxy_tunnels WHERE server_id=? AND apply_status='running') THEN 0 ELSE ? END,last_error=?,updated_at=datetime('now') WHERE id=?`, fact.Status, fact.Revision, fact.AssignedPort, applyStatus, serverID, publishable, lastError, node.id)
+			_, _ = db.ExecContext(ctx, `UPDATE managed_proxy_nodes SET observed_status=?,observed_revision=?,observed_port=?,stats_port=?,observed_at=datetime('now'),apply_status=?,publishable=CASE WHEN access_mode='cloudflare_tunnel' AND NOT EXISTS(SELECT 1 FROM managed_proxy_tunnels WHERE server_id=? AND apply_status='running') THEN 0 ELSE ? END,last_error=?,updated_at=datetime('now') WHERE id=?`, fact.Status, fact.Revision, fact.AssignedPort, fact.StatsPort, applyStatus, serverID, publishable, lastError, node.id)
 		}
 	}
 }
@@ -122,6 +128,7 @@ func proxyFactPayload(operation, nodeID, version string, release proxyRuntimeRel
 		"runtime": release.Runtime, "runtime_version": version,
 		"asset_url_amd64": release.AMD64URL, "asset_sha256_amd64": release.AMD64SHA256,
 		"asset_url_arm64": release.ARM64URL, "asset_sha256_arm64": release.ARM64SHA256,
-		"config": "{}", "port_min": 45654, "port_max": 55654, "transport": "tcp",
+		"asset_format": release.AssetFormat,
+		"config":       "{}", "port_min": 45654, "port_max": 55654, "transport": "tcp",
 	}
 }

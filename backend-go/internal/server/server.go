@@ -67,9 +67,35 @@ func New(cfg config.Config) http.Handler {
 }
 
 func NewServer(cfg config.Config) *Server {
+	server, err := newServer(cfg)
+	if err != nil {
+		panic(err)
+	}
+	return server
+}
+
+// NewChecked is the production constructor. Schema initialization failures
+// are fatal because serving a partially migrated subscription API only turns a
+// deterministic startup problem into repeated HTTP 500 responses.
+func NewChecked(cfg config.Config) (*Server, error) {
+	return newServer(cfg)
+}
+
+func newServer(cfg config.Config) (*Server, error) {
+	subscriptionService := subscription.New(cfg)
+	initCtx, initCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	err := subscriptionService.Initialize(initCtx)
+	initCancel()
+	if err != nil {
+		return nil, fmt.Errorf("initialize subscription schema: %w", err)
+	}
 	authService := auth.New(cfg)
 	notifyService := notification.New(cfg)
 	serverAgentService := serveragent.New(cfg)
+	if err := serverAgentService.StartupError(); err != nil {
+		serverAgentService.Stop()
+		return nil, fmt.Errorf("initialize server agent schema: %w", err)
+	}
 	serverAgentService.SetNotifier(notifyService)
 	cloudflareService := cloudflare.New(cfg)
 	serverAgentService.SetCloudflareTunnelManager(cloudflareService)
@@ -105,13 +131,16 @@ func NewServer(cfg config.Config) *Server {
 		server:   serverAgentService,
 		backup:   backupService,
 		logs:     systemlogs.New(cfg),
-		sub:      subscription.New(cfg),
+		sub:      subscriptionService,
 	}
 	systemService.SetAICaller(server.callAPIFromAI)
-	return server
+	return server, nil
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.server != nil {
+		s.server.Stop()
+	}
 	if s.uptime != nil {
 		s.uptime.Stop()
 	}

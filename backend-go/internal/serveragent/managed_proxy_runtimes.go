@@ -77,6 +77,9 @@ func (s *Service) startManagedProxyRuntimeTask(w http.ResponseWriter, r *http.Re
 	if !s.requireAgentCapability(w, serverID, "proxy_runtime_lifecycle_v2") {
 		return
 	}
+	if !s.requireAgentCapability(w, serverID, "proxy_user_traffic_v1") {
+		return
+	}
 	desired := "running"
 	if operation == "remove_runtime" {
 		desired = "removed"
@@ -123,7 +126,8 @@ func (s *Service) runManagedProxyRuntimeTask(taskID, serverID, serverName, opera
 		"runtime": release.Runtime, "runtime_version": release.Version,
 		"asset_url_amd64": release.AMD64URL, "asset_sha256_amd64": release.AMD64SHA256,
 		"asset_url_arm64": release.ARM64URL, "asset_sha256_arm64": release.ARM64SHA256,
-		"config": `{}`, "enabled": false, "port_min": 45654, "port_max": 55654, "transport": "tcp",
+		"asset_format": release.AssetFormat,
+		"config":       `{}`, "enabled": false, "port_min": 45654, "port_max": 55654, "transport": "tcp",
 	})
 	if operation == "install_runtime" {
 		progress(30, "download", "正在下载并校验 sing-box")

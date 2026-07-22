@@ -35,6 +35,22 @@ The panel stores desired state. The Agent validates a versioned candidate,
 applies it atomically, verifies runtime health, and rolls back on failure. The
 proxy data plane continues running when the panel or Agent is unavailable.
 
+Subscriber access is reconciled from the plan graph, never from a copied node
+list in the subscription record. Each subscription has a public download token
+plus independent VLESS UUID and Hysteria2 password credentials. The Agent uses
+the subscription ID as the sing-box user name and exposes statistics only on a
+loopback V2Ray Stats gRPC listener. It persists counter baselines locally and
+sends `(boot_id, sequence)` keyed deltas; the Go ledger canonicalizes credential
+aliases, clamps a final delta at the plan quota, and queues node reconciliation
+when a plan changes, is disabled, or reaches its limit. A stale report for a
+deleted subscription or node is acknowledged and ignored so store-and-forward
+collection cannot block later reports.
+
+Plans own quota and reset policy. Subscriptions select a plan and do not carry a
+second independent expiry or quota. Monthly cycle transitions are persisted and
+enqueue a reconciliation that restores users after a reset. Queue generations
+are monotonic, so a change arriving while a node is applying cannot be lost.
+
 Node traffic terminology is explicit:
 
 - `ownership`: `self` or `external`

@@ -40,6 +40,7 @@ type managedProxyNode struct {
 	Runtime            string                    `json:"runtime"`
 	PublicHost         string                    `json:"public_host"`
 	AssignedPort       int                       `json:"assigned_port"`
+	StatsPort          int                       `json:"stats_port"`
 	Transport          string                    `json:"transport"`
 	ClientURI          string                    `json:"client_uri"`
 	Revision           int64                     `json:"revision"`
@@ -193,7 +194,7 @@ func (s *Service) updateManagedProxyNodeState(w http.ResponseWriter, r *http.Req
 }
 
 func (s *Service) listManagedProxyNodes(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	rows, err := db.QueryContext(r.Context(), `SELECT n.id,n.server_id,COALESCE(a.name,''),n.name,n.protocol,n.runtime,n.public_host,n.assigned_port,n.transport,n.client_uri_encrypted,n.revision,n.enabled,n.publishable,n.apply_status,n.last_error,n.observed_status,n.observed_revision,n.observed_port,COALESCE(n.observed_at,''),n.health_status,n.access_mode,n.tunnel_path,n.preferred_address_id,n.connect_address,n.connect_port,n.tunnel_hostname,n.created_at,n.updated_at FROM managed_proxy_nodes n LEFT JOIN server_accounts a ON a.id=n.server_id ORDER BY n.created_at DESC`)
+	rows, err := db.QueryContext(r.Context(), `SELECT n.id,n.server_id,COALESCE(a.name,''),n.name,n.protocol,n.runtime,n.public_host,n.assigned_port,COALESCE(n.stats_port,0),n.transport,n.client_uri_encrypted,n.revision,n.enabled,n.publishable,n.apply_status,n.last_error,n.observed_status,n.observed_revision,n.observed_port,COALESCE(n.observed_at,''),n.health_status,n.access_mode,n.tunnel_path,n.preferred_address_id,n.connect_address,n.connect_port,n.tunnel_hostname,n.created_at,n.updated_at FROM managed_proxy_nodes n LEFT JOIN server_accounts a ON a.id=n.server_id ORDER BY n.created_at DESC`)
 	if err != nil {
 		response.Error(w, 500, err.Error())
 		return
@@ -203,7 +204,7 @@ func (s *Service) listManagedProxyNodes(w http.ResponseWriter, r *http.Request, 
 		var node managedProxyNode
 		var client string
 		var enabled, publishable int
-		if err := rows.Scan(&node.ID, &node.ServerID, &node.ServerName, &node.Name, &node.Protocol, &node.Runtime, &node.PublicHost, &node.AssignedPort, &node.Transport, &client, &node.Revision, &enabled, &publishable, &node.ApplyStatus, &node.LastError, &node.ObservedStatus, &node.ObservedRevision, &node.ObservedPort, &node.ObservedAt, &node.HealthStatus, &node.AccessMode, &node.TunnelPath, &node.PreferredAddressID, &node.ConnectAddress, &node.ConnectPort, &node.TunnelHostname, &node.CreatedAt, &node.UpdatedAt); err != nil {
+		if err := rows.Scan(&node.ID, &node.ServerID, &node.ServerName, &node.Name, &node.Protocol, &node.Runtime, &node.PublicHost, &node.AssignedPort, &node.StatsPort, &node.Transport, &client, &node.Revision, &enabled, &publishable, &node.ApplyStatus, &node.LastError, &node.ObservedStatus, &node.ObservedRevision, &node.ObservedPort, &node.ObservedAt, &node.HealthStatus, &node.AccessMode, &node.TunnelPath, &node.PreferredAddressID, &node.ConnectAddress, &node.ConnectPort, &node.TunnelHostname, &node.CreatedAt, &node.UpdatedAt); err != nil {
 			response.Error(w, 500, err.Error())
 			return
 		}
@@ -339,6 +340,9 @@ func (s *Service) createManagedProxyNode(w http.ResponseWriter, r *http.Request,
 	var runtimeStatus string
 	if err := db.QueryRowContext(r.Context(), `SELECT apply_status FROM managed_proxy_runtimes WHERE server_id=?`, input.ServerID).Scan(&runtimeStatus); err != nil || runtimeStatus != "running" {
 		response.Error(w, http.StatusConflict, "install the sing-box proxy program for this instance first")
+		return
+	}
+	if !s.requireAgentCapability(w, input.ServerID, "proxy_user_traffic_v1") {
 		return
 	}
 	// Connection addressing belongs to the host instance. The caller only
@@ -568,6 +572,9 @@ func (s *Service) reconcileManagedProxyNode(w http.ResponseWriter, r *http.Reque
 	if !s.requireAgentCapability(w, serverID, "proxy_runtime_v1") {
 		return
 	}
+	if !s.requireAgentCapability(w, serverID, "proxy_user_traffic_v1") {
+		return
+	}
 	task, ok := s.createExclusiveProxyTask(w, serverID, "proxy.node.reconcile", id)
 	if !ok {
 		return
@@ -608,12 +615,12 @@ func (s *Service) applyManagedProxyNodeTask(taskID, id string) {
 		s.taskRegistry.UpdateProgress(taskID, value, map[string]interface{}{"stage": stage, "message": message, "node_id": id})
 	}
 	progress(5, "validate", "正在校验实例与 Agent 连接")
-	var serverID, runtime, configEncrypted, transport, accessMode string
+	var serverID, runtime, protocol, configEncrypted, transport, accessMode string
 	var nodeName string
 	var revision int64
 	var enabled int
 	var requestedPort int
-	err = db.QueryRowContext(ctx, `SELECT server_id,name,runtime,config_encrypted,revision,enabled,assigned_port,transport,access_mode FROM managed_proxy_nodes WHERE id=?`, id).Scan(&serverID, &nodeName, &runtime, &configEncrypted, &revision, &enabled, &requestedPort, &transport, &accessMode)
+	err = db.QueryRowContext(ctx, `SELECT server_id,name,runtime,protocol,config_encrypted,revision,enabled,assigned_port,transport,access_mode FROM managed_proxy_nodes WHERE id=?`, id).Scan(&serverID, &nodeName, &runtime, &protocol, &configEncrypted, &revision, &enabled, &requestedPort, &transport, &accessMode)
 	if err == sql.ErrNoRows {
 		fail("validate", errors.New("internal node not found"))
 		return
@@ -643,7 +650,12 @@ func (s *Service) applyManagedProxyNodeTask(taskID, id string) {
 	} else {
 		progress(18, "runtime", "正在准备停用节点")
 	}
-	payload, _ := json.Marshal(map[string]interface{}{"node_id": id, "revision": revision, "runtime": "sing-box", "runtime_version": release.Version, "asset_url_amd64": release.AMD64URL, "asset_sha256_amd64": release.AMD64SHA256, "asset_url_arm64": release.ARM64URL, "asset_sha256_arm64": release.ARM64SHA256, "config": secure.SecureDecrypt(configEncrypted), "enabled": enabled == 1, "requested_port": requestedPort, "excluded_ports": excludedPorts, "port_min": 45654, "port_max": 55654, "transport": transport})
+	effectiveConfig, subscriberCount, err := bindManagedNodeSubscribers(ctx, db, id, protocol, secure.SecureDecrypt(configEncrypted))
+	if err != nil {
+		fail("bind_subscribers", err)
+		return
+	}
+	payload, _ := json.Marshal(map[string]interface{}{"node_id": id, "revision": revision, "runtime": "sing-box", "runtime_version": release.Version, "asset_url_amd64": release.AMD64URL, "asset_sha256_amd64": release.AMD64SHA256, "asset_url_arm64": release.ARM64URL, "asset_sha256_arm64": release.ARM64SHA256, "asset_format": release.AssetFormat, "config": effectiveConfig, "enabled": enabled == 1, "requested_port": requestedPort, "excluded_ports": excludedPorts, "port_min": 45654, "port_max": 55654, "transport": transport, "subscriber_count": subscriberCount})
 	if enabled == 1 {
 		progress(35, "configure", "正在生成配置并分配可用端口")
 	} else {
@@ -661,10 +673,11 @@ func (s *Service) applyManagedProxyNodeTask(taskID, id string) {
 	}
 	var applied struct {
 		AssignedPort int    `json:"assigned_port"`
+		StatsPort    int    `json:"stats_port"`
 		Config       string `json:"config"`
 		Status       string `json:"status"`
 	}
-	if err := json.Unmarshal([]byte(result), &applied); err != nil || applied.AssignedPort < 45654 || applied.AssignedPort > 55654 {
+	if err := json.Unmarshal([]byte(result), &applied); err != nil || applied.AssignedPort < 45654 || applied.AssignedPort > 55654 || applied.StatsPort < 20000 || applied.StatsPort > 29999 {
 		fail("verify_agent", errors.New("Agent returned invalid node binding"))
 		return
 	}
@@ -675,7 +688,7 @@ func (s *Service) applyManagedProxyNodeTask(taskID, id string) {
 	client = bindManagedNodeRuntimePort(client, applied.AssignedPort, accessMode)
 	updatedClient, _ := secure.SecureEncrypt(client)
 	if enabled == 0 {
-		if _, err := db.ExecContext(ctx, `UPDATE managed_proxy_nodes SET assigned_port=?,config_encrypted=?,client_uri_encrypted=?,apply_status='stopped',publishable=0,last_error='',observed_status='stopped',observed_revision=revision,observed_port=?,observed_at=datetime('now'),health_status='disabled',updated_at=datetime('now') WHERE id=?`, applied.AssignedPort, updatedConfig, updatedClient, applied.AssignedPort, id); err != nil {
+		if _, err := db.ExecContext(ctx, `UPDATE managed_proxy_nodes SET assigned_port=?,stats_port=?,config_encrypted=?,client_uri_encrypted=?,apply_status='stopped',publishable=0,last_error='',observed_status='stopped',observed_revision=revision,observed_port=?,observed_at=datetime('now'),health_status='disabled',updated_at=datetime('now') WHERE id=?`, applied.AssignedPort, applied.StatsPort, updatedConfig, updatedClient, applied.AssignedPort, id); err != nil {
 			fail("persist_stopped", fmt.Errorf("保存节点停用状态失败: %w", err))
 			return
 		}
@@ -699,7 +712,7 @@ func (s *Service) applyManagedProxyNodeTask(taskID, id string) {
 	} else if accessMode == "cloudflare_tunnel" {
 		healthStatus = "tunnel_pending"
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE managed_proxy_nodes SET assigned_port=?,config_encrypted=?,client_uri_encrypted=?,apply_status='running',publishable=CASE WHEN access_mode='cloudflare_tunnel' THEN 0 ELSE 1 END,last_error='',observed_status=?,observed_revision=revision,observed_port=?,observed_at=datetime('now'),health_status=?,updated_at=datetime('now') WHERE id=?`, applied.AssignedPort, updatedConfig, updatedClient, applied.Status, applied.AssignedPort, healthStatus, id); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE managed_proxy_nodes SET assigned_port=?,stats_port=?,config_encrypted=?,client_uri_encrypted=?,apply_status='running',publishable=CASE WHEN access_mode='cloudflare_tunnel' THEN 0 ELSE 1 END,last_error='',observed_status=?,observed_revision=revision,observed_port=?,observed_at=datetime('now'),health_status=?,updated_at=datetime('now') WHERE id=?`, applied.AssignedPort, applied.StatsPort, updatedConfig, updatedClient, applied.Status, applied.AssignedPort, healthStatus, id); err != nil {
 		_ = s.compensateManagedProxyNode(ctx, serverID, id, revision, release)
 		fail("persist_binding", fmt.Errorf("persist Agent binding: %w", err))
 		return
@@ -795,7 +808,8 @@ func (s *Service) compensateManagedProxyNode(ctx context.Context, serverID, node
 		"runtime_version": release.Version, "asset_url_amd64": release.AMD64URL,
 		"asset_sha256_amd64": release.AMD64SHA256, "asset_url_arm64": release.ARM64URL,
 		"asset_sha256_arm64": release.ARM64SHA256, "config": "{}", "remove": true,
-		"port_min": 45654, "port_max": 55654,
+		"asset_format": release.AssetFormat,
+		"port_min":     45654, "port_max": 55654,
 	})
 	_, err := s.RunProxyRuntimeTaskAndWait(serverID, string(payload))
 	return err
@@ -981,7 +995,7 @@ func (s *Service) runManagedProxyNodeDelete(taskID, id, serverID, runtime string
 			return
 		}
 		s.taskRegistry.UpdateProgress(taskID, 35, map[string]interface{}{"stage": "remove_host", "message": "正在删除主机服务、配置与防火墙规则", "node_id": id})
-		payload, _ := json.Marshal(map[string]interface{}{"node_id": id, "revision": revision + 1, "runtime": "sing-box", "runtime_version": release.Version, "asset_url_amd64": release.AMD64URL, "asset_sha256_amd64": release.AMD64SHA256, "asset_url_arm64": release.ARM64URL, "asset_sha256_arm64": release.ARM64SHA256, "config": "{}", "remove": true, "port_min": 45654, "port_max": 55654})
+		payload, _ := json.Marshal(map[string]interface{}{"node_id": id, "revision": revision + 1, "runtime": "sing-box", "runtime_version": release.Version, "asset_url_amd64": release.AMD64URL, "asset_sha256_amd64": release.AMD64SHA256, "asset_url_arm64": release.ARM64URL, "asset_sha256_arm64": release.ARM64SHA256, "asset_format": release.AssetFormat, "config": "{}", "remove": true, "port_min": 45654, "port_max": 55654})
 		if _, err := s.RunProxyRuntimeTaskAndWait(serverID, string(payload)); err != nil {
 			fail("remove_host", err)
 			return
@@ -1003,6 +1017,19 @@ func (s *Service) runManagedProxyNodeDelete(taskID, id, serverID, runtime string
 	if _, err := tx.ExecContext(ctx, `DELETE FROM subscription_plan_nodes WHERE node_id=? AND source='internal'`, id); err != nil && !isMissingTableError(err) {
 		fail("delete_relations", err)
 		return
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM subscription_runtime_reconcile WHERE node_id=?`, id); err != nil && !isMissingTableError(err) {
+		fail("delete_queue", err)
+		return
+	}
+	for _, statement := range []string{
+		`DELETE FROM subscription_usage_reports WHERE node_id=?`,
+		`DELETE FROM subscription_usage_report_keys WHERE node_id=?`,
+	} {
+		if _, err := tx.ExecContext(ctx, statement, id); err != nil && !isMissingTableError(err) {
+			fail("delete_traffic_ledger", err)
+			return
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM managed_proxy_nodes WHERE id=?`, id); err != nil {
 		fail("delete_record", err)

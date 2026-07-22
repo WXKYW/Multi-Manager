@@ -16,6 +16,8 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
 	"github.com/iwvw/api-monitor/backend-go/internal/secure"
+	subscriptionservice "github.com/iwvw/api-monitor/backend-go/internal/subscription"
+	"github.com/iwvw/api-monitor/backend-go/internal/subscriptionledger"
 )
 
 func testService(t *testing.T) (*Service, *sql.DB) {
@@ -25,6 +27,7 @@ func testService(t *testing.T) (*Service, *sql.DB) {
 		DataDir: t.TempDir(),
 		DBName:  "data.db",
 	})
+	t.Cleanup(service.Stop)
 	db, err := service.open(context.Background())
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -58,6 +61,9 @@ func TestDeleteAccountRequiresForceWhenAgentOfflineWithManagedDependencies(t *te
 
 func TestDeleteAccountForceCascadesPanelRecordsAndStatusPageMembership(t *testing.T) {
 	service, db := testService(t)
+	if err := subscriptionservice.New(service.cfg).Initialize(context.Background()); err != nil {
+		t.Fatalf("initialize subscription schema: %v", err)
+	}
 	if _, err := db.Exec(`INSERT INTO server_accounts(id,name,host,username,auth_type) VALUES('clean-host','可删除主机','192.0.2.11','root','password')`); err != nil {
 		t.Fatal(err)
 	}
@@ -65,6 +71,18 @@ func TestDeleteAccountForceCascadesPanelRecordsAndStatusPageMembership(t *testin
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO managed_proxy_nodes(id,server_id,name,protocol,runtime,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted,apply_status) VALUES('clean-node','clean-host','测试节点','vless-reality','sing-box','192.0.2.11',45654,'tcp','{}','','running')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_plans(id,name) VALUES('cascade-plan','级联套餐')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_subscriptions(id,plan_id,name,public_token) VALUES('cascade-sub','cascade-plan','级联订阅','cascade-token')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_usage_reports(server_id,node_id,subscription_id,credential_id,boot_id,sequence,upload_bytes,download_bytes) VALUES('clean-host','clean-node','cascade-sub','cascade-sub','boot',1,2,3)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_usage_report_keys(server_id,node_id,subscription_id,boot_id,sequence) VALUES('clean-host','clean-node','cascade-sub','boot',1)`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO server_status_pages(slug,title,server_ids_json) VALUES('cascade-page','级联页','["clean-host","other-host"]')`); err != nil {
@@ -114,6 +132,8 @@ func TestDeleteAccountForceCascadesPanelRecordsAndStatusPageMembership(t *testin
 		`SELECT COUNT(*) FROM managed_proxy_runtimes WHERE server_id='clean-host'`,
 		`SELECT COUNT(*) FROM server_agent_credentials WHERE server_id='clean-host'`,
 		`SELECT COUNT(*) FROM server_proxy_traffic_reports WHERE server_id='clean-host'`,
+		`SELECT COUNT(*) FROM subscription_usage_reports WHERE server_id='clean-host'`,
+		`SELECT COUNT(*) FROM subscription_usage_report_keys WHERE server_id='clean-host'`,
 	} {
 		var count int
 		if err := db.QueryRow(query).Scan(&count); err != nil || count != 0 {
@@ -126,6 +146,46 @@ func TestDeleteAccountForceCascadesPanelRecordsAndStatusPageMembership(t *testin
 	}
 	if statusPageServers != `["other-host"]` {
 		t.Fatalf("status page references = %s", statusPageServers)
+	}
+}
+
+func TestDeleteManagedNodeRemovesRelationsAndRawTrafficHistory(t *testing.T) {
+	service, db := testService(t)
+	ctx := context.Background()
+	if err := subscriptionservice.New(service.cfg).Initialize(ctx); err != nil {
+		t.Fatalf("initialize subscription schema: %v", err)
+	}
+	for _, statement := range []string{
+		`INSERT INTO server_accounts(id,name,host,username,auth_type) VALUES('node-host','节点主机','192.0.2.20','agent','password')`,
+		`INSERT INTO managed_proxy_nodes(id,server_id,name,protocol,runtime,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted,apply_status) VALUES('deleted-node','node-host','待删除节点','vless-reality','sing-box','192.0.2.20',45654,'tcp','{}','','running')`,
+		`INSERT INTO subscription_plans(id,name) VALUES('node-plan','节点套餐')`,
+		`INSERT INTO subscription_subscriptions(id,plan_id,name,public_token) VALUES('node-sub','node-plan','节点订阅','node-token')`,
+		`INSERT INTO subscription_plan_nodes(plan_id,node_id,source) VALUES('node-plan','deleted-node','internal')`,
+		`INSERT INTO subscription_runtime_reconcile(node_id,state) VALUES('deleted-node','pending')`,
+		`INSERT INTO subscription_usage_reports(server_id,node_id,subscription_id,credential_id,boot_id,sequence) VALUES('node-host','deleted-node','node-sub','node-sub','boot',1)`,
+		`INSERT INTO subscription_usage_report_keys(server_id,node_id,subscription_id,boot_id,sequence) VALUES('node-host','deleted-node','node-sub','boot',1)`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("fixture %q: %v", statement, err)
+		}
+	}
+	task := service.taskRegistry.Create("node-host", "proxy.node.delete", "deleted-node")
+	service.runManagedProxyNodeDelete(task.ID, "deleted-node", "node-host", "sing-box", 1, false, true, "direct")
+	for _, query := range []string{
+		`SELECT COUNT(*) FROM managed_proxy_nodes WHERE id='deleted-node'`,
+		`SELECT COUNT(*) FROM subscription_plan_nodes WHERE node_id='deleted-node' AND source='internal'`,
+		`SELECT COUNT(*) FROM subscription_runtime_reconcile WHERE node_id='deleted-node'`,
+		`SELECT COUNT(*) FROM subscription_usage_reports WHERE node_id='deleted-node'`,
+		`SELECT COUNT(*) FROM subscription_usage_report_keys WHERE node_id='deleted-node'`,
+	} {
+		var count int
+		if err := db.QueryRowContext(ctx, query).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("query %q count=%d err=%v", query, count, err)
+		}
+	}
+	var subscriptionCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_subscriptions WHERE id='node-sub'`).Scan(&subscriptionCount); err != nil || subscriptionCount != 1 {
+		t.Fatalf("subscription should survive node deletion: count=%d err=%v", subscriptionCount, err)
 	}
 }
 
@@ -2130,6 +2190,75 @@ func TestProxyTrafficReportsAreIdempotent(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("traffic report count=%d, want 1", count)
+	}
+}
+
+func TestProxyTrafficHTTPBatchValidatesScopeAndQuota(t *testing.T) {
+	service, db := testService(t)
+	ctx := context.Background()
+	if err := subscriptionservice.New(service.cfg).Initialize(ctx); err != nil {
+		t.Fatalf("initialize subscription schema: %v", err)
+	}
+	for _, statement := range []string{
+		`INSERT INTO server_accounts (id,name,host,username,auth_type) VALUES ('traffic-host','traffic-host','192.0.2.40','agent','password'),('other-host','other-host','192.0.2.41','agent','password')`,
+		`INSERT INTO managed_proxy_nodes (id,server_id,name,protocol,runtime,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted,revision,enabled,publishable,apply_status,stats_port) VALUES ('traffic-node','traffic-host','traffic-node','vless-reality','sing-box','192.0.2.40',45654,'tcp','{}','',1,1,1,'running',21000),('other-node','other-host','other-node','vless-reality','sing-box','192.0.2.41',45655,'tcp','{}','',1,1,1,'running',21001)`,
+		`INSERT INTO subscription_plans (id,name,enabled,total_bytes,cycle_type,cycle_day,selection_mode,include_internal_nodes,include_external_nodes) VALUES ('traffic-plan','Traffic plan',1,100,'monthly',1,'explicit',1,0)`,
+		`INSERT INTO subscription_subscriptions (id,profile_id,plan_id,name,public_token,vless_uuid,hysteria2_password,enabled,created_at) VALUES ('traffic-sub','traffic-sub','traffic-plan','Traffic subscription','public-token','11111111-1111-4111-8111-111111111111','traffic-password',1,'2026-01-01 00:00:00')`,
+		`INSERT INTO subscription_plan_nodes (plan_id,node_id,source) VALUES ('traffic-plan','traffic-node','internal')`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("fixture %q: %v", statement, err)
+		}
+	}
+	key, err := service.getOrGenerateAgentKeyForServer(ctx, db, "traffic-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	post := func(serverID, body string) (int, map[string]interface{}) {
+		req := httptest.NewRequest(http.MethodPost, "/api/server/agent/proxy/"+serverID+"/traffic", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+key)
+		req.Header.Set("Content-Type", "application/json")
+		res := httptest.NewRecorder()
+		service.ServeHTTP(res, req)
+		return res.Code, decodePayload(t, res)
+	}
+	status, payload := post("traffic-host", `{"boot_id":"boot-batch","sequence":1,"reports":[{"node_id":"traffic-node","credential_id":"traffic-sub","upload_bytes":80,"download_bytes":50}]}`)
+	if status != http.StatusOK || payload["data"].(map[string]interface{})["accepted"] != float64(1) {
+		t.Fatalf("accepted batch status=%d payload=%#v", status, payload)
+	}
+	usage, err := subscriptionledger.Current(ctx, db, "traffic-sub", "monthly", 1, "2026-01-01 00:00:00", time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC))
+	if err != nil || usage.UploadBytes != 80 || usage.DownloadBytes != 20 {
+		t.Fatalf("clamped usage=%#v err=%v", usage, err)
+	}
+	status, payload = post("traffic-host", `{"boot_id":"boot-batch","sequence":1,"reports":[{"node_id":"traffic-node","credential_id":"11111111-1111-4111-8111-111111111111","upload_bytes":1,"download_bytes":1}]}`)
+	data := payload["data"].(map[string]interface{})
+	if status != http.StatusOK || data["duplicates"] != float64(1) {
+		t.Fatalf("canonical duplicate status=%d payload=%#v", status, payload)
+	}
+	status, payload = post("traffic-host", `{"boot_id":"boot-batch","sequence":2,"reports":[{"node_id":"traffic-node","credential_id":"traffic-password","upload_bytes":1,"download_bytes":1}]}`)
+	data = payload["data"].(map[string]interface{})
+	if status != http.StatusOK || data["ignored"] != float64(1) {
+		t.Fatalf("exhausted report status=%d payload=%#v", status, payload)
+	}
+	status, payload = post("traffic-host", `{"boot_id":"boot-stale","sequence":1,"reports":[{"node_id":"removed-node","credential_id":"traffic-sub","upload_bytes":1,"download_bytes":1}]}`)
+	data = payload["data"].(map[string]interface{})
+	if status != http.StatusOK || data["ignored"] != float64(1) {
+		t.Fatalf("stale report status=%d payload=%#v", status, payload)
+	}
+	status, _ = post("other-host", `{"boot_id":"boot-cross","sequence":1,"reports":[{"node_id":"traffic-node","credential_id":"traffic-sub","upload_bytes":1,"download_bytes":1}]}`)
+	if status != http.StatusUnauthorized {
+		t.Fatalf("cross-server credential status=%d, want unauthorized", status)
+	}
+	otherKey, err := service.getOrGenerateAgentKeyForServer(ctx, db, "other-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/server/agent/proxy/other-host/traffic", strings.NewReader(`{"boot_id":"boot-cross","sequence":1,"reports":[{"node_id":"traffic-node","credential_id":"traffic-sub","upload_bytes":1,"download_bytes":1}]}`))
+	req.Header.Set("Authorization", "Bearer "+otherKey)
+	res := httptest.NewRecorder()
+	service.ServeHTTP(res, req)
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "does not belong") {
+		t.Fatalf("cross-server node status=%d body=%s", res.Code, res.Body.String())
 	}
 }
 

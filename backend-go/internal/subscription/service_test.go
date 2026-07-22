@@ -61,7 +61,7 @@ func TestManagedSubscriptionNodesApplyPreferredAddress(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `INSERT INTO managed_proxy_nodes(id,server_id,name,protocol,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted,enabled,publishable,apply_status,access_mode,tunnel_hostname) VALUES('managed-one','server-one','节点一','vless-reality','origin.example.com',45654,'tcp','',?,1,1,'running','cloudflare_tunnel','origin.example.com')`, encrypted); err != nil {
 		t.Fatal(err)
 	}
-	nodes, err := loadManagedSubscriptionNodes(ctx, db)
+	nodes, err := loadManagedSubscriptionNodes(ctx, db, Subscription{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,6 +126,72 @@ func TestDefaultMihomoOutputUsesClientCompatibleFingerprintAndUniqueNames(t *tes
 		if proxy["client-fingerprint"] != "chrome" {
 			t.Fatalf("proxy fingerprint missing: %#v", proxy)
 		}
+	}
+}
+
+func TestMihomoOutputFallsBackWhenCustomTemplateDuplicatesGeneratedProxyName(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	custom := `proxies:
+{{ proxies_yaml }}
+  - name: HK 香港月抛
+    type: trojan
+    server: static.example.com
+    port: 443
+    password: static-password
+proxy-groups:
+  - name: 手动选择
+    type: select
+    proxies:
+{{ proxy_names_yaml | indent 6 }}`
+	if _, err := db.Exec(`INSERT INTO subscription_templates(id,name,format,content) VALUES('custom','冲突模板','clash',?)`, custom); err != nil {
+		t.Fatal(err)
+	}
+	nodes := []Node{{Name: "HK 香港月抛", Type: "trojan", Server: "node.example.com", Port: 443, ConfigJSON: `{"name":"HK 香港月抛","type":"trojan","server":"node.example.com","port":443,"password":"node-password"}`, Enabled: true}}
+	body, _, err := renderOutput(ctx, db, Subscription{Name: "测试", TemplateID: "custom"}, nodes, "clash", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(body, "static.example.com") {
+		t.Fatalf("invalid custom template should fall back to the built-in template:\n%s", body)
+	}
+	if err := validateMihomoOutput(body); err != nil {
+		t.Fatalf("fallback output remains invalid: %v\n%s", err, body)
+	}
+}
+
+func TestTemplateWriteRejectsInvalidMihomoDefinition(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+
+	service := New(config.Config{})
+	for name, body := range map[string]string{
+		"unknown placeholder":    `{"name":"错误模板","format":"clash","content":"proxies:\n{{ unknown_nodes }}"}`,
+		"broken group reference": `{"name":"错误模板","format":"clash","content":"proxies: []\nproxy-groups:\n  - name: 手动\n    type: select\n    proxies: [不存在的节点]"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/subscription/templates", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			service.createTemplate(rec, req, db)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+		})
 	}
 }
 
@@ -1130,7 +1196,7 @@ func TestComputeTrafficDoesNotApplyExternalUpstreamUsageToSubscription(t *testin
 	}
 
 	info := computeTraffic(ctx, db, Subscription{ID: "link_one", ProfileID: "profile_one", TrafficSource: "upstream"})
-	if info.Upload != 0 || info.Download != 0 || info.Total != 0 || info.Source != "panel" || info.MeteringStatus != "pending" {
+	if info.Upload != 0 || info.Download != 0 || info.Total != 0 || info.Source != "panel" || info.MeteringStatus != "unavailable" {
 		t.Fatalf("traffic = %#v", info)
 	}
 }
@@ -1443,6 +1509,102 @@ func TestCreateSubscriptionStoresOnlyIdentityFieldsFromPlan(t *testing.T) {
 	}
 }
 
+func TestManagedNodesUseSubscriptionSpecificCredentials(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	vlessRaw := "vless://legacy@node.example.com:45654?security=reality&pbk=public&sid=abcd&sni=www.cloudflare.com#VLESS"
+	hy2Raw := "hysteria2://legacy@hy2.example.com:45655?sni=hy2.example.com&insecure=1#HY2"
+	for id, raw := range map[string]string{"vless-node": vlessRaw, "hy2-node": hy2Raw} {
+		encrypted, err := secure.SecureEncrypt(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		protocol := "vless-reality"
+		transport := "tcp"
+		if id == "hy2-node" {
+			protocol, transport = "hysteria2", "udp"
+		}
+		if _, err := db.Exec(`INSERT INTO managed_proxy_nodes(id,server_id,name,protocol,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted,enabled,publishable,apply_status) VALUES(?,?,?,?,?,?,?,?,?,1,1,'running')`, id, "host", id, protocol, "node.example.com", 45654, transport, "", encrypted); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sub := Subscription{VLESSUUID: "00000000-0000-4000-8000-000000000099", Hysteria2Password: "subscription-password"}
+	nodes, err := loadManagedSubscriptionNodes(ctx, db, sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 2 {
+		t.Fatalf("nodes=%#v", nodes)
+	}
+	for _, node := range nodes {
+		if strings.Contains(node.Raw, "legacy") {
+			t.Fatalf("shared node credential leaked into subscription output: %s", node.Raw)
+		}
+		if node.Type == "vless" && !strings.Contains(node.Raw, sub.VLESSUUID+"@") {
+			t.Fatalf("VLESS subscription credential missing: %s", node.Raw)
+		}
+		if node.Type == "hysteria2" && !strings.Contains(node.Raw, sub.Hysteria2Password+"@") {
+			t.Fatalf("Hysteria2 subscription credential missing: %s", node.Raw)
+		}
+	}
+}
+
+func TestSubscriptionUsageReportsAreIdempotentAndCycleScoped(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_plans(id,name,total_bytes,cycle_type,cycle_day) VALUES('plan','套餐',1000,'monthly',1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_subscriptions(id,profile_id,plan_id,name,enabled,public_token,vless_uuid,hysteria2_password) VALUES('sub','pool','plan','用户',1,'token','00000000-0000-4000-8000-000000000099','hy2-password')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS server_accounts(id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO server_accounts(id) VALUES('host')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO managed_proxy_nodes(id,server_id,name,protocol,runtime,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted,enabled,publishable,apply_status) VALUES('node','host','节点','vless-reality','sing-box','127.0.0.1',45654,'tcp','{}','',1,1,'running')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_plan_nodes(plan_id,node_id,source) VALUES('plan','node','internal')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE subscription_plans SET include_internal_nodes=1 WHERE id='plan'`); err != nil {
+		t.Fatal(err)
+	}
+	report := subscriptionUsageReport{ServerID: "host", NodeID: "node", CredentialID: "00000000-0000-4000-8000-000000000099", BootID: "boot", Sequence: 7, UploadBytes: 300, DownloadBytes: 400}
+	accepted, err := recordSubscriptionUsage(ctx, db, report)
+	if err != nil || !accepted {
+		t.Fatalf("first report accepted=%v err=%v", accepted, err)
+	}
+	accepted, err = recordSubscriptionUsage(ctx, db, report)
+	if err != nil || accepted {
+		t.Fatalf("duplicate report accepted=%v err=%v", accepted, err)
+	}
+	items, err := loadSubscriptions(ctx, db, "sub")
+	if err != nil || len(items) != 1 {
+		t.Fatalf("subscriptions=%#v err=%v", items, err)
+	}
+	if items[0].Traffic.Upload != 300 || items[0].Traffic.Download != 400 || items[0].Traffic.MeteringStatus != "available" {
+		t.Fatalf("traffic=%#v", items[0].Traffic)
+	}
+}
+
 func TestPlanCycleWindowUsesPlanResetDay(t *testing.T) {
 	start, end := planCycleWindow(time.Date(2026, time.July, 22, 12, 0, 0, 0, time.UTC), "monthly", 9)
 	if start != "2026-07-09T00:00:00Z" || end != "2026-08-09T00:00:00Z" {
@@ -1506,6 +1668,15 @@ func TestDeleteSubscriptionNeverDeletesSharedNodes(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO subscription_subscriptions(id,profile_id,name,public_token) VALUES('link','pool','订阅','token')`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.Exec(`INSERT INTO subscription_usage_reports(server_id,node_id,subscription_id,credential_id,boot_id,sequence) VALUES('host','managed-node','link','link','boot',1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_usage_report_keys(server_id,node_id,subscription_id,boot_id,sequence) VALUES('host','managed-node','link','boot',1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_usage_cycles(subscription_id,cycle_start,upload_bytes,download_bytes) VALUES('link','2026-07-01T00:00:00Z',10,20)`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec(`INSERT INTO subscription_nodes(id,subscription_id,profile_id,name) VALUES('node','pool','pool','节点')`); err != nil {
 		t.Fatal(err)
 	}
@@ -1517,6 +1688,15 @@ func TestDeleteSubscriptionNeverDeletesSharedNodes(t *testing.T) {
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM subscription_nodes WHERE id='node'`).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("shared node count=%d err=%v", count, err)
+	}
+	for _, query := range []string{
+		`SELECT COUNT(*) FROM subscription_usage_reports WHERE subscription_id='link'`,
+		`SELECT COUNT(*) FROM subscription_usage_report_keys WHERE subscription_id='link'`,
+		`SELECT COUNT(*) FROM subscription_usage_cycles WHERE subscription_id='link'`,
+	} {
+		if err := db.QueryRow(query).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("deleted subscription ledger query %q count=%d err=%v", query, count, err)
+		}
 	}
 }
 
@@ -1652,12 +1832,12 @@ func TestComputeTrafficFromNodeBoundServers(t *testing.T) {
 	}
 
 	info := computeTraffic(ctx, db, Subscription{ID: "link_one", ProfileID: "profile_one", TrafficSource: "node_servers", TotalBytes: 50000})
-	if info.Upload != 0 || info.Download != 0 || info.Total != 50000 || info.Source != "panel" || info.MeteringStatus != "pending" {
+	if info.Upload != 0 || info.Download != 0 || info.Total != 50000 || info.Source != "panel" || info.MeteringStatus != "unavailable" {
 		t.Fatalf("traffic = %#v, host NIC totals must not be treated as subscription usage", info)
 	}
 
 	filtered := computeTraffic(ctx, db, Subscription{ID: "link_one", ProfileID: "profile_one", TrafficSource: "node_servers", NodeFilterIDs: []string{"node_two"}, TotalBytes: 50000})
-	if filtered.Upload != 0 || filtered.Download != 0 || filtered.Total != 50000 || filtered.Source != "panel" || filtered.MeteringStatus != "pending" {
+	if filtered.Upload != 0 || filtered.Download != 0 || filtered.Total != 50000 || filtered.Source != "panel" || filtered.MeteringStatus != "unavailable" {
 		t.Fatalf("filtered traffic = %#v, node filters must not turn host NIC totals into subscription usage", filtered)
 	}
 }

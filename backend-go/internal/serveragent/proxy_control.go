@@ -6,9 +6,11 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
 	"github.com/iwvw/api-monitor/backend-go/internal/secure"
+	"github.com/iwvw/api-monitor/backend-go/internal/subscriptionledger"
 )
 
 type proxyDesiredState struct {
@@ -139,6 +141,7 @@ func (s *Service) reconcileProxyDesiredState(w http.ResponseWriter, r *http.Requ
 	payloadMap["asset_sha256_amd64"] = release.AMD64SHA256
 	payloadMap["asset_url_arm64"] = release.ARM64URL
 	payloadMap["asset_sha256_arm64"] = release.ARM64SHA256
+	payloadMap["asset_format"] = release.AssetFormat
 	payload, _ = json.Marshal(payloadMap)
 	result, runErr := s.RunProxyRuntimeTaskAndWait(serverID, string(payload))
 	status, lastError := "applied", ""
@@ -180,11 +183,49 @@ func (s *Service) recordProxyTraffic(w http.ResponseWriter, r *http.Request, db 
 		BootID        string `json:"boot_id"`
 		Sequence      int64  `json:"sequence"`
 		NodeID        string `json:"node_id"`
+		CredentialID  string `json:"credential_id"`
 		UploadBytes   int64  `json:"upload_bytes"`
 		DownloadBytes int64  `json:"download_bytes"`
+		Reports       []struct {
+			NodeID        string `json:"node_id"`
+			CredentialID  string `json:"credential_id"`
+			UploadBytes   int64  `json:"upload_bytes"`
+			DownloadBytes int64  `json:"download_bytes"`
+		} `json:"reports"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&input); err != nil || input.BootID == "" || input.Sequence < 0 || input.NodeID == "" || input.UploadBytes < 0 || input.DownloadBytes < 0 {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&input); err != nil || input.BootID == "" || input.Sequence < 0 {
 		response.Error(w, http.StatusBadRequest, "invalid proxy traffic report")
+		return
+	}
+	if len(input.Reports) > 0 {
+		reports := make([]subscriptionledger.Report, 0, len(input.Reports))
+		for _, item := range input.Reports {
+			report := subscriptionledger.Report{ServerID: serverID, NodeID: item.NodeID, CredentialID: item.CredentialID, BootID: input.BootID, Sequence: input.Sequence, UploadBytes: item.UploadBytes, DownloadBytes: item.DownloadBytes}
+			if err := report.Validate(); err != nil {
+				response.Error(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			reports = append(reports, report)
+		}
+		result, err := subscriptionledger.RecordBatchDetailed(r.Context(), db, reports, time.Now().UTC())
+		if err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		response.OK(w, map[string]interface{}{"accepted": result.Accepted, "duplicates": result.Duplicates, "ignored": result.Ignored, "upload_bytes": result.UploadBytes, "download_bytes": result.DownloadBytes})
+		return
+	}
+	if input.NodeID == "" || input.UploadBytes < 0 || input.DownloadBytes < 0 {
+		response.Error(w, http.StatusBadRequest, "invalid proxy traffic report")
+		return
+	}
+	if strings.TrimSpace(input.CredentialID) != "" {
+		result, err := subscriptionledger.RecordBatchDetailed(r.Context(), db, []subscriptionledger.Report{{ServerID: serverID, NodeID: input.NodeID, CredentialID: input.CredentialID, BootID: input.BootID, Sequence: input.Sequence, UploadBytes: input.UploadBytes, DownloadBytes: input.DownloadBytes}}, time.Now().UTC())
+		if err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		response.OK(w, map[string]interface{}{"accepted": result.Accepted == 1, "duplicate": result.Duplicates == 1, "ignored": result.Ignored == 1, "upload_bytes": result.UploadBytes, "download_bytes": result.DownloadBytes})
 		return
 	}
 	result, err := db.ExecContext(r.Context(), `INSERT OR IGNORE INTO server_proxy_traffic_reports

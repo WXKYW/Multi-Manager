@@ -9,13 +9,15 @@ type proxyRuntimeRelease struct {
 	AMD64SHA256 string
 	ARM64URL    string
 	ARM64SHA256 string
+	AssetFormat string
 }
 
 var managedProxyRuntimeCatalog = map[string]proxyRuntimeRelease{
 	"sing-box": {
-		Runtime: "sing-box", Version: "1.13.14",
-		AMD64URL: "https://github.com/SagerNet/sing-box/releases/download/v1.13.14/sing-box-1.13.14-linux-amd64.tar.gz", AMD64SHA256: "f48703461a15476951ac4967cdad339d986f4b8096b4eb3ff0829a500502d697",
-		ARM64URL: "https://github.com/SagerNet/sing-box/releases/download/v1.13.14/sing-box-1.13.14-linux-arm64.tar.gz", ARM64SHA256: "4742df6a4314e8ecc41736849fca6d73b8f9e91b6e8b06ee794ff17ba180579e",
+		Runtime: "sing-box", Version: "1.13.14-am1",
+		AMD64URL: "https://github.com/iwvw/API-Monitor/releases/download/managed-runtime-v1.13.14/sing-box-1.13.14-linux-amd64", AMD64SHA256: "b1084f055f8aaddf9a6b554791f704fd40d1536c44928977b91ae0d31e8329fb",
+		ARM64URL: "https://github.com/iwvw/API-Monitor/releases/download/managed-runtime-v1.13.14/sing-box-1.13.14-linux-arm64", ARM64SHA256: "82a24f1947e1cd6296a053511fbf3e5e8acaf4fa98940550e010692cee700623",
+		AssetFormat: "binary",
 	},
 }
 

@@ -8,6 +8,7 @@ mod docker;
 mod file_manager;
 mod protocol;
 mod proxy_runtime;
+mod proxy_traffic;
 mod pty;
 mod remote_desktop;
 
@@ -49,6 +50,8 @@ fn agent_capabilities() -> Vec<String> {
     capabilities.push("proxy_runtime_v1".to_string());
     #[cfg(target_os = "linux")]
     capabilities.push("proxy_runtime_lifecycle_v2".to_string());
+    #[cfg(target_os = "linux")]
+    capabilities.push("proxy_user_traffic_v1".to_string());
     #[cfg(target_os = "linux")]
     capabilities.push("cloudflared_runtime_v1".to_string());
     #[cfg(target_os = "linux")]
@@ -192,6 +195,9 @@ async fn main() {
     let pty_sessions = Arc::new(Mutex::new(HashMap::<String, Arc<PtySession>>::new()));
     let task_progress = Arc::new(Mutex::new(HashMap::<String, TaskProgress>::new()));
     let remote_desktop = Arc::new(RemoteDesktopManager::new());
+
+    #[cfg(unix)]
+    tokio::spawn(proxy_traffic::run(config.clone()));
 
     // Keep dialing loop. A healthy long-lived connection resets the delay; only
     // repeated short failures back off to avoid hammering the control plane.

@@ -508,11 +508,12 @@ func (s *Service) runManagedTunnelUninstall(taskID, serverID string) {
 	}
 	for _, node := range nodes {
 		release, _ := managedProxyRuntime(node.runtime)
-		payload, _ := json.Marshal(map[string]interface{}{"node_id": node.id, "revision": node.revision + 1, "runtime": "sing-box", "runtime_version": release.Version, "asset_url_amd64": release.AMD64URL, "asset_sha256_amd64": release.AMD64SHA256, "asset_url_arm64": release.ARM64URL, "asset_sha256_arm64": release.ARM64SHA256, "config": "{}", "remove": true, "port_min": 45654, "port_max": 55654})
+		payload, _ := json.Marshal(map[string]interface{}{"node_id": node.id, "revision": node.revision + 1, "runtime": "sing-box", "runtime_version": release.Version, "asset_url_amd64": release.AMD64URL, "asset_sha256_amd64": release.AMD64SHA256, "asset_url_arm64": release.ARM64URL, "asset_sha256_arm64": release.ARM64SHA256, "asset_format": release.AssetFormat, "config": "{}", "remove": true, "port_min": 45654, "port_max": 55654})
 		if _, err := s.RunProxyRuntimeTaskAndWait(serverID, string(payload)); err != nil {
 			failures = append(failures, "remove node "+node.id+": "+err.Error())
 			continue
 		}
+		_, _ = db.ExecContext(ctx, `DELETE FROM subscription_runtime_reconcile WHERE node_id=?`, node.id)
 		_, _ = db.ExecContext(ctx, `DELETE FROM managed_proxy_nodes WHERE id=?`, node.id)
 	}
 	if len(failures) > 0 {

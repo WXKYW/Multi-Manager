@@ -19,8 +19,11 @@ import (
 	"github.com/iwvw/api-monitor/backend-go/internal/cloudflare"
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
 	"github.com/iwvw/api-monitor/backend-go/internal/database"
+	"github.com/iwvw/api-monitor/backend-go/internal/managedproxy"
+	"github.com/iwvw/api-monitor/backend-go/internal/reconcilequeue"
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
 	"github.com/iwvw/api-monitor/backend-go/internal/secure"
+	"github.com/iwvw/api-monitor/backend-go/internal/subscriptionledger"
 )
 
 type Notifier interface {
@@ -62,6 +65,10 @@ type Service struct {
 	notifier                      Notifier
 	cloudflare                    cloudflare.ManagedTunnelAPI
 	alertStates                   sync.Map // serverID -> *alertState
+	backgroundCancel              context.CancelFunc
+	backgroundWG                  sync.WaitGroup
+	stopOnce                      sync.Once
+	startupErr                    error
 }
 
 const defaultRealtimeMetricsPersistInterval = 30 * time.Second
@@ -73,6 +80,8 @@ const agentMetricsStaleAfter = 45 * time.Second
 func (s *Service) SetNotifier(n Notifier) {
 	s.notifier = n
 }
+
+func (s *Service) StartupError() error { return s.startupErr }
 
 func (s *Service) SetCloudflareTunnelManager(manager cloudflare.ManagedTunnelAPI) {
 	s.cloudflare = manager
@@ -460,16 +469,25 @@ func New(cfg config.Config) *Service {
 	if db, err := s.store.Open(ctx); err == nil {
 		if schemaErr := database.WithSchemaLock(ctx, func() error { return ensureSchema(ctx, db) }); schemaErr != nil {
 			applog.Error(context.Background(), "serveragent", "ensure schema failed", "error", schemaErr.Error())
+			s.startupErr = schemaErr
 		}
 		db.Close()
 	} else {
 		applog.Error(context.Background(), "serveragent", "open database during startup failed", "error", err.Error())
+		s.startupErr = err
+	}
+	if s.startupErr != nil {
+		return s
 	}
 	taskPersistence := newSQLiteTaskPersistence(store)
 	if err := taskPersistence.Ensure(ctx); err != nil {
 		applog.Error(context.Background(), "serveragent", "ensure task persistence failed", "error", err.Error())
+		s.startupErr = fmt.Errorf("ensure task persistence: %w", err)
+		return s
 	} else if err := taskRegistry.AttachPersistence(ctx, taskPersistence); err != nil {
 		applog.Error(context.Background(), "serveragent", "restore task persistence failed", "error", err.Error())
+		s.startupErr = fmt.Errorf("restore task persistence: %w", err)
+		return s
 	}
 
 	s.initTargetsCache()
@@ -478,10 +496,40 @@ func New(cfg config.Config) *Service {
 	if s.presence != nil {
 		s.presence.start()
 	}
-	go s.startMetricsCollectorLoop()
-	go s.startManagedProxyFactsLoop()
+	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
+	s.backgroundCancel = backgroundCancel
+	s.backgroundWG.Add(3)
+	go func() {
+		defer s.backgroundWG.Done()
+		s.startMetricsCollectorLoop(backgroundCtx)
+	}()
+	go func() {
+		defer s.backgroundWG.Done()
+		s.startManagedProxyFactsLoop(backgroundCtx)
+	}()
+	go func() {
+		defer s.backgroundWG.Done()
+		s.startSubscriptionReconcileLoop(backgroundCtx)
+	}()
 
 	return s
+}
+
+// Stop terminates background work owned by the service. It is idempotent so
+// tests and process shutdown can safely share the same cleanup path.
+func (s *Service) Stop() {
+	s.stopOnce.Do(func() {
+		if s.backgroundCancel != nil {
+			s.backgroundCancel()
+		}
+		s.backgroundWG.Wait()
+		if s.presence != nil {
+			s.presence.stop()
+		}
+		if s.registry != nil {
+			s.registry.Stop()
+		}
+	})
 }
 
 func (s *Service) open(ctx context.Context) (*sql.DB, error) {
@@ -804,6 +852,7 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			apply_status TEXT NOT NULL DEFAULT 'pending',
 			last_error TEXT NOT NULL DEFAULT '',
 			assigned_port INTEGER NOT NULL DEFAULT 0,
+			stats_port INTEGER NOT NULL DEFAULT 0,
 			transport TEXT NOT NULL DEFAULT 'tcp',
 			updated_at TEXT DEFAULT (datetime('now'))
 		)`,
@@ -818,31 +867,7 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			reported_at TEXT DEFAULT (datetime('now')),
 			UNIQUE(server_id, boot_id, sequence, node_id)
 		)`,
-		`CREATE TABLE IF NOT EXISTS managed_proxy_nodes (
-			id TEXT PRIMARY KEY,
-			server_id TEXT NOT NULL,
-			name TEXT NOT NULL,
-			protocol TEXT NOT NULL CHECK(protocol IN ('vless-reality', 'hysteria2', 'vless-ws-tunnel')),
-			runtime TEXT NOT NULL DEFAULT 'sing-box',
-			public_host TEXT NOT NULL,
-			assigned_port INTEGER NOT NULL DEFAULT 0,
-			transport TEXT NOT NULL CHECK(transport IN ('tcp', 'udp')),
-			config_encrypted TEXT NOT NULL,
-			client_uri_encrypted TEXT NOT NULL,
-			revision INTEGER NOT NULL DEFAULT 1,
-			enabled INTEGER NOT NULL DEFAULT 1,
-			publishable INTEGER NOT NULL DEFAULT 0,
-			apply_status TEXT NOT NULL DEFAULT 'pending',
-			last_error TEXT NOT NULL DEFAULT '',
-			observed_status TEXT NOT NULL DEFAULT 'unknown',
-			observed_revision INTEGER NOT NULL DEFAULT 0,
-			observed_port INTEGER NOT NULL DEFAULT 0,
-			observed_at TEXT,
-			health_status TEXT NOT NULL DEFAULT 'unknown',
-			created_at TEXT DEFAULT (datetime('now')),
-			updated_at TEXT DEFAULT (datetime('now')),
-			FOREIGN KEY (server_id) REFERENCES server_accounts(id) ON DELETE CASCADE
-		)`,
+		managedproxy.NodeTableDDL,
 		`CREATE TABLE IF NOT EXISTS managed_proxy_runtimes (
 			server_id TEXT PRIMARY KEY,
 			runtime TEXT NOT NULL DEFAULT 'sing-box',
@@ -982,6 +1007,12 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("ensure server schema: %w", err)
 		}
 	}
+	if err := reconcilequeue.EnsureSchema(ctx, db); err != nil {
+		return err
+	}
+	if err := subscriptionledger.EnsureSchema(ctx, db); err != nil {
+		return err
+	}
 	// Existing managed nodes are evidence that the sing-box runtime was
 	// already installed before the runtime inventory was introduced.
 	if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO managed_proxy_runtimes(server_id,runtime,version,desired_status,apply_status,last_stage,last_error,installed_at,updated_at) SELECT DISTINCT server_id,'sing-box','','running','running','legacy_detected','',datetime('now'),datetime('now') FROM managed_proxy_nodes WHERE apply_status='running'`); err != nil {
@@ -1008,25 +1039,8 @@ func migrateColumns(ctx context.Context, db *sql.DB) error {
 			}
 		}
 	}
-	nodeFields := []struct{ Name, SQL string }{
-		{"access_mode", "ALTER TABLE managed_proxy_nodes ADD COLUMN access_mode TEXT NOT NULL DEFAULT 'direct'"},
-		{"tunnel_path", "ALTER TABLE managed_proxy_nodes ADD COLUMN tunnel_path TEXT NOT NULL DEFAULT ''"},
-		{"preferred_address_id", "ALTER TABLE managed_proxy_nodes ADD COLUMN preferred_address_id TEXT NOT NULL DEFAULT ''"},
-		{"connect_address", "ALTER TABLE managed_proxy_nodes ADD COLUMN connect_address TEXT NOT NULL DEFAULT ''"},
-		{"connect_port", "ALTER TABLE managed_proxy_nodes ADD COLUMN connect_port INTEGER NOT NULL DEFAULT 0"},
-		{"tunnel_hostname", "ALTER TABLE managed_proxy_nodes ADD COLUMN tunnel_hostname TEXT NOT NULL DEFAULT ''"},
-		{"observed_status", "ALTER TABLE managed_proxy_nodes ADD COLUMN observed_status TEXT NOT NULL DEFAULT 'unknown'"},
-		{"observed_revision", "ALTER TABLE managed_proxy_nodes ADD COLUMN observed_revision INTEGER NOT NULL DEFAULT 0"},
-		{"observed_port", "ALTER TABLE managed_proxy_nodes ADD COLUMN observed_port INTEGER NOT NULL DEFAULT 0"},
-		{"observed_at", "ALTER TABLE managed_proxy_nodes ADD COLUMN observed_at TEXT"},
-		{"health_status", "ALTER TABLE managed_proxy_nodes ADD COLUMN health_status TEXT NOT NULL DEFAULT 'unknown'"},
-	}
-	for _, f := range nodeFields {
-		if exists, err := hasColumn(ctx, db, "managed_proxy_nodes", f.Name); err == nil && !exists {
-			if _, err := db.ExecContext(ctx, f.SQL); err != nil {
-				return fmt.Errorf("migrate managed proxy node %s: %w", f.Name, err)
-			}
-		}
+	if err := managedproxy.EnsureNodeColumns(ctx, db); err != nil {
+		return err
 	}
 	runtimeFields := []struct{ Name, SQL string }{
 		{"observed_status", "ALTER TABLE managed_proxy_runtimes ADD COLUMN observed_status TEXT NOT NULL DEFAULT 'unknown'"},
@@ -2656,19 +2670,29 @@ func (s *Service) collectMonitorMetrics(w http.ResponseWriter, r *http.Request, 
 	})
 }
 
-func (s *Service) startMetricsCollectorLoop() {
+func (s *Service) startMetricsCollectorLoop(ctx context.Context) {
 	// Wait a moment for database initialization and server startup
-	time.Sleep(5 * time.Second)
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(5 * time.Second):
+	}
 
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	var lastCollected time.Time
 
-	for range ticker.C {
-		ctx := context.Background()
-		db, err := s.open(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		loopCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		db, err := s.open(loopCtx)
 		if err != nil {
+			cancel()
 			continue
 		}
 
@@ -2676,14 +2700,16 @@ func (s *Service) startMetricsCollectorLoop() {
 		var interval int
 		var autoStart int
 		var retentionDays int
-		err = db.QueryRowContext(ctx, "SELECT metrics_collect_interval, auto_start, metrics_retention_days FROM server_monitor_config WHERE id = 1").Scan(&interval, &autoStart, &retentionDays)
+		err = db.QueryRowContext(loopCtx, "SELECT metrics_collect_interval, auto_start, metrics_retention_days FROM server_monitor_config WHERE id = 1").Scan(&interval, &autoStart, &retentionDays)
 		if err != nil {
 			db.Close()
+			cancel()
 			continue
 		}
 
 		if autoStart != 1 {
 			db.Close()
+			cancel()
 			continue
 		}
 
@@ -2691,17 +2717,18 @@ func (s *Service) startMetricsCollectorLoop() {
 		// If it's time to collect
 		if lastCollected.IsZero() || now.Sub(lastCollected) >= time.Duration(interval)*time.Second {
 			// Trigger collection
-			s.runPeriodicCollection(ctx, db)
+			s.runPeriodicCollection(loopCtx, db)
 			lastCollected = now
 
 			// Clean up old metrics
 			if retentionDays > 0 {
-				_, _ = db.ExecContext(ctx, "DELETE FROM server_metrics_history WHERE recorded_at < datetime('now', '-' || ? || ' days')", retentionDays)
-				_, _ = db.ExecContext(ctx, "DELETE FROM server_network_quality_samples WHERE checked_at < datetime('now', '-' || ? || ' days')", retentionDays)
+				_, _ = db.ExecContext(loopCtx, "DELETE FROM server_metrics_history WHERE recorded_at < datetime('now', '-' || ? || ' days')", retentionDays)
+				_, _ = db.ExecContext(loopCtx, "DELETE FROM server_network_quality_samples WHERE checked_at < datetime('now', '-' || ? || ' days')", retentionDays)
 			}
 		}
 
 		db.Close()
+		cancel()
 	}
 }
 
@@ -3623,7 +3650,8 @@ func (s *Service) removeAccountManagedProxyResources(ctx context.Context, db *sq
 			"runtime_version": release.Version, "asset_url_amd64": release.AMD64URL,
 			"asset_sha256_amd64": release.AMD64SHA256, "asset_url_arm64": release.ARM64URL,
 			"asset_sha256_arm64": release.ARM64SHA256, "config": "{}", "remove": true,
-			"port_min": 45654, "port_max": 55654,
+			"asset_format": release.AssetFormat,
+			"port_min":     45654, "port_max": 55654,
 		})
 		if _, err := s.RunProxyRuntimeTaskAndWait(serverID, string(payload)); err != nil {
 			return fmt.Errorf("remove node %s: %w", node.ID, err)
@@ -3645,7 +3673,8 @@ func (s *Service) removeAccountManagedProxyResources(ctx context.Context, db *sq
 			"runtime": release.Runtime, "runtime_version": release.Version,
 			"asset_url_amd64": release.AMD64URL, "asset_sha256_amd64": release.AMD64SHA256,
 			"asset_url_arm64": release.ARM64URL, "asset_sha256_arm64": release.ARM64SHA256,
-			"config": `{}`, "enabled": false, "port_min": 45654, "port_max": 55654, "transport": "tcp",
+			"asset_format": release.AssetFormat,
+			"config":       `{}`, "enabled": false, "port_min": 45654, "port_max": 55654, "transport": "tcp",
 		})
 		if _, err := s.RunProxyRuntimeTaskAndWait(serverID, string(payload)); err != nil {
 			return fmt.Errorf("remove sing-box runtime: %w", err)
@@ -3697,6 +3726,9 @@ func deleteAccountRecords(ctx context.Context, db *sql.DB, serverID string) erro
 	if _, err := tx.ExecContext(ctx, `DELETE FROM subscription_plan_nodes WHERE source='internal' AND node_id IN (SELECT id FROM managed_proxy_nodes WHERE server_id=?)`, serverID); err != nil && !isMissingTableError(err) {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM subscription_runtime_reconcile WHERE node_id IN (SELECT id FROM managed_proxy_nodes WHERE server_id=?)`, serverID); err != nil && !isMissingTableError(err) {
+		return err
+	}
 	for _, statement := range []string{
 		`DELETE FROM managed_proxy_nodes WHERE server_id=?`,
 		`DELETE FROM managed_proxy_runtimes WHERE server_id=?`,
@@ -3708,9 +3740,11 @@ func deleteAccountRecords(ctx context.Context, db *sql.DB, serverID string) erro
 		`DELETE FROM server_agent_credentials WHERE server_id=?`,
 		`DELETE FROM server_proxy_desired_state WHERE server_id=?`,
 		`DELETE FROM server_proxy_traffic_reports WHERE server_id=?`,
+		`DELETE FROM subscription_usage_reports WHERE server_id=?`,
+		`DELETE FROM subscription_usage_report_keys WHERE server_id=?`,
 		`UPDATE server_command_history SET server_id=NULL WHERE server_id=?`,
 	} {
-		if _, err := tx.ExecContext(ctx, statement, serverID); err != nil {
+		if _, err := tx.ExecContext(ctx, statement, serverID); err != nil && !isMissingTableError(err) {
 			return err
 		}
 	}

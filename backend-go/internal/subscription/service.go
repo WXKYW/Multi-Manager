@@ -25,8 +25,11 @@ import (
 
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
 	"github.com/iwvw/api-monitor/backend-go/internal/database"
+	"github.com/iwvw/api-monitor/backend-go/internal/managedproxy"
+	"github.com/iwvw/api-monitor/backend-go/internal/reconcilequeue"
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
 	"github.com/iwvw/api-monitor/backend-go/internal/secure"
+	"github.com/iwvw/api-monitor/backend-go/internal/subscriptionledger"
 	"gopkg.in/yaml.v3"
 )
 
@@ -66,6 +69,8 @@ type Subscription struct {
 	Remark                string           `json:"remark"`
 	Enabled               bool             `json:"enabled"`
 	PublicToken           string           `json:"public_token"`
+	VLESSUUID             string           `json:"vless_uuid"`
+	Hysteria2Password     string           `json:"hysteria2_password"`
 	TemplateID            string           `json:"template_id"`
 	TrafficSource         string           `json:"traffic_source"`
 	TrafficServerID       string           `json:"traffic_server_id,omitempty"`
@@ -97,6 +102,7 @@ type Subscription struct {
 	AccessCountToday      int              `json:"access_count_today"`
 	LastAccessAt          string           `json:"last_access_at,omitempty"`
 	Traffic               TrafficInfo      `json:"traffic"`
+	RuntimeSyncStatus     string           `json:"runtime_sync_status"`
 	Quality               []QualitySummary `json:"quality,omitempty"`
 }
 
@@ -163,15 +169,17 @@ type Node struct {
 }
 
 type Template struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Format      string `json:"format"`
-	Content     string `json:"content"`
-	Builtin     bool   `json:"builtin"`
-	IsDefault   bool   `json:"is_default"`
-	Description string `json:"description"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Format          string `json:"format"`
+	Content         string `json:"content"`
+	Builtin         bool   `json:"builtin"`
+	IsDefault       bool   `json:"is_default"`
+	Valid           bool   `json:"valid"`
+	ValidationError string `json:"validation_error,omitempty"`
+	Description     string `json:"description"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
 }
 
 type TrafficInfo struct {
@@ -185,6 +193,16 @@ type TrafficInfo struct {
 	MeteringStatus string  `json:"metering_status"`
 	CycleStart     string  `json:"cycle_start,omitempty"`
 	CycleEnd       string  `json:"cycle_end,omitempty"`
+}
+
+type subscriptionUsageReport struct {
+	ServerID      string `json:"server_id"`
+	NodeID        string `json:"node_id"`
+	CredentialID  string `json:"credential_id"`
+	BootID        string `json:"boot_id"`
+	Sequence      int64  `json:"sequence"`
+	UploadBytes   int64  `json:"upload_bytes"`
+	DownloadBytes int64  `json:"download_bytes"`
 }
 
 type serverTrafficQuota struct {
@@ -235,6 +253,35 @@ func New(cfg config.Config) *Service {
 		store:  database.New(cfg),
 		client: &http.Client{Timeout: 20 * time.Second},
 	}
+}
+
+// Initialize performs all subscription DDL before HTTP traffic is accepted.
+// open retains a locked fallback for isolated tests, but production startup
+// calls this method so ALTER TABLE never races with concurrent requests.
+func (s *Service) Initialize(ctx context.Context) error {
+	db, err := s.store.Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	s.schemaMu.Lock()
+	defer s.schemaMu.Unlock()
+	if s.schemaReady {
+		return nil
+	}
+	if err := database.WithSchemaLock(ctx, func() error {
+		if err := ensureSchema(ctx, db); err != nil {
+			return err
+		}
+		if err := ensureBuiltins(ctx, db, false); err != nil {
+			return err
+		}
+		return ensureDefaultNodeLibrary(ctx, db)
+	}); err != nil {
+		return err
+	}
+	s.schemaReady = true
+	return nil
 }
 
 func (s *Service) StartAutoRefresh(ctx context.Context) {
@@ -601,6 +648,8 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			remark TEXT,
 			enabled INTEGER DEFAULT 1,
 			public_token TEXT NOT NULL UNIQUE,
+			vless_uuid TEXT NOT NULL DEFAULT '',
+			hysteria2_password TEXT NOT NULL DEFAULT '',
 			template_id TEXT DEFAULT 'builtin_mihomo_default',
 			traffic_source TEXT DEFAULT 'manual',
 			traffic_server_id TEXT,
@@ -699,23 +748,7 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			expire_at INTEGER DEFAULT 0,
 			created_at TEXT DEFAULT (datetime('now'))
 		)`,
-		`CREATE TABLE IF NOT EXISTS managed_proxy_nodes (
-			id TEXT PRIMARY KEY, server_id TEXT NOT NULL, name TEXT NOT NULL,
-			protocol TEXT NOT NULL CHECK(protocol IN ('vless-reality', 'hysteria2', 'vless-ws-tunnel')), runtime TEXT NOT NULL DEFAULT 'sing-box',
-			public_host TEXT NOT NULL, assigned_port INTEGER NOT NULL DEFAULT 0,
-			transport TEXT NOT NULL CHECK(transport IN ('tcp', 'udp')), config_encrypted TEXT NOT NULL,
-			client_uri_encrypted TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
-			enabled INTEGER NOT NULL DEFAULT 1, publishable INTEGER NOT NULL DEFAULT 0,
-			apply_status TEXT NOT NULL DEFAULT 'pending', last_error TEXT NOT NULL DEFAULT '',
-			observed_status TEXT NOT NULL DEFAULT 'unknown', observed_revision INTEGER NOT NULL DEFAULT 0,
-			observed_port INTEGER NOT NULL DEFAULT 0, observed_at TEXT,
-			health_status TEXT NOT NULL DEFAULT 'unknown', access_mode TEXT NOT NULL DEFAULT 'direct',
-			tunnel_path TEXT NOT NULL DEFAULT '', preferred_address_id TEXT NOT NULL DEFAULT '',
-			connect_address TEXT NOT NULL DEFAULT '', connect_port INTEGER NOT NULL DEFAULT 0,
-			tunnel_hostname TEXT NOT NULL DEFAULT '',
-			created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')),
-			FOREIGN KEY (server_id) REFERENCES server_accounts(id) ON DELETE CASCADE
-		)`,
+		managedproxy.NodeTableDDL,
 		`CREATE TABLE IF NOT EXISTS managed_proxy_preferences (
 			id TEXT PRIMARY KEY, name TEXT NOT NULL, address TEXT NOT NULL,
 			port INTEGER NOT NULL DEFAULT 443, enabled INTEGER NOT NULL DEFAULT 1,
@@ -735,8 +768,26 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("ensure subscription schema: %w", err)
 		}
 	}
+	if err := reconcilequeue.EnsureSchema(ctx, db); err != nil {
+		return err
+	}
+	if err := subscriptionledger.EnsureSchema(ctx, db); err != nil {
+		return err
+	}
 	if err := ensureColumn(ctx, db, "subscription_subscriptions", "profile_id", "ALTER TABLE subscription_subscriptions ADD COLUMN profile_id TEXT"); err != nil {
 		return err
+	}
+	if err := ensureColumn(ctx, db, "subscription_subscriptions", "vless_uuid", "ALTER TABLE subscription_subscriptions ADD COLUMN vless_uuid TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "subscription_subscriptions", "hysteria2_password", "ALTER TABLE subscription_subscriptions ADD COLUMN hysteria2_password TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_subscription_vless_uuid ON subscription_subscriptions(vless_uuid) WHERE vless_uuid<>''`); err != nil {
+		return fmt.Errorf("create subscription VLESS credential index: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_subscription_hysteria2_password ON subscription_subscriptions(hysteria2_password) WHERE hysteria2_password<>''`); err != nil {
+		return fmt.Errorf("create subscription Hysteria2 credential index: %w", err)
 	}
 	if err := ensureColumn(ctx, db, "subscription_plans", "selection_mode", "ALTER TABLE subscription_plans ADD COLUMN selection_mode TEXT NOT NULL DEFAULT 'explicit'"); err != nil {
 		return err
@@ -768,22 +819,8 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 	}
-	for _, column := range []struct{ name, sql string }{
-		{"access_mode", "ALTER TABLE managed_proxy_nodes ADD COLUMN access_mode TEXT NOT NULL DEFAULT 'direct'"},
-		{"tunnel_path", "ALTER TABLE managed_proxy_nodes ADD COLUMN tunnel_path TEXT NOT NULL DEFAULT ''"},
-		{"preferred_address_id", "ALTER TABLE managed_proxy_nodes ADD COLUMN preferred_address_id TEXT NOT NULL DEFAULT ''"},
-		{"connect_address", "ALTER TABLE managed_proxy_nodes ADD COLUMN connect_address TEXT NOT NULL DEFAULT ''"},
-		{"connect_port", "ALTER TABLE managed_proxy_nodes ADD COLUMN connect_port INTEGER NOT NULL DEFAULT 0"},
-		{"tunnel_hostname", "ALTER TABLE managed_proxy_nodes ADD COLUMN tunnel_hostname TEXT NOT NULL DEFAULT ''"},
-		{"observed_status", "ALTER TABLE managed_proxy_nodes ADD COLUMN observed_status TEXT NOT NULL DEFAULT 'unknown'"},
-		{"observed_revision", "ALTER TABLE managed_proxy_nodes ADD COLUMN observed_revision INTEGER NOT NULL DEFAULT 0"},
-		{"observed_port", "ALTER TABLE managed_proxy_nodes ADD COLUMN observed_port INTEGER NOT NULL DEFAULT 0"},
-		{"observed_at", "ALTER TABLE managed_proxy_nodes ADD COLUMN observed_at TEXT"},
-		{"health_status", "ALTER TABLE managed_proxy_nodes ADD COLUMN health_status TEXT NOT NULL DEFAULT 'unknown'"},
-	} {
-		if err := ensureColumn(ctx, db, "managed_proxy_nodes", column.name, column.sql); err != nil {
-			return err
-		}
+	if err := managedproxy.EnsureNodeColumns(ctx, db); err != nil {
+		return err
 	}
 	if err := ensureColumn(ctx, db, "subscription_subscriptions", "node_filter_ids", "ALTER TABLE subscription_subscriptions ADD COLUMN node_filter_ids TEXT DEFAULT ''"); err != nil {
 		return err
@@ -828,6 +865,34 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 	}
 	if err := migratePlanNodeRelations(ctx, db); err != nil {
 		return err
+	}
+	if err := backfillSubscriptionCredentials(ctx, db); err != nil {
+		return err
+	}
+	return nil
+}
+
+func backfillSubscriptionCredentials(ctx context.Context, db *sql.DB) error {
+	rows, err := db.QueryContext(ctx, `SELECT id FROM subscription_subscriptions WHERE COALESCE(vless_uuid,'')='' OR COALESCE(hysteria2_password,'')=''`)
+	if err != nil {
+		return err
+	}
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if _, err := db.ExecContext(ctx, `UPDATE subscription_subscriptions SET vless_uuid=CASE WHEN COALESCE(vless_uuid,'')='' THEN ? ELSE vless_uuid END,hysteria2_password=CASE WHEN COALESCE(hysteria2_password,'')='' THEN ? ELSE hysteria2_password END WHERE id=?`, randomUUID(), randomCredential(), id); err != nil {
+			return fmt.Errorf("backfill subscription credentials: %w", err)
+		}
 	}
 	return nil
 }
@@ -977,7 +1042,13 @@ func (s *Service) handlePlans(w http.ResponseWriter, r *http.Request, db *sql.DB
 			response.Error(w, http.StatusBadRequest, "enabled 不能为空")
 			return
 		}
-		result, err := db.ExecContext(r.Context(), `UPDATE subscription_plans SET enabled=?,updated_at=datetime('now') WHERE id=?`, boolToInt(*input.Enabled), id)
+		tx, err := db.BeginTx(r.Context(), nil)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		defer tx.Rollback()
+		result, err := tx.ExecContext(r.Context(), `UPDATE subscription_plans SET enabled=?,updated_at=datetime('now') WHERE id=?`, boolToInt(*input.Enabled), id)
 		if err != nil {
 			response.Error(w, http.StatusInternalServerError, err.Error())
 			return
@@ -985,6 +1056,15 @@ func (s *Service) handlePlans(w http.ResponseWriter, r *http.Request, db *sql.DB
 		affected, _ := result.RowsAffected()
 		if affected == 0 {
 			response.Error(w, http.StatusNotFound, "套餐不存在")
+			return
+		}
+		nodeIDs, err := reconcilequeue.NodeIDsForPlan(r.Context(), tx, id)
+		if err != nil || reconcilequeue.EnqueueNodes(r.Context(), tx, nodeIDs, "plan enabled state changed") != nil {
+			response.Error(w, http.StatusInternalServerError, "无法安排节点配置同步")
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		plans, _ := loadPlans(r.Context(), db, id)
@@ -1023,6 +1103,11 @@ func (s *Service) handlePlans(w http.ResponseWriter, r *http.Request, db *sql.DB
 			return
 		}
 		defer tx.Rollback()
+		previousNodeIDs, err := reconcilequeue.NodeIDsForPlan(r.Context(), tx, id)
+		if err != nil {
+			response.Error(w, 500, err.Error())
+			return
+		}
 		_, err = tx.ExecContext(r.Context(), `INSERT INTO subscription_plans
 			(id,name,remark,enabled,total_bytes,cycle_type,cycle_day,rate_limit_enabled,rate_limit_per_minute,node_ids,selection_mode,include_internal_nodes,include_external_nodes,updated_at)
 			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now')) ON CONFLICT(id) DO UPDATE SET
@@ -1046,6 +1131,15 @@ func (s *Service) handlePlans(w http.ResponseWriter, r *http.Request, db *sql.DB
 				response.Error(w, 500, err.Error())
 				return
 			}
+		}
+		currentNodeIDs, err := reconcilequeue.NodeIDsForPlan(r.Context(), tx, id)
+		if err != nil {
+			response.Error(w, 500, err.Error())
+			return
+		}
+		if err := reconcilequeue.EnqueueNodes(r.Context(), tx, append(previousNodeIDs, currentNodeIDs...), "plan policy changed"); err != nil {
+			response.Error(w, 500, err.Error())
+			return
 		}
 		if err := tx.Commit(); err != nil {
 			response.Error(w, 500, err.Error())
@@ -1223,7 +1317,7 @@ func countPublishedSubscriptionNodes(ctx context.Context, db *sql.DB, sub Subscr
 func loadPublishedNodesForSubscription(ctx context.Context, db *sql.DB, sub Subscription) ([]Node, error) {
 	nodes := []Node{}
 	if sub.IncludeInternalNodes {
-		internal, err := loadManagedSubscriptionNodes(ctx, db)
+		internal, err := loadManagedSubscriptionNodes(ctx, db, sub)
 		if err != nil {
 			return nil, err
 		}
@@ -1495,6 +1589,10 @@ func (s *Service) createProfile(w http.ResponseWriter, r *http.Request, db *sql.
 	subInput.Enabled = input.Enabled || !isExplicitFalse(r, "enabled")
 	subInput.RateLimitEnabled = input.RateLimitEnabled || settings.DefaultRateLimitEnabled
 	templateID := firstNonEmpty(input.TemplateID, settings.DefaultTemplateID, defaultTemplateID)
+	if err := validateTemplateReference(r.Context(), db, templateID); err != nil {
+		response.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	trafficSource := normalizeTrafficSource(input.TrafficSource)
 	cycleType := normalizeCycleType(input.CycleType)
 	cycleDay := input.CycleDay
@@ -1540,6 +1638,10 @@ func (s *Service) updateProfile(w http.ResponseWriter, r *http.Request, db *sql.
 		cycleDay = 1
 	}
 	templateID := firstNonEmpty(input.TemplateID, defaultTemplateID)
+	if err := validateTemplateReference(r.Context(), db, templateID); err != nil {
+		response.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	trafficSource := normalizeTrafficSource(input.TrafficSource)
 	cycleType := normalizeCycleType(input.CycleType)
 	refreshHours := intDefault(input.UpstreamRefreshHours, defaultRefreshHours)
@@ -1642,6 +1744,10 @@ func (s *Service) createSubscription(w http.ResponseWriter, r *http.Request, db 
 	profileID := defaultNodeLibrary
 	token := randomToken()
 	templateID := firstNonEmpty(input.TemplateID, settings.DefaultTemplateID, defaultTemplateID)
+	if err := validateTemplateReference(r.Context(), db, templateID); err != nil {
+		response.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	effectiveEnabled := input.Enabled || !isExplicitFalse(r, "enabled")
 	input.Enabled = effectiveEnabled
 	tx, err := db.BeginTx(r.Context(), nil)
@@ -1658,17 +1764,22 @@ func (s *Service) createSubscription(w http.ResponseWriter, r *http.Request, db 
 		}
 	}
 	_, err = tx.ExecContext(r.Context(), `INSERT INTO subscription_subscriptions (
-		id, profile_id, plan_id, name, remark, enabled, public_token, template_id, traffic_source, traffic_server_id,
+		id, profile_id, plan_id, name, remark, enabled, public_token, vless_uuid, hysteria2_password, template_id, traffic_source, traffic_server_id,
 		upstream_url, upstream_enabled, upstream_refresh_hours, total_bytes, manual_upload_bytes,
 		manual_download_bytes, expire_at, cycle_type, cycle_day, cycle_start, cycle_end,
 		rate_limit_enabled, rate_limit_per_minute, node_filter_ids, include_internal_nodes, include_external_nodes, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-		id, profileID, input.PlanID, input.Name, input.Remark, boolToInt(effectiveEnabled), token, templateID, "panel", nil,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+		id, profileID, input.PlanID, input.Name, input.Remark, boolToInt(effectiveEnabled), token, randomUUID(), randomCredential(), templateID, "panel", nil,
 		nil, 0, defaultRefreshHours, 0, 0,
 		0, nil, "none", 1, nil, nil,
 		0, 0, "", 0, 0)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	nodeIDs, err := reconcilequeue.NodeIDsForPlan(r.Context(), tx, input.PlanID)
+	if err != nil || reconcilequeue.EnqueueNodes(r.Context(), tx, nodeIDs, "subscription created") != nil {
+		response.Error(w, http.StatusInternalServerError, "无法安排节点配置同步")
 		return
 	}
 	if err := tx.Commit(); err != nil {
@@ -1699,12 +1810,25 @@ func (s *Service) updateSubscription(w http.ResponseWriter, r *http.Request, db 
 	applyPlanToSubscription(r.Context(), db, &input)
 	profileID := firstNonEmpty(profileIDForSubscription(r.Context(), db, id), defaultNodeLibrary)
 	templateID := firstNonEmpty(input.TemplateID, defaultTemplateID)
+	if err := validateTemplateReference(r.Context(), db, templateID); err != nil {
+		response.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	tx, err := db.BeginTx(r.Context(), nil)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer tx.Rollback()
+	var previousPlanID string
+	if err := tx.QueryRowContext(r.Context(), `SELECT COALESCE(plan_id,'') FROM subscription_subscriptions WHERE id=?`, id).Scan(&previousPlanID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			response.Error(w, http.StatusNotFound, "订阅不存在")
+		} else {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
 	result, err := tx.ExecContext(r.Context(), `UPDATE subscription_subscriptions SET
 		profile_id = ?, plan_id = ?, name = ?, remark = ?, enabled = ?, template_id = ?, traffic_source = ?, traffic_server_id = ?,
 		upstream_url = ?, upstream_enabled = ?, upstream_refresh_hours = ?, total_bytes = ?,
@@ -1722,6 +1846,11 @@ func (s *Service) updateSubscription(w http.ResponseWriter, r *http.Request, db 
 	affected, _ := result.RowsAffected()
 	if affected == 0 {
 		response.Error(w, http.StatusNotFound, "订阅不存在")
+		return
+	}
+	nodeIDs, err := reconcilequeue.NodeIDsForPlans(r.Context(), tx, previousPlanID, input.PlanID)
+	if err != nil || reconcilequeue.EnqueueNodes(r.Context(), tx, nodeIDs, "subscription policy changed") != nil {
+		response.Error(w, http.StatusInternalServerError, "无法安排节点配置同步")
 		return
 	}
 	if err := tx.Commit(); err != nil {
@@ -1743,7 +1872,22 @@ func (s *Service) setSubscriptionEnabled(w http.ResponseWriter, r *http.Request,
 		response.Error(w, http.StatusBadRequest, "enabled 不能为空")
 		return
 	}
-	result, err := db.ExecContext(r.Context(), `UPDATE subscription_subscriptions SET enabled=?,updated_at=datetime('now') WHERE id=?`, boolToInt(*input.Enabled), id)
+	tx, err := db.BeginTx(r.Context(), nil)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer tx.Rollback()
+	var planID string
+	if err := tx.QueryRowContext(r.Context(), `SELECT COALESCE(plan_id,'') FROM subscription_subscriptions WHERE id=?`, id).Scan(&planID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			response.Error(w, http.StatusNotFound, "订阅不存在")
+		} else {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	result, err := tx.ExecContext(r.Context(), `UPDATE subscription_subscriptions SET enabled=?,updated_at=datetime('now') WHERE id=?`, boolToInt(*input.Enabled), id)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1751,6 +1895,15 @@ func (s *Service) setSubscriptionEnabled(w http.ResponseWriter, r *http.Request,
 	affected, _ := result.RowsAffected()
 	if affected == 0 {
 		response.Error(w, http.StatusNotFound, "订阅不存在")
+		return
+	}
+	nodeIDs, err := reconcilequeue.NodeIDsForPlan(r.Context(), tx, planID)
+	if err != nil || reconcilequeue.EnqueueNodes(r.Context(), tx, nodeIDs, "subscription enabled state changed") != nil {
+		response.Error(w, http.StatusInternalServerError, "无法安排节点配置同步")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	subs, _ := loadSubscriptions(r.Context(), db, id)
@@ -1777,7 +1930,30 @@ func (s *Service) deleteSubscription(w http.ResponseWriter, r *http.Request, db 
 		return
 	}
 	defer tx.Rollback()
+	var planID string
+	if err := tx.QueryRowContext(r.Context(), `SELECT COALESCE(plan_id,'') FROM subscription_subscriptions WHERE id=?`, id).Scan(&planID); err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	nodeIDs, err := reconcilequeue.NodeIDsForPlan(r.Context(), tx, planID)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	_, _ = tx.ExecContext(r.Context(), `DELETE FROM subscription_access_logs WHERE subscription_id = ?`, id)
+	// Remove quota and Agent replay/audit rows explicitly so legacy databases
+	// created before foreign-key enforcement cannot retain orphaned state.
+	for _, statement := range []string{
+		`DELETE FROM subscription_usage_reports WHERE subscription_id=?`,
+		`DELETE FROM subscription_usage_report_keys WHERE subscription_id=?`,
+		`DELETE FROM subscription_usage_cycles WHERE subscription_id=?`,
+		`DELETE FROM subscription_cycle_state WHERE subscription_id=?`,
+	} {
+		if _, err := tx.ExecContext(r.Context(), statement, id); err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
 	result, err := tx.ExecContext(r.Context(), `DELETE FROM subscription_subscriptions WHERE id = ?`, id)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
@@ -1786,6 +1962,10 @@ func (s *Service) deleteSubscription(w http.ResponseWriter, r *http.Request, db 
 	affected, _ := result.RowsAffected()
 	if affected == 0 {
 		response.Error(w, http.StatusNotFound, "订阅不存在")
+		return
+	}
+	if err := reconcilequeue.EnqueueNodes(r.Context(), tx, nodeIDs, "subscription deleted"); err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if err := tx.Commit(); err != nil {
@@ -2183,15 +2363,18 @@ func (s *Service) createTemplate(w http.ResponseWriter, r *http.Request, db *sql
 	if !decodeJSON(w, r, &tpl) {
 		return
 	}
-	if tpl.Name == "" || tpl.Content == "" {
+	tpl.Name = strings.TrimSpace(tpl.Name)
+	tpl.Format = normalizeTemplateFormat(tpl.Format)
+	if tpl.Name == "" || strings.TrimSpace(tpl.Content) == "" {
 		response.Error(w, http.StatusBadRequest, "模板名称和内容不能为空")
+		return
+	}
+	if err := validateTemplateDefinition(tpl.Format, tpl.Content); err != nil {
+		response.Error(w, http.StatusBadRequest, "模板配置无效: "+err.Error())
 		return
 	}
 	if tpl.ID == "" {
 		tpl.ID = randomID("tpl")
-	}
-	if tpl.Format == "" {
-		tpl.Format = "clash"
 	}
 	_, err := db.ExecContext(r.Context(), `INSERT INTO subscription_templates (id, name, format, content, builtin, is_default, description) VALUES (?, ?, ?, ?, 0, 0, ?)`,
 		tpl.ID, tpl.Name, tpl.Format, tpl.Content, tpl.Description)
@@ -2199,6 +2382,7 @@ func (s *Service) createTemplate(w http.ResponseWriter, r *http.Request, db *sql
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	tpl.Valid = true
 	response.OK(w, tpl)
 }
 
@@ -2207,10 +2391,25 @@ func (s *Service) updateTemplate(w http.ResponseWriter, r *http.Request, db *sql
 	if !decodeJSON(w, r, &tpl) {
 		return
 	}
-	_, err := db.ExecContext(r.Context(), `UPDATE subscription_templates SET name = ?, format = ?, content = ?, description = ?, updated_at = datetime('now') WHERE id = ?`,
+	tpl.Name = strings.TrimSpace(tpl.Name)
+	tpl.Format = normalizeTemplateFormat(tpl.Format)
+	if tpl.Name == "" || strings.TrimSpace(tpl.Content) == "" {
+		response.Error(w, http.StatusBadRequest, "模板名称和内容不能为空")
+		return
+	}
+	if err := validateTemplateDefinition(tpl.Format, tpl.Content); err != nil {
+		response.Error(w, http.StatusBadRequest, "模板配置无效: "+err.Error())
+		return
+	}
+	result, err := db.ExecContext(r.Context(), `UPDATE subscription_templates SET name = ?, format = ?, content = ?, description = ?, updated_at = datetime('now') WHERE id = ?`,
 		tpl.Name, tpl.Format, tpl.Content, tpl.Description, id)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		response.Error(w, http.StatusNotFound, "模板不存在")
 		return
 	}
 	response.OK(w, map[string]bool{"updated": true})
@@ -2262,13 +2461,8 @@ func (s *Service) deleteTemplate(w http.ResponseWriter, r *http.Request, db *sql
 }
 
 func (s *Service) setDefaultTemplate(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {
-	var exists int
-	if err := db.QueryRowContext(r.Context(), `SELECT 1 FROM subscription_templates WHERE id=?`, id).Scan(&exists); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			response.Error(w, http.StatusNotFound, "模板不存在")
-		} else {
-			response.Error(w, http.StatusInternalServerError, err.Error())
-		}
+	if err := validateTemplateReference(r.Context(), db, id); err != nil {
+		response.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	tx, err := db.BeginTx(r.Context(), nil)
@@ -2326,8 +2520,13 @@ func (s *Service) updateSettings(w http.ResponseWriter, r *http.Request, db *sql
 	if !decodeJSON(w, r, &settings) {
 		return
 	}
+	settings.DefaultTemplateID = firstNonEmpty(settings.DefaultTemplateID, defaultTemplateID)
+	if err := validateTemplateReference(r.Context(), db, settings.DefaultTemplateID); err != nil {
+		response.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	_, err := db.ExecContext(r.Context(), `UPDATE subscription_settings SET default_template_id = ?, default_rate_limit_enabled = ?, default_rate_limit_per_minute = ?, default_refresh_hours = ?, geoip_enabled = ?, updated_at = datetime('now') WHERE id = 1`,
-		firstNonEmpty(settings.DefaultTemplateID, defaultTemplateID), boolToInt(settings.DefaultRateLimitEnabled), intDefault(settings.DefaultRateLimitPerMin, defaultLimitPerMin), intDefault(settings.DefaultRefreshHours, defaultRefreshHours), boolToInt(settings.GeoIPEnabled))
+		settings.DefaultTemplateID, boolToInt(settings.DefaultRateLimitEnabled), intDefault(settings.DefaultRateLimitPerMin, defaultLimitPerMin), intDefault(settings.DefaultRefreshHours, defaultRefreshHours), boolToInt(settings.GeoIPEnabled))
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2468,7 +2667,7 @@ func (s *Service) servePublicSubscription(w http.ResponseWriter, r *http.Request
 	success = true
 }
 
-func loadManagedSubscriptionNodes(ctx context.Context, db *sql.DB) ([]Node, error) {
+func loadManagedSubscriptionNodes(ctx context.Context, db *sql.DB, sub Subscription) ([]Node, error) {
 	rows, err := db.QueryContext(ctx, `SELECT id,server_id,name,protocol,public_host,assigned_port,client_uri_encrypted,COALESCE(access_mode,'direct'),COALESCE(preferred_address_id,''),COALESCE(connect_address,''),COALESCE(connect_port,0),COALESCE(tunnel_hostname,''),created_at,updated_at FROM managed_proxy_nodes WHERE enabled=1 AND publishable=1 AND apply_status='running' ORDER BY created_at ASC`)
 	if err != nil {
 		return nil, err
@@ -2495,6 +2694,7 @@ func loadManagedSubscriptionNodes(ctx context.Context, db *sql.DB) ([]Node, erro
 	nodes := make([]Node, 0, len(managedRows))
 	for _, item := range managedRows {
 		raw := secure.SecureDecrypt(item.encrypted)
+		raw = bindSubscriptionCredential(raw, item.protocol, sub)
 		if item.accessMode == "cloudflare_tunnel" {
 			address, port := strings.TrimSpace(item.connectAddress), item.connectPort
 			if address == "" && item.preferredID != "" {
@@ -2531,6 +2731,26 @@ func loadManagedSubscriptionNodes(ctx context.Context, db *sql.DB) ([]Node, erro
 		nodes = append(nodes, node)
 	}
 	return nodes, nil
+}
+
+func bindSubscriptionCredential(raw, protocol string, sub Subscription) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" {
+		return raw
+	}
+	switch strings.ToLower(strings.TrimSpace(protocol)) {
+	case "vless-reality", "vless-ws-tunnel", "vless":
+		if strings.TrimSpace(sub.VLESSUUID) == "" {
+			return raw
+		}
+		parsed.User = url.User(sub.VLESSUUID)
+	case "hysteria2", "hy2":
+		if strings.TrimSpace(sub.Hysteria2Password) == "" {
+			return raw
+		}
+		parsed.User = url.User(sub.Hysteria2Password)
+	}
+	return parsed.String()
 }
 
 func replacePublishedURIAddress(raw, address string, port int) string {
@@ -2732,7 +2952,7 @@ func loadSubscriptions(ctx context.Context, db *sql.DB, id string) ([]Subscripti
 		where = "WHERE id = ?"
 		args = append(args, id)
 	}
-	rows, err := db.QueryContext(ctx, `SELECT id, COALESCE(profile_id, id), COALESCE(plan_id, ''), name, COALESCE(remark, ''), enabled, public_token, COALESCE(template_id, ''), COALESCE(traffic_source, 'manual'), COALESCE(traffic_server_id, ''), COALESCE(upstream_url, ''), upstream_enabled, COALESCE(upstream_refresh_hours, 24), COALESCE(upstream_status, ''), COALESCE(upstream_last_error, ''), COALESCE(upstream_last_refresh_at, ''), total_bytes, manual_upload_bytes, manual_download_bytes, COALESCE(expire_at, ''), COALESCE(cycle_type, 'none'), COALESCE(cycle_day, 1), COALESCE(cycle_start, ''), COALESCE(cycle_end, ''), baseline_upload_bytes, baseline_download_bytes, rate_limit_enabled, COALESCE(rate_limit_per_minute, 30), COALESCE(node_filter_ids, ''), COALESCE(include_internal_nodes,1), COALESCE(include_external_nodes,0), created_at, updated_at FROM subscription_subscriptions `+where+` ORDER BY updated_at DESC`, args...)
+	rows, err := db.QueryContext(ctx, `SELECT id, COALESCE(profile_id, id), COALESCE(plan_id, ''), name, COALESCE(remark, ''), enabled, public_token, COALESCE(vless_uuid,''), COALESCE(hysteria2_password,''), COALESCE(template_id, ''), COALESCE(traffic_source, 'manual'), COALESCE(traffic_server_id, ''), COALESCE(upstream_url, ''), upstream_enabled, COALESCE(upstream_refresh_hours, 24), COALESCE(upstream_status, ''), COALESCE(upstream_last_error, ''), COALESCE(upstream_last_refresh_at, ''), total_bytes, manual_upload_bytes, manual_download_bytes, COALESCE(expire_at, ''), COALESCE(cycle_type, 'none'), COALESCE(cycle_day, 1), COALESCE(cycle_start, ''), COALESCE(cycle_end, ''), baseline_upload_bytes, baseline_download_bytes, rate_limit_enabled, COALESCE(rate_limit_per_minute, 30), COALESCE(node_filter_ids, ''), COALESCE(include_internal_nodes,1), COALESCE(include_external_nodes,0), created_at, updated_at FROM subscription_subscriptions `+where+` ORDER BY updated_at DESC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -2741,7 +2961,7 @@ func loadSubscriptions(ctx context.Context, db *sql.DB, id string) ([]Subscripti
 		var sub Subscription
 		var enabled, upstreamEnabled, rateEnabled, includeInternal, includeExternal int
 		var nodeFilterIDs string
-		if err := rows.Scan(&sub.ID, &sub.ProfileID, &sub.PlanID, &sub.Name, &sub.Remark, &enabled, &sub.PublicToken, &sub.TemplateID, &sub.TrafficSource, &sub.TrafficServerID, &sub.UpstreamURL, &upstreamEnabled, &sub.UpstreamRefreshHours, &sub.UpstreamStatus, &sub.UpstreamLastError, &sub.UpstreamLastRefreshAt, &sub.TotalBytes, &sub.ManualUploadBytes, &sub.ManualDownloadBytes, &sub.ExpireAt, &sub.CycleType, &sub.CycleDay, &sub.CycleStart, &sub.CycleEnd, &sub.BaselineUploadBytes, &sub.BaselineDownloadBytes, &rateEnabled, &sub.RateLimitPerMinute, &nodeFilterIDs, &includeInternal, &includeExternal, &sub.CreatedAt, &sub.UpdatedAt); err != nil {
+		if err := rows.Scan(&sub.ID, &sub.ProfileID, &sub.PlanID, &sub.Name, &sub.Remark, &enabled, &sub.PublicToken, &sub.VLESSUUID, &sub.Hysteria2Password, &sub.TemplateID, &sub.TrafficSource, &sub.TrafficServerID, &sub.UpstreamURL, &upstreamEnabled, &sub.UpstreamRefreshHours, &sub.UpstreamStatus, &sub.UpstreamLastError, &sub.UpstreamLastRefreshAt, &sub.TotalBytes, &sub.ManualUploadBytes, &sub.ManualDownloadBytes, &sub.ExpireAt, &sub.CycleType, &sub.CycleDay, &sub.CycleStart, &sub.CycleEnd, &sub.BaselineUploadBytes, &sub.BaselineDownloadBytes, &rateEnabled, &sub.RateLimitPerMinute, &nodeFilterIDs, &includeInternal, &includeExternal, &sub.CreatedAt, &sub.UpdatedAt); err != nil {
 			return nil, err
 		}
 		sub.Enabled = enabled == 1
@@ -2767,6 +2987,11 @@ func loadSubscriptions(ctx context.Context, db *sql.DB, id string) ([]Subscripti
 		_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_access_logs WHERE subscription_id = ? AND date(created_at) = date('now')`, items[i].ID).Scan(&items[i].AccessCountToday)
 		_ = db.QueryRowContext(ctx, `SELECT COALESCE(MAX(created_at), '') FROM subscription_access_logs WHERE subscription_id = ?`, items[i].ID).Scan(&items[i].LastAccessAt)
 		items[i].Traffic = computeTraffic(ctx, db, items[i])
+		if nodeIDs, err := reconcilequeue.NodeIDsForPlan(ctx, db, items[i].PlanID); err == nil {
+			items[i].RuntimeSyncStatus = reconcilequeue.Status(ctx, db, nodeIDs)
+		} else {
+			items[i].RuntimeSyncStatus = "unknown"
+		}
 		items[i].Quality = loadQuality(ctx, db, items[i].TrafficServerID)
 	}
 	return items, nil
@@ -3095,9 +3320,42 @@ func loadTemplates(ctx context.Context, db *sql.DB) ([]Template, error) {
 		}
 		tpl.Builtin = builtin == 1
 		tpl.IsDefault = def == 1
+		if validationErr := validateTemplateDefinition(tpl.Format, tpl.Content); validationErr != nil {
+			tpl.ValidationError = validationErr.Error()
+		} else {
+			tpl.Valid = true
+		}
 		items = append(items, tpl)
 	}
 	return items, rows.Err()
+}
+
+func validateTemplateReference(ctx context.Context, db *sql.DB, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("请选择输出模板")
+	}
+	var format, content string
+	if err := db.QueryRowContext(ctx, `SELECT format,content FROM subscription_templates WHERE id=?`, id).Scan(&format, &content); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			switch id {
+			case defaultTemplateID:
+				format, content = "clash", loadDefaultMihomoTemplate()
+			case rawTemplateID:
+				format, content = "raw", "{{ raw_uri_list }}"
+			case base64TemplateID:
+				format, content = "base64", "{{ raw_uri_list }}"
+			default:
+				return errors.New("所选模板不存在")
+			}
+		} else {
+			return fmt.Errorf("读取模板失败: %w", err)
+		}
+	}
+	if err := validateTemplateDefinition(format, content); err != nil {
+		return fmt.Errorf("所选模板配置无效: %w", err)
+	}
+	return nil
 }
 
 func loadSettings(ctx context.Context, db *sql.DB) (Settings, error) {
@@ -3113,14 +3371,15 @@ func loadSettings(ctx context.Context, db *sql.DB) (Settings, error) {
 }
 
 func computeTraffic(ctx context.Context, db *sql.DB, sub Subscription) TrafficInfo {
-	_ = ctx
-	_ = db
-	// A subscription quota is a panel-owned policy. Host NIC counters and a
-	// node's aggregate proxy counters cannot be attributed to one subscription,
-	// so reporting either as subscription usage would be misleading. Accurate
-	// usage becomes available only after managed nodes have per-subscription
-	// credentials and report counters for those identities.
 	info := TrafficInfo{Total: sub.TotalBytes, Source: "panel", Status: "active", MeteringStatus: "pending", CycleStart: sub.CycleStart, CycleEnd: sub.CycleEnd}
+	usage, err := subscriptionledger.Current(ctx, db, sub.ID, sub.CycleType, sub.CycleDay, sub.CreatedAt, time.Now().UTC())
+	if err == nil {
+		info.Upload = usage.UploadBytes
+		info.Download = usage.DownloadBytes
+		info.MeteringStatus = usage.Metering
+		info.CycleStart = usage.CycleStart
+		info.CycleEnd = usage.CycleEnd
+	}
 	if sub.ExpireAt != "" {
 		if t, err := parseTime(sub.ExpireAt); err == nil {
 			info.Expire = t.Unix()
@@ -3137,6 +3396,13 @@ func computeTraffic(ctx context.Context, db *sql.DB, sub Subscription) TrafficIn
 		}
 	}
 	return info
+}
+
+func recordSubscriptionUsage(ctx context.Context, db *sql.DB, report subscriptionUsageReport) (bool, error) {
+	return subscriptionledger.Record(ctx, db, subscriptionledger.Report{
+		ServerID: report.ServerID, NodeID: report.NodeID, CredentialID: report.CredentialID,
+		BootID: report.BootID, Sequence: report.Sequence, UploadBytes: report.UploadBytes, DownloadBytes: report.DownloadBytes,
+	}, time.Now().UTC())
 }
 
 func planCycleWindow(now time.Time, cycleType string, cycleDay int) (string, string) {
@@ -3237,14 +3503,26 @@ func renderOutput(ctx context.Context, db *sql.DB, sub Subscription, nodes []Nod
 	}
 	if format == "" || format == "clash" || format == "mihomo" {
 		tpl := loadDefaultMihomoTemplate()
+		usingCustomTemplate := false
 		if sub.TemplateID != "" {
 			var customTemplate string
-			_ = db.QueryRowContext(ctx, `SELECT content FROM subscription_templates WHERE id = ?`, sub.TemplateID).Scan(&customTemplate)
+			var builtin int
+			_ = db.QueryRowContext(ctx, `SELECT content,builtin FROM subscription_templates WHERE id = ?`, sub.TemplateID).Scan(&customTemplate, &builtin)
 			if strings.TrimSpace(customTemplate) != "" {
 				tpl = customTemplate
+				usingCustomTemplate = builtin == 0
 			}
 		}
 		body := renderTemplate(tpl, sub, nodes)
+		if err := validateMihomoOutput(body); err != nil {
+			if !usingCustomTemplate {
+				return "", "", fmt.Errorf("内置 Mihomo 模板输出无效: %w", err)
+			}
+			body = renderTemplate(loadDefaultMihomoTemplate(), sub, nodes)
+			if fallbackErr := validateMihomoOutput(body); fallbackErr != nil {
+				return "", "", fmt.Errorf("Mihomo 模板输出无效，且内置模板回退失败: %w", fallbackErr)
+			}
+		}
 		return body, "text/yaml; charset=utf-8", nil
 	}
 	raw := rawURIList(nodes)
@@ -3252,6 +3530,233 @@ func renderOutput(ctx context.Context, db *sql.DB, sub Subscription, nodes []Nod
 		return base64.StdEncoding.EncodeToString([]byte(raw)), "text/plain; charset=utf-8", nil
 	}
 	return raw, "text/plain; charset=utf-8", nil
+}
+
+var unresolvedTemplatePattern = regexp.MustCompile(`\{\{[^{}]+\}\}`)
+
+func normalizeTemplateFormat(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "clash", "mihomo", "yaml", "yml":
+		return "clash"
+	case "raw":
+		return "raw"
+	case "base64":
+		return "base64"
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+}
+
+func validateTemplateDefinition(format, content string) error {
+	format = normalizeTemplateFormat(format)
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return errors.New("模板内容不能为空")
+	}
+	if format != "clash" && format != "raw" && format != "base64" {
+		return fmt.Errorf("不支持的模板格式 %q", format)
+	}
+	if format != "clash" {
+		if unresolved := unresolvedTemplatePattern.FindString(content); unresolved != "" && unresolved != "{{ raw_uri_list }}" {
+			return fmt.Errorf("包含未知占位符 %s", unresolved)
+		}
+		return nil
+	}
+	fixtureNodes := preparePublishedNodes([]Node{
+		{Name: "模板验证节点", Type: "vless", Server: "node.example.com", Port: 443, ConfigJSON: `{"name":"模板验证节点","type":"vless","server":"node.example.com","port":443,"uuid":"00000000-0000-4000-8000-000000000001"}`, Enabled: true, Stable: true},
+	})
+	fixture := Subscription{Name: "模板验证", Traffic: TrafficInfo{Total: 1024}}
+	rendered := renderTemplate(content, fixture, fixtureNodes)
+	if unresolved := unresolvedTemplatePattern.FindString(rendered); unresolved != "" {
+		return fmt.Errorf("包含未知占位符 %s", unresolved)
+	}
+	return validateMihomoOutput(rendered)
+}
+
+func validateMihomoOutput(body string) error {
+	var document yaml.Node
+	if err := yaml.Unmarshal([]byte(body), &document); err != nil {
+		return fmt.Errorf("YAML 语法错误: %w", err)
+	}
+	if err := validateYAMLMappingKeys(&document); err != nil {
+		return err
+	}
+	var raw interface{}
+	if err := document.Decode(&raw); err != nil {
+		return fmt.Errorf("YAML 解析失败: %w", err)
+	}
+	root, ok := normalizeStringMap(raw).(map[string]interface{})
+	if !ok {
+		return errors.New("顶层配置必须是对象")
+	}
+	proxyNames := map[string]string{}
+	if rawProxies, exists := root["proxies"]; exists {
+		proxies, ok := rawProxies.([]interface{})
+		if !ok {
+			return errors.New("proxies 必须是列表")
+		}
+		for index, item := range proxies {
+			proxy, ok := normalizeStringMap(item).(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("proxies[%d] 必须是对象", index)
+			}
+			name := strings.TrimSpace(stringVal(proxy["name"]))
+			if name == "" {
+				return fmt.Errorf("proxies[%d] 缺少名称", index)
+			}
+			key := strings.ToLower(name)
+			if previous, duplicate := proxyNames[key]; duplicate {
+				return fmt.Errorf("代理名称重复: %s（与 %s 冲突）", name, previous)
+			}
+			proxyNames[key] = name
+			if err := validateMihomoProxy(proxy); err != nil {
+				return fmt.Errorf("代理 %s 配置无效: %w", name, err)
+			}
+		}
+	}
+
+	groupNames := map[string]string{}
+	groups := []map[string]interface{}{}
+	if rawGroups, exists := root["proxy-groups"]; exists {
+		items, ok := rawGroups.([]interface{})
+		if !ok {
+			return errors.New("proxy-groups 必须是列表")
+		}
+		for index, item := range items {
+			group, ok := normalizeStringMap(item).(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("proxy-groups[%d] 必须是对象", index)
+			}
+			name := strings.TrimSpace(stringVal(group["name"]))
+			if name == "" || strings.TrimSpace(stringVal(group["type"])) == "" {
+				return fmt.Errorf("proxy-groups[%d] 缺少名称或类型", index)
+			}
+			key := strings.ToLower(name)
+			if previous, duplicate := groupNames[key]; duplicate {
+				return fmt.Errorf("代理组名称重复: %s（与 %s 冲突）", name, previous)
+			}
+			if proxyName, collision := proxyNames[key]; collision {
+				return fmt.Errorf("代理组名称 %s 与代理 %s 冲突", name, proxyName)
+			}
+			groupNames[key] = name
+			groups = append(groups, group)
+		}
+	}
+	allowed := map[string]bool{"direct": true, "reject": true, "reject-drop": true, "pass": true, "compatible": true}
+	for key := range proxyNames {
+		allowed[key] = true
+	}
+	for key := range groupNames {
+		allowed[key] = true
+	}
+	graph := map[string][]string{}
+	for _, group := range groups {
+		groupName := strings.TrimSpace(stringVal(group["name"]))
+		groupKey := strings.ToLower(groupName)
+		rawRefs, exists := group["proxies"]
+		if !exists {
+			continue
+		}
+		refs, ok := rawRefs.([]interface{})
+		if !ok {
+			return fmt.Errorf("代理组 %s 的 proxies 必须是列表", groupName)
+		}
+		seenRefs := map[string]bool{}
+		for _, rawRef := range refs {
+			ref := strings.TrimSpace(stringVal(rawRef))
+			key := strings.ToLower(ref)
+			if ref == "" || !allowed[key] {
+				return fmt.Errorf("代理组 %s 引用了不存在的代理或代理组 %q", groupName, ref)
+			}
+			if seenRefs[key] {
+				return fmt.Errorf("代理组 %s 重复引用 %s", groupName, ref)
+			}
+			seenRefs[key] = true
+			if _, isGroup := groupNames[key]; isGroup {
+				graph[groupKey] = append(graph[groupKey], key)
+			}
+		}
+	}
+	if err := validateProxyGroupGraph(graph); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateYAMLMappingKeys(node *yaml.Node) error {
+	if node == nil {
+		return nil
+	}
+	if node.Kind == yaml.MappingNode {
+		seen := map[string]bool{}
+		for index := 0; index+1 < len(node.Content); index += 2 {
+			key := strings.TrimSpace(node.Content[index].Value)
+			if seen[key] {
+				return fmt.Errorf("YAML 字段重复: %s", key)
+			}
+			seen[key] = true
+		}
+	}
+	for _, child := range node.Content {
+		if err := validateYAMLMappingKeys(child); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateMihomoProxy(proxy map[string]interface{}) error {
+	typ := strings.ToLower(strings.TrimSpace(stringVal(proxy["type"])))
+	server := strings.TrimSpace(stringVal(proxy["server"]))
+	port := int(floatVal(proxy["port"]))
+	if typ == "" || server == "" || port < 1 || port > 65535 {
+		return errors.New("缺少有效的 type、server 或 port")
+	}
+	switch typ {
+	case "vless", "vmess":
+		if strings.TrimSpace(stringVal(proxy["uuid"])) == "" {
+			return errors.New("缺少 uuid")
+		}
+	case "trojan", "hysteria", "hysteria2", "tuic", "anytls":
+		if strings.TrimSpace(stringVal(proxy["password"])) == "" {
+			return errors.New("缺少 password")
+		}
+	case "ss":
+		if strings.TrimSpace(firstNonEmpty(stringVal(proxy["cipher"]), stringVal(proxy["method"]))) == "" || strings.TrimSpace(stringVal(proxy["password"])) == "" {
+			return errors.New("缺少加密方式或 password")
+		}
+	case "http", "socks", "socks5", "wireguard", "snell", "mieru":
+	default:
+		return fmt.Errorf("不支持的代理类型 %q", typ)
+	}
+	return nil
+}
+
+func validateProxyGroupGraph(graph map[string][]string) error {
+	state := map[string]uint8{}
+	var visit func(string) error
+	visit = func(name string) error {
+		switch state[name] {
+		case 1:
+			return fmt.Errorf("代理组存在循环引用: %s", name)
+		case 2:
+			return nil
+		}
+		state[name] = 1
+		for _, next := range graph[name] {
+			if err := visit(next); err != nil {
+				return err
+			}
+		}
+		state[name] = 2
+		return nil
+	}
+	for name := range graph {
+		if err := visit(name); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func renderTemplate(tpl string, sub Subscription, nodes []Node) string {
@@ -4080,6 +4585,20 @@ func randomID(prefix string) string {
 
 func randomToken() string {
 	return randomHex(24)
+}
+
+func randomCredential() string {
+	buffer := make([]byte, 24)
+	_, _ = rand.Read(buffer)
+	return base64.RawURLEncoding.EncodeToString(buffer)
+}
+
+func randomUUID() string {
+	raw := randomHex(16)
+	if len(raw) != 32 {
+		return "00000000-0000-4000-8000-" + randomHex(6)
+	}
+	return raw[0:8] + "-" + raw[8:12] + "-4" + raw[13:16] + "-8" + raw[17:20] + "-" + raw[20:32]
 }
 
 func randomHex(n int) string {

@@ -20,7 +20,12 @@ func main() {
 		os.Exit(1)
 	}
 	memguard.Start(context.Background())
-	handler := applog.Middleware(server.New(cfg))
+	appServer, err := server.NewChecked(cfg)
+	if err != nil {
+		applog.Error(nil, "startup", "backend initialization failed", "error", err.Error())
+		os.Exit(1)
+	}
+	handler := applog.Middleware(appServer)
 
 	applog.Info(nil, "startup", "api-monitor go shell listening", "address", cfg.ListenAddress())
 	applog.Info(nil, "startup", "static files configured", "dist", cfg.DistDir, "public", cfg.PublicDir)

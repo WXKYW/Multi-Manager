@@ -31,6 +31,8 @@ pub struct ReconcileRequest {
     pub asset_sha256_amd64: String,
     pub asset_url_arm64: String,
     pub asset_sha256_arm64: String,
+    #[serde(default = "default_asset_format")]
+    pub asset_format: String,
     pub config: String,
     #[serde(default)]
     pub enabled: bool,
@@ -56,6 +58,8 @@ struct AppliedState {
     assigned_port: u16,
     #[serde(default = "default_transport")]
     transport: String,
+    #[serde(default)]
+    stats_port: u16,
 }
 
 #[cfg(unix)]
@@ -69,6 +73,11 @@ fn default_port_max() -> u16 {
 #[cfg(unix)]
 fn default_transport() -> String {
     "tcp".to_string()
+}
+
+#[cfg(unix)]
+fn default_asset_format() -> String {
+    "archive".to_string()
 }
 
 #[cfg(unix)]
@@ -124,6 +133,7 @@ pub fn reconcile(raw: &str) -> Result<String, String> {
                 "revision": state.as_ref().map(|value| value.revision).unwrap_or(0),
                 "assigned_port": state.as_ref().map(|value| value.assigned_port).unwrap_or(0),
                 "transport": state.as_ref().map(|value| value.transport.as_str()).unwrap_or(""),
+                "stats_port": state.as_ref().map(|value| value.stats_port).unwrap_or(0),
                 "config_present": config.is_file()
             })
             .to_string());
@@ -184,12 +194,14 @@ pub fn reconcile(raw: &str) -> Result<String, String> {
         state.revision == request.revision
             && state.assigned_port == request.requested_port
             && state.transport == transport
+            && (state.stats_port > 0 || !config_uses_v2ray_stats(&request.config))
             && unit_is_active(&unit) == request.enabled
     }) {
         let state = previous_state.unwrap();
         return Ok(serde_json::json!({
             "node_id": request.node_id, "revision": state.revision, "runtime": runtime,
             "assigned_port": state.assigned_port, "transport": state.transport,
+            "stats_port": state.stats_port,
             "status": "already_applied"
         })
         .to_string());
@@ -216,7 +228,26 @@ pub fn reconcile(raw: &str) -> Result<String, String> {
             &request.excluded_ports,
         )?
     };
-    let effective_config = rewrite_inbound_port(&request.config, assigned_port)?;
+    let stats_port = if config_uses_v2ray_stats(&request.config) {
+        let preferred = previous_state
+            .as_ref()
+            .map(|state| state.stats_port)
+            .unwrap_or(0);
+        if preferred >= 20000 && preferred <= 29999 {
+            preferred
+        } else {
+            find_available_port(
+                0,
+                20000,
+                29999,
+                "tcp",
+                &reserved_stats_ports(&request.node_id),
+            )?
+        }
+    } else {
+        0
+    };
+    let effective_config = rewrite_runtime_bindings(&request.config, assigned_port, stats_port)?;
     let candidate = config_dir.join(format!("candidate-{}.json", request.revision));
     atomic_write(&candidate, effective_config.as_bytes(), 0o600)?;
     validate_config(runtime, &binary, &candidate)?;
@@ -254,12 +285,14 @@ pub fn reconcile(raw: &str) -> Result<String, String> {
         runtime: runtime.to_string(),
         assigned_port,
         transport: transport.to_string(),
+        stats_port,
     })
     .map_err(|err| format!("serialize applied proxy state: {err}"))?;
     atomic_write(&applied_path, &state, 0o600)?;
     Ok(serde_json::json!({
         "node_id": request.node_id, "revision": request.revision, "runtime": runtime,
         "assigned_port": assigned_port, "transport": transport, "config": effective_config,
+        "stats_port": stats_port,
         "firewall_adapter": firewall_adapter,
         "status": if request.enabled { "running" } else { "stopped" }
     })
@@ -312,11 +345,11 @@ fn ensure_runtime(request: &ReconcileRequest, runtime: &str) -> Result<PathBuf, 
         return Ok(binary);
     }
     fs::create_dir_all(&version_dir).map_err(|err| format!("create runtime directory: {err}"))?;
-    for dependency in ["curl", "tar", "sha256sum"] {
+    for dependency in ["curl", "sha256sum"] {
         ensure_command(dependency)?;
     }
     let _ = fs::remove_file(&binary);
-    let archive = version_dir.join("runtime.tar.gz");
+    let asset = version_dir.join("runtime.download");
     let extract_dir = version_dir.join("extracting");
     let _ = fs::remove_dir_all(&extract_dir);
     fs::create_dir_all(&extract_dir)
@@ -338,12 +371,12 @@ fn ensure_runtime(request: &ReconcileRequest, runtime: &str) -> Result<PathBuf, 
                 "--tlsv1.2",
                 "--output",
             ])
-            .arg(&archive)
+            .arg(&asset)
             .arg(url),
         "download proxy runtime",
     )?;
     let output = Command::new("sha256sum")
-        .arg(&archive)
+        .arg(&asset)
         .output()
         .map_err(|err| format!("run sha256sum: {err}"))?;
     let actual = String::from_utf8_lossy(&output.stdout)
@@ -352,32 +385,40 @@ fn ensure_runtime(request: &ReconcileRequest, runtime: &str) -> Result<PathBuf, 
         .unwrap_or("")
         .to_ascii_lowercase();
     if !output.status.success() || actual != sha256.to_ascii_lowercase() {
-        let _ = fs::remove_file(&archive);
+        let _ = fs::remove_file(&asset);
         return Err("proxy runtime SHA-256 verification failed".to_string());
     }
-    // Upstream archives do not guarantee a stable number of leading path
-    // components. Extract into an isolated directory, then locate the sole
-    // expected executable instead of assuming `--strip-components=1` works.
-    run(
-        Command::new("tar")
-            .args(["--extract", "--gzip", "--file"])
-            .arg(&archive)
-            .args(["--directory"])
-            .arg(&extract_dir)
-            .args(["--no-same-owner", "--no-same-permissions"]),
-        "extract sing-box archive",
-    )?;
-    let extracted_binary = find_runtime_binary(&extract_dir, runtime)?;
     let candidate = version_dir.join(format!(".{runtime}.download"));
-    fs::copy(&extracted_binary, &candidate)
-        .map_err(|err| format!("stage {runtime} binary: {err}"))?;
+    if request.asset_format == "binary" {
+        fs::rename(&asset, &candidate).map_err(|err| format!("stage {runtime} binary: {err}"))?;
+    } else if request.asset_format == "archive" {
+        ensure_command("tar")?;
+        // Upstream archives do not guarantee a stable number of leading path
+        // components. Extract into an isolated directory, then locate the sole
+        // expected executable instead of assuming a path depth.
+        run(
+            Command::new("tar")
+                .args(["--extract", "--gzip", "--file"])
+                .arg(&asset)
+                .args(["--directory"])
+                .arg(&extract_dir)
+                .args(["--no-same-owner", "--no-same-permissions"]),
+            "extract sing-box archive",
+        )?;
+        let extracted_binary = find_runtime_binary(&extract_dir, runtime)?;
+        fs::copy(&extracted_binary, &candidate)
+            .map_err(|err| format!("stage {runtime} binary: {err}"))?;
+    } else {
+        let _ = fs::remove_file(&asset);
+        return Err("unsupported proxy runtime asset format".to_string());
+    }
     set_file_mode(&candidate, 0o755)?;
     fs::rename(&candidate, &binary).map_err(|err| format!("activate {runtime} binary: {err}"))?;
     run(
         Command::new(&binary).arg("version"),
         "verify sing-box executable",
     )?;
-    let _ = fs::remove_file(&archive);
+    let _ = fs::remove_file(&asset);
     let _ = fs::remove_dir_all(&extract_dir);
     Ok(binary)
 }
@@ -575,7 +616,7 @@ fn ensure_command(name: &str) -> Result<(), String> {
         .ok_or_else(|| format!("required command is unavailable: {name}"))
 }
 #[cfg(unix)]
-fn rewrite_inbound_port(config: &str, port: u16) -> Result<String, String> {
+fn rewrite_runtime_bindings(config: &str, port: u16, stats_port: u16) -> Result<String, String> {
     let mut root: serde_json::Value =
         serde_json::from_str(config).map_err(|err| format!("invalid proxy config: {err}"))?;
     let inbounds = root
@@ -595,7 +636,49 @@ fn rewrite_inbound_port(config: &str, port: u16) -> Result<String, String> {
     };
     inbound.remove(if key == "port" { "listen_port" } else { "port" });
     inbound.insert(key.to_string(), serde_json::Value::from(port));
+    if stats_port > 0 {
+        let v2ray = root
+            .get_mut("experimental")
+            .and_then(|value| value.as_object_mut())
+            .and_then(|experimental| experimental.get_mut("v2ray_api"))
+            .and_then(|value| value.as_object_mut())
+            .ok_or_else(|| "managed proxy statistics configuration is missing".to_string())?;
+        v2ray.insert(
+            "listen".to_string(),
+            serde_json::Value::from(format!("127.0.0.1:{stats_port}")),
+        );
+    }
     serde_json::to_string(&root).map_err(|err| format!("serialize proxy config: {err}"))
+}
+
+#[cfg(unix)]
+fn config_uses_v2ray_stats(config: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(config)
+        .ok()
+        .and_then(|root| root.get("experimental").cloned())
+        .and_then(|experimental| experimental.get("v2ray_api").cloned())
+        .and_then(|v2ray| v2ray.get("stats").cloned())
+        .and_then(|stats| stats.get("enabled").and_then(|value| value.as_bool()))
+        .unwrap_or(false)
+}
+
+#[cfg(unix)]
+fn reserved_stats_ports(current_node_id: &str) -> Vec<u16> {
+    let mut ports = Vec::new();
+    let Ok(entries) = fs::read_dir(STATE_ROOT) else {
+        return ports;
+    };
+    for entry in entries.flatten() {
+        if entry.file_name().to_string_lossy() == current_node_id {
+            continue;
+        }
+        if let Some(state) = read_applied_state(&entry.path().join("applied.json")) {
+            if state.stats_port > 0 {
+                ports.push(state.stats_port);
+            }
+        }
+    }
+    ports
 }
 #[cfg(unix)]
 fn validate_config(runtime: &str, binary: &Path, path: &Path) -> Result<(), String> {
@@ -670,11 +753,16 @@ mod tests {
     use super::*;
     #[test]
     fn rewrites_xray_and_sing_box_ports() {
-        let x = rewrite_inbound_port(r#"{"inbounds":[{"port":443,"protocol":"vless"}]}"#, 45654)
-            .unwrap();
-        let s = rewrite_inbound_port(
+        let x = rewrite_runtime_bindings(
+            r#"{"inbounds":[{"port":443,"protocol":"vless"}]}"#,
+            45654,
+            0,
+        )
+        .unwrap();
+        let s = rewrite_runtime_bindings(
             r#"{"inbounds":[{"type":"hysteria2","listen_port":443}]}"#,
             45655,
+            0,
         )
         .unwrap();
         assert_eq!(
@@ -684,6 +772,22 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&s).unwrap()["inbounds"][0]["listen_port"],
             45655
+        );
+    }
+
+    #[test]
+    fn rewrites_loopback_stats_port_without_exposing_it() {
+        let config = rewrite_runtime_bindings(
+            r#"{"inbounds":[{"type":"vless","listen_port":443}],"experimental":{"v2ray_api":{"listen":"127.0.0.1:0","stats":{"enabled":true,"users":["sub"]}}}}"#,
+            45654,
+            23456,
+        )
+        .unwrap();
+        let root = serde_json::from_str::<serde_json::Value>(&config).unwrap();
+        assert_eq!(root["inbounds"][0]["listen_port"], 45654);
+        assert_eq!(
+            root["experimental"]["v2ray_api"]["listen"],
+            "127.0.0.1:23456"
         );
     }
     #[test]
