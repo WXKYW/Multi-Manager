@@ -68,6 +68,9 @@ func TestManagedSubscriptionNodesApplyPreferredAddress(t *testing.T) {
 	if len(nodes) != 1 || !strings.Contains(nodes[0].Raw, "@saas.sin.fan:443") {
 		t.Fatalf("preferred address was not published: %#v", nodes)
 	}
+	if nodes[0].TrafficServerID != "server-one" {
+		t.Fatalf("managed node traffic host missing: %#v", nodes[0])
+	}
 	if !strings.Contains(nodes[0].Raw, "sni=origin.example.com") {
 		t.Fatalf("Tunnel SNI must remain owned hostname: %s", nodes[0].Raw)
 	}
@@ -886,6 +889,111 @@ func TestMihomoRenderUsesEmptyProxyListWhenNoNodes(t *testing.T) {
 	}
 }
 
+func TestRenderOutputSkipsDuplicateAndBrokenNodes(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	nodes := []Node{
+		{Name: "节点一", Type: "trojan", Server: "example.com", Port: 443, Raw: "trojan://password@example.com:443#节点一", Enabled: true},
+		{Name: "节点一-重复", Type: "trojan", Server: "example.com", Port: 443, Raw: "trojan://password@example.com:443#节点一-重复", Enabled: true},
+		{Name: "坏节点", Type: "trojan", Raw: "not-a-uri", Enabled: true},
+	}
+	rawBody, _, err := renderOutput(ctx, db, Subscription{Name: "测试", TemplateID: rawTemplateID}, nodes, "raw", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(rawBody), "\n")
+	if len(lines) != 1 || !strings.Contains(lines[0], "trojan://password@example.com:443#") {
+		t.Fatalf("raw output still contains duplicates or invalid nodes: %q", rawBody)
+	}
+	clashBody, _, err := renderOutput(ctx, db, Subscription{Name: "测试"}, nodes, "clash", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		Proxies []map[string]interface{} `yaml:"proxies"`
+	}
+	if err := yaml.Unmarshal([]byte(clashBody), &parsed); err != nil {
+		t.Fatalf("invalid yaml: %v\n%s", err, clashBody)
+	}
+	if len(parsed.Proxies) != 1 {
+		t.Fatalf("proxies = %#v, want single valid proxy", parsed.Proxies)
+	}
+}
+
+func TestBlockedRenderReturnsEmptySubscriptionWithoutWarningComment(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	body, _, err := renderOutput(ctx, db, Subscription{Name: "测试"}, []Node{
+		{Name: "节点一", Type: "trojan", Server: "example.com", Port: 443, Raw: "trojan://password@example.com:443#节点一", Enabled: true},
+	}, "clash", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(body, "Nodes are hidden") || strings.Contains(body, "Subscription is") {
+		t.Fatalf("blocked output should not include warning comment:\n%s", body)
+	}
+	var parsed map[string]interface{}
+	if err := yaml.Unmarshal([]byte(body), &parsed); err != nil {
+		t.Fatalf("invalid blocked yaml: %v\n%s", err, body)
+	}
+	proxies, ok := parsed["proxies"].([]interface{})
+	if !ok || len(proxies) != 0 {
+		t.Fatalf("blocked subscription should expose no proxies: %#v", parsed["proxies"])
+	}
+}
+
+func TestPublicSubscriptionHidesNodesWhenHostQuotaIsExhausted(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	dataDir := t.TempDir()
+	svc := New(config.Config{DataDir: dataDir, DBName: "data.db"})
+	db, err := svc.open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	raw := "vless://00000000-0000-4000-8000-000000000001@origin.example.com:443?security=reality&pbk=pubkey123&sid=abcd&sni=origin.example.com#节点一"
+	encrypted, err := secure.SecureEncrypt(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE server_accounts (id TEXT PRIMARY KEY, name TEXT, host TEXT, cached_info TEXT, traffic_limit_bytes INTEGER DEFAULT 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO server_accounts (id, name, host, cached_info, traffic_limit_bytes) VALUES ('server-one', 'Server One', 'one.example.com', '{"network":{"rx_total_bytes":600,"tx_total_bytes":500}}', 1000)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO subscription_subscriptions (id, profile_id, name, public_token, enabled, template_id, include_internal_nodes, include_external_nodes) VALUES ('link_one', 'profile_one', '公开链接', 'token_one', 1, 'builtin_raw_uri', 1, 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO managed_proxy_nodes(id,server_id,name,protocol,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted,enabled,publishable,apply_status,access_mode,tunnel_hostname) VALUES('managed-one','server-one','节点一','vless-reality','origin.example.com',443,'tcp','',?,1,1,'running','direct','')`, encrypted); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/sub/token_one", nil)
+	rec := httptest.NewRecorder()
+	svc.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.TrimSpace(rec.Body.String()) != "" {
+		t.Fatalf("exhausted host nodes should be hidden from raw subscription: %q", rec.Body.String())
+	}
+}
+
 func TestLoadProfilesReturnsLibrariesWithCountsAndUpstream(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -1022,7 +1130,7 @@ func TestComputeTrafficDoesNotApplyExternalUpstreamUsageToSubscription(t *testin
 	}
 
 	info := computeTraffic(ctx, db, Subscription{ID: "link_one", ProfileID: "profile_one", TrafficSource: "upstream"})
-	if info.Upload != 0 || info.Download != 0 || info.Total != 0 || info.Source != "panel" || info.MeteringStatus != "unavailable" {
+	if info.Upload != 0 || info.Download != 0 || info.Total != 0 || info.Source != "panel" || info.MeteringStatus != "pending" {
 		t.Fatalf("traffic = %#v", info)
 	}
 }
@@ -1335,6 +1443,53 @@ func TestCreateSubscriptionStoresOnlyIdentityFieldsFromPlan(t *testing.T) {
 	}
 }
 
+func TestPlanCycleWindowUsesPlanResetDay(t *testing.T) {
+	start, end := planCycleWindow(time.Date(2026, time.July, 22, 12, 0, 0, 0, time.UTC), "monthly", 9)
+	if start != "2026-07-09T00:00:00Z" || end != "2026-08-09T00:00:00Z" {
+		t.Fatalf("cycle window=%q..%q", start, end)
+	}
+	start, end = planCycleWindow(time.Date(2026, time.February, 15, 12, 0, 0, 0, time.UTC), "monthly", 31)
+	if start != "2026-01-31T00:00:00Z" || end != "2026-02-28T00:00:00Z" {
+		t.Fatalf("clamped cycle window=%q..%q", start, end)
+	}
+}
+
+func TestPlanAndSubscriptionEnabledPatchKeepPolicyCentralized(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_plans(id,name,enabled,total_bytes,cycle_type,cycle_day) VALUES('plan','套餐',1,4096,'monthly',9)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_subscriptions(id,profile_id,plan_id,name,public_token,enabled,expire_at) VALUES('sub','subscription_external_pool','plan','订阅','token',1,'2030-01-01')`); err != nil {
+		t.Fatal(err)
+	}
+	service := New(config.Config{})
+	planRecorder := httptest.NewRecorder()
+	service.handlePlans(planRecorder, httptest.NewRequest(http.MethodPatch, "/api/subscription/plans/plan", strings.NewReader(`{"enabled":false}`)), db, "plan")
+	if planRecorder.Code != http.StatusOK {
+		t.Fatalf("disable plan status=%d body=%s", planRecorder.Code, planRecorder.Body.String())
+	}
+	items, err := loadSubscriptions(ctx, db, "sub")
+	if err != nil || len(items) != 1 {
+		t.Fatalf("load subscription items=%#v err=%v", items, err)
+	}
+	if items[0].PlanEnabled || items[0].ExpireAt != "" || items[0].TotalBytes != 4096 || items[0].CycleEnd == "" {
+		t.Fatalf("effective policy=%#v", items[0])
+	}
+	subRecorder := httptest.NewRecorder()
+	service.setSubscriptionEnabled(subRecorder, httptest.NewRequest(http.MethodPatch, "/api/subscription/subscriptions/sub", strings.NewReader(`{"enabled":false}`)), db, "sub")
+	if subRecorder.Code != http.StatusOK {
+		t.Fatalf("disable subscription status=%d body=%s", subRecorder.Code, subRecorder.Body.String())
+	}
+}
+
 func TestDeleteSubscriptionNeverDeletesSharedNodes(t *testing.T) {
 	ctx := context.Background()
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -1497,12 +1652,12 @@ func TestComputeTrafficFromNodeBoundServers(t *testing.T) {
 	}
 
 	info := computeTraffic(ctx, db, Subscription{ID: "link_one", ProfileID: "profile_one", TrafficSource: "node_servers", TotalBytes: 50000})
-	if info.Upload != 0 || info.Download != 0 || info.Total != 50000 || info.Source != "panel" || info.MeteringStatus != "unavailable" {
+	if info.Upload != 0 || info.Download != 0 || info.Total != 50000 || info.Source != "panel" || info.MeteringStatus != "pending" {
 		t.Fatalf("traffic = %#v, host NIC totals must not be treated as subscription usage", info)
 	}
 
 	filtered := computeTraffic(ctx, db, Subscription{ID: "link_one", ProfileID: "profile_one", TrafficSource: "node_servers", NodeFilterIDs: []string{"node_two"}, TotalBytes: 50000})
-	if filtered.Upload != 0 || filtered.Download != 0 || filtered.Total != 50000 || filtered.Source != "panel" || filtered.MeteringStatus != "unavailable" {
+	if filtered.Upload != 0 || filtered.Download != 0 || filtered.Total != 50000 || filtered.Source != "panel" || filtered.MeteringStatus != "pending" {
 		t.Fatalf("filtered traffic = %#v, node filters must not turn host NIC totals into subscription usage", filtered)
 	}
 }

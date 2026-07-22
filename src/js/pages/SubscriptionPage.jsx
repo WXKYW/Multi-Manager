@@ -58,28 +58,11 @@ const formatInstanceUptime = (value) => {
 };
 
 const emptySubscriptionForm = {
-  profile_id: '',
   plan_id: '',
   name: '',
   remark: '',
   enabled: true,
   template_id: 'builtin_mihomo_default',
-  traffic_source: 'panel',
-  traffic_server_id: '',
-  upstream_url: '',
-  upstream_enabled: false,
-  upstream_refresh_hours: 24,
-  total_bytes: 0,
-  manual_upload_bytes: 0,
-  manual_download_bytes: 0,
-  expire_at: '',
-  cycle_type: 'none',
-  cycle_day: 1,
-  rate_limit_enabled: true,
-  rate_limit_per_minute: 30,
-  node_filter_ids: [],
-  include_internal_nodes: true,
-  include_external_nodes: false,
 };
 
 const emptyPlanForm = {
@@ -482,6 +465,7 @@ const formatTime = (value) => {
 
 const statusLabel = (sub) => {
   if (!sub.enabled) return ['停用', 'neutral'];
+  if (sub.plan_enabled === false) return ['套餐停用', 'error'];
   if (sub.traffic?.status === 'expired') return ['已过期', 'error'];
   if (sub.traffic?.status === 'exhausted') return ['流量用尽', 'warning'];
   return ['运行中', 'success'];
@@ -1052,7 +1036,7 @@ function SubscriptionPage() {
     const entry = managedTunnels.find((item) => item.server_id === server.id);
     if (!entry) return toast.warning('该主机没有 Managed Tunnel');
 		const affectedNodes = Number(entry.node_count ?? internalNodes.filter((node) => node.server_id === server.id && node.access_mode === 'cloudflare_tunnel').length);
-    if (!confirmDestructivePress(`managed-tunnel-delete:${server.id}`, `删除 ${server.name} 的 Tunnel、DNS、cloudflared 以及 ${affectedNodes} 个关联节点`)) return;
+    if (!confirmDestructivePress(`managed-tunnel-delete:${server.id}`, `卸载 ${server.name} 的 Tunnel、DNS、cloudflared 以及 ${affectedNodes} 个关联节点`)) return;
     try {
       const response = await fetch(`${TUNNEL_API}/${server.id}?cascade=1`, { method: 'DELETE', headers: getAuthHeaders() });
       const payload = await response.json();
@@ -1351,7 +1335,8 @@ function SubscriptionPage() {
   );
   const exportSubscriptions = subscriptions;
   const subscriptionItems = useMemo(() => exportSubscriptions.map((item) => ({ value: item.id, label: item.name })), [exportSubscriptions]);
-  const planItems = useMemo(() => plans.filter((item) => item.enabled).map((item) => ({ value: item.id, label: item.name })), [plans]);
+  const planItems = useMemo(() => plans.map((item) => ({ value: item.id, label: item.enabled ? item.name : `${item.name}（已停用）`, disabled: !item.enabled })), [plans]);
+  const firstEnabledPlanID = useMemo(() => plans.find((item) => item.enabled)?.id || '', [plans]);
   const planCandidateNodes = useMemo(() => [
     ...internalNodes.map((node) => ({ ...node, source_group: 'internal', display_type: node.protocol === 'vless-reality' ? 'vless' : node.protocol })),
     ...nodes.map((node) => ({ ...node, source_group: 'external', display_type: String(node.type || 'unknown').toLowerCase() })),
@@ -1431,15 +1416,9 @@ function SubscriptionPage() {
     setEditingSubscriptionId(null);
     setSubscriptionForm({
       ...emptySubscriptionForm,
-      profile_id: DEFAULT_EXTERNAL_POOL_ID,
-      plan_id: planItems[0]?.value || '',
+      plan_id: firstEnabledPlanID,
       name: `订阅 ${linkIndex}`,
       template_id: settings?.default_template_id || 'builtin_mihomo_default',
-      rate_limit_enabled: settings?.default_rate_limit_enabled ?? true,
-      rate_limit_per_minute: settings?.default_rate_limit_per_minute || 30,
-      node_filter_ids: [],
-      include_internal_nodes: true,
-      include_external_nodes: false,
     });
     setSubscriptionModalOpen(true);
   };
@@ -1477,13 +1456,25 @@ function SubscriptionPage() {
     await loadAll(); toast.success('套餐已删除');
   };
 
+  const togglePlanEnabled = async (plan, enabled) => {
+    try {
+      const res = await fetch(`${API}/plans/${plan.id}`, { method: 'PATCH', headers: getAuthHeaders(), body: JSON.stringify({ enabled }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) throw new Error(data.error || '套餐状态更新失败');
+      await loadAll();
+      toast.success(enabled ? '套餐已启用，对应订阅已恢复' : '套餐已停用，对应订阅已失效');
+    } catch (error) { toast.error(error.message || '套餐状态更新失败'); }
+  };
+
   const openEditSubscription = (sub) => {
     setEditingSubscriptionId(sub.id);
     setSubscriptionForm({
       ...emptySubscriptionForm,
-      ...sub,
-      node_filter_ids: Array.isArray(sub.node_filter_ids) ? sub.node_filter_ids : [],
-      expire_at: sub.expire_at ? String(sub.expire_at).slice(0, 10) : '',
+      plan_id: sub.plan_id || '',
+      name: sub.name || '',
+      remark: sub.remark || '',
+      enabled: sub.enabled !== false,
+      template_id: sub.template_id || settings?.default_template_id || 'builtin_mihomo_default',
     });
     setSubscriptionModalOpen(true);
   };
@@ -1498,13 +1489,7 @@ function SubscriptionPage() {
       const res = await fetch(editingSubscriptionId ? `${API}/subscriptions/${editingSubscriptionId}` : `${API}/subscriptions`, {
         method: editingSubscriptionId ? 'PUT' : 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({
-          ...subscriptionForm,
-          traffic_source: 'panel',
-          traffic_server_id: '',
-          manual_upload_bytes: 0,
-          manual_download_bytes: 0,
-        }),
+        body: JSON.stringify(subscriptionForm),
       });
       const data = await res.json();
       if (!res.ok || data.success === false) throw new Error(data.error || '保存失败');
@@ -1532,6 +1517,16 @@ function SubscriptionPage() {
     }
     toast.success('订阅链接已删除');
     loadAll();
+  };
+
+  const toggleSubscriptionEnabled = async (sub, enabled) => {
+    try {
+      const res = await fetch(`${API}/subscriptions/${sub.id}`, { method: 'PATCH', headers: getAuthHeaders(), body: JSON.stringify({ enabled }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) throw new Error(data.error || '订阅状态更新失败');
+      await loadAll();
+      toast.success(enabled ? '订阅已启用' : '订阅已停用');
+    } catch (error) { toast.error(error.message || '订阅状态更新失败'); }
   };
 
   const resetToken = async (sub) => {
@@ -1815,12 +1810,12 @@ function SubscriptionPage() {
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
             <span className="hidden rounded border border-kumo-info/20 bg-kumo-info/10 px-1.5 py-0.5 text-[11px] font-semibold text-kumo-info sm:inline-flex">{visibleNodes.length} 个节点</span>
             <span className="hidden rounded border border-kumo-badge-purple/20 bg-kumo-badge-purple/10 px-1.5 py-0.5 text-[11px] font-semibold text-kumo-badge-purple sm:inline-flex">{currentSubscriptions.length} 个订阅</span>
-            <Button size="sm" variant="primary" onClick={() => openCreateSubscription()} disabled={plans.length === 0}><Plus className="h-3.5 w-3.5" />生成订阅</Button>
+            <Button size="sm" variant="primary" onClick={() => openCreateSubscription()} disabled={!firstEnabledPlanID}><Plus className="h-3.5 w-3.5" />生成订阅</Button>
           </div>
         )}
       >
         <div className="min-h-0 flex-1 overflow-x-auto overflow-y-visible overscroll-x-contain touch-pan-x scrollbar-thin">
-          <AppTable percentageWidths layout="fixed" widths={[320, 130, 240, 130, 180]} style={{ minWidth: 820 }}>
+          <AppTable percentageWidths layout="fixed" widths={[300, 150, 250, 130, 180]} style={{ minWidth: 840 }}>
             <Table.Header sticky variant="compact">
               <Table.Row>
                 <Table.Head>订阅链接</Table.Head>
@@ -1834,6 +1829,7 @@ function SubscriptionPage() {
               {currentSubscriptions.map((sub) => {
                 const [label, variant] = statusLabel(sub);
                 const used = (sub.traffic?.upload || 0) + (sub.traffic?.download || 0);
+                const meteringAvailable = sub.traffic?.metering_status === 'available';
                 const link = subscriptionURL(publicBase, sub);
                 return (
                   <Table.Row key={sub.id} onDoubleClick={() => openEditSubscription(sub)} className="cursor-pointer">
@@ -1842,21 +1838,25 @@ function SubscriptionPage() {
                       <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
                         <span className="rounded border border-kumo-info/20 bg-kumo-info/10 px-1.5 py-0.5 text-[10px] font-semibold text-kumo-info">{sub.node_count || 0} 个节点</span>
 						<Badge variant="neutral">{plans.find((plan) => plan.id === sub.plan_id)?.name || '未绑定套餐'}</Badge>
-                        <span className="truncate font-mono text-[10px] text-kumo-subtle" title={sub.id}>{sub.id}</span>
+                        <span className="truncate font-mono text-[10px] text-kumo-subtle" title={sub.public_token}>凭证 {sub.public_token}</span>
                       </div>
                     </Table.Cell>
                     <Table.Cell className="text-center">
-                      <Badge variant={variant} appearance="dot">{label}</Badge>
-                      <div className="mt-1 text-[11px] text-kumo-subtle">{sub.expire_at ? `过期 ${sub.expire_at}` : '不过期'}</div>
+                      <div className="flex items-center justify-center gap-2">
+                        <Switch size="sm" aria-label={sub.enabled ? `停用订阅 ${sub.name}` : `启用订阅 ${sub.name}`} checked={!!sub.enabled} onCheckedChange={(checked) => toggleSubscriptionEnabled(sub, checked)} />
+                        <Badge variant={variant} appearance="dot">{label}</Badge>
+                      </div>
                     </Table.Cell>
                     <Table.Cell>
-							{sub.traffic?.metering_status === 'available' ? (
-								<Meter
-									label="流量"
-									value={Math.min(100, sub.traffic?.percent || 0)}
-									customValue={`${formatBytes(used)} / ${sub.traffic?.total ? formatBytes(sub.traffic.total) : '无限制'}`}
-								/>
-							) : <Badge variant="warning">按订阅计量未启用</Badge>}
+                      <Meter
+                        label="托管流量"
+                        value={meteringAvailable ? Math.min(100, sub.traffic?.percent || 0) : 0}
+                        customValue={`${meteringAvailable ? formatBytes(used) : '—'} / ${sub.traffic?.total ? formatBytes(sub.traffic.total) : '无限制'}`}
+                      />
+                      <div className="mt-1 text-[10px] text-kumo-subtle">
+                        {sub.traffic?.cycle_end ? `下次重置 ${formatTime(sub.traffic.cycle_end)}` : '不自动重置'}
+                        {!meteringAvailable ? ' · 等待按订阅凭证上报' : ''}
+                      </div>
                     </Table.Cell>
                     <Table.Cell>
                       <div className="text-xs font-semibold text-kumo-strong">{sub.access_count_today || 0} 次</div>
@@ -1886,18 +1886,19 @@ function SubscriptionPage() {
   const renderPlans = () => (
     <SectionCard title={`套餐管理 (${plans.length})`} className="h-full min-h-0" bodyPadding="none" bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden" actions={<Button size="sm" variant="primary" onClick={openCreatePlan}><Plus className="h-3.5 w-3.5" />新建套餐</Button>}>
       <div className="min-h-0 flex-1 overflow-x-auto overflow-y-visible overscroll-x-contain touch-pan-x scrollbar-thin">
-        <AppTable percentageWidths layout="fixed" widths={[260, 180, 160, 180, 120, 132]} style={{ minWidth: 780 }}>
-          <Table.Header sticky variant="compact"><Table.Row><Table.Head>套餐</Table.Head><Table.Head>总额度</Table.Head><Table.Head className="text-center">重置</Table.Head><Table.Head>节点范围</Table.Head><Table.Head className="text-center">订阅</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row></Table.Header>
+        <AppTable percentageWidths layout="fixed" widths={[240, 110, 170, 150, 180, 90, 132]} style={{ minWidth: 900 }}>
+          <Table.Header sticky variant="compact"><Table.Row><Table.Head>套餐</Table.Head><Table.Head className="text-center">状态</Table.Head><Table.Head>单订阅额度</Table.Head><Table.Head className="text-center">重置</Table.Head><Table.Head>节点范围</Table.Head><Table.Head className="text-center">订阅</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row></Table.Header>
           <Table.Body>
             {plans.map((plan) => <Table.Row key={plan.id} onDoubleClick={() => openEditPlan(plan)} className="cursor-pointer">
               <Table.Cell><div className="font-semibold text-kumo-strong">{plan.name}</div><div className="mt-1 truncate text-[11px] text-kumo-subtle">{plan.remark || plan.id}</div></Table.Cell>
+              <Table.Cell className="text-center"><div className="flex items-center justify-center gap-2"><Switch size="sm" aria-label={plan.enabled ? `停用套餐 ${plan.name}` : `启用套餐 ${plan.name}`} checked={!!plan.enabled} onCheckedChange={(checked) => togglePlanEnabled(plan, checked)} /><Badge variant={plan.enabled ? 'success' : 'neutral'} appearance="dot">{plan.enabled ? '启用' : '停用'}</Badge></div></Table.Cell>
               <Table.Cell>{plan.total_bytes > 0 ? formatBytes(plan.total_bytes) : '不限'}</Table.Cell>
               <Table.Cell className="text-center">{plan.cycle_type === 'monthly' ? `每月 ${plan.cycle_day} 日` : plan.cycle_type === 'custom' ? '自定义' : '不重置'}</Table.Cell>
 				<Table.Cell><div className="flex flex-wrap gap-1"><Badge variant="success">内部 {plan.selection_mode === 'all' ? (plan.include_internal_nodes ? internalNodes.length : 0) : (plan.node_ids || []).filter((id) => internalNodes.some((node) => node.id === id)).length}</Badge><Badge variant="neutral">外部 {plan.selection_mode === 'all' ? (plan.include_external_nodes ? nodes.length : 0) : (plan.node_ids || []).filter((id) => nodes.some((node) => node.id === id)).length}</Badge>{plan.selection_mode === 'all' && <Badge variant="warning">动态范围</Badge>}</div></Table.Cell>
               <Table.Cell className="text-center">{plan.subscription_count || 0}</Table.Cell>
               <Table.Cell className="text-center"><div className="inline-flex justify-center gap-2"><Button size="sm" shape="square" variant="secondary" onClick={() => openEditPlan(plan)} icon={<Edit className="h-3.5 w-3.5" />} aria-label="编辑套餐" /><Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deletePlan(plan)} icon={<Trash className="h-3.5 w-3.5" />} aria-label="删除套餐" /></div></Table.Cell>
             </Table.Row>)}
-            {plans.length === 0 && <Table.Row><Table.Cell colSpan={6} className="p-8 text-center text-kumo-subtle">暂无套餐。套餐统一定义节点范围、额度和重置规则。</Table.Cell></Table.Row>}
+            {plans.length === 0 && <Table.Row><Table.Cell colSpan={7} className="p-8 text-center text-kumo-subtle">暂无套餐。套餐统一定义节点范围、额度和重置规则。</Table.Cell></Table.Row>}
           </Table.Body>
         </AppTable>
       </div>
@@ -1953,17 +1954,17 @@ function SubscriptionPage() {
     <SectionCard
       title={`节点列表 (${filteredNodes.length})`}
       className="min-h-0"
-      headerClassName="flex-wrap items-center gap-y-2 [&>div:last-child]:ml-0 [&>div:last-child]:w-full [&>div:last-child]:justify-start sm:[&>div:last-child]:ml-auto sm:[&>div:last-child]:w-auto sm:[&>div:last-child]:justify-end"
       bodyPadding="none"
       bodyClassName="min-h-0"
-      actions={(
-        <div className="flex w-full min-w-0 flex-wrap items-center justify-start gap-2 sm:justify-end">
+      actions={<Button size="sm" variant="primary" onClick={() => openImportModal()} aria-label="导入外部节点" title="导入外部节点"><Download className="h-3.5 w-3.5" />导入外部节点</Button>}
+    >
+      <div className="flex min-w-0 items-center gap-2 overflow-x-auto border-b border-kumo-line px-3 py-2 overscroll-x-contain whitespace-nowrap touch-pan-x scrollbar-thin">
           <Tabs
             {...TOOL_TABS_PROPS}
             value={protocolFilter}
             onValueChange={(value) => setProtocolFilter(String(value))}
             tabs={protocolItems}
-            className="min-w-0 w-full sm:w-auto sm:max-w-full sm:flex-1 md:flex-none"
+            className="min-w-max shrink-0"
             listClassName="max-w-full overflow-x-auto whitespace-nowrap scrollbar-thin"
           />
           {tagItems.length > 1 && (
@@ -1973,13 +1974,10 @@ function SubscriptionPage() {
               value={tagFilter}
               onValueChange={(value) => setTagFilter(String(value))}
               items={tagItems}
-              className="w-full sm:w-36"
+              className="w-36 shrink-0"
             />
           )}
-          <Button size="sm" variant="primary" onClick={() => openImportModal()} aria-label="导入外部节点" title="导入外部节点"><Download className="h-3.5 w-3.5" />导入外部节点</Button>
-        </div>
-      )}
-    >
+      </div>
       <DataTableFrame variant="embedded">
         <AppTable percentageWidths layout="fixed" widths={[92, 248, 104, 280, 172, 144]} style={{ minWidth: 860 }}>
           <Table.Header sticky variant="compact">
@@ -2110,7 +2108,7 @@ function SubscriptionPage() {
                   <Table.Cell className="text-center"><span className="font-mono text-xs">{server.agent_version && server.agent_version !== '<nil>' ? server.agent_version : '未报告'}</span></Table.Cell>
 					<Table.Cell className="text-center"><div className="inline-flex flex-col items-center gap-1">{runtime ? <Badge variant={runtime.apply_status === 'running' ? 'success' : ['failed', 'drifted'].includes(runtime.apply_status) ? 'error' : 'warning'}>{runtime.apply_status === 'running' ? `sing-box${runtime.version ? ` ${runtime.version}` : ''}` : runtime.apply_status === 'failed' ? '部署失败' : runtime.apply_status === 'drifted' ? '状态漂移' : '部署中'}</Badge> : <Badge variant="neutral">未安装</Badge>}{server.status === 'online' && !supportsRuntimeLifecycle && <Badge variant="warning">需升级 Agent</Badge>}{tunnel && <Badge variant={tunnel.apply_status === 'running' ? 'success' : tunnel.apply_status === 'failed' ? 'error' : 'warning'}>Tunnel {tunnel.apply_status === 'running' ? '已连接' : tunnel.apply_status}</Badge>}</div></Table.Cell>
 					<Table.Cell className="text-center"><div className="flex flex-wrap justify-center gap-1">{managed.map((node) => <Badge key={node.id} variant={nodeTypeBadgeVariant(node.protocol)}>{node.protocol === 'hysteria2' ? 'HY2' : 'VLESS'}</Badge>)}{managed.length === 0 && <span className="text-xs text-kumo-subtle">—</span>}</div></Table.Cell>
-                  <Table.Cell className="text-center"><div className="flex w-full flex-wrap items-center justify-center gap-1">{runtime?.apply_status === 'running' ? <><Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>升级 / 重装</Button><Button size="sm" variant={isDestructiveConfirmActive(`runtime-uninstall:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallProxyRuntime(server)} disabled={saving || managed.length > 0 || !supportsRuntimeLifecycle} title={managed.length > 0 ? '请先在节点管理中卸载该实例的全部节点' : !supportsRuntimeLifecycle ? '请先升级 Agent' : '卸载 sing-box'}>{isDestructiveConfirmActive(`runtime-uninstall:${server.id}`) ? '再次确认' : '卸载程序'}</Button></> : <Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>安装代理程序</Button>}{tunnel ? <Button size="sm" variant="secondary-destructive" onClick={() => uninstallTunnel(server)}>删 Tunnel</Button> : <Button size="sm" variant="secondary" onClick={() => openTunnelDeployment(server)} disabled={server.status !== 'online'}>部署 Tunnel</Button>}</div></Table.Cell>
+                  <Table.Cell className="text-center"><div className="flex w-full flex-wrap items-center justify-center gap-1">{runtime?.apply_status === 'running' ? <><Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>升级 / 重装</Button><Button size="sm" variant={isDestructiveConfirmActive(`runtime-uninstall:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallProxyRuntime(server)} disabled={saving || managed.length > 0 || !supportsRuntimeLifecycle} title={managed.length > 0 ? '请先在节点管理中卸载该实例的全部节点' : !supportsRuntimeLifecycle ? '请先升级 Agent' : '卸载 sing-box'}>{isDestructiveConfirmActive(`runtime-uninstall:${server.id}`) ? '再次确认' : '卸载程序'}</Button></> : <Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>安装代理程序</Button>}{tunnel ? <Button size="sm" variant={isDestructiveConfirmActive(`managed-tunnel-delete:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallTunnel(server)}>{isDestructiveConfirmActive(`managed-tunnel-delete:${server.id}`) ? '再次确认' : '卸载 Tunnel'}</Button> : <Button size="sm" variant="secondary" onClick={() => openTunnelDeployment(server)} disabled={server.status !== 'online'}>部署 Tunnel</Button>}</div></Table.Cell>
                 </Table.Row>
               );
             })}
@@ -2128,9 +2126,9 @@ function SubscriptionPage() {
           <div className="text-sm font-semibold text-kumo-strong">Tunnel 与优选地址</div>
           <Button className="shrink-0 sm:hidden" size="sm" variant="secondary" onClick={() => setPreferredModalOpen(true)}><Plus className="h-3.5 w-3.5" />管理</Button>
         </div>
-        {(managedTunnels.length > 0 || preferredAddresses.length > 0) && <div className="flex w-full min-w-0 flex-nowrap items-center gap-2 overflow-x-auto overscroll-x-contain whitespace-nowrap touch-pan-x scrollbar-thin sm:flex-1">
-          {managedTunnels.map((item) => <Badge key={item.server_id} className="shrink-0" appearance="dot" variant={item.apply_status === 'running' ? 'success' : item.apply_status === 'failed' ? 'error' : 'warning'}>{item.server_name} · {item.hostname}</Badge>)}
-          {preferredAddresses.map((item) => <Badge key={item.id} className="shrink-0 font-mono" variant="neutral">{item.name} · {item.address}:{item.port}</Badge>)}
+        {(managedTunnels.length > 0 || preferredAddresses.length > 0) && <div className="flex w-full min-w-0 flex-nowrap items-center gap-3 overflow-x-auto py-0.5 overscroll-x-contain whitespace-nowrap touch-pan-x scrollbar-thin sm:flex-1">
+          {managedTunnels.map((item) => <span key={item.server_id} className="inline-flex shrink-0 items-center gap-1.5 text-xs text-kumo-strong"><span className={`h-2 w-2 rounded-full ${item.apply_status === 'running' ? 'bg-kumo-success' : item.apply_status === 'failed' ? 'bg-kumo-danger' : 'bg-kumo-warning'}`} />{item.server_name} · <span className="font-mono text-kumo-subtle">{item.hostname}</span></span>)}
+          {preferredAddresses.map((item) => <span key={item.id} className="shrink-0 font-mono text-xs text-kumo-subtle">{item.name} · {item.address}:{item.port}</span>)}
         </div>}
         <Button className="ml-auto hidden shrink-0 sm:inline-flex" size="sm" variant="secondary" onClick={() => setPreferredModalOpen(true)}><Plus className="h-3.5 w-3.5" />管理优选地址</Button>
       </LayerCard.Primary>
@@ -2340,8 +2338,8 @@ function SubscriptionPage() {
           <div className="border-b border-kumo-line px-3 py-3 sm:px-5 sm:py-4"><Dialog.Title>{editingPlanId ? '编辑套餐' : '新建套餐'}</Dialog.Title></div>
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3 scrollbar-thin sm:p-5">
             <div className="grid gap-3 sm:grid-cols-2"><Input size="sm" label="套餐名称" value={planForm.name} onChange={(e) => setPlanForm((prev) => ({ ...prev, name: e.target.value }))} /><Input size="sm" label="备注" value={planForm.remark} onChange={(e) => setPlanForm((prev) => ({ ...prev, remark: e.target.value }))} /></div>
-            <div className="grid items-end gap-3 md:grid-cols-[minmax(16rem,1.2fr)_minmax(12rem,.8fr)_minmax(10rem,.7fr)]"><TrafficSizeInput label="订阅总额度（0 为不限）" value={planForm.total_bytes} onChange={(value) => setPlanForm((prev) => ({ ...prev, total_bytes: value }))} /><Select size="sm" label="重置周期" value={planForm.cycle_type} onValueChange={(value) => setPlanForm((prev) => ({ ...prev, cycle_type: String(value) }))} items={[{ value: 'monthly', label: '每月重置' }, { value: 'none', label: '不重置' }]} /><Input size="sm" label="每月重置日" type="number" min="1" max="31" value={planForm.cycle_day} disabled={planForm.cycle_type !== 'monthly'} onChange={(e) => setPlanForm((prev) => ({ ...prev, cycle_day: Number(e.target.value) || 1 }))} /></div>
-            <div className="grid items-end gap-3 md:grid-cols-[minmax(18rem,1fr)_auto]"><Input size="sm" label="订阅请求限制（次/分钟）" type="number" min="1" value={planForm.rate_limit_per_minute} onChange={(e) => setPlanForm((prev) => ({ ...prev, rate_limit_per_minute: Number(e.target.value) || 30 }))} /><div className="flex min-h-8 flex-wrap items-center gap-x-6 gap-y-2"><Switch size="sm" label="启用套餐" checked={planForm.enabled} onCheckedChange={(checked) => setPlanForm((prev) => ({ ...prev, enabled: checked }))} /><Switch size="sm" label="启用请求限制" checked={planForm.rate_limit_enabled} onCheckedChange={(checked) => setPlanForm((prev) => ({ ...prev, rate_limit_enabled: checked }))} /></div></div>
+            <div className="grid items-end gap-3 md:grid-cols-[minmax(16rem,1.2fr)_minmax(12rem,.8fr)_minmax(10rem,.7fr)]"><TrafficSizeInput label="每个订阅额度（仅托管节点，0 为不限）" value={planForm.total_bytes} onChange={(value) => setPlanForm((prev) => ({ ...prev, total_bytes: value }))} /><Select size="sm" label="重置周期" value={planForm.cycle_type} onValueChange={(value) => setPlanForm((prev) => ({ ...prev, cycle_type: String(value) }))} items={[{ value: 'monthly', label: '每月重置' }, { value: 'none', label: '不重置' }]} /><Input size="sm" label="每月重置日" type="number" min="1" max="31" value={planForm.cycle_day} disabled={planForm.cycle_type !== 'monthly'} onChange={(e) => setPlanForm((prev) => ({ ...prev, cycle_day: Number(e.target.value) || 1 }))} /></div>
+            <div className="grid items-end gap-3 md:grid-cols-[minmax(18rem,1fr)_auto]"><Input size="sm" label="订阅请求限制（次/分钟）" type="number" min="1" value={planForm.rate_limit_per_minute} onChange={(e) => setPlanForm((prev) => ({ ...prev, rate_limit_per_minute: Number(e.target.value) || 30 }))} /><div className="flex min-h-8 items-center"><Switch size="sm" label="启用请求限制" checked={planForm.rate_limit_enabled} onCheckedChange={(checked) => setPlanForm((prev) => ({ ...prev, rate_limit_enabled: checked }))} /></div></div>
             <div className="border-t border-kumo-line pt-4">
               <div className="mb-3 grid items-end gap-3 sm:grid-cols-[14rem_1fr]">
                 <Select size="sm" label="节点范围" value={planForm.selection_mode} onValueChange={(value) => setPlanForm((prev) => ({ ...prev, selection_mode: String(value), node_ids: String(value) === 'all' ? [] : prev.node_ids }))} items={[{ value: 'explicit', label: '指定节点' }, { value: 'all', label: '全部当前及未来节点' }]} />
@@ -2439,20 +2437,6 @@ function SubscriptionPage() {
                   </div>
                 </section>
 
-                <section className="space-y-3 border-t border-kumo-line pt-4">
-                  <div className="text-[11px] font-bold uppercase tracking-wide text-kumo-subtle">有效期</div>
-                  <div className="grid min-w-0 gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(12rem,100%),1fr))]">
-                    <div className="min-w-0">
-                      <Input size="sm" label="过期日期" type="date" value={subscriptionForm.expire_at || ''} onChange={(e) => setSubscriptionForm((prev) => ({ ...prev, expire_at: e.target.value }))} className="w-full min-w-0" />
-                    </div>
-                  </div>
-                </section>
-
-                <section className="space-y-3 border-t border-kumo-line pt-4">
-                  <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-                    <Switch size="sm" label="启用链接" controlFirst={false} checked={!!subscriptionForm.enabled} onCheckedChange={(checked) => setSubscriptionForm((prev) => ({ ...prev, enabled: checked }))} />
-                  </div>
-                </section>
               </div>
             </div>
 

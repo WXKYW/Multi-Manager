@@ -61,6 +61,7 @@ type Subscription struct {
 	ID                    string           `json:"id"`
 	ProfileID             string           `json:"profile_id"`
 	PlanID                string           `json:"plan_id"`
+	PlanEnabled           bool             `json:"plan_enabled"`
 	Name                  string           `json:"name"`
 	Remark                string           `json:"remark"`
 	Enabled               bool             `json:"enabled"`
@@ -182,6 +183,14 @@ type TrafficInfo struct {
 	Source         string  `json:"source"`
 	Status         string  `json:"status"`
 	MeteringStatus string  `json:"metering_status"`
+	CycleStart     string  `json:"cycle_start,omitempty"`
+	CycleEnd       string  `json:"cycle_end,omitempty"`
+}
+
+type serverTrafficQuota struct {
+	UsedBytes  int64
+	LimitBytes int64
+	Exhausted  bool
 }
 
 type QualitySummary struct {
@@ -375,6 +384,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.getSubscription(w, r, db, parts[1])
 		case http.MethodPut:
 			s.updateSubscription(w, r, db, parts[1])
+		case http.MethodPatch:
+			s.setSubscriptionEnabled(w, r, db, parts[1])
 		case http.MethodDelete:
 			s.deleteSubscription(w, r, db, parts[1])
 		default:
@@ -951,6 +962,33 @@ func (s *Service) handlePlans(w http.ResponseWriter, r *http.Request, db *sql.DB
 			return
 		}
 		response.OK(w, plans)
+	case http.MethodPatch:
+		if id == "" {
+			response.Error(w, http.StatusBadRequest, "套餐 ID 不能为空")
+			return
+		}
+		var input struct {
+			Enabled *bool `json:"enabled"`
+		}
+		if !decodeJSON(w, r, &input) {
+			return
+		}
+		if input.Enabled == nil {
+			response.Error(w, http.StatusBadRequest, "enabled 不能为空")
+			return
+		}
+		result, err := db.ExecContext(r.Context(), `UPDATE subscription_plans SET enabled=?,updated_at=datetime('now') WHERE id=?`, boolToInt(*input.Enabled), id)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			response.Error(w, http.StatusNotFound, "套餐不存在")
+			return
+		}
+		plans, _ := loadPlans(r.Context(), db, id)
+		response.OK(w, plans[0])
 	case http.MethodPost, http.MethodPut:
 		var input Plan
 		if !decodeJSON(w, r, &input) {
@@ -1148,17 +1186,24 @@ func replacePlanNodeRelations(ctx context.Context, db *sql.DB, tx *sql.Tx, planI
 }
 
 func applyPlanToSubscription(ctx context.Context, db *sql.DB, sub *Subscription) {
+	if sub != nil {
+		sub.PlanEnabled = true
+	}
 	if sub == nil || strings.TrimSpace(sub.PlanID) == "" {
 		return
 	}
 	plans, err := loadPlans(ctx, db, sub.PlanID)
 	if err != nil || len(plans) == 0 {
+		sub.PlanEnabled = false
 		return
 	}
 	p := plans[0]
+	sub.PlanEnabled = p.Enabled
 	sub.TotalBytes = p.TotalBytes
 	sub.CycleType = p.CycleType
 	sub.CycleDay = p.CycleDay
+	sub.ExpireAt = ""
+	sub.CycleStart, sub.CycleEnd = planCycleWindow(time.Now().UTC(), p.CycleType, p.CycleDay)
 	sub.RateLimitEnabled = p.RateLimitEnabled
 	sub.RateLimitPerMinute = p.RateLimitPerMinute
 	sub.NodeFilterIDs = append([]string(nil), p.NodeIDs...)
@@ -1168,39 +1213,163 @@ func applyPlanToSubscription(ctx context.Context, db *sql.DB, sub *Subscription)
 }
 
 func countPublishedSubscriptionNodes(ctx context.Context, db *sql.DB, sub Subscription) int {
-	count := 0
-	if sub.PlanID != "" && normalizePlanSelectionMode(sub.NodeSelectionMode) == planSelectionExplicit {
-		if sub.IncludeInternalNodes {
-			var internal int
-			_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_plan_nodes pn
-				JOIN managed_proxy_nodes n ON n.id=pn.node_id
-				WHERE pn.plan_id=? AND pn.source='internal' AND n.enabled=1 AND n.publishable=1 AND n.apply_status='running'`, sub.PlanID).Scan(&internal)
-			count += internal
-		}
-		if sub.IncludeExternalNodes {
-			var external int
-			_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_plan_nodes pn
-				JOIN subscription_nodes n ON n.id=pn.node_id
-				WHERE pn.plan_id=? AND pn.source='external' AND n.enabled=1`, sub.PlanID).Scan(&external)
-			count += external
-		}
-		return count
+	nodes, err := loadPublishedNodesForSubscription(ctx, db, sub)
+	if err != nil {
+		return 0
 	}
+	return len(nodes)
+}
+
+func loadPublishedNodesForSubscription(ctx context.Context, db *sql.DB, sub Subscription) ([]Node, error) {
+	nodes := []Node{}
 	if sub.IncludeInternalNodes {
-		var internal int
-		_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM managed_proxy_nodes WHERE enabled=1 AND publishable=1 AND apply_status='running'`).Scan(&internal)
-		count += internal
+		internal, err := loadManagedSubscriptionNodes(ctx, db)
+		if err != nil {
+			return nil, err
+		}
+		if sub.PlanID != "" {
+			internal = filterPlanNodesByIDsForSource(internal, sub.NodeFilterIDs, sub.NodeSelectionMode)
+		}
+		nodes = append(nodes, internal...)
 	}
 	if sub.IncludeExternalNodes {
-		var external int
+		profileID := firstNonEmpty(sub.ProfileID, sub.ID)
 		if sub.PlanID != "" {
-			_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_nodes WHERE enabled=1`).Scan(&external)
-		} else {
-			_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_nodes WHERE COALESCE(profile_id,subscription_id)=? AND enabled=1`, firstNonEmpty(sub.ProfileID, sub.ID)).Scan(&external)
+			profileID = ""
 		}
-		count += external
+		external, err := loadNodes(ctx, db, profileID, true)
+		if err != nil {
+			return nil, err
+		}
+		if sub.PlanID != "" {
+			external = filterPlanNodesByIDsForSource(external, sub.NodeFilterIDs, sub.NodeSelectionMode)
+		} else {
+			external = filterNodesByIDsForSource(external, sub.NodeFilterIDs)
+		}
+		nodes = append(nodes, external...)
 	}
-	return count
+	nodes = filterEnabledPublishedNodes(nodes)
+	nodes, err := filterNodesByAvailableHostQuota(ctx, db, nodes)
+	if err != nil {
+		return nil, err
+	}
+	return nodes, nil
+}
+
+func filterEnabledPublishedNodes(nodes []Node) []Node {
+	filtered := make([]Node, 0, len(nodes))
+	for _, node := range nodes {
+		if node.Enabled {
+			filtered = append(filtered, node)
+		}
+	}
+	return filtered
+}
+
+func filterNodesByAvailableHostQuota(ctx context.Context, db *sql.DB, nodes []Node) ([]Node, error) {
+	serverIDs := []string{}
+	seen := map[string]bool{}
+	for _, node := range nodes {
+		serverID := strings.TrimSpace(node.TrafficServerID)
+		if serverID == "" || seen[serverID] {
+			continue
+		}
+		seen[serverID] = true
+		serverIDs = append(serverIDs, serverID)
+	}
+	if len(serverIDs) == 0 {
+		return nodes, nil
+	}
+	quotaByServerID, err := loadServerTrafficQuotaStates(ctx, db, serverIDs)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]Node, 0, len(nodes))
+	for _, node := range nodes {
+		serverID := strings.TrimSpace(node.TrafficServerID)
+		if quotaByServerID[serverID].Exhausted {
+			continue
+		}
+		filtered = append(filtered, node)
+	}
+	return filtered, nil
+}
+
+func loadServerTrafficQuotaStates(ctx context.Context, db *sql.DB, serverIDs []string) (map[string]serverTrafficQuota, error) {
+	states := make(map[string]serverTrafficQuota, len(serverIDs))
+	serverIDs = compactStringList(serverIDs)
+	if len(serverIDs) == 0 {
+		return states, nil
+	}
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(serverIDs)), ",")
+	args := make([]interface{}, 0, len(serverIDs))
+	for _, id := range serverIDs {
+		args = append(args, id)
+	}
+	queries := []string{
+		`SELECT id, COALESCE(traffic_limit_bytes, 0), COALESCE(traffic_limit_mode, 'total'), COALESCE(cached_info, '{}') FROM server_accounts WHERE id IN (` + placeholders + `)`,
+		`SELECT id, COALESCE(traffic_limit_bytes, 0), 'total', COALESCE(cached_info, '{}') FROM server_accounts WHERE id IN (` + placeholders + `)`,
+	}
+	var lastErr error
+	for _, query := range queries {
+		rows, err := db.QueryContext(ctx, query, args...)
+		if err != nil {
+			lower := strings.ToLower(err.Error())
+			if strings.Contains(lower, "no such table") || strings.Contains(lower, "no such column") {
+				lastErr = err
+				continue
+			}
+			return nil, err
+		}
+		for rows.Next() {
+			var serverID, limitMode, cachedInfo string
+			var limitBytes int64
+			if err := rows.Scan(&serverID, &limitBytes, &limitMode, &cachedInfo); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			usedBytes := trafficUsedBytesFromCachedInfo(cachedInfo, limitMode)
+			limitBytes = maxInt64(limitBytes, 0)
+			states[serverID] = serverTrafficQuota{
+				UsedBytes:  usedBytes,
+				LimitBytes: limitBytes,
+				Exhausted:  limitBytes > 0 && usedBytes >= limitBytes,
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+		return states, nil
+	}
+	if lastErr != nil {
+		return states, nil
+	}
+	return states, nil
+}
+
+func trafficUsedBytesFromCachedInfo(raw, mode string) int64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "{}" {
+		return 0
+	}
+	var cached map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &cached); err != nil {
+		return 0
+	}
+	network, _ := cached["network"].(map[string]interface{})
+	rxTotal := firstFloatValue(cached, "net_in_transfer", "net_rx_total", "rx_total_bytes")
+	txTotal := firstFloatValue(cached, "net_out_transfer", "net_tx_total", "tx_total_bytes")
+	if value := getFloatFromMap(network, "rx_total_bytes"); value > 0 {
+		rxTotal = value
+	}
+	if value := getFloatFromMap(network, "tx_total_bytes"); value > 0 {
+		txTotal = value
+	}
+	return trafficUsedBytesForMode(rxTotal, txTotal, mode)
 }
 
 func ensureDefaultNodeLibrary(ctx context.Context, db *sql.DB) error {
@@ -1269,7 +1438,7 @@ func ensureBuiltins(ctx context.Context, db *sql.DB, overwrite bool) error {
 func (s *Service) summary(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	var total, enabled, expired, exhausted, today int
 	_ = db.QueryRowContext(r.Context(), `SELECT COUNT(*), COALESCE(SUM(enabled), 0) FROM subscription_subscriptions`).Scan(&total, &enabled)
-	_ = db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM subscription_subscriptions WHERE expire_at IS NOT NULL AND expire_at != '' AND datetime(expire_at) < datetime('now')`).Scan(&expired)
+	_ = db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM subscription_subscriptions WHERE COALESCE(plan_id,'')='' AND expire_at IS NOT NULL AND expire_at != '' AND datetime(expire_at) < datetime('now')`).Scan(&expired)
 	_ = db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM subscription_access_logs WHERE date(created_at) = date('now')`).Scan(&today)
 	subs, _ := loadSubscriptions(r.Context(), db, "")
 	for _, sub := range subs {
@@ -1496,7 +1665,7 @@ func (s *Service) createSubscription(w http.ResponseWriter, r *http.Request, db 
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
 		id, profileID, input.PlanID, input.Name, input.Remark, boolToInt(effectiveEnabled), token, templateID, "panel", nil,
 		nil, 0, defaultRefreshHours, 0, 0,
-		0, nullString(input.ExpireAt), "none", 1, nil, nil,
+		0, nil, "none", 1, nil, nil,
 		0, 0, "", 0, 0)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
@@ -1523,8 +1692,8 @@ func (s *Service) updateSubscription(w http.ResponseWriter, r *http.Request, db 
 		response.Error(w, http.StatusBadRequest, "请选择套餐")
 		return
 	}
-	if plans, err := loadPlans(r.Context(), db, input.PlanID); err != nil || len(plans) == 0 || !plans[0].Enabled {
-		response.Error(w, http.StatusBadRequest, "所选套餐不存在或已停用")
+	if plans, err := loadPlans(r.Context(), db, input.PlanID); err != nil || len(plans) == 0 {
+		response.Error(w, http.StatusBadRequest, "所选套餐不存在")
 		return
 	}
 	applyPlanToSubscription(r.Context(), db, &input)
@@ -1544,7 +1713,7 @@ func (s *Service) updateSubscription(w http.ResponseWriter, r *http.Request, db 
 		WHERE id = ?`,
 		profileID, input.PlanID, input.Name, input.Remark, boolToInt(input.Enabled), templateID, "panel", nil,
 		nil, 0, defaultRefreshHours, 0,
-		0, 0, nullString(input.ExpireAt), "none", 1,
+		0, 0, nil, "none", 1,
 		nil, nil, 0, 0, "", 0, 0, id)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
@@ -1557,6 +1726,31 @@ func (s *Service) updateSubscription(w http.ResponseWriter, r *http.Request, db 
 	}
 	if err := tx.Commit(); err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	subs, _ := loadSubscriptions(r.Context(), db, id)
+	response.OK(w, firstSub(subs))
+}
+
+func (s *Service) setSubscriptionEnabled(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {
+	var input struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if input.Enabled == nil {
+		response.Error(w, http.StatusBadRequest, "enabled 不能为空")
+		return
+	}
+	result, err := db.ExecContext(r.Context(), `UPDATE subscription_subscriptions SET enabled=?,updated_at=datetime('now') WHERE id=?`, boolToInt(*input.Enabled), id)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		response.Error(w, http.StatusNotFound, "订阅不存在")
 		return
 	}
 	subs, _ := loadSubscriptions(r.Context(), db, id)
@@ -2229,9 +2423,9 @@ func (s *Service) servePublicSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 	sub = subs[0]
-	if !sub.Enabled {
+	if !sub.Enabled || !sub.PlanEnabled {
 		statusCode = http.StatusForbidden
-		errMsg = "subscription disabled"
+		errMsg = "subscription or plan disabled"
 		response.Error(w, statusCode, errMsg)
 		return
 	}
@@ -2241,55 +2435,22 @@ func (s *Service) servePublicSubscription(w http.ResponseWriter, r *http.Request
 		response.Error(w, statusCode, errMsg)
 		return
 	}
+	traffic = sub.Traffic
 	nodes := []Node{}
-	if sub.IncludeInternalNodes {
-		nodes, err = loadManagedSubscriptionNodes(r.Context(), db)
+	renderBlocked := traffic.Status == "expired" || traffic.Status == "exhausted"
+	if !renderBlocked {
+		nodes, err = loadPublishedNodesForSubscription(r.Context(), db, sub)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
-			errMsg = "load managed nodes: " + err.Error()
+			errMsg = "load subscription nodes: " + err.Error()
 			response.Error(w, statusCode, errMsg)
 			return
 		}
-		if sub.PlanID != "" {
-			nodes = filterPlanNodesByIDsForSource(nodes, sub.NodeFilterIDs, sub.NodeSelectionMode)
-		} else {
-			nodes = filterNodesByIDsForSource(nodes, sub.NodeFilterIDs)
-		}
-	}
-	if sub.IncludeExternalNodes {
-		externalProfileID := firstNonEmpty(sub.ProfileID, sub.ID)
-		if sub.PlanID != "" {
-			externalProfileID = ""
-		}
-		external, loadErr := loadNodes(r.Context(), db, externalProfileID, true)
-		if loadErr != nil {
-			statusCode = http.StatusInternalServerError
-			errMsg = "load external nodes: " + loadErr.Error()
-			response.Error(w, statusCode, errMsg)
-			return
-		}
-		if sub.PlanID != "" {
-			nodes = append(nodes, filterPlanNodesByIDsForSource(external, sub.NodeFilterIDs, sub.NodeSelectionMode)...)
-		} else {
-			nodes = append(nodes, filterNodesByIDsForSource(external, sub.NodeFilterIDs)...)
-		}
-	}
-	enabledNodes := nodes[:0]
-	for _, node := range nodes {
-		if node.Enabled {
-			enabledNodes = append(enabledNodes, node)
-		}
-	}
-	nodes = ensureUniquePublishedNodeNames(enabledNodes)
-	traffic = sub.Traffic
-	blocked := traffic.Status == "expired" || traffic.Status == "exhausted"
-	if blocked {
-		nodes = []Node{}
 	}
 	if format == "" {
 		format = templateFormat(r.Context(), db, sub.TemplateID)
 	}
-	body, contentType, err := renderOutput(r.Context(), db, sub, nodes, format, blocked)
+	body, contentType, err := renderOutput(r.Context(), db, sub, nodes, format, renderBlocked)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
 		errMsg = err.Error()
@@ -2308,19 +2469,19 @@ func (s *Service) servePublicSubscription(w http.ResponseWriter, r *http.Request
 }
 
 func loadManagedSubscriptionNodes(ctx context.Context, db *sql.DB) ([]Node, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id,name,protocol,public_host,assigned_port,client_uri_encrypted,COALESCE(access_mode,'direct'),COALESCE(preferred_address_id,''),COALESCE(connect_address,''),COALESCE(connect_port,0),COALESCE(tunnel_hostname,''),created_at,updated_at FROM managed_proxy_nodes WHERE enabled=1 AND publishable=1 AND apply_status='running' ORDER BY created_at ASC`)
+	rows, err := db.QueryContext(ctx, `SELECT id,server_id,name,protocol,public_host,assigned_port,client_uri_encrypted,COALESCE(access_mode,'direct'),COALESCE(preferred_address_id,''),COALESCE(connect_address,''),COALESCE(connect_port,0),COALESCE(tunnel_hostname,''),created_at,updated_at FROM managed_proxy_nodes WHERE enabled=1 AND publishable=1 AND apply_status='running' ORDER BY created_at ASC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	type managedRow struct {
-		id, name, protocol, host, encrypted, accessMode, preferredID, connectAddress, tunnelHostname, createdAt, updatedAt string
-		port, connectPort                                                                                                  int
+		id, serverID, name, protocol, host, encrypted, accessMode, preferredID, connectAddress, tunnelHostname, createdAt, updatedAt string
+		port, connectPort                                                                                                            int
 	}
 	managedRows := []managedRow{}
 	for rows.Next() {
 		var item managedRow
-		if err := rows.Scan(&item.id, &item.name, &item.protocol, &item.host, &item.port, &item.encrypted, &item.accessMode, &item.preferredID, &item.connectAddress, &item.connectPort, &item.tunnelHostname, &item.createdAt, &item.updatedAt); err != nil {
+		if err := rows.Scan(&item.id, &item.serverID, &item.name, &item.protocol, &item.host, &item.port, &item.encrypted, &item.accessMode, &item.preferredID, &item.connectAddress, &item.connectPort, &item.tunnelHostname, &item.createdAt, &item.updatedAt); err != nil {
 			return nil, err
 		}
 		managedRows = append(managedRows, item)
@@ -2355,6 +2516,7 @@ func loadManagedSubscriptionNodes(ctx context.Context, db *sql.DB) ([]Node, erro
 		node.Name = item.name
 		node.Server = item.host
 		node.Port = item.port
+		node.TrafficServerID = item.serverID
 		node.Raw = raw
 		node.Enabled = true
 		// A running managed node is publishable, but that alone is not evidence
@@ -2958,7 +3120,7 @@ func computeTraffic(ctx context.Context, db *sql.DB, sub Subscription) TrafficIn
 	// so reporting either as subscription usage would be misleading. Accurate
 	// usage becomes available only after managed nodes have per-subscription
 	// credentials and report counters for those identities.
-	info := TrafficInfo{Total: sub.TotalBytes, Source: "panel", Status: "active", MeteringStatus: "unavailable"}
+	info := TrafficInfo{Total: sub.TotalBytes, Source: "panel", Status: "active", MeteringStatus: "pending", CycleStart: sub.CycleStart, CycleEnd: sub.CycleEnd}
 	if sub.ExpireAt != "" {
 		if t, err := parseTime(sub.ExpireAt); err == nil {
 			info.Expire = t.Unix()
@@ -2975,6 +3137,36 @@ func computeTraffic(ctx context.Context, db *sql.DB, sub Subscription) TrafficIn
 		}
 	}
 	return info
+}
+
+func planCycleWindow(now time.Time, cycleType string, cycleDay int) (string, string) {
+	if normalizeCycleType(cycleType) != "monthly" {
+		return "", ""
+	}
+	if cycleDay < 1 || cycleDay > 31 {
+		cycleDay = 1
+	}
+	now = now.UTC()
+	boundary := func(year int, month time.Month) time.Time {
+		lastDay := time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC).Day()
+		day := cycleDay
+		if day > lastDay {
+			day = lastDay
+		}
+		return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+	}
+	current := boundary(now.Year(), now.Month())
+	var start, end time.Time
+	if now.Before(current) {
+		previous := now.AddDate(0, -1, 0)
+		start = boundary(previous.Year(), previous.Month())
+		end = current
+	} else {
+		start = current
+		next := now.AddDate(0, 1, 0)
+		end = boundary(next.Year(), next.Month())
+	}
+	return start.Format(time.RFC3339), end.Format(time.RFC3339)
 }
 
 func loadQuality(ctx context.Context, db *sql.DB, serverID string) []QualitySummary {
@@ -3039,6 +3231,10 @@ func loadQuality(ctx context.Context, db *sql.DB, serverID string) []QualitySumm
 }
 
 func renderOutput(ctx context.Context, db *sql.DB, sub Subscription, nodes []Node, format string, blocked bool) (string, string, error) {
+	nodes = preparePublishedNodes(nodes)
+	if blocked {
+		nodes = nil
+	}
 	if format == "" || format == "clash" || format == "mihomo" {
 		tpl := loadDefaultMihomoTemplate()
 		if sub.TemplateID != "" {
@@ -3049,9 +3245,6 @@ func renderOutput(ctx context.Context, db *sql.DB, sub Subscription, nodes []Nod
 			}
 		}
 		body := renderTemplate(tpl, sub, nodes)
-		if blocked {
-			body = "# Subscription is " + sub.Traffic.Status + ". Nodes are hidden.\n" + body
-		}
 		return body, "text/yaml; charset=utf-8", nil
 	}
 	raw := rawURIList(nodes)
@@ -3080,6 +3273,118 @@ func renderTemplate(tpl string, sub Subscription, nodes []Node) string {
 	return out
 }
 
+func preparePublishedNodes(nodes []Node) []Node {
+	filtered := make([]Node, 0, len(nodes))
+	seen := map[string]bool{}
+	for _, node := range nodes {
+		node.Name = strings.TrimSpace(node.Name)
+		node.Raw = strings.TrimSpace(node.Raw)
+		node.ConfigJSON = strings.TrimSpace(node.ConfigJSON)
+		if node.Name == "" {
+			node.Name = firstNonEmpty(strings.TrimSpace(node.Server), strings.TrimSpace(node.Type), "未命名节点")
+		}
+		if !hasValidPublishedRawURI(node) && validatedPublishedProxyConfig(node) == nil {
+			continue
+		}
+		key := publishedNodeDedupKey(node)
+		if key != "" && seen[key] {
+			continue
+		}
+		if key != "" {
+			seen[key] = true
+		}
+		filtered = append(filtered, node)
+	}
+	return ensureUniquePublishedNodeNames(filtered)
+}
+
+func publishedNodeDedupKey(node Node) string {
+	if proxy := validatedPublishedProxyConfig(node); len(proxy) > 0 {
+		canonical := make(map[string]interface{}, len(proxy))
+		for key, value := range proxy {
+			if key == "name" {
+				continue
+			}
+			canonical[key] = value
+		}
+		if encoded, err := json.Marshal(canonical); err == nil {
+			return "proxy:" + string(encoded)
+		}
+	}
+	if hasValidPublishedRawURI(node) {
+		return "raw:" + canonicalizePublishedRawURI(node.Raw)
+	}
+	return ""
+}
+
+func validatedPublishedProxyConfig(node Node) map[string]interface{} {
+	proxy := nodeProxyConfig(node)
+	if len(proxy) == 0 {
+		return nil
+	}
+	typ := strings.ToLower(strings.TrimSpace(stringVal(proxy["type"])))
+	server := strings.TrimSpace(stringVal(proxy["server"]))
+	port := int(floatVal(proxy["port"]))
+	if typ == "" || server == "" || port <= 0 {
+		return nil
+	}
+	switch typ {
+	case "vless", "vmess":
+		if strings.TrimSpace(stringVal(proxy["uuid"])) == "" {
+			return nil
+		}
+	case "trojan", "hysteria2", "tuic":
+		if strings.TrimSpace(stringVal(proxy["password"])) == "" {
+			return nil
+		}
+	case "ss":
+		if strings.TrimSpace(stringVal(proxy["cipher"])) == "" || strings.TrimSpace(stringVal(proxy["password"])) == "" {
+			return nil
+		}
+	case "http", "socks5", "socks":
+	default:
+		return nil
+	}
+	return proxy
+}
+
+func hasValidPublishedRawURI(node Node) bool {
+	raw := strings.TrimSpace(node.Raw)
+	if raw == "" {
+		return false
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
+	if scheme == "" {
+		return false
+	}
+	switch scheme {
+	case "vmess":
+		if parsed.Host == "" {
+			_, ok := parseVMessBase64URI(raw, 1)
+			return ok
+		}
+		return parsed.Hostname() != ""
+	case "vless", "trojan", "ss", "hysteria2", "hy2", "tuic", "socks", "http":
+		return parsed.Hostname() != ""
+	default:
+		return false
+	}
+}
+
+func canonicalizePublishedRawURI(raw string) string {
+	raw = strings.TrimSpace(raw)
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	parsed.Fragment = ""
+	return parsed.String()
+}
+
 func proxiesYAML(nodes []Node, indent int) string {
 	lines := []string{}
 	pad := strings.Repeat(" ", indent)
@@ -3087,7 +3392,7 @@ func proxiesYAML(nodes []Node, indent int) string {
 		if !node.Enabled {
 			continue
 		}
-		proxy := nodeProxyConfig(node)
+		proxy := validatedPublishedProxyConfig(node)
 		if len(proxy) == 0 {
 			continue
 		}
@@ -3168,7 +3473,7 @@ func nodeProxyConfig(node Node) map[string]interface{} {
 func rawURIList(nodes []Node) string {
 	lines := []string{}
 	for _, node := range nodes {
-		if node.Enabled && strings.TrimSpace(node.Raw) != "" {
+		if node.Enabled && hasValidPublishedRawURI(node) {
 			lines = append(lines, strings.TrimSpace(node.Raw))
 		}
 	}
@@ -3891,6 +4196,54 @@ func normalizeCycleType(value string) string {
 
 func isExplicitFalse(r *http.Request, field string) bool {
 	return false
+}
+
+func getFloatFromMap(m map[string]interface{}, key string) float64 {
+	if m == nil {
+		return 0
+	}
+	return floatVal(m[key])
+}
+
+func getFloatValue(m map[string]interface{}, key string) float64 {
+	if m == nil {
+		return 0
+	}
+	return floatVal(m[key])
+}
+
+func firstFloatValue(m map[string]interface{}, keys ...string) float64 {
+	for _, key := range keys {
+		if value := getFloatValue(m, key); value != 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func normalizeTrafficLimitMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "upload", "download":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "total"
+	}
+}
+
+func trafficUsedBytesForMode(rxTotal, txTotal float64, mode string) int64 {
+	var used float64
+	switch normalizeTrafficLimitMode(mode) {
+	case "upload":
+		used = txTotal
+	case "download":
+		used = rxTotal
+	default:
+		used = rxTotal + txTotal
+	}
+	if used < 0 {
+		return 0
+	}
+	return int64(used)
 }
 
 func stringVal(value interface{}) string {
