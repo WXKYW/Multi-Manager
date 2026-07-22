@@ -1541,9 +1541,9 @@ function SubscriptionPage() {
 
   const resetToken = async (sub) => {
     const confirmed = await dialog.confirm({
-      title: '重置订阅链接',
-      message: `确定要重置「${sub.name}」的订阅链接吗？重置后旧链接会立即失效，需要重新复制新链接给使用者。`,
-      confirmText: '重置链接',
+      title: '重置连接凭据',
+      message: `确定要重置「${sub.name}」的连接凭据吗？旧链接、VLESS UUID 和 HY2 密码都会失效，已下载配置会在 Agent 同步后断开。`,
+      confirmText: '重置并同步',
       confirmClass: 'text-kumo-warning',
     });
     if (!confirmed) return;
@@ -1553,7 +1553,8 @@ function SubscriptionPage() {
       toast.error(data.error || '重置失败');
       return;
     }
-    toast.success('订阅链接已重置');
+    const queued = Number(data.data?.nodes_queued || 0);
+    toast.success(queued > 0 ? `连接凭据已重置，正在同步 ${queued} 个节点` : '连接凭据已重置');
     loadAll();
   };
 
@@ -1879,7 +1880,7 @@ function SubscriptionPage() {
                       <div className="inline-flex items-center justify-center gap-2">
                         <Button size="sm" shape="square" variant="secondary" aria-label="复制订阅链接" title="复制订阅链接" onClick={() => copyText(link, '订阅链接已复制')} icon={<Copy className="h-3.5 w-3.5" />} />
                         <Button size="sm" shape="square" variant="secondary" aria-label="编辑订阅链接" title="编辑订阅链接" onClick={() => openEditSubscription(sub)} icon={<Edit className="h-3.5 w-3.5" />} />
-                        <Button size="sm" shape="square" variant="secondary" aria-label="重置链接" title="重置链接" onClick={() => resetToken(sub)} icon={<RefreshCw className="h-3.5 w-3.5" />} />
+                        <Button size="sm" shape="square" variant="secondary" aria-label="重置连接凭据" title="重置连接凭据" onClick={() => resetToken(sub)} icon={<RefreshCw className="h-3.5 w-3.5" />} />
                         <Button size="sm" shape="square" variant="secondary-destructive" aria-label="删除订阅链接" title="删除订阅链接" onClick={() => deleteSubscription(sub)} icon={<Trash className="h-3.5 w-3.5" />} />
                       </div>
                     </Table.Cell>

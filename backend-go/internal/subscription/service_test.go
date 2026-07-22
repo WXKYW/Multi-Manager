@@ -79,6 +79,57 @@ func TestManagedSubscriptionNodesApplyPreferredAddress(t *testing.T) {
 	}
 }
 
+func TestResetTokenRotatesNodeCredentialsAndQueuesRuntimeSync(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE server_accounts(id TEXT PRIMARY KEY,name TEXT,host TEXT,username TEXT,auth_type TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO server_accounts(id,name,host,username,auth_type) VALUES('host','主机','192.0.2.1','root','password')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO managed_proxy_nodes(id,server_id,name,protocol,runtime,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted,enabled,publishable,apply_status) VALUES('node','host','节点','vless-reality','sing-box','192.0.2.1',45654,'tcp','{}','',1,1,'running')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO subscription_plans(id,name,enabled,total_bytes,cycle_type,cycle_day,selection_mode,include_internal_nodes,include_external_nodes) VALUES('plan','套餐',1,0,'none',1,'explicit',1,0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO subscription_plan_nodes(plan_id,node_id,source) VALUES('plan','node','internal')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO subscription_subscriptions(id,profile_id,plan_id,name,public_token,vless_uuid,hysteria2_password,enabled) VALUES('sub','sub','plan','订阅','old-token','00000000-0000-4000-8000-000000000001','old-password',1)`); err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/subscriptions/sub/reset-token", nil)
+	responseRecorder := httptest.NewRecorder()
+	(&Service{}).resetToken(responseRecorder, request, db, "sub")
+	if responseRecorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", responseRecorder.Code, responseRecorder.Body.String())
+	}
+	var token, uuid, password string
+	if err := db.QueryRowContext(ctx, `SELECT public_token,vless_uuid,hysteria2_password FROM subscription_subscriptions WHERE id='sub'`).Scan(&token, &uuid, &password); err != nil {
+		t.Fatal(err)
+	}
+	if token == "old-token" || uuid == "00000000-0000-4000-8000-000000000001" || password == "old-password" {
+		t.Fatalf("credentials were not rotated: token=%q uuid=%q password=%q", token, uuid, password)
+	}
+	var state, reason string
+	if err := db.QueryRowContext(ctx, `SELECT state,reason FROM subscription_runtime_reconcile WHERE node_id='node'`).Scan(&state, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if state != "pending" || reason != "subscription credentials rotated" {
+		t.Fatalf("unexpected reconcile job: state=%q reason=%q", state, reason)
+	}
+}
+
 func TestPublishedNodeNamesAreUnique(t *testing.T) {
 	nodes := ensureUniquePublishedNodeNames([]Node{
 		{Name: "🇸🇬 新加坡", Raw: "vless://a@example.com:443#old", ConfigJSON: `{"name":"old","type":"vless"}`},

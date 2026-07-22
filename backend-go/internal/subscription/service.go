@@ -1897,7 +1897,7 @@ func (s *Service) setSubscriptionEnabled(w http.ResponseWriter, r *http.Request,
 		response.Error(w, http.StatusNotFound, "订阅不存在")
 		return
 	}
-	nodeIDs, err := reconcilequeue.NodeIDsForPlan(r.Context(), tx, planID)
+	nodeIDs, err := nodeIDsForSubscription(r.Context(), tx, id, planID)
 	if err != nil || reconcilequeue.EnqueueNodes(r.Context(), tx, nodeIDs, "subscription enabled state changed") != nil {
 		response.Error(w, http.StatusInternalServerError, "无法安排节点配置同步")
 		return
@@ -1935,7 +1935,7 @@ func (s *Service) deleteSubscription(w http.ResponseWriter, r *http.Request, db 
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	nodeIDs, err := reconcilequeue.NodeIDsForPlan(r.Context(), tx, planID)
+	nodeIDs, err := nodeIDsForSubscription(r.Context(), tx, id, planID)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2060,11 +2060,91 @@ func profileExists(ctx context.Context, executor subscriptionExecutor, id string
 
 func (s *Service) resetToken(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {
 	token := randomToken()
-	if _, err := db.ExecContext(r.Context(), `UPDATE subscription_subscriptions SET public_token = ?, updated_at = datetime('now') WHERE id = ?`, token, id); err != nil {
+	vlessUUID := randomUUID()
+	hysteria2Password := randomCredential()
+	tx, err := db.BeginTx(r.Context(), nil)
+	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	response.OK(w, map[string]string{"public_token": token})
+	defer tx.Rollback()
+	var planID string
+	if err := tx.QueryRowContext(r.Context(), `SELECT COALESCE(plan_id,'') FROM subscription_subscriptions WHERE id=?`, id).Scan(&planID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			response.Error(w, http.StatusNotFound, "订阅不存在")
+		} else {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	result, err := tx.ExecContext(r.Context(), `UPDATE subscription_subscriptions
+		SET public_token=?,vless_uuid=?,hysteria2_password=?,updated_at=datetime('now')
+		WHERE id=?`, token, vlessUUID, hysteria2Password, id)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		response.Error(w, http.StatusNotFound, "订阅不存在")
+		return
+	}
+	nodeIDs, err := nodeIDsForSubscription(r.Context(), tx, id, planID)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "无法解析订阅节点范围")
+		return
+	}
+	if err := reconcilequeue.EnqueueNodes(r.Context(), tx, nodeIDs, "subscription credentials rotated"); err != nil {
+		response.Error(w, http.StatusInternalServerError, "无法安排节点凭据同步")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	syncStatus := "not_required"
+	if len(nodeIDs) > 0 {
+		syncStatus = "pending"
+	}
+	response.OK(w, map[string]interface{}{
+		"public_token":        token,
+		"credentials_rotated": true,
+		"nodes_queued":        len(nodeIDs),
+		"runtime_sync_status": syncStatus,
+	})
+}
+
+// nodeIDsForSubscription keeps credential rotation compatible with legacy
+// subscriptions that predate mandatory plans. New subscriptions always use
+// the plan path; legacy filters are treated as managed-node IDs when present.
+func nodeIDsForSubscription(ctx context.Context, tx *sql.Tx, subscriptionID, planID string) ([]string, error) {
+	if strings.TrimSpace(planID) != "" {
+		return reconcilequeue.NodeIDsForPlan(ctx, tx, planID)
+	}
+	var filters string
+	var includeInternal int
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(node_filter_ids,''),COALESCE(include_internal_nodes,1) FROM subscription_subscriptions WHERE id=?`, subscriptionID).Scan(&filters, &includeInternal); err != nil {
+		return nil, err
+	}
+	if ids := decodeNodeFilterIDs(filters); len(ids) > 0 {
+		return ids, nil
+	}
+	if includeInternal == 0 {
+		return nil, nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM managed_proxy_nodes WHERE enabled=1 ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func (s *Service) refreshUpstream(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {
