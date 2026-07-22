@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
-import { Input, Textarea } from '@cloudflare/kumo/components/input';
+import { Input } from '@cloudflare/kumo/components/input';
 import { Table } from '@cloudflare/kumo/components/table';
 import { DropdownMenu } from '@cloudflare/kumo';
 import { ContextMenu } from '@cloudflare/kumo/primitives/context-menu';
@@ -20,6 +20,7 @@ import {
   writeSftpFile,
 } from '../../modules/server-sftp.js';
 import { ArrowLeft, Copy, Download, Edit, Eye, FileText, Folder, FolderOpen, Key, RefreshCw, Save, Trash, Upload, X } from '../Icons.jsx';
+import CodeEditor from '../ui/CodeEditor.jsx';
 
 const contextMenuItemClassName = 'relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-hidden select-none focus:text-kumo-default focus:ring-kumo-focus/50 focus-visible:ring-2 focus-visible:ring-kumo-brand data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-kumo-overlay';
 const contextMenuDangerItemClassName = 'relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-sm text-kumo-danger outline-hidden select-none focus:text-kumo-danger focus:ring-kumo-focus/50 focus-visible:ring-2 focus-visible:ring-kumo-brand data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-kumo-danger/5 data-highlighted:text-kumo-danger';
@@ -411,11 +412,13 @@ export default function SftpPanel({ serverId, serverName, initialPath = '.', onC
           </div>
           <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden p-4">
             <div className="shrink-0 truncate font-mono text-[10px] text-kumo-subtle">{editFile?.path}</div>
-            <Textarea
-              aria-label="SFTP 文件内容"
+            <CodeEditor
+              label="SFTP 文件内容"
+              fileName={editFile?.name || editFile?.path || ''}
               value={editFile?.content || ''}
-              onChange={event => setEditFile(prev => ({ ...prev, content: event.target.value }))}
-              className="h-full min-h-0 w-full flex-1 resize-none overflow-auto font-mono text-xs"
+              onChange={content => setEditFile(prev => ({ ...prev, content }))}
+              className="min-h-0 flex-1"
+              minHeight="0"
             />
           </div>
           <div className="flex justify-end gap-2 border-t border-kumo-line px-4 py-3">

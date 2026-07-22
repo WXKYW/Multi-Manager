@@ -2,6 +2,7 @@ mod config;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+mod cloudflared;
 mod collector;
 mod docker;
 mod file_manager;
@@ -46,6 +47,8 @@ fn agent_capabilities() -> Vec<String> {
     ];
     #[cfg(target_os = "linux")]
     capabilities.push("proxy_runtime_v1".to_string());
+    #[cfg(target_os = "linux")]
+    capabilities.push("cloudflared_runtime_v1".to_string());
     #[cfg(target_os = "windows")]
     let capabilities = {
         let mut capabilities = capabilities;
@@ -1062,6 +1065,15 @@ async fn run_client(
                                         }
                                     }
                                     50 => match proxy_runtime::reconcile(&task.data) {
+                                        Ok(out) => {
+                                            successful = true;
+                                            res_data = out;
+                                        }
+                                        Err(err) => {
+                                            res_data = err;
+                                        }
+                                    },
+                                    51 => match cloudflared::reconcile(&task.data) {
                                         Ok(out) => {
                                             successful = true;
                                             res_data = out;

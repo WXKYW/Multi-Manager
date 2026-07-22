@@ -28,23 +28,29 @@ import (
 )
 
 type managedProxyNode struct {
-	ID           string `json:"id"`
-	ServerID     string `json:"server_id"`
-	ServerName   string `json:"server_name"`
-	Name         string `json:"name"`
-	Protocol     string `json:"protocol"`
-	Runtime      string `json:"runtime"`
-	PublicHost   string `json:"public_host"`
-	AssignedPort int    `json:"assigned_port"`
-	Transport    string `json:"transport"`
-	ClientURI    string `json:"client_uri"`
-	Revision     int64  `json:"revision"`
-	Enabled      bool   `json:"enabled"`
-	Publishable  bool   `json:"publishable"`
-	ApplyStatus  string `json:"apply_status"`
-	LastError    string `json:"last_error"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
+	ID                 string `json:"id"`
+	ServerID           string `json:"server_id"`
+	ServerName         string `json:"server_name"`
+	Name               string `json:"name"`
+	Protocol           string `json:"protocol"`
+	Runtime            string `json:"runtime"`
+	PublicHost         string `json:"public_host"`
+	AssignedPort       int    `json:"assigned_port"`
+	Transport          string `json:"transport"`
+	ClientURI          string `json:"client_uri"`
+	Revision           int64  `json:"revision"`
+	Enabled            bool   `json:"enabled"`
+	Publishable        bool   `json:"publishable"`
+	ApplyStatus        string `json:"apply_status"`
+	LastError          string `json:"last_error"`
+	AccessMode         string `json:"access_mode"`
+	TunnelPath         string `json:"tunnel_path"`
+	PreferredAddressID string `json:"preferred_address_id"`
+	ConnectAddress     string `json:"connect_address"`
+	ConnectPort        int    `json:"connect_port"`
+	TunnelHostname     string `json:"tunnel_hostname"`
+	CreatedAt          string `json:"created_at"`
+	UpdatedAt          string `json:"updated_at"`
 }
 
 func (s *Service) handleManagedProxyNodes(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {
@@ -64,14 +70,18 @@ func (s *Service) handleManagedProxyNodes(w http.ResponseWriter, r *http.Request
 
 func (s *Service) updateManagedProxyNodeState(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {
 	var input struct {
-		Enabled *bool  `json:"enabled"`
-		Name    string `json:"name"`
+		Enabled            *bool   `json:"enabled"`
+		Name               string  `json:"name"`
+		PreferredAddressID *string `json:"preferred_address_id"`
+		ConnectAddress     *string `json:"connect_address"`
+		ConnectPort        *int    `json:"connect_port"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&input); err != nil {
 		response.Error(w, http.StatusBadRequest, "invalid internal node update")
 		return
 	}
 	input.Name = strings.TrimSpace(input.Name)
+	metadataUpdated := false
 	if input.Name != "" {
 		var clientEncrypted string
 		if err := db.QueryRowContext(r.Context(), `SELECT client_uri_encrypted FROM managed_proxy_nodes WHERE id=?`, id).Scan(&clientEncrypted); err != nil {
@@ -105,11 +115,51 @@ func (s *Service) updateManagedProxyNodeState(w http.ResponseWriter, r *http.Req
 			response.Error(w, http.StatusNotFound, "internal node not found")
 			return
 		}
-		response.OK(w, map[string]interface{}{"id": id, "name": input.Name})
-		return
+		metadataUpdated = true
+	}
+	if input.PreferredAddressID != nil || input.ConnectAddress != nil || input.ConnectPort != nil {
+		var preferredID, connectAddress string
+		var connectPort int
+		if err := db.QueryRowContext(r.Context(), `SELECT preferred_address_id,connect_address,connect_port FROM managed_proxy_nodes WHERE id=?`, id).Scan(&preferredID, &connectAddress, &connectPort); err != nil {
+			response.Error(w, http.StatusNotFound, "internal node not found")
+			return
+		}
+		if input.PreferredAddressID != nil {
+			preferredID = strings.TrimSpace(*input.PreferredAddressID)
+			if preferredID != "" {
+				var exists int
+				if err := db.QueryRowContext(r.Context(), `SELECT 1 FROM managed_proxy_preferences WHERE id=? AND enabled=1`, preferredID).Scan(&exists); err != nil {
+					response.Error(w, http.StatusBadRequest, "preferred address is unavailable")
+					return
+				}
+			}
+		}
+		if input.ConnectAddress != nil {
+			connectAddress = strings.TrimSpace(*input.ConnectAddress)
+			if strings.ContainsAny(connectAddress, "/?#@ ") {
+				response.Error(w, http.StatusBadRequest, "connect_address must be a domain or IP address")
+				return
+			}
+		}
+		if input.ConnectPort != nil {
+			connectPort = *input.ConnectPort
+			if connectPort < 0 || connectPort > 65535 {
+				response.Error(w, http.StatusBadRequest, "connect_port must be between 1 and 65535")
+				return
+			}
+		}
+		if _, err := db.ExecContext(r.Context(), `UPDATE managed_proxy_nodes SET preferred_address_id=?,connect_address=?,connect_port=?,updated_at=datetime('now') WHERE id=?`, preferredID, connectAddress, connectPort, id); err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		metadataUpdated = true
 	}
 	if input.Enabled == nil {
-		response.Error(w, http.StatusBadRequest, "name or enabled is required")
+		if metadataUpdated {
+			response.OK(w, map[string]interface{}{"id": id, "updated": true})
+			return
+		}
+		response.Error(w, http.StatusBadRequest, "name, preferred address, connect address, or enabled is required")
 		return
 	}
 	result, err := db.ExecContext(r.Context(), `UPDATE managed_proxy_nodes SET enabled=?,publishable=CASE WHEN ?=1 THEN publishable ELSE 0 END,revision=revision+1,updated_at=datetime('now') WHERE id=?`, boolToInt(*input.Enabled), boolToInt(*input.Enabled), id)
@@ -121,11 +171,11 @@ func (s *Service) updateManagedProxyNodeState(w http.ResponseWriter, r *http.Req
 		response.Error(w, http.StatusNotFound, "internal node not found")
 		return
 	}
-	s.reconcileManagedProxyNode(w, r, db, id)
+	s.reconcileManagedProxyNode(w, r, db, id, false)
 }
 
 func (s *Service) listManagedProxyNodes(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	rows, err := db.QueryContext(r.Context(), `SELECT n.id,n.server_id,COALESCE(a.name,''),n.name,n.protocol,n.runtime,n.public_host,n.assigned_port,n.transport,n.client_uri_encrypted,n.revision,n.enabled,n.publishable,n.apply_status,n.last_error,n.created_at,n.updated_at FROM managed_proxy_nodes n LEFT JOIN server_accounts a ON a.id=n.server_id ORDER BY n.created_at DESC`)
+	rows, err := db.QueryContext(r.Context(), `SELECT n.id,n.server_id,COALESCE(a.name,''),n.name,n.protocol,n.runtime,n.public_host,n.assigned_port,n.transport,n.client_uri_encrypted,n.revision,n.enabled,n.publishable,n.apply_status,n.last_error,n.access_mode,n.tunnel_path,n.preferred_address_id,n.connect_address,n.connect_port,n.tunnel_hostname,n.created_at,n.updated_at FROM managed_proxy_nodes n LEFT JOIN server_accounts a ON a.id=n.server_id ORDER BY n.created_at DESC`)
 	if err != nil {
 		response.Error(w, 500, err.Error())
 		return
@@ -136,12 +186,13 @@ func (s *Service) listManagedProxyNodes(w http.ResponseWriter, r *http.Request, 
 		var node managedProxyNode
 		var client string
 		var enabled, publishable int
-		if err := rows.Scan(&node.ID, &node.ServerID, &node.ServerName, &node.Name, &node.Protocol, &node.Runtime, &node.PublicHost, &node.AssignedPort, &node.Transport, &client, &node.Revision, &enabled, &publishable, &node.ApplyStatus, &node.LastError, &node.CreatedAt, &node.UpdatedAt); err != nil {
+		if err := rows.Scan(&node.ID, &node.ServerID, &node.ServerName, &node.Name, &node.Protocol, &node.Runtime, &node.PublicHost, &node.AssignedPort, &node.Transport, &client, &node.Revision, &enabled, &publishable, &node.ApplyStatus, &node.LastError, &node.AccessMode, &node.TunnelPath, &node.PreferredAddressID, &node.ConnectAddress, &node.ConnectPort, &node.TunnelHostname, &node.CreatedAt, &node.UpdatedAt); err != nil {
 			response.Error(w, 500, err.Error())
 			return
 		}
 		node.Enabled, node.Publishable = enabled == 1, publishable == 1
 		node.ClientURI = secure.SecureDecrypt(client)
+		node.ClientURI = resolveManagedNodeClientURI(r.Context(), db, node)
 		nodes = append(nodes, node)
 	}
 	response.OK(w, nodes)
@@ -149,20 +200,39 @@ func (s *Service) listManagedProxyNodes(w http.ResponseWriter, r *http.Request, 
 
 func (s *Service) createManagedProxyNode(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	var input struct {
-		ServerID       string `json:"server_id"`
-		Name           string `json:"name"`
-		Protocol       string `json:"protocol"`
-		PublicHost     string `json:"public_host"`
-		ServerName     string `json:"server_name"`
-		CertificatePEM string `json:"certificate_pem"`
-		PrivateKeyPEM  string `json:"private_key_pem"`
-		Enabled        *bool  `json:"enabled"`
+		ServerID           string `json:"server_id"`
+		Name               string `json:"name"`
+		Protocol           string `json:"protocol"`
+		PublicHost         string `json:"public_host"`
+		ServerName         string `json:"server_name"`
+		CertificatePEM     string `json:"certificate_pem"`
+		PrivateKeyPEM      string `json:"private_key_pem"`
+		AccessMode         string `json:"access_mode"`
+		PreferredAddressID string `json:"preferred_address_id"`
+		ConnectAddress     string `json:"connect_address"`
+		ConnectPort        int    `json:"connect_port"`
+		Enabled            *bool  `json:"enabled"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&input); err != nil {
 		response.Error(w, 400, "invalid internal node")
 		return
 	}
 	input.ServerID, input.Name, input.Protocol, input.PublicHost = strings.TrimSpace(input.ServerID), strings.TrimSpace(input.Name), strings.ToLower(strings.TrimSpace(input.Protocol)), strings.TrimSpace(input.PublicHost)
+	input.AccessMode = strings.ToLower(strings.TrimSpace(input.AccessMode))
+	if input.Protocol == "vless-ws-tunnel" {
+		input.Protocol, input.AccessMode = "vless-reality", "cloudflare_tunnel"
+	}
+	if input.AccessMode == "" {
+		input.AccessMode = "direct"
+	}
+	if input.AccessMode != "direct" && input.AccessMode != "cloudflare_tunnel" {
+		response.Error(w, 400, "access_mode must be direct or cloudflare_tunnel")
+		return
+	}
+	if input.AccessMode == "cloudflare_tunnel" && input.Protocol != "vless-reality" {
+		response.Error(w, 400, "Cloudflare Tunnel currently supports VLESS over WebSocket")
+		return
+	}
 	if input.ServerID == "" {
 		response.Error(w, 400, "server_id is required")
 		return
@@ -170,6 +240,18 @@ func (s *Service) createManagedProxyNode(w http.ResponseWriter, r *http.Request,
 	if input.Protocol != "vless-reality" && input.Protocol != "hysteria2" {
 		response.Error(w, 400, "protocol must be vless-reality or hysteria2")
 		return
+	}
+	var tunnelHostname, tunnelPath string
+	if input.AccessMode == "cloudflare_tunnel" {
+		if err := db.QueryRowContext(r.Context(), `SELECT hostname FROM managed_proxy_tunnels WHERE server_id=? AND apply_status='running'`, input.ServerID).Scan(&tunnelHostname); err != nil {
+			response.Error(w, 409, "deploy and connect a Named Tunnel for this instance first")
+			return
+		}
+		tunnelPath = "/api-monitor/" + strings.ReplaceAll(uuid.NewString(), "-", "")
+		input.PublicHost = tunnelHostname
+		if input.ConnectPort == 0 {
+			input.ConnectPort = 443
+		}
 	}
 	var accountHost, accountName, accountCountry, accountResolvedCountry, accountCachedInfo string
 	if err := db.QueryRowContext(r.Context(), `SELECT COALESCE(host,''),COALESCE(name,''),COALESCE(country,''),COALESCE(resolved_country,''),COALESCE(cached_info,'{}') FROM server_accounts WHERE id=?`, input.ServerID).Scan(&accountHost, &accountName, &accountCountry, &accountResolvedCountry, &accountCachedInfo); err != nil {
@@ -179,21 +261,33 @@ func (s *Service) createManagedProxyNode(w http.ResponseWriter, r *http.Request,
 	// Connection addressing belongs to the host instance. The caller only
 	// chooses the node identity/protocol; changing a host address is done from
 	// Host Instances and is picked up by the next deployment.
-	input.PublicHost = strings.TrimSpace(accountHost)
+	if input.AccessMode == "direct" {
+		input.PublicHost = strings.TrimSpace(accountHost)
+	}
 	if input.PublicHost == "" || input.PublicHost == "0.0.0.0" {
 		response.Error(w, 400, "host instance has no deployable address")
 		return
 	}
 	if input.Name == "" {
-		label := "VLESS"
-		if input.Protocol == "hysteria2" {
-			label = "HY2"
-		}
 		cached := map[string]interface{}{}
 		_ = json.Unmarshal([]byte(accountCachedInfo), &cached)
 		countryCode := firstNonEmpty(cleanCountryCode(getString(cached, "country_code")), cleanCountryCode(getString(cached, "country")), cleanCountryCode(accountCountry), cleanCountryCode(accountResolvedCountry))
 		flag := countryFlag(countryCode)
-		input.Name = strings.TrimSpace(strings.TrimSpace(flag+" ") + accountName + " " + label)
+		input.Name = strings.TrimSpace(strings.TrimSpace(flag+" ") + accountName)
+	}
+	var existingID, existingProtocol string
+	err := db.QueryRowContext(r.Context(), `SELECT id,protocol FROM managed_proxy_nodes WHERE server_id=? AND name=?`, input.ServerID, input.Name).Scan(&existingID, &existingProtocol)
+	if err == nil {
+		if existingProtocol != input.Protocol {
+			response.Error(w, http.StatusConflict, "this server already has a node with that name using another protocol")
+			return
+		}
+		s.reconcileManagedProxyNode(w, r, db, existingID, true)
+		return
+	}
+	if err != sql.ErrNoRows {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	if input.Protocol == "hysteria2" && (input.CertificatePEM == "" || input.PrivateKeyPEM == "") {
 		cert, key, certErr := generateManagedTLSCertificate(input.PublicHost)
@@ -204,7 +298,7 @@ func (s *Service) createManagedProxyNode(w http.ResponseWriter, r *http.Request,
 		input.CertificatePEM, input.PrivateKeyPEM = cert, key
 	}
 	id := "mnode-" + uuid.NewString()
-	config, clientURI, transport, err := generateManagedNode(id, input.Name, input.Protocol, input.PublicHost, input.ServerName, input.CertificatePEM, input.PrivateKeyPEM)
+	config, clientURI, transport, err := generateManagedNode(id, input.Name, input.Protocol, input.PublicHost, input.ServerName, input.CertificatePEM, input.PrivateKeyPEM, input.AccessMode, tunnelHostname, tunnelPath, input.ConnectAddress, input.ConnectPort)
 	if err != nil {
 		response.Error(w, 400, err.Error())
 		return
@@ -223,7 +317,7 @@ func (s *Service) createManagedProxyNode(w http.ResponseWriter, r *http.Request,
 	if input.Enabled != nil {
 		enabled = *input.Enabled
 	}
-	_, err = db.ExecContext(r.Context(), `INSERT INTO managed_proxy_nodes(id,server_id,name,protocol,runtime,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted,revision,enabled,publishable,apply_status) VALUES(?,?,?,?,?,?,0,?,?,?,?,?,0,'pending')`, id, input.ServerID, input.Name, input.Protocol, "sing-box", input.PublicHost, transport, configEncrypted, clientEncrypted, 1, boolToInt(enabled))
+	_, err = db.ExecContext(r.Context(), `INSERT INTO managed_proxy_nodes(id,server_id,name,protocol,runtime,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted,revision,enabled,publishable,apply_status,access_mode,tunnel_path,preferred_address_id,connect_address,connect_port,tunnel_hostname) VALUES(?,?,?,?,?,?,0,?,?,?,?,?,0,'pending',?,?,?,?,?,?)`, id, input.ServerID, input.Name, input.Protocol, "sing-box", input.PublicHost, transport, configEncrypted, clientEncrypted, 1, boolToInt(enabled), input.AccessMode, tunnelPath, strings.TrimSpace(input.PreferredAddressID), strings.TrimSpace(input.ConnectAddress), input.ConnectPort, tunnelHostname)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			response.Error(w, 409, "this server already has a node with that name")
@@ -232,7 +326,7 @@ func (s *Service) createManagedProxyNode(w http.ResponseWriter, r *http.Request,
 		}
 		return
 	}
-	s.reconcileManagedProxyNode(w, r, db, id)
+	s.reconcileManagedProxyNode(w, r, db, id, false)
 }
 
 func countryFlag(countryCode string) string {
@@ -243,7 +337,45 @@ func countryFlag(countryCode string) string {
 	return string([]rune{rune(0x1F1E6) + rune(code[0]-'A'), rune(0x1F1E6) + rune(code[1]-'A')})
 }
 
-func generateManagedNode(id, name, protocol, host, serverName, cert, key string) (string, string, string, error) {
+func generateManagedNode(id, name, protocol, host, serverName, cert, key string, tunnelOptions ...interface{}) (string, string, string, error) {
+	accessMode, tunnelHostname, tunnelPath, connectAddress := "direct", "", "", ""
+	connectPort := 0
+	if len(tunnelOptions) > 0 {
+		accessMode, _ = tunnelOptions[0].(string)
+	}
+	if len(tunnelOptions) > 1 {
+		tunnelHostname, _ = tunnelOptions[1].(string)
+	}
+	if len(tunnelOptions) > 2 {
+		tunnelPath, _ = tunnelOptions[2].(string)
+	}
+	if len(tunnelOptions) > 3 {
+		connectAddress, _ = tunnelOptions[3].(string)
+	}
+	if len(tunnelOptions) > 4 {
+		connectPort, _ = tunnelOptions[4].(int)
+	}
+	if accessMode == "cloudflare_tunnel" {
+		if tunnelHostname == "" || tunnelPath == "" {
+			return "", "", "", errors.New("Named Tunnel hostname and WebSocket path are required")
+		}
+		userID := uuid.NewString()
+		inbound := map[string]interface{}{
+			"type": "vless", "tag": id, "listen": "127.0.0.1", "listen_port": 0,
+			"users":     []interface{}{map[string]interface{}{"uuid": userID}},
+			"transport": map[string]interface{}{"type": "ws", "path": tunnelPath},
+		}
+		root := map[string]interface{}{"log": map[string]interface{}{"level": "warn"}, "inbounds": []interface{}{inbound}, "outbounds": []interface{}{map[string]interface{}{"type": "direct", "tag": "direct"}}}
+		encoded, _ := json.Marshal(root)
+		if strings.TrimSpace(connectAddress) == "" {
+			connectAddress = tunnelHostname
+		}
+		if connectPort == 0 {
+			connectPort = 443
+		}
+		q := url.Values{"encryption": {"none"}, "security": {"tls"}, "sni": {tunnelHostname}, "fp": {"chrome"}, "type": {"ws"}, "host": {tunnelHostname}, "path": {tunnelPath}}
+		return string(encoded), fmt.Sprintf("vless://%s@%s:%d?%s#%s", userID, connectAddress, connectPort, q.Encode(), url.QueryEscape(name)), "tcp", nil
+	}
 	if protocol == "vless-reality" {
 		if serverName == "" {
 			serverName = "www.cloudflare.com"
@@ -335,12 +467,23 @@ func generateManagedTLSCertificate(host string) (string, string, error) {
 	return string(certPEM), string(keyPEM), nil
 }
 
-func (s *Service) reconcileManagedProxyNode(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {
-	var serverID, runtime, configEncrypted, transport string
+func (s *Service) reconcileManagedProxyNode(w http.ResponseWriter, r *http.Request, db *sql.DB, id string, advanceRevision bool) {
+	if advanceRevision {
+		result, err := db.ExecContext(r.Context(), `UPDATE managed_proxy_nodes SET revision=revision+1,apply_status='pending',publishable=0,last_error='',updated_at=datetime('now') WHERE id=?`, id)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if affected, _ := result.RowsAffected(); affected == 0 {
+			response.Error(w, http.StatusNotFound, "internal node not found")
+			return
+		}
+	}
+	var serverID, runtime, configEncrypted, transport, accessMode string
 	var revision int64
 	var enabled int
 	var requestedPort int
-	err := db.QueryRowContext(r.Context(), `SELECT server_id,runtime,config_encrypted,revision,enabled,assigned_port,transport FROM managed_proxy_nodes WHERE id=?`, id).Scan(&serverID, &runtime, &configEncrypted, &revision, &enabled, &requestedPort, &transport)
+	err := db.QueryRowContext(r.Context(), `SELECT server_id,runtime,config_encrypted,revision,enabled,assigned_port,transport,access_mode FROM managed_proxy_nodes WHERE id=?`, id).Scan(&serverID, &runtime, &configEncrypted, &revision, &enabled, &requestedPort, &transport, &accessMode)
 	if err == sql.ErrNoRows {
 		response.Error(w, 404, "internal node not found")
 		return
@@ -366,10 +509,12 @@ func (s *Service) reconcileManagedProxyNode(w http.ResponseWriter, r *http.Reque
 		response.Error(w, 502, "Agent returned invalid node binding")
 		return
 	}
-	if err := verifyManagedNodeReachability(statePublicHost(r.Context(), db, id), applied.AssignedPort, transport); err != nil {
-		_, _ = db.ExecContext(r.Context(), `UPDATE managed_proxy_nodes SET assigned_port=?,apply_status='unreachable',publishable=0,last_error=?,updated_at=datetime('now') WHERE id=?`, applied.AssignedPort, err.Error(), id)
-		response.Error(w, http.StatusBadGateway, err.Error())
-		return
+	if accessMode == "direct" {
+		if err := verifyManagedNodeReachability(statePublicHost(r.Context(), db, id), applied.AssignedPort, transport); err != nil {
+			_, _ = db.ExecContext(r.Context(), `UPDATE managed_proxy_nodes SET assigned_port=?,apply_status='unreachable',publishable=0,last_error=?,updated_at=datetime('now') WHERE id=?`, applied.AssignedPort, err.Error(), id)
+			response.Error(w, http.StatusBadGateway, err.Error())
+			return
+		}
 	}
 	updatedConfig, _ := secure.SecureEncrypt(applied.Config)
 	var clientEncrypted string
@@ -378,7 +523,62 @@ func (s *Service) reconcileManagedProxyNode(w http.ResponseWriter, r *http.Reque
 	client = replaceURIClientPort(client, applied.AssignedPort)
 	updatedClient, _ := secure.SecureEncrypt(client)
 	_, _ = db.ExecContext(r.Context(), `UPDATE managed_proxy_nodes SET assigned_port=?,config_encrypted=?,client_uri_encrypted=?,apply_status='running',publishable=1,last_error='',updated_at=datetime('now') WHERE id=?`, applied.AssignedPort, updatedConfig, updatedClient, id)
+	if accessMode == "cloudflare_tunnel" {
+		if err := s.syncTunnelIngress(r.Context(), db, serverID); err != nil {
+			_, _ = db.ExecContext(r.Context(), `UPDATE managed_proxy_nodes SET apply_status='failed',publishable=0,last_error=?,updated_at=datetime('now') WHERE id=?`, err.Error(), id)
+			response.Error(w, http.StatusBadGateway, err.Error())
+			return
+		}
+	}
+	var node managedProxyNode
+	node.ID = id
+	node.ClientURI = client
+	_ = db.QueryRowContext(r.Context(), `SELECT access_mode,preferred_address_id,connect_address,connect_port,tunnel_hostname FROM managed_proxy_nodes WHERE id=?`, id).Scan(&node.AccessMode, &node.PreferredAddressID, &node.ConnectAddress, &node.ConnectPort, &node.TunnelHostname)
+	client = resolveManagedNodeClientURI(r.Context(), db, node)
 	response.OK(w, map[string]interface{}{"id": id, "server_id": serverID, "assigned_port": applied.AssignedPort, "status": "running", "client_uri": client})
+}
+
+func (s *Service) syncTunnelIngress(ctx context.Context, db *sql.DB, serverID string) error {
+	if s.cloudflare == nil {
+		return errors.New("Cloudflare integration is unavailable")
+	}
+	var accountID, tunnelID, hostname string
+	if err := db.QueryRowContext(ctx, `SELECT account_id,tunnel_id,hostname FROM managed_proxy_tunnels WHERE server_id=? AND apply_status='running'`, serverID).Scan(&accountID, &tunnelID, &hostname); err != nil {
+		return errors.New("managed Named Tunnel is not connected")
+	}
+	ingress, err := loadTunnelIngress(ctx, db, serverID, hostname)
+	if err != nil {
+		return err
+	}
+	return s.cloudflare.ConfigureManagedTunnel(ctx, accountID, tunnelID, ingress)
+}
+
+func resolveManagedNodeClientURI(ctx context.Context, db *sql.DB, node managedProxyNode) string {
+	if strings.TrimSpace(node.ClientURI) == "" {
+		return node.ClientURI
+	}
+	address, port := strings.TrimSpace(node.ConnectAddress), node.ConnectPort
+	if address == "" && node.PreferredAddressID != "" {
+		_ = db.QueryRowContext(ctx, `SELECT address,port FROM managed_proxy_preferences WHERE id=? AND enabled=1`, node.PreferredAddressID).Scan(&address, &port)
+	}
+	if address == "" {
+		_ = db.QueryRowContext(ctx, `SELECT address,port FROM managed_proxy_preferences WHERE enabled=1 AND is_default=1 ORDER BY sort_order ASC LIMIT 1`).Scan(&address, &port)
+	}
+	if address == "" {
+		address = node.TunnelHostname
+	}
+	if address == "" && node.AccessMode == "direct" {
+		return node.ClientURI
+	}
+	if port == 0 {
+		port = 443
+	}
+	parsed, err := url.Parse(node.ClientURI)
+	if err != nil {
+		return node.ClientURI
+	}
+	parsed.Host = net.JoinHostPort(address, strconv.Itoa(port))
+	return parsed.String()
 }
 
 func statePublicHost(ctx context.Context, db *sql.DB, id string) string {
@@ -412,7 +612,7 @@ func replaceURIClientPort(raw string, port int) string {
 }
 
 func loadPublishableManagedNodes(ctx context.Context, db *sql.DB) ([]managedProxyNode, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id,server_id,name,protocol,runtime,public_host,assigned_port,transport,client_uri_encrypted,revision,enabled,publishable,apply_status,last_error,created_at,updated_at FROM managed_proxy_nodes WHERE enabled=1 AND publishable=1 AND apply_status='running' ORDER BY created_at ASC`)
+	rows, err := db.QueryContext(ctx, `SELECT id,server_id,name,protocol,runtime,public_host,assigned_port,transport,client_uri_encrypted,revision,enabled,publishable,apply_status,last_error,access_mode,tunnel_path,preferred_address_id,connect_address,connect_port,tunnel_hostname,created_at,updated_at FROM managed_proxy_nodes WHERE enabled=1 AND publishable=1 AND apply_status='running' ORDER BY created_at ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -422,25 +622,35 @@ func loadPublishableManagedNodes(ctx context.Context, db *sql.DB) ([]managedProx
 		var node managedProxyNode
 		var client string
 		var enabled, publishable int
-		if err := rows.Scan(&node.ID, &node.ServerID, &node.Name, &node.Protocol, &node.Runtime, &node.PublicHost, &node.AssignedPort, &node.Transport, &client, &node.Revision, &enabled, &publishable, &node.ApplyStatus, &node.LastError, &node.CreatedAt, &node.UpdatedAt); err != nil {
+		if err := rows.Scan(&node.ID, &node.ServerID, &node.Name, &node.Protocol, &node.Runtime, &node.PublicHost, &node.AssignedPort, &node.Transport, &client, &node.Revision, &enabled, &publishable, &node.ApplyStatus, &node.LastError, &node.AccessMode, &node.TunnelPath, &node.PreferredAddressID, &node.ConnectAddress, &node.ConnectPort, &node.TunnelHostname, &node.CreatedAt, &node.UpdatedAt); err != nil {
 			return nil, err
 		}
 		node.Enabled, node.Publishable = enabled == 1, publishable == 1
 		node.ClientURI = secure.SecureDecrypt(client)
+		node.ClientURI = resolveManagedNodeClientURI(ctx, db, node)
 		nodes = append(nodes, node)
 	}
 	return nodes, rows.Err()
 }
 
 func (s *Service) deleteManagedProxyNode(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {
-	var serverID, runtime string
+	var serverID, runtime, applyStatus string
 	var revision int64
-	if err := db.QueryRowContext(r.Context(), `SELECT server_id,runtime,revision FROM managed_proxy_nodes WHERE id=?`, id).Scan(&serverID, &runtime, &revision); err != nil {
+	var assignedPort int
+	if err := db.QueryRowContext(r.Context(), `SELECT server_id,runtime,revision,assigned_port,apply_status FROM managed_proxy_nodes WHERE id=?`, id).Scan(&serverID, &runtime, &revision, &assignedPort, &applyStatus); err != nil {
 		if err == sql.ErrNoRows {
 			response.Error(w, 404, "internal node not found")
 		} else {
 			response.Error(w, 500, err.Error())
 		}
+		return
+	}
+	// A node that never received a binding has no managed runtime to remove.
+	// Deleting it locally also lets operators clear failed deployments made by
+	// an older Agent that rejected the host before creating any resources.
+	if assignedPort == 0 && applyStatus != "running" {
+		_, _ = db.ExecContext(r.Context(), `DELETE FROM managed_proxy_nodes WHERE id=?`, id)
+		response.OK(w, map[string]bool{"deleted": true})
 		return
 	}
 	release, _ := managedProxyRuntime(runtime)
@@ -450,5 +660,8 @@ func (s *Service) deleteManagedProxyNode(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	_, _ = db.ExecContext(r.Context(), `DELETE FROM managed_proxy_nodes WHERE id=?`, id)
+	if applyStatus == "running" {
+		_ = s.syncTunnelIngress(r.Context(), db, serverID)
+	}
 	response.OK(w, map[string]bool{"deleted": true})
 }

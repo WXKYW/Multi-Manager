@@ -425,39 +425,11 @@ fn find_available_port(requested: u16, min: u16, max: u16, transport: &str) -> R
 }
 
 #[cfg(unix)]
-fn os_release_value(key: &str) -> Option<String> {
-    fs::read_to_string("/etc/os-release")
-        .ok()?
-        .lines()
-        .find_map(|line| {
-            let (name, value) = line.split_once('=')?;
-            (name == key).then(|| value.trim_matches('"').to_string())
-        })
-}
-
-#[cfg(unix)]
 fn validate_supported_host() -> Result<(), String> {
     if !Path::new("/run/systemd/system").exists() {
         return Err("managed proxy deployment requires systemd".to_string());
     }
-    let id = os_release_value("ID").unwrap_or_default();
-    let version = os_release_value("VERSION_ID").unwrap_or_default();
-    let major = version
-        .split('.')
-        .next()
-        .and_then(|value| value.parse::<u32>().ok())
-        .unwrap_or(0);
-    let supported = match id.as_str() {
-        "debian" => major >= 12,
-        "ubuntu" => major >= 22,
-        "almalinux" | "rocky" => major >= 9,
-        _ => false,
-    };
-    if supported {
-        Ok(())
-    } else {
-        Err(format!("unsupported managed proxy host: {id} {version}"))
-    }
+    Ok(())
 }
 #[cfg(unix)]
 fn rewrite_inbound_port(config: &str, port: u16) -> Result<String, String> {

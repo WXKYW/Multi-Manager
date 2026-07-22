@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/iwvw/api-monitor/backend-go/internal/applog"
+	"github.com/iwvw/api-monitor/backend-go/internal/cloudflare"
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
 	"github.com/iwvw/api-monitor/backend-go/internal/database"
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
@@ -59,6 +60,7 @@ type Service struct {
 	targetsCache                  []networkQualityTarget
 	targetsCacheMu                sync.RWMutex
 	notifier                      Notifier
+	cloudflare                    cloudflare.ManagedTunnelAPI
 	alertStates                   sync.Map // serverID -> *alertState
 }
 
@@ -70,6 +72,10 @@ const agentMetricsStaleAfter = 45 * time.Second
 
 func (s *Service) SetNotifier(n Notifier) {
 	s.notifier = n
+}
+
+func (s *Service) SetCloudflareTunnelManager(manager cloudflare.ManagedTunnelAPI) {
+	s.cloudflare = manager
 }
 
 func (s *Service) validateAgentConnection(ctx context.Context, serverID, key string) error {
@@ -787,7 +793,7 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			id TEXT PRIMARY KEY,
 			server_id TEXT NOT NULL,
 			name TEXT NOT NULL,
-			protocol TEXT NOT NULL CHECK(protocol IN ('vless-reality', 'hysteria2')),
+			protocol TEXT NOT NULL CHECK(protocol IN ('vless-reality', 'hysteria2', 'vless-ws-tunnel')),
 			runtime TEXT NOT NULL DEFAULT 'sing-box',
 			public_host TEXT NOT NULL,
 			assigned_port INTEGER NOT NULL DEFAULT 0,
@@ -803,8 +809,43 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			updated_at TEXT DEFAULT (datetime('now')),
 			FOREIGN KEY (server_id) REFERENCES server_accounts(id) ON DELETE CASCADE
 		)`,
+		`CREATE TABLE IF NOT EXISTS managed_proxy_tunnels (
+			server_id TEXT PRIMARY KEY,
+			account_id TEXT NOT NULL,
+			zone_id TEXT NOT NULL,
+			zone_name TEXT NOT NULL DEFAULT '',
+			tunnel_id TEXT NOT NULL DEFAULT '',
+			tunnel_name TEXT NOT NULL DEFAULT '',
+			hostname TEXT NOT NULL,
+			dns_record_id TEXT NOT NULL DEFAULT '',
+			token_encrypted TEXT NOT NULL DEFAULT '',
+			revision INTEGER NOT NULL DEFAULT 1,
+			desired_status TEXT NOT NULL DEFAULT 'running',
+			apply_status TEXT NOT NULL DEFAULT 'pending',
+			last_stage TEXT NOT NULL DEFAULT '',
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at TEXT DEFAULT (datetime('now')),
+			updated_at TEXT DEFAULT (datetime('now')),
+			FOREIGN KEY (server_id) REFERENCES server_accounts(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS managed_proxy_preferences (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			address TEXT NOT NULL,
+			port INTEGER NOT NULL DEFAULT 443,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			is_default INTEGER NOT NULL DEFAULT 0,
+			sort_order INTEGER NOT NULL DEFAULT 0,
+			last_status TEXT NOT NULL DEFAULT 'unknown',
+			last_latency_ms INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			checked_at TEXT,
+			created_at TEXT DEFAULT (datetime('now')),
+			updated_at TEXT DEFAULT (datetime('now'))
+		)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_managed_proxy_node_name_server ON managed_proxy_nodes(server_id, name)`,
 		`CREATE INDEX IF NOT EXISTS idx_managed_proxy_nodes_server ON managed_proxy_nodes(server_id, updated_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_managed_proxy_preferences_order ON managed_proxy_preferences(enabled DESC, is_default DESC, sort_order ASC)`,
 		`CREATE INDEX IF NOT EXISTS idx_proxy_traffic_server_time ON server_proxy_traffic_reports(server_id, reported_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS server_network_quality_targets (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -898,6 +939,21 @@ func migrateColumns(ctx context.Context, db *sql.DB) error {
 		if exists, err := hasColumn(ctx, db, "server_proxy_desired_state", f.Name); err == nil && !exists {
 			if _, err := db.ExecContext(ctx, f.SQL); err != nil {
 				return fmt.Errorf("migrate managed proxy %s: %w", f.Name, err)
+			}
+		}
+	}
+	nodeFields := []struct{ Name, SQL string }{
+		{"access_mode", "ALTER TABLE managed_proxy_nodes ADD COLUMN access_mode TEXT NOT NULL DEFAULT 'direct'"},
+		{"tunnel_path", "ALTER TABLE managed_proxy_nodes ADD COLUMN tunnel_path TEXT NOT NULL DEFAULT ''"},
+		{"preferred_address_id", "ALTER TABLE managed_proxy_nodes ADD COLUMN preferred_address_id TEXT NOT NULL DEFAULT ''"},
+		{"connect_address", "ALTER TABLE managed_proxy_nodes ADD COLUMN connect_address TEXT NOT NULL DEFAULT ''"},
+		{"connect_port", "ALTER TABLE managed_proxy_nodes ADD COLUMN connect_port INTEGER NOT NULL DEFAULT 0"},
+		{"tunnel_hostname", "ALTER TABLE managed_proxy_nodes ADD COLUMN tunnel_hostname TEXT NOT NULL DEFAULT ''"},
+	}
+	for _, f := range nodeFields {
+		if exists, err := hasColumn(ctx, db, "managed_proxy_nodes", f.Name); err == nil && !exists {
+			if _, err := db.ExecContext(ctx, f.SQL); err != nil {
+				return fmt.Errorf("migrate managed proxy node %s: %w", f.Name, err)
 			}
 		}
 	}

@@ -3,7 +3,7 @@ import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
-import { Input, Textarea } from '@cloudflare/kumo/components/input';
+import { Input } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
@@ -15,6 +15,7 @@ import { Tooltip, TooltipProvider } from '@cloudflare/kumo/components/tooltip';
 import { LayerCard, Tabs } from '@cloudflare/kumo';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { SectionCard } from '../components/ui/AppPrimitives.jsx';
+import CodeEditor from '../components/ui/CodeEditor.jsx';
 import {
   Activity,
   ArrowRight,
@@ -1269,7 +1270,11 @@ function SchedulerPage() {
                 <Select size="sm" label="任务类型" className="w-full" value={taskForm.type} onValueChange={(value) => setTaskForm((prev) => ({ ...prev, type: value }))} items={TYPE_ITEMS} />
                 <Input size="sm" label="节点标签选择器" value={taskForm.node_selector} onChange={(event) => setTaskForm((prev) => ({ ...prev, node_selector: event.target.value }))} />
               </div>
-              <Textarea size="sm" label={taskCommandLabel} placeholder={taskCommandPlaceholder} value={taskForm.command} onChange={(event) => setTaskForm((prev) => ({ ...prev, command: event.target.value }))} rows={4} />
+              {taskForm.type === 'shell' || taskForm.type === 'agent' ? (
+                <CodeEditor label={taskCommandLabel} language="shell" placeholder={taskCommandPlaceholder} value={taskForm.command} onChange={(command) => setTaskForm((prev) => ({ ...prev, command }))} minHeight="8rem" />
+              ) : (
+                <Input size="sm" label={taskCommandLabel} placeholder={taskCommandPlaceholder} value={taskForm.command} onChange={(event) => setTaskForm((prev) => ({ ...prev, command: event.target.value }))} />
+              )}
               <div className="grid gap-3 sm:grid-cols-4">
                 <Input size="sm" type="number" label="超时秒数" min="1" value={taskForm.timeout_seconds} onChange={(event) => setTaskForm((prev) => ({ ...prev, timeout_seconds: Number(event.target.value) }))} />
                 <Input size="sm" type="number" label="重试次数" min="0" value={taskForm.retry_count} onChange={(event) => setTaskForm((prev) => ({ ...prev, retry_count: Number(event.target.value) }))} />
@@ -1357,13 +1362,13 @@ function SchedulerPage() {
                                 items={taskItems}
                               />
                               {!selectedWorkflowNode.task_id && (
-                                <Textarea
-                                  size="sm"
+                                <CodeEditor
                                   label="内联命令"
+                                  language="shell"
                                   value={selectedWorkflowNode.command || ''}
-                                  onChange={(event) => updateWorkflowNode(selectedWorkflowNode.id, { command: event.target.value })}
+                                  onChange={(command) => updateWorkflowNode(selectedWorkflowNode.id, { command })}
                                   placeholder="echo workflow-inline-step"
-                                  rows={3}
+                                  minHeight="8rem"
                                 />
                               )}
                             </div>

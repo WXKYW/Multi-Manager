@@ -4,7 +4,7 @@ import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
 import { Checkbox } from '@cloudflare/kumo/components/checkbox';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
-import { Input, Textarea } from '@cloudflare/kumo/components/input';
+import { Input } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Table } from '@cloudflare/kumo/components/table';
 import { Switch } from '@cloudflare/kumo/components/switch';
@@ -25,6 +25,7 @@ import useTableResize from '../composables/useTableResize.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
 import { AppCard, PageStack, PageToolbar, SectionCard } from '../components/ui/AppPrimitives.jsx';
+import CodeEditor from '../components/ui/CodeEditor.jsx';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
@@ -3027,11 +3028,12 @@ function DnsPage() {
               {loading.workerScript ? (
                 <SkeletonLine className="h-64 w-full" />
               ) : (
-                <Textarea
+                <CodeEditor
                   label="脚本内容"
+                  language="javascript"
                   value={workerForm.script}
-                  onChange={(event) => setWorkerForm((prev) => ({ ...prev, script: event.target.value }))}
-                  className="min-h-96 font-mono text-xs"
+                  onChange={(script) => setWorkerForm((prev) => ({ ...prev, script }))}
+                  minHeight="24rem"
                 />
               )}
               <div className="flex justify-end gap-2">
@@ -3130,7 +3132,7 @@ function DnsPage() {
               {loading.workerAnalytics ? (
                 <SkeletonLine className="h-64 w-full" />
               ) : (
-                <Textarea label="统计数据" value={JSON.stringify(workerAnalyticsState.analytics || {}, null, 2)} readOnly className="min-h-80 font-mono text-xs" />
+                <CodeEditor label="统计数据" language="json" value={JSON.stringify(workerAnalyticsState.analytics || {}, null, 2)} readOnly minHeight="20rem" />
               )}
               <div className="flex justify-end"><Button size="sm" variant="secondary" onClick={closeModal}>关闭</Button></div>
             </div>
@@ -3289,11 +3291,12 @@ function DnsPage() {
               <Dialog.Title className="text-base font-semibold text-kumo-strong">
                 导入{importState.kind === 'accounts' ? '账号' : importState.kind === 'templates' ? '模板' : 'DNS 记录'}
               </Dialog.Title>
-              <Textarea
+              <CodeEditor
                 label="JSON 内容"
+                language="json"
                 value={importState.text}
-                onChange={(event) => setImportState((prev) => ({ ...prev, text: event.target.value }))}
-                className="min-h-80 font-mono text-xs"
+                onChange={(text) => setImportState((prev) => ({ ...prev, text }))}
+                minHeight="20rem"
                 placeholder='{"records":[{"type":"A","name":"@","content":"1.1.1.1","ttl":1,"proxied":false}]}'
               />
               {importState.kind !== 'records' && (
@@ -3355,11 +3358,12 @@ function DnsPage() {
               {loading.tunnelConfig ? (
                 <SkeletonLine className="h-80 w-full" />
               ) : (
-                <Textarea
+                <CodeEditor
                   label="配置 JSON"
+                  language="json"
                   value={tunnelConfigState.text}
-                  onChange={(event) => setTunnelConfigState((prev) => ({ ...prev, text: event.target.value }))}
-                  className="min-h-96 font-mono text-xs"
+                  onChange={(text) => setTunnelConfigState((prev) => ({ ...prev, text }))}
+                  minHeight="24rem"
                 />
               )}
               <div className="flex justify-end gap-2">

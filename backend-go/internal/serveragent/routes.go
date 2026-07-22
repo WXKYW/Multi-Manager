@@ -102,10 +102,14 @@ func (s *Service) handleAgentRoutes(w http.ResponseWriter, r *http.Request, db *
 
 	case len(subparts) == 2 && subparts[0] == "proxy" && subparts[1] == "nodes":
 		s.handleManagedProxyNodes(w, r, db, "")
+	case len(subparts) >= 2 && subparts[0] == "proxy" && subparts[1] == "tunnels":
+		s.handleManagedTunnelRoutes(w, r, db, subparts[2:])
+	case len(subparts) >= 2 && subparts[0] == "proxy" && subparts[1] == "preferred-addresses":
+		s.handlePreferredAddressRoutes(w, r, db, subparts[2:])
 	case len(subparts) == 3 && subparts[0] == "proxy" && subparts[1] == "nodes":
 		s.handleManagedProxyNodes(w, r, db, subparts[2])
 	case len(subparts) == 4 && subparts[0] == "proxy" && subparts[1] == "nodes" && subparts[3] == "reconcile" && r.Method == http.MethodPost:
-		s.reconcileManagedProxyNode(w, r, db, subparts[2])
+		s.reconcileManagedProxyNode(w, r, db, subparts[2], true)
 	case len(subparts) == 2 && subparts[0] == "proxy" && r.Method == http.MethodGet:
 		s.getProxyDesiredState(w, r, db, subparts[1])
 	case len(subparts) == 2 && subparts[0] == "proxy" && r.Method == http.MethodPut:

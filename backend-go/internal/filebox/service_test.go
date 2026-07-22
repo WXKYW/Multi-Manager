@@ -47,7 +47,7 @@ func TestTextShareRetrieveVerifyDownloadAndExpire(t *testing.T) {
 		} `json:"data"`
 	}
 	mustDecodeFilebox(t, res, &createPayload)
-	if !createPayload.Success || createPayload.Code == "" || !createPayload.Data.RequiresPassword || createPayload.Data.Preview != "hello filebox" {
+	if !createPayload.Success || createPayload.Code == "" || !createPayload.Data.RequiresPassword || createPayload.Data.Preview != "" {
 		t.Fatalf("unexpected create payload: %#v", createPayload)
 	}
 
@@ -60,10 +60,11 @@ func TestTextShareRetrieveVerifyDownloadAndExpire(t *testing.T) {
 		Data    struct {
 			Code             string `json:"code"`
 			RequiresPassword bool   `json:"requiresPassword"`
+			Preview          string `json:"preview"`
 		} `json:"data"`
 	}
 	mustDecodeFilebox(t, res, &metadata)
-	if !metadata.Success || metadata.Data.Code != createPayload.Code || !metadata.Data.RequiresPassword {
+	if !metadata.Success || metadata.Data.Code != createPayload.Code || !metadata.Data.RequiresPassword || metadata.Data.Preview != "" {
 		t.Fatalf("unexpected metadata: %#v", metadata)
 	}
 
@@ -100,6 +101,71 @@ func TestTextShareRetrieveVerifyDownloadAndExpire(t *testing.T) {
 	mustDecodeFilebox(t, res, &logs)
 	if !logs.Success || len(logs.Data) < 2 {
 		t.Fatalf("expected access logs, got %#v", logs)
+	}
+}
+
+func TestMarkdownTextSharePreservesFormatAndDownloadMetadata(t *testing.T) {
+	service := newTestService(t, fakeAuth{ok: true})
+	markdown := "# Release notes\n\n- [x] GFM task\n\n| Name | Value |\n| --- | --- |\n| API | Ready |"
+	body, contentType := multipartBody(t, map[string]string{
+		"type":   "text",
+		"text":   markdown,
+		"expiry": "1",
+	}, nil)
+	res := performFileboxRequest(service, http.MethodPost, "/api/filebox/share", body, contentType)
+	if res.Code != http.StatusOK {
+		t.Fatalf("create markdown status = %d body=%s", res.Code, res.Body.String())
+	}
+	var created struct {
+		Success bool   `json:"success"`
+		Code    string `json:"code"`
+		Data    struct {
+			Filename   string `json:"filename"`
+			MIMEType   string `json:"mimetype"`
+			TextFormat string `json:"textFormat"`
+			Preview    string `json:"preview"`
+			Size       int64  `json:"size"`
+		} `json:"data"`
+	}
+	mustDecodeFilebox(t, res, &created)
+	if !created.Success || created.Code == "" || created.Data.TextFormat != textFormatMarkdown || !strings.HasSuffix(created.Data.Filename, ".md") || created.Data.MIMEType != "text/markdown; charset=utf-8" || created.Data.Preview == "" || created.Data.Size != int64(len([]byte(markdown))) {
+		t.Fatalf("unexpected markdown payload: %#v", created)
+	}
+
+	entry, err := service.GetEntry(context.Background(), created.Code, false)
+	if err != nil || entry == nil {
+		t.Fatalf("load markdown entry: entry=%#v err=%v", entry, err)
+	}
+	if entry.Metadata["textFormat"] != textFormatMarkdown {
+		t.Fatalf("markdown metadata = %#v", entry.Metadata)
+	}
+
+	res = performFileboxRequest(service, http.MethodGet, "/api/filebox/public/"+created.Code, nil, "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("markdown metadata status = %d body=%s", res.Code, res.Body.String())
+	}
+	var metadata struct {
+		Data struct {
+			TextFormat string `json:"textFormat"`
+			Filename   string `json:"filename"`
+		} `json:"data"`
+	}
+	mustDecodeFilebox(t, res, &metadata)
+	if metadata.Data.TextFormat != textFormatMarkdown || !strings.HasSuffix(metadata.Data.Filename, ".md") {
+		t.Fatalf("unexpected public markdown metadata: %#v", metadata)
+	}
+
+	res = performFileboxRequest(service, http.MethodGet, "/api/filebox/public/"+created.Code+"/download", nil, "")
+	if res.Code != http.StatusOK || res.Body.String() != markdown {
+		t.Fatalf("markdown download status=%d body=%q", res.Code, res.Body.String())
+	}
+
+	res = performFileboxRequest(service, http.MethodGet, "/api/filebox/d/"+created.Code, nil, "")
+	if res.Code != http.StatusOK || res.Body.String() != markdown {
+		t.Fatalf("markdown short direct link status=%d body=%q", res.Code, res.Body.String())
+	}
+	if got := res.Header().Get("Content-Type"); got != "text/markdown; charset=utf-8" {
+		t.Fatalf("markdown short direct link content type = %q", got)
 	}
 }
 

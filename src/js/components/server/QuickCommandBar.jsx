@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
-import { Input, Textarea } from '@cloudflare/kumo/components/input';
+import { Input } from '@cloudflare/kumo/components/input';
 import { Tabs } from '@cloudflare/kumo';
 import { TOOL_TABS_PROPS } from '../../modules/kumoTabs.js';
 import { toast } from '../../modules/toast.js';
@@ -16,6 +16,7 @@ import {
   updateCommandSnippet,
 } from '../../modules/server-commands.js';
 import { Clock, Copy, Edit, Plus, Save, Send, Star, Trash } from '../Icons.jsx';
+import CodeEditor from '../ui/CodeEditor.jsx';
 
 const DEFAULT_LINUX_COMMANDS = [
   { title: '当前目录', content: 'pwd', category: '默认', platform: 'linux' },
@@ -445,7 +446,7 @@ export default function QuickCommandBar({
                 </div>
               )}
             </div>
-            <Textarea size="sm" label="命令" value={form.content} onChange={event => setForm(prev => ({ ...prev, content: event.target.value }))} className="min-h-28 font-mono text-xs" />
+            <CodeEditor label="命令" language="shell" value={form.content} onChange={content => setForm(prev => ({ ...prev, content }))} minHeight="8rem" />
             <Input size="sm" label="说明" value={form.description} onChange={event => setForm(prev => ({ ...prev, description: event.target.value }))} />
             <Button size="sm" variant={form.favorite ? 'primary' : 'secondary'} icon={<Star className="h-3.5 w-3.5" />} onClick={() => setForm(prev => ({ ...prev, favorite: !prev.favorite }))}>
               {form.favorite ? '已收藏' : '收藏'}

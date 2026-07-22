@@ -1769,7 +1769,7 @@ func (s *Service) handleCreateV2Task(w http.ResponseWriter, r *http.Request, db 
 		mappedData = ""
 		timeoutSec = 60
 
-	case "compose.up", "compose.down", "compose.start", "compose.stop", "compose.restart", "compose.pull":
+	case "compose.up", "compose.down", "compose.start", "compose.stop", "compose.restart", "compose.pull", "compose.update":
 		actionPart := strings.Split(req.Action, ".")[1]
 		project, _ := req.Payload["project"].(string)
 		if project == "" {
@@ -1792,7 +1792,7 @@ func (s *Service) handleCreateV2Task(w http.ResponseWriter, r *http.Request, db 
 			"project":     project,
 			"config_file": configFile,
 		}
-		if actionPart == "pull" {
+		if actionPart == "pull" || actionPart == "update" {
 			timeoutSec = 300
 		} else {
 			timeoutSec = 120
@@ -1922,7 +1922,13 @@ func (s *Service) runAgentTaskAndWait(serverID string, taskType int, command str
 		return "", fmt.Errorf("agent offline")
 	}
 
-	task := s.taskRegistry.Create(serverID, fmt.Sprintf("docker.internal.%d", taskType), command)
+	taskTypeName := fmt.Sprintf("docker.internal.%d", taskType)
+	if taskType == 51 {
+		taskTypeName = "proxy.cloudflared"
+	} else if taskType == 50 {
+		taskTypeName = "proxy.runtime"
+	}
+	task := s.taskRegistry.Create(serverID, taskTypeName, command)
 	eventCh := task.Subscribe()
 
 	err := conn.SendEvent("dashboard:task", map[string]interface{}{
@@ -1967,4 +1973,8 @@ func (s *Service) RunCommandTaskAndWait(serverID string, command string, timeout
 // managed proxy module. Callers cannot vary the task type or timeout.
 func (s *Service) RunProxyRuntimeTaskAndWait(serverID, desiredState string) (string, error) {
 	return s.runAgentTaskAndWait(serverID, 50, desiredState, 3*time.Minute)
+}
+
+func (s *Service) RunCloudflaredTaskAndWait(serverID, desiredState string) (string, error) {
+	return s.runAgentTaskAndWait(serverID, 51, desiredState, 3*time.Minute)
 }

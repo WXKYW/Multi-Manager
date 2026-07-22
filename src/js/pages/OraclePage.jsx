@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@cloudflare/kumo/components/button';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
-import { Input, Textarea } from '@cloudflare/kumo/components/input';
+import { Input } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Table } from '@cloudflare/kumo/components/table';
 import { DropdownMenu, Tabs } from '@cloudflare/kumo';
@@ -11,6 +11,7 @@ import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { AppTable, DataTableFrame, EmptyState, InsetPanel, KeyValueGrid, PageStack, PageToolbar, SectionCard, StatusBadge } from '../components/ui/AppPrimitives.jsx';
+import CodeEditor from '../components/ui/CodeEditor.jsx';
 import {
   Cloud,
   Copy,
@@ -1098,12 +1099,13 @@ function OraclePage() {
                     ]}
                   />
                 </InsetPanel>
-                <Textarea
-                  aria-label="控制台连接 SSH 公钥"
+                <CodeEditor
+                  label="控制台连接 SSH 公钥"
+                  language="text"
                   value={consolePublicKey}
-                  onChange={(event) => setConsolePublicKey(event.target.value)}
+                  onChange={setConsolePublicKey}
                   placeholder="粘贴用于创建 console connection 的 SSH 公钥"
-                  rows={8}
+                  minHeight="10rem"
                 />
                 <div className="text-xs leading-5 text-kumo-subtle">
                   使用本地 SSH 公钥创建 Oracle console connection，创建后可在右侧查看连接串和指纹。
@@ -1383,24 +1385,18 @@ function OraclePage() {
             从 OCI 控制台复制 API Key 配置，把下载的 PEM 私钥全文粘贴到私钥框。
           </Dialog.Description>
           <div className="mb-4 space-y-2">
-            <Textarea
-              size="sm"
+            <CodeEditor
               label="OCI 配置文件"
-              className="min-h-28 w-full font-mono text-xs"
+              language="ini"
               value={accountConfigText}
-              onChange={(event) => updateAccountConfigText(event.target.value)}
+              onChange={updateAccountConfigText}
+              minHeight="10rem"
               placeholder={`[DEFAULT]
 user=ocid1.user...
 fingerprint=fa:d1:...
 tenancy=ocid1.tenancy...
 region=us-sanjose-1
 key_file=<path to your private keyfile>`}
-              autoComplete="off"
-              data-1p-ignore
-              data-lpignore="true"
-              data-bwignore="true"
-              data-form-type="other"
-              spellCheck={false}
             />
             <div className="flex items-start gap-1.5 text-xs leading-5 text-kumo-subtle">
               <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -1485,20 +1481,13 @@ key_file=<path to your private keyfile>`}
                   上传 PEM
                 </Button>
               </div>
-              <Textarea
-                size="sm"
-                aria-label="Oracle API 私钥 PEM"
-                className="min-h-40 w-full font-mono text-xs"
+              <CodeEditor
+                label="Oracle API 私钥 PEM"
+                language="text"
                 value={accountForm.privateKeyPem}
-                onChange={(event) => setAccountForm({ ...accountForm, privateKeyPem: event.target.value })}
-                rows={7}
+                onChange={(privateKeyPem) => setAccountForm({ ...accountForm, privateKeyPem })}
+                minHeight="10rem"
                 placeholder={editingAccount ? '留空不修改私钥' : '-----BEGIN PRIVATE KEY-----'}
-                autoComplete="off"
-                data-1p-ignore
-                data-lpignore="true"
-                data-bwignore="true"
-                data-form-type="other"
-                spellCheck={false}
               />
             </div>
           </div>
@@ -1530,14 +1519,13 @@ key_file=<path to your private keyfile>`}
                 {accountImportFileName || '尚未选择文件'}
               </div>
             </div>
-            <Textarea
-              size="sm"
-              aria-label="导入 Oracle 账号 JSON"
-              className="min-h-56 w-full font-mono text-xs"
+            <CodeEditor
+              label="导入 Oracle 账号 JSON"
+              language="json"
               value={accountImportText}
-              onChange={(event) => setAccountImportText(event.target.value)}
+              onChange={setAccountImportText}
+              minHeight="14rem"
               placeholder={`{\n  "version": "1.0",\n  "accounts": []\n}`}
-              spellCheck={false}
             />
             <Switch
               size="sm"

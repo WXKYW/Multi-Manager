@@ -38,6 +38,8 @@ const (
 	voidRoomModePersistent = "persistent"
 )
 
+const textFormatMarkdown = "markdown"
+
 type Authenticator interface {
 	IsAuthenticated(context.Context, *http.Request) (bool, error)
 }
@@ -157,6 +159,7 @@ type PublicEntry struct {
 	Downloads        int64   `json:"downloads"`
 	MaxDownloads     int64   `json:"maxDownloads"`
 	RequiresPassword bool    `json:"requiresPassword"`
+	TextFormat       string  `json:"textFormat,omitempty"`
 	Preview          string  `json:"preview,omitempty"`
 }
 
@@ -239,6 +242,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case len(parts) == 2 && parts[0] == "public" && r.Method == http.MethodGet:
 		s.sendEntryMetadata(w, r, parts[1])
 	case len(parts) == 2 && parts[0] == "download" && r.Method == http.MethodGet:
+		s.downloadEntry(w, r, parts[1])
+	case len(parts) == 2 && parts[0] == "d" && r.Method == http.MethodGet:
 		s.downloadEntry(w, r, parts[1])
 	case len(parts) == 3 && parts[0] == "public" && parts[2] == "download" && r.Method == http.MethodGet:
 		s.downloadEntry(w, r, parts[1])
@@ -1094,7 +1099,14 @@ func (s *Service) downloadEntry(w http.ResponseWriter, r *http.Request, code str
 	}
 
 	if entry.Type == "text" {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		contentType := "text/plain; charset=utf-8"
+		if entry.MIMEType != nil && *entry.MIMEType != "" {
+			contentType = *entry.MIMEType
+		} else if entryTextFormat(entry) == textFormatMarkdown {
+			contentType = "text/markdown; charset=utf-8"
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": entry.Filename}))
 		if entry.Content != nil {
 			_, _ = io.WriteString(w, *entry.Content)
 		}
@@ -1309,6 +1321,12 @@ func (s *Service) AddText(ctx context.Context, content string, expiryHours float
 	if err != nil {
 		return nil, err
 	}
+	filename := "text_" + code + ".md"
+	mimeType := "text/markdown; charset=utf-8"
+	metadataJSON, err := json.Marshal(map[string]string{"textFormat": textFormatMarkdown})
+	if err != nil {
+		return nil, fmt.Errorf("encode filebox text metadata: %w", err)
+	}
 
 	db, err := s.open(ctx)
 	if err != nil {
@@ -1317,10 +1335,10 @@ func (s *Service) AddText(ctx context.Context, content string, expiryHours float
 	defer db.Close()
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO filebox_entries (
-			code, type, content, filename, created_at, expiry,
-			burn_after_reading, max_downloads, access_password_hash
-		) VALUES (?, 'text', ?, ?, ?, ?, ?, ?, ?)
-	`, code, content, "text_"+code+".txt", now, expiry, boolInt(burnAfterReading), maxDownloads, passwordHash)
+			code, type, content, filename, mimetype, size, created_at, expiry,
+			burn_after_reading, max_downloads, access_password_hash, metadata_json
+		) VALUES (?, 'text', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, code, content, filename, mimeType, len([]byte(content)), now, expiry, boolInt(burnAfterReading), maxDownloads, passwordHash, string(metadataJSON))
 	if err != nil {
 		return nil, fmt.Errorf("create filebox text share: %w", err)
 	}
@@ -1804,8 +1822,9 @@ func publicEntry(entry *Entry) PublicEntry {
 		Downloads:        entry.Downloads,
 		MaxDownloads:     entry.MaxDownloads,
 		RequiresPassword: entry.RequiresPassword,
+		TextFormat:       entryTextFormat(entry),
 	}
-	if entry.Type == "text" && entry.Content != nil {
+	if entry.Type == "text" && entry.Content != nil && !entry.RequiresPassword {
 		runes := []rune(*entry.Content)
 		if len(runes) > 80 {
 			runes = runes[:80]
@@ -1813,6 +1832,13 @@ func publicEntry(entry *Entry) PublicEntry {
 		result.Preview = string(runes)
 	}
 	return result
+}
+
+func entryTextFormat(entry *Entry) string {
+	if entry == nil || entry.Type != "text" {
+		return ""
+	}
+	return textFormatMarkdown
 }
 
 func (s *Service) migrateJSONMetadata(ctx context.Context) error {

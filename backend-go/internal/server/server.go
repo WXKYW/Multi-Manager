@@ -71,6 +71,8 @@ func NewServer(cfg config.Config) *Server {
 	notifyService := notification.New(cfg)
 	serverAgentService := serveragent.New(cfg)
 	serverAgentService.SetNotifier(notifyService)
+	cloudflareService := cloudflare.New(cfg)
+	serverAgentService.SetCloudflareTunnelManager(cloudflareService)
 	cronService := cronjobs.New(cfg)
 	cronService.SetAgentRunner(serverAgentService)
 	uptimeService := uptime.New(cfg, authService, notifyService)
@@ -97,7 +99,7 @@ func NewServer(cfg config.Config) *Server {
 		aliyun:   aliyun.New(cfg),
 		tencent:  tencent.New(cfg),
 		oracle:   oracle.New(cfg),
-		cf:       cloudflare.New(cfg),
+		cf:       cloudflareService,
 		m365:     m365.New(cfg),
 		openai:   openai.New(cfg),
 		server:   serverAgentService,

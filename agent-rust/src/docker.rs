@@ -7,8 +7,8 @@ use bollard::image::{
     CreateImageOptions, ListImagesOptions, PruneImagesOptions, RemoveImageOptions,
 };
 use bollard::models::{
-    EndpointSettings, HostConfig, Ipam, IpamConfig, PortBinding, PortMap, RestartPolicy,
-    RestartPolicyNameEnum,
+    EndpointSettings, HostConfig, ImageDeleteResponseItem, Ipam, IpamConfig, PortBinding, PortMap,
+    RestartPolicy, RestartPolicyNameEnum,
 };
 use bollard::network::{
     ConnectNetworkOptions, CreateNetworkOptions, DisconnectNetworkOptions, ListNetworksOptions,
@@ -585,6 +585,7 @@ impl DockerBridge {
             id: String,
             created: String,
             size: String,
+            dangling: bool,
         }
 
         if self.docker.is_none() {
@@ -608,6 +609,8 @@ impl DockerBridge {
             let id = short_docker_id(&image.id);
             let created = unix_seconds_to_display(image.created);
             let size = format_docker_bytes(image.size);
+            let dangling = image.repo_tags.is_empty()
+                || image.repo_tags.iter().all(|tag| tag == "<none>:<none>");
             let tags = if image.repo_tags.is_empty() {
                 vec!["<none>:<none>".to_string()]
             } else {
@@ -621,6 +624,7 @@ impl DockerBridge {
                     id: id.clone(),
                     created: created.clone(),
                     size: size.clone(),
+                    dangling,
                 });
             }
         }
@@ -781,10 +785,15 @@ impl DockerBridge {
                     }))
                     .await
                     .map_err(|e| format!("Docker image prune failed: {}", e))?;
-                Ok(format!(
-                    "image prune success, reclaimed {}",
-                    format_docker_bytes(result.space_reclaimed.unwrap_or_default())
-                ))
+                let deleted = count_pruned_images(result.images_deleted.unwrap_or_default());
+                let reclaimed_bytes = result.space_reclaimed.unwrap_or_default();
+                Ok(serde_json::json!({
+                    "resource": "image",
+                    "deleted": deleted,
+                    "reclaimed_bytes": reclaimed_bytes,
+                    "reclaimed": format_docker_bytes(reclaimed_bytes)
+                })
+                .to_string())
             }
             _ => Err(format!("unsupported image action: {}", req.action)),
         }
@@ -927,10 +936,11 @@ impl DockerBridge {
                     }))
                     .await
                     .map_err(|e| format!("Docker network prune failed: {}", e))?;
-                Ok(format!(
-                    "network prune success, deleted {}",
-                    result.networks_deleted.unwrap_or_default().len()
-                ))
+                Ok(serde_json::json!({
+                    "resource": "network",
+                    "deleted": result.networks_deleted.unwrap_or_default().len()
+                })
+                .to_string())
             }
             _ => Err(format!("unsupported network action: {}", req.action)),
         }
@@ -988,10 +998,13 @@ impl DockerBridge {
                     }))
                     .await
                     .map_err(|e| format!("Docker volume prune failed: {}", e))?;
-                Ok(format!(
-                    "volume prune success, reclaimed {}",
-                    format_docker_bytes(result.space_reclaimed.unwrap_or_default())
-                ))
+                Ok(serde_json::json!({
+                    "resource": "volume",
+                    "deleted": result.volumes_deleted.unwrap_or_default().len(),
+                    "reclaimed_bytes": result.space_reclaimed.unwrap_or_default(),
+                    "reclaimed": format_docker_bytes(result.space_reclaimed.unwrap_or_default())
+                })
+                .to_string())
             }
             _ => Err(format!("unsupported volume action: {}", req.action)),
         }
@@ -1031,31 +1044,7 @@ impl DockerBridge {
         let req: ComposeActionReq =
             serde_json::from_str(data).map_err(|e| format!("解析请求失败: {}", e))?;
 
-        let mut args = vec![];
-        if !req.config_file.is_empty() {
-            for file in req.config_file.split(',') {
-                let file = file.trim();
-                if !file.is_empty() {
-                    args.push("-f");
-                    args.push(file);
-                }
-            }
-        } else if let Some(project) = req.project.as_deref() {
-            if !project.trim().is_empty() {
-                args.push("--project-name");
-                args.push(project.trim());
-            }
-        }
-
-        match req.action.as_str() {
-            "up" => args.extend(["up", "-d"]),
-            "down" => args.push("down"),
-            "stop" => args.push("stop"),
-            "start" => args.push("start"),
-            "restart" => args.push("restart"),
-            "pull" => args.push("pull"),
-            _ => return Err(format!("不支持的 Compose 操作: {}", req.action)),
-        }
+        let args = docker_compose_args(&req.config_file, req.project.as_deref(), &req.action)?;
 
         let output = Command::new("docker")
             .arg("compose")
@@ -1467,6 +1456,49 @@ impl DockerBridge {
         update_progress(100, "更新完成", "");
         Ok(())
     }
+}
+
+fn docker_compose_args(
+    config_file: &str,
+    project: Option<&str>,
+    action: &str,
+) -> Result<Vec<String>, String> {
+    let mut args = Vec::new();
+    for file in config_file
+        .split(',')
+        .map(str::trim)
+        .filter(|file| !file.is_empty())
+    {
+        args.push("-f".to_string());
+        args.push(file.to_string());
+    }
+    if args.is_empty() {
+        if let Some(project) = project.map(str::trim).filter(|value| !value.is_empty()) {
+            args.push("--project-name".to_string());
+            args.push(project.to_string());
+        }
+    }
+
+    let action_args: &[&str] = match action {
+        "up" => &["up", "-d"],
+        "down" => &["down"],
+        "stop" => &["stop"],
+        "start" => &["start"],
+        "restart" => &["restart"],
+        "pull" => &["pull"],
+        "update" => &["up", "-d", "--pull", "always", "--force-recreate"],
+        _ => return Err(format!("不支持的 Compose 操作: {}", action)),
+    };
+    args.extend(action_args.iter().map(|value| (*value).to_string()));
+    Ok(args)
+}
+
+fn count_pruned_images(items: Vec<ImageDeleteResponseItem>) -> usize {
+    items
+        .into_iter()
+        .filter_map(|item| item.deleted)
+        .collect::<HashSet<_>>()
+        .len()
 }
 
 async fn pull_docker_image(docker_client: &Docker, image: &str) -> Result<(), String> {
@@ -2131,5 +2163,59 @@ mod tests {
         let check: DockerCheckUpdateRequest =
             serde_json::from_str(r#"{"containerId":"abc123"}"#).unwrap();
         assert_eq!(check.container_id.as_deref(), Some("abc123"));
+    }
+
+    #[test]
+    fn compose_update_forces_pull_and_recreate() {
+        let args = docker_compose_args(
+            "/srv/app/compose.yml,/srv/app/compose.prod.yml",
+            Some("ignored-project"),
+            "update",
+        )
+        .unwrap();
+        assert_eq!(
+            args,
+            vec![
+                "-f",
+                "/srv/app/compose.yml",
+                "-f",
+                "/srv/app/compose.prod.yml",
+                "up",
+                "-d",
+                "--pull",
+                "always",
+                "--force-recreate"
+            ]
+        );
+    }
+
+    #[test]
+    fn compose_action_falls_back_to_project_name_without_config_files() {
+        let args = docker_compose_args("", Some("edge"), "restart").unwrap();
+        assert_eq!(args, vec!["--project-name", "edge", "restart"]);
+        assert!(docker_compose_args("", Some("edge"), "delete").is_err());
+    }
+
+    #[test]
+    fn prune_count_only_includes_unique_deleted_images() {
+        let count = count_pruned_images(vec![
+            ImageDeleteResponseItem {
+                untagged: Some("example/app:old".to_string()),
+                deleted: None,
+            },
+            ImageDeleteResponseItem {
+                untagged: None,
+                deleted: Some("sha256:one".to_string()),
+            },
+            ImageDeleteResponseItem {
+                untagged: None,
+                deleted: Some("sha256:one".to_string()),
+            },
+            ImageDeleteResponseItem {
+                untagged: None,
+                deleted: Some("sha256:two".to_string()),
+            },
+        ]);
+        assert_eq!(count, 2);
     }
 }

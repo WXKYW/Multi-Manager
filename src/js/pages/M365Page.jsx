@@ -22,6 +22,7 @@ import {
   SectionCard,
   StatusBadge,
 } from '../components/ui/AppPrimitives.jsx';
+import CodeEditor from '../components/ui/CodeEditor.jsx';
 import {
   ChevronDown,
   Cloud,
@@ -3251,13 +3252,14 @@ function M365Page() {
             </div>
             <div className="space-y-2">
               <div className="text-xs font-medium text-kumo-subtle">JSON 内容</div>
-              <Textarea
-                aria-label="租户 JSON"
+              <CodeEditor
+                label="租户 JSON"
+                language="json"
                 value={accountImportState.text}
-                onChange={event =>
-                  setAccountImportState(current => ({ ...current, text: event.target.value }))
+                onChange={text =>
+                  setAccountImportState(current => ({ ...current, text }))
                 }
-                className="min-h-72 w-full font-mono text-xs"
+                minHeight="18rem"
                 placeholder='{"accounts":[{"name":"Contoso","tenantId":"tenant-id","clientId":"client-id","clientSecret":"client-secret"}]}'
               />
             </div>

@@ -450,7 +450,7 @@ func isDockerContainerAction(action string) bool {
 
 func isDockerComposeAction(action string) bool {
 	switch action {
-	case "up", "down", "start", "stop", "restart", "pull":
+	case "up", "down", "start", "stop", "restart", "pull", "update":
 		return true
 	default:
 		return false
@@ -458,7 +458,7 @@ func isDockerComposeAction(action string) bool {
 }
 
 func dockerComposeActionTimeout(action string) time.Duration {
-	if action == "pull" {
+	if action == "pull" || action == "update" {
 		return 300 * time.Second
 	}
 	return 120 * time.Second

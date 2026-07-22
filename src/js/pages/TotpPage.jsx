@@ -4,7 +4,7 @@ import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
-import { Input, Textarea } from '@cloudflare/kumo/components/input';
+import { Input } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
@@ -17,6 +17,7 @@ import { buildTotpAccountPayload } from '../modules/totpPayload.js';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
 import BrandIcon, { BRAND_COLOR_FALLBACK, getIssuerColor } from '../components/ui/BrandIcon.jsx';
 import { AppCard, SectionCard } from '../components/ui/AppPrimitives.jsx';
+import CodeEditor from '../components/ui/CodeEditor.jsx';
 import {
   Key,
   FolderOpen,
@@ -1913,13 +1914,14 @@ function TotpPage() {
                   <label className="text-xs font-semibold text-kumo-subtle">
                     批量 OTP Auth URIs 导入 (每行一条)
                   </label>
-                  <Textarea
-                    aria-label="批量 OTP Auth URIs"
-                    rows={4}
+                  <CodeEditor
+                    label="批量 OTP Auth URIs"
+                    language="text"
                     placeholder="otpauth://totp/GitHub:user@example.com?secret=XXXX..."
                     value={importUris}
-                    onChange={(e) => setImportUris(e.target.value)}
-                    className="w-full font-mono"
+                    onChange={setImportUris}
+                    minHeight="8rem"
+                    showHeader={false}
                   />
                 </div>
               </div>
@@ -2349,12 +2351,12 @@ function TotpPage() {
           </Dialog.Description>
 
           <div className="space-y-1.5">
-            <Textarea
-              aria-label="导出的加密 2FA 备份"
+            <CodeEditor
+              label="导出的加密 2FA 备份"
+              language="text"
               readOnly
-              rows={8}
               value={exportUris}
-              className="w-full text-kumo-strong text-xs px-3 py-2 font-mono"
+              minHeight="12rem"
             />
             <span className="text-[10px] text-kumo-subtle block">
               {exportMeta?.accountCount !== undefined

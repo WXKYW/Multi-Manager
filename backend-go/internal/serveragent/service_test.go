@@ -903,7 +903,7 @@ func TestDockerProxyRoutesUseDockerSemanticsOverAgentTasks(t *testing.T) {
 					t.Fatalf("decode compose action: %v data=%s", err, data)
 				}
 				action, _ := req["action"].(string)
-				if action != "up" && action != "start" && action != "stop" {
+				if action != "up" && action != "start" && action != "stop" && action != "update" {
 					t.Fatalf("unexpected compose action: %s data=%s", action, data)
 				}
 				if req["project"] != "edge" || req["config_file"] != "/srv/edge/docker-compose.yml" {
@@ -980,6 +980,11 @@ func TestDockerProxyRoutesUseDockerSemanticsOverAgentTasks(t *testing.T) {
 	stacks = payload["data"].([]interface{})
 	if len(stacks) != 1 || stacks[0].(map[string]interface{})["status"] != "running" {
 		t.Fatalf("expected stack status to be updated, payload=%#v", payload)
+	}
+
+	res = perform(service, http.MethodPost, "/api/server/v2/docker/docker-agent/stacks/edge/update", `{"configFiles":["/srv/edge/docker-compose.yml"]}`)
+	if res.Code != http.StatusOK {
+		t.Fatalf("stack update status=%d body=%s", res.Code, res.Body.String())
 	}
 
 	res = perform(service, http.MethodPost, "/api/server/v2/docker/docker-agent/compose/edge/start", `{"configFile":"/srv/edge/docker-compose.yml"}`)
@@ -1060,6 +1065,15 @@ func TestDockerComposeTaskNormalizesConfigFiles(t *testing.T) {
 	res := perform(service, http.MethodPost, "/api/server/v2/tasks", `{"serverId":"compose-agent","domain":"docker","action":"compose.restart","payload":{"project":"edge","configFiles":["/srv/app/compose.yml","/srv/app/compose.prod.yml"]}}`)
 	if res.Code != http.StatusOK {
 		t.Fatalf("compose task status=%d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestDockerComposeUpdateActionUsesLongTimeout(t *testing.T) {
+	if !isDockerComposeAction("update") {
+		t.Fatal("compose update action should be supported")
+	}
+	if got := dockerComposeActionTimeout("update"); got != 300*time.Second {
+		t.Fatalf("compose update timeout=%s, want=5m", got)
 	}
 }
 
@@ -1832,6 +1846,50 @@ func TestGeneratedRealityNodeHasMihomoCompatibleFields(t *testing.T) {
 	}
 	if !strings.Contains(raw, "security=reality") || !strings.Contains(raw, "flow=xtls-rprx-vision") || !strings.Contains(raw, "pbk=") || !strings.Contains(raw, "sid=") {
 		t.Fatalf("invalid client URI: %s", raw)
+	}
+}
+
+func TestFailedManagedProxyNodeCanBeDeletedWithoutAgentCleanup(t *testing.T) {
+	service, db := testService(t)
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id,name,host,username,auth_type) VALUES ('failed-proxy-host','Debian 11','192.0.2.10','agent','password')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO managed_proxy_nodes (id,server_id,name,protocol,runtime,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted,revision,enabled,publishable,apply_status,last_error) VALUES ('failed-node','failed-proxy-host','JP VLESS','vless-reality','sing-box','192.0.2.10',0,'tcp','{}','vless://example',1,1,0,'failed','unsupported managed proxy host: debian 11')`); err != nil {
+		t.Fatal(err)
+	}
+
+	res := perform(service, http.MethodDelete, "/api/server/agent/proxy/nodes/failed-node", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("delete failed node status=%d body=%s", res.Code, res.Body.String())
+	}
+	var count int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM managed_proxy_nodes WHERE id='failed-node'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("failed node was not deleted, count=%d", count)
+	}
+}
+
+func TestManagedProxyReconcileAdvancesRevision(t *testing.T) {
+	service, db := testService(t)
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id,name,host,username,auth_type,status) VALUES ('proxy-reconcile-host','edge','192.0.2.11','agent','password','online')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO managed_proxy_nodes (id,server_id,name,protocol,runtime,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted,revision,enabled,publishable,apply_status) VALUES ('reconcile-node','proxy-reconcile-host','edge VLESS','vless-reality','sing-box','192.0.2.11',45654,'tcp','{"inbounds":[{"type":"vless","listen_port":45654}]}','vless://example@192.0.2.11:45654#edge',1,1,1,'running')`); err != nil {
+		t.Fatal(err)
+	}
+
+	res := perform(service, http.MethodPost, "/api/server/agent/proxy/nodes/reconcile-node/reconcile", "")
+	if res.Code != http.StatusBadGateway {
+		t.Fatalf("offline reconcile status=%d body=%s", res.Code, res.Body.String())
+	}
+	var revision int
+	if err := db.QueryRowContext(context.Background(), `SELECT revision FROM managed_proxy_nodes WHERE id='reconcile-node'`).Scan(&revision); err != nil {
+		t.Fatal(err)
+	}
+	if revision != 2 {
+		t.Fatalf("stored revision=%d, want 2", revision)
 	}
 }
 

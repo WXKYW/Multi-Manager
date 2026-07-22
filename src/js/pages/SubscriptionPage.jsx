@@ -1,16 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from '@cloudflare/kumo/components/button';
+import { Button, RefreshButton } from '@cloudflare/kumo/components/button';
 import { Checkbox } from '@cloudflare/kumo/components/checkbox';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
-import { Input, InputArea } from '@cloudflare/kumo/components/input';
+import { Input } from '@cloudflare/kumo/components/input';
 import { Label } from '@cloudflare/kumo/components/label';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Badge, ClipboardText, Code, LayerCard, Meter, Tabs } from '@cloudflare/kumo';
-import { ShikiProvider, useShikiHighlighter } from '@cloudflare/kumo/code';
 import { AppTable, DataTableFrame, PageStack, PageToolbar, SectionCard } from '../components/ui/AppPrimitives.jsx';
+import CodeEditor from '../components/ui/CodeEditor.jsx';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { getOSIconClass, getServerPlatformLabel } from '../modules/osPlatform.js';
 import useStore from '../store.js';
@@ -21,10 +21,13 @@ import { Copy, Download, Edit, Plus, RefreshCw, Save, Star, Trash, X } from '../
 
 const API = '/api/subscription';
 const INTERNAL_API = '/api/server/agent/proxy/nodes';
+const TUNNEL_API = '/api/server/agent/proxy/tunnels';
+const PREFERRED_API = '/api/server/agent/proxy/preferred-addresses';
 const LOAD_TIMEOUT_MS = 8000;
 const INITIAL_SKELETON_MS = 900;
+const DESTRUCTIVE_CONFIRM_MS = 8000;
 
-const emptyInternalNodeForm = { server_id: '', name: '', protocol: 'vless-reality', public_host: '', server_name: 'www.cloudflare.com', certificate_pem: '', private_key_pem: '', enabled: true };
+const emptyInternalNodeForm = { server_id: '', name: '', protocol: 'vless-reality', access_mode: 'direct', preferred_address_id: '', connect_address: '', connect_port: 443, public_host: '', server_name: 'www.cloudflare.com', certificate_pem: '', private_key_pem: '', enabled: true };
 
 const getInstanceCountryCode = (server) => {
   const direct = String(server?.country_code || server?.countryCode || server?.resolved_country || '').trim();
@@ -680,58 +683,15 @@ const copyText = async (text, message = '已复制') => {
 
 const templateLanguage = (format) => (format === 'clash' ? 'yaml' : 'bash');
 
-function TemplateCodeEditorInner({ label, value, format, onChange }) {
-  const highlightRef = useRef(null);
-  const { highlight, isReady } = useShikiHighlighter();
-  const language = templateLanguage(format);
-  const highlightedHtml = useMemo(() => {
-    if (!isReady) return null;
-    return highlight(String(value || ''), language);
-  }, [highlight, isReady, language, value]);
-
-  const handleScroll = (event) => {
-    if (!highlightRef.current) return;
-    highlightRef.current.scrollTop = event.currentTarget.scrollTop;
-    highlightRef.current.scrollLeft = event.currentTarget.scrollLeft;
-  };
-
+function TemplateCodeEditor({ label, value, format, onChange }) {
   return (
-    <div className="min-w-0 space-y-1.5">
-      <Label className="text-xs font-semibold text-kumo-subtle">{label}</Label>
-      <div className="app-code-editor-shell min-h-64 lg:min-h-80">
-        <div
-          ref={highlightRef}
-          aria-hidden="true"
-          className="app-code-editor-highlight"
-        >
-          {highlightedHtml ? (
-            <div
-              className="app-code-editor-shiki"
-              dangerouslySetInnerHTML={{ __html: highlightedHtml }}
-            />
-          ) : (
-            <pre className="app-code-editor-plain">{String(value || '')}</pre>
-          )}
-        </div>
-        <textarea
-          aria-label={label}
-          className="app-code-editor-input"
-          value={value}
-          onChange={onChange}
-          onScroll={handleScroll}
-          spellCheck={false}
-          wrap="off"
-        />
-      </div>
-    </div>
-  );
-}
-
-function TemplateCodeEditor(props) {
-  return (
-    <ShikiProvider engine="javascript" languages={['yaml', 'bash']}>
-      <TemplateCodeEditorInner {...props} />
-    </ShikiProvider>
+    <CodeEditor
+      value={value}
+      onChange={onChange}
+      language={templateLanguage(format)}
+      label={label}
+      minHeight="20rem"
+    />
   );
 }
 
@@ -790,10 +750,24 @@ function SubscriptionPage() {
   const [subscriptions, setSubscriptions] = useState([]);
   const [nodes, setNodes] = useState([]);
   const [internalNodes, setInternalNodes] = useState([]);
+	const [managedTunnels, setManagedTunnels] = useState([]);
+	const [preferredAddresses, setPreferredAddresses] = useState([]);
+	const [tunnelForm, setTunnelForm] = useState({ account_id: '', zone_id: '', hostname: 'cf-node.dsukhub.com' });
+	const [tunnelModalOpen, setTunnelModalOpen] = useState(false);
+	const [tunnelTargetServer, setTunnelTargetServer] = useState(null);
+	const [preferredModalOpen, setPreferredModalOpen] = useState(false);
+	const [preferredForm, setPreferredForm] = useState({ name: '', address: '', port: 443, enabled: true, is_default: false });
+	const [cloudflareAccounts, setCloudflareAccounts] = useState([]);
+	const [cloudflareZones, setCloudflareZones] = useState([]);
+	const [tunnelTasks, setTunnelTasks] = useState({});
 	const [selectedInternalHosts, setSelectedInternalHosts] = useState(new Set());
 	const [internalNodeModalOpen, setInternalNodeModalOpen] = useState(false);
 	const [internalNodeForm, setInternalNodeForm] = useState(emptyInternalNodeForm);
 	const [editingInternalNodeId, setEditingInternalNodeId] = useState(null);
+  const [internalNodeActions, setInternalNodeActions] = useState({});
+  const [externalNodeActions, setExternalNodeActions] = useState({});
+  const [uninstallingServerId, setUninstallingServerId] = useState('');
+  const [destructiveConfirm, setDestructiveConfirm] = useState({ key: '', expiresAt: 0 });
   const [templates, setTemplates] = useState([]);
   const [logs, setLogs] = useState([]);
   const [servers, setServers] = useState([]);
@@ -829,6 +803,7 @@ function SubscriptionPage() {
   const [templateSubscriptionId, setTemplateSubscriptionId] = useState('');
   const [templateBindingId, setTemplateBindingId] = useState('');
   const loadGenerationRef = useRef(0);
+  const destructiveConfirmTimerRef = useRef(null);
 
   const publicBase = useMemo(
     () => normalizePublicBase(publicApiUrl, typeof window === 'undefined' ? '' : window.location.origin),
@@ -856,6 +831,8 @@ function SubscriptionPage() {
       [`${API}/subscriptions`, setSubscriptions, []],
       [`${API}/nodes`, setNodes, []],
       [INTERNAL_API, setInternalNodes, []],
+	  [TUNNEL_API, setManagedTunnels, []],
+	  [PREFERRED_API, setPreferredAddresses, []],
       [`${API}/templates`, setTemplates, []],
       [`${API}/logs?limit=200`, setLogs, []],
       [`${API}/servers`, setServers, []],
@@ -886,7 +863,141 @@ function SubscriptionPage() {
 
   useEffect(() => {
     loadAll();
+    return () => {
+      if (destructiveConfirmTimerRef.current) window.clearTimeout(destructiveConfirmTimerRef.current);
+    };
   }, []);
+
+  useEffect(() => {
+    const entries = Object.entries(tunnelTasks);
+    if (entries.length === 0) return undefined;
+    const sources = entries.map(([taskID]) => {
+      const source = new EventSource(`/api/server/tasks/${taskID}/stream`);
+      source.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          const data = payload.data || {};
+          setTunnelTasks((current) => ({ ...current, [taskID]: payload }));
+          if (payload.type === 'progress' && data.message) toast.info(`${data.message}（${payload.progress || 0}%）`, { isManual: true, timeout: 2500 });
+          if (payload.status === 'completed') {
+            toast.success(typeof data === 'string' ? data : (data.message || 'Tunnel 任务已完成'));
+            source.close();
+            setTunnelTasks((current) => { const next = { ...current }; delete next[taskID]; return next; });
+            loadAll();
+          }
+          if (payload.status === 'failed') {
+            toast.error(payload.error || 'Tunnel 任务失败');
+            source.close();
+            setTunnelTasks((current) => { const next = { ...current }; delete next[taskID]; return next; });
+          }
+        } catch { /* malformed task events are ignored; the task remains visible */ }
+      };
+      source.onerror = () => source.close();
+      return source;
+    });
+    return () => sources.forEach((source) => source.close());
+  }, [Object.keys(tunnelTasks).join(',')]);
+
+	useEffect(() => {
+		if (!tunnelModalOpen) return undefined;
+		fetch('/api/cloudflare/accounts', { headers: getAuthHeaders(), cache: 'no-store' }).then((response) => response.json()).then((payload) => {
+			const accounts = Array.isArray(payload) ? payload : (payload.data || payload.accounts || []);
+			setCloudflareAccounts(accounts);
+			setTunnelForm((current) => ({ ...current, account_id: current.account_id || accounts[0]?.id || '' }));
+		}).catch(() => setCloudflareAccounts([]));
+		return undefined;
+	}, [tunnelModalOpen]);
+
+	useEffect(() => {
+		if (!tunnelForm.account_id) { setCloudflareZones([]); return undefined; }
+		fetch(`/api/cloudflare/accounts/${encodeURIComponent(tunnelForm.account_id)}/zones`, { headers: getAuthHeaders(), cache: 'no-store' }).then((response) => response.json()).then((payload) => {
+			const zones = Array.isArray(payload) ? payload : (payload.data || payload.zones || []);
+			setCloudflareZones(zones);
+			setTunnelForm((current) => ({ ...current, zone_id: current.zone_id || zones[0]?.id || '' }));
+		}).catch(() => setCloudflareZones([]));
+		return undefined;
+	}, [tunnelForm.account_id]);
+
+  const openTunnelDeployment = (server) => {
+		setTunnelTargetServer(server);
+		setTunnelModalOpen(true);
+	};
+
+  const deployTunnel = async (server = tunnelTargetServer) => {
+    if (!tunnelForm.account_id || !tunnelForm.zone_id || !tunnelForm.hostname) {
+      toast.warning('请填写 Cloudflare 账号、Zone ID 和 Tunnel 域名');
+      return;
+    }
+    try {
+      const response = await fetch(`${TUNNEL_API}/${server.id}/deploy`, { method: 'POST', headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(tunnelForm) });
+      const payload = await response.json();
+      if (!response.ok || payload.success === false) throw new Error(payload.error || payload.message || 'Tunnel 部署失败');
+      const taskID = payload.data?.task_id;
+      if (taskID) setTunnelTasks((current) => ({ ...current, [taskID]: { progress: 0, data: { message: '任务已提交' } } }));
+      toast.info(`${server.name} 的 Tunnel 部署已提交`, { isManual: true });
+		setTunnelModalOpen(false);
+    } catch (error) { toast.error(error.message || 'Tunnel 部署失败'); }
+  };
+
+	const savePreferredAddress = async () => {
+		if (!preferredForm.name.trim() || !preferredForm.address.trim()) return toast.warning('请填写优选地址名称和域名/IP');
+		try {
+			const response = await fetch(PREFERRED_API, { method: 'POST', headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(preferredForm) });
+			const payload = await response.json();
+			if (!response.ok || payload.success === false) throw new Error(payload.error || payload.message || '保存优选地址失败');
+			setPreferredForm({ name: '', address: '', port: 443, enabled: true, is_default: false });
+			await loadAll();
+			toast.success('优选地址已保存');
+		} catch (error) { toast.error(error.message || '保存优选地址失败'); }
+	};
+
+	const deletePreferredAddress = async (item) => {
+		if (!confirmDestructivePress(`preferred-address:${item.id}`, `删除优选地址 ${item.name}`)) return;
+		try {
+			const response = await fetch(`${PREFERRED_API}/${item.id}`, { method: 'DELETE', headers: getAuthHeaders() });
+			const payload = await response.json();
+			if (!response.ok || payload.success === false) throw new Error(payload.error || payload.message || '删除优选地址失败');
+			await loadAll();
+			toast.success('优选地址已删除');
+		} catch (error) { toast.error(error.message || '删除优选地址失败'); }
+	};
+
+  const uninstallTunnel = async (server) => {
+    const entry = managedTunnels.find((item) => item.server_id === server.id);
+    if (!entry) return toast.warning('该主机没有 Managed Tunnel');
+    if (!confirmDestructivePress(`managed-tunnel-delete:${server.id}`, `删除 ${server.name} 的 Tunnel、DNS 和 cloudflared`)) return;
+    try {
+      const response = await fetch(`${TUNNEL_API}/${server.id}`, { method: 'DELETE', headers: getAuthHeaders() });
+      const payload = await response.json();
+      if (!response.ok || payload.success === false) throw new Error(payload.error || payload.message || 'Tunnel 卸载失败');
+      const taskID = payload.data?.task_id;
+      if (taskID) setTunnelTasks((current) => ({ ...current, [taskID]: { progress: 0, data: { message: '卸载任务已提交' } } }));
+      toast.info('Tunnel 卸载任务已提交', { isManual: true });
+    } catch (error) { toast.error(error.message || 'Tunnel 卸载失败'); }
+  };
+
+  const isDestructiveConfirmActive = (key) => (
+    destructiveConfirm.key === key && destructiveConfirm.expiresAt > Date.now()
+  );
+
+  const confirmDestructivePress = (key, label) => {
+    if (isDestructiveConfirmActive(key)) {
+      if (destructiveConfirmTimerRef.current) window.clearTimeout(destructiveConfirmTimerRef.current);
+      destructiveConfirmTimerRef.current = null;
+      setDestructiveConfirm({ key: '', expiresAt: 0 });
+      return true;
+    }
+
+    if (destructiveConfirmTimerRef.current) window.clearTimeout(destructiveConfirmTimerRef.current);
+    const expiresAt = Date.now() + DESTRUCTIVE_CONFIRM_MS;
+    setDestructiveConfirm({ key, expiresAt });
+    destructiveConfirmTimerRef.current = window.setTimeout(() => {
+      setDestructiveConfirm((current) => current.key === key ? { key: '', expiresAt: 0 } : current);
+      destructiveConfirmTimerRef.current = null;
+    }, DESTRUCTIVE_CONFIRM_MS);
+    toast.warning(`${label}，请再次点击红色按钮确认`);
+    return false;
+  };
 
   const createInternalNode = async () => {
     const selectedIDs = [...selectedInternalHosts];
@@ -897,15 +1008,25 @@ function SubscriptionPage() {
     }
     setSaving(true);
     try {
-      const results = await Promise.all(targetServerIDs.map(async (serverID) => {
+      const results = await Promise.allSettled(targetServerIDs.map(async (serverID) => {
         const server = servers.find((item) => item.id === serverID);
         const customName = internalNodeForm.name.trim();
-        const protocolLabel = internalNodeForm.protocol === 'hysteria2' ? 'HY2' : 'VLESS';
         const flag = countryFlagEmoji(getInstanceCountryCode(server));
-        const generatedName = `${flag ? `${flag} ` : ''}${server?.name || serverID} ${protocolLabel}`;
+        const generatedName = `${flag ? `${flag} ` : ''}${server?.name || serverID}`;
         const namedNode = customName
           ? `${flag && !customName.startsWith(flag) ? `${flag} ` : ''}${targetServerIDs.length > 1 ? `${customName}-${server?.name || serverID}` : customName}`
           : generatedName;
+        const existingNode = internalNodes.find((node) => (
+          node.server_id === serverID
+          && node.protocol === internalNodeForm.protocol
+          && node.name === namedNode
+        ));
+        if (existingNode) {
+          const res = await fetch(`${INTERNAL_API}/${existingNode.id}/reconcile`, { method: 'POST', headers: getAuthHeaders() });
+          const data = await res.json();
+          if (!res.ok || data.success === false) throw new Error(`${server?.name || serverID}: ${data.error || data.message || '重新部署失败'}`);
+          return { ...data, reused: true };
+        }
         const payload = {
           ...internalNodeForm,
           server_id: serverID,
@@ -917,27 +1038,61 @@ function SubscriptionPage() {
         if (!res.ok || data.success === false) throw new Error(`${servers.find((server) => server.id === serverID)?.name || serverID}: ${data.error || data.message || '部署失败'}`);
         return data;
       }));
-      toast.success(`已向 ${results.length} 台主机下发部署`);
-      setInternalNodeModalOpen(false);
-      setInternalNodeForm(emptyInternalNodeForm);
-      setSelectedInternalHosts(new Set());
+      const succeeded = results.filter((result) => result.status === 'fulfilled');
+      const failed = results.filter((result) => result.status === 'rejected');
+      if (succeeded.length > 0) toast.success(`已向 ${succeeded.length} 台主机下发部署`);
+      if (failed.length > 0) toast.error(`${failed.length} 台部署失败：${failed[0].reason?.message || '未知错误'}`);
+      if (succeeded.length > 0) {
+        setInternalNodeModalOpen(false);
+        setInternalNodeForm(emptyInternalNodeForm);
+        setSelectedInternalHosts(new Set());
+      }
       await loadAll();
     } catch (error) { toast.error(error.message); } finally { setSaving(false); }
   };
 
+  const withInternalNodeAction = async (nodeID, action, callback) => {
+    const actionKey = `${nodeID}:${action}`;
+    if (internalNodeActions[actionKey]) return;
+    setInternalNodeActions((previous) => ({ ...previous, [actionKey]: true }));
+    try {
+      await callback();
+    } finally {
+      setInternalNodeActions((previous) => {
+        const next = { ...previous };
+        delete next[actionKey];
+        return next;
+      });
+    }
+  };
+
   const reconcileInternalNode = async (node) => {
-    const res = await fetch(`${INTERNAL_API}/${node.id}/reconcile`, { method: 'POST', headers: getAuthHeaders() });
-    const data = await res.json();
-    if (!res.ok || data.success === false) return toast.error(data.error || data.message || '重新部署失败');
-    toast.success('节点状态已同步'); await loadAll();
+    await withInternalNodeAction(node.id, 'reconcile', async () => {
+      try {
+        const res = await fetch(`${INTERNAL_API}/${node.id}/reconcile`, { method: 'POST', headers: getAuthHeaders() });
+        const data = await res.json();
+        if (!res.ok || data.success === false) throw new Error(data.error || data.message || '重新部署失败');
+        toast.success(`${node.name} 已重新部署`);
+        await loadAll();
+      } catch (error) {
+        toast.error(error.message || '重新部署失败');
+      }
+    });
   };
 
   const deleteInternalNode = async (node) => {
-    if (!(await dialog.deleteResource({ resourceType: '内部节点', resourceName: node.name }))) return;
-    const res = await fetch(`${INTERNAL_API}/${node.id}`, { method: 'DELETE', headers: getAuthHeaders() });
-    const data = await res.json();
-    if (!res.ok || data.success === false) return toast.error(data.error || data.message || '卸载失败');
-    toast.success('内部节点已卸载'); await loadAll();
+    if (!confirmDestructivePress(`internal-node-delete:${node.id}`, `卸载节点 ${node.name}`)) return;
+    await withInternalNodeAction(node.id, 'delete', async () => {
+      try {
+        const res = await fetch(`${INTERNAL_API}/${node.id}`, { method: 'DELETE', headers: getAuthHeaders() });
+        const data = await res.json();
+        if (!res.ok || data.success === false) throw new Error(data.error || data.message || '卸载失败');
+        toast.success(`${node.name} 已卸载`);
+        await loadAll();
+      } catch (error) {
+        toast.error(error.message || '卸载失败');
+      }
+    });
   };
 
   const reconcileInternalNodes = async (managed) => {
@@ -959,7 +1114,8 @@ function SubscriptionPage() {
   };
 
   const uninstallInternalNodes = async (server, managed) => {
-    if (!(await dialog.deleteResource({ resourceType: '实例代理服务', resourceName: `${server.name}（${managed.length} 个节点）` }))) return;
+    if (!confirmDestructivePress(`instance-proxy-uninstall:${server.id}`, `卸载 ${server.name} 的 ${managed.length} 个节点`)) return;
+    setUninstallingServerId(server.id);
     setSaving(true);
     try {
       await Promise.all(managed.map(async (node) => {
@@ -972,6 +1128,7 @@ function SubscriptionPage() {
     } catch (error) {
       toast.error(error.message || '卸载失败');
     } finally {
+      setUninstallingServerId('');
       setSaving(false);
     }
   };
@@ -1019,7 +1176,7 @@ function SubscriptionPage() {
       const res = await fetch(`${INTERNAL_API}/${editingInternalNodeId}`, {
         method: 'PUT',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ name: internalNodeForm.name.trim() }),
+        body: JSON.stringify({ name: internalNodeForm.name.trim(), preferred_address_id: internalNodeForm.preferred_address_id || '', connect_address: internalNodeForm.connect_address || '', connect_port: Number(internalNodeForm.connect_port) || 0 }),
       });
       const data = await res.json();
       if (!res.ok || data.success === false) throw new Error(data.error || data.message || '保存失败');
@@ -1554,14 +1711,25 @@ function SubscriptionPage() {
   };
 
   const deleteNode = async (node) => {
-    const res = await fetch(`${API}/nodes/${node.id}`, { method: 'DELETE', headers: getAuthHeaders() });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.success === false) {
-      toast.error(data.error || '删除失败');
-      return;
+    if (!confirmDestructivePress(`external-node-delete:${node.id}`, `删除节点 ${node.name}`)) return;
+    const actionKey = `${node.id}:delete`;
+    if (externalNodeActions[actionKey]) return;
+    setExternalNodeActions((current) => ({ ...current, [actionKey]: true }));
+    try {
+      const res = await fetch(`${API}/nodes/${node.id}`, { method: 'DELETE', headers: getAuthHeaders() });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) throw new Error(data.error || '删除失败');
+      toast.success(`${node.name} 已删除`);
+      await loadAll();
+    } catch (error) {
+      toast.error(error.message || '删除失败');
+    } finally {
+      setExternalNodeActions((current) => {
+        const next = { ...current };
+        delete next[actionKey];
+        return next;
+      });
     }
-    toast.success('节点已删除');
-    loadAll();
   };
 
   const openCreateTemplate = () => {
@@ -1853,13 +2021,17 @@ function SubscriptionPage() {
               const server = servers.find((item) => item.id === node.server_id);
               const protocol = node.protocol === 'vless-reality' ? 'vless' : node.protocol;
               const connectionTags = [node.transport, node.protocol === 'vless-reality' ? 'reality' : 'tls', node.runtime].filter(Boolean);
+              const reconciling = !!internalNodeActions[`${node.id}:reconcile`];
+              const deleting = !!internalNodeActions[`${node.id}:delete`];
+              const deleteConfirmKey = `internal-node-delete:${node.id}`;
+              const confirmingDelete = isDestructiveConfirmActive(deleteConfirmKey);
               return <Table.Row key={node.id} onDoubleClick={() => openEditInternalNode(node)} className="cursor-pointer">
                 <Table.Cell className="text-center"><Switch size="sm" aria-label={node.enabled ? '停用内部节点' : '启用内部节点'} checked={!!node.enabled} onCheckedChange={(checked) => toggleInternalNodeEnabled(node, checked)} /></Table.Cell>
                 <Table.Cell><div className="truncate text-sm font-bold text-kumo-strong">{node.name}</div><div className="mt-1 flex flex-wrap gap-1"><Badge variant="success">自有</Badge><Badge variant="info">Agent 托管</Badge><Badge variant={node.publishable ? 'success' : node.apply_status === 'failed' ? 'destructive' : 'warning'}>{node.publishable ? '可发布' : node.apply_status === 'failed' ? '部署失败' : '同步中'}</Badge></div></Table.Cell>
                 <Table.Cell className="text-center"><Badge variant={nodeTypeBadgeVariant(protocol)} className="uppercase">{node.protocol === 'vless-reality' ? 'VLESS' : 'HYSTERIA2'}</Badge></Table.Cell>
                 <Table.Cell><div className="truncate font-mono text-xs text-kumo-strong">{node.public_host || '-'}:{node.assigned_port || '-'}</div><div className="mt-1 flex min-w-0 flex-wrap gap-1">{connectionTags.map((tag) => <span key={tag} className={`inline-flex rounded-[3px] border px-1.5 py-0.5 font-mono text-[10px] leading-4 ${nodeNetworkTagClass({ key: tag === 'tls' ? 'tls' : 'network', tone: tag })}`}>{tag}</span>)}</div></Table.Cell>
                 <Table.Cell><div className="flex min-w-0 flex-col items-start gap-1"><span className="inline-flex max-w-full rounded-[3px] border border-kumo-info/25 bg-kumo-info/10 px-1.5 py-0.5 text-[10px] font-semibold leading-4 text-kumo-info"><span className="truncate">{server?.name || node.server_name || node.server_id}</span></span><span className={`inline-flex rounded-[3px] border px-1.5 py-0.5 text-[10px] font-semibold leading-4 ${latencyChipClass(0)}`}>{server?.status === 'online' ? '等待节点延迟' : '主机离线'}</span></div></Table.Cell>
-                <Table.Cell className="text-center"><div className="inline-flex items-center justify-center gap-2"><Button size="sm" shape="square" variant="secondary" aria-label={`编辑 ${node.name}`} title={`编辑 ${node.name}`} onClick={() => openEditInternalNode(node)} icon={<Edit className="h-3.5 w-3.5" />} /><Button size="sm" shape="square" variant="secondary" aria-label={`同步 ${node.name}`} title={`同步 ${node.name}`} onClick={() => reconcileInternalNode(node)} icon={<RefreshCw className="h-3.5 w-3.5" />} /><Button size="sm" shape="square" variant="secondary-destructive" aria-label={`卸载 ${node.name}`} title={`卸载 ${node.name}`} onDoubleClick={() => deleteInternalNode(node)} icon={<Trash className="h-3.5 w-3.5" />} /></div></Table.Cell>
+                <Table.Cell className="text-center"><div className="inline-flex items-center justify-center gap-2"><Button size="sm" shape="square" variant="secondary" aria-label={`编辑 ${node.name}`} title={`编辑 ${node.name}`} disabled={reconciling || deleting} onClick={(event) => { event.stopPropagation(); openEditInternalNode(node); }} icon={<Edit className="h-3.5 w-3.5" />} /><RefreshButton size="sm" variant="secondary" loading={reconciling} aria-label={`重新部署 ${node.name}`} title={`重新部署 ${node.name}`} disabled={reconciling || deleting} onClick={(event) => { event.stopPropagation(); reconcileInternalNode(node); }} /><Button size="sm" shape="square" variant={confirmingDelete ? 'destructive' : 'secondary-destructive'} aria-label={confirmingDelete ? `再次确认卸载 ${node.name}` : `卸载 ${node.name}`} title={confirmingDelete ? '再次点击确认卸载' : `卸载 ${node.name}`} disabled={reconciling || deleting} onClick={(event) => { event.stopPropagation(); deleteInternalNode(node); }} icon={deleting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />} /></div></Table.Cell>
               </Table.Row>;
             })}
             {internalNodes.length === 0 && <Table.Row><Table.Cell colSpan={6} className="p-6 text-center text-kumo-subtle">暂无本机节点。请先选择 Linux 主机部署节点。</Table.Cell></Table.Row>}
@@ -1916,6 +2088,9 @@ function SubscriptionPage() {
           <Table.Body>
             {filteredNodes.map((node) => {
               const networkTags = nodeNetworkTags(node);
+              const deleting = !!externalNodeActions[`${node.id}:delete`];
+              const deleteConfirmKey = `external-node-delete:${node.id}`;
+              const confirmingDelete = isDestructiveConfirmActive(deleteConfirmKey);
               return (
                 <Table.Row key={node.id} onDoubleClick={() => openEditNode(node)} className="cursor-pointer">
                   <Table.Cell className="text-center">
@@ -1967,15 +2142,15 @@ function SubscriptionPage() {
                       <Button
                         size="sm"
                         shape="square"
-                        variant="secondary-destructive"
-                        aria-label="双击删除节点"
-                        title="双击删除节点"
-                        onClick={(event) => event.stopPropagation()}
-                        onDoubleClick={(event) => {
+                        variant={confirmingDelete ? 'destructive' : 'secondary-destructive'}
+                        aria-label={confirmingDelete ? `再次确认删除 ${node.name}` : `删除 ${node.name}`}
+                        title={confirmingDelete ? '再次点击确认删除' : `删除 ${node.name}`}
+                        disabled={deleting}
+                        onClick={(event) => {
                           event.stopPropagation();
                           deleteNode(node);
                         }}
-                        icon={<Trash className="h-3.5 w-3.5" />}
+                        icon={deleting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />}
                       />
                     </div>
                   </Table.Cell>
@@ -2018,8 +2193,11 @@ function SubscriptionPage() {
             {servers.map((server) => {
               const managed = internalNodes.filter((node) => node.server_id === server.id);
               const running = managed.filter((node) => node.publishable && node.apply_status === 'running');
+              const tunnel = managedTunnels.find((item) => item.server_id === server.id);
               const countryCode = getInstanceCountryCode(server);
               const locationLabel = getInstanceLocationLabel(server);
+              const uninstallConfirmKey = `instance-proxy-uninstall:${server.id}`;
+              const confirmingUninstall = isDestructiveConfirmActive(uninstallConfirmKey);
               return (
                 <Table.Row key={server.id}>
                   <Table.CheckCell checked={selectedInternalHosts.has(server.id)} onCheckedChange={(checked) => toggleInternalHost(server.id, checked)} />
@@ -2028,9 +2206,9 @@ function SubscriptionPage() {
                   <Table.Cell className="text-center"><div className="mx-auto flex w-[64px] items-center justify-center gap-1.5">{countryCode && <CountryFlag preferSvg countryCode={countryCode} className="h-3.5 w-5 shrink-0 !rounded-[2px] text-sm" />}<span className="truncate font-semibold uppercase text-kumo-strong" title={server.location || locationLabel}>{locationLabel}</span></div></Table.Cell>
                   <Table.Cell className="text-center"><span className="font-semibold tabular-nums text-kumo-strong">{formatInstanceUptime(server.uptime)}</span></Table.Cell>
                   <Table.Cell className="text-center"><span className="font-mono text-xs">{server.agent_version && server.agent_version !== '<nil>' ? server.agent_version : '未报告'}</span></Table.Cell>
-                  <Table.Cell className="text-center">{managed.length > 0 ? <div className="inline-flex flex-col items-center gap-1"><Badge variant={running.length > 0 ? 'success' : 'warning'}>{running.length > 0 ? 'sing-box 1.13.14' : managed.some((node) => node.apply_status === 'failed') ? '部署失败' : '部署中'}</Badge>{managed.find((node) => node.apply_status === 'failed')?.last_error && <span className="max-w-40 truncate text-[10px] text-kumo-danger" title={managed.find((node) => node.apply_status === 'failed')?.last_error}>查看错误后重新部署</span>}</div> : <Badge variant="secondary">未部署</Badge>}</Table.Cell>
+                  <Table.Cell className="text-center"><div className="inline-flex flex-col items-center gap-1">{managed.length > 0 && <Badge variant={running.length > 0 ? 'success' : 'warning'}>{running.length > 0 ? 'sing-box 1.13.14' : managed.some((node) => node.apply_status === 'failed') ? '部署失败' : '部署中'}</Badge>}{tunnel && <Badge variant={tunnel.apply_status === 'running' ? 'info' : tunnel.apply_status === 'failed' ? 'destructive' : 'warning'}>Tunnel {tunnel.apply_status === 'running' ? '已连接' : tunnel.apply_status}</Badge>}{managed.length === 0 && !tunnel && <Badge variant="secondary">未部署</Badge>}</div></Table.Cell>
                   <Table.Cell className="text-center"><div className="flex flex-wrap justify-center gap-1">{managed.map((node) => <Badge key={node.id} variant={node.protocol === 'hysteria2' ? 'orange' : 'blue'}>{node.protocol === 'hysteria2' ? 'HY2' : 'VLESS'}</Badge>)}{managed.length === 0 && <span className="text-xs text-kumo-subtle">—</span>}</div></Table.Cell>
-                  <Table.Cell className="text-center"><div className="inline-flex items-center justify-center gap-2">{managed.length === 0 ? <Button size="sm" variant="secondary" onClick={() => startInternalDeployment(server.id)} disabled={server.status !== 'online'}>部署节点</Button> : <><Button size="sm" variant="secondary" onClick={() => reconcileInternalNodes(managed)} disabled={server.status !== 'online' || saving}>重新部署</Button><Button size="sm" variant="secondary-destructive" onClick={() => uninstallInternalNodes(server, managed)} disabled={saving}>卸载</Button></>}</div></Table.Cell>
+                  <Table.Cell className="text-center"><div className="inline-flex items-center justify-center gap-2">{managed.length === 0 ? <Button size="sm" variant="secondary" onClick={() => startInternalDeployment(server.id)} disabled={server.status !== 'online'}>部署节点</Button> : <><Button size="sm" variant="secondary" onClick={() => reconcileInternalNodes(managed)} disabled={server.status !== 'online' || saving}>重新部署</Button><Button size="sm" variant={confirmingUninstall ? 'destructive' : 'secondary-destructive'} loading={uninstallingServerId === server.id} onClick={() => uninstallInternalNodes(server, managed)} disabled={saving}>{confirmingUninstall ? '再次确认' : '卸载'}</Button></>}{tunnel ? <Button size="sm" variant="secondary-destructive" onClick={() => uninstallTunnel(server)}>删 Tunnel</Button> : <Button size="sm" variant="secondary" onClick={() => openTunnelDeployment(server)} disabled={server.status !== 'online'}>部署 Tunnel</Button>}</div></Table.Cell>
                 </Table.Row>
               );
             })}
@@ -2040,6 +2218,15 @@ function SubscriptionPage() {
       </DataTableFrame>
     </SectionCard>
   );
+
+  const renderTunnelControls = () => (
+		<SectionCard title="Cloudflare Tunnel 与优选地址" className="mb-3" actions={<Button size="sm" variant="secondary" onClick={() => setPreferredModalOpen(true)}><Plus className="h-3.5 w-3.5" />管理优选地址</Button>}>
+			<div className="flex flex-wrap gap-2">
+				{managedTunnels.length === 0 ? <span className="text-xs text-kumo-subtle">尚未部署 Named Tunnel。每台主机使用一个稳定 Tunnel，多个 Tunnel 节点通过路径共存。</span> : managedTunnels.map((item) => <Badge key={item.server_id} variant={item.apply_status === 'running' ? 'success' : item.apply_status === 'failed' ? 'destructive' : 'warning'}>{item.server_name} · {item.hostname} · {item.apply_status}</Badge>)}
+			</div>
+			{preferredAddresses.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{preferredAddresses.map((item) => <span key={item.id} className="inline-flex items-center gap-1 rounded border border-kumo-line bg-kumo-recessed/30 px-2 py-1 text-xs"><span>{item.name}</span><span className="font-mono text-kumo-subtle">{item.address}:{item.port}</span><Button size="sm" shape="square" variant="secondary-destructive" aria-label={`删除 ${item.name}`} onClick={() => deletePreferredAddress(item)} icon={<Trash className="h-3 w-3" />} /></span>)}</div>}
+		</SectionCard>
+	);
 
   const renderNodesSkeleton = () => (
     <div className="grid gap-3" aria-busy="true" aria-label="正在加载节点">
@@ -2230,7 +2417,7 @@ function SubscriptionPage() {
         {loading && nodeLibraries.length === 0 ? renderNodesSkeleton() : (
           <div className="min-w-0">
             {activeTab === 'nodes' && renderNodes()}
-            {activeTab === 'instances' && renderInstanceManagement()}
+            {activeTab === 'instances' && <>{renderTunnelControls()}{renderInstanceManagement()}</>}
             {activeTab === 'plans' && renderPlans()}
             {activeTab === 'subscriptions' && renderSubscriptions()}
           </div>
@@ -2238,7 +2425,7 @@ function SubscriptionPage() {
       </div>
 
       <Dialog.Root open={planModalOpen} onOpenChange={setPlanModalOpen}>
-        <Dialog size="lg" className="flex max-h-[min(calc(100dvh-2rem),48rem)] w-[calc(100vw-1rem)] max-w-[min(76rem,calc(100vw-2rem))] flex-col overflow-hidden p-0">
+        <Dialog size="xl" className="flex max-h-[min(calc(100dvh-2rem),48rem)] w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] flex-col overflow-hidden p-0 sm:!w-[min(72rem,calc(100vw-3rem))] sm:!max-w-[min(72rem,calc(100vw-3rem))]">
           <div className="border-b border-kumo-line px-5 py-4"><Dialog.Title>{editingPlanId ? '编辑套餐' : '新建套餐'}</Dialog.Title><Dialog.Description>统一定义订阅额度、重置规则和可使用节点。</Dialog.Description></div>
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5 scrollbar-thin">
             <div className="grid gap-3 sm:grid-cols-2"><Input size="sm" label="套餐名称" value={planForm.name} onChange={(e) => setPlanForm((prev) => ({ ...prev, name: e.target.value }))} /><Input size="sm" label="备注" value={planForm.remark} onChange={(e) => setPlanForm((prev) => ({ ...prev, remark: e.target.value }))} /></div>
@@ -2273,10 +2460,30 @@ function SubscriptionPage() {
             <Input size="sm" label={editingInternalNodeId ? '节点名称' : selectedInternalHosts.size > 1 ? '节点名称前缀（可选）' : '节点名称（可选）'} placeholder="留空则自动添加国家图标并按实例名称生成" value={internalNodeForm.name} onChange={(event) => setInternalNodeForm((prev) => ({ ...prev, name: event.target.value }))} />
             {!editingInternalNodeId && internalNodeForm.protocol === 'vless-reality' && <Input size="sm" label="REALITY 握手站点（可选）" placeholder="默认 www.cloudflare.com" value={internalNodeForm.server_name} onChange={(event) => setInternalNodeForm((prev) => ({ ...prev, server_name: event.target.value }))} />}
             {!editingInternalNodeId && internalNodeForm.protocol === 'hysteria2' && <div className="flex min-h-8 items-center rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 text-xs text-kumo-subtle">TLS 证书、私钥、SNI 和端口将自动生成并配置。</div>}
+            {!editingInternalNodeId && <Select size="sm" label="接入方式" value={internalNodeForm.access_mode || 'direct'} onValueChange={(value) => setInternalNodeForm((prev) => ({ ...prev, access_mode: String(value) }))} items={[{ value: 'direct', label: '直连节点' }, { value: 'cloudflare_tunnel', label: 'Cloudflare Tunnel（VLESS WS）' }]} />}
+            {internalNodeForm.access_mode === 'cloudflare_tunnel' && <Select size="sm" label="优选地址" value={internalNodeForm.preferred_address_id || ''} onValueChange={(value) => setInternalNodeForm((prev) => ({ ...prev, preferred_address_id: String(value) }))} items={[{ value: '', label: '继承全局默认 / Tunnel 域名' }, ...preferredAddresses.map((item) => ({ value: item.id, label: `${item.name} · ${item.address}:${item.port}` }))]} />}
+			{internalNodeForm.access_mode === 'cloudflare_tunnel' && <div className="grid gap-3 sm:grid-cols-[1fr_8rem]"><Input size="sm" label="节点专用优选域名/IP（可选）" value={internalNodeForm.connect_address || ''} onChange={(event) => setInternalNodeForm((prev) => ({ ...prev, connect_address: event.target.value }))} /><Input size="sm" label="端口" type="number" value={internalNodeForm.connect_port || 443} onChange={(event) => setInternalNodeForm((prev) => ({ ...prev, connect_port: Number(event.target.value) || 443 }))} /></div>}
           </div>
           <div className="flex justify-end gap-2 border-t border-kumo-line px-5 py-4"><Button size="sm" variant="secondary" onClick={() => setInternalNodeModalOpen(false)}>取消</Button><Button size="sm" variant="primary" loading={saving} onClick={editingInternalNodeId ? saveInternalNode : createInternalNode}>{editingInternalNodeId ? '保存' : '部署节点'}</Button></div>
         </Dialog>
       </Dialog.Root>
+
+		<Dialog.Root open={tunnelModalOpen} onOpenChange={setTunnelModalOpen}>
+			<Dialog size="lg" className="w-[calc(100vw-1rem)] max-w-2xl p-0">
+				<div className="border-b border-kumo-line px-5 py-4"><Dialog.Title>部署 Cloudflare Named Tunnel</Dialog.Title><Dialog.Description>使用面板中的 Cloudflare 账号自动创建 Tunnel、DNS 记录并在主机 Agent 上安装 cloudflared。</Dialog.Description></div>
+				<div className="grid gap-3 p-5"><Select size="sm" label="Cloudflare 账号" value={tunnelForm.account_id} onValueChange={(value) => setTunnelForm((prev) => ({ ...prev, account_id: String(value), zone_id: '' }))} items={cloudflareAccounts.map((item) => ({ value: item.id, label: item.name || item.email || item.id }))} /><Select size="sm" label="DNS Zone" value={tunnelForm.zone_id} onValueChange={(value) => setTunnelForm((prev) => ({ ...prev, zone_id: String(value) }))} items={cloudflareZones.map((item) => ({ value: item.id, label: item.name || item.id }))} /><Input size="sm" label="Tunnel 域名" placeholder="cf-node.dsukhub.com" value={tunnelForm.hostname} onChange={(event) => setTunnelForm((prev) => ({ ...prev, hostname: event.target.value }))} /></div>
+				<div className="flex justify-end gap-2 border-t border-kumo-line px-5 py-4"><Button size="sm" variant="secondary" onClick={() => setTunnelModalOpen(false)}>取消</Button><Button size="sm" variant="primary" onClick={() => deployTunnel()} disabled={!tunnelTargetServer}>开始部署</Button></div>
+			</Dialog>
+		</Dialog.Root>
+
+		<Dialog.Root open={preferredModalOpen} onOpenChange={setPreferredModalOpen}>
+			<Dialog size="lg" className="w-[calc(100vw-1rem)] max-w-2xl p-0">
+				<div className="border-b border-kumo-line px-5 py-4"><Dialog.Title>优选地址</Dialog.Title><Dialog.Description>全局地址仅用于 Tunnel 节点，直连 REALITY/HY2 节点始终使用主机实例地址。</Dialog.Description></div>
+				<div className="grid gap-3 p-5 sm:grid-cols-[1fr_1.5fr_8rem_auto]"><Input size="sm" label="名称" value={preferredForm.name} onChange={(event) => setPreferredForm((prev) => ({ ...prev, name: event.target.value }))} /><Input size="sm" label="域名或 IP" placeholder="saas.sin.fan" value={preferredForm.address} onChange={(event) => setPreferredForm((prev) => ({ ...prev, address: event.target.value }))} /><Input size="sm" label="端口" type="number" value={preferredForm.port} onChange={(event) => setPreferredForm((prev) => ({ ...prev, port: Number(event.target.value) || 443 }))} /><div className="flex items-end pb-1"><Switch size="sm" label="设为全局默认" checked={!!preferredForm.is_default} onCheckedChange={(checked) => setPreferredForm((prev) => ({ ...prev, is_default: checked }))} /></div></div>
+				<div className="max-h-48 overflow-auto border-t border-kumo-line"><Table layout="fixed"><Table.Header><Table.Row><Table.Head>名称</Table.Head><Table.Head>地址</Table.Head><Table.Head className="text-center">操作</Table.Head></Table.Row></Table.Header><Table.Body>{preferredAddresses.map((item) => <Table.Row key={item.id}><Table.Cell>{item.name}</Table.Cell><Table.Cell className="font-mono text-xs">{item.address}:{item.port}</Table.Cell><Table.Cell className="text-center"><Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deletePreferredAddress(item)} icon={<Trash className="h-3.5 w-3.5" />} aria-label={`删除 ${item.name}`} /></Table.Cell></Table.Row>)}</Table.Body></Table></div>
+				<div className="flex justify-end gap-2 border-t border-kumo-line px-5 py-4"><Button size="sm" variant="secondary" onClick={() => setPreferredModalOpen(false)}>关闭</Button><Button size="sm" variant="primary" onClick={savePreferredAddress}><Save className="h-3.5 w-3.5" />保存地址</Button></div>
+			</Dialog>
+		</Dialog.Root>
 
       <Dialog.Root open={profileModalOpen} onOpenChange={setProfileModalOpen}>
         <Dialog size="lg" className="flex max-h-[min(calc(100dvh-2rem),42rem)] w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] flex-col overflow-hidden p-0 sm:w-[min(calc(100vw-3rem),64rem)]">
@@ -2469,8 +2676,8 @@ function SubscriptionPage() {
                 <section className="min-w-0 space-y-3 border-t border-kumo-line pt-4">
                   <div className="text-[11px] font-bold uppercase tracking-wide text-kumo-subtle">原始配置</div>
                   <div className="grid min-w-0 gap-3">
-                    <InputArea label="原始节点链接" className="min-h-36 w-full min-w-0 font-mono text-xs" value={nodeForm.raw || ''} onChange={(e) => setNodeForm((prev) => syncNodeForm(prev, 'raw', e.target.value))} />
-                    <InputArea label="节点配置 JSON" className="min-h-36 w-full min-w-0 font-mono text-xs" value={nodeForm.config_json || ''} onChange={(e) => setNodeForm((prev) => syncNodeForm(prev, 'config_json', e.target.value))} />
+                    <CodeEditor label="原始节点链接" language="text" minHeight="9rem" value={nodeForm.raw || ''} onChange={(raw) => setNodeForm((prev) => syncNodeForm(prev, 'raw', raw))} />
+                    <CodeEditor label="节点配置 JSON" language="json" minHeight="9rem" value={nodeForm.config_json || ''} onChange={(config_json) => setNodeForm((prev) => syncNodeForm(prev, 'config_json', config_json))} />
                   </div>
                 </section>
               </div>
@@ -2516,7 +2723,7 @@ function SubscriptionPage() {
                 <div className="space-y-3">
                   <div className="rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 py-2 text-xs text-kumo-subtle">外部节点导入后直接进入节点管理，不统计流量或应用额度限制。</div>
                   <Input size="sm" label="原始订阅 URL" placeholder="https://example.com/sub.yaml" value={importSourceURL} onChange={(e) => setImportSourceURL(e.target.value)} />
-                  <InputArea label="节点链接 / YAML / Base64 内容" className="min-h-56 w-full font-mono text-xs lg:min-h-72" placeholder="可粘贴 vmess/vless/trojan/ss/hysteria2 链接、Base64 订阅内容，或 Clash/Mihomo YAML 的 proxies 内容。" value={importText} onChange={(e) => setImportText(e.target.value)} />
+                  <CodeEditor label="节点链接 / YAML / Base64 内容" language="yaml" minHeight="18rem" placeholder="可粘贴 vmess/vless/trojan/ss/hysteria2 链接、Base64 订阅内容，或 Clash/Mihomo YAML 的 proxies 内容。" value={importText} onChange={setImportText} />
                 </div>
                 <LayerCard className="flex min-h-72 flex-col overflow-hidden border border-kumo-line bg-kumo-elevated p-0 shadow-none">
                   <LayerCard.Secondary className="flex min-h-11 items-center justify-between gap-3 border-b border-kumo-line bg-kumo-recessed/20 px-4 py-2.5">
@@ -2598,7 +2805,7 @@ function SubscriptionPage() {
                   <Input size="sm" label="名称" value={templateForm.name} onChange={(e) => setTemplateForm((prev) => ({ ...prev, name: e.target.value }))} />
                   <Select size="sm" label="格式" value={templateForm.format} onValueChange={(value) => setTemplateForm((prev) => ({ ...prev, format: String(value) }))} items={[{ value: 'clash', label: 'Mihomo/Clash YAML' }, { value: 'raw', label: 'Raw URI List' }, { value: 'base64', label: 'Base64 URI List' }]} />
                 </div>
-                <TemplateCodeEditor label="模板内容" value={templateForm.content} format={templateForm.format} onChange={(e) => setTemplateForm((prev) => ({ ...prev, content: e.target.value }))} />
+                <TemplateCodeEditor label="模板内容" value={templateForm.content} format={templateForm.format} onChange={(content) => setTemplateForm((prev) => ({ ...prev, content }))} />
                 <Input size="sm" label="描述" value={templateForm.description} onChange={(e) => setTemplateForm((prev) => ({ ...prev, description: e.target.value }))} />
               </div>
             </div>

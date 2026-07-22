@@ -32,15 +32,11 @@ must never be counted as physical host or self-hosted proxy traffic.
 
 ## Production support matrix
 
-The managed runtime is supported on systemd Linux only:
-
-- Debian 12+
-- Ubuntu 22.04 LTS+
-- AlmaLinux/Rocky Linux 9+
-- Architectures: amd64 and arm64
-
-Other Linux distributions may run the monitoring Agent, but proxy lifecycle
-operations must be refused until that operating system is certified.
+The managed runtime is supported on systemd Linux with amd64 or arm64.
+Distribution and release-version allowlists are intentionally avoided: the
+Agent validates the capabilities it actually depends on (systemd, architecture,
+runtime binary validation, writable state directories, bindable ports, and a
+supported firewall adapter) rather than rejecting otherwise compatible hosts.
 
 ## Security and delivery
 

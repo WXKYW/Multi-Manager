@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
-import { Input, Textarea } from '@cloudflare/kumo/components/input';
+import { Input } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
@@ -18,6 +18,7 @@ import useStore, {
 } from '../store.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { AppCard, SectionCard, cx } from '../components/ui/AppPrimitives.jsx';
+import CodeEditor from '../components/ui/CodeEditor.jsx';
 import { BackupPanel } from './BackupPage.jsx';
 import {
   Activity,
@@ -1448,12 +1449,13 @@ function SettingsPage() {
             bodyPadding="none"
           >
             <div className="p-4">
-              <Textarea
+              <CodeEditor
                 label="CSS"
+                language="css"
                 value={settings.customCss}
-                onChange={(e) => patchSettings({ customCss: e.target.value })}
+                onChange={(customCss) => patchSettings({ customCss })}
                 placeholder="/* 在此输入自定义 CSS */"
-                className="min-h-[22rem] font-mono text-sm"
+                minHeight="22rem"
               />
             </div>
           </SectionCard>

@@ -19,6 +19,7 @@ import CountryFlag from '../components/CountryFlag.jsx';
 import QuickCommandBar from '../components/server/QuickCommandBar.jsx';
 import SftpPanel from '../components/server/SftpPanel.jsx';
 import ServerLocationMap from '../components/server/ServerLocationMap.jsx';
+import CodeEditor from '../components/ui/CodeEditor.jsx';
 import {
   ChartBoundaryBox,
   ChartWarmupSkeleton,
@@ -35,6 +36,12 @@ import { canOpenRemoteDesktop, remoteDesktopPath } from '../modules/remoteDeskto
 import { readSftpFile, writeSftpFile } from '../modules/server-sftp.js';
 import { formatDockerContainerPorts } from '../modules/docker-format.js';
 import { summarizeDockerContainers } from '../modules/dockerSummary.js';
+import {
+  formatDockerPruneResult,
+  isDockerImagePruneCandidate,
+  normalizeDockerTaskResult,
+  summarizeDockerTaskMessage,
+} from '../modules/dockerTasks.js';
 import {
   buildAgentInstallCommand,
   buildAgentInstallEndpoint,
@@ -2184,6 +2191,7 @@ const getDockerTaskActionLabel = (action = '') => {
     'compose.down': '停止 Compose 项目',
     'compose.restart': '重启 Compose 项目',
     'compose.pull': '升级 Compose 项目',
+    'compose.update': '更新 Compose 编排',
     'image.prune': '清理镜像',
     'image.remove': '删除镜像',
     'network.prune': '清理网络',
@@ -4737,7 +4745,7 @@ function ServerPage() {
   const decorateDockerTask = (task = {}) => {
     const meta = dockerTaskMetaRef.current[task.taskId] || {};
     const payload = task.payload || meta.payload || {};
-    return {
+    return normalizeDockerTaskResult({
       ...meta,
       ...task,
       payload,
@@ -4745,7 +4753,7 @@ function ServerPage() {
       serverId: task.serverId || meta.serverId,
       targetName: task.targetName || meta.targetName || getDockerTaskTargetLabel(payload),
       silent: task.silent ?? meta.silent,
-    };
+    });
   };
 
   const rememberDockerTaskMeta = (taskId, meta = {}) => {
@@ -4844,23 +4852,7 @@ function ServerPage() {
     return { variant: 'neutral', label: '已检测', title: '远端或本地摘要不完整，无法严格判断' };
   };
 
-  const summarizeDockerTaskMessage = (task = {}) => {
-    const raw = String(task.message || '');
-    if (!raw) return '';
-    const trimmed = raw.trim();
-    if (!trimmed.startsWith('[') && !trimmed.startsWith('{')) return raw.length > 96 ? `${raw.slice(0, 96)}...` : raw;
-    try {
-      const parsed = JSON.parse(trimmed);
-      const list = Array.isArray(parsed) ? parsed : [parsed];
-      const updateCount = list.filter(item => item?.has_update || item?.hasUpdate).length;
-      if (task.action === 'container.checkUpdates' || list.some(item => item?.container_name || item?.containerName)) {
-        return updateCount > 0 ? `发现 ${updateCount} 个可更新容器` : `已检查 ${list.length} 个容器`;
-      }
-      return `返回 ${list.length} 条结果`;
-    } catch (error) {
-      return raw.length > 96 ? `${raw.slice(0, 96)}...` : raw;
-    }
-  };
+  const getDockerUpdateResultError = (result = {}) => String(result.error || '').trim();
 
   const getDockerStateBadge = (state) => {
     if (state === 'running') return { variant: 'success', label: '运行' };
@@ -5555,7 +5547,7 @@ function ServerPage() {
     }
     if (action.startsWith('compose.')) {
       const composeAction = action.split('.')[1];
-      if (['up', 'down', 'restart', 'pull'].includes(composeAction)) {
+      if (['up', 'down', 'restart', 'pull', 'update'].includes(composeAction)) {
         const project = payload.project || payload.projectName || payload.name;
         if (!project) throw new Error('Missing compose project');
         const configFile = payload.config_file || payload.configFile || payload.configFiles || payload.ConfigFiles || '';
@@ -5631,10 +5623,13 @@ function ServerPage() {
         if (!res.ok || !data.success) {
           throw new Error(data.error || data.message || 'Docker operation failed');
         }
-        if (!options.silent) toast.success(`${getDockerTaskActionLabel(action)}执行成功`);
+        if (!options.silent) {
+          const pruneActions = ['image.prune', 'network.prune', 'volume.prune'];
+          toast.success(pruneActions.includes(action) ? formatDockerPruneResult(action, data) : `${getDockerTaskActionLabel(action)}执行成功`);
+        }
         clearDockerActionPending(serverId, action, payload);
         scheduleDockerResourceRefresh(400);
-        return { ok: true };
+        return { ok: true, data };
       }
 
       const proxyAction = getDockerProxyContainerAction(action);
@@ -6297,16 +6292,20 @@ function ServerPage() {
         }], fallback);
       }
 
+      const failedResults = results.filter(result => getDockerUpdateResultError(result));
       if (!options.silent) {
         const updateCount = results.filter(item => item?.has_update || item?.hasUpdate).length;
-        if (updateCount > 0) {
+        if (failedResults.length > 0) {
+          const target = failedResults[0]?.container_name || failedResults[0]?.containerName || fallback.containerName || '容器';
+          toast.error(`${target} 检测失败：${getDockerUpdateResultError(failedResults[0])}`);
+        } else if (updateCount > 0) {
           toast.warning(`检测完成，发现 ${updateCount} 个可更新镜像`);
         } else {
           toast.success('检测完成，暂无可更新镜像');
         }
       }
 
-      return { ok: true, results };
+      return { ok: failedResults.length === 0, error: getDockerUpdateResultError(failedResults[0]), results };
     } catch (error) {
       if (container) {
         storeDockerUpdateChecks(serverId, [{
@@ -6532,6 +6531,8 @@ function ServerPage() {
       originalContent: '',
       loading: Boolean(path),
       saving: false,
+      saved: false,
+      updating: false,
       error: path ? '' : '未找到 Compose 配置文件路径',
     };
     setDockerComposeEditor(baseEditor);
@@ -6599,6 +6600,7 @@ function ServerPage() {
         saving: false,
         mode: 'view',
         originalContent: prev.content,
+        saved: true,
       } : prev);
       toast.success('Mock 模式: Compose 配置已保存');
       return;
@@ -6611,6 +6613,7 @@ function ServerPage() {
         saving: false,
         mode: 'view',
         originalContent: prev.content,
+        saved: true,
       } : prev);
       toast.success('Compose 配置已保存');
       scheduleDockerResourceRefresh(500);
@@ -7245,6 +7248,22 @@ function ServerPage() {
         return { left: gap, right: gap, top: '50%', bottom: gap };
       default:
         return { left: gap, right: gap, top: gap, bottom: gap };
+    }
+  };
+
+  const updateDockerComposeDeployment = async () => {
+    if (!dockerComposeEditor?.serverId || !dockerComposeEditor?.projectName || !dockerComposeEditor?.path) return;
+    setDockerComposeEditor(prev => prev ? { ...prev, updating: true, error: '' } : prev);
+    const payload = {
+      serverId: dockerComposeEditor.serverId,
+      project: dockerComposeEditor.projectName,
+      config_file: dockerComposeEditor.configFiles?.join(', ') || dockerComposeEditor.path,
+    };
+    const result = await submitDockerTask('compose.update', payload, { silent: true });
+    setDockerComposeEditor(prev => prev ? { ...prev, updating: false, saved: result?.ok ? false : prev.saved } : prev);
+    if (result?.ok) {
+      toast.success('编排已更新，并已强制拉取镜像');
+      scheduleDockerResourceRefresh(500);
     }
   };
 
@@ -9163,8 +9182,8 @@ function ServerPage() {
                                           aria-label={`选择更新 ${containerName}`}
                                         />
                                       </Table.Cell>
-                                      <Table.Cell className="p-2 font-bold text-kumo-strong truncate" title={containerName}>{containerName}</Table.Cell>
-                                      <Table.Cell className="p-2 truncate" title={containerImage}>{containerImage}</Table.Cell>
+                                      <Table.Cell className="truncate p-2 font-bold leading-5 text-kumo-strong" title={containerName}>{containerName}</Table.Cell>
+                                      <Table.Cell className="truncate p-2 leading-5" title={containerImage}>{containerImage}</Table.Cell>
                                       <Table.Cell className="p-2 text-center">
                                         {updatePending ? (
                                           <span className="inline-flex flex-col items-center justify-center gap-1 text-[10px] font-semibold text-kumo-brand">
@@ -9536,6 +9555,7 @@ function ServerPage() {
               {dockerSubTab === 'images' && (() => {
                 const hosts = dockerOverviewServers.filter(server => isDockerOverviewHostVisible(server, 'images'));
                 const allImagePruneConfirmKey = `image.prune.all::${hosts.map(server => server.id).join('|')}`;
+                const pruneCandidateCount = dockerImages.filter(isDockerImagePruneCandidate).length;
                 return (
                   <div className="grid min-w-0 gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
                     {renderDockerResourceSideRail({
@@ -9546,6 +9566,7 @@ function ServerPage() {
                       countLabel: '镜像',
                       summaryItems: [
                         { label: '仓库', value: new Set(dockerImages.map(item => getDockerImageRepository(item))).size },
+                        { label: '可清理', value: pruneCandidateCount, className: pruneCandidateCount > 0 ? 'text-kumo-warning' : 'text-kumo-success' },
                       ],
                       actions: (
                         <Button
@@ -9563,7 +9584,11 @@ function ServerPage() {
                       getHostCount: server => asArray(server.resources?.images).length,
                       getHostBadges: server => {
                         const images = asArray(server.resources?.images);
-                        return images.length > 0 ? [{ label: `${new Set(images.map(img => getDockerImageRepository(img))).size} 仓库` }] : [];
+                        const pruneCandidates = images.filter(isDockerImagePruneCandidate).length;
+                        return images.length > 0 ? [
+                          { label: `${new Set(images.map(img => getDockerImageRepository(img))).size} 仓库` },
+                          ...(pruneCandidates > 0 ? [{ label: `${pruneCandidates} 可清理`, variant: 'warning' }] : []),
+                        ] : [];
                       },
                       renderHostAction: server => {
                         const prunePayload = { serverId: server.id };
@@ -9592,12 +9617,16 @@ function ServerPage() {
                           const prunePayload = { serverId: server.id };
                           const prunePending = isDockerActionPending(server.id, 'image.prune', prunePayload);
                           const pruneConfirmKey = `image.prune.section::${server.id}`;
+                          const pruneCandidates = images.filter(isDockerImagePruneCandidate).length;
                           return renderDockerHostResourceSection({
                             server,
                             icon: <HardDrive className="h-4 w-4 shrink-0 text-kumo-brand" />,
                             count: images.length,
                             countLabel: '镜像',
-                            badges: images.length > 0 ? [{ label: `${new Set(images.map(img => getDockerImageRepository(img))).size} 仓库` }] : [],
+                            badges: images.length > 0 ? [
+                              { label: `${new Set(images.map(img => getDockerImageRepository(img))).size} 仓库` },
+                              ...(pruneCandidates > 0 ? [{ label: `${pruneCandidates} 可清理`, variant: 'warning' }] : []),
+                            ] : [],
                             actions: (
                               <Button
                                 size="sm"
@@ -10177,14 +10206,14 @@ function ServerPage() {
               bodyPadding="sm"
               bodyClassName="flex flex-col gap-2"
             >
-                <Textarea
+                <CodeEditor
                   label="主机列表"
-                  aria-label="批量快速添加主机"
+                  language="text"
                   value={serverBatchText}
-                  onChange={e => setServerBatchText(e.target.value)}
+                  onChange={setServerBatchText}
                   placeholder="名称,IP,端口,用户名,密码 
 例如: prod-server,192.168.1.10,22,root,password"
-                  className="h-12 text-xs"
+                  minHeight="7rem"
                 />
                 {serverBatchError && <Badge variant="error">{serverBatchError}</Badge>}
                 {serverBatchSuccess && <Badge variant="success">{serverBatchSuccess}</Badge>}
@@ -11093,12 +11122,13 @@ function ServerPage() {
                       <div className="flex flex-col gap-3">
                         <div className="flex flex-col gap-1.5">
                           <label className="font-semibold text-kumo-subtle">私钥证书</label>
-                          <Textarea
-                            aria-label="证书密钥"
+                          <CodeEditor
+                            label="证书密钥"
+                            language="text"
                             value={serverForm.privateKey}
-                            onChange={e => setServerForm(prev => ({ ...prev, privateKey: e.target.value }))}
+                            onChange={privateKey => setServerForm(prev => ({ ...prev, privateKey }))}
                             placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
-                            className="w-full h-20 p-2 text-xs font-mono"
+                            minHeight="8rem"
                           />
                         </div>
                         <div className="flex flex-col gap-1.5">
@@ -11314,12 +11344,13 @@ function ServerPage() {
                 <div className="flex flex-col gap-3">
                   <div className="flex flex-col gap-1.5">
                     <label className="font-semibold text-kumo-subtle">PEM 私钥证书内容</label>
-                    <Textarea
-                      aria-label="PEM 私钥证书内容"
+                    <CodeEditor
+                      label="PEM 私钥证书内容"
+                      language="text"
                       value={credForm.private_key}
-                      onChange={e => setCredForm(prev => ({ ...prev, private_key: e.target.value }))}
+                      onChange={private_key => setCredForm(prev => ({ ...prev, private_key }))}
                       placeholder="-----BEGIN RSA PRIVATE KEY-----"
-                      className="w-full h-24 p-2 text-xs font-mono"
+                      minHeight="8rem"
                     />
                   </div>
                   <div className="flex flex-col gap-1.5">
@@ -11549,11 +11580,13 @@ function ServerPage() {
                 )}
 
                 {agentInstallLog && (
-                  <Textarea
+                  <CodeEditor
                     label="安装日志"
+                    language="text"
                     value={agentInstallLog}
                     readOnly
-                    className={`agent-command-textarea min-h-40 resize-none font-mono text-[11px] leading-5 ${agentInstallResult === 'success'
+                    minHeight="10rem"
+                    className={`${agentInstallResult === 'success'
                       ? 'ring-kumo-success/40'
                       : agentInstallResult === 'error'
                         ? 'ring-kumo-danger/40'
@@ -11994,12 +12027,14 @@ function ServerPage() {
               {dockerComposeEditor?.error && (
                 <Badge variant="error">{dockerComposeEditor.error}</Badge>
               )}
-              <Textarea
-                aria-label="Compose 配置内容"
+              <CodeEditor
+                label="Compose 配置内容"
+                language="yaml"
                 value={dockerComposeEditor?.loading ? '正在读取 Compose 配置...' : dockerComposeEditor?.content || ''}
-                onChange={event => setDockerComposeEditor(prev => prev ? { ...prev, content: event.target.value } : prev)}
+                onChange={content => setDockerComposeEditor(prev => prev ? { ...prev, content } : prev)}
                 readOnly={dockerComposeEditor?.mode !== 'edit' || dockerComposeEditor?.loading}
-                className="min-h-0 flex-1 resize-none overflow-auto font-mono text-xs"
+                className="min-h-0 flex-1"
+                minHeight="0"
               />
             </div>
           </div>
@@ -12030,6 +12065,20 @@ function ServerPage() {
                   className="w-full sm:w-auto"
                 >
                   保存
+                </Button>
+              )}
+              {dockerComposeEditor?.mode === 'view' && dockerComposeEditor?.saved && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="primary"
+                  icon={<Upload className="h-3.5 w-3.5" />}
+                  loading={dockerComposeEditor?.updating}
+                  disabled={dockerComposeEditor?.updating || !dockerComposeEditor?.path}
+                  onClick={updateDockerComposeDeployment}
+                  className="w-full sm:w-auto"
+                >
+                  更新编排
                 </Button>
               )}
             </div>
