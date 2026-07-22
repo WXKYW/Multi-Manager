@@ -839,24 +839,44 @@ func TestDockerOverviewQueriesServersConcurrently(t *testing.T) {
 		t.Fatalf("insert accounts: %v", err)
 	}
 
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
 	reply := func(taskType int, data string) string {
 		if taskType != dockerTaskContainers {
 			t.Fatalf("unexpected task type: %d data=%s", taskType, data)
 		}
-		time.Sleep(120 * time.Millisecond)
+		started <- struct{}{}
+		<-release
 		return `[{"id":"abc123","name":"web","state":"running"}]`
 	}
 	service.registry.Register("docker-one", &taskReplySocket{t: t, service: service, reply: reply})
 	service.registry.Register("docker-two", &taskReplySocket{t: t, service: service, reply: reply})
 
-	started := time.Now()
-	res := perform(service, http.MethodGet, "/api/server/v2/docker/overview?scope=containers", "")
-	elapsed := time.Since(started)
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- perform(service, http.MethodGet, "/api/server/v2/docker/overview?scope=containers", "")
+	}()
+
+	bothStarted := true
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	for count := 0; count < 2; count++ {
+		select {
+		case <-started:
+		case <-timer.C:
+			bothStarted = false
+		}
+		if !bothStarted {
+			break
+		}
+	}
+	close(release)
+	res := <-done
+	if !bothStarted {
+		t.Fatal("overview did not start both server queries concurrently")
+	}
 	if res.Code != http.StatusOK {
 		t.Fatalf("overview status=%d body=%s", res.Code, res.Body.String())
-	}
-	if elapsed >= 220*time.Millisecond {
-		t.Fatalf("overview queried servers serially, elapsed=%s", elapsed)
 	}
 
 	payload := decodePayload(t, res)
