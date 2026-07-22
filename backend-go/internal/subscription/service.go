@@ -1248,8 +1248,16 @@ func ensureBuiltins(ctx context.Context, db *sql.DB, overwrite bool) error {
 			}
 			continue
 		}
-		_, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO subscription_templates (id, name, format, content, builtin, is_default, description)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`, tpl.ID, tpl.Name, tpl.Format, tpl.Content, boolToInt(tpl.Builtin), boolToInt(tpl.IsDefault), tpl.Description)
+		_, err := db.ExecContext(ctx, `INSERT INTO subscription_templates (id, name, format, content, builtin, is_default, description)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET
+				name=CASE WHEN subscription_templates.builtin=1 THEN excluded.name ELSE subscription_templates.name END,
+				format=CASE WHEN subscription_templates.builtin=1 THEN excluded.format ELSE subscription_templates.format END,
+				content=CASE WHEN subscription_templates.builtin=1 THEN excluded.content ELSE subscription_templates.content END,
+				builtin=CASE WHEN subscription_templates.builtin=1 THEN 1 ELSE subscription_templates.builtin END,
+				description=CASE WHEN subscription_templates.builtin=1 THEN excluded.description ELSE subscription_templates.description END,
+				updated_at=CASE WHEN subscription_templates.builtin=1 THEN datetime('now') ELSE subscription_templates.updated_at END`,
+			tpl.ID, tpl.Name, tpl.Format, tpl.Content, boolToInt(tpl.Builtin), boolToInt(tpl.IsDefault), tpl.Description)
 		if err != nil {
 			return err
 		}
@@ -1914,29 +1922,29 @@ func (s *Service) importCommit(w http.ResponseWriter, r *http.Request, db *sql.D
 		return
 	}
 	defer tx.Rollback()
-	if payload.Replace {
-		if sourceURL != "" {
-			_, _ = tx.ExecContext(r.Context(), `DELETE FROM subscription_plan_nodes WHERE source='external' AND node_id IN (SELECT id FROM subscription_nodes WHERE COALESCE(profile_id, subscription_id) = ? AND source IN ('managed', 'upstream'))`, profileID)
-			_, _ = tx.ExecContext(r.Context(), `DELETE FROM subscription_nodes WHERE COALESCE(profile_id, subscription_id) = ? AND source IN ('managed', 'upstream')`, profileID)
-		} else {
-			_, _ = tx.ExecContext(r.Context(), `DELETE FROM subscription_plan_nodes WHERE source='external' AND node_id IN (SELECT id FROM subscription_nodes WHERE COALESCE(profile_id, subscription_id) = ? AND source = 'manual')`, profileID)
-			_, _ = tx.ExecContext(r.Context(), `DELETE FROM subscription_nodes WHERE COALESCE(profile_id, subscription_id) = ? AND source = 'manual'`, profileID)
-		}
-	}
 	var maxOrder int
 	_ = tx.QueryRowContext(r.Context(), `SELECT COALESCE(MAX(sort_order), 0) FROM subscription_nodes WHERE COALESCE(profile_id, subscription_id) = ?`, profileID).Scan(&maxOrder)
+	source := "manual"
+	if sourceURL != "" {
+		source = "managed"
+	}
 	for i := range nodes {
 		nodes[i].SubscriptionID = profileID
 		nodes[i].ProfileID = profileID
-		if sourceURL != "" {
-			nodes[i].Source = "managed"
-		} else {
-			nodes[i].Source = "manual"
-		}
+		nodes[i].Source = source
 		nodes[i].SortOrder = maxOrder + i + 1
-		if err := insertNode(r.Context(), tx, nodes[i]); err != nil {
+	}
+	if payload.Replace {
+		if err := replaceImportedNodes(r.Context(), tx, profileID, source, nodes); err != nil {
 			response.Error(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+	} else {
+		for i := range nodes {
+			if err := insertNode(r.Context(), tx, nodes[i]); err != nil {
+				response.Error(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 		}
 	}
 	if sourceURL != "" {
@@ -2687,10 +2695,133 @@ func insertNode(ctx context.Context, tx *sql.Tx, node Node) error {
 	return err
 }
 
+// replaceImportedNodes reconciles a replace import in place. Plans reference
+// node IDs, so deleting every row before re-importing silently disconnects all
+// downstream subscriptions. Exact fingerprints are preferred; a unique name
+// is the stable fallback when an upstream changes the endpoint or credentials.
+func replaceImportedNodes(ctx context.Context, tx *sql.Tx, profileID, source string, incoming []Node) error {
+	existing, err := loadReplaceCandidates(ctx, tx, profileID, source)
+	if err != nil {
+		return err
+	}
+	byFingerprint := make(map[string]Node, len(existing))
+	nameCandidates := make(map[string][]Node, len(existing))
+	for _, node := range existing {
+		fingerprint := nodeFingerprint(node)
+		if fingerprint != "" {
+			byFingerprint[fingerprint] = node
+		}
+		nameKey := normalizedNodeIdentityName(node.Name)
+		if nameKey != "" {
+			nameCandidates[nameKey] = append(nameCandidates[nameKey], node)
+		}
+	}
+
+	seenIDs := make(map[string]bool, len(incoming))
+	for index := range incoming {
+		node := incoming[index]
+		fingerprint := nodeFingerprint(node)
+		current, matched := byFingerprint[fingerprint]
+		if !matched {
+			matches := nameCandidates[normalizedNodeIdentityName(node.Name)]
+			if len(matches) == 1 {
+				current, matched = matches[0], true
+			}
+		}
+		if matched && !seenIDs[current.ID] {
+			node.ID = current.ID
+			node.Enabled = current.Enabled
+			node.Stable = current.Stable
+			if err := updateImportedNode(ctx, tx, node, source, fingerprint); err != nil {
+				return err
+			}
+			seenIDs[current.ID] = true
+			continue
+		}
+		if err := insertNode(ctx, tx, node); err != nil {
+			return err
+		}
+		seenIDs[node.ID] = true
+	}
+
+	for _, node := range existing {
+		if seenIDs[node.ID] {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM subscription_plan_nodes WHERE node_id=? AND source='external'`, node.ID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM subscription_nodes WHERE id=?`, node.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func loadReplaceCandidates(ctx context.Context, tx *sql.Tx, profileID, source string) ([]Node, error) {
+	sourceClause := "source = 'manual'"
+	if source == "managed" {
+		sourceClause = "source IN ('managed','upstream')"
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id,subscription_id,COALESCE(profile_id,subscription_id),name,
+		COALESCE(type,''),COALESCE(server,''),COALESCE(port,0),COALESCE(country_code,''),COALESCE(location,''),
+		COALESCE(tags,''),enabled,stable,sort_order,COALESCE(fingerprint,'')
+		FROM subscription_nodes WHERE COALESCE(profile_id,subscription_id)=? AND `+sourceClause, profileID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Node{}
+	for rows.Next() {
+		var node Node
+		var enabled, stable int
+		var fingerprint string
+		if err := rows.Scan(&node.ID, &node.SubscriptionID, &node.ProfileID, &node.Name, &node.Type, &node.Server, &node.Port, &node.CountryCode, &node.Location, &node.Tags, &enabled, &stable, &node.SortOrder, &fingerprint); err != nil {
+			return nil, err
+		}
+		node.Enabled = enabled == 1
+		node.Stable = stable == 1
+		items = append(items, node)
+	}
+	return items, rows.Err()
+}
+
+func updateImportedNode(ctx context.Context, tx *sql.Tx, node Node, source, fingerprint string) error {
+	rawEnc, err := secure.SecureEncrypt(node.Raw)
+	if err != nil {
+		return err
+	}
+	cfgEnc, err := secure.SecureEncrypt(node.ConfigJSON)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE subscription_nodes SET subscription_id=?,profile_id=?,name=?,type=?,server=?,port=?,country_code=?,location=?,tags=?,
+		traffic_server_id=NULL,ownership='external',management='unmanaged',traffic_reporting='unavailable',enabled=?,stable=?,sort_order=?,
+		raw_encrypted=?,config_encrypted=?,fingerprint=?,source=?,updated_at=datetime('now') WHERE id=?`,
+		node.SubscriptionID, node.ProfileID, node.Name, node.Type, node.Server, node.Port, node.CountryCode, node.Location, node.Tags,
+		boolToInt(node.Enabled), boolToInt(node.Stable), node.SortOrder, rawEnc, cfgEnc, fingerprint, source, node.ID)
+	return err
+}
+
+func normalizedNodeIdentityName(value string) string {
+	return strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(value)), " "))
+}
+
 func mergeManagedNodes(ctx context.Context, tx *sql.Tx, profileID string, incoming []Node) error {
 	existing, err := loadManagedNodeFingerprints(ctx, tx, profileID)
 	if err != nil {
 		return err
+	}
+	candidates, err := loadReplaceCandidates(ctx, tx, profileID, "managed")
+	if err != nil {
+		return err
+	}
+	nameCandidates := make(map[string][]Node, len(candidates))
+	for _, candidate := range candidates {
+		key := normalizedNodeIdentityName(candidate.Name)
+		if key != "" {
+			nameCandidates[key] = append(nameCandidates[key], candidate)
+		}
 	}
 	seenIDs := map[string]bool{}
 	for i := range incoming {
@@ -2702,7 +2833,14 @@ func mergeManagedNodes(ctx context.Context, tx *sql.Tx, profileID string, incomi
 			node.SortOrder = i + 1
 		}
 		fingerprint := nodeFingerprint(node)
-		if current, ok := existing[fingerprint]; ok {
+		current, ok := existing[fingerprint]
+		if !ok {
+			matches := nameCandidates[normalizedNodeIdentityName(node.Name)]
+			if len(matches) == 1 {
+				current, ok = matches[0], true
+			}
+		}
+		if ok && !seenIDs[current.ID] {
 			node.ID = current.ID
 			node.Name = firstNonEmpty(current.Name, node.Name)
 			node.CountryCode = firstNonEmpty(current.CountryCode, node.CountryCode)

@@ -89,6 +89,43 @@ func TestPublishedNodeNamesAreUnique(t *testing.T) {
 	}
 }
 
+func TestDefaultMihomoOutputUsesClientCompatibleFingerprintAndUniqueNames(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	nodes := ensureUniquePublishedNodeNames([]Node{
+		{Name: "香港月抛", Type: "vless", Server: "one.example.com", Port: 443, ConfigJSON: `{"name":"香港月抛","type":"vless","server":"one.example.com","port":443,"uuid":"one","tls":true,"client-fingerprint":"chrome"}`, Enabled: true},
+		{Name: "香港月抛", Type: "trojan", Server: "two.example.com", Port: 443, ConfigJSON: `{"name":"香港月抛","type":"trojan","server":"two.example.com","port":443,"password":"two","tls":true,"client-fingerprint":"chrome"}`, Enabled: true},
+	})
+	body, _, err := renderOutput(ctx, db, Subscription{Name: "测试"}, nodes, "clash", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(body, "global-client-fingerprint") {
+		t.Fatal("deprecated global-client-fingerprint must not be emitted")
+	}
+	var output struct {
+		Proxies []map[string]interface{} `yaml:"proxies"`
+	}
+	if err := yaml.Unmarshal([]byte(body), &output); err != nil {
+		t.Fatalf("invalid mihomo yaml: %v", err)
+	}
+	if len(output.Proxies) != 2 || output.Proxies[0]["name"] == output.Proxies[1]["name"] {
+		t.Fatalf("proxy names are not unique: %#v", output.Proxies)
+	}
+	for _, proxy := range output.Proxies {
+		if proxy["client-fingerprint"] != "chrome" {
+			t.Fatalf("proxy fingerprint missing: %#v", proxy)
+		}
+	}
+}
+
 func TestJSONServerMetadataDoesNotTurnMissingValuesIntoNilText(t *testing.T) {
 	values := map[string]interface{}{"platform": nil, "os": "Ubuntu"}
 	if got := jsonString(values, "platform"); got != "" {
@@ -1101,6 +1138,138 @@ func TestDeleteExternalNodeRemovesPlanMembership(t *testing.T) {
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM subscription_plan_nodes WHERE node_id='external'`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("membership count=%d err=%v", count, err)
+	}
+}
+
+func TestReplacingImportedNodePreservesPlanMembershipWhenEndpointChanges(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_profiles(id,name) VALUES('library','节点库')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_plans(id,name) VALUES('plan','套餐')`); err != nil {
+		t.Fatal(err)
+	}
+	old := Node{ID: "external", SubscriptionID: "library", ProfileID: "library", Name: "香港节点", Type: "vless", Server: "old.example.com", Port: 443, Raw: "vless://old@example.com:443#香港节点", Enabled: true, Source: "manual"}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := insertNode(ctx, tx, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_plan_nodes(plan_id,node_id,source) VALUES('plan','external','external')`); err != nil {
+		t.Fatal(err)
+	}
+
+	body := `{"subscription_id":"library","replace":true,"nodes":[{"name":"香港节点","type":"vless","server":"new.example.com","port":8443,"raw":"vless://new@example.com:8443#香港节点","enabled":true}]}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/subscription/import/commit", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	New(config.Config{}).importCommit(rec, req, db)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var nodeID, server string
+	var port int
+	if err := db.QueryRow(`SELECT id,server,port FROM subscription_nodes WHERE COALESCE(profile_id,subscription_id)='library'`).Scan(&nodeID, &server, &port); err != nil {
+		t.Fatal(err)
+	}
+	if nodeID != "external" || server != "new.example.com" || port != 8443 {
+		t.Fatalf("replacement node id=%q server=%q port=%d", nodeID, server, port)
+	}
+	var relationCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM subscription_plan_nodes WHERE plan_id='plan' AND node_id='external' AND source='external'`).Scan(&relationCount); err != nil || relationCount != 1 {
+		t.Fatalf("membership count=%d err=%v", relationCount, err)
+	}
+}
+
+func TestRefreshingManagedSourcePreservesPlanMembershipWhenEndpointChanges(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_profiles(id,name) VALUES('library','节点库')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_plans(id,name) VALUES('plan','套餐')`); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := Node{ID: "managed", SubscriptionID: "library", ProfileID: "library", Name: "新加坡节点", Type: "trojan", Server: "old.example.com", Port: 443, Raw: "trojan://old@example.com:443#新加坡节点", Enabled: true, Source: "managed"}
+	if err := insertNode(ctx, tx, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_plan_nodes(plan_id,node_id,source) VALUES('plan','managed','external')`); err != nil {
+		t.Fatal(err)
+	}
+	tx, err = db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	incoming := []Node{{Name: "新加坡节点", Type: "trojan", Server: "new.example.com", Port: 8443, Raw: "trojan://new@example.com:8443#新加坡节点", Enabled: true}}
+	if err := mergeManagedNodes(ctx, tx, "library", incoming); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	var nodeID, server string
+	if err := db.QueryRow(`SELECT id,server FROM subscription_nodes WHERE COALESCE(profile_id,subscription_id)='library'`).Scan(&nodeID, &server); err != nil {
+		t.Fatal(err)
+	}
+	if nodeID != "managed" || server != "new.example.com" {
+		t.Fatalf("refreshed node id=%q server=%q", nodeID, server)
+	}
+	var relationCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM subscription_plan_nodes WHERE plan_id='plan' AND node_id='managed'`).Scan(&relationCount); err != nil || relationCount != 1 {
+		t.Fatalf("membership count=%d err=%v", relationCount, err)
+	}
+}
+
+func TestEnsureBuiltinsRefreshesStaleBuiltinTemplate(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_templates(id,name,format,content,builtin) VALUES(?,?,?,?,1)`, defaultTemplateID, "旧模板", "clash", "global-client-fingerprint: chrome"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureBuiltins(ctx, db, false); err != nil {
+		t.Fatal(err)
+	}
+	var content string
+	if err := db.QueryRow(`SELECT content FROM subscription_templates WHERE id=?`, defaultTemplateID).Scan(&content); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(content, "global-client-fingerprint") || !strings.Contains(content, "{{ proxies_yaml }}") {
+		t.Fatalf("builtin template was not refreshed: %q", content)
 	}
 }
 

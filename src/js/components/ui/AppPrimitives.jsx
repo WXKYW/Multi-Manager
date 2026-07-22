@@ -223,7 +223,11 @@ export function DataTableFrame({
   children,
   ...props
 }) {
-  const frameClassName = cx('overflow-x-auto', tableDensityClass[density], className);
+  const frameClassName = cx(
+    'overflow-x-auto overscroll-x-contain touch-pan-x scrollbar-thin',
+    tableDensityClass[density],
+    className
+  );
 
   if (variant === 'embedded') {
     return (

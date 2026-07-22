@@ -10,7 +10,6 @@ geo-update-interval: 24
 unified-delay: true                # 以“完成握手后”的 RTT 统计延迟，更贴近真实体验
 tcp-concurrent: true               # 并发拨号择优保留，跨境网络通常更稳更快
 find-process-mode: strict          # 更精准地识别连接来源进程（Windows 需管理员权限）
-global-client-fingerprint: randomized  # 统一 TLS 指纹为 Chrome；如遇个别站点校验可改 randomized
 geox-url:
   geoip: https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat
   geosite: https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat
