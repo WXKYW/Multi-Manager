@@ -27,6 +27,10 @@ import (
 	"golang.org/x/crypto/curve25519"
 )
 
+func isMissingTableError(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "no such table")
+}
+
 type managedProxyNode struct {
 	ID                 string `json:"id"`
 	ServerID           string `json:"server_id"`
@@ -612,7 +616,7 @@ func (s *Service) applyManagedProxyNodeTask(taskID, id string) {
 	var clientEncrypted string
 	_ = db.QueryRowContext(ctx, `SELECT client_uri_encrypted FROM managed_proxy_nodes WHERE id=?`, id).Scan(&clientEncrypted)
 	client := secure.SecureDecrypt(clientEncrypted)
-	client = replaceURIClientPort(client, applied.AssignedPort)
+	client = bindManagedNodeRuntimePort(client, applied.AssignedPort, accessMode)
 	updatedClient, _ := secure.SecureEncrypt(client)
 	if _, err := db.ExecContext(ctx, `UPDATE managed_proxy_nodes SET assigned_port=?,config_encrypted=?,client_uri_encrypted=?,apply_status='running',publishable=CASE WHEN access_mode='cloudflare_tunnel' THEN 0 ELSE 1 END,last_error='',observed_status=?,observed_revision=revision,observed_port=?,observed_at=datetime('now'),health_status=?,updated_at=datetime('now') WHERE id=?`, applied.AssignedPort, updatedConfig, updatedClient, applied.Status, applied.AssignedPort, healthStatus, id); err != nil {
 		_ = s.compensateManagedProxyNode(ctx, serverID, id, revision, release)
@@ -789,6 +793,16 @@ func replaceURIClientPort(raw string, port int) string {
 	return parsed.String()
 }
 
+// A Tunnel node has two independent endpoints: the local origin port assigned
+// by the Agent and the public Cloudflare/Preferred-Address endpoint. Only a
+// direct node exposes the assigned origin port to clients.
+func bindManagedNodeRuntimePort(raw string, port int, accessMode string) string {
+	if accessMode == "cloudflare_tunnel" {
+		return raw
+	}
+	return replaceURIClientPort(raw, port)
+}
+
 func loadPublishableManagedNodes(ctx context.Context, db *sql.DB) ([]managedProxyNode, error) {
 	rows, err := db.QueryContext(ctx, `SELECT id,server_id,name,protocol,runtime,public_host,assigned_port,transport,client_uri_encrypted,revision,enabled,publishable,apply_status,last_error,access_mode,tunnel_path,preferred_address_id,connect_address,connect_port,tunnel_hostname,created_at,updated_at FROM managed_proxy_nodes WHERE enabled=1 AND publishable=1 AND apply_status='running' ORDER BY created_at ASC`)
 	if err != nil {
@@ -832,21 +846,39 @@ func (s *Service) deleteManagedProxyNode(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	requiresAgent := assignedPort > 0 || applyStatus == "running"
-	if requiresAgent {
-		if !s.requireAgentCapability(w, serverID, "proxy_runtime_v1") {
+	forceDetach := r.URL.Query().Get("force") == "1" || strings.EqualFold(r.URL.Query().Get("force"), "true")
+	if requiresAgent && !forceDetach {
+		connection, online := s.registry.Get(serverID)
+		capable := online && connection.GetCapabilities()["proxy_runtime_v1"]
+		if !capable {
+			reason := "Agent 离线，无法清理主机上的服务、配置和防火墙规则"
+			if online {
+				reason = "Agent 版本过旧，无法执行节点卸载"
+			}
+			response.JSON(w, http.StatusConflict, map[string]interface{}{
+				"success": false,
+				"error":   reason,
+				"data": map[string]interface{}{
+					"can_force_detach": true,
+					"node_id":          id,
+					"server_id":        serverID,
+					"agent_online":     online,
+				},
+			})
 			return
 		}
 	}
+	requiresAgent = requiresAgent && !forceDetach
 	task, ok := s.createExclusiveProxyTask(w, serverID, "proxy.node.delete", id)
 	if !ok {
 		return
 	}
 	_, _ = db.ExecContext(r.Context(), `UPDATE managed_proxy_nodes SET enabled=0,publishable=0,apply_status='removing',last_error='',updated_at=datetime('now') WHERE id=?`, id)
 	response.JSON(w, http.StatusAccepted, map[string]interface{}{"success": true, "data": map[string]interface{}{"task_id": task.ID, "status": task.Status, "node_id": id}})
-	go s.runManagedProxyNodeDelete(task.ID, id, serverID, runtime, revision, requiresAgent, accessMode)
+	go s.runManagedProxyNodeDelete(task.ID, id, serverID, runtime, revision, requiresAgent, forceDetach, accessMode)
 }
 
-func (s *Service) runManagedProxyNodeDelete(taskID, id, serverID, runtime string, revision int64, requiresAgent bool, accessMode string) {
+func (s *Service) runManagedProxyNodeDelete(taskID, id, serverID, runtime string, revision int64, requiresAgent, forceDetach bool, accessMode string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 	db, err := s.open(ctx)
@@ -881,9 +913,27 @@ func (s *Service) runManagedProxyNodeDelete(taskID, id, serverID, runtime string
 			return
 		}
 	}
-	if _, err := db.ExecContext(ctx, `DELETE FROM managed_proxy_nodes WHERE id=?`, id); err != nil {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
 		fail("delete_record", err)
 		return
 	}
-	s.taskRegistry.Complete(taskID, "节点已从主机与订阅中删除")
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM subscription_plan_nodes WHERE node_id=? AND source='internal'`, id); err != nil && !isMissingTableError(err) {
+		fail("delete_relations", err)
+		return
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM managed_proxy_nodes WHERE id=?`, id); err != nil {
+		fail("delete_record", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		fail("delete_record", err)
+		return
+	}
+	message := "节点已从主机与订阅中删除"
+	if forceDetach {
+		message = "节点已从面板和订阅中移除；主机离线，未清理主机残留"
+	}
+	s.taskRegistry.Complete(taskID, message)
 }

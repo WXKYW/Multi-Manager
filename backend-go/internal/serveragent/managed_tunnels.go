@@ -515,22 +515,32 @@ func (s *Service) runManagedTunnelUninstall(taskID, serverID string) {
 		}
 		_, _ = db.ExecContext(ctx, `DELETE FROM managed_proxy_nodes WHERE id=?`, node.id)
 	}
+	if len(failures) > 0 {
+		message := strings.Join(failures, "; ")
+		_, _ = db.ExecContext(ctx, `UPDATE managed_proxy_tunnels SET apply_status='cleanup_failed',last_stage='remove_nodes',last_error=?,updated_at=datetime('now') WHERE server_id=?`, message, serverID)
+		s.taskRegistry.Fail(taskID, message)
+		return
+	}
 	progress(45, "remove_connector", "正在停止并删除主机上的 cloudflared")
 	payload, _ := json.Marshal(cloudflaredTaskPayload("remove", ""))
 	if _, err := s.RunCloudflaredTaskAndWait(serverID, string(payload)); err != nil {
 		failures = append(failures, "remove cloudflared: "+err.Error())
 	}
 	progress(62, "remove_dns", "正在删除 Tunnel DNS 记录")
-	if err := s.cloudflare.DeleteManagedTunnelDNS(ctx, state.AccountID, state.ZoneID, state.DNSRecordID); err != nil {
-		failures = append(failures, err.Error())
-	} else {
-		_, _ = db.ExecContext(ctx, `UPDATE managed_proxy_tunnels SET dns_record_id='' WHERE server_id=?`, serverID)
+	if state.DNSRecordID != "" {
+		if err := s.cloudflare.DeleteManagedTunnelDNS(ctx, state.AccountID, state.ZoneID, state.DNSRecordID); err != nil {
+			failures = append(failures, err.Error())
+		} else {
+			_, _ = db.ExecContext(ctx, `UPDATE managed_proxy_tunnels SET dns_record_id='' WHERE server_id=?`, serverID)
+		}
 	}
 	progress(80, "remove_tunnel", "正在删除 Cloudflare Named Tunnel")
-	if err := s.cloudflare.DeleteManagedTunnel(ctx, state.AccountID, state.TunnelID); err != nil {
-		failures = append(failures, err.Error())
-	} else {
-		_, _ = db.ExecContext(ctx, `UPDATE managed_proxy_tunnels SET tunnel_id='',token_encrypted='' WHERE server_id=?`, serverID)
+	if state.TunnelID != "" {
+		if err := s.cloudflare.DeleteManagedTunnel(ctx, state.AccountID, state.TunnelID); err != nil {
+			failures = append(failures, err.Error())
+		} else {
+			_, _ = db.ExecContext(ctx, `UPDATE managed_proxy_tunnels SET tunnel_id='',token_encrypted='' WHERE server_id=?`, serverID)
+		}
 	}
 	if len(failures) > 0 {
 		message := strings.Join(failures, "; ")

@@ -174,6 +174,9 @@ func New(cfg config.Config) *Service {
 					if sess.Arch != "" {
 						conn.SetMetadata("arch", sess.Arch)
 					}
+					if sess.RemoteIP != "" {
+						conn.SetMetadata("connection_ip", sess.RemoteIP)
+					}
 					sess.mu.RUnlock()
 				}
 				if s.presence != nil && s.presence.legacyMode() {
@@ -262,6 +265,11 @@ func New(cfg config.Config) *Service {
 								if err == nil {
 									defer db.Close()
 									persistedInfoMap = s.mergeCachedLocationFieldsFromDB(ctx, db, serverID, persistedInfoMap)
+									if host, changed, hostErr := backfillAccountHostFromAgent(ctx, db, serverID, persistedInfoMap); hostErr != nil {
+										applog.Warn(ctx, "serveragent", "failed to backfill host from Agent", "server_id", serverID, "error", hostErr.Error())
+									} else if changed {
+										applog.Info(ctx, "serveragent", "backfilled placeholder host from Agent", "server_id", serverID, "host", host)
+									}
 									now := time.Now().Format("2006-01-02 15:04:05")
 									cachedInfoJSON, _ := json.Marshal(persistedInfoMap)
 									_, _ = db.ExecContext(ctx, `UPDATE server_accounts
@@ -326,6 +334,11 @@ func New(cfg config.Config) *Service {
 							if err == nil {
 								defer db.Close()
 								fullCachedInfo = s.mergeCachedLocationFieldsFromDB(ctx, db, serverID, fullCachedInfo)
+								if host, changed, hostErr := backfillAccountHostFromAgent(ctx, db, serverID, fullCachedInfo); hostErr != nil {
+									applog.Warn(ctx, "serveragent", "failed to backfill host from Agent", "server_id", serverID, "error", hostErr.Error())
+								} else if changed {
+									applog.Info(ctx, "serveragent", "backfilled placeholder host from Agent", "server_id", serverID, "host", host)
+								}
 								now := time.Now().Format("2006-01-02 15:04:05")
 								cachedInfoJSON, _ := json.Marshal(fullCachedInfo)
 								_, _ = db.ExecContext(ctx, `UPDATE server_accounts
@@ -445,7 +458,7 @@ func New(cfg config.Config) *Service {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if db, err := s.store.Open(ctx); err == nil {
-		if schemaErr := ensureSchema(ctx, db); schemaErr != nil {
+		if schemaErr := database.WithSchemaLock(ctx, func() error { return ensureSchema(ctx, db) }); schemaErr != nil {
 			applog.Error(context.Background(), "serveragent", "ensure schema failed", "error", schemaErr.Error())
 		}
 		db.Close()
@@ -3356,23 +3369,414 @@ func (s *Service) testTrafficAlert(w http.ResponseWriter, r *http.Request, db *s
 	response.OK(w, map[string]interface{}{"sent": true})
 }
 
+type accountDeleteDependencies struct {
+	Nodes       int
+	Runtimes    int
+	Tunnels     int
+	StatusPages int
+}
+
+func (d accountDeleteDependencies) responseData() map[string]int {
+	return map[string]int{
+		"nodes":        d.Nodes,
+		"runtimes":     d.Runtimes,
+		"tunnels":      d.Tunnels,
+		"status_pages": d.StatusPages,
+	}
+}
+
 func (s *Service) deleteAccount(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {
-	res, err := db.ExecContext(r.Context(), "DELETE FROM server_accounts WHERE id = ?", id)
+	var name, lastCheckStatus, lastCheckTime string
+	if err := db.QueryRowContext(r.Context(), `SELECT name,COALESCE(last_check_status,''),COALESCE(last_check_time,'') FROM server_accounts WHERE id=?`, id).Scan(&name, &lastCheckStatus, &lastCheckTime); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			response.Error(w, http.StatusNotFound, "服务器不存在")
+		} else {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	dependencies, err := loadAccountDeleteDependencies(r.Context(), db, id)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	forceRequested := r.URL.Query().Get("force") == "1" || strings.EqualFold(r.URL.Query().Get("force"), "true")
+	connection, online := s.registry.Get(id)
+	agentObserved := lastCheckTime != "" && !strings.EqualFold(lastCheckStatus, "uninstalled")
+	requiresHostCleanup := online || agentObserved || dependencies.Nodes > 0 || dependencies.Runtimes > 0 || dependencies.Tunnels > 0
+	forceDetach := forceRequested
+	if requiresHostCleanup {
+		if !online {
+			if !forceRequested {
+				response.JSON(w, http.StatusConflict, map[string]interface{}{
+					"success": false,
+					"error":   "Agent 离线，无法确认主机上的节点、代理程序和 Agent 已卸载",
+					"data": map[string]interface{}{
+						"can_force_delete": true,
+						"server_id":        id,
+						"dependencies":     dependencies.responseData(),
+					},
+				})
+				return
+			}
+		} else {
+			capabilities := connection.GetCapabilities()
+			missing := []string{}
+			if dependencies.Nodes > 0 && !capabilities["proxy_runtime_v1"] {
+				missing = append(missing, "节点卸载")
+			}
+			if (dependencies.Runtimes > 0 || dependencies.Nodes > 0) && !capabilities["proxy_runtime_lifecycle_v2"] {
+				missing = append(missing, "代理程序卸载")
+			}
+			if dependencies.Tunnels > 0 && !capabilities["cloudflared_runtime_v1"] {
+				missing = append(missing, "Tunnel 卸载")
+			}
+			if !capabilities["self_uninstall_v1"] {
+				missing = append(missing, "Agent 自卸载")
+			}
+			if len(missing) == 0 {
+				// A force query must not bypass verified cleanup when a capable
+				// Agent is online. Force is reserved for genuine recovery paths.
+				forceDetach = false
+			} else if !forceRequested {
+				response.JSON(w, http.StatusConflict, map[string]interface{}{
+					"success": false,
+					"error":   "Agent 版本过旧，缺少安全级联删除能力：" + strings.Join(missing, "、") + "；请先升级 Agent",
+					"data": map[string]interface{}{
+						"can_force_delete": true,
+						"server_id":        id,
+						"dependencies":     dependencies.responseData(),
+					},
+				})
+				return
+			}
+		}
+	}
 
-	affected, _ := res.RowsAffected()
-	if affected == 0 {
-		response.Error(w, http.StatusNotFound, "服务器不存在")
+	task, ok := s.createExclusiveProxyTask(w, id, "server.delete", "cascade-delete")
+	if !ok {
+		return
+	}
+	if _, err := db.ExecContext(r.Context(), `UPDATE managed_proxy_nodes SET enabled=0,publishable=0,apply_status='removing',updated_at=datetime('now') WHERE server_id=?`, id); err != nil {
+		s.taskRegistry.Fail(task.ID, err.Error())
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.JSON(w, http.StatusAccepted, map[string]interface{}{
+		"success": true,
+		"data": map[string]interface{}{
+			"task_id":      task.ID,
+			"status":       task.Status,
+			"server_id":    id,
+			"dependencies": dependencies.responseData(),
+		},
+	})
+	go s.runAccountCascadeDelete(task.ID, id, name, dependencies, requiresHostCleanup, forceDetach)
+}
+
+func loadAccountDeleteDependencies(ctx context.Context, db *sql.DB, serverID string) (accountDeleteDependencies, error) {
+	var dependencies accountDeleteDependencies
+	for _, check := range []struct {
+		query string
+		value *int
+	}{
+		{`SELECT COUNT(*) FROM managed_proxy_nodes WHERE server_id=?`, &dependencies.Nodes},
+		{`SELECT COUNT(*) FROM managed_proxy_runtimes WHERE server_id=?`, &dependencies.Runtimes},
+		{`SELECT COUNT(*) FROM managed_proxy_tunnels WHERE server_id=?`, &dependencies.Tunnels},
+	} {
+		if err := db.QueryRowContext(ctx, check.query, serverID).Scan(check.value); err != nil {
+			return dependencies, err
+		}
+	}
+	rows, err := db.QueryContext(ctx, `SELECT COALESCE(server_ids_json,'[]') FROM server_status_pages`)
+	if err != nil {
+		return dependencies, err
+	}
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			rows.Close()
+			return dependencies, err
+		}
+		var serverIDs []string
+		if err := json.Unmarshal([]byte(raw), &serverIDs); err != nil {
+			rows.Close()
+			return dependencies, fmt.Errorf("decode status page server references: %w", err)
+		}
+		for _, candidate := range serverIDs {
+			if candidate == serverID {
+				dependencies.StatusPages++
+				break
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return dependencies, err
+	}
+	return dependencies, rows.Close()
+}
+
+func (s *Service) runAccountCascadeDelete(taskID, serverID, serverName string, dependencies accountDeleteDependencies, requiresHostCleanup, forceDetach bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	db, err := s.open(ctx)
+	if err != nil {
+		s.taskRegistry.Fail(taskID, err.Error())
+		return
+	}
+	defer db.Close()
+	progress := func(value int, stage, message string) {
+		s.taskRegistry.UpdateProgress(taskID, value, map[string]interface{}{
+			"stage": stage, "message": message, "server_id": serverID, "server_name": serverName,
+		})
+	}
+	fail := func(stage string, cause error) {
+		progress(100, stage, cause.Error())
+		s.taskRegistry.Fail(taskID, cause.Error())
+	}
+
+	progress(5, "unpublish", "已停止发布该主机的全部节点")
+	if requiresHostCleanup && !forceDetach {
+		if _, online := s.registry.Get(serverID); !online {
+			fail("agent_offline", errors.New("Agent 在级联删除期间离线；节点已停止发布，请重试或选择强制移除"))
+			return
+		}
+		progress(15, "remove_nodes", "正在清理主机上的节点服务与防火墙规则")
+		if err := s.removeAccountManagedProxyResources(ctx, db, serverID, dependencies); err != nil {
+			fail("remove_host_resources", err)
+			return
+		}
+	}
+
+	progress(58, "remove_cloudflare", "正在清理 Tunnel DNS 与 Cloudflare 资源")
+	if err := s.removeAccountManagedTunnelControlPlane(ctx, db, serverID); err != nil {
+		fail("remove_cloudflare", err)
 		return
 	}
 
-	response.JSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-		"message": "服务器删除成功",
-	})
+	if requiresHostCleanup && !forceDetach {
+		progress(72, "uninstall_agent", "正在卸载主机 Agent")
+		if _, err := s.uninstallAgentAndWait(ctx, serverID); err != nil {
+			fail("uninstall_agent", err)
+			return
+		}
+		progress(82, "agent_uninstalled", "Agent 已卸载并断开连接")
+	}
+
+	progress(86, "delete_records", "正在删除主机及全部面板关联记录")
+	if err := deleteAccountRecords(ctx, db, serverID); err != nil {
+		fail("delete_records", err)
+		return
+	}
+	if s.presence != nil {
+		s.presence.suppress(serverID, 10*time.Minute)
+		s.presence.recordDisconnect(serverID, "deleted")
+	}
+	s.registry.Disconnect(serverID)
+	if s.metricsHub != nil {
+		s.metricsHub.BroadcastServerStatus(serverID, "offline", false)
+	}
+	message := "主机、节点、代理程序、Agent 与全部面板关联资源已删除"
+	if forceDetach {
+		message = "主机与全部面板关联资源已删除；Agent 离线或版本过旧，主机本地可能仍有残留"
+	}
+	s.taskRegistry.Complete(taskID, message)
+}
+
+func (s *Service) removeAccountManagedProxyResources(ctx context.Context, db *sql.DB, serverID string, dependencies accountDeleteDependencies) error {
+	rows, err := db.QueryContext(ctx, `SELECT id,runtime,revision,assigned_port,apply_status FROM managed_proxy_nodes WHERE server_id=? ORDER BY created_at`, serverID)
+	if err != nil {
+		return err
+	}
+	type nodeState struct {
+		ID, Runtime, ApplyStatus string
+		Revision                 int64
+		AssignedPort             int
+	}
+	nodes := []nodeState{}
+	for rows.Next() {
+		var node nodeState
+		if err := rows.Scan(&node.ID, &node.Runtime, &node.Revision, &node.AssignedPort, &node.ApplyStatus); err != nil {
+			rows.Close()
+			return err
+		}
+		nodes = append(nodes, node)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, node := range nodes {
+		if node.AssignedPort <= 0 && node.ApplyStatus != "running" && node.ApplyStatus != "removing" {
+			continue
+		}
+		release, ok := managedProxyRuntime(node.Runtime)
+		if !ok {
+			return fmt.Errorf("node %s uses an unpinned proxy runtime", node.ID)
+		}
+		payload, _ := json.Marshal(map[string]interface{}{
+			"node_id": node.ID, "revision": node.Revision + 1, "runtime": release.Runtime,
+			"runtime_version": release.Version, "asset_url_amd64": release.AMD64URL,
+			"asset_sha256_amd64": release.AMD64SHA256, "asset_url_arm64": release.ARM64URL,
+			"asset_sha256_arm64": release.ARM64SHA256, "config": "{}", "remove": true,
+			"port_min": 45654, "port_max": 55654,
+		})
+		if _, err := s.RunProxyRuntimeTaskAndWait(serverID, string(payload)); err != nil {
+			return fmt.Errorf("remove node %s: %w", node.ID, err)
+		}
+	}
+	if dependencies.Tunnels > 0 {
+		payload, _ := json.Marshal(cloudflaredTaskPayload("remove", ""))
+		if _, err := s.RunCloudflaredTaskAndWait(serverID, string(payload)); err != nil {
+			return fmt.Errorf("remove cloudflared: %w", err)
+		}
+	}
+	if dependencies.Runtimes > 0 || len(nodes) > 0 {
+		release, ok := managedProxyRuntime("sing-box")
+		if !ok {
+			return errors.New("managed proxy runtime is not pinned")
+		}
+		payload, _ := json.Marshal(map[string]interface{}{
+			"operation": "remove_runtime", "node_id": "runtime-" + serverID, "revision": 1,
+			"runtime": release.Runtime, "runtime_version": release.Version,
+			"asset_url_amd64": release.AMD64URL, "asset_sha256_amd64": release.AMD64SHA256,
+			"asset_url_arm64": release.ARM64URL, "asset_sha256_arm64": release.ARM64SHA256,
+			"config": `{}`, "enabled": false, "port_min": 45654, "port_max": 55654, "transport": "tcp",
+		})
+		if _, err := s.RunProxyRuntimeTaskAndWait(serverID, string(payload)); err != nil {
+			return fmt.Errorf("remove sing-box runtime: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *Service) removeAccountManagedTunnelControlPlane(ctx context.Context, db *sql.DB, serverID string) error {
+	var accountID, zoneID, tunnelID, dnsRecordID string
+	err := db.QueryRowContext(ctx, `SELECT account_id,zone_id,tunnel_id,dns_record_id FROM managed_proxy_tunnels WHERE server_id=?`, serverID).Scan(&accountID, &zoneID, &tunnelID, &dnsRecordID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if (dnsRecordID != "" || tunnelID != "") && s.cloudflare == nil {
+		return errors.New("Cloudflare Tunnel 管理器不可用，无法安全删除远端资源")
+	}
+	if dnsRecordID != "" {
+		if err := s.cloudflare.DeleteManagedTunnelDNS(ctx, accountID, zoneID, dnsRecordID); err != nil {
+			return fmt.Errorf("delete Tunnel DNS record: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE managed_proxy_tunnels SET dns_record_id='',updated_at=datetime('now') WHERE server_id=?`, serverID); err != nil {
+			return err
+		}
+	}
+	if tunnelID != "" {
+		if err := s.cloudflare.DeleteManagedTunnel(ctx, accountID, tunnelID); err != nil {
+			return fmt.Errorf("delete Cloudflare Tunnel: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE managed_proxy_tunnels SET tunnel_id='',token_encrypted='',updated_at=datetime('now') WHERE server_id=?`, serverID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func deleteAccountRecords(ctx context.Context, db *sql.DB, serverID string) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := removeServerFromStatusPages(ctx, tx, serverID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM subscription_plan_nodes WHERE source='internal' AND node_id IN (SELECT id FROM managed_proxy_nodes WHERE server_id=?)`, serverID); err != nil && !isMissingTableError(err) {
+		return err
+	}
+	for _, statement := range []string{
+		`DELETE FROM managed_proxy_nodes WHERE server_id=?`,
+		`DELETE FROM managed_proxy_runtimes WHERE server_id=?`,
+		`DELETE FROM managed_proxy_tunnels WHERE server_id=?`,
+		`DELETE FROM server_monitor_logs WHERE server_id=?`,
+		`DELETE FROM server_metrics_history WHERE server_id=?`,
+		`DELETE FROM server_network_quality_samples WHERE server_id=?`,
+		`DELETE FROM docker_stacks WHERE server_id=?`,
+		`DELETE FROM server_agent_credentials WHERE server_id=?`,
+		`DELETE FROM server_proxy_desired_state WHERE server_id=?`,
+		`DELETE FROM server_proxy_traffic_reports WHERE server_id=?`,
+		`UPDATE server_command_history SET server_id=NULL WHERE server_id=?`,
+	} {
+		if _, err := tx.ExecContext(ctx, statement, serverID); err != nil {
+			return err
+		}
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM server_accounts WHERE id=?`, serverID)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return sql.ErrNoRows
+	}
+	return tx.Commit()
+}
+
+func removeServerFromStatusPages(ctx context.Context, tx *sql.Tx, serverID string) error {
+	rows, err := tx.QueryContext(ctx, `SELECT id,COALESCE(server_ids_json,'[]') FROM server_status_pages`)
+	if err != nil {
+		return err
+	}
+	type update struct {
+		ID   int64
+		JSON string
+	}
+	updates := []update{}
+	for rows.Next() {
+		var id int64
+		var raw string
+		if err := rows.Scan(&id, &raw); err != nil {
+			rows.Close()
+			return err
+		}
+		var serverIDs []string
+		if err := json.Unmarshal([]byte(raw), &serverIDs); err != nil {
+			rows.Close()
+			return fmt.Errorf("decode status page %d server references: %w", id, err)
+		}
+		filtered := make([]string, 0, len(serverIDs))
+		changed := false
+		for _, candidate := range serverIDs {
+			if candidate == serverID {
+				changed = true
+				continue
+			}
+			filtered = append(filtered, candidate)
+		}
+		if changed {
+			encoded, err := json.Marshal(filtered)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			updates = append(updates, update{ID: id, JSON: string(encoded)})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, item := range updates {
+		if _, err := tx.ExecContext(ctx, `UPDATE server_status_pages SET server_ids_json=?,updated_at=datetime('now') WHERE id=?`, item.JSON, item.ID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Service) exportAccounts(w http.ResponseWriter, r *http.Request, db *sql.DB) {

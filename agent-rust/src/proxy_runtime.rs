@@ -134,9 +134,16 @@ pub fn reconcile(raw: &str) -> Result<String, String> {
                     "remove managed nodes before uninstalling the proxy runtime".to_string()
                 );
             }
-            let root = PathBuf::from(RUNTIME_ROOT).join(runtime);
-            if root.exists() {
-                fs::remove_dir_all(&root).map_err(|err| format!("remove proxy runtime: {err}"))?;
+            for root in [
+                Path::new("/opt/api-monitor/proxy"),
+                Path::new("/etc/api-monitor/proxy"),
+                Path::new("/var/lib/api-monitor/proxy"),
+            ] {
+                if root.exists() {
+                    fs::remove_dir_all(root).map_err(|err| {
+                        format!("remove proxy runtime data {}: {err}", root.display())
+                    })?;
+                }
             }
             return Ok(serde_json::json!({"status": "removed", "runtime": runtime}).to_string());
         }

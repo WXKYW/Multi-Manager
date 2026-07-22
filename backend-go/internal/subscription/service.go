@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -30,12 +31,14 @@ import (
 )
 
 const (
-	defaultTemplateID   = "builtin_mihomo_default"
-	rawTemplateID       = "builtin_raw_uri"
-	base64TemplateID    = "builtin_base64_uri"
-	defaultNodeLibrary  = "sub_default_nodes"
-	defaultLimitPerMin  = 30
-	defaultRefreshHours = 24
+	defaultTemplateID     = "builtin_mihomo_default"
+	rawTemplateID         = "builtin_raw_uri"
+	base64TemplateID      = "builtin_base64_uri"
+	defaultNodeLibrary    = "sub_default_nodes"
+	defaultLimitPerMin    = 30
+	defaultRefreshHours   = 24
+	planSelectionExplicit = "explicit"
+	planSelectionAll      = "all"
 )
 
 var nodeLinkPattern = regexp.MustCompile(`(?im)(vmess|vless|trojan|ss|hysteria2|hy2|tuic|socks|http)://[^\s'"<>]+`)
@@ -44,12 +47,14 @@ var nodeLinkPattern = regexp.MustCompile(`(?im)(vmess|vless|trojan|ss|hysteria2|
 var defaultMihomoTemplateEmbedded string
 
 type Service struct {
-	cfg        config.Config
-	store      *database.Store
-	client     *http.Client
-	refreshMu  sync.Mutex
-	stopAuto   context.CancelFunc
-	autoClosed chan struct{}
+	cfg         config.Config
+	store       *database.Store
+	client      *http.Client
+	refreshMu   sync.Mutex
+	schemaMu    sync.Mutex
+	schemaReady bool
+	stopAuto    context.CancelFunc
+	autoClosed  chan struct{}
 }
 
 type Subscription struct {
@@ -82,6 +87,7 @@ type Subscription struct {
 	RateLimitEnabled      bool             `json:"rate_limit_enabled"`
 	RateLimitPerMinute    int              `json:"rate_limit_per_minute"`
 	NodeFilterIDs         []string         `json:"node_filter_ids,omitempty"`
+	NodeSelectionMode     string           `json:"node_selection_mode,omitempty"`
 	IncludeInternalNodes  bool             `json:"include_internal_nodes"`
 	IncludeExternalNodes  bool             `json:"include_external_nodes"`
 	CreatedAt             string           `json:"created_at"`
@@ -206,6 +212,7 @@ type Plan struct {
 	RateLimitEnabled     bool     `json:"rate_limit_enabled"`
 	RateLimitPerMinute   int      `json:"rate_limit_per_minute"`
 	NodeIDs              []string `json:"node_ids"`
+	SelectionMode        string   `json:"selection_mode"`
 	IncludeInternalNodes bool     `json:"include_internal_nodes"`
 	IncludeExternalNodes bool     `json:"include_external_nodes"`
 	SubscriptionCount    int      `json:"subscription_count"`
@@ -489,18 +496,24 @@ func (s *Service) open(ctx context.Context) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := ensureSchema(ctx, db); err != nil {
+	s.schemaMu.Lock()
+	defer s.schemaMu.Unlock()
+	if s.schemaReady {
+		return db, nil
+	}
+	if err := database.WithSchemaLock(ctx, func() error {
+		if err := ensureSchema(ctx, db); err != nil {
+			return err
+		}
+		if err := ensureBuiltins(ctx, db, false); err != nil {
+			return err
+		}
+		return ensureDefaultNodeLibrary(ctx, db)
+	}); err != nil {
 		db.Close()
 		return nil, err
 	}
-	if err := ensureBuiltins(ctx, db, false); err != nil {
-		db.Close()
-		return nil, err
-	}
-	if err := ensureDefaultNodeLibrary(ctx, db); err != nil {
-		db.Close()
-		return nil, err
-	}
+	s.schemaReady = true
 	return db, nil
 }
 
@@ -612,6 +625,7 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			rate_limit_enabled INTEGER NOT NULL DEFAULT 1,
 			rate_limit_per_minute INTEGER NOT NULL DEFAULT 30,
 			node_ids TEXT NOT NULL DEFAULT '',
+			selection_mode TEXT NOT NULL DEFAULT 'explicit' CHECK(selection_mode IN ('explicit','all')),
 			include_internal_nodes INTEGER NOT NULL DEFAULT 1,
 			include_external_nodes INTEGER NOT NULL DEFAULT 0,
 			created_at TEXT DEFAULT (datetime('now')),
@@ -668,13 +682,20 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 		)`,
 		`CREATE TABLE IF NOT EXISTS managed_proxy_nodes (
 			id TEXT PRIMARY KEY, server_id TEXT NOT NULL, name TEXT NOT NULL,
-			protocol TEXT NOT NULL, runtime TEXT NOT NULL DEFAULT 'sing-box',
+			protocol TEXT NOT NULL CHECK(protocol IN ('vless-reality', 'hysteria2', 'vless-ws-tunnel')), runtime TEXT NOT NULL DEFAULT 'sing-box',
 			public_host TEXT NOT NULL, assigned_port INTEGER NOT NULL DEFAULT 0,
-			transport TEXT NOT NULL, config_encrypted TEXT NOT NULL,
+			transport TEXT NOT NULL CHECK(transport IN ('tcp', 'udp')), config_encrypted TEXT NOT NULL,
 			client_uri_encrypted TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
 			enabled INTEGER NOT NULL DEFAULT 1, publishable INTEGER NOT NULL DEFAULT 0,
 			apply_status TEXT NOT NULL DEFAULT 'pending', last_error TEXT NOT NULL DEFAULT '',
-			created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+			observed_status TEXT NOT NULL DEFAULT 'unknown', observed_revision INTEGER NOT NULL DEFAULT 0,
+			observed_port INTEGER NOT NULL DEFAULT 0, observed_at TEXT,
+			health_status TEXT NOT NULL DEFAULT 'unknown', access_mode TEXT NOT NULL DEFAULT 'direct',
+			tunnel_path TEXT NOT NULL DEFAULT '', preferred_address_id TEXT NOT NULL DEFAULT '',
+			connect_address TEXT NOT NULL DEFAULT '', connect_port INTEGER NOT NULL DEFAULT 0,
+			tunnel_hostname TEXT NOT NULL DEFAULT '',
+			created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')),
+			FOREIGN KEY (server_id) REFERENCES server_accounts(id) ON DELETE CASCADE
 		)`,
 		`CREATE TABLE IF NOT EXISTS managed_proxy_preferences (
 			id TEXT PRIMARY KEY, name TEXT NOT NULL, address TEXT NOT NULL,
@@ -698,6 +719,9 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 	if err := ensureColumn(ctx, db, "subscription_subscriptions", "profile_id", "ALTER TABLE subscription_subscriptions ADD COLUMN profile_id TEXT"); err != nil {
 		return err
 	}
+	if err := ensureColumn(ctx, db, "subscription_plans", "selection_mode", "ALTER TABLE subscription_plans ADD COLUMN selection_mode TEXT NOT NULL DEFAULT 'explicit'"); err != nil {
+		return err
+	}
 	if err := ensureColumn(ctx, db, "subscription_subscriptions", "plan_id", "ALTER TABLE subscription_subscriptions ADD COLUMN plan_id TEXT DEFAULT ''"); err != nil {
 		return err
 	}
@@ -713,6 +737,15 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 		{"traffic_reporting", "ALTER TABLE subscription_nodes ADD COLUMN traffic_reporting TEXT DEFAULT 'unavailable'"},
 	} {
 		if err := ensureColumn(ctx, db, "subscription_nodes", column.name, column.sql); err != nil {
+			return err
+		}
+	}
+	for _, column := range []struct{ name, sql string }{
+		{"ownership", "ALTER TABLE subscription_profiles ADD COLUMN ownership TEXT DEFAULT 'external'"},
+		{"management", "ALTER TABLE subscription_profiles ADD COLUMN management TEXT DEFAULT 'unmanaged'"},
+		{"traffic_reporting", "ALTER TABLE subscription_profiles ADD COLUMN traffic_reporting TEXT DEFAULT 'unavailable'"},
+	} {
+		if err := ensureColumn(ctx, db, "subscription_profiles", column.name, column.sql); err != nil {
 			return err
 		}
 	}
@@ -798,25 +831,75 @@ func migratePlanNodeRelations(ctx context.Context, db *sql.DB) error {
 	if err := rows.Close(); err != nil {
 		return err
 	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	for _, plan := range legacy {
 		var relationCount int
-		_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_plan_nodes WHERE plan_id=?`, plan.id).Scan(&relationCount)
-		if relationCount > 0 {
-			continue
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_plan_nodes WHERE plan_id=?`, plan.id).Scan(&relationCount); err != nil {
+			return err
 		}
-		if err := replacePlanNodeRelations(ctx, db, nil, plan.id, decodeNodeFilterIDs(plan.nodeIDs)); err != nil {
-			return fmt.Errorf("migrate plan node relations: %w", err)
+		if relationCount == 0 {
+			seen := map[string]struct{}{}
+			for _, rawID := range decodeNodeFilterIDs(plan.nodeIDs) {
+				nodeID := strings.TrimSpace(rawID)
+				if nodeID == "" {
+					continue
+				}
+				if _, exists := seen[nodeID]; exists {
+					continue
+				}
+				seen[nodeID] = struct{}{}
+				source := ""
+				var exists int
+				if scanErr := tx.QueryRowContext(ctx, `SELECT 1 FROM managed_proxy_nodes WHERE id=?`, nodeID).Scan(&exists); scanErr == nil {
+					source = "internal"
+				} else if scanErr := tx.QueryRowContext(ctx, `SELECT 1 FROM subscription_nodes WHERE id=?`, nodeID).Scan(&exists); scanErr == nil {
+					source = "external"
+				}
+				// Legacy snapshots can outlive their node. Migration intentionally
+				// drops those stale references; normal plan saves remain strict.
+				if source == "" {
+					continue
+				}
+				if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO subscription_plan_nodes(plan_id,node_id,source) VALUES(?,?,?)`, plan.id, nodeID, source); err != nil {
+					return fmt.Errorf("migrate plan node relations: %w", err)
+				}
+			}
 		}
+		if _, err := tx.ExecContext(ctx, `UPDATE subscription_plans SET node_ids='' WHERE id=?`, plan.id); err != nil {
+			return fmt.Errorf("retire legacy plan node snapshot: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+func ensureColumn(ctx context.Context, db *sql.DB, tableName, columnName, alterSQL string) error {
+	exists, err := schemaColumnExists(ctx, db, tableName, columnName)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, alterSQL); err != nil {
+		// Another backend process may have completed the same ALTER between the
+		// inspection and this statement. Re-inspect before treating it as fatal.
+		if exists, inspectErr := schemaColumnExists(ctx, db, tableName, columnName); inspectErr == nil && exists {
+			return nil
+		}
+		return fmt.Errorf("add %s.%s: %w", tableName, columnName, err)
 	}
 	return nil
 }
 
-func ensureColumn(ctx context.Context, db *sql.DB, tableName, columnName, alterSQL string) error {
+func schemaColumnExists(ctx context.Context, db *sql.DB, tableName, columnName string) (bool, error) {
 	rows, err := db.QueryContext(ctx, fmt.Sprintf(`PRAGMA table_info(%s)`, tableName))
 	if err != nil {
-		return fmt.Errorf("inspect %s columns: %w", tableName, err)
+		return false, fmt.Errorf("inspect %s columns: %w", tableName, err)
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var cid int
 		var name, typ string
@@ -824,19 +907,22 @@ func ensureColumn(ctx context.Context, db *sql.DB, tableName, columnName, alterS
 		var defaultValue sql.NullString
 		var pk int
 		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
-			return fmt.Errorf("scan %s columns: %w", tableName, err)
+			rows.Close()
+			return false, fmt.Errorf("scan %s columns: %w", tableName, err)
 		}
 		if name == columnName {
-			return nil
+			rows.Close()
+			return true, nil
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate %s columns: %w", tableName, err)
+		rows.Close()
+		return false, fmt.Errorf("iterate %s columns: %w", tableName, err)
 	}
-	if _, err := db.ExecContext(ctx, alterSQL); err != nil {
-		return fmt.Errorf("add %s.%s: %w", tableName, columnName, err)
+	if err := rows.Close(); err != nil {
+		return false, fmt.Errorf("close %s columns: %w", tableName, err)
 	}
-	return nil
+	return false, nil
 }
 
 func (s *Service) handlePlans(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {
@@ -871,6 +957,14 @@ func (s *Service) handlePlans(w http.ResponseWriter, r *http.Request, db *sql.DB
 			input.CycleDay = 1
 		}
 		input.CycleType = normalizeCycleType(input.CycleType)
+		input.SelectionMode = normalizePlanSelectionMode(input.SelectionMode)
+		if input.SelectionMode == planSelectionAll && !input.IncludeInternalNodes && !input.IncludeExternalNodes {
+			response.Error(w, http.StatusBadRequest, "全部节点模式至少需要启用一个节点来源")
+			return
+		}
+		if input.SelectionMode == planSelectionAll {
+			input.NodeIDs = nil
+		}
 		if input.RateLimitPerMinute <= 0 {
 			input.RateLimitPerMinute = defaultLimitPerMin
 		}
@@ -884,21 +978,28 @@ func (s *Service) handlePlans(w http.ResponseWriter, r *http.Request, db *sql.DB
 		}
 		defer tx.Rollback()
 		_, err = tx.ExecContext(r.Context(), `INSERT INTO subscription_plans
-			(id,name,remark,enabled,total_bytes,cycle_type,cycle_day,rate_limit_enabled,rate_limit_per_minute,node_ids,include_internal_nodes,include_external_nodes,updated_at)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,datetime('now')) ON CONFLICT(id) DO UPDATE SET
+			(id,name,remark,enabled,total_bytes,cycle_type,cycle_day,rate_limit_enabled,rate_limit_per_minute,node_ids,selection_mode,include_internal_nodes,include_external_nodes,updated_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now')) ON CONFLICT(id) DO UPDATE SET
 			name=excluded.name,remark=excluded.remark,enabled=excluded.enabled,total_bytes=excluded.total_bytes,
 			cycle_type=excluded.cycle_type,cycle_day=excluded.cycle_day,rate_limit_enabled=excluded.rate_limit_enabled,
-			rate_limit_per_minute=excluded.rate_limit_per_minute,node_ids=excluded.node_ids,
+			rate_limit_per_minute=excluded.rate_limit_per_minute,node_ids='',selection_mode=excluded.selection_mode,
 			include_internal_nodes=excluded.include_internal_nodes,include_external_nodes=excluded.include_external_nodes,updated_at=datetime('now')`,
 			id, input.Name, input.Remark, boolToInt(input.Enabled), maxInt64(0, input.TotalBytes), input.CycleType, input.CycleDay,
-			boolToInt(input.RateLimitEnabled), input.RateLimitPerMinute, encodeNodeFilterIDs(input.NodeIDs), boolToInt(input.IncludeInternalNodes), boolToInt(input.IncludeExternalNodes))
+			boolToInt(input.RateLimitEnabled), input.RateLimitPerMinute, "", input.SelectionMode, boolToInt(input.IncludeInternalNodes), boolToInt(input.IncludeExternalNodes))
 		if err != nil {
 			response.Error(w, 500, err.Error())
 			return
 		}
-		if err := replacePlanNodeRelations(r.Context(), db, tx, id, input.NodeIDs); err != nil {
+		containsInternal, containsExternal, err := replacePlanNodeRelations(r.Context(), db, tx, id, input.NodeIDs)
+		if err != nil {
 			response.Error(w, 400, err.Error())
 			return
+		}
+		if input.SelectionMode == planSelectionExplicit {
+			if _, err := tx.ExecContext(r.Context(), `UPDATE subscription_plans SET include_internal_nodes=?,include_external_nodes=? WHERE id=?`, boolToInt(containsInternal), boolToInt(containsExternal), id); err != nil {
+				response.Error(w, 500, err.Error())
+				return
+			}
 		}
 		if err := tx.Commit(); err != nil {
 			response.Error(w, 500, err.Error())
@@ -950,26 +1051,23 @@ func loadPlans(ctx context.Context, db *sql.DB, id string) ([]Plan, error) {
 		where, args = " WHERE p.id=?", append(args, id)
 	}
 	rows, err := db.QueryContext(ctx, `SELECT p.id,p.name,COALESCE(p.remark,''),p.enabled,p.total_bytes,p.cycle_type,p.cycle_day,
-		p.rate_limit_enabled,p.rate_limit_per_minute,COALESCE(p.node_ids,''),p.include_internal_nodes,p.include_external_nodes,
+		p.rate_limit_enabled,p.rate_limit_per_minute,COALESCE(p.selection_mode,'explicit'),p.include_internal_nodes,p.include_external_nodes,
 		p.created_at,p.updated_at,(SELECT COUNT(*) FROM subscription_subscriptions s WHERE s.plan_id=p.id)
 		FROM subscription_plans p`+where+` ORDER BY p.updated_at DESC`, args...)
 	if err != nil {
 		return nil, err
 	}
 	plans := []Plan{}
-	legacyNodeIDs := []string{}
 	for rows.Next() {
 		var p Plan
 		var enabled, rateEnabled, includeInternal, includeExternal int
-		var nodeIDs string
-		if err := rows.Scan(&p.ID, &p.Name, &p.Remark, &enabled, &p.TotalBytes, &p.CycleType, &p.CycleDay, &rateEnabled, &p.RateLimitPerMinute, &nodeIDs, &includeInternal, &includeExternal, &p.CreatedAt, &p.UpdatedAt, &p.SubscriptionCount); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Remark, &enabled, &p.TotalBytes, &p.CycleType, &p.CycleDay, &rateEnabled, &p.RateLimitPerMinute, &p.SelectionMode, &includeInternal, &includeExternal, &p.CreatedAt, &p.UpdatedAt, &p.SubscriptionCount); err != nil {
 			return nil, err
 		}
 		p.Enabled, p.RateLimitEnabled = enabled == 1, rateEnabled == 1
 		p.IncludeInternalNodes, p.IncludeExternalNodes = includeInternal == 1, includeExternal == 1
-		p.NodeIDs = decodeNodeFilterIDs(nodeIDs)
+		p.SelectionMode = normalizePlanSelectionMode(p.SelectionMode)
 		plans = append(plans, p)
-		legacyNodeIDs = append(legacyNodeIDs, nodeIDs)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -993,27 +1091,26 @@ func loadPlans(ctx context.Context, db *sql.DB, id string) ([]Plan, error) {
 			relations = append(relations, nodeID)
 		}
 		nodeRows.Close()
-		if len(relations) > 0 || strings.TrimSpace(legacyNodeIDs[i]) == "" {
-			plans[i].NodeIDs = relations
-		}
+		plans[i].NodeIDs = relations
 	}
 	return plans, nil
 }
 
-type planNodeExecutor interface {
+type subscriptionExecutor interface {
 	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
 	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
 }
 
-func replacePlanNodeRelations(ctx context.Context, db *sql.DB, tx *sql.Tx, planID string, nodeIDs []string) error {
-	var executor planNodeExecutor = db
+func replacePlanNodeRelations(ctx context.Context, db *sql.DB, tx *sql.Tx, planID string, nodeIDs []string) (bool, bool, error) {
+	var executor subscriptionExecutor = db
 	if tx != nil {
 		executor = tx
 	}
 	if _, err := executor.ExecContext(ctx, `DELETE FROM subscription_plan_nodes WHERE plan_id=?`, planID); err != nil {
-		return err
+		return false, false, err
 	}
 	seen := map[string]struct{}{}
+	containsInternal, containsExternal := false, false
 	for _, rawID := range nodeIDs {
 		nodeID := strings.TrimSpace(rawID)
 		if nodeID == "" {
@@ -1031,13 +1128,15 @@ func replacePlanNodeRelations(ctx context.Context, db *sql.DB, tx *sql.Tx, planI
 			source = "external"
 		}
 		if source == "" {
-			return fmt.Errorf("节点 %s 不存在或已被删除", nodeID)
+			return false, false, fmt.Errorf("节点 %s 不存在或已被删除", nodeID)
 		}
 		if _, err := executor.ExecContext(ctx, `INSERT INTO subscription_plan_nodes(plan_id,node_id,source) VALUES(?,?,?)`, planID, nodeID, source); err != nil {
-			return err
+			return false, false, err
 		}
+		containsInternal = containsInternal || source == "internal"
+		containsExternal = containsExternal || source == "external"
 	}
-	return nil
+	return containsInternal, containsExternal, nil
 }
 
 func applyPlanToSubscription(ctx context.Context, db *sql.DB, sub *Subscription) {
@@ -1055,32 +1154,70 @@ func applyPlanToSubscription(ctx context.Context, db *sql.DB, sub *Subscription)
 	sub.RateLimitEnabled = p.RateLimitEnabled
 	sub.RateLimitPerMinute = p.RateLimitPerMinute
 	sub.NodeFilterIDs = append([]string(nil), p.NodeIDs...)
+	sub.NodeSelectionMode = p.SelectionMode
 	sub.IncludeInternalNodes = p.IncludeInternalNodes
 	sub.IncludeExternalNodes = p.IncludeExternalNodes
 }
 
+func countPublishedSubscriptionNodes(ctx context.Context, db *sql.DB, sub Subscription) int {
+	count := 0
+	if sub.PlanID != "" && normalizePlanSelectionMode(sub.NodeSelectionMode) == planSelectionExplicit {
+		if sub.IncludeInternalNodes {
+			var internal int
+			_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_plan_nodes pn
+				JOIN managed_proxy_nodes n ON n.id=pn.node_id
+				WHERE pn.plan_id=? AND pn.source='internal' AND n.enabled=1 AND n.publishable=1 AND n.apply_status='running'`, sub.PlanID).Scan(&internal)
+			count += internal
+		}
+		if sub.IncludeExternalNodes {
+			var external int
+			_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_plan_nodes pn
+				JOIN subscription_nodes n ON n.id=pn.node_id
+				WHERE pn.plan_id=? AND pn.source='external' AND n.enabled=1`, sub.PlanID).Scan(&external)
+			count += external
+		}
+		return count
+	}
+	if sub.IncludeInternalNodes {
+		var internal int
+		_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM managed_proxy_nodes WHERE enabled=1 AND publishable=1 AND apply_status='running'`).Scan(&internal)
+		count += internal
+	}
+	if sub.IncludeExternalNodes {
+		var external int
+		if sub.PlanID != "" {
+			_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_nodes WHERE enabled=1`).Scan(&external)
+		} else {
+			_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_nodes WHERE COALESCE(profile_id,subscription_id)=? AND enabled=1`, firstNonEmpty(sub.ProfileID, sub.ID)).Scan(&external)
+		}
+		count += external
+	}
+	return count
+}
+
 func ensureDefaultNodeLibrary(ctx context.Context, db *sql.DB) error {
-	var count int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_subscriptions`).Scan(&count); err != nil {
-		return fmt.Errorf("count node libraries: %w", err)
-	}
-	if count > 0 {
-		return nil
-	}
-	token := randomToken()
-	_, err := db.ExecContext(ctx, `INSERT INTO subscription_subscriptions (
-			id, profile_id, name, remark, enabled, public_token, template_id, traffic_source,
-			upstream_enabled, upstream_refresh_hours, rate_limit_enabled, rate_limit_per_minute, updated_at
-		) VALUES (?, ?, '默认节点库', '系统默认节点接管空间', 1, ?, ?, 'manual', 0, 24, 0, 30, datetime('now'))`,
-		defaultNodeLibrary, defaultNodeLibrary, token, rawTemplateID)
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("create default node library: %w", err)
-	}
-	input := Subscription{Name: "默认节点库", Remark: "系统默认节点接管空间", Enabled: true}
-	if err := upsertProfile(ctx, db, defaultNodeLibrary, input, rawTemplateID, "manual", "none", 1, defaultLimitPerMin); err != nil {
 		return err
 	}
-	return nil
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO subscription_profiles (
+			id,name,remark,enabled,template_id,traffic_source,ownership,management,traffic_reporting,
+			cycle_type,cycle_day,rate_limit_enabled,rate_limit_per_minute,updated_at
+		) VALUES (?, '外部节点池', '系统统一外部节点池', 1, ?, 'manual', 'external', 'unmanaged', 'unavailable', 'none', 1, 0, ?, datetime('now'))`,
+		defaultNodeLibrary, rawTemplateID, defaultLimitPerMin); err != nil {
+		return fmt.Errorf("create default external node pool: %w", err)
+	}
+	// Older releases represented the node pool as an enabled public
+	// subscription. Retire that anchor so it cannot leak a hidden public URL or
+	// pollute subscription counts; nodes continue to reference the profile ID.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM subscription_access_logs WHERE subscription_id=?`, defaultNodeLibrary); err != nil {
+		return fmt.Errorf("delete legacy node pool access logs: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM subscription_subscriptions WHERE id=?`, defaultNodeLibrary); err != nil {
+		return fmt.Errorf("delete legacy node pool subscription: %w", err)
+	}
+	return tx.Commit()
 }
 
 func ensureBuiltins(ctx context.Context, db *sql.DB, overwrite bool) error {
@@ -1235,6 +1372,10 @@ func (s *Service) updateProfile(w http.ResponseWriter, r *http.Request, db *sql.
 }
 
 func (s *Service) deleteProfile(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {
+	if id == defaultNodeLibrary {
+		response.Error(w, http.StatusConflict, "系统外部节点池不能删除")
+		return
+	}
 	var nodeCount, linkCount int
 	_ = db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM subscription_nodes WHERE COALESCE(profile_id, subscription_id) = ?`, id).Scan(&nodeCount)
 	_ = db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM subscription_subscriptions WHERE COALESCE(profile_id, id) = ? AND id != COALESCE(profile_id, id)`, id).Scan(&linkCount)
@@ -1253,6 +1394,7 @@ func (s *Service) deleteProfile(w http.ResponseWriter, r *http.Request, db *sql.
 		_, _ = tx.ExecContext(r.Context(), `DELETE FROM subscription_access_logs WHERE subscription_id IN (
 			SELECT id FROM subscription_subscriptions WHERE COALESCE(profile_id, id) = ?
 		)`, id)
+		_, _ = tx.ExecContext(r.Context(), `DELETE FROM subscription_plan_nodes WHERE source='external' AND node_id IN (SELECT id FROM subscription_nodes WHERE COALESCE(profile_id, subscription_id) = ?)`, id)
 		_, _ = tx.ExecContext(r.Context(), `DELETE FROM subscription_nodes WHERE COALESCE(profile_id, subscription_id) = ?`, id)
 		_, _ = tx.ExecContext(r.Context(), `DELETE FROM subscription_subscriptions WHERE COALESCE(profile_id, id) = ?`, id)
 	} else {
@@ -1312,53 +1454,41 @@ func (s *Service) createSubscription(w http.ResponseWriter, r *http.Request, db 
 	applyPlanToSubscription(r.Context(), db, &input)
 	settings, _ := loadSettings(r.Context(), db)
 	id := randomID("sub")
-	profileID := firstNonEmpty(input.ProfileID, id)
+	profileID := defaultNodeLibrary
 	token := randomToken()
 	templateID := firstNonEmpty(input.TemplateID, settings.DefaultTemplateID, defaultTemplateID)
-	trafficSource := normalizeTrafficSource(input.TrafficSource)
-	cycleType := normalizeCycleType(input.CycleType)
-	cycleDay := input.CycleDay
-	if cycleDay <= 0 {
-		cycleDay = 1
-	}
-	refreshHours := input.UpstreamRefreshHours
-	if refreshHours <= 0 {
-		refreshHours = settings.DefaultRefreshHours
-	}
-	limitPerMin := input.RateLimitPerMinute
-	if limitPerMin <= 0 {
-		limitPerMin = settings.DefaultRateLimitPerMin
-	}
 	effectiveEnabled := input.Enabled || !isExplicitFalse(r, "enabled")
-	effectiveRateLimitEnabled := input.RateLimitEnabled || settings.DefaultRateLimitEnabled
 	input.Enabled = effectiveEnabled
-	input.RateLimitEnabled = effectiveRateLimitEnabled
-	_, err := db.ExecContext(r.Context(), `INSERT INTO subscription_subscriptions (
+	tx, err := db.BeginTx(r.Context(), nil)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer tx.Rollback()
+	if !profileExists(r.Context(), tx, profileID) {
+		library := Subscription{Name: "外部节点池", Remark: "系统统一外部节点池", Enabled: true}
+		if err := upsertProfile(r.Context(), tx, profileID, library, rawTemplateID, "manual", "none", 1, defaultLimitPerMin); err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	_, err = tx.ExecContext(r.Context(), `INSERT INTO subscription_subscriptions (
 		id, profile_id, plan_id, name, remark, enabled, public_token, template_id, traffic_source, traffic_server_id,
 		upstream_url, upstream_enabled, upstream_refresh_hours, total_bytes, manual_upload_bytes,
 		manual_download_bytes, expire_at, cycle_type, cycle_day, cycle_start, cycle_end,
 		rate_limit_enabled, rate_limit_per_minute, node_filter_ids, include_internal_nodes, include_external_nodes, updated_at
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-		id, profileID, input.PlanID, input.Name, input.Remark, boolToInt(effectiveEnabled), token, templateID, trafficSource, nullString(input.TrafficServerID),
-		nullString(input.UpstreamURL), boolToInt(input.UpstreamEnabled), refreshHours, input.TotalBytes, input.ManualUploadBytes,
-		input.ManualDownloadBytes, nullString(input.ExpireAt), cycleType, cycleDay, nullString(input.CycleStart), nullString(input.CycleEnd),
-		boolToInt(effectiveRateLimitEnabled), limitPerMin, encodeNodeFilterIDs(input.NodeFilterIDs), boolToInt(input.IncludeInternalNodes), boolToInt(input.IncludeExternalNodes))
+		id, profileID, input.PlanID, input.Name, input.Remark, boolToInt(effectiveEnabled), token, templateID, "panel", nil,
+		nil, 0, defaultRefreshHours, 0, 0,
+		0, nullString(input.ExpireAt), "none", 1, nil, nil,
+		0, 0, "", 0, 0)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if profileID == id || !profileExists(r.Context(), db, profileID) {
-		if err := upsertProfile(r.Context(), db, profileID, input, templateID, trafficSource, cycleType, cycleDay, limitPerMin); err != nil {
-			response.Error(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	}
-	if err := upsertDefaultUpstream(r.Context(), db, profileID, input, refreshHours); err != nil {
+	if err := tx.Commit(); err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
-	}
-	if strings.TrimSpace(input.UpstreamURL) != "" && input.UpstreamEnabled {
-		_ = s.refreshUpstreamNow(r.Context(), db, id)
 	}
 	subs, _ := loadSubscriptions(r.Context(), db, id)
 	response.OK(w, firstSub(subs))
@@ -1382,64 +1512,71 @@ func (s *Service) updateSubscription(w http.ResponseWriter, r *http.Request, db 
 		return
 	}
 	applyPlanToSubscription(r.Context(), db, &input)
-	cycleDay := input.CycleDay
-	if cycleDay <= 0 {
-		cycleDay = 1
-	}
-	profileID := firstNonEmpty(input.ProfileID, profileIDForSubscription(r.Context(), db, id), id)
+	profileID := firstNonEmpty(profileIDForSubscription(r.Context(), db, id), defaultNodeLibrary)
 	templateID := firstNonEmpty(input.TemplateID, defaultTemplateID)
-	trafficSource := normalizeTrafficSource(input.TrafficSource)
-	cycleType := normalizeCycleType(input.CycleType)
-	refreshHours := intDefault(input.UpstreamRefreshHours, defaultRefreshHours)
-	limitPerMin := intDefault(input.RateLimitPerMinute, defaultLimitPerMin)
-	_, err := db.ExecContext(r.Context(), `UPDATE subscription_subscriptions SET
-		profile_id = ?, plan_id = ?, name = ?, remark = ?, enabled = ?, template_id = ?, traffic_source = ?, traffic_server_id = ?,
-		upstream_url = ?, upstream_enabled = ?, upstream_refresh_hours = ?, total_bytes = ?,
-		manual_upload_bytes = ?, manual_download_bytes = ?, expire_at = ?, cycle_type = ?, cycle_day = ?,
-		cycle_start = ?, cycle_end = ?, rate_limit_enabled = ?, rate_limit_per_minute = ?, node_filter_ids = ?, include_internal_nodes = ?, include_external_nodes = ?, updated_at = datetime('now')
-		WHERE id = ?`,
-		profileID, input.PlanID, input.Name, input.Remark, boolToInt(input.Enabled), templateID, trafficSource, nullString(input.TrafficServerID),
-		nullString(input.UpstreamURL), boolToInt(input.UpstreamEnabled), refreshHours, input.TotalBytes,
-		input.ManualUploadBytes, input.ManualDownloadBytes, nullString(input.ExpireAt), cycleType, cycleDay,
-		nullString(input.CycleStart), nullString(input.CycleEnd), boolToInt(input.RateLimitEnabled), limitPerMin, encodeNodeFilterIDs(input.NodeFilterIDs), boolToInt(input.IncludeInternalNodes), boolToInt(input.IncludeExternalNodes), id)
-	if err != nil {
-		response.Error(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	if profileID == id || !profileExists(r.Context(), db, profileID) {
-		if err := upsertProfile(r.Context(), db, profileID, input, templateID, trafficSource, cycleType, cycleDay, limitPerMin); err != nil {
-			response.Error(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if err := upsertDefaultUpstream(r.Context(), db, profileID, input, refreshHours); err != nil {
-			response.Error(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	}
-	subs, _ := loadSubscriptions(r.Context(), db, id)
-	response.OK(w, firstSub(subs))
-}
-
-func (s *Service) deleteSubscription(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {
-	profileID := firstNonEmpty(profileIDForSubscription(r.Context(), db, id), id)
 	tx, err := db.BeginTx(r.Context(), nil)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer tx.Rollback()
-	_, _ = tx.ExecContext(r.Context(), `DELETE FROM subscription_nodes WHERE subscription_id = ? AND COALESCE(profile_id, '') IN ('', ?)`, id, id)
-	_, _ = tx.ExecContext(r.Context(), `DELETE FROM subscription_access_logs WHERE subscription_id = ?`, id)
-	if _, err := tx.ExecContext(r.Context(), `DELETE FROM subscription_subscriptions WHERE id = ?`, id); err != nil {
+	result, err := tx.ExecContext(r.Context(), `UPDATE subscription_subscriptions SET
+		profile_id = ?, plan_id = ?, name = ?, remark = ?, enabled = ?, template_id = ?, traffic_source = ?, traffic_server_id = ?,
+		upstream_url = ?, upstream_enabled = ?, upstream_refresh_hours = ?, total_bytes = ?,
+		manual_upload_bytes = ?, manual_download_bytes = ?, expire_at = ?, cycle_type = ?, cycle_day = ?,
+		cycle_start = ?, cycle_end = ?, rate_limit_enabled = ?, rate_limit_per_minute = ?, node_filter_ids = ?, include_internal_nodes = ?, include_external_nodes = ?, updated_at = datetime('now')
+		WHERE id = ?`,
+		profileID, input.PlanID, input.Name, input.Remark, boolToInt(input.Enabled), templateID, "panel", nil,
+		nil, 0, defaultRefreshHours, 0,
+		0, 0, nullString(input.ExpireAt), "none", 1,
+		nil, nil, 0, 0, "", 0, 0, id)
+	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	var remainingLinks int
-	_ = tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM subscription_subscriptions WHERE COALESCE(profile_id, id) = ?`, profileID).Scan(&remainingLinks)
-	if remainingLinks == 0 {
-		_, _ = tx.ExecContext(r.Context(), `DELETE FROM subscription_nodes WHERE COALESCE(profile_id, subscription_id) = ?`, profileID)
-		_, _ = tx.ExecContext(r.Context(), `DELETE FROM subscription_upstreams WHERE profile_id = ?`, profileID)
-		_, _ = tx.ExecContext(r.Context(), `DELETE FROM subscription_profiles WHERE id = ?`, profileID)
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		response.Error(w, http.StatusNotFound, "订阅不存在")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	subs, _ := loadSubscriptions(r.Context(), db, id)
+	response.OK(w, firstSub(subs))
+}
+
+func (s *Service) deleteSubscription(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {
+	if id == defaultNodeLibrary {
+		response.Error(w, http.StatusConflict, "系统外部节点池锚点不能删除")
+		return
+	}
+	var exists int
+	if err := db.QueryRowContext(r.Context(), `SELECT 1 FROM subscription_subscriptions WHERE id=?`, id).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			response.Error(w, http.StatusNotFound, "订阅不存在")
+		} else {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	tx, err := db.BeginTx(r.Context(), nil)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer tx.Rollback()
+	_, _ = tx.ExecContext(r.Context(), `DELETE FROM subscription_access_logs WHERE subscription_id = ?`, id)
+	result, err := tx.ExecContext(r.Context(), `DELETE FROM subscription_subscriptions WHERE id = ?`, id)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		response.Error(w, http.StatusNotFound, "订阅不存在")
+		return
 	}
 	if err := tx.Commit(); err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
@@ -1448,11 +1585,11 @@ func (s *Service) deleteSubscription(w http.ResponseWriter, r *http.Request, db 
 	response.OK(w, map[string]bool{"deleted": true})
 }
 
-func upsertProfile(ctx context.Context, db *sql.DB, id string, input Subscription, templateID, trafficSource, cycleType string, cycleDay, limitPerMin int) error {
+func upsertProfile(ctx context.Context, executor subscriptionExecutor, id string, input Subscription, templateID, trafficSource, cycleType string, cycleDay, limitPerMin int) error {
 	if strings.TrimSpace(id) == "" {
 		return fmt.Errorf("profile id is required")
 	}
-	_, err := db.ExecContext(ctx, `INSERT INTO subscription_profiles (
+	_, err := executor.ExecContext(ctx, `INSERT INTO subscription_profiles (
 			id, name, remark, enabled, template_id, traffic_source, traffic_server_id,
 			total_bytes, manual_upload_bytes, manual_download_bytes, expire_at, cycle_type,
 			cycle_day, cycle_start, cycle_end, baseline_upload_bytes, baseline_download_bytes,
@@ -1488,16 +1625,16 @@ func upsertProfile(ctx context.Context, db *sql.DB, id string, input Subscriptio
 	return nil
 }
 
-func upsertDefaultUpstream(ctx context.Context, db *sql.DB, profileID string, input Subscription, refreshHours int) error {
+func upsertDefaultUpstream(ctx context.Context, executor subscriptionExecutor, profileID string, input Subscription, refreshHours int) error {
 	upstreamURL := strings.TrimSpace(input.UpstreamURL)
 	upstreamID := "up_" + profileID
 	if upstreamURL == "" {
-		if _, err := db.ExecContext(ctx, `DELETE FROM subscription_upstreams WHERE id = ?`, upstreamID); err != nil {
+		if _, err := executor.ExecContext(ctx, `DELETE FROM subscription_upstreams WHERE id = ?`, upstreamID); err != nil {
 			return fmt.Errorf("delete default upstream: %w", err)
 		}
 		return nil
 	}
-	_, err := db.ExecContext(ctx, `INSERT INTO subscription_upstreams (
+	_, err := executor.ExecContext(ctx, `INSERT INTO subscription_upstreams (
 			id, profile_id, name, url, enabled, refresh_hours, status, last_error, last_refresh_at, updated_at
 		) VALUES (?, ?, '默认上游', ?, ?, ?, ?, ?, ?, datetime('now'))
 		ON CONFLICT(id) DO UPDATE SET
@@ -1522,12 +1659,12 @@ func profileIDForSubscription(ctx context.Context, db *sql.DB, id string) string
 	return profileID
 }
 
-func profileExists(ctx context.Context, db *sql.DB, id string) bool {
+func profileExists(ctx context.Context, executor subscriptionExecutor, id string) bool {
 	if strings.TrimSpace(id) == "" {
 		return false
 	}
 	var count int
-	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_profiles WHERE id = ?`, id).Scan(&count)
+	_ = executor.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_profiles WHERE id = ?`, id).Scan(&count)
 	return count > 0
 }
 
@@ -1664,8 +1801,27 @@ func normalizeNodeTrafficReporting(value, management string) string {
 }
 
 func (s *Service) deleteNode(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {
-	_, err := db.ExecContext(r.Context(), `DELETE FROM subscription_nodes WHERE id = ?`, id)
+	tx, err := db.BeginTx(r.Context(), nil)
 	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(r.Context(), `DELETE FROM subscription_plan_nodes WHERE node_id=? AND source='external'`, id); err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	result, err := tx.ExecContext(r.Context(), `DELETE FROM subscription_nodes WHERE id = ?`, id)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		response.Error(w, http.StatusNotFound, "外部节点不存在")
+		return
+	}
+	if err := tx.Commit(); err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -1726,10 +1882,7 @@ func (s *Service) importCommit(w http.ResponseWriter, r *http.Request, db *sql.D
 	if !decodeJSON(w, r, &payload) {
 		return
 	}
-	if payload.SubscriptionID == "" {
-		response.Error(w, http.StatusBadRequest, "缺少订阅 ID")
-		return
-	}
+	payload.SubscriptionID = firstNonEmpty(strings.TrimSpace(payload.SubscriptionID), defaultNodeLibrary)
 	profileID := firstNonEmpty(profileIDForSubscription(r.Context(), db, payload.SubscriptionID), payload.SubscriptionID)
 	sourceURL := strings.TrimSpace(payload.SourceURL)
 	text := payload.Text
@@ -1755,8 +1908,10 @@ func (s *Service) importCommit(w http.ResponseWriter, r *http.Request, db *sql.D
 	defer tx.Rollback()
 	if payload.Replace {
 		if sourceURL != "" {
+			_, _ = tx.ExecContext(r.Context(), `DELETE FROM subscription_plan_nodes WHERE source='external' AND node_id IN (SELECT id FROM subscription_nodes WHERE COALESCE(profile_id, subscription_id) = ? AND source IN ('managed', 'upstream'))`, profileID)
 			_, _ = tx.ExecContext(r.Context(), `DELETE FROM subscription_nodes WHERE COALESCE(profile_id, subscription_id) = ? AND source IN ('managed', 'upstream')`, profileID)
 		} else {
+			_, _ = tx.ExecContext(r.Context(), `DELETE FROM subscription_plan_nodes WHERE source='external' AND node_id IN (SELECT id FROM subscription_nodes WHERE COALESCE(profile_id, subscription_id) = ? AND source = 'manual')`, profileID)
 			_, _ = tx.ExecContext(r.Context(), `DELETE FROM subscription_nodes WHERE COALESCE(profile_id, subscription_id) = ? AND source = 'manual'`, profileID)
 		}
 	}
@@ -1779,10 +1934,6 @@ func (s *Service) importCommit(w http.ResponseWriter, r *http.Request, db *sql.D
 	if sourceURL != "" {
 		refreshHours := defaultRefreshHours
 		_ = tx.QueryRowContext(r.Context(), `SELECT COALESCE(default_refresh_hours, 24) FROM subscription_settings WHERE id = 1`).Scan(&refreshHours)
-		if _, err := tx.ExecContext(r.Context(), `UPDATE subscription_subscriptions SET upstream_url = ?, upstream_enabled = 1, upstream_refresh_hours = ?, upstream_status = 'ok', upstream_last_error = '', upstream_last_refresh_at = datetime('now'), upstream_userinfo = ?, updated_at = datetime('now') WHERE id = ?`, sourceURL, refreshHours, userinfo, payload.SubscriptionID); err != nil {
-			response.Error(w, http.StatusInternalServerError, err.Error())
-			return
-		}
 		if _, err := tx.ExecContext(r.Context(), `INSERT INTO subscription_upstreams (
 				id, profile_id, name, url, enabled, refresh_hours, status, last_error, last_refresh_at, userinfo, updated_at
 			) VALUES (?, ?, '托管源', ?, 1, ?, 'ok', '', datetime('now'), ?, datetime('now'))
@@ -1856,20 +2007,75 @@ func (s *Service) updateTemplate(w http.ResponseWriter, r *http.Request, db *sql
 }
 
 func (s *Service) deleteTemplate(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {
-	_, err := db.ExecContext(r.Context(), `DELETE FROM subscription_templates WHERE id = ? AND builtin = 0`, id)
+	var builtin int
+	if err := db.QueryRowContext(r.Context(), `SELECT builtin FROM subscription_templates WHERE id=?`, id).Scan(&builtin); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			response.Error(w, http.StatusNotFound, "模板不存在")
+		} else {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	if builtin == 1 {
+		response.Error(w, http.StatusConflict, "内置模板不能删除")
+		return
+	}
+	var profiles, subscriptions, defaults int
+	for _, dependency := range []struct {
+		query string
+		count *int
+	}{
+		{`SELECT COUNT(*) FROM subscription_profiles WHERE template_id=?`, &profiles},
+		{`SELECT COUNT(*) FROM subscription_subscriptions WHERE template_id=?`, &subscriptions},
+		{`SELECT COUNT(*) FROM subscription_settings WHERE default_template_id=?`, &defaults},
+	} {
+		if err := db.QueryRowContext(r.Context(), dependency.query, id).Scan(dependency.count); err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	if profiles+subscriptions+defaults > 0 {
+		response.JSON(w, http.StatusConflict, map[string]interface{}{"success": false, "error": "模板仍被引用，请先更换关联模板", "dependencies": map[string]int{"profiles": profiles, "subscriptions": subscriptions, "defaults": defaults}})
+		return
+	}
+	result, err := db.ExecContext(r.Context(), `DELETE FROM subscription_templates WHERE id = ?`, id)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		response.Error(w, http.StatusNotFound, "模板不存在")
 		return
 	}
 	response.OK(w, map[string]bool{"deleted": true})
 }
 
 func (s *Service) setDefaultTemplate(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {
-	_, err := db.ExecContext(r.Context(), `UPDATE subscription_settings SET default_template_id = ?, updated_at = datetime('now') WHERE id = 1`, id)
+	var exists int
+	if err := db.QueryRowContext(r.Context(), `SELECT 1 FROM subscription_templates WHERE id=?`, id).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			response.Error(w, http.StatusNotFound, "模板不存在")
+		} else {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	tx, err := db.BeginTx(r.Context(), nil)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(r.Context(), `UPDATE subscription_settings SET default_template_id = ?, updated_at = datetime('now') WHERE id = 1`, id)
 	if err == nil {
-		_, err = db.ExecContext(r.Context(), `UPDATE subscription_templates SET is_default = CASE WHEN id = ? THEN 1 ELSE 0 END`, id)
+		_, err = tx.ExecContext(r.Context(), `UPDATE subscription_templates SET is_default = CASE WHEN id = ? THEN 1 ELSE 0 END`, id)
 	}
 	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := tx.Commit(); err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -2028,7 +2234,11 @@ func (s *Service) servePublicSubscription(w http.ResponseWriter, r *http.Request
 			response.Error(w, statusCode, errMsg)
 			return
 		}
-		nodes = filterNodesByIDsForSource(nodes, sub.NodeFilterIDs)
+		if sub.PlanID != "" {
+			nodes = filterPlanNodesByIDsForSource(nodes, sub.NodeFilterIDs, sub.NodeSelectionMode)
+		} else {
+			nodes = filterNodesByIDsForSource(nodes, sub.NodeFilterIDs)
+		}
 	}
 	if sub.IncludeExternalNodes {
 		externalProfileID := firstNonEmpty(sub.ProfileID, sub.ID)
@@ -2042,9 +2252,19 @@ func (s *Service) servePublicSubscription(w http.ResponseWriter, r *http.Request
 			response.Error(w, statusCode, errMsg)
 			return
 		}
-		nodes = append(nodes, filterNodesByIDsForSource(external, sub.NodeFilterIDs)...)
+		if sub.PlanID != "" {
+			nodes = append(nodes, filterPlanNodesByIDsForSource(external, sub.NodeFilterIDs, sub.NodeSelectionMode)...)
+		} else {
+			nodes = append(nodes, filterNodesByIDsForSource(external, sub.NodeFilterIDs)...)
+		}
 	}
-	nodes = ensureUniquePublishedNodeNames(nodes)
+	enabledNodes := nodes[:0]
+	for _, node := range nodes {
+		if node.Enabled {
+			enabledNodes = append(enabledNodes, node)
+		}
+	}
+	nodes = ensureUniquePublishedNodeNames(enabledNodes)
 	traffic = sub.Traffic
 	blocked := traffic.Status == "expired" || traffic.Status == "exhausted"
 	if blocked {
@@ -2194,6 +2414,23 @@ func filterNodesByIDsForSource(nodes []Node, ids []string) []Node {
 		return []Node{}
 	}
 	return filterNodesByIDs(nodes, selected)
+}
+
+func normalizePlanSelectionMode(value string) string {
+	if strings.EqualFold(strings.TrimSpace(value), planSelectionAll) {
+		return planSelectionAll
+	}
+	return planSelectionExplicit
+}
+
+func filterPlanNodesByIDsForSource(nodes []Node, ids []string, selectionMode string) []Node {
+	if normalizePlanSelectionMode(selectionMode) == planSelectionAll {
+		return nodes
+	}
+	if len(ids) == 0 {
+		return []Node{}
+	}
+	return filterNodesByIDsForSource(nodes, ids)
 }
 
 func subscriptionProfileTitle(sub Subscription) string {
@@ -2346,14 +2583,7 @@ func loadSubscriptions(ctx context.Context, db *sql.DB, id string) ([]Subscripti
 		// while the subscription cursor is still open would wait forever for that
 		// same connection, blocking both list and create/update responses.
 		applyPlanToSubscription(ctx, db, &items[i])
-		if items[i].IncludeInternalNodes {
-			_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM managed_proxy_nodes WHERE enabled=1 AND publishable=1 AND apply_status='running'`).Scan(&items[i].NodeCount)
-		}
-		if items[i].IncludeExternalNodes {
-			var externalCount int
-			_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_nodes WHERE COALESCE(profile_id, subscription_id) = ? AND enabled=1`, firstNonEmpty(items[i].ProfileID, items[i].ID)).Scan(&externalCount)
-			items[i].NodeCount += externalCount
-		}
+		items[i].NodeCount = countPublishedSubscriptionNodes(ctx, db, items[i])
 		_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_access_logs WHERE subscription_id = ? AND date(created_at) = date('now')`, items[i].ID).Scan(&items[i].AccessCountToday)
 		_ = db.QueryRowContext(ctx, `SELECT COALESCE(MAX(created_at), '') FROM subscription_access_logs WHERE subscription_id = ?`, items[i].ID).Scan(&items[i].LastAccessAt)
 		items[i].Traffic = computeTraffic(ctx, db, items[i])

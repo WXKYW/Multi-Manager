@@ -1240,7 +1240,6 @@ func (s *Service) handleV2TasksRoutes(w http.ResponseWriter, r *http.Request, db
 				return
 			}
 		}
-		return
 	}
 
 	response.Error(w, http.StatusNotFound, "v2 tasks route not found")
@@ -1996,4 +1995,11 @@ func (s *Service) runProxyRuntimeProbeAndWait(serverID, desiredState string) (st
 
 func (s *Service) RunCloudflaredTaskAndWait(serverID, desiredState string) (string, error) {
 	return s.runAgentTaskAndWait(serverID, 51, desiredState, 3*time.Minute)
+}
+
+// RunAgentSelfUninstallTaskAndWait schedules removal from a detached helper
+// owned by the Agent. The helper acknowledges before stopping the Agent
+// service, so the control-plane task can complete deterministically.
+func (s *Service) RunAgentSelfUninstallTaskAndWait(serverID string) (string, error) {
+	return s.runAgentTaskAndWait(serverID, 52, "{}", 30*time.Second)
 }

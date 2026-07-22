@@ -39,6 +39,10 @@ func (s *Store) Open(ctx context.Context) (*sql.DB, error) {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
 	db.SetMaxOpenConns(1)
+	if _, err := db.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("configure sqlite foreign_keys: %w", err)
+	}
 	if _, err := db.ExecContext(ctx, "PRAGMA busy_timeout = 5000"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("configure sqlite busy_timeout: %w", err)
@@ -56,7 +60,9 @@ func (s *Store) Open(ctx context.Context) (*sql.DB, error) {
 		return nil, fmt.Errorf("configure sqlite journal_size_limit: %w", err)
 	}
 	s.schemaOnce.Do(func() {
-		s.schemaErr = EnsureCoreSchema(ctx, db)
+		s.schemaErr = WithSchemaLock(ctx, func() error {
+			return EnsureCoreSchema(ctx, db)
+		})
 	})
 	if s.schemaErr != nil {
 		db.Close()

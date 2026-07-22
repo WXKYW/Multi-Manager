@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -58,6 +59,7 @@ type EngineIOSession struct {
 	Version         string
 	Platform        string
 	Arch            string
+	RemoteIP        string
 	PendingMessages []string
 	wsConn          *websocket.Conn
 	mu              sync.RWMutex
@@ -127,6 +129,7 @@ func (s *EngineIOServer) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 		session := &EngineIOSession{
 			ID:           sid,
 			Transport:    "websocket",
+			RemoteIP:     requestRemoteIP(r),
 			LastActivity: time.Now(),
 		}
 
@@ -179,6 +182,9 @@ func (s *EngineIOServer) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 	// 更新传输类型和 WebSocket 连接
 	session.mu.Lock()
 	session.Transport = "websocket"
+	if session.RemoteIP == "" {
+		session.RemoteIP = requestRemoteIP(r)
+	}
 	session.wsConn = conn
 	session.mu.Unlock()
 
@@ -429,6 +435,7 @@ func (s *EngineIOServer) handleHandshake(w http.ResponseWriter, r *http.Request)
 		Upgrades:        []string{"websocket"},
 		CreatedAt:       time.Now(),
 		LastActivity:    time.Now(),
+		RemoteIP:        requestRemoteIP(r),
 		PendingMessages: []string{},
 	}
 
@@ -451,6 +458,18 @@ func (s *EngineIOServer) handleHandshake(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Access-Control-Allow-Credentials", "true")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(packet))
+}
+
+func requestRemoteIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err != nil {
+		host = strings.Trim(strings.TrimSpace(r.RemoteAddr), "[]")
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return ""
+	}
+	return ip.String()
 }
 
 // handlePoll 处理 GET polling

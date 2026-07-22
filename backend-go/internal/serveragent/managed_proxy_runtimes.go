@@ -74,7 +74,7 @@ func (s *Service) startManagedProxyRuntimeTask(w http.ResponseWriter, r *http.Re
 		}
 		return
 	}
-	if !s.requireAgentCapability(w, serverID, "proxy_runtime_v1") {
+	if !s.requireAgentCapability(w, serverID, "proxy_runtime_lifecycle_v2") {
 		return
 	}
 	desired := "running"

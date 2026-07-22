@@ -53,3 +53,14 @@ func TestRewriteTunnelClientURIKeepsPreferredAddressAndMigratesSNI(t *testing.T)
 		t.Fatalf("unexpected migrated URI: %s", got)
 	}
 }
+
+func TestBindManagedNodeRuntimePortDoesNotExposeTunnelOriginPort(t *testing.T) {
+	tunnel := "vless://id@tunnel.example.com:443?security=tls&type=ws#node"
+	if got := bindManagedNodeRuntimePort(tunnel, 45656, "cloudflare_tunnel"); got != tunnel {
+		t.Fatalf("Tunnel client endpoint was rewritten to its origin port: %s", got)
+	}
+	direct := "vless://id@192.0.2.10:0?security=reality#node"
+	if got := bindManagedNodeRuntimePort(direct, 45654, "direct"); !strings.Contains(got, "@192.0.2.10:45654") {
+		t.Fatalf("direct client endpoint did not receive its runtime port: %s", got)
+	}
+}

@@ -33,6 +33,291 @@ func testService(t *testing.T) (*Service, *sql.DB) {
 	return service, db
 }
 
+func TestDeleteAccountRequiresForceWhenAgentOfflineWithManagedDependencies(t *testing.T) {
+	service, db := testService(t)
+	if _, err := db.Exec(`INSERT INTO server_accounts(id,name,host,username,auth_type) VALUES('delete-host','待删除主机','192.0.2.10','root','password')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO managed_proxy_runtimes(server_id,runtime,apply_status) VALUES('delete-host','sing-box','running')`); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/server/accounts/delete-host", nil)
+	service.deleteAccount(rec, req, db, "delete-host")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"can_force_delete":true`) {
+		t.Fatalf("force delete recovery is missing: %s", rec.Body.String())
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM server_accounts WHERE id='delete-host'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("host was deleted with managed resources: count=%d err=%v", count, err)
+	}
+}
+
+func TestDeleteAccountForceCascadesPanelRecordsAndStatusPageMembership(t *testing.T) {
+	service, db := testService(t)
+	if _, err := db.Exec(`INSERT INTO server_accounts(id,name,host,username,auth_type) VALUES('clean-host','可删除主机','192.0.2.11','root','password')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO managed_proxy_runtimes(server_id,runtime,apply_status) VALUES('clean-host','sing-box','running')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO managed_proxy_nodes(id,server_id,name,protocol,runtime,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted,apply_status) VALUES('clean-node','clean-host','测试节点','vless-reality','sing-box','192.0.2.11',45654,'tcp','{}','','running')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO server_status_pages(slug,title,server_ids_json) VALUES('cascade-page','级联页','["clean-host","other-host"]')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO server_agent_credentials(server_id,secret_encrypted) VALUES('clean-host','secret')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO server_proxy_traffic_reports(server_id,boot_id,sequence,node_id) VALUES('clean-host','boot',1,'node')`); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/server/accounts/clean-host?force=1", nil)
+	service.deleteAccount(rec, req, db, "clean-host")
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var accepted struct {
+		Data struct {
+			TaskID string `json:"task_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &accepted); err != nil || accepted.Data.TaskID == "" {
+		t.Fatalf("decode delete task: task=%q err=%v body=%s", accepted.Data.TaskID, err, rec.Body.String())
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		task, ok := service.taskRegistry.Get(accepted.Data.TaskID)
+		if !ok {
+			t.Fatal("delete task disappeared")
+		}
+		snapshot := task.Snapshot()
+		if snapshot.Status == TaskCompleted {
+			break
+		}
+		if snapshot.Status == TaskFailed {
+			t.Fatalf("delete task failed: %s", snapshot.Error)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("delete task did not complete")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	for _, query := range []string{
+		`SELECT COUNT(*) FROM server_accounts WHERE id='clean-host'`,
+		`SELECT COUNT(*) FROM managed_proxy_nodes WHERE server_id='clean-host'`,
+		`SELECT COUNT(*) FROM managed_proxy_runtimes WHERE server_id='clean-host'`,
+		`SELECT COUNT(*) FROM server_agent_credentials WHERE server_id='clean-host'`,
+		`SELECT COUNT(*) FROM server_proxy_traffic_reports WHERE server_id='clean-host'`,
+	} {
+		var count int
+		if err := db.QueryRow(query).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("query %q count=%d err=%v", query, count, err)
+		}
+	}
+	var statusPageServers string
+	if err := db.QueryRow(`SELECT server_ids_json FROM server_status_pages WHERE slug='cascade-page'`).Scan(&statusPageServers); err != nil {
+		t.Fatal(err)
+	}
+	if statusPageServers != `["other-host"]` {
+		t.Fatalf("status page references = %s", statusPageServers)
+	}
+}
+
+func TestDeleteAccountUninstallsAgentBeforeDeletingHostRecord(t *testing.T) {
+	service, db := testService(t)
+	if _, err := db.Exec(`INSERT INTO server_accounts(id,name,host,username,auth_type) VALUES('online-delete-host','在线主机','192.0.2.12','root','password')`); err != nil {
+		t.Fatal(err)
+	}
+	recordPresentBeforeDisconnect := make(chan bool, 1)
+	socket := &selfUninstallReplySocket{
+		t:               t,
+		service:         service,
+		serverID:        "online-delete-host",
+		disconnectDelay: 20 * time.Millisecond,
+		beforeDisconnect: func() {
+			var count int
+			err := db.QueryRow(`SELECT COUNT(*) FROM server_accounts WHERE id='online-delete-host'`).Scan(&count)
+			recordPresentBeforeDisconnect <- err == nil && count == 1
+		},
+	}
+	connection := service.registry.Register("online-delete-host", socket)
+	connection.UpdateCapabilities(map[string]bool{"self_uninstall_v1": true})
+
+	rec := httptest.NewRecorder()
+	// Even an explicit force query must use the verified cleanup path while a
+	// capable Agent is online.
+	req := httptest.NewRequest(http.MethodDelete, "/api/server/accounts/online-delete-host?force=1", nil)
+	service.deleteAccount(rec, req, db, "online-delete-host")
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var accepted struct {
+		Data struct {
+			TaskID string `json:"task_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &accepted); err != nil || accepted.Data.TaskID == "" {
+		t.Fatalf("decode delete task: task=%q err=%v body=%s", accepted.Data.TaskID, err, rec.Body.String())
+	}
+
+	select {
+	case present := <-recordPresentBeforeDisconnect:
+		if !present {
+			t.Fatal("host record was deleted before the Agent disconnected")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("self-uninstall task was not sent")
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		task, ok := service.taskRegistry.Get(accepted.Data.TaskID)
+		if !ok {
+			t.Fatal("delete task disappeared")
+		}
+		snapshot := task.Snapshot()
+		if snapshot.Status == TaskCompleted {
+			break
+		}
+		if snapshot.Status == TaskFailed {
+			t.Fatalf("delete task failed: %s", snapshot.Error)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("delete task did not complete")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM server_accounts WHERE id='online-delete-host'`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("host record remains after Agent uninstall: count=%d err=%v", count, err)
+	}
+}
+
+func TestAgentUninstallRequiresOnlineCapableAgentUnlessForced(t *testing.T) {
+	service, db := testService(t)
+	if _, err := db.Exec(`INSERT INTO server_accounts(id,name,host,username,auth_type) VALUES('uninstall-host','卸载测试','192.0.2.13','root','password')`); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/server/agent/uninstall/uninstall-host", nil)
+	service.handleAgentUninstall(rec, req, db, "uninstall-host")
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), `"can_force_detach":true`) {
+		t.Fatalf("offline status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	connection := service.registry.Register("uninstall-host", &taskReplySocket{
+		t:       t,
+		service: service,
+		reply:   func(int, string) string { return "scheduled" },
+	})
+	connection.UpdateCapabilities(map[string]bool{"self_update_v1": true})
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/server/agent/uninstall/uninstall-host", nil)
+	service.handleAgentUninstall(rec, req, db, "uninstall-host")
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "Agent 版本过旧") {
+		t.Fatalf("legacy status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	service.registry.Disconnect("uninstall-host")
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/server/agent/uninstall/uninstall-host?force=1", nil)
+	service.handleAgentUninstall(rec, req, db, "uninstall-host")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "未确认主机本地程序已清理") {
+		t.Fatalf("force status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var status string
+	if err := db.QueryRow(`SELECT last_check_status FROM server_accounts WHERE id='uninstall-host'`).Scan(&status); err != nil || status != "uninstalled" {
+		t.Fatalf("last_check_status=%q err=%v", status, err)
+	}
+}
+
+func TestAgentUninstallRefusesToOrphanManagedProxyResources(t *testing.T) {
+	service, db := testService(t)
+	if _, err := db.Exec(`INSERT INTO server_accounts(id,name,host,username,auth_type) VALUES('managed-uninstall','托管资源主机','192.0.2.16','root','password')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO managed_proxy_runtimes(server_id,runtime,apply_status) VALUES('managed-uninstall','sing-box','running')`); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{
+		"/api/server/agent/uninstall/managed-uninstall",
+		"/api/server/agent/uninstall/managed-uninstall?force=1",
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		service.handleAgentUninstall(rec, req, db, "managed-uninstall")
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "安全级联流程") {
+			t.Fatalf("path=%s status=%d body=%s", path, rec.Code, rec.Body.String())
+		}
+		if strings.Contains(rec.Body.String(), `"can_force_detach":true`) {
+			t.Fatalf("managed resources must not allow force detach: %s", rec.Body.String())
+		}
+	}
+}
+
+func TestAgentUninstallWaitsForDisconnectConfirmation(t *testing.T) {
+	t.Setenv("API_MONITOR_AGENT_UNINSTALL_VERIFY_TIMEOUT_MS", "1000")
+	service, db := testService(t)
+	if _, err := db.Exec(`INSERT INTO server_accounts(id,name,host,username,auth_type) VALUES('confirmed-uninstall','确认卸载','192.0.2.14','root','password')`); err != nil {
+		t.Fatal(err)
+	}
+	socket := &selfUninstallReplySocket{
+		t:               t,
+		service:         service,
+		serverID:        "confirmed-uninstall",
+		disconnectDelay: 20 * time.Millisecond,
+	}
+	connection := service.registry.Register("confirmed-uninstall", socket)
+	connection.UpdateCapabilities(map[string]bool{"self_uninstall_v1": true})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/server/agent/uninstall/confirmed-uninstall", nil)
+	service.handleAgentUninstall(rec, req, db, "confirmed-uninstall")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if _, online := service.registry.Get("confirmed-uninstall"); online {
+		t.Fatal("Agent remained connected after uninstall returned success")
+	}
+	var status string
+	if err := db.QueryRow(`SELECT last_check_status FROM server_accounts WHERE id='confirmed-uninstall'`).Scan(&status); err != nil || status != "uninstalled" {
+		t.Fatalf("last_check_status=%q err=%v", status, err)
+	}
+}
+
+func TestAgentUninstallDoesNotDetachWhenDisconnectCannotBeConfirmed(t *testing.T) {
+	t.Setenv("API_MONITOR_AGENT_UNINSTALL_VERIFY_TIMEOUT_MS", "20")
+	service, db := testService(t)
+	if _, err := db.Exec(`INSERT INTO server_accounts(id,name,host,username,auth_type) VALUES('stuck-uninstall','卸载超时','192.0.2.15','root','password')`); err != nil {
+		t.Fatal(err)
+	}
+	connection := service.registry.Register("stuck-uninstall", &taskReplySocket{
+		t:       t,
+		service: service,
+		reply:   func(int, string) string { return "scheduled" },
+	})
+	connection.UpdateCapabilities(map[string]bool{"self_uninstall_v1": true})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/server/agent/uninstall/stuck-uninstall", nil)
+	service.handleAgentUninstall(rec, req, db, "stuck-uninstall")
+	if rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "未在") {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var status string
+	if err := db.QueryRow(`SELECT COALESCE(last_check_status,'') FROM server_accounts WHERE id='stuck-uninstall'`).Scan(&status); err != nil || status == "uninstalled" {
+		t.Fatalf("unconfirmed uninstall changed status=%q err=%v", status, err)
+	}
+}
+
 func TestResolveRealtimeMetricsPersistInterval(t *testing.T) {
 	t.Setenv("API_MONITOR_AGENT_METRICS_PERSIST_INTERVAL_MS", "")
 	if got := resolveRealtimeMetricsPersistInterval(); got != defaultRealtimeMetricsPersistInterval {
@@ -163,6 +448,46 @@ func (s *taskReplySocket) WriteMessage(_ int, data []byte) error {
 	taskData, _ := payload["data"].(string)
 	result := s.reply(int(taskType), taskData)
 	go s.service.taskRegistry.Complete(taskID, result)
+	return nil
+}
+
+type selfUninstallReplySocket struct {
+	t                *testing.T
+	service          *Service
+	serverID         string
+	disconnectDelay  time.Duration
+	beforeDisconnect func()
+}
+
+func (s *selfUninstallReplySocket) WriteMessage(_ int, data []byte) error {
+	raw := string(data)
+	if !strings.HasPrefix(raw, "42") {
+		s.t.Fatalf("unexpected socket frame: %s", raw)
+	}
+	var frame []interface{}
+	if err := json.Unmarshal([]byte(raw[2:]), &frame); err != nil {
+		s.t.Fatalf("decode socket frame: %v frame=%s", err, raw)
+	}
+	if len(frame) != 2 || frame[0] != "dashboard:task" {
+		s.t.Fatalf("unexpected socket event: %#v", frame)
+	}
+	payload, ok := frame[1].(map[string]interface{})
+	if !ok {
+		s.t.Fatalf("unexpected socket payload: %#v", frame[1])
+	}
+	taskID, _ := payload["id"].(string)
+	taskType, _ := payload["type"].(float64)
+	if int(taskType) != 52 {
+		s.t.Fatalf("task type = %d, want self-uninstall task 52", int(taskType))
+	}
+	go func() {
+		s.service.taskRegistry.Complete(taskID, "scheduled")
+		time.Sleep(s.disconnectDelay)
+		if s.beforeDisconnect != nil {
+			s.beforeDisconnect()
+		}
+		s.service.registry.Disconnect(s.serverID)
+	}()
 	return nil
 }
 
@@ -405,6 +730,9 @@ func TestCredentialsAcceptFrontendDefaultPost(t *testing.T) {
 
 func TestSnippetsPreviewHistoryAndMonitorLogs(t *testing.T) {
 	service, db := testService(t)
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id,name,host,username,auth_type) VALUES ('server-1','测试主机','127.0.0.1','root','password')`); err != nil {
+		t.Fatal(err)
+	}
 
 	res := perform(service, http.MethodPost, "/api/server/snippets", `{"title":"echo","content":"echo {host}","tags":["ops"]}`)
 	if res.Code != http.StatusOK {

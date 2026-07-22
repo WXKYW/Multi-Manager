@@ -48,7 +48,11 @@ fn agent_capabilities() -> Vec<String> {
     #[cfg(target_os = "linux")]
     capabilities.push("proxy_runtime_v1".to_string());
     #[cfg(target_os = "linux")]
+    capabilities.push("proxy_runtime_lifecycle_v2".to_string());
+    #[cfg(target_os = "linux")]
     capabilities.push("cloudflared_runtime_v1".to_string());
+    #[cfg(target_os = "linux")]
+    capabilities.push("self_uninstall_v1".to_string());
     #[cfg(target_os = "windows")]
     let capabilities = {
         let mut capabilities = capabilities;
@@ -1082,6 +1086,15 @@ async fn run_client(
                                             res_data = err;
                                         }
                                     },
+                                    52 => match schedule_self_uninstall() {
+                                        Ok(()) => {
+                                            successful = true;
+                                            res_data = "Agent 卸载任务已在后台安排".to_string();
+                                        }
+                                        Err(err) => {
+                                            res_data = err;
+                                        }
+                                    },
                                     5 => {
                                         // UPGRADE
                                         match handle_upgrade(&task.id, &task.data, &config_task)
@@ -1434,6 +1447,149 @@ fn schedule_self_update(download_url: &str) -> Result<(), String> {
     } else {
         schedule_self_update_unix(&exe_path, download_url, timestamp_ms)
     }
+}
+
+#[cfg(target_os = "linux")]
+fn schedule_self_uninstall() -> Result<(), String> {
+    let exe_path =
+        std::env::current_exe().map_err(|e| format!("获取当前 Agent 路径失败: {}", e))?;
+    let install_dir = exe_path
+        .parent()
+        .ok_or_else(|| "无法获取 Agent 安装目录".to_string())?;
+    validate_self_uninstall_dir(install_dir)?;
+
+    let timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let script_path =
+        std::env::temp_dir().join(format!("api-monitor-agent-uninstall-{}.sh", timestamp_ms));
+    let unit_name = format!("api-monitor-agent-uninstall-{}", timestamp_ms);
+    let agent_pid = std::process::id();
+    let script = render_self_uninstall_script(install_dir, &script_path, agent_pid);
+    fs::write(&script_path, script).map_err(|e| format!("写入卸载脚本失败: {}", e))?;
+
+    if let Ok(status) = Command::new("systemd-run")
+        .args([
+            "--unit",
+            &unit_name,
+            "--collect",
+            "--quiet",
+            "sh",
+            &script_path.to_string_lossy(),
+        ])
+        .status()
+    {
+        if status.success() {
+            return Ok(());
+        }
+    }
+
+    Command::new("sh")
+        .args([
+            "-c",
+            &format!(
+                "nohup sh {} >/tmp/api-monitor-agent-uninstall.log 2>&1 &",
+                sh_quote(&script_path.to_string_lossy())
+            ),
+        ])
+        .spawn()
+        .map_err(|e| format!("启动 Agent 卸载进程失败: {}", e))?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn validate_self_uninstall_dir(install_dir: &std::path::Path) -> Result<(), String> {
+    let expected = std::path::Path::new("/opt/api-monitor-agent");
+    if install_dir != expected {
+        return Err(format!(
+            "拒绝清理非标准 Agent 安装目录: {}",
+            install_dir.display()
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn render_self_uninstall_script(
+    install_dir: &std::path::Path,
+    script_path: &std::path::Path,
+    agent_pid: u32,
+) -> String {
+    format!(
+        r#"#!/bin/sh
+set -eu
+LOG="/tmp/api-monitor-agent-uninstall.log"
+exec >>"$LOG" 2>&1
+echo "API Monitor Agent uninstall started at $(date -Is)"
+INSTALL_DIR={install_dir}
+SCRIPT_PATH={script_path}
+AGENT_PID={agent_pid}
+
+if [ "$(id -u)" -eq 0 ]; then
+    SUDO=""
+elif command -v sudo >/dev/null 2>&1; then
+    SUDO="sudo"
+else
+    echo "Error: Agent uninstall needs root or sudo"
+    exit 1
+fi
+
+case "$INSTALL_DIR" in
+    "/opt/api-monitor-agent") ;;
+    *)
+        echo "Error: unsafe Agent install directory"
+        exit 1
+        ;;
+esac
+
+# Give the Agent enough time to return the accepted task result before its
+# control connection is stopped.
+sleep 2
+if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files api-monitor-agent.service >/dev/null 2>&1; then
+    # Defensive cleanup: the control plane normally removes these resources
+    # first, but self-uninstall must never leave a publishable proxy service
+    # running if the orchestration sequence was interrupted.
+    for UNIT_PATH in /etc/systemd/system/api-monitor-proxy@*.service; do
+        [ -e "$UNIT_PATH" ] || continue
+        UNIT_NAME="$(basename "$UNIT_PATH")"
+        $SUDO systemctl disable --now "$UNIT_NAME" || true
+        $SUDO rm -f -- "$UNIT_PATH"
+    done
+    $SUDO systemctl disable --now api-monitor-cloudflared.service 2>/dev/null || true
+    $SUDO rm -f /etc/systemd/system/api-monitor-cloudflared.service
+    $SUDO rm -rf -- /opt/api-monitor/proxy /etc/api-monitor/proxy /var/lib/api-monitor/proxy
+    $SUDO rm -rf -- /opt/api-monitor/cloudflared /etc/api-monitor/cloudflared
+    # Remove only the now-empty managed parent. rmdir deliberately preserves it
+    # if another API Monitor component still owns files below it.
+    $SUDO rmdir /opt/api-monitor 2>/dev/null || true
+
+    # Remove the durable installation before stopping the running process. The
+    # control plane treats the socket disconnect as the uninstall confirmation,
+    # so the unit and install directory must already be gone at that point.
+    $SUDO systemctl disable api-monitor-agent.service || true
+    $SUDO rm -f /etc/systemd/system/api-monitor-agent.service /usr/lib/systemd/system/api-monitor-agent.service
+    $SUDO rm -rf -- "$INSTALL_DIR"
+    $SUDO systemctl stop api-monitor-agent.service || true
+    $SUDO systemctl daemon-reload || true
+    $SUDO systemctl reset-failed api-monitor-agent.service 2>/dev/null || true
+else
+    $SUDO rm -rf -- "$INSTALL_DIR"
+    $SUDO kill "$AGENT_PID" 2>/dev/null || true
+fi
+
+rm -f -- "$SCRIPT_PATH"
+echo "API Monitor Agent uninstall completed at $(date -Is)"
+"#,
+        install_dir = sh_quote(&install_dir.to_string_lossy()),
+        script_path = sh_quote(&script_path.to_string_lossy()),
+        agent_pid = agent_pid,
+    )
+}
+
+#[cfg(not(target_os = "linux"))]
+fn schedule_self_uninstall() -> Result<(), String> {
+    Err("当前平台暂不支持 Agent 自卸载".to_string())
 }
 
 #[cfg(target_os = "windows")]
@@ -2390,5 +2546,58 @@ mod tests {
 
         assert!(addrs[0].is_ipv4());
         assert!(addrs[1].is_ipv6());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn self_uninstall_removes_installation_before_stopping_agent() {
+        let script = render_self_uninstall_script(
+            std::path::Path::new("/opt/api-monitor-agent"),
+            std::path::Path::new("/tmp/api-monitor-agent-uninstall-test.sh"),
+            1234,
+        );
+
+        let disable = script
+            .find("systemctl disable api-monitor-agent.service")
+            .expect("service must be disabled");
+        let remove_unit = script
+            .find("rm -f /etc/systemd/system/api-monitor-agent.service")
+            .expect("systemd unit must be removed");
+        let remove_install = script
+            .find("rm -rf -- \"$INSTALL_DIR\"")
+            .expect("install directory must be removed");
+        let safety_guard = script
+            .find("case \"$INSTALL_DIR\" in")
+            .expect("install directory must be guarded");
+        let stop = script
+            .find("systemctl stop api-monitor-agent.service")
+            .expect("service must be stopped");
+        let remove_proxy = script
+            .find("rm -rf -- /opt/api-monitor/proxy")
+            .expect("managed proxy resources must be removed");
+        let remove_empty_parent = script
+            .find("rmdir /opt/api-monitor")
+            .expect("empty managed parent must be removed");
+
+        assert!(safety_guard < remove_install);
+        assert!(safety_guard < remove_proxy);
+        assert!(remove_proxy < remove_empty_parent);
+        assert!(remove_proxy < stop);
+        assert!(disable < remove_unit);
+        assert!(remove_unit < remove_install);
+        assert!(remove_install < stop);
+        assert!(script.contains("\"/opt/api-monitor-agent\""));
+        assert!(script.contains("rm -f -- \"$SCRIPT_PATH\""));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn self_uninstall_only_accepts_managed_install_directory() {
+        assert!(
+            validate_self_uninstall_dir(std::path::Path::new("/opt/api-monitor-agent")).is_ok()
+        );
+        for unsafe_dir in ["/", "/opt", "/usr/bin", "/tmp/api-monitor-agent"] {
+            assert!(validate_self_uninstall_dir(std::path::Path::new(unsafe_dir)).is_err());
+        }
     }
 }

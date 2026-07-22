@@ -4436,10 +4436,22 @@ function ServerPage() {
 
     setAgentInstallLoading(true);
     try {
-      const response = await fetch(`/api/server/agent/uninstall/${serverId}`, { method: 'POST' });
-      const data = await response.json();
-      if (data.success) {
-        toast.success('Agent 已卸载');
+      let response = await fetch(`/api/server/agent/uninstall/${serverId}`, { method: 'POST' });
+      let data = await response.json();
+      if (response.status === 409 && data.data?.can_force_detach) {
+        const confirmed = await dialog.confirm({
+          title: '仅断开 Agent 关联',
+          message: `${data.error}。继续操作只会断开面板关联，无法确认目标主机上的 Agent 程序已经删除。`,
+          confirmText: '仅断开关联',
+          cancelText: '取消',
+          variant: 'destructive',
+        });
+        if (!confirmed) return;
+        response = await fetch(`/api/server/agent/uninstall/${serverId}?force=1`, { method: 'POST' });
+        data = await response.json();
+      }
+      if (response.ok && data.success) {
+        toast.success(data.message || 'Agent 已卸载');
         setShowAgentModal(false);
         loadServerList();
       } else {
@@ -4459,16 +4471,62 @@ function ServerPage() {
       resourceName: server?.name || server?.host || `#${serverId}`,
     }))) return;
     try {
-      const response = await fetch(`/api/server/accounts/${serverId}`, { method: 'DELETE' });
-      const data = await response.json();
-      if (data.success) {
-        toast.success('主机删除成功');
-        loadServerList();
-      } else {
-        toast.error('删除失败: ' + data.error);
+      let response = await fetch(`/api/server/accounts/${serverId}`, { method: 'DELETE' });
+      let data = await response.json();
+      if (response.status === 409 && data.data?.can_force_delete) {
+        const dependencies = data.data.dependencies || {};
+        const dependencyText = [
+          dependencies.nodes ? `${dependencies.nodes} 个节点` : '',
+          dependencies.runtimes ? `${dependencies.runtimes} 个代理程序` : '',
+          dependencies.tunnels ? `${dependencies.tunnels} 个 Tunnel` : '',
+          dependencies.status_pages ? `${dependencies.status_pages} 个状态页关联` : '',
+        ].filter(Boolean).join('、');
+        const confirmed = await dialog.confirm({
+          title: '强制移除离线主机',
+          message: `${data.error}${dependencyText ? `。关联资源：${dependencyText}` : ''}。继续后会停止发布节点并清理全部面板关联，但离线主机本地可能残留 Agent 或代理服务。`,
+          confirmText: '强制移除',
+          cancelText: '取消',
+          variant: 'destructive',
+        });
+        if (!confirmed) return;
+        response = await fetch(`/api/server/accounts/${serverId}?force=1`, { method: 'DELETE' });
+        data = await response.json();
       }
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || '删除任务提交失败');
+      }
+      const taskId = data.data?.task_id;
+      if (!taskId) {
+        toast.success(data.message || '主机删除成功');
+        await loadServerList();
+        return;
+      }
+      toast.show({
+        type: 'info',
+        title: '正在级联删除主机',
+        description: '系统将依次停止发布节点、清理代理资源、卸载 Agent，并删除面板关联。',
+        isManual: true,
+        duration: 5000,
+      });
+      const deadline = Date.now() + 10 * 60 * 1000;
+      while (Date.now() < deadline) {
+        const taskResponse = await fetch(`/api/server/tasks/${taskId}`, { cache: 'no-store' });
+        const taskPayload = await taskResponse.json();
+        if (!taskResponse.ok) throw new Error(taskPayload.error || '无法读取删除任务状态');
+        const task = taskPayload.data || taskPayload;
+        if (task.status === 'completed') {
+          toast.success(typeof task.data === 'string' ? task.data : '主机级联删除完成');
+          await loadServerList();
+          return;
+        }
+        if (task.status === 'failed' || task.status === 'cancelled') {
+          throw new Error(task.error || '主机级联删除失败');
+        }
+        await new Promise(resolve => window.setTimeout(resolve, 1000));
+      }
+      throw new Error('删除任务等待超时，请稍后刷新查看最终状态');
     } catch (e) {
-      toast.error('删除请求失败');
+      toast.error(`删除失败: ${e.message || '未知错误'}`);
     }
   };
 

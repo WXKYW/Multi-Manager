@@ -158,7 +158,7 @@ func TestLoadSubscriptionsDoesNotQueryWhileRowsOpen(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `INSERT INTO subscription_subscriptions (id, name, public_token, enabled, include_internal_nodes, include_external_nodes) VALUES ('sub_test', '测试订阅', 'token_test', 1, 0, 1)`); err != nil {
 		t.Fatalf("insert subscription: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO subscription_plans (id, name, total_bytes, cycle_type, cycle_day, rate_limit_enabled, rate_limit_per_minute, include_internal_nodes, include_external_nodes) VALUES ('plan_test', '测试套餐', 4096, 'monthly', 6, 1, 20, 0, 1)`); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO subscription_plans (id, name, total_bytes, cycle_type, cycle_day, rate_limit_enabled, rate_limit_per_minute, selection_mode, include_internal_nodes, include_external_nodes) VALUES ('plan_test', '测试套餐', 4096, 'monthly', 6, 1, 20, 'all', 0, 1)`); err != nil {
 		t.Fatalf("insert plan: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `UPDATE subscription_subscriptions SET plan_id = 'plan_test' WHERE id = 'sub_test'`); err != nil {
@@ -623,6 +623,61 @@ func TestEnsureSchemaMigratesLegacySubscriptionsToProfiles(t *testing.T) {
 	}
 }
 
+func TestEnsureSchemaAddsProfileOwnershipColumnsToLegacyDatabase(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	_, err = db.ExecContext(ctx, `CREATE TABLE subscription_profiles (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		remark TEXT,
+		enabled INTEGER DEFAULT 1,
+		template_id TEXT DEFAULT 'builtin_mihomo_default',
+		traffic_source TEXT DEFAULT 'manual',
+		traffic_server_id TEXT,
+		total_bytes INTEGER DEFAULT 0,
+		manual_upload_bytes INTEGER DEFAULT 0,
+		manual_download_bytes INTEGER DEFAULT 0,
+		expire_at TEXT,
+		cycle_type TEXT DEFAULT 'none',
+		cycle_day INTEGER DEFAULT 1,
+		cycle_start TEXT,
+		cycle_end TEXT,
+		baseline_upload_bytes INTEGER DEFAULT 0,
+		baseline_download_bytes INTEGER DEFAULT 0,
+		rate_limit_enabled INTEGER DEFAULT 1,
+		rate_limit_per_minute INTEGER DEFAULT 30,
+		node_filter_tags TEXT DEFAULT '',
+		sort_order INTEGER DEFAULT 0,
+		created_at TEXT DEFAULT (datetime('now')),
+		updated_at TEXT DEFAULT (datetime('now'))
+	)`)
+	if err != nil {
+		t.Fatalf("create legacy subscription_profiles: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO subscription_profiles (id, name) VALUES ('legacy_pool', '旧节点池')`); err != nil {
+		t.Fatalf("insert legacy profile: %v", err)
+	}
+
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatalf("ensure schema: %v", err)
+	}
+
+	var ownership, management, trafficReporting string
+	if err := db.QueryRowContext(ctx, `SELECT ownership, management, traffic_reporting FROM subscription_profiles WHERE id='legacy_pool'`).Scan(&ownership, &management, &trafficReporting); err != nil {
+		t.Fatalf("load migrated profile ownership: %v", err)
+	}
+	if ownership != "external" || management != "unmanaged" || trafficReporting != "unavailable" {
+		t.Fatalf("profile ownership defaults = %q/%q/%q", ownership, management, trafficReporting)
+	}
+}
+
 func TestSubscriptionTokenRendersNodesFromProfile(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -935,14 +990,198 @@ func TestPlanOverridesSubscriptionPolicy(t *testing.T) {
 	if err := ensureSchema(ctx, db); err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.ExecContext(ctx, `INSERT INTO subscription_plans(id,name,total_bytes,cycle_type,cycle_day,rate_limit_enabled,rate_limit_per_minute,node_ids,include_internal_nodes,include_external_nodes) VALUES('plan_one','基础套餐',1000,'monthly',8,1,12,'["internal_one","external_one"]',1,1)`)
+	_, err = db.ExecContext(ctx, `INSERT INTO subscription_plans(id,name,total_bytes,cycle_type,cycle_day,rate_limit_enabled,rate_limit_per_minute,selection_mode,include_internal_nodes,include_external_nodes) VALUES('plan_one','基础套餐',1000,'monthly',8,1,12,'explicit',1,1)`)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.ExecContext(ctx, `INSERT INTO managed_proxy_nodes(id,server_id,name,protocol,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted) VALUES('internal_one','host_one','内部节点','vless-reality','internal.example',45654,'tcp','','')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.ExecContext(ctx, `INSERT INTO subscription_nodes(id,subscription_id,name,type,server,port) VALUES('external_one','library_one','外部节点','vless','external.example',443)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.ExecContext(ctx, `INSERT INTO subscription_plan_nodes(plan_id,node_id,source) VALUES('plan_one','internal_one','internal'),('plan_one','external_one','external')`); err != nil {
 		t.Fatal(err)
 	}
 	sub := Subscription{PlanID: "plan_one", TotalBytes: 9, CycleType: "none", NodeFilterIDs: []string{"wrong"}}
 	applyPlanToSubscription(ctx, db, &sub)
 	if sub.TotalBytes != 1000 || sub.CycleType != "monthly" || sub.CycleDay != 8 || sub.RateLimitPerMinute != 12 || len(sub.NodeFilterIDs) != 2 || !sub.IncludeInternalNodes || !sub.IncludeExternalNodes {
 		t.Fatalf("plan policy not applied: %#v", sub)
+	}
+}
+
+func TestPlanNodeMigrationDropsDeletedLegacyReferences(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO managed_proxy_nodes(id,server_id,name,protocol,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted) VALUES('managed_last','host_one','最后节点','vless-reality','node.example',45654,'tcp','','')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO subscription_plans(id,name,node_ids,selection_mode) VALUES('plan_legacy','历史套餐','["managed_last","already_deleted"]','explicit')`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := migratePlanNodeRelations(ctx, db); err != nil {
+		t.Fatalf("initial legacy migration: %v", err)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_plan_nodes WHERE plan_id='plan_legacy'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("migrated relation count=%d err=%v", count, err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM managed_proxy_nodes WHERE id='managed_last'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatalf("schema must remain available after deleting the last plan node: %v", err)
+	}
+	var legacy string
+	if err := db.QueryRowContext(ctx, `SELECT node_ids FROM subscription_plans WHERE id='plan_legacy'`).Scan(&legacy); err != nil {
+		t.Fatal(err)
+	}
+	if legacy != "" {
+		t.Fatalf("legacy node_ids were not retired: %q", legacy)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_plan_nodes WHERE plan_id='plan_legacy'`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("deleted node relation count=%d err=%v", count, err)
+	}
+}
+
+func TestExplicitPlanWithNoNodesPublishesNoNodes(t *testing.T) {
+	nodes := []Node{{ID: "one", Name: "节点一"}}
+	if got := filterPlanNodesByIDsForSource(nodes, nil, "explicit"); len(got) != 0 {
+		t.Fatalf("explicit empty selection published nodes: %#v", got)
+	}
+	if got := filterPlanNodesByIDsForSource(nodes, nil, "all"); len(got) != 1 {
+		t.Fatalf("all selection did not publish all nodes: %#v", got)
+	}
+}
+
+func TestDeleteExternalNodeRemovesPlanMembership(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_plans(id,name) VALUES('plan','套餐')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_nodes(id,subscription_id,name) VALUES('external','library','外部节点')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_plan_nodes(plan_id,node_id,source) VALUES('plan','external','external')`); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	New(config.Config{}).deleteNode(rec, httptest.NewRequest(http.MethodDelete, "/api/subscription/nodes/external", nil), db, "external")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM subscription_plan_nodes WHERE node_id='external'`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("membership count=%d err=%v", count, err)
+	}
+}
+
+func TestDeleteTemplateRejectsReferences(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_templates(id,name,format,content) VALUES('custom','自定义','clash','x')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_profiles(id,name,template_id) VALUES('profile','节点池','custom')`); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	New(config.Config{}).deleteTemplate(rec, httptest.NewRequest(http.MethodDelete, "/api/subscription/templates/custom", nil), db, "custom")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM subscription_templates WHERE id='custom'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("referenced template count=%d err=%v", count, err)
+	}
+}
+
+func TestCreateSubscriptionStoresOnlyIdentityFieldsFromPlan(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_plans(id,name,total_bytes,cycle_type,cycle_day,rate_limit_enabled,rate_limit_per_minute,selection_mode) VALUES('plan','套餐',4096,'monthly',9,1,20,'explicit')`); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"name":"客户 A","plan_id":"plan","enabled":true,"expire_at":"2030-01-01","total_bytes":999,"node_filter_ids":["stale"]}`
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/subscription/subscriptions", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	New(config.Config{}).createSubscription(rec, req, db)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var profileID, planID, nodeIDs, cycleType string
+	var total int64
+	if err := db.QueryRow(`SELECT profile_id,plan_id,total_bytes,node_filter_ids,cycle_type FROM subscription_subscriptions WHERE name='客户 A'`).Scan(&profileID, &planID, &total, &nodeIDs, &cycleType); err != nil {
+		t.Fatal(err)
+	}
+	if profileID != defaultNodeLibrary || planID != "plan" || total != 0 || nodeIDs != "" || cycleType != "none" {
+		t.Fatalf("stored subscription snapshot profile=%q plan=%q total=%d nodes=%q cycle=%q", profileID, planID, total, nodeIDs, cycleType)
+	}
+	items, err := loadSubscriptions(ctx, db, "")
+	if err != nil || len(items) != 1 || items[0].TotalBytes != 4096 || items[0].CycleDay != 9 {
+		t.Fatalf("effective plan policy items=%#v err=%v", items, err)
+	}
+}
+
+func TestDeleteSubscriptionNeverDeletesSharedNodes(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := ensureSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_profiles(id,name) VALUES('pool','外部节点池')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_subscriptions(id,profile_id,name,public_token) VALUES('link','pool','订阅','token')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_nodes(id,subscription_id,profile_id,name) VALUES('node','pool','pool','节点')`); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	New(config.Config{}).deleteSubscription(rec, httptest.NewRequest(http.MethodDelete, "/api/subscription/subscriptions/link", nil), db, "link")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM subscription_nodes WHERE id='node'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("shared node count=%d err=%v", count, err)
 	}
 }
 

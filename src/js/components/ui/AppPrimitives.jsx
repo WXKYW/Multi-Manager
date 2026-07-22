@@ -240,20 +240,37 @@ export function DataTableFrame({
   );
 }
 
-export function AppTable({ widths, fitContent = false, className = '', style, ...props }) {
-  const minWidth = Array.isArray(widths)
-    ? widths.reduce((total, width) => total + (Number(width) || 0), 0)
-    : undefined;
+export function AppTable({ widths, fitContent = false, percentageWidths = false, className = '', style, children, ...props }) {
+  const columnWeights = Array.isArray(widths)
+    ? widths.map((width) => Math.max(Number(width) || 0, 0))
+    : [];
+  const totalWeight = columnWeights.reduce((total, width) => total + width, 0);
+  const hasExplicitColgroup = React.Children.toArray(children).some(
+    (child) => React.isValidElement(child) && child.type === 'colgroup'
+  );
 
   return (
     <Table
       {...props}
-      className={className}
+      className={cx(percentageWidths && 'w-full max-w-full', className)}
       style={{
-        ...(minWidth ? { minWidth, width: fitContent ? minWidth : '100%' } : undefined),
+        ...(percentageWidths
+          ? { minWidth: 0, width: '100%', maxWidth: '100%' }
+          : totalWeight > 0
+            ? { minWidth: totalWeight, width: fitContent ? totalWeight : '100%' }
+            : undefined),
         ...style,
       }}
-    />
+    >
+      {percentageWidths && totalWeight > 0 && !hasExplicitColgroup && (
+        <colgroup>
+          {columnWeights.map((width, index) => (
+            <col key={index} style={{ width: `${(width / totalWeight) * 100}%` }} />
+          ))}
+        </colgroup>
+      )}
+      {children}
+    </Table>
   );
 }
 
