@@ -15,8 +15,8 @@ type proxyRuntimeRelease struct {
 var managedProxyRuntimeCatalog = map[string]proxyRuntimeRelease{
 	"sing-box": {
 		Runtime: "sing-box", Version: "1.13.14-am1",
-		AMD64URL: "https://github.com/iwvw/API-Monitor/releases/download/managed-runtime-v1.13.14/sing-box-1.13.14-linux-amd64", AMD64SHA256: "b1084f055f8aaddf9a6b554791f704fd40d1536c44928977b91ae0d31e8329fb",
-		ARM64URL: "https://github.com/iwvw/API-Monitor/releases/download/managed-runtime-v1.13.14/sing-box-1.13.14-linux-arm64", ARM64SHA256: "82a24f1947e1cd6296a053511fbf3e5e8acaf4fa98940550e010692cee700623",
+		AMD64URL: "https://github.com/iwvw/API-Monitor/releases/download/managed-runtime-v1.13.14/sing-box-1.13.14-linux-amd64", AMD64SHA256: "094568655c7324de08bbeb108df886950f76b4dc164e1e5bc08e64219f1af727",
+		ARM64URL: "https://github.com/iwvw/API-Monitor/releases/download/managed-runtime-v1.13.14/sing-box-1.13.14-linux-arm64", ARM64SHA256: "fd19a07696593307c14133ae0ebed2e089523424b3f2ab2ea74aa206661f7131",
 		AssetFormat: "binary",
 	},
 }
