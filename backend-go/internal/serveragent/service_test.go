@@ -2026,8 +2026,8 @@ func TestConnectionRegistryIgnoresStaleSocketDisconnect(t *testing.T) {
 
 func TestAgentSocketAuthenticationRequiresValidServerAndKey(t *testing.T) {
 	service, db := testService(t)
-	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, status, cached_info, tags, order_index) VALUES
-		('auth-agent', 'auth', '0.0.0.0', 'agent', 'password', 'offline', '{}', '[]', 1)`)
+	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, status, country, resolved_country, cached_info, tags, order_index) VALUES
+		('auth-agent', 'auth', '0.0.0.0', 'agent', 'password', 'offline', 'us', 'San Jose, California, US', '{"country_code":"us","location":"San Jose, California, US","latitude":37.33939,"longitude":-121.89496}', '[]', 1)`)
 	if err != nil {
 		t.Fatalf("insert account: %v", err)
 	}
@@ -2172,6 +2172,30 @@ func TestManagedProxyNodesRouteIsNotCapturedAsLegacyServerID(t *testing.T) {
 	payload := decodePayload(t, res)
 	if _, ok := payload["data"].([]interface{}); !ok {
 		t.Fatalf("managed node list should return an array: %#v", payload)
+	}
+}
+
+func TestManagedProxyNodeListIncludesHostNetworkQuality(t *testing.T) {
+	service, db := testService(t)
+	ctx := context.Background()
+	statements := []string{
+		`INSERT INTO server_accounts (id,name,host,username,auth_type) VALUES ('quality-host','东京','192.0.2.90','agent','password')`,
+		`INSERT INTO managed_proxy_nodes (id,server_id,name,protocol,runtime,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted,enabled,publishable,apply_status) VALUES ('quality-node','quality-host','东京节点','vless-reality','sing-box','192.0.2.90',45654,'tcp','{}','',1,1,'running')`,
+		`INSERT INTO server_network_quality_samples (server_id,target_name,target_host,success,latency_ms,checked_at) VALUES ('quality-host','联通','cu.example',1,80,datetime('now','-5 minutes'))`,
+		`INSERT INTO server_network_quality_samples (server_id,target_name,target_host,success,latency_ms,checked_at) VALUES ('quality-host','联通','cu.example',1,120,datetime('now','-10 minutes'))`,
+	}
+	for _, statement := range statements {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	res := perform(service, http.MethodGet, "/api/server/agent/proxy/nodes", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("managed node list status=%d body=%s", res.Code, res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), `"quality"`) || !strings.Contains(res.Body.String(), `"avg_latency_ms":100`) {
+		t.Fatalf("managed node list should include aggregated host quality: %s", res.Body.String())
 	}
 }
 
@@ -2405,6 +2429,11 @@ func TestAgentQuickInstallCreatesHostFromName(t *testing.T) {
 		!strings.Contains(resWin.Body.String(), `"serverId": "$SERVER_ID"`) {
 		t.Fatalf("windows install script should replace stale agent config: %s", resWin.Body.String())
 	}
+	if !strings.Contains(resWin.Body.String(), `API_MONITOR_AGENT_INSTALL_DETACHED`) ||
+		!strings.Contains(resWin.Body.String(), `-EncodedCommand`) ||
+		!strings.Contains(resWin.Body.String(), `installation will continue in the background`) {
+		t.Fatalf("windows install script should detach before replacing a running Agent: %s", resWin.Body.String())
+	}
 	if !strings.Contains(resWin.Body.String(), `Move-Item -Path $TEMP_AGENT_PATH -Destination $AGENT_PATH -Force`) {
 		t.Fatalf("windows install script should atomically replace the agent binary: %s", resWin.Body.String())
 	}
@@ -2531,6 +2560,56 @@ func TestAgentBatchUpgradeUsesServerSideBatchAndVerifiesReconnect(t *testing.T) 
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatalf("batch did not complete in time, last payload=%#v", lastPayload)
+}
+
+func TestAgentBatchUpgradeNeverForcesOnlineWindowsAgentThroughSSH(t *testing.T) {
+	service, _ := testService(t)
+
+	res := perform(service, http.MethodPost, "/api/server/agent/quick-install", `{"name":"windows-agent"}`)
+	if res.Code != http.StatusOK {
+		t.Fatalf("quick install status=%d body=%s", res.Code, res.Body.String())
+	}
+	payload := decodePayload(t, res)
+	serverID := payload["data"].(map[string]interface{})["serverId"].(string)
+
+	socket := &reconnectOnUpgradeSocket{t: t, service: service, serverID: serverID}
+	connection := service.registry.Register(serverID, socket)
+	connection.SetMetadata("platform", "windows")
+	connection.SetMetadata("arch", "amd64")
+
+	res = perform(service, http.MethodPost, "/api/server/agent/batch-upgrade?protocol=http", `{"serverIds":["`+serverID+`"],"force_ssh":true,"fallback_ssh":true,"concurrency":1}`)
+	if res.Code != http.StatusOK {
+		t.Fatalf("batch upgrade status=%d body=%s", res.Code, res.Body.String())
+	}
+	payload = decodePayload(t, res)
+	batchID := payload["data"].(map[string]interface{})["id"].(string)
+
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		res = perform(service, http.MethodGet, "/api/server/agent/batch/"+batchID, "")
+		payload = decodePayload(t, res)
+		data := payload["data"].(map[string]interface{})
+		if data["status"] == string(AgentBatchSucceeded) {
+			items := data["items"].([]interface{})
+			item := items[0].(map[string]interface{})
+			if item["status"] != string(AgentBatchSucceeded) {
+				t.Fatalf("unexpected completed item: %#v", item)
+			}
+			logs, _ := item["log"].([]interface{})
+			for _, rawLine := range logs {
+				line, _ := rawLine.(string)
+				if strings.Contains(line, "SSH") {
+					t.Fatalf("online Windows Agent must not use SSH: %#v", logs)
+				}
+			}
+			return
+		}
+		if data["status"] == string(AgentBatchFailed) {
+			t.Fatalf("Windows Agent upgrade failed: %#v", data)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("Windows Agent batch upgrade did not complete")
 }
 
 func TestAgentBatchUpgradeVerificationTimeoutMarksItemFailed(t *testing.T) {

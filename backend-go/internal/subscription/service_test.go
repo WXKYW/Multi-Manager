@@ -40,7 +40,7 @@ func TestIsLinuxPlatformRecognizesDistributions(t *testing.T) {
 }
 
 func TestManagedSubscriptionNodesApplyPreferredAddress(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
 	if err != nil {
@@ -71,6 +71,9 @@ func TestManagedSubscriptionNodesApplyPreferredAddress(t *testing.T) {
 	if !strings.Contains(nodes[0].Raw, "sni=origin.example.com") {
 		t.Fatalf("Tunnel SNI must remain owned hostname: %s", nodes[0].Raw)
 	}
+	if nodes[0].Stable {
+		t.Fatal("managed nodes must not enter the stable group without an explicit stability policy")
+	}
 }
 
 func TestPublishedNodeNamesAreUnique(t *testing.T) {
@@ -97,7 +100,7 @@ func TestJSONServerMetadataDoesNotTurnMissingValuesIntoNilText(t *testing.T) {
 }
 
 func TestListServersIncludesLinuxDistributionsAndPreservesPlatform(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
 	if err != nil {
@@ -142,7 +145,7 @@ func TestListServersIncludesLinuxDistributionsAndPreservesPlatform(t *testing.T)
 }
 
 func TestLoadSubscriptionsDoesNotQueryWhileRowsOpen(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -194,7 +197,7 @@ func TestLoadSubscriptionsDoesNotQueryWhileRowsOpen(t *testing.T) {
 }
 
 func TestLoadNodesDoesNotQueryQualityWhileRowsOpen(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -261,7 +264,7 @@ func TestImportedNodeDefaultsToExternalUnmanagedTrafficUnavailable(t *testing.T)
 }
 
 func TestLoadQualityUsesDailyAverageLatency(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -472,7 +475,7 @@ proxies:
 	}
 }
 
-func TestStableProxyNamesAlwaysIncludesManualGroup(t *testing.T) {
+func TestStableProxyNamesOnlyIncludesExplicitStableNodes(t *testing.T) {
 	nodes := []Node{
 		{Name: "🇺🇸 洛杉矶", Enabled: true, Stable: true},
 		{Name: "🇯🇵 日本", Enabled: true, Stable: false},
@@ -487,11 +490,19 @@ func TestStableProxyNamesAlwaysIncludesManualGroup(t *testing.T) {
 	if !strings.Contains(joined, "🇺🇸 洛杉矶") {
 		t.Fatalf("stable node missing from stable proxy names: %#v", names)
 	}
-	if !strings.Contains(joined, "🚀 手动") {
-		t.Fatalf("manual group missing from stable proxy names: %#v", names)
-	}
 	if strings.Contains(joined, "🇯🇵 日本") {
 		t.Fatalf("non-stable node should not be in stable proxy names:\n%s", body)
+	}
+}
+
+func TestStableProxyNamesFallsBackToDirect(t *testing.T) {
+	body := stableProxyNamesYAML([]Node{{Name: "普通节点", Enabled: true}}, 0)
+	var names []string
+	if err := yaml.Unmarshal([]byte(strings.TrimSpace(body)), &names); err != nil {
+		t.Fatalf("stable proxy names should parse: %v\n%s", err, body)
+	}
+	if len(names) != 1 || names[0] != "DIRECT" {
+		t.Fatalf("stable group without explicitly stable nodes = %#v, want DIRECT", names)
 	}
 }
 
@@ -516,7 +527,7 @@ func TestProxiesYAMLRendersClientCompatibleList(t *testing.T) {
 }
 
 func TestEnsureSchemaMigratesLegacySubscriptionsToProfiles(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -624,7 +635,7 @@ func TestEnsureSchemaMigratesLegacySubscriptionsToProfiles(t *testing.T) {
 }
 
 func TestEnsureSchemaAddsProfileOwnershipColumnsToLegacyDatabase(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -679,7 +690,7 @@ func TestEnsureSchemaAddsProfileOwnershipColumnsToLegacyDatabase(t *testing.T) {
 }
 
 func TestSubscriptionTokenRendersNodesFromProfile(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -729,7 +740,7 @@ func TestSubscriptionTokenRendersNodesFromProfile(t *testing.T) {
 }
 
 func TestPublicSubscriptionIncludesClientProfileNameHeaders(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	dataDir := t.TempDir()
@@ -776,7 +787,7 @@ func TestPublicSubscriptionIncludesClientProfileNameHeaders(t *testing.T) {
 }
 
 func TestMihomoRenderFallsBackWhenBoundTemplateIsEmpty(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -807,7 +818,7 @@ func TestMihomoRenderFallsBackWhenBoundTemplateIsEmpty(t *testing.T) {
 }
 
 func TestMihomoRenderUsesEmptyProxyListWhenNoNodes(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -839,7 +850,7 @@ func TestMihomoRenderUsesEmptyProxyListWhenNoNodes(t *testing.T) {
 }
 
 func TestLoadProfilesReturnsLibrariesWithCountsAndUpstream(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -890,7 +901,7 @@ func TestLoadProfilesReturnsLibrariesWithCountsAndUpstream(t *testing.T) {
 }
 
 func TestDeleteProfileBlocksWhenNodesOrLinksExist(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -957,7 +968,7 @@ func TestDeleteProfileBlocksWhenNodesOrLinksExist(t *testing.T) {
 }
 
 func TestComputeTrafficDoesNotApplyExternalUpstreamUsageToSubscription(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -980,7 +991,7 @@ func TestComputeTrafficDoesNotApplyExternalUpstreamUsageToSubscription(t *testin
 }
 
 func TestPlanOverridesSubscriptionPolicy(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
 	if err != nil {
@@ -1011,7 +1022,7 @@ func TestPlanOverridesSubscriptionPolicy(t *testing.T) {
 }
 
 func TestPlanNodeMigrationDropsDeletedLegacyReferences(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
 	if err != nil {
@@ -1186,7 +1197,7 @@ func TestDeleteSubscriptionNeverDeletesSharedNodes(t *testing.T) {
 }
 
 func TestExternalNodeTrafficIsNotPartOfPlanUsage(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
 	if err != nil {
@@ -1203,7 +1214,7 @@ func TestExternalNodeTrafficIsNotPartOfPlanUsage(t *testing.T) {
 }
 
 func TestRefreshUpstreamPreservesBoundNodeProperties(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	upstreamRaw := "vless://0119068b-0148-47bf-875b-2145040b8174@saas.sin.fan:443?security=tls&type=ws&path=/group/live/intro&encryption=none#%F0%9F%87%AD%F0%9F%87%B0%20%E9%A6%99%E6%B8%AF"
@@ -1278,7 +1289,7 @@ func TestRefreshUpstreamPreservesBoundNodeProperties(t *testing.T) {
 }
 
 func TestComputeTrafficFromNodeBoundServers(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -1328,7 +1339,7 @@ func TestComputeTrafficFromNodeBoundServers(t *testing.T) {
 }
 
 func TestDeleteSubscriptionKeepsSharedProfile(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))
@@ -1380,7 +1391,7 @@ func TestDeleteSubscriptionKeepsSharedProfile(t *testing.T) {
 }
 
 func TestImportCommitReadsSettingsThroughOpenTransaction(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "data.db"))

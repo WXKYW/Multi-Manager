@@ -31,7 +31,7 @@ import useTableResize from '../composables/useTableResize.js';
 import { formatUptime, formatFileSize, formatDateTime, maskAddress, parseSpeed } from '../modules/utils.js';
 import { FLOW_UNIT_BADGE_CLASS, getFlowUnitClassName } from '../modules/flowUnits.js';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
-import { canOpenTerminal, hasSshEndpoint, isAgentServer, resolveTerminalProtocol } from '../modules/serverTerminal.js';
+import { canOpenTerminal, hasSshEndpoint, isAgentServer, resolveTerminalProtocol, resolveTerminalSocketTransport } from '../modules/serverTerminal.js';
 import { canOpenRemoteDesktop, remoteDesktopPath } from '../modules/remoteDesktop.js';
 import { readSftpFile, writeSftpFile } from '../modules/server-sftp.js';
 import { formatDockerContainerPorts } from '../modules/docker-format.js';
@@ -2557,8 +2557,6 @@ function ServerPage() {
   const [agentInstallOS, setAgentInstallOS] = useState('linux');
   const [showAgentModal, setShowAgentModal] = useState(false);
   const [agentModalData, setAgentModalData] = useState(null);
-  const [agentInstallProtocol, setAgentInstallProtocol] = useState('https');
-  const [agentInstallHostType, setAgentInstallHostType] = useState('domain');
   const [agentForceSsh, setAgentForceSsh] = useState(false);
   const [agentInstalling, setAgentInstalling] = useState(false);
   const [agentInstallLoading, setAgentInstallLoading] = useState(false);
@@ -2645,8 +2643,7 @@ function ServerPage() {
   const [upgradeLog, setUpgradeLog] = useState('');
   const [upgradeBatchSnapshot, setUpgradeBatchSnapshot] = useState(null);
   const [upgradeProgress, setUpgradeProgress] = useState(0);
-  const [forceUpgrade, setForceUpgrade] = useState(false);
-  const [upgradeFallbackSsh, setUpgradeFallbackSsh] = useState(true);
+  const [upgradeFallbackSsh, setUpgradeFallbackSsh] = useState(false);
 
   // SSH 终端会话
   const [sshSessions, setSshSessions] = useState([]);
@@ -4277,8 +4274,7 @@ function ServerPage() {
     if (!raw) return '';
 
     try {
-      const url = new URL(raw.startsWith('http') ? raw : `${agentInstallProtocol}://${raw}`);
-      url.protocol = `${agentInstallProtocol}:`;
+      const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
       return url.origin;
     } catch (e) {
       return '';
@@ -4288,7 +4284,7 @@ function ServerPage() {
   const getAgentPublicBaseApiUrl = () => {
     const configuredOrigin = normalizeAgentOrigin(publicApiUrl);
     if (configuredOrigin) return configuredOrigin;
-    return normalizeAgentOrigin(`${agentInstallProtocol}://${window.location.host}`);
+    return window.location.origin;
   };
 
   const getAgentBaseApiUrl = () => {
@@ -4297,8 +4293,7 @@ function ServerPage() {
       if (!raw) return '';
 
       try {
-        const url = new URL(raw.startsWith('http') ? raw : `${agentInstallProtocol}://${raw}`);
-        url.protocol = `${agentInstallProtocol}:`;
+        const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
         return url.origin;
       } catch (e) {
         return '';
@@ -4311,7 +4306,15 @@ function ServerPage() {
     const modalOrigin = normalizeOrigin(agentModalData?.apiUrl);
     if (modalOrigin) return modalOrigin;
 
-    return normalizeOrigin(`${agentInstallProtocol}://${window.location.host}`);
+    return window.location.origin;
+  };
+
+  const getAgentInstallProtocol = () => {
+    try {
+      return new URL(getAgentBaseApiUrl()).protocol === 'http:' ? 'http' : 'https';
+    } catch (_) {
+      return 'https';
+    }
   };
 
   const getAgentInstallEndpoint = (osType = agentInstallOS) => {
@@ -4319,7 +4322,7 @@ function ServerPage() {
       baseUrl: getAgentBaseApiUrl(),
       serverId: agentModalData?.serverId,
       agentKey: agentModalData?.agentKey,
-      protocol: agentInstallProtocol || 'https',
+      protocol: getAgentInstallProtocol(),
       osType,
     });
   };
@@ -4336,7 +4339,7 @@ function ServerPage() {
       baseUrl: getAgentBaseApiUrl(),
       serverId: agentModalData.serverId,
       agentKey: agentModalData.agentKey,
-      protocol: agentInstallProtocol || 'https',
+      protocol: getAgentInstallProtocol(),
       osType,
     });
   };
@@ -4395,7 +4398,7 @@ function ServerPage() {
     }
 
     try {
-      const response = await fetch(`/api/server/agent/auto-install/${serverId}?protocol=${encodeURIComponent(agentInstallProtocol)}`, {
+      const response = await fetch(`/api/server/agent/auto-install/${serverId}?protocol=${encodeURIComponent(getAgentInstallProtocol())}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ force_ssh: agentForceSsh, base_url: getAgentPublicBaseApiUrl() }),
@@ -5000,7 +5003,7 @@ function ServerPage() {
     setAgentInstallLoading(true);
 
     try {
-      const response = await fetch(`/api/server/agent/batch-install?protocol=${encodeURIComponent(agentInstallProtocol)}`, {
+      const response = await fetch(`/api/server/agent/batch-install?protocol=${encodeURIComponent(getAgentInstallProtocol())}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -5038,14 +5041,13 @@ function ServerPage() {
     setUpgradeBatchSnapshot(null);
     setUpgradeProgress(0);
     setUpgrading(false);
-    setForceUpgrade(false);
-    setUpgradeFallbackSsh(true);
+    setUpgradeFallbackSsh(false);
     setShowUpgradeModal(true);
   };
 
-	const getAgentUpgradeTargets = () => serverList.filter(s =>
-		isServerOnline(s) || s.monitor_mode === 'agent' || s.host === '0.0.0.0'
-	);
+	const getAgentUpgradeTargets = () => serverList.filter(server => (
+		isServerOnline(server) || (upgradeFallbackSsh && canSshDeployAgent(server))
+	));
 
   const getUpgradeBatchStatusLabel = (status) => {
     switch (status) {
@@ -5155,12 +5157,12 @@ function ServerPage() {
     ]);
 
     try {
-      const response = await fetch(`/api/server/agent/batch-upgrade?protocol=${encodeURIComponent(agentInstallProtocol)}`, {
+      const response = await fetch(`/api/server/agent/batch-upgrade?protocol=${encodeURIComponent(getAgentInstallProtocol())}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           serverIds: targetServers.map(server => server.id),
-          force_ssh: forceUpgrade,
+          force_ssh: false,
           fallback_ssh: upgradeFallbackSsh,
           base_url: getAgentPublicBaseApiUrl(),
           concurrency: 4,
@@ -6939,7 +6941,10 @@ function ServerPage() {
       const params = new URLSearchParams({
         server_id: String(sessionMeta.server.id),
         session_id: sessionId,
-        transport: sessionMeta.server.preferred_terminal_transport || sessionMeta.type || 'auto',
+        transport: resolveTerminalSocketTransport(
+			sessionMeta.server,
+			sessionMeta.server.preferred_terminal_transport || sessionMeta.type || 'auto',
+		),
         cols: String(sshSessionRefs.current[sessionId]?.terminal?.cols || 120),
         rows: String(sshSessionRefs.current[sessionId]?.terminal?.rows || 32),
       });
@@ -11512,7 +11517,7 @@ function ServerPage() {
           if (!open) setAgentModalData(null);
         }}
       >
-        <Dialog size="sm" className="flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] flex-col overflow-hidden p-0 sm:min-w-[32rem] sm:max-w-[calc(100vw-3rem)]">
+        <Dialog size="xl" className="flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] flex-col overflow-hidden p-0 lg:!w-[min(72rem,calc(100vw-3rem))] lg:!max-w-[min(72rem,calc(100vw-3rem))]">
           <div className="flex min-w-0 items-center justify-between gap-3 bg-kumo-recessed/35 px-4 py-3 border-b border-kumo-line">
             <Dialog.Title className="min-w-0 truncate text-sm font-bold text-kumo-strong">
               部署 Agent
@@ -11550,29 +11555,7 @@ function ServerPage() {
                 <div className="flex flex-col gap-3">
                   <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
                     <div className="font-semibold text-kumo-subtle">安装命令</div>
-                    <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
-                      <Tabs
-                        {...TOOL_TABS_PROPS}
-                        className="w-fit max-w-full"
-                        listClassName="w-fit max-w-full"
-                        value={agentInstallProtocol}
-                        onValueChange={setAgentInstallProtocol}
-                        tabs={[
-                          { value: 'https', label: 'HTTPS' },
-                          { value: 'http', label: 'HTTP' },
-                        ]}
-                      />
-                      <Tabs
-                        {...TOOL_TABS_PROPS}
-                        className="w-fit max-w-full"
-                        listClassName="w-fit max-w-full"
-                        value={agentInstallHostType}
-                        onValueChange={setAgentInstallHostType}
-                        tabs={[
-                          { value: 'domain', label: '域名' },
-                          { value: 'ip', label: 'IP' },
-                        ]}
-                      />
+                    <div className="min-w-0">
                       <Tabs
                         {...TOOL_TABS_PROPS}
                         className="w-fit max-w-full"
@@ -11600,28 +11583,17 @@ function ServerPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-2">
                   <LinkButton size="sm"
                     variant="secondary"
-                    href={`${getAgentBaseApiUrl() || agentModalData.apiUrl}/agent/agent-linux-amd64`}
+                    href={`${getAgentBaseApiUrl() || agentModalData.apiUrl}/agent/${isWindowsAgentInstallOs(agentInstallOS) ? 'agent-windows-amd64.exe' : 'agent-linux-amd64'}`}
                     target="_blank"
                     rel="noreferrer"
                     external
                     icon={<Download className="h-3.5 w-3.5" />}
                     className="w-full justify-center"
                   >
-                    Linux x64
-                  </LinkButton>
-                  <LinkButton size="sm"
-                    variant="secondary"
-                    href={`${getAgentBaseApiUrl() || agentModalData.apiUrl}/agent/agent-windows-amd64.exe`}
-                    target="_blank"
-                    rel="noreferrer"
-                    external
-                    icon={<Download className="h-3.5 w-3.5" />}
-                    className="w-full justify-center"
-                  >
-                    Windows x64
+                    下载 {isWindowsAgentInstallOs(agentInstallOS) ? 'Windows x64' : 'Linux x64'} Agent
                   </LinkButton>
                 </div>
 
@@ -11682,12 +11654,12 @@ function ServerPage() {
               </Button>
             </div>
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-3">
-              <Checkbox
-                label="强制 SSH 覆盖"
+              {!isWindowsAgentInstallOs(agentInstallOS) && canSshDeployAgent(serverList.find((server) => server.id === agentModalData?.serverId)) && <Checkbox
+                label="Linux SSH 覆盖"
                 checked={agentForceSsh}
                 disabled={agentInstallLoading || agentInstalling}
                 onCheckedChange={(checked) => setAgentForceSsh(Boolean(checked))}
-              />
+              />}
               <Button
                 type="button" size="sm"
                 variant="secondary"
@@ -11922,62 +11894,61 @@ function ServerPage() {
                 />
               )}
 
-              {upgradeBatchSnapshot?.items?.length > 0 && (
-                <div className="overflow-hidden rounded-md border border-kumo-line">
-                  {upgradeBatchSnapshot.items.map(item => (
-                    <div key={item.serverId} className="flex min-w-0 items-center justify-between gap-3 border-b border-kumo-line bg-kumo-base px-3 py-2 last:border-b-0">
-                      <div className="min-w-0">
-                        <div className="truncate text-xs font-semibold text-kumo-strong">{item.serverName || item.serverId}</div>
-                        {(item.error || item.log?.at?.(-1)) && (
-                          <div className={`mt-0.5 truncate text-[11px] ${item.error ? 'text-kumo-danger' : 'text-kumo-subtle'}`} title={item.error || item.log.at(-1)}>
-                            {item.error || item.log.at(-1)}
+              <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(18rem,0.85fr)_minmax(0,1.15fr)] lg:items-stretch">
+                <div className="min-w-0 space-y-1.5">
+                  <div className="text-xs font-semibold text-kumo-strong">主机状态</div>
+                  {upgradeBatchSnapshot?.items?.length > 0 ? (
+                    <div className="max-h-[24rem] overflow-auto rounded-md border border-kumo-line scrollbar-thin">
+                      {upgradeBatchSnapshot.items.map(item => (
+                        <div key={item.serverId} className="flex min-w-0 items-center justify-between gap-3 border-b border-kumo-line bg-kumo-base px-3 py-2 last:border-b-0">
+                          <div className="min-w-0">
+                            <div className="truncate text-xs font-semibold text-kumo-strong">{item.serverName || item.serverId}</div>
+                            {(item.error || item.log?.at?.(-1)) && (
+                              <div className={`mt-0.5 truncate text-[11px] ${item.error ? 'text-kumo-danger' : 'text-kumo-subtle'}`} title={item.error || item.log.at(-1)}>
+                                {item.error || item.log.at(-1)}
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                      <Badge
-                        variant={item.status === 'succeeded'
-                          ? 'success'
-                          : item.status === 'failed'
-                            ? 'danger'
-                            : item.status === 'verifying'
-                              ? 'warning'
-                              : 'info'}
-                      >
-                        {getUpgradeItemStatusLabel(item.status)}
-                      </Badge>
+                          <Badge
+                            variant={item.status === 'succeeded'
+                              ? 'success'
+                              : item.status === 'failed'
+                                ? 'danger'
+                                : item.status === 'verifying'
+                                  ? 'warning'
+                                  : 'info'}
+                          >
+                            {getUpgradeItemStatusLabel(item.status)}
+                          </Badge>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  ) : (
+                    <AppCard padding="none" className="min-h-56 p-3 text-kumo-subtle">等待开始升级。</AppCard>
+                  )}
                 </div>
-              )}
 
-              {upgradeLog ? (
-                <div className="space-y-1.5">
+                <div className="min-w-0 space-y-1.5">
                   <div className="text-xs font-semibold text-kumo-strong">升级日志</div>
-                  <pre
-                    ref={upgradeLogViewportRef}
-                    className="min-h-56 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md border border-kumo-line bg-kumo-recessed/25 p-3 font-mono text-[11px] leading-5 text-kumo-strong"
-                  >
-                    {upgradeLog}
-                  </pre>
+                  {upgradeLog ? (
+                    <pre
+                      ref={upgradeLogViewportRef}
+                      className="min-h-56 max-h-[24rem] overflow-auto whitespace-pre-wrap break-words rounded-md border border-kumo-line bg-kumo-recessed/25 p-3 font-mono text-[11px] leading-5 text-kumo-strong scrollbar-thin"
+                    >
+                      {upgradeLog}
+                    </pre>
+                  ) : (
+                    <AppCard padding="none" className="min-h-56 p-3 text-kumo-subtle">将对在线 Agent 下发后台自升级任务。</AppCard>
+                  )}
                 </div>
-              ) : (
-                <AppCard padding="none" className="p-3 text-kumo-subtle">
-                  将对在线 Agent 或 Agent 模式主机下发升级任务。
-                </AppCard>
-              )}
+              </div>
             </div>
           </div>
 
           <div className="flex flex-col gap-3 border-t border-kumo-line bg-kumo-recessed/25 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap items-center gap-3">
               <Checkbox
-                label="强制覆盖"
-                checked={forceUpgrade}
-                disabled={upgrading}
-                onCheckedChange={(checked) => setForceUpgrade(Boolean(checked))}
-              />
-              <Checkbox
-                label="SSH 保底"
+                label="Linux SSH 保底"
                 checked={upgradeFallbackSsh}
                 disabled={upgrading}
                 onCheckedChange={(checked) => setUpgradeFallbackSsh(Boolean(checked))}

@@ -355,15 +355,20 @@ func (s *Service) runAgentBatchItem(batch *AgentBatch, item *AgentBatchItem, ori
 	defer db.Close()
 
 	forceSSH := batch.ForceSSH
-	if batch.Kind == AgentBatchInstall {
-		forceSSH = batch.ForceSSH
-	}
 	startedAt := time.Now()
 	startMs := startedAt.UnixNano() / int64(time.Millisecond)
 
 	verifyTimeout := agentBatchVerifyTimeout()
 
-	if conn, exists := s.registry.Get(item.ServerID); exists && !forceSSH {
+	conn, agentOnline := s.registry.Get(item.ServerID)
+	if agentOnline && isWindowsAgentConnection(conn) {
+		// Windows Agent hosts commonly have no SSH service or credentials. Even
+		// legacy callers that still send force_ssh must use the detached native
+		// self-updater while the control connection is online.
+		forceSSH = false
+	}
+
+	if agentOnline && !forceSSH {
 		item.appendLog("Agent 在线，发送自升级任务")
 		downloadURL := s.agentUpgradeDownloadURL(context.Background(), db, conn, origin)
 		task := s.taskRegistry.Create(item.ServerID, "agent_upgrade", downloadURL)
@@ -372,6 +377,7 @@ func (s *Service) runAgentBatchItem(batch *AgentBatch, item *AgentBatchItem, ori
 			return
 		}
 		item.setStatus(AgentBatchVerifying, "")
+		selfUpdateFailure := ""
 		switch status, detail, ok := waitForTaskTerminal(task, agentBatchAckTimeout()); {
 		case ok && status == TaskCompleted:
 			if detail != "" {
@@ -380,28 +386,40 @@ func (s *Service) runAgentBatchItem(batch *AgentBatch, item *AgentBatchItem, ori
 				item.appendLog("Agent 已确认后台更新")
 			}
 		case ok && status == TaskFailed:
-			if batch.Kind == AgentBatchUpgrade && batch.FallbackSSH {
-				item.appendLog("自升级调度失败，切换到 SSH 覆盖安装: " + detail)
-				forceSSH = true
-			} else {
-				item.fail("自升级调度失败: " + detail)
-				return
-			}
+			selfUpdateFailure = "自升级调度失败: " + detail
 		default:
 			item.appendLog("未收到自升级调度结果，继续等待 Agent 重连")
 		}
-		if !forceSSH && s.waitForAgentReconnectWithLog(item, item.ServerID, startMs, verifyTimeout) {
+		if selfUpdateFailure == "" && s.waitForAgentReconnectWithLog(item, item.ServerID, startMs, verifyTimeout) {
 			item.succeed("Agent 已重新上线")
 			return
 		}
-		if !forceSSH && (batch.Kind != AgentBatchUpgrade || !batch.FallbackSSH) {
-			item.fail("验证超时: Agent 未能在 " + formatBatchDuration(verifyTimeout) + " 内重新上线")
+		if selfUpdateFailure == "" {
+			selfUpdateFailure = "验证超时: Agent 未能在 " + formatBatchDuration(verifyTimeout) + " 内重新上线"
+		}
+		if batch.Kind != AgentBatchUpgrade || !batch.FallbackSSH {
+			item.fail(selfUpdateFailure)
 			return
 		}
-		if !forceSSH {
-			item.appendLog("自升级验证超时，切换到 SSH 覆盖安装")
-			forceSSH = true
+		if isWindowsAgentConnection(conn) {
+			item.fail(selfUpdateFailure + "；Windows Agent 仅支持在线自升级，不使用 SSH 保底")
+			return
 		}
+		if err := s.validateBatchSSHConfig(ctx, db, item.ServerID); err != nil {
+			item.fail(selfUpdateFailure + "；SSH 保底不可用: " + err.Error())
+			return
+		}
+		item.appendLog(selfUpdateFailure + "，切换到 SSH 覆盖安装")
+		forceSSH = true
+	}
+
+	if batch.Kind == AgentBatchUpgrade && !agentOnline && !forceSSH && !batch.FallbackSSH {
+		item.fail("Agent 离线，无法执行在线自升级；如该 Linux 主机已配置 SSH，可启用 Linux SSH 保底")
+		return
+	}
+	if err := s.validateBatchSSHConfig(ctx, db, item.ServerID); err != nil {
+		item.fail("SSH 安装不可用: " + err.Error())
+		return
 	}
 
 	if forceSSH {
@@ -438,6 +456,25 @@ func (s *Service) runAgentBatchItem(batch *AgentBatch, item *AgentBatchItem, ori
 		return
 	}
 	item.fail("验证超时: Agent 未能在 " + formatBatchDuration(verifyTimeout) + " 内上线")
+}
+
+func isWindowsAgentConnection(conn *AgentConnection) bool {
+	if conn == nil {
+		return false
+	}
+	platform := strings.ToLower(strings.TrimSpace(fmt.Sprint(conn.GetMetadata()["platform"])))
+	return strings.Contains(platform, "windows") || platform == "win32" || platform == "win64"
+}
+
+func (s *Service) validateBatchSSHConfig(ctx context.Context, db *sql.DB, serverID string) error {
+	cfg, err := s.getSFTPServerConfigCtx(ctx, db, serverID)
+	if err != nil {
+		return err
+	}
+	if err := ensureTerminalAuthConfigured(cfg); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Service) renderAgentInstallScript(ctx context.Context, db *sql.DB, serverID string, origin agentInstallOrigin) (string, error) {

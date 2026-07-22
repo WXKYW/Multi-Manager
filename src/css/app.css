@@ -481,7 +481,9 @@ th > button[aria-label='Resize column'] > span {
 .app-code-editor {
   position: relative;
   display: flex;
-  height: 100%;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
   min-width: 0;
   flex-direction: column;
   overflow: hidden;
@@ -500,14 +502,31 @@ th > button[aria-label='Resize column'] > span {
   display: flex;
   min-height: 0;
   flex: 1;
+  flex-direction: column;
   width: 100%;
   overflow: hidden;
 }
 
 .app-code-editor > [class^='cm-theme'] > .cm-editor {
+  width: 100%;
+  max-width: 100%;
   height: 100%;
   min-height: 0;
   flex: 1;
+}
+
+.app-code-editor .cm-scroller {
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+  max-width: 100%;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.app-code-editor .cm-content,
+.app-code-editor .cm-line {
+  max-width: none;
 }
 
 .app-code-editor-header,

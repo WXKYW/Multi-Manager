@@ -584,6 +584,8 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 		)`,
 		`CREATE TABLE IF NOT EXISTS subscription_subscriptions (
 			id TEXT PRIMARY KEY,
+			profile_id TEXT,
+			plan_id TEXT DEFAULT '',
 			name TEXT NOT NULL,
 			remark TEXT,
 			enabled INTEGER DEFAULT 1,
@@ -611,6 +613,8 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			rate_limit_enabled INTEGER DEFAULT 1,
 			rate_limit_per_minute INTEGER DEFAULT 30,
 			node_filter_ids TEXT DEFAULT '',
+			include_internal_nodes INTEGER DEFAULT 1,
+			include_external_nodes INTEGER DEFAULT 0,
 			created_at TEXT DEFAULT (datetime('now')),
 			updated_at TEXT DEFAULT (datetime('now'))
 		)`,
@@ -644,6 +648,7 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS subscription_nodes (
 			id TEXT PRIMARY KEY,
 			subscription_id TEXT NOT NULL,
+			profile_id TEXT,
 			name TEXT NOT NULL,
 			type TEXT,
 			server TEXT,
@@ -652,6 +657,9 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			location TEXT,
 			tags TEXT,
 			traffic_server_id TEXT,
+			ownership TEXT DEFAULT 'external',
+			management TEXT DEFAULT 'unmanaged',
+			traffic_reporting TEXT DEFAULT 'unavailable',
 			enabled INTEGER DEFAULT 1,
 			stable INTEGER DEFAULT 0,
 			sort_order INTEGER DEFAULT 0,
@@ -2341,7 +2349,9 @@ func loadManagedSubscriptionNodes(ctx context.Context, db *sql.DB) ([]Node, erro
 		node.Port = item.port
 		node.Raw = raw
 		node.Enabled = true
-		node.Stable = true
+		// A running managed node is publishable, but that alone is not evidence
+		// that it belongs in the operator-curated stable group.
+		node.Stable = false
 		node.Ownership = "self"
 		node.Management = "agent"
 		node.TrafficReporting = "trusted"
@@ -2829,78 +2839,6 @@ func computeTraffic(ctx context.Context, db *sql.DB, sub Subscription) TrafficIn
 	return info
 }
 
-func nodeServerTraffic(ctx context.Context, db *sql.DB, sub Subscription) (int64, int64, int64) {
-	profileID := firstNonEmpty(sub.ProfileID, sub.ID)
-	if profileID == "" {
-		return 0, 0, 0
-	}
-	where := `WHERE COALESCE(profile_id, subscription_id) = ? AND enabled = 1 AND COALESCE(traffic_server_id, '') != ''`
-	args := []interface{}{profileID}
-	if len(sub.NodeFilterIDs) > 0 {
-		placeholders := make([]string, 0, len(sub.NodeFilterIDs))
-		for _, id := range sub.NodeFilterIDs {
-			id = strings.TrimSpace(id)
-			if id == "" {
-				continue
-			}
-			placeholders = append(placeholders, "?")
-			args = append(args, id)
-		}
-		if len(placeholders) > 0 {
-			where += ` AND id IN (` + strings.Join(placeholders, ",") + `)`
-		}
-	}
-	rows, err := db.QueryContext(ctx, `SELECT DISTINCT traffic_server_id FROM subscription_nodes `+where, args...)
-	if err != nil {
-		return 0, 0, 0
-	}
-	serverIDs := []string{}
-	for rows.Next() {
-		var serverID string
-		if err := rows.Scan(&serverID); err != nil || strings.TrimSpace(serverID) == "" {
-			continue
-		}
-		serverIDs = append(serverIDs, strings.TrimSpace(serverID))
-	}
-	if err := rows.Close(); err != nil {
-		return 0, 0, 0
-	}
-	if err := rows.Err(); err != nil {
-		return 0, 0, 0
-	}
-
-	var upload, download, total int64
-	for _, serverID := range serverIDs {
-		up, down := serverTraffic(ctx, db, serverID)
-		upload += up
-		download += down
-		var limit int64
-		_ = db.QueryRowContext(ctx, `SELECT traffic_limit_bytes FROM server_accounts WHERE id = ?`, serverID).Scan(&limit)
-		total += maxInt64(0, limit)
-	}
-	return upload, download, total
-}
-
-func serverTraffic(ctx context.Context, db *sql.DB, serverID string) (int64, int64) {
-	if serverID == "" {
-		return 0, 0
-	}
-	var cached string
-	_ = db.QueryRowContext(ctx, `SELECT COALESCE(cached_info, '{}') FROM server_accounts WHERE id = ?`, serverID).Scan(&cached)
-	var m map[string]interface{}
-	_ = json.Unmarshal([]byte(cached), &m)
-	network, _ := m["network"].(map[string]interface{})
-	rx := int64(floatVal(network["rx_total_bytes"]))
-	tx := int64(floatVal(network["tx_total_bytes"]))
-	if rx == 0 {
-		rx = int64(floatVal(m["net_in_transfer"]))
-	}
-	if tx == 0 {
-		tx = int64(floatVal(m["net_out_transfer"]))
-	}
-	return rx, tx
-}
-
 func loadQuality(ctx context.Context, db *sql.DB, serverID string) []QualitySummary {
 	if serverID == "" {
 		return nil
@@ -3056,8 +2994,8 @@ func stableProxyNamesYAML(nodes []Node, indent int) string {
 		lines = append(lines, yamlStringListItem(node.Name, indent))
 		seen[node.Name] = true
 	}
-	if !seen["🚀 手动"] {
-		lines = append(lines, yamlStringListItem("🚀 手动", indent))
+	if len(lines) == 0 {
+		lines = append(lines, yamlStringListItem("DIRECT", indent))
 	}
 	return strings.Join(lines, "\n")
 }

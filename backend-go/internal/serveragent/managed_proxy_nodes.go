@@ -32,34 +32,43 @@ func isMissingTableError(err error) bool {
 }
 
 type managedProxyNode struct {
-	ID                 string `json:"id"`
-	ServerID           string `json:"server_id"`
-	ServerName         string `json:"server_name"`
-	Name               string `json:"name"`
-	Protocol           string `json:"protocol"`
-	Runtime            string `json:"runtime"`
-	PublicHost         string `json:"public_host"`
-	AssignedPort       int    `json:"assigned_port"`
-	Transport          string `json:"transport"`
-	ClientURI          string `json:"client_uri"`
-	Revision           int64  `json:"revision"`
-	Enabled            bool   `json:"enabled"`
-	Publishable        bool   `json:"publishable"`
-	ApplyStatus        string `json:"apply_status"`
-	LastError          string `json:"last_error"`
-	ObservedStatus     string `json:"observed_status"`
-	ObservedRevision   int64  `json:"observed_revision"`
-	ObservedPort       int    `json:"observed_port"`
-	ObservedAt         string `json:"observed_at"`
-	HealthStatus       string `json:"health_status"`
-	AccessMode         string `json:"access_mode"`
-	TunnelPath         string `json:"tunnel_path"`
-	PreferredAddressID string `json:"preferred_address_id"`
-	ConnectAddress     string `json:"connect_address"`
-	ConnectPort        int    `json:"connect_port"`
-	TunnelHostname     string `json:"tunnel_hostname"`
-	CreatedAt          string `json:"created_at"`
-	UpdatedAt          string `json:"updated_at"`
+	ID                 string                    `json:"id"`
+	ServerID           string                    `json:"server_id"`
+	ServerName         string                    `json:"server_name"`
+	Name               string                    `json:"name"`
+	Protocol           string                    `json:"protocol"`
+	Runtime            string                    `json:"runtime"`
+	PublicHost         string                    `json:"public_host"`
+	AssignedPort       int                       `json:"assigned_port"`
+	Transport          string                    `json:"transport"`
+	ClientURI          string                    `json:"client_uri"`
+	Revision           int64                     `json:"revision"`
+	Enabled            bool                      `json:"enabled"`
+	Publishable        bool                      `json:"publishable"`
+	ApplyStatus        string                    `json:"apply_status"`
+	LastError          string                    `json:"last_error"`
+	ObservedStatus     string                    `json:"observed_status"`
+	ObservedRevision   int64                     `json:"observed_revision"`
+	ObservedPort       int                       `json:"observed_port"`
+	ObservedAt         string                    `json:"observed_at"`
+	HealthStatus       string                    `json:"health_status"`
+	AccessMode         string                    `json:"access_mode"`
+	TunnelPath         string                    `json:"tunnel_path"`
+	PreferredAddressID string                    `json:"preferred_address_id"`
+	ConnectAddress     string                    `json:"connect_address"`
+	ConnectPort        int                       `json:"connect_port"`
+	TunnelHostname     string                    `json:"tunnel_hostname"`
+	Quality            []managedProxyNodeQuality `json:"quality,omitempty"`
+	CreatedAt          string                    `json:"created_at"`
+	UpdatedAt          string                    `json:"updated_at"`
+}
+
+type managedProxyNodeQuality struct {
+	Name         string  `json:"name"`
+	LatencyMS    float64 `json:"latency_ms"`
+	AvgLatencyMS float64 `json:"avg_latency_ms"`
+	LossRate     float64 `json:"loss_rate"`
+	SampledAt    string  `json:"sampled_at"`
 }
 
 func (s *Service) handleManagedProxyNodes(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {
@@ -214,7 +223,57 @@ func (s *Service) listManagedProxyNodes(w http.ResponseWriter, r *http.Request, 
 	for index := range nodes {
 		nodes[index].ClientURI = resolveManagedNodeClientURI(r.Context(), db, nodes[index])
 	}
+	qualityByServer := loadManagedProxyNodeQuality(r.Context(), db, nodes)
+	for index := range nodes {
+		nodes[index].Quality = qualityByServer[nodes[index].ServerID]
+	}
 	response.OK(w, nodes)
+}
+
+func loadManagedProxyNodeQuality(ctx context.Context, db *sql.DB, nodes []managedProxyNode) map[string][]managedProxyNodeQuality {
+	result := make(map[string][]managedProxyNodeQuality)
+	serverIDs := make([]string, 0, len(nodes))
+	seen := make(map[string]bool, len(nodes))
+	for _, node := range nodes {
+		serverID := strings.TrimSpace(node.ServerID)
+		if serverID == "" || seen[serverID] {
+			continue
+		}
+		seen[serverID] = true
+		serverIDs = append(serverIDs, serverID)
+	}
+	if len(serverIDs) == 0 {
+		return result
+	}
+
+	placeholders := make([]string, len(serverIDs))
+	args := make([]interface{}, len(serverIDs))
+	for index, serverID := range serverIDs {
+		placeholders[index] = "?"
+		args[index] = serverID
+	}
+	rows, err := db.QueryContext(ctx, `SELECT server_id,target_name,
+		COALESCE(AVG(CASE WHEN success=1 THEN latency_ms END),0),
+		CASE WHEN COUNT(*)=0 THEN 0 ELSE (1.0-(1.0*SUM(CASE WHEN success=1 THEN 1 ELSE 0 END)/COUNT(*)))*100 END,
+		MAX(checked_at)
+		FROM server_network_quality_samples
+		WHERE checked_at >= datetime('now','-1 day') AND server_id IN (`+strings.Join(placeholders, ",")+`)
+		GROUP BY server_id,target_name
+		ORDER BY server_id,target_name`, args...)
+	if err != nil {
+		return result
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var serverID string
+		var item managedProxyNodeQuality
+		if err := rows.Scan(&serverID, &item.Name, &item.AvgLatencyMS, &item.LossRate, &item.SampledAt); err != nil {
+			continue
+		}
+		item.LatencyMS = item.AvgLatencyMS
+		result[serverID] = append(result[serverID], item)
+	}
+	return result
 }
 
 func (s *Service) createManagedProxyNode(w http.ResponseWriter, r *http.Request, db *sql.DB) {
@@ -579,15 +638,27 @@ func (s *Service) applyManagedProxyNodeTask(taskID, id string) {
 		fail("runtime", errors.New("managed proxy runtime is not pinned"))
 		return
 	}
-	progress(18, "runtime", "正在检查并安装 sing-box 运行时")
+	if enabled == 1 {
+		progress(18, "runtime", "正在检查 sing-box 运行时")
+	} else {
+		progress(18, "runtime", "正在准备停用节点")
+	}
 	payload, _ := json.Marshal(map[string]interface{}{"node_id": id, "revision": revision, "runtime": "sing-box", "runtime_version": release.Version, "asset_url_amd64": release.AMD64URL, "asset_sha256_amd64": release.AMD64SHA256, "asset_url_arm64": release.ARM64URL, "asset_sha256_arm64": release.ARM64SHA256, "config": secure.SecureDecrypt(configEncrypted), "enabled": enabled == 1, "requested_port": requestedPort, "excluded_ports": excludedPorts, "port_min": 45654, "port_max": 55654, "transport": transport})
-	progress(35, "configure", "正在生成配置并分配可用端口")
+	if enabled == 1 {
+		progress(35, "configure", "正在生成配置并分配可用端口")
+	} else {
+		progress(35, "configure", "正在停止节点服务并关闭端口")
+	}
 	result, runErr := s.RunProxyRuntimeTaskAndWait(serverID, string(payload))
 	if runErr != nil {
 		fail("agent_apply", runErr)
 		return
 	}
-	progress(72, "verify_agent", "代理服务已启动，正在校验 Agent 返回状态")
+	if enabled == 1 {
+		progress(72, "verify_agent", "代理服务已启动，正在校验 Agent 状态")
+	} else {
+		progress(72, "verify_agent", "节点服务已停止，正在确认状态")
+	}
 	var applied struct {
 		AssignedPort int    `json:"assigned_port"`
 		Config       string `json:"config"`
@@ -597,12 +668,28 @@ func (s *Service) applyManagedProxyNodeTask(taskID, id string) {
 		fail("verify_agent", errors.New("Agent returned invalid node binding"))
 		return
 	}
+	updatedConfig, _ := secure.SecureEncrypt(applied.Config)
+	var clientEncrypted string
+	_ = db.QueryRowContext(ctx, `SELECT client_uri_encrypted FROM managed_proxy_nodes WHERE id=?`, id).Scan(&clientEncrypted)
+	client := secure.SecureDecrypt(clientEncrypted)
+	client = bindManagedNodeRuntimePort(client, applied.AssignedPort, accessMode)
+	updatedClient, _ := secure.SecureEncrypt(client)
+	if enabled == 0 {
+		if _, err := db.ExecContext(ctx, `UPDATE managed_proxy_nodes SET assigned_port=?,config_encrypted=?,client_uri_encrypted=?,apply_status='stopped',publishable=0,last_error='',observed_status='stopped',observed_revision=revision,observed_port=?,observed_at=datetime('now'),health_status='disabled',updated_at=datetime('now') WHERE id=?`, applied.AssignedPort, updatedConfig, updatedClient, applied.AssignedPort, id); err != nil {
+			fail("persist_stopped", fmt.Errorf("保存节点停用状态失败: %w", err))
+			return
+		}
+		progress(97, "disabled", "节点已停用，正在从订阅中移除")
+		s.taskRegistry.Complete(taskID, fmt.Sprintf("%s 已停用", nodeName))
+		return
+	}
 	if accessMode == "direct" {
 		progress(82, "reachability", "正在检查节点公网连通性")
 		if err := verifyManagedNodeReachability(statePublicHost(ctx, db, id), applied.AssignedPort, transport); err != nil {
-			_, _ = db.ExecContext(ctx, `UPDATE managed_proxy_nodes SET assigned_port=?,apply_status='runtime_running_unreachable',publishable=0,last_error=?,observed_status=?,observed_revision=revision,observed_port=?,observed_at=datetime('now'),health_status='external_unreachable',updated_at=datetime('now') WHERE id=?`, applied.AssignedPort, err.Error(), applied.Status, applied.AssignedPort, id)
-			s.taskRegistry.UpdateProgress(taskID, 100, map[string]interface{}{"stage": "reachability", "message": err.Error(), "node_id": id})
-			s.taskRegistry.Fail(taskID, err.Error())
+			message := fmt.Sprintf("节点服务已启动，但公网地址 %s:%d 无法连接，请检查主机防火墙和云平台安全组", statePublicHost(ctx, db, id), applied.AssignedPort)
+			_, _ = db.ExecContext(ctx, `UPDATE managed_proxy_nodes SET assigned_port=?,apply_status='runtime_running_unreachable',publishable=0,last_error=?,observed_status=?,observed_revision=revision,observed_port=?,observed_at=datetime('now'),health_status='external_unreachable',updated_at=datetime('now') WHERE id=?`, applied.AssignedPort, message, applied.Status, applied.AssignedPort, id)
+			s.taskRegistry.UpdateProgress(taskID, 100, map[string]interface{}{"stage": "reachability", "message": message, "node_id": id})
+			s.taskRegistry.Fail(taskID, message)
 			return
 		}
 	}
@@ -612,12 +699,6 @@ func (s *Service) applyManagedProxyNodeTask(taskID, id string) {
 	} else if accessMode == "cloudflare_tunnel" {
 		healthStatus = "tunnel_pending"
 	}
-	updatedConfig, _ := secure.SecureEncrypt(applied.Config)
-	var clientEncrypted string
-	_ = db.QueryRowContext(ctx, `SELECT client_uri_encrypted FROM managed_proxy_nodes WHERE id=?`, id).Scan(&clientEncrypted)
-	client := secure.SecureDecrypt(clientEncrypted)
-	client = bindManagedNodeRuntimePort(client, applied.AssignedPort, accessMode)
-	updatedClient, _ := secure.SecureEncrypt(client)
 	if _, err := db.ExecContext(ctx, `UPDATE managed_proxy_nodes SET assigned_port=?,config_encrypted=?,client_uri_encrypted=?,apply_status='running',publishable=CASE WHEN access_mode='cloudflare_tunnel' THEN 0 ELSE 1 END,last_error='',observed_status=?,observed_revision=revision,observed_port=?,observed_at=datetime('now'),health_status=?,updated_at=datetime('now') WHERE id=?`, applied.AssignedPort, updatedConfig, updatedClient, applied.Status, applied.AssignedPort, healthStatus, id); err != nil {
 		_ = s.compensateManagedProxyNode(ctx, serverID, id, revision, release)
 		fail("persist_binding", fmt.Errorf("persist Agent binding: %w", err))
@@ -635,7 +716,7 @@ func (s *Service) applyManagedProxyNodeTask(taskID, id string) {
 		_, _ = db.ExecContext(ctx, `UPDATE managed_proxy_nodes SET publishable=1,health_status='tunnel_routed',updated_at=datetime('now') WHERE id=?`, id)
 	}
 	progress(97, "publish", "正在发布节点到订阅")
-	s.taskRegistry.Complete(taskID, fmt.Sprintf("%s 部署完成，端口 %d", nodeName, applied.AssignedPort))
+	s.taskRegistry.Complete(taskID, fmt.Sprintf("%s 已启用，端口 %d", nodeName, applied.AssignedPort))
 }
 
 func syncDirectManagedNodeAddress(ctx context.Context, db *sql.DB, nodeID, serverID string) error {

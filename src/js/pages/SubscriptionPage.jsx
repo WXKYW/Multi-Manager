@@ -30,7 +30,7 @@ const LOAD_TIMEOUT_MS = 8000;
 const INITIAL_SKELETON_MS = 900;
 const DESTRUCTIVE_CONFIRM_MS = 8000;
 
-const emptyInternalNodeForm = { server_id: '', name: '', protocol: 'vless-reality', access_mode: 'direct', preferred_address_id: '', connect_address: '', connect_port: 443, public_host: '', server_name: 'www.cloudflare.com', certificate_pem: '', private_key_pem: '', enabled: true };
+const emptyInternalNodeForm = { server_id: '', name: '', protocol: 'vless-reality', access_mode: 'direct', preferred_address_id: '', public_host: '', server_name: 'www.cloudflare.com', certificate_pem: '', private_key_pem: '', enabled: true };
 
 const getInstanceCountryCode = (server) => {
   const direct = String(server?.country_code || server?.countryCode || server?.resolved_country || '').trim();
@@ -905,7 +905,7 @@ function SubscriptionPage() {
 	      const terminal = payload?.status === 'completed' || payload?.status === 'failed' || payload?.type === 'completed' || payload?.type === 'failed';
 	      const setter = kind === 'tunnel' ? setTunnelTasks : setNodeTasks;
 	      setter((current) => ({ ...current, [taskID]: payload }));
-	      if (payload?.type === 'progress' && data?.message) toast.info(`${data.message}（${payload.progress || 0}%）`, { isManual: true, timeout: 2500 });
+	      if (payload?.type === 'progress' && !terminal && Number(payload.progress || 0) < 100 && data?.message) toast.info(`${data.message}（${payload.progress || 0}%）`, { isManual: true, timeout: 2500 });
 	      if (terminal && !terminalTaskIDsRef.current.has(taskID)) {
 	        terminalTaskIDsRef.current.add(taskID);
 	        if (payload.status === 'completed' || payload.type === 'completed') {
@@ -1280,7 +1280,7 @@ function SubscriptionPage() {
       if (!res.ok || data.success === false) throw new Error(data.error || data.message || '更新失败');
       if (data.data?.task_id) {
         setNodeTasks((current) => ({ ...current, [data.data.task_id]: { progress: 0, status: 'pending', data: { message: `${node.name} 状态更新任务已提交` } } }));
-        toast.info(enabled ? '节点启用任务已提交' : '节点停用任务已提交', { isManual: true });
+        toast.info(enabled ? `正在启用 ${node.name}` : `正在停用 ${node.name}`, { isManual: true });
       } else toast.success(enabled ? '内部节点已启用' : '内部节点已停用');
       await loadAll();
     } catch (error) {
@@ -1315,13 +1315,13 @@ function SubscriptionPage() {
       const res = await fetch(`${INTERNAL_API}/${editingInternalNodeId}`, {
         method: 'PUT',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ name: internalNodeForm.name.trim(), preferred_address_id: internalNodeForm.preferred_address_id || '', connect_address: internalNodeForm.connect_address || '', connect_port: Number(internalNodeForm.connect_port) || 0 }),
+        body: JSON.stringify({ name: internalNodeForm.name.trim(), preferred_address_id: internalNodeForm.preferred_address_id || '', connect_address: '', connect_port: 0 }),
       });
       const data = await res.json();
       if (!res.ok || data.success === false) throw new Error(data.error || data.message || '保存失败');
       setInternalNodeModalOpen(false);
       setEditingInternalNodeId(null);
-      toast.success('节点名称已更新');
+      toast.success('节点配置已更新');
       await loadAll();
     } catch (error) {
       toast.error(error.message || '保存失败');
@@ -1938,10 +1938,10 @@ function SubscriptionPage() {
               const confirmingDelete = isDestructiveConfirmActive(deleteConfirmKey);
               return <Table.Row key={node.id} onDoubleClick={() => openEditInternalNode(node)} className="cursor-pointer">
                 <Table.Cell className="text-center"><Switch size="sm" aria-label={node.enabled ? '停用内部节点' : '启用内部节点'} checked={!!node.enabled} onCheckedChange={(checked) => toggleInternalNodeEnabled(node, checked)} /></Table.Cell>
-				{(() => { const [stateLabel, stateVariant] = managedNodeState(node); return <Table.Cell><div className="truncate text-sm font-bold text-kumo-strong">{node.name}</div><div className="mt-1 flex flex-wrap gap-1"><Badge variant="success">自有</Badge><Badge variant="neutral">Agent 托管</Badge><Badge variant={stateVariant}>{stateLabel}</Badge></div></Table.Cell>; })()}
+                <Table.Cell><div className="truncate text-sm font-bold text-kumo-strong">{node.name}</div>{!node.publishable && (() => { const [stateLabel, stateVariant] = managedNodeState(node); return <div className="mt-1"><Badge variant={stateVariant}>{stateLabel}</Badge></div>; })()}</Table.Cell>
                 <Table.Cell className="text-center"><Badge variant={nodeTypeBadgeVariant(protocol)} className="uppercase">{node.protocol === 'vless-reality' ? 'VLESS' : 'HYSTERIA2'}</Badge></Table.Cell>
                 <Table.Cell><div className="truncate font-mono text-xs text-kumo-strong">{displayHost}:{displayPort}</div><div className="mt-1 flex min-w-0 flex-wrap gap-1">{connectionTags.map((tag) => <span key={tag} className={`inline-flex rounded-[3px] border px-1.5 py-0.5 font-mono text-[10px] leading-4 ${nodeNetworkTagClass({ key: tag === 'tls' ? 'tls' : 'network', tone: tag })}`}>{tag}</span>)}</div></Table.Cell>
-                <Table.Cell><div className="flex min-w-0 flex-col items-start gap-1"><span className="inline-flex max-w-full rounded-[3px] border border-kumo-info/25 bg-kumo-info/10 px-1.5 py-0.5 text-[10px] font-semibold leading-4 text-kumo-info"><span className="truncate">{server?.name || node.server_name || node.server_id}</span></span><span className={`inline-flex rounded-[3px] border px-1.5 py-0.5 text-[10px] font-semibold leading-4 ${latencyChipClass(0)}`}>{server?.status === 'online' ? '等待节点延迟' : '主机离线'}</span></div></Table.Cell>
+                <Table.Cell>{server?.status === 'online' ? <NodeHostQuality node={{ ...node, traffic_server_id: node.server_id }} serverNameById={serverNameById} /> : <div className="flex min-w-0 flex-col items-start gap-1"><span className="inline-flex max-w-full rounded-[3px] border border-kumo-info/25 bg-kumo-info/10 px-1.5 py-0.5 text-[10px] font-semibold leading-4 text-kumo-info"><span className="truncate">{server?.name || node.server_name || node.server_id}</span></span><span className={`inline-flex rounded-[3px] border px-1.5 py-0.5 text-[10px] font-semibold leading-4 ${latencyChipClass(0)}`}>主机离线</span></div>}</Table.Cell>
                 <Table.Cell className="text-center"><div className="inline-flex items-center justify-center gap-2"><Button size="sm" shape="square" variant="secondary" aria-label={`编辑 ${node.name}`} title={`编辑 ${node.name}`} disabled={reconciling || deleting} onClick={(event) => { event.stopPropagation(); openEditInternalNode(node); }} icon={<Edit className="h-3.5 w-3.5" />} /><RefreshButton size="sm" variant="secondary" loading={reconciling} aria-label={`重新部署 ${node.name}`} title={`重新部署 ${node.name}`} disabled={reconciling || deleting} onClick={(event) => { event.stopPropagation(); reconcileInternalNode(node); }} /><Button size="sm" shape="square" variant={confirmingDelete ? 'destructive' : 'secondary-destructive'} aria-label={confirmingDelete ? `再次确认卸载 ${node.name}` : `卸载 ${node.name}`} title={confirmingDelete ? '再次点击确认卸载' : `卸载 ${node.name}`} disabled={reconciling || deleting} onClick={(event) => { event.stopPropagation(); deleteInternalNode(node); }} icon={deleting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />} /></div></Table.Cell>
               </Table.Row>;
             })}
@@ -1976,10 +1976,6 @@ function SubscriptionPage() {
               className="w-full sm:w-36"
             />
           )}
-          <Button size="sm" variant="secondary" onClick={() => externalNodePool && refreshProfileUpstream(externalNodePool)} disabled={!externalNodePool?.upstream_url}>
-            <RefreshCw className="h-3.5 w-3.5" />
-            拉取来源
-          </Button>
           <Button size="sm" variant="primary" onClick={() => openImportModal()} aria-label="导入外部节点" title="导入外部节点"><Download className="h-3.5 w-3.5" />导入外部节点</Button>
         </div>
       )}
@@ -2017,10 +2013,6 @@ function SubscriptionPage() {
                       <NodeFlag node={node} />
                       {node.stable && <Star className="h-3.5 w-3.5 text-kumo-warning" />}
                       <span className="truncate text-sm font-bold text-kumo-strong">{node.name}</span>
-                    </div>
-                    <div className="mt-1 flex flex-wrap gap-1">
-						<Badge variant={node.ownership === 'self' ? 'success' : 'neutral'}>{node.ownership === 'self' ? '自有' : '外部'}</Badge>
-						<Badge variant="neutral">{node.management === 'agent' ? 'Agent 托管' : '未托管'}</Badge>
                     </div>
                   </Table.Cell>
                   <Table.Cell className="text-center">
@@ -2367,7 +2359,7 @@ function SubscriptionPage() {
       </Dialog.Root>
 
       <Dialog.Root open={internalNodeModalOpen} onOpenChange={setInternalNodeModalOpen}>
-        <Dialog size="lg" className="w-[calc(100vw-1rem)] max-w-3xl p-0">
+        <Dialog size="xl" className="!w-[min(58rem,calc(100vw-1rem))] !max-w-[min(58rem,calc(100vw-1rem))] overflow-hidden p-0">
           <div className="border-b border-kumo-line px-5 py-4"><Dialog.Title>{editingInternalNodeId ? '编辑内部节点' : '生成内部节点'}</Dialog.Title></div>
           <div className="grid gap-3 p-5 sm:grid-cols-2">
             {!editingInternalNodeId && <div className="sm:col-span-2">
@@ -2382,13 +2374,12 @@ function SubscriptionPage() {
                 </div>
               </div>
             </div>}
-            <Select size="sm" label="节点协议" disabled={!!editingInternalNodeId} value={internalNodeForm.protocol} onValueChange={(value) => setInternalNodeForm((prev) => ({ ...prev, protocol: String(value) }))} items={[{ value: 'vless-reality', label: 'VLESS REALITY' }, { value: 'hysteria2', label: 'Hysteria2' }]} />
+            {!editingInternalNodeId && <Select size="sm" label="节点协议" value={internalNodeForm.protocol} onValueChange={(value) => setInternalNodeForm((prev) => ({ ...prev, protocol: String(value) }))} items={[{ value: 'vless-reality', label: 'VLESS REALITY' }, { value: 'hysteria2', label: 'Hysteria2' }]} />}
             <Input size="sm" label={editingInternalNodeId ? '节点名称' : selectedInternalHosts.size > 1 ? '节点名称前缀（可选）' : '节点名称（可选）'} placeholder="留空则自动添加国家图标并按实例名称生成" value={internalNodeForm.name} onChange={(event) => setInternalNodeForm((prev) => ({ ...prev, name: event.target.value }))} />
             {!editingInternalNodeId && internalNodeForm.protocol === 'vless-reality' && <Input size="sm" label="REALITY 握手站点（可选）" placeholder="默认 www.cloudflare.com" value={internalNodeForm.server_name} onChange={(event) => setInternalNodeForm((prev) => ({ ...prev, server_name: event.target.value }))} />}
             {!editingInternalNodeId && internalNodeForm.protocol === 'hysteria2' && <div className="flex min-h-8 items-center rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 text-xs text-kumo-subtle">TLS 证书、私钥、SNI 和端口将自动生成并配置。</div>}
             {!editingInternalNodeId && <Select size="sm" label="接入方式" value={internalNodeForm.access_mode || 'direct'} onValueChange={(value) => setInternalNodeForm((prev) => ({ ...prev, access_mode: String(value) }))} items={[{ value: 'direct', label: '直连节点' }, { value: 'cloudflare_tunnel', label: 'Cloudflare Tunnel（VLESS WS）' }]} />}
-            {internalNodeForm.access_mode === 'cloudflare_tunnel' && <Select size="sm" label="优选地址" value={internalNodeForm.preferred_address_id || ''} onValueChange={(value) => setInternalNodeForm((prev) => ({ ...prev, preferred_address_id: String(value) }))} items={[{ value: '', label: '继承全局默认 / Tunnel 域名' }, ...preferredAddresses.map((item) => ({ value: item.id, label: `${item.name} · ${item.address}:${item.port}` }))]} />}
-			{internalNodeForm.access_mode === 'cloudflare_tunnel' && <div className="grid gap-3 sm:grid-cols-[1fr_8rem]"><Input size="sm" label="节点专用优选域名/IP（可选）" value={internalNodeForm.connect_address || ''} onChange={(event) => setInternalNodeForm((prev) => ({ ...prev, connect_address: event.target.value }))} /><Input size="sm" label="端口" type="number" value={internalNodeForm.connect_port || 443} onChange={(event) => setInternalNodeForm((prev) => ({ ...prev, connect_port: Number(event.target.value) || 443 }))} /></div>}
+            {internalNodeForm.access_mode === 'cloudflare_tunnel' && <Select size="sm" label="优选地址" value={internalNodeForm.preferred_address_id || ''} onValueChange={(value) => setInternalNodeForm((prev) => ({ ...prev, preferred_address_id: String(value) }))} items={[{ value: '', label: '继承默认地址' }, ...preferredAddresses.map((item) => ({ value: item.id, label: `${item.name} · ${item.address}` }))]} />}
           </div>
           <div className="flex justify-end gap-2 border-t border-kumo-line px-5 py-4"><Button size="sm" variant="secondary" onClick={() => setInternalNodeModalOpen(false)}>取消</Button><Button size="sm" variant="primary" loading={saving} onClick={editingInternalNodeId ? saveInternalNode : createInternalNode}>{editingInternalNodeId ? '保存' : '生成节点'}</Button></div>
         </Dialog>
@@ -2549,7 +2540,7 @@ function SubscriptionPage() {
       </Dialog.Root>
 
       <Dialog.Root open={importModalOpen} onOpenChange={setImportModalOpen}>
-        <Dialog size="lg" className="flex max-h-[min(calc(100dvh-2rem),42rem)] w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] flex-col overflow-hidden p-0 sm:w-[min(calc(100vw-3rem),72rem)]">
+        <Dialog size="xl" className="flex !h-auto max-h-[min(calc(100dvh-1rem),42rem)] !w-[min(72rem,calc(100vw-1rem))] !max-w-[min(72rem,calc(100vw-1rem))] flex-col overflow-hidden p-0">
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="flex min-h-14 shrink-0 items-center justify-between gap-4 border-b border-kumo-line bg-kumo-recessed/20 px-5 py-3.5">
               <div className="min-w-0">
@@ -2576,13 +2567,13 @@ function SubscriptionPage() {
             </div>
 
             <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-5 py-4 scrollbar-thin">
-              <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,0.6fr)] lg:items-stretch">
-                <div className="space-y-3">
+              <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(18rem,0.65fr)]">
+                <div className="min-w-0 space-y-3">
                   <div className="rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 py-2 text-xs text-kumo-subtle">外部节点导入后直接进入节点管理，不统计流量或应用额度限制。</div>
                   <Input size="sm" label="原始订阅 URL" placeholder="https://example.com/sub.yaml" value={importSourceURL} onChange={(e) => setImportSourceURL(e.target.value)} />
-                  <CodeEditor label="节点链接 / YAML / Base64 内容" language="yaml" minHeight="18rem" placeholder="可粘贴 vmess/vless/trojan/ss/hysteria2 链接、Base64 订阅内容，或 Clash/Mihomo YAML 的 proxies 内容。" value={importText} onChange={setImportText} />
+                  <CodeEditor className="h-[18rem] min-w-0" label="节点链接 / YAML / Base64 内容" language="yaml" minHeight="18rem" placeholder="可粘贴 vmess/vless/trojan/ss/hysteria2 链接、Base64 订阅内容，或 Clash/Mihomo YAML 的 proxies 内容。" value={importText} onChange={setImportText} />
                 </div>
-                <LayerCard className="flex min-h-72 flex-col overflow-hidden border border-kumo-line bg-kumo-elevated p-0 shadow-none">
+                <LayerCard className="flex h-[18rem] min-h-0 min-w-0 flex-col overflow-hidden border border-kumo-line bg-kumo-elevated p-0 shadow-none lg:mt-[5.25rem]">
                   <LayerCard.Secondary className="flex min-h-11 items-center justify-between gap-3 border-b border-kumo-line bg-kumo-recessed/20 px-4 py-2.5">
                     <div className="min-w-0 truncate text-sm font-bold text-kumo-strong">解析预览</div>
 					<Badge variant="neutral">{importPreview.length} 个节点</Badge>

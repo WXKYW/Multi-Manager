@@ -3,6 +3,7 @@ import {
   canOpenTerminal,
   getTerminalTransports,
   resolveTerminalProtocol,
+  resolveTerminalSocketTransport,
 } from './serverTerminal.js';
 
 describe('server terminal transport resolution', () => {
@@ -33,7 +34,21 @@ describe('server terminal transport resolution', () => {
 
     expect(getTerminalTransports(server)).toEqual(['ssh']);
     expect(resolveTerminalProtocol(server)).toBe('ssh');
+		expect(resolveTerminalSocketTransport(server, 'agent')).toBe('ssh');
   });
+
+	it('lets the backend use live state when a stale page snapshot offers agent and ssh', () => {
+		const server = {
+			id: 'server-1',
+			host: '203.0.113.10',
+			port: 22,
+			username: 'root',
+			ssh_configured: true,
+			agent_online: true,
+		};
+
+		expect(resolveTerminalSocketTransport(server, 'agent')).toBe('auto');
+	});
 
   it('opens an agent-only host through the agent tunnel', () => {
     const server = {

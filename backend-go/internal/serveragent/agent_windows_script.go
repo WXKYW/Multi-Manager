@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
@@ -36,6 +37,7 @@ func (s *Service) getWindowsAgentInstallScript(w http.ResponseWriter, r *http.Re
 	proto, serverURL := resolveInstallOrigin(r)
 	serverBaseURL := fmt.Sprintf("%s://%s", proto, serverURL)
 	agentDownloadBaseURL := s.resolveAgentDownloadBaseURL(r.Context(), db, serverBaseURL)
+	installScriptURL := fmt.Sprintf("%s/api/server/agent/install/win/%s/%s?protocol=%s&base_url=%s", serverBaseURL, accountID, agentKey, proto, url.QueryEscape(serverBaseURL))
 
 	script := fmt.Sprintf(`# API Monitor Agent - Windows install script
 # Host: %s (%s:%d)
@@ -49,10 +51,23 @@ $SERVER_URL = "%s://%s"
 $AGENT_DOWNLOAD_BASE_URL = "%s"
 $SERVER_ID = "%s"
 $AGENT_KEY = "%s"
+$INSTALL_SCRIPT_URL = "%s"
 
 Write-Host "Installing API Monitor Agent..."
 Write-Host "Target host: %s"
 Write-Host "Server: $SERVER_URL"
+
+# A script launched inside the Agent terminal must outlive the Agent process
+# that it is about to replace. Start a hidden, independent PowerShell updater
+# before stopping the current Agent, then return from the terminal-bound copy.
+if ($env:API_MONITOR_AGENT_INSTALL_DETACHED -ne "1" -and (Get-Process -Name "api-monitor-agent" -ErrorAction SilentlyContinue)) {
+    Write-Host "Detected a running Agent process. Scheduling detached installer..."
+    $DETACHED_COMMAND = '$env:API_MONITOR_AGENT_INSTALL_DETACHED = "1"; irm "' + $INSTALL_SCRIPT_URL + '" | iex'
+    $ENCODED_COMMAND = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($DETACHED_COMMAND))
+    Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $ENCODED_COMMAND -WindowStyle Hidden
+    Write-Host "Detached installer scheduled. The Agent terminal may disconnect; installation will continue in the background."
+    return
+}
 
 if (!(Test-Path $INSTALL_DIR)) {
     New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null
@@ -170,6 +185,7 @@ Write-Host ""
 		agentDownloadBaseURL,
 		accountID,
 		agentKey,
+		installScriptURL,
 		name,
 	)
 

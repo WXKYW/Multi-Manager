@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { EditorView } from '@codemirror/view';
-import useStore from '../../store.js';
 import { findCodeLanguage, getCodeLanguageName } from '../../modules/codeEditorLanguage.js';
 
 const editorTheme = EditorView.theme({
@@ -15,6 +14,8 @@ const editorTheme = EditorView.theme({
     fontFamily:
       "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
     lineHeight: '20px',
+    overflow: 'auto',
+    scrollbarColor: 'var(--color-kumo-fill) transparent',
   },
   '.cm-gutters': {
     backgroundColor: 'color-mix(in oklab, var(--color-kumo-base) 88%, var(--color-kumo-overlay))',
@@ -25,6 +26,17 @@ const editorTheme = EditorView.theme({
     backgroundColor: 'color-mix(in oklab, var(--color-kumo-brand) 7%, transparent)',
   },
   '&.cm-focused': { outline: 'none' },
+}, { dark: false });
+
+const shiftWheelHorizontalScroll = EditorView.domEventHandlers({
+  wheel(event, view) {
+    if (!event.shiftKey) return false;
+    const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+    if (!delta) return false;
+    view.scrollDOM.scrollLeft += delta;
+    event.preventDefault();
+    return true;
+  },
 });
 
 export default function CodeEditor({
@@ -41,7 +53,6 @@ export default function CodeEditor({
   showHeader = true,
   lineWrapping = false,
 }) {
-  const theme = useStore(state => state.theme);
   const description = useMemo(() => findCodeLanguage({ fileName, language }), [fileName, language]);
   const [languageSupport, setLanguageSupport] = useState(description?.support || null);
 
@@ -66,6 +77,7 @@ export default function CodeEditor({
   const extensions = useMemo(
     () => [
       editorTheme,
+      shiftWheelHorizontalScroll,
       EditorView.contentAttributes.of({
         'aria-label': label,
         'aria-readonly': String(readOnly),
@@ -93,7 +105,7 @@ export default function CodeEditor({
         value={String(value ?? '')}
         onChange={(nextValue, viewUpdate) => onChange?.(nextValue, viewUpdate)}
         placeholder={placeholder}
-        theme={theme === 'dark' ? 'dark' : 'light'}
+        theme={editorTheme}
         extensions={extensions}
         editable={!readOnly}
         readOnly={readOnly}
