@@ -60,6 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           cd managed-runtime-dist
+          sha256sum sing-box-*
           echo 'b1084f055f8aaddf9a6b554791f704fd40d1536c44928977b91ae0d31e8329fb  sing-box-1.13.14-linux-amd64' | sha256sum --check --strict
           echo '82a24f1947e1cd6296a053511fbf3e5e8acaf4fa98940550e010692cee700623  sing-box-1.13.14-linux-arm64' | sha256sum --check --strict
           chmod 0755 sing-box-*

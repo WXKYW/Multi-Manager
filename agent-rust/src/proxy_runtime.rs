@@ -357,6 +357,8 @@ fn ensure_runtime(request: &ReconcileRequest, runtime: &str) -> Result<PathBuf, 
     run(
         Command::new("curl")
             .args([
+                "--silent",
+                "--show-error",
                 "--fail",
                 "--location",
                 "--retry",
@@ -720,9 +722,30 @@ fn run(command: &mut Command, label: &str) -> Result<(), String> {
     } else {
         Err(format!(
             "{label}: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
+            compact_command_error(&output.stderr)
         ))
     }
+}
+
+#[cfg(unix)]
+fn compact_command_error(stderr: &[u8]) -> String {
+    let cleaned: String = String::from_utf8_lossy(stderr)
+        .chars()
+        .filter(|character| !character.is_control() || *character == '\n' || *character == '\t')
+        .collect();
+    let message = cleaned
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    const MAX_CHARS: usize = 800;
+    let count = message.chars().count();
+    if count <= MAX_CHARS {
+        return message;
+    }
+    let tail: String = message.chars().skip(count - MAX_CHARS).collect();
+    format!("...{tail}")
 }
 #[cfg(unix)]
 fn read_applied_state(path: &Path) -> Option<AppliedState> {
@@ -809,5 +832,17 @@ mod tests {
             nested.join("sing-box")
         );
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn compacts_noisy_command_errors() {
+        let noisy = format!(
+            "{}curl: (22) The requested URL returned error: 404",
+            "download progress\r\n".repeat(100)
+        );
+        let compact = compact_command_error(noisy.as_bytes());
+        assert!(compact.starts_with("..."));
+        assert!(compact.contains("curl: (22)"));
+        assert!(compact.chars().count() <= 803);
     }
 }
