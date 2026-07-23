@@ -2,7 +2,7 @@
 
 API Monitor 是一个自托管的 API 管理、云资源管理与主机监控面板。
 
-集中管理服务器、DNS、对象存储、PaaS、文件分享等。
+集中管理服务器、DNS、对象存储、PaaS、文件分享等各种分散服务。
 
 ## 功能概览
 
@@ -12,6 +12,9 @@ API Monitor 是一个自托管的 API 管理、云资源管理与主机监控面
 - OpenAI 兼容接口、模型调用记录与用量统计
 - 可用性监测、公开状态页、自定义域名与首页快捷入口
 - 文件中转、TOTP、备份、定时任务、通知模板与系统日志
+- 还有很多待定功能>>>>>>
+
+![image](https://image.dooo.ng/t/2026/07/23/6a61fba454686.webp)
 
 ## 快速部署
 
@@ -73,8 +76,6 @@ npm run backend-go:build
 | `JWT_SECRET` | 会话密钥，建议使用长随机字符串 |
 | `LOG_LEVEL` | 日志级别：`DEBUG`、`INFO`、`WARN`、`ERROR` |
 
-不要把真实密码、Token、Cookie、私钥或云厂商凭证提交到仓库。
-
 ## 技术栈
 
 - 后端：Go + SQLite
@@ -88,8 +89,6 @@ npm run backend-go:build
 - [开发指南](./docs/开发指南.md)
 - [API 接口文档](./docs/API接口文档.md)
 - [Kumo UI 规则](./docs/Kumo%20UI%20规则.md)
-
-前端如果遇到 Kumo `Tabs` 描边被裁、tab 切换左右抖动、双栏页面高度填充不稳定等问题，先看 [docs/README.md](./docs/README.md) 里的“前端布局约定”。
 
 ## 许可证
 
