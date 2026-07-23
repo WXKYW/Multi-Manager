@@ -4,7 +4,7 @@
     "Autocomplete": {
       "name": "Autocomplete",
       "type": "component",
-      "description": "Autocomplete — free-form text input with an optional filtered suggestion list.  Unlike Combobox, the input value is not restricted to items in the list. Use Combobox when the selected value must come from the list.  Compound component: `Autocomplete` (Root), `.InputGroup`, `.Content`, `.Item`, `.GroupLabel`, `.Group`, `.Separator`, `.List`, `.Collection`.  `InputGroup` renders the text input with Input component styling. Pass a `size` prop to `InputGroup` to match the Input component sizes.",
+      "description": "Autocomplete — free-form text input with an optional filtered suggestion list.",
       "importPath": "@cloudflare/kumo",
       "category": "Other",
       "props": {
@@ -266,12 +266,13 @@
       },
       "examples": [
         "<div className=\"flex flex-wrap items-center gap-2\">\n      <Badge variant=\"primary\">Primary</Badge>\n      <Badge variant=\"secondary\">Secondary</Badge>\n      <Badge variant=\"error\">Error</Badge>\n      <Badge variant=\"success\">Success</Badge>\n      <Badge variant=\"warning\">Warning</Badge>\n      <Badge variant=\"info\">Info</Badge>\n      <Badge variant=\"outline\">Outline</Badge>\n      <Badge variant=\"beta\">Beta</Badge>\n    </div>",
-        "<div className=\"flex flex-wrap items-center gap-2\">\n      <Badge variant=\"neutral\">Neutral</Badge>\n      <Badge variant=\"red\">Red</Badge>\n      <Badge variant=\"orange\">Orange</Badge>\n      <Badge variant=\"teal\">Teal</Badge>\n      <Badge variant=\"blue\">Blue</Badge>\n      <Badge variant=\"purple\">Purple</Badge>\n    </div>",
+        "<div className=\"flex flex-wrap items-center gap-2\">\n      <Badge variant=\"neutral\">Neutral</Badge>\n      <Badge variant=\"red\">Red</Badge>\n      <Badge variant=\"green\">Green</Badge>\n      <Badge variant=\"orange\">Orange</Badge>\n      <Badge variant=\"teal\">Teal</Badge>\n      <Badge variant=\"blue\">Blue</Badge>\n      <Badge variant=\"purple\">Purple</Badge>\n    </div>",
         "<p className=\"flex items-center gap-2\">\n      Workers\n      <Badge variant=\"secondary\">New</Badge>\n    </p>",
         "<div className=\"flex flex-wrap items-center gap-2\">\n      <Badge variant=\"success\" appearance=\"dot\">Healthy</Badge>\n      <Badge variant=\"warning\" appearance=\"dot\">Warning</Badge>\n      <Badge variant=\"error\" appearance=\"dot\">Error</Badge>\n      <Badge variant=\"neutral\" appearance=\"dot\">Neutral</Badge>\n    </div>"
       ],
       "colors": [
         "bg-kumo-badge-blue",
+        "bg-kumo-badge-green",
         "bg-kumo-badge-inverted",
         "bg-kumo-badge-neutral",
         "bg-kumo-badge-orange",
@@ -560,17 +561,18 @@
             "outline": "Bordered button with transparent background"
           },
           "classes": {
-            "primary": "bg-kumo-brand !text-white hover:bg-kumo-brand-hover disabled:bg-kumo-brand/50",
-            "secondary": "bg-kumo-base !text-kumo-default ring not-disabled:hover:bg-kumo-tint disabled:bg-kumo-base/50 disabled:!text-kumo-default/70 ring-kumo-hairline data-[state=open]:bg-kumo-base",
+            "primary": "relative overflow-hidden bg-(--kumo-button-emphasis-bg) !text-white ring ring-(--kumo-button-emphasis-ring) focus:ring-(--kumo-button-emphasis-ring) focus-visible:ring-(--kumo-button-emphasis-ring) active:ring-(--kumo-button-emphasis-ring) disabled:opacity-50",
+            "secondary": "bg-kumo-base !text-kumo-default ring not-disabled:hover:bg-kumo-tint disabled:bg-kumo-base/50 disabled:!text-kumo-default/70 ring-kumo-line data-[state=open]:bg-kumo-base",
             "ghost": "text-kumo-default hover:bg-kumo-tint shadow-none bg-inherit",
-            "destructive": "bg-kumo-danger !text-white hover:bg-kumo-danger/70",
-            "secondary-destructive": "bg-kumo-base !text-kumo-danger ring not-disabled:hover:bg-kumo-base disabled:bg-kumo-base/50 disabled:!text-kumo-danger/70 ring-kumo-hairline data-[state=open]:bg-kumo-base",
-            "outline": "bg-transparent text-kumo-default ring ring-kumo-hairline"
+            "destructive": "relative overflow-hidden bg-(--kumo-button-emphasis-bg) !text-white ring ring-(--kumo-button-emphasis-ring) focus:ring-(--kumo-button-emphasis-ring) focus-visible:ring-(--kumo-button-emphasis-ring) active:ring-(--kumo-button-emphasis-ring) disabled:opacity-50",
+            "secondary-destructive": "bg-kumo-base !text-kumo-danger ring not-disabled:hover:!text-kumo-danger not-disabled:hover:ring-kumo-danger/30 disabled:bg-kumo-base/50 disabled:!text-kumo-danger/70 ring-kumo-line data-[state=open]:bg-kumo-base",
+            "outline": "bg-transparent text-kumo-default ring ring-kumo-line transition-colors not-disabled:hover:text-kumo-strong not-disabled:hover:ring-kumo-focus/25"
           },
           "stateClasses": {
             "primary": {
-              "hover": "hover:bg-kumo-brand-hover",
-              "disabled": "disabled:bg-kumo-brand/50"
+              "focus": "focus:ring-(--kumo-button-emphasis-ring) focus-visible:ring-(--kumo-button-emphasis-ring)",
+              "active": "active:ring-(--kumo-button-emphasis-ring)",
+              "disabled": "disabled:opacity-50"
             },
             "secondary": {
               "not-disabled": "not-disabled:hover:bg-kumo-tint",
@@ -581,12 +583,17 @@
               "hover": "hover:bg-kumo-tint"
             },
             "destructive": {
-              "hover": "hover:bg-kumo-danger/70"
+              "focus": "focus:ring-(--kumo-button-emphasis-ring) focus-visible:ring-(--kumo-button-emphasis-ring)",
+              "active": "active:ring-(--kumo-button-emphasis-ring)",
+              "disabled": "disabled:opacity-50"
             },
             "secondary-destructive": {
-              "not-disabled": "not-disabled:hover:bg-kumo-base",
+              "not-disabled": "not-disabled:hover:!text-kumo-danger not-disabled:hover:ring-kumo-danger/30",
               "disabled": "disabled:bg-kumo-base/50 disabled:!text-kumo-danger/70",
               "data-state": "data-[state=open]:bg-kumo-base"
+            },
+            "outline": {
+              "not-disabled": "not-disabled:hover:text-kumo-strong not-disabled:hover:ring-kumo-focus/25"
             }
           },
           "default": "secondary"
@@ -662,15 +669,14 @@
       ],
       "colors": [
         "bg-kumo-base",
-        "bg-kumo-brand",
-        "bg-kumo-brand-hover",
-        "bg-kumo-danger",
         "bg-kumo-tint",
         "ring-kumo-brand",
+        "ring-kumo-danger",
         "ring-kumo-focus",
-        "ring-kumo-hairline",
+        "ring-kumo-line",
         "text-kumo-danger",
         "text-kumo-default",
+        "text-kumo-strong",
         "text-kumo-subtle"
       ]
     },
@@ -2250,7 +2256,7 @@
     "Collapsible": {
       "name": "Collapsible",
       "type": "component",
-      "description": "Collapsible — a composable disclosure component for showing/hiding content.  Built on Base UI's Collapsible with full composition support.  ## Basic Usage  ```tsx const [open, setOpen] = useState(false);  <Collapsible.Root open={open} onOpenChange={setOpen}> <Collapsible.Trigger render={<Button variant=\"ghost\" />}> Show details </Collapsible.Trigger> <Collapsible.Panel className=\"mt-2\"> <Text>Hidden content revealed when expanded.</Text> </Collapsible.Panel> </Collapsible.Root> ```  ## With Default Styling  Use `DefaultTrigger` and `DefaultPanel` for the classic Kumo style:  ```tsx <Collapsible.Root> <Collapsible.DefaultTrigger>Show details</Collapsible.DefaultTrigger> <Collapsible.DefaultPanel> <Text>Content with border-left accent</Text> </Collapsible.DefaultPanel> </Collapsible.Root> ```  ## Controlled Accordion Pattern  ```tsx const [activeIndex, setActiveIndex] = useState<number | null>(null);  {items.map((item, i) => ( <Collapsible.Root key={i} open={activeIndex === i} onOpenChange={(open) => setActiveIndex(open ? i : null)} > <Collapsible.DefaultTrigger>{item.title}</Collapsible.DefaultTrigger> <Collapsible.DefaultPanel>{item.content}</Collapsible.DefaultPanel> </Collapsible.Root> ))} ```",
+      "description": "Collapsible — a composable disclosure component for showing/hiding content.",
       "importPath": "@cloudflare/kumo",
       "category": "Display",
       "props": {
@@ -2340,7 +2346,7 @@
     "Combobox": {
       "name": "Combobox",
       "type": "component",
-      "description": "Combobox — autocomplete input with filterable dropdown list.  Compound component: `Combobox` (Root), `.TriggerInput`, `.TriggerValue`, `.TriggerMultipleWithInput`, `.Content`, `.Item`, `.Chip`, `.Input`, `.Empty`, `.GroupLabel`, `.Group`, `.List`, `.Collection`.",
+      "description": "Combobox — autocomplete input with filterable dropdown list.",
       "importPath": "@cloudflare/kumo",
       "category": "Input",
       "props": {
@@ -2577,7 +2583,7 @@
     "CommandPalette": {
       "name": "CommandPalette",
       "type": "component",
-      "description": "CommandPalette — accessible command palette / spotlight search overlay.  Compound component: `CommandPalette.Root` (or `.Dialog` + `.Panel`), `.Input`, `.List`, `.Results`, `.Items`, `.Group`, `.GroupLabel`, `.Item`, `.ResultItem`, `.HighlightedText`, `.Empty`, `.Loading`, `.Footer`.  Built on `@base-ui/react/autocomplete` + `@base-ui/react/dialog`.",
+      "description": "CommandPalette — accessible command palette / spotlight search overlay.",
       "importPath": "@cloudflare/kumo",
       "category": "Navigation",
       "props": {
@@ -2618,7 +2624,7 @@
     "DatePicker": {
       "name": "DatePicker",
       "type": "component",
-      "description": "DatePicker — a date selection calendar.  Built on [react-day-picker](https://daypicker.dev) with Kumo styling. Supports three selection modes: single, multiple, and range.",
+      "description": "DatePicker — a date selection calendar.",
       "importPath": "@cloudflare/kumo",
       "category": "Other",
       "props": {
@@ -2648,7 +2654,7 @@
     "DateRangePicker": {
       "name": "DateRangePicker",
       "type": "component",
-      "description": "DateRangePicker — dual-calendar date range selector.  Renders two side-by-side month calendars with click-to-select start/end dates, hover preview of the range, a timezone footer, and a reset button.",
+      "description": "DateRangePicker — dual-calendar date range selector.",
       "importPath": "@cloudflare/kumo",
       "category": "Input",
       "props": {
@@ -2791,7 +2797,7 @@
         "size": {
           "type": "enum",
           "optional": true,
-          "description": "Dialog width.\n- `\"sm\"` — Small (min 288px) for simple confirmations\n- `\"base\"` — Default (min 384px)\n- `\"lg\"` — Large (min 512px) for complex content\n- `\"xl\"` — Extra large (min 768px) for detailed views",
+          "description": "Dialog width.\n- `\"sm\"` — Small (288px) for simple confirmations\n- `\"base\"` — Default (384px)\n- `\"lg\"` — Large (512px) for complex content\n- `\"xl\"` — Extra large (768px) for detailed views",
           "values": [
             "base",
             "sm",
@@ -2799,16 +2805,16 @@
             "xl"
           ],
           "descriptions": {
-            "base": "Default dialog width",
-            "sm": "Small dialog for simple confirmations",
-            "lg": "Large dialog for complex content",
-            "xl": "Extra large dialog for detailed views"
+            "base": "Default dialog width (384px)",
+            "sm": "Small dialog for simple confirmations (288px)",
+            "lg": "Large dialog for complex content (512px)",
+            "xl": "Extra large dialog for detailed views (768px)"
           },
           "classes": {
-            "base": "sm:min-w-96",
-            "sm": "min-w-72",
-            "lg": "min-w-[32rem]",
-            "xl": "min-w-[48rem]"
+            "base": "sm:w-96",
+            "sm": "sm:w-72",
+            "lg": "sm:w-[32rem]",
+            "xl": "sm:w-[48rem]"
           },
           "default": "base"
         }
@@ -2816,11 +2822,13 @@
       "examples": [
         "<Dialog.Root>\n      <Dialog.Trigger render={(p) => <Button {...p}>Click me</Button>} />\n      <Dialog className=\"p-8\">\n        <div className=\"mb-4 flex items-start justify-between gap-4\">\n          <Dialog.Title className=\"text-2xl font-semibold\">\n            Modal Title\n          </Dialog.Title>\n          <Dialog.Close\n            aria-label=\"Close\"\n            render={(props) => (\n              <Button\n                {...props}\n                variant=\"secondary\"\n                shape=\"square\"\n                icon={<X />}\n                aria-label=\"Close\"\n              />\n            )}\n          />\n        </div>\n        <Dialog.Description className=\"text-kumo-subtle\">\n          Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do\n          eiusmod tempor incididunt ut labore et dolore magna aliqua.\n        </Dialog.Description>\n      </Dialog>\n    </Dialog.Root>",
         "<Dialog.Root>\n      <Dialog.Trigger render={(p) => <Button {...p}>Delete</Button>} />\n      <Dialog className=\"p-8\">\n        <div className=\"mb-4 flex items-start justify-between gap-4\">\n          <Dialog.Title className=\"text-2xl font-semibold\">\n            Modal Title\n          </Dialog.Title>\n          <Dialog.Close\n            aria-label=\"Close\"\n            render={(props) => (\n              <Button\n                {...props}\n                variant=\"secondary\"\n                shape=\"square\"\n                icon={<X />}\n                aria-label=\"Close\"\n              />\n            )}\n          />\n        </div>\n        <Dialog.Description className=\"text-kumo-subtle\">\n          Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do\n          eiusmod tempor incididunt ut labore et dolore magna aliqua.\n        </Dialog.Description>\n        <div className=\"mt-8 flex justify-end gap-2\">\n          <Dialog.Close\n            render={(props) => (\n              <Button variant=\"secondary\" {...props}>\n                Cancel\n              </Button>\n            )}\n          />\n          <Dialog.Close\n            render={(props) => (\n              <Button variant=\"destructive\" {...props}>\n                Delete\n              </Button>\n            )}\n          />\n        </div>\n      </Dialog>\n    </Dialog.Root>",
+        "<Dialog.Root>\n      <Dialog.Trigger render={(p) => <Button {...p}>Open capped dialog</Button>} />\n      <Dialog className=\"max-w-lg p-8\">\n        <div className=\"mb-4 flex items-start justify-between gap-4\">\n          <Dialog.Title className=\"text-2xl font-semibold\">\n            Max width override\n          </Dialog.Title>\n          <Dialog.Close\n            aria-label=\"Close\"\n            render={(props) => (\n              <Button\n                {...props}\n                variant=\"secondary\"\n                shape=\"square\"\n                icon={<X />}\n                aria-label=\"Close\"\n              />\n            )}\n          />\n        </div>\n        <Dialog.Description className=\"text-kumo-subtle\">\n          This dialog uses <code>className=\"max-w-lg\"</code> and should stay\n          capped around 512px on desktop.\n        </Dialog.Description>\n        <div className=\"mt-4 truncate rounded-md border border-kumo-line bg-kumo-recessed p-3 font-mono text-sm\">\n          abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\n        </div>\n      </Dialog>\n    </Dialog.Root>",
         "<Dialog.Root disablePointerDismissal>\n      <Dialog.Trigger\n        render={(p) => (\n          <Button {...p} variant=\"destructive\">\n            Delete Project\n          </Button>\n        )}\n      />\n      <Dialog className=\"p-8\">\n        <div className=\"mb-4 flex items-center gap-3\">\n          <div className=\"flex h-10 w-10 items-center justify-center rounded-full bg-kumo-danger/20\">\n            <Warning size={20} className=\"text-kumo-danger\" />\n          </div>\n          <Dialog.Title className=\"text-xl font-semibold\">\n            Delete Project?\n          </Dialog.Title>\n        </div>\n        <Dialog.Description className=\"text-kumo-subtle\">\n          This action cannot be undone. This will permanently delete the project\n          and all associated data.\n        </Dialog.Description>\n        <div className=\"mt-8 flex justify-end gap-2\">\n          <Dialog.Close\n            render={(props) => (\n              <Button variant=\"secondary\" {...props}>\n                Cancel\n              </Button>\n            )}\n          />\n          <Dialog.Close\n            render={(props) => (\n              <Button variant=\"destructive\" {...props}>\n                Delete\n              </Button>\n            )}\n          />\n        </div>\n      </Dialog>\n    </Dialog.Root>",
         "<Dialog.Root role=\"alertdialog\">\n      <Dialog.Trigger\n        render={(p) => (\n          <Button {...p} variant=\"destructive\">\n            Delete Account\n          </Button>\n        )}\n      />\n      <Dialog className=\"p-8\">\n        <div className=\"mb-4 flex items-center gap-3\">\n          <div className=\"flex h-10 w-10 items-center justify-center rounded-full bg-kumo-danger/20\">\n            <Warning size={20} className=\"text-kumo-danger\" weight=\"fill\" />\n          </div>\n          <Dialog.Title className=\"text-xl font-semibold\">\n            Delete Account?\n          </Dialog.Title>\n        </div>\n        <Dialog.Description className=\"text-kumo-subtle\">\n          This action cannot be undone. All your data will be permanently\n          removed from our servers. Are you sure you want to proceed?\n        </Dialog.Description>\n        <div className=\"mt-8 flex justify-end gap-2\">\n          <Dialog.Close\n            render={(props) => (\n              <Button variant=\"secondary\" {...props}>\n                Cancel\n              </Button>\n            )}\n          />\n          <Dialog.Close\n            render={(props) => (\n              <Button variant=\"destructive\" {...props}>\n                Delete Account\n              </Button>\n            )}\n          />\n        </div>\n      </Dialog>\n    </Dialog.Root>",
-        "<Dialog.Root>\n      <Dialog.Trigger render={(p) => <Button {...p}>Open Form</Button>} />\n      <Dialog className=\"p-8\">\n        <div className=\"mb-4 flex items-start justify-between gap-4\">\n          <Dialog.Title className=\"text-2xl font-semibold\">\n            Create Resource\n          </Dialog.Title>\n          <Dialog.Close\n            aria-label=\"Close\"\n            render={(props) => (\n              <Button\n                {...props}\n                variant=\"secondary\"\n                shape=\"square\"\n                icon={<X />}\n                aria-label=\"Close\"\n              />\n            )}\n          />\n        </div>\n        <Dialog.Description className=\"mb-4 text-kumo-subtle\">\n          Select a region for your new resource.\n        </Dialog.Description>\n        <Select\n          className=\"w-full\"\n          renderValue={(v) =>\n            regions.find((r) => r.value === v)?.label ?? \"Select region...\"\n          }\n        >\n          {regions.map((region) => (\n            <Select.Option key={region.value} value={region.value}>\n              {region.label}\n            </Select.Option>\n          ))}\n        </Select>\n        <div className=\"mt-8 flex justify-end gap-2\">\n          <Dialog.Close\n            render={(props) => (\n              <Button variant=\"secondary\" {...props}>\n                Cancel\n              </Button>\n            )}\n          />\n          <Button variant=\"primary\">Create</Button>\n        </div>\n      </Dialog>\n    </Dialog.Root>",
+        "<Dialog.Root>\n      <Dialog.Trigger render={(p) => <Button {...p}>Open Form</Button>} />\n      <Dialog className=\"p-8\">\n        <div className=\"mb-4 flex items-start justify-between gap-4\">\n          <Dialog.Title className=\"text-2xl font-semibold\">\n            Create Resource\n          </Dialog.Title>\n          <Dialog.Close\n            aria-label=\"Close\"\n            render={(props) => (\n              <Button\n                {...props}\n                variant=\"secondary\"\n                shape=\"square\"\n                icon={<X />}\n                aria-label=\"Close\"\n              />\n            )}\n          />\n        </div>\n        <Dialog.Description className=\"mb-4 text-kumo-subtle\">\n          Select a region for your new resource.\n        </Dialog.Description>\n        <Select\n          className=\"w-full\"\n          placeholder=\"Select region...\"\n          renderValue={(v) =>\n            regions.find((r) => r.value === v)?.label\n          }\n        >\n          {regions.map((region) => (\n            <Select.Option key={region.value} value={region.value}>\n              {region.label}\n            </Select.Option>\n          ))}\n        </Select>\n        <div className=\"mt-8 flex justify-end gap-2\">\n          <Dialog.Close\n            render={(props) => (\n              <Button variant=\"secondary\" {...props}>\n                Cancel\n              </Button>\n            )}\n          />\n          <Button variant=\"primary\">Create</Button>\n        </div>\n      </Dialog>\n    </Dialog.Root>",
         "<Dialog.Root>\n      <Dialog.Trigger render={(p) => <Button {...p}>Open Form</Button>} />\n      <Dialog className=\"p-8\">\n        <div className=\"mb-4 flex items-start justify-between gap-4\">\n          <Dialog.Title className=\"text-2xl font-semibold\">\n            Create Resource\n          </Dialog.Title>\n          <Dialog.Close\n            aria-label=\"Close\"\n            render={(props) => (\n              <Button\n                {...props}\n                variant=\"secondary\"\n                shape=\"square\"\n                icon={<X />}\n                aria-label=\"Close\"\n              />\n            )}\n          />\n        </div>\n        <Dialog.Description className=\"mb-4 text-kumo-subtle\">\n          Search and select a region for your new resource.\n        </Dialog.Description>\n        <Combobox value={value} onValueChange={setValue} items={regions}>\n          <Combobox.TriggerInput\n            className=\"w-full\"\n            placeholder=\"Search regions...\"\n          />\n          <Combobox.Content>\n            <Combobox.Empty>No regions found</Combobox.Empty>\n            <Combobox.List>\n              {(item: { value: string; label: string }) => (\n                <Combobox.Item key={item.value} value={item}>\n                  {item.label}\n                </Combobox.Item>\n              )}\n            </Combobox.List>\n          </Combobox.Content>\n        </Combobox>\n        <div className=\"mt-8 flex justify-end gap-2\">\n          <Dialog.Close\n            render={(props) => (\n              <Button variant=\"secondary\" {...props}>\n                Cancel\n              </Button>\n            )}\n          />\n          <Button variant=\"primary\">Create</Button>\n        </div>\n      </Dialog>\n    </Dialog.Root>",
-        "<Dialog.Root>\n      <Dialog.Trigger render={(p) => <Button {...p}>Open Form</Button>} />\n      <Dialog className=\"p-8\">\n        <div className=\"mb-4 flex items-start justify-between gap-4\">\n          <Dialog.Title className=\"text-2xl font-semibold\">\n            Resource Actions\n          </Dialog.Title>\n          <Dialog.Close\n            aria-label=\"Close\"\n            render={(props) => (\n              <Button\n                {...props}\n                variant=\"secondary\"\n                shape=\"square\"\n                icon={<X />}\n                aria-label=\"Close\"\n              />\n            )}\n          />\n        </div>\n        <Dialog.Description className=\"mb-4 text-kumo-subtle\">\n          Choose an action for the selected resource.\n        </Dialog.Description>\n        <DropdownMenu>\n          <DropdownMenu.Trigger render={<Button>Actions</Button>} />\n          <DropdownMenu.Content>\n            <DropdownMenu.Item>Edit</DropdownMenu.Item>\n            <DropdownMenu.Item>Duplicate</DropdownMenu.Item>\n            <DropdownMenu.Separator />\n            <DropdownMenu.Item variant=\"danger\">Delete</DropdownMenu.Item>\n          </DropdownMenu.Content>\n        </DropdownMenu>\n        <div className=\"mt-8 flex justify-end\">\n          <Dialog.Close\n            render={(props) => (\n              <Button variant=\"secondary\" {...props}>\n                Close\n              </Button>\n            )}\n          />\n        </div>\n      </Dialog>\n    </Dialog.Root>"
+        "<Dialog.Root>\n      <Dialog.Trigger render={(p) => <Button {...p}>Open Form</Button>} />\n      <Dialog className=\"p-8\">\n        <div className=\"mb-4 flex items-start justify-between gap-4\">\n          <Dialog.Title className=\"text-2xl font-semibold\">\n            Resource Actions\n          </Dialog.Title>\n          <Dialog.Close\n            aria-label=\"Close\"\n            render={(props) => (\n              <Button\n                {...props}\n                variant=\"secondary\"\n                shape=\"square\"\n                icon={<X />}\n                aria-label=\"Close\"\n              />\n            )}\n          />\n        </div>\n        <Dialog.Description className=\"mb-4 text-kumo-subtle\">\n          Choose an action for the selected resource.\n        </Dialog.Description>\n        <DropdownMenu>\n          <DropdownMenu.Trigger render={<Button>Actions</Button>} />\n          <DropdownMenu.Content>\n            <DropdownMenu.Item>Edit</DropdownMenu.Item>\n            <DropdownMenu.Item>Duplicate</DropdownMenu.Item>\n            <DropdownMenu.Separator />\n            <DropdownMenu.Item variant=\"danger\">Delete</DropdownMenu.Item>\n          </DropdownMenu.Content>\n        </DropdownMenu>\n        <div className=\"mt-8 flex justify-end\">\n          <Dialog.Close\n            render={(props) => (\n              <Button variant=\"secondary\" {...props}>\n                Close\n              </Button>\n            )}\n          />\n        </div>\n      </Dialog>\n    </Dialog.Root>",
+        "<div className=\"flex flex-wrap gap-2\">\n      {sizes.map(({ size, label, width }) => (\n        <Dialog.Root key={size}>\n          <Dialog.Trigger\n            render={(p) => (\n              <Button variant=\"secondary\" {...p}>\n                {label} ({width})\n              </Button>\n            )}\n          />\n          <Dialog size={size} className=\"p-8\">\n            <div className=\"mb-4 flex items-start justify-between gap-4\">\n              <Dialog.Title className=\"text-2xl font-semibold\">\n                {label} Dialog\n              </Dialog.Title>\n              <Dialog.Close\n                aria-label=\"Close\"\n                render={(props) => (\n                  <Button\n                    {...props}\n                    variant=\"secondary\"\n                    shape=\"square\"\n                    icon={<X />}\n                    aria-label=\"Close\"\n                  />\n                )}\n              />\n            </div>\n            <Dialog.Description className=\"text-kumo-subtle\">\n              This <code>size=\"{size}\"</code> dialog should stay at {width} wide\n              regardless of the content below.\n            </Dialog.Description>\n            <div className=\"mt-4 overflow-auto rounded-md border border-kumo-line\">\n              <table className=\"w-max text-sm\">\n                <thead className=\"bg-kumo-elevated text-left\">\n                  <tr>\n                    <th className=\"px-3 py-2\">Resource</th>\n                    <th className=\"px-3 py-2\">Region</th>\n                    <th className=\"px-3 py-2\">Status</th>\n                    <th className=\"px-3 py-2\">Latency</th>\n                    <th className=\"px-3 py-2\">Requests</th>\n                    <th className=\"px-3 py-2\">Last Deployed</th>\n                  </tr>\n                </thead>\n                <tbody className=\"divide-y divide-kumo-hairline\">\n                  <tr>\n                    <td className=\"px-3 py-2\">api-gateway-prod</td>\n                    <td className=\"px-3 py-2\">us-east-1</td>\n                    <td className=\"px-3 py-2 text-kumo-success\">Healthy</td>\n                    <td className=\"px-3 py-2\">12ms</td>\n                    <td className=\"px-3 py-2\">1,234,567</td>\n                    <td className=\"px-3 py-2\">2026-06-23</td>\n                  </tr>\n                  <tr>\n                    <td className=\"px-3 py-2\">worker-analytics</td>\n                    <td className=\"px-3 py-2\">eu-west-1</td>\n                    <td className=\"px-3 py-2 text-kumo-warning\">Degraded</td>\n                    <td className=\"px-3 py-2\">89ms</td>\n                    <td className=\"px-3 py-2\">456,789</td>\n                    <td className=\"px-3 py-2\">2026-06-22</td>\n                  </tr>\n                </tbody>\n              </table>\n            </div>\n            <div className=\"mt-6 flex justify-end gap-2\">\n              <Dialog.Close\n                render={(props) => (\n                  <Button variant=\"secondary\" {...props}>\n                    Close\n                  </Button>\n                )}\n              />\n            </div>\n          </Dialog>\n        </Dialog.Root>\n      ))}\n    </div>"
       ],
       "colors": [
         "bg-kumo-base",
@@ -2930,7 +2938,7 @@
     "DropdownMenu": {
       "name": "DropdownMenu",
       "type": "component",
-      "description": "DropdownMenu — accessible dropdown menu anchored to a trigger.  Compound component: `DropdownMenu` (Root), `.Trigger`, `.Content`, `.Item`, `.LinkItem`, `.CheckboxItem`, `.RadioGroup`, `.RadioItem`, `.RadioItemIndicator`, `.Sub`, `.SubTrigger`, `.SubContent`, `.Label`, `.Separator`, `.Shortcut`, `.Group`.  Built on `@base-ui/react/menu`.",
+      "description": "DropdownMenu — accessible dropdown menu anchored to a trigger.",
       "importPath": "@cloudflare/kumo",
       "category": "Overlay",
       "props": {
@@ -2959,6 +2967,7 @@
         "<DropdownMenu>\n      <DropdownMenu.Trigger render={<Button>Edit</Button>} />\n      <DropdownMenu.Content>\n        <DropdownMenu.Item icon={PencilSimpleIcon}>Rename</DropdownMenu.Item>\n        <DropdownMenu.Item icon={CopyIcon}>Duplicate</DropdownMenu.Item>\n        <DropdownMenu.Separator />\n        <DropdownMenu.Item inset>Move to folder</DropdownMenu.Item>\n        <DropdownMenu.Item inset>Add to favorites</DropdownMenu.Item>\n        <DropdownMenu.Separator />\n        <DropdownMenu.Item icon={TrashIcon} variant=\"danger\">\n          Delete\n        </DropdownMenu.Item>\n      </DropdownMenu.Content>\n    </DropdownMenu>",
         "<div className=\"flex flex-col items-start gap-2\">\n      <DropdownMenu>\n        <DropdownMenu.Trigger render={<Button>Actions</Button>} />\n        <DropdownMenu.Content>\n          <DropdownMenu.Item\n            icon={CopyIcon}\n            onClick={() => setLastAction(\"Duplicated\")}\n          >\n            Duplicate\n          </DropdownMenu.Item>\n          <DropdownMenu.Item\n            icon={PencilSimpleIcon}\n            onClick={() => setLastAction(\"Renamed\")}\n          >\n            Rename\n          </DropdownMenu.Item>\n          <DropdownMenu.Separator />\n          <DropdownMenu.Item\n            icon={TrashIcon}\n            variant=\"danger\"\n            onClick={() => setLastAction(\"Deleted\")}\n          >\n            Delete\n          </DropdownMenu.Item>\n        </DropdownMenu.Content>\n      </DropdownMenu>\n      {lastAction && (\n        <p className=\"text-sm text-kumo-subtle\">\n          Last action: <span className=\"text-kumo-default\">{lastAction}</span>\n        </p>\n      )}\n    </div>",
         "<DropdownMenu>\n      <DropdownMenu.Trigger\n        render={<button type=\"button\" className=\"rounded-full\" />}\n      >\n        <span className=\"flex h-8 w-8 items-center justify-center rounded-full bg-kumo-brand text-sm font-medium text-white\">\n          MR\n        </span>\n      </DropdownMenu.Trigger>\n      <DropdownMenu.Content>\n        <DropdownMenu.Item icon={UserIcon}>Profile</DropdownMenu.Item>\n        <DropdownMenu.Item icon={GearIcon}>Settings</DropdownMenu.Item>\n        <DropdownMenu.Separator />\n        <DropdownMenu.Item icon={SignOutIcon} variant=\"danger\">\n          Log out\n        </DropdownMenu.Item>\n      </DropdownMenu.Content>\n    </DropdownMenu>",
+        "<DropdownMenu>\n      <DropdownMenu.Trigger render={<Button>Open long list</Button>} />\n      <DropdownMenu.Content>\n        {items.map((item) => (\n          <DropdownMenu.Item key={item}>{item}</DropdownMenu.Item>\n        ))}\n      </DropdownMenu.Content>\n    </DropdownMenu>",
         "<DropdownMenu>\n      <DropdownMenu.Trigger render={<Button>Resources</Button>} />\n      <DropdownMenu.Content>\n        <DropdownMenu.LinkItem href=\"/settings\" icon={GearIcon}>\n          Settings\n        </DropdownMenu.LinkItem>\n        <DropdownMenu.LinkItem href=\"/docs\" icon={BookOpenIcon}>\n          Documentation\n        </DropdownMenu.LinkItem>\n        <DropdownMenu.Separator />\n        <DropdownMenu.LinkItem\n          href=\"https://developers.cloudflare.com\"\n          target=\"_blank\"\n          icon={ArrowSquareOutIcon}\n        >\n          Developer Docs\n        </DropdownMenu.LinkItem>\n      </DropdownMenu.Content>\n    </DropdownMenu>"
       ],
       "colors": [
@@ -3542,10 +3551,10 @@
         "<Input label=\"Disabled field\" placeholder=\"Cannot edit\" disabled />",
         "<Input placeholder=\"Search...\" aria-label=\"Search products\" />",
         "<div className=\"flex flex-col gap-4\">\n      <Input\n        aria-label=\"Hostname\"\n        placeholder=\"example.com\"\n        value=\"not a host\"\n        error=\"Please enter a valid hostname\"\n      />\n      <Input\n        aria-label=\"Path\"\n        placeholder=\"/api/v1/users\"\n        value=\"missing-slash\"\n        error={{ message: \"Path must start with /\", match: true }}\n      />\n    </div>",
-        "<div className=\"flex flex-col gap-4\">\n      <Input\n        label=\"API Key (default)\"\n        type=\"password\"\n        placeholder=\"<API_KEY>\"\n      />\n      <Input\n        label=\"API Key (passwordManagerIgnore)\"\n        type=\"password\"\n        placeholder=\"<API_KEY>\"\n        passwordManagerIgnore\n      />\n    </div>",
+        "<div className=\"flex flex-col gap-4\">\n      <Input\n        label=\"API Key (default)\"\n        type=\"password\"\n        placeholder=\"sk_live_...\"\n      />\n      <Input\n        label=\"API Key (passwordManagerIgnore)\"\n        type=\"password\"\n        placeholder=\"sk_live_...\"\n        passwordManagerIgnore\n      />\n    </div>",
         "<div className=\"flex flex-col gap-4\">\n      <Input type=\"email\" label=\"Email\" placeholder=\"you@example.com\" />\n      <Input type=\"password\" label=\"Password\" placeholder=\"••••••••\" />\n      <Input type=\"number\" label=\"Age\" placeholder=\"18\" />\n      <Input type=\"tel\" label=\"Phone\" placeholder=\"+1 (555) 000-0000\" />\n    </div>",
         "<Input\n      label=\"Phone Number\"\n      required={false}\n      placeholder=\"+1 (555) 000-0000\"\n    />",
-        "<Input\n      label=\"API Key\"\n      labelTooltip=\"Find this in your dashboard under Settings > API Keys\"\n      placeholder=\"<API_KEY>\"\n    />",
+        "<Input\n      label=\"API Key\"\n      labelTooltip=\"Find this in your dashboard under Settings > API Keys\"\n      placeholder=\"sk_live_...\"\n    />",
         "<Input\n      label={\n        <span>\n          Email for <strong>billing</strong>\n        </span>\n      }\n      required\n      placeholder=\"billing@company.com\"\n      type=\"email\"\n    />",
         "<Input\n      label=\"With onChange\"\n      placeholder=\"Type something...\"\n      description={value ? `Value: ${value}` : \"Uses e.target.value\"}\n      value={value}\n      onChange={(e) => setValue(e.target.value)}\n    />",
         "<Input\n      label=\"With onValueChange\"\n      placeholder=\"Type something...\"\n      description={value ? `Value: ${value}` : \"Receives the value directly\"}\n      value={value}\n      onValueChange={(v) => setValue(v)}\n    />"
@@ -3778,7 +3787,7 @@
     "Label": {
       "name": "Label",
       "type": "component",
-      "description": "Label component for form fields.  Provides a standardized way to display labels with optional indicators: - Optional indicator: gray \"(optional)\" text when `showOptional={true}` - Tooltip: info icon with hover tooltip for additional context",
+      "description": "Label component for form fields.",
       "importPath": "@cloudflare/kumo",
       "category": "Other",
       "props": {
@@ -3816,7 +3825,7 @@
       "examples": [
         "<div className=\"flex flex-col gap-4\">\n      <Label>Default Label</Label>\n      <Label showOptional>Optional Label</Label>\n      <Label tooltip=\"More information about this field\">\n        Label with Tooltip\n      </Label>\n    </div>",
         "<Input label=\"Phone Number\" required={false} placeholder=\"+1 555-0000\" />",
-        "<Input\n      label=\"API Key\"\n      labelTooltip=\"Find this in your dashboard settings under API > Keys\"\n      placeholder=\"<API_KEY>\"\n    />",
+        "<Input\n      label=\"API Key\"\n      labelTooltip=\"Find this in your dashboard settings under API > Keys\"\n      placeholder=\"sk_live_...\"\n    />",
         "<Checkbox\n      label={\n        <span>\n          I agree to the <strong>Terms of Service</strong>\n        </span>\n      }\n    />",
         "<div className=\"flex max-w-md flex-col gap-4\">\n      <Input label=\"Full Name\" placeholder=\"John Doe\" />\n      <Input\n        label=\"Email\"\n        labelTooltip=\"We'll send your receipt here\"\n        placeholder=\"john@example.com\"\n        type=\"email\"\n      />\n      <Input label=\"Company\" required={false} placeholder=\"Acme Inc.\" />\n      <Select label=\"Country\" placeholder=\"Select a country\">\n        <Select.Option value=\"us\">United States</Select.Option>\n        <Select.Option value=\"uk\">United Kingdom</Select.Option>\n        <Select.Option value=\"ca\">Canada</Select.Option>\n      </Select>\n    </div>",
         "<div className=\"flex flex-col gap-3\">\n      <Label>Default</Label>\n      <Label showOptional>Optional</Label>\n      <Label tooltip=\"Important field\">With Tooltip</Label>\n    </div>"
@@ -4066,7 +4075,7 @@
     "MenuBar": {
       "name": "MenuBar",
       "type": "component",
-      "description": "MenuBar — horizontal icon-button toolbar with keyboard arrow-key navigation.  Each option renders as a `<button>` with a Tooltip. The active option is visually highlighted with an elevated background.",
+      "description": "MenuBar — horizontal icon-button toolbar with keyboard arrow-key navigation.",
       "importPath": "@cloudflare/kumo",
       "category": "Navigation",
       "props": {
@@ -4424,37 +4433,33 @@
     "Radio": {
       "name": "Radio",
       "type": "component",
-      "description": "Radio — radio button group for single-select choices.  Compound component: `Radio.Group` (with built-in Fieldset), `Radio.Item`, and `Radio.Legend`. Built on `@base-ui/react/radio-group` + `@base-ui/react/radio`.",
+      "description": "Radio — radio button group for single-select choices.",
       "importPath": "@cloudflare/kumo",
       "category": "Input",
       "props": {
-        "legend": {
-          "type": "string",
-          "optional": true,
-          "description": "Legend text for the group (required for accessibility). For more control over legend styling, omit this prop and use `<Radio.Legend>` as a child instead."
-        },
-        "children": {
-          "type": "ReactNode",
-          "optional": true,
-          "description": "Child Radio.Item components (and optionally a Radio.Legend)"
-        },
-        "orientation": {
+        "variant": {
           "type": "enum",
-          "optional": true,
-          "description": "Layout direction of the radio items",
           "values": [
-            "vertical",
-            "horizontal"
-          ]
+            "default",
+            "error"
+          ],
+          "default": "default",
+          "descriptions": {
+            "default": "Default radio appearance",
+            "error": "Error state for validation failures"
+          },
+          "classes": {
+            "default": "ring-kumo-hairline",
+            "error": "ring-kumo-danger"
+          }
         },
         "appearance": {
           "type": "enum",
-          "optional": true,
-          "description": "Visual appearance applied to all Radio.Item children.\n- `\"default\"` — Standard inline radio items\n- `\"card\"` — Choice card with border, padding, and highlighted selection state\n\nIndividual items can override this with their own `appearance` prop.",
           "values": [
             "default",
             "card"
           ],
+          "default": "default",
           "descriptions": {
             "default": "Standard inline radio item",
             "card": "Choice card appearance with border, padding, and highlighted selection state"
@@ -4466,47 +4471,27 @@
             "card": {
               "hover": "hover:bg-kumo-tint"
             }
-          },
-          "default": "default"
-        },
-        "error": {
-          "type": "string",
-          "optional": true,
-          "description": "Error message for the group"
-        },
-        "description": {
-          "type": "ReactNode",
-          "optional": true,
-          "description": "Helper text for the group"
-        },
-        "value": {
-          "type": "string",
-          "optional": true,
-          "description": "Value of the radio that should be selected (controlled)"
-        },
-        "disabled": {
-          "type": "boolean",
-          "optional": true,
-          "description": "Whether all radios in the group are disabled"
-        },
-        "controlPosition": {
-          "type": "enum",
-          "optional": true,
-          "description": "Position of radio control relative to label: \"start\" puts radio before label, \"end\" puts label before radio. Defaults to \"start\" for default appearance and \"end\" for card appearance.",
-          "values": [
-            "start",
-            "end"
-          ]
-        },
-        "name": {
-          "type": "string",
-          "optional": true,
-          "description": "Form submission name for the radio group"
+          }
         },
         "className": {
           "type": "string",
-          "optional": true,
           "description": "Additional CSS classes"
+        },
+        "children": {
+          "type": "ReactNode",
+          "description": "Child elements"
+        },
+        "value": {
+          "type": "T",
+          "description": "The controlled value of the selected radio item."
+        },
+        "defaultValue": {
+          "type": "T",
+          "description": "The uncontrolled initial value of the selected radio item."
+        },
+        "onValueChange": {
+          "type": "(value: T, eventDetails: RadioGroupChangeEventDetails) => void",
+          "description": "Callback fired when the selected value changes. The second argument carries native event details about the interaction."
         }
       },
       "examples": [
@@ -4521,6 +4506,7 @@
         "<Radio.Group defaultValue=\"all\" value={value} onValueChange={setValue}>\n      <Radio.Legend className=\"sr-only\">Paths</Radio.Legend>\n      <Radio.Item label=\"Allow all paths\" value=\"all\" />\n      <Radio.Item label=\"Restrict to specific paths\" value=\"specific\" />\n    </Radio.Group>",
         "<Radio.Group value={value} onValueChange={setValue}>\n      <Radio.Legend className=\"text-sm font-normal text-kumo-subtle\">\n        Notification preference\n      </Radio.Legend>\n      <Radio.Item label=\"Email\" value=\"email\" />\n      <Radio.Item label=\"SMS\" value=\"sms\" />\n      <Radio.Item label=\"Push notification\" value=\"push\" />\n    </Radio.Group>",
         "<Radio.Group\n      legend=\"Choose a plan\"\n      appearance=\"card\"\n      controlPosition=\"start\"\n      value={value}\n      onValueChange={setValue}\n    >\n      <Radio.Item\n        label=\"Free\"\n        description=\"For personal or hobby projects that aren't business-critical.\"\n        value=\"free\"\n      />\n      <Radio.Item\n        label=\"Pro\"\n        description=\"For professional websites that aren't business-critical.\"\n        value=\"pro\"\n      />\n    </Radio.Group>",
+        "<div className=\"grid grid-cols-2 gap-6\">\n      <Radio.Group<number>\n        legend=\"Items per page\"\n        value={pageSize}\n        onValueChange={setPageSize}\n      >\n        <Radio.Item<number> label=\"10\" value={10} />\n        <Radio.Item<number> label=\"25\" value={25} />\n        <Radio.Item<number> label=\"50\" value={50} />\n      </Radio.Group>\n      <Radio.Group<ThemeType>\n        legend=\"Theme\"\n        value={theme}\n        onValueChange={setTheme}\n      >\n        <Radio.Item<ThemeType> label=\"Light\" value={ThemeType.light} />\n        <Radio.Item<ThemeType> label=\"Dark\" value={ThemeType.dark} />\n        <Radio.Item<ThemeType> label=\"System\" value={ThemeType.system} />\n      </Radio.Group>\n    </div>",
         "<Radio.Group\n      legend=\"Choose a plan\"\n      appearance=\"card\"\n      value={value}\n      onValueChange={setValue}\n    >\n      <Radio.Item\n        label={\n          <span className=\"flex items-center gap-2\">\n            Free\n            <Badge variant=\"neutral\">$0</Badge>\n          </span>\n        }\n        description=\"For personal or hobby projects.\"\n        value=\"free\"\n      />\n      <Radio.Item\n        label={\n          <span className=\"flex items-center gap-2\">\n            Pro\n            <Badge variant=\"primary\">Popular</Badge>\n          </span>\n        }\n        description=\"For professional websites.\"\n        value=\"pro\"\n      />\n    </Radio.Group>",
         "<Radio.Group\n      legend=\"Choose a plan\"\n      appearance=\"card\"\n      orientation=\"horizontal\"\n      value={value}\n      onValueChange={setValue}\n    >\n      <Radio.Item\n        label=\"Free\"\n        description=\"For personal or hobby projects that aren't business-critical.\"\n        value=\"free\"\n      />\n      <Radio.Item\n        label=\"Pro\"\n        description=\"For professional websites that aren't business-critical.\"\n        value=\"pro\"\n      />\n      <Radio.Item\n        label=\"Business\"\n        description=\"For small businesses operating online.\"\n        value=\"business\"\n      />\n      <Radio.Item\n        label=\"Contract\"\n        description=\"For mission-critical applications that are core to your business.\"\n        value=\"contract\"\n      />\n    </Radio.Group>"
       ],
@@ -4550,53 +4536,17 @@
           "name": "Group",
           "description": "Group sub-component",
           "props": {
-            "legend": {
-              "type": "string",
-              "optional": true
-            },
-            "children": {
-              "type": "ReactNode",
-              "required": true
-            },
-            "orientation": {
-              "type": "\"vertical\" | \"horizontal\"",
-              "optional": true
-            },
-            "appearance": {
-              "type": "KumoRadioAppearance",
-              "optional": true
-            },
-            "error": {
-              "type": "string",
-              "optional": true
-            },
-            "description": {
-              "type": "ReactNode",
-              "optional": true
-            },
             "value": {
-              "type": "string",
-              "optional": true
+              "type": "T",
+              "description": "The controlled value of the selected radio item."
             },
-            "disabled": {
-              "type": "boolean",
-              "optional": true
+            "defaultValue": {
+              "type": "T",
+              "description": "The uncontrolled initial value of the selected radio item."
             },
-            "label": {
-              "type": "\"start\" puts radio before label",
-              "required": true
-            },
-            "controlPosition": {
-              "type": "RadioControlPosition",
-              "optional": true
-            },
-            "name": {
-              "type": "string",
-              "optional": true
-            },
-            "className": {
-              "type": "string",
-              "optional": true
+            "onValueChange": {
+              "type": "(value: T, eventDetails: RadioGroupChangeEventDetails) => void",
+              "description": "Callback fired when the selected value changes. The second argument carries native event details about the interaction."
             }
           }
         },
@@ -4938,9 +4888,9 @@
       },
       "examples": [
         "<div className=\"w-80\">\n      <SensitiveInput label=\"API Key\" defaultValue=\"sk_live_abc123xyz789\" />\n    </div>",
-        "<div className=\"flex flex-col gap-4\">\n      {sizes.map((size) => (\n        <div key={size} className=\"flex items-center gap-2\">\n          <span className=\"w-12 text-sm text-kumo-subtle\">{size}</span>\n          <SensitiveInput\n            label={`${size} size`}\n            size={size}\n            defaultValue=\"<SECRET>\"\n          />\n        </div>\n      ))}\n    </div>",
-        "<div className=\"flex w-80 flex-col gap-4\">\n      <SensitiveInput\n        label=\"Controlled Secret\"\n        value={value}\n        onValueChange={setValue}\n      />\n      <div className=\"text-sm text-kumo-subtle\">\n        Current value: <code className=\"text-kumo-default\">{value}</code>\n      </div>\n      <div className=\"flex gap-2\">\n        <Button\n          onClick={() => setValue(\"<SECRET>-\" + Date.now())}\n          variant=\"primary\"\n          size=\"sm\"\n        >\n          Change value\n        </Button>\n        <Button onClick={() => setValue(\"\")} variant=\"secondary\" size=\"sm\">\n          Clear\n        </Button>\n      </div>\n    </div>",
-        "<div className=\"flex w-80 flex-col gap-4\">\n      <SensitiveInput\n        label=\"Error State\"\n        variant=\"error\"\n        defaultValue=\"invalid-key\"\n        error=\"This API key is not valid\"\n      />\n      <SensitiveInput label=\"Disabled\" defaultValue=\"cannot-edit\" disabled />\n      <SensitiveInput\n        label=\"Read-only\"\n        defaultValue=\"<SECRET>\"\n        readOnly\n      />\n      <SensitiveInput\n        label=\"With Description\"\n        defaultValue=\"<SECRET>\"\n        description=\"Keep this value secure and don't share it\"\n      />\n    </div>"
+        "<div className=\"flex flex-col gap-4\">\n      {sizes.map((size) => (\n        <div key={size} className=\"flex items-center gap-2\">\n          <span className=\"w-12 text-sm text-kumo-subtle\">{size}</span>\n          <SensitiveInput\n            label={`${size} size`}\n            size={size}\n            defaultValue=\"secret-api-key-123\"\n          />\n        </div>\n      ))}\n    </div>",
+        "<div className=\"flex w-80 flex-col gap-4\">\n      <SensitiveInput\n        label=\"Controlled Secret\"\n        value={value}\n        onValueChange={setValue}\n      />\n      <div className=\"text-sm text-kumo-subtle\">\n        Current value: <code className=\"text-kumo-default\">{value}</code>\n      </div>\n      <div className=\"flex gap-2\">\n        <Button\n          onClick={() => setValue(\"new-secret-\" + Date.now())}\n          variant=\"primary\"\n          size=\"sm\"\n        >\n          Change value\n        </Button>\n        <Button onClick={() => setValue(\"\")} variant=\"secondary\" size=\"sm\">\n          Clear\n        </Button>\n      </div>\n    </div>",
+        "<div className=\"flex w-80 flex-col gap-4\">\n      <SensitiveInput\n        label=\"Error State\"\n        variant=\"error\"\n        defaultValue=\"invalid-key\"\n        error=\"This API key is not valid\"\n      />\n      <SensitiveInput label=\"Disabled\" defaultValue=\"cannot-edit\" disabled />\n      <SensitiveInput\n        label=\"Read-only\"\n        defaultValue=\"view-only-secret-key\"\n        readOnly\n      />\n      <SensitiveInput\n        label=\"With Description\"\n        defaultValue=\"my-secret-value\"\n        description=\"Keep this value secure and don't share it\"\n      />\n    </div>"
       ],
       "colors": [
         "bg-kumo-brand",
@@ -4955,7 +4905,7 @@
     "Sidebar": {
       "name": "Sidebar",
       "type": "component",
-      "description": "Sidebar — responsive navigation panel with expand/collapse support.  Compound component: `Sidebar` (root `<aside>`), `.Provider`, `.Header`, `.Content`, `.Footer`, `.Group`, `.GroupLabel`, `.Menu`, `.MenuItem`, `.MenuButton`, `.MenuBadge`, `.MenuSub`, `.MenuSubItem`, `.MenuSubButton`, `.Separator`, `.Trigger`, `.Rail`, `.MenuChevron`, `.Collapsible`, `.CollapsibleTrigger`, `.CollapsibleContent`.",
+      "description": "Sidebar — responsive navigation panel with expand/collapse support.",
       "importPath": "@cloudflare/kumo",
       "category": "Other",
       "props": {
@@ -5683,7 +5633,7 @@
     "Table": {
       "name": "Table",
       "type": "component",
-      "description": "Table — semantic HTML table with styled rows, cells, and selection support.  Compound component: `Table` (Root), `.Header`, `.Head`, `.Body`, `.Row`, `.Cell`, `.Footer`, `.CheckCell`, `.CheckHead`, `.ResizeHandle`.",
+      "description": "Table — semantic HTML table with styled rows, cells, and selection support.",
       "importPath": "@cloudflare/kumo",
       "category": "Other",
       "props": {
@@ -5812,7 +5762,7 @@
     "TableOfContents": {
       "name": "TableOfContents",
       "type": "component",
-      "description": "TableOfContents — presentational compound component for section navigation.  Purely visual; all interaction logic (scroll tracking, active state management) is left to the consumer.",
+      "description": "TableOfContents — presentational compound component for section navigation.",
       "importPath": "@cloudflare/kumo",
       "category": "Other",
       "props": {
@@ -6163,7 +6113,7 @@
     "Toasty": {
       "name": "Toasty",
       "type": "component",
-      "description": "Toasty — toast notification provider and viewport.  Renders a `Toast.Provider` with a fixed-position viewport in the bottom-right corner. Toasts stack with smooth enter/exit animations, swipe-to-dismiss, and expand-on-hover.  Built on `@base-ui/react/toast`.",
+      "description": "Toasty — toast notification provider and viewport.",
       "importPath": "@cloudflare/kumo",
       "category": "Feedback",
       "props": {
@@ -6216,10 +6166,8 @@
       ],
       "colors": [
         "bg-kumo-base",
-        "bg-kumo-contrast",
         "bg-kumo-control",
         "bg-kumo-danger-tint",
-        "bg-kumo-fill-hover",
         "bg-kumo-info-tint",
         "bg-kumo-success-tint",
         "bg-kumo-warning-tint",
@@ -6265,6 +6213,112 @@
           "hoverBackground": "color-color-2",
           "hoverColor": "text-color-label",
           "borderRadius": 4
+        }
+      }
+    },
+    "Toolbar": {
+      "name": "Toolbar",
+      "type": "component",
+      "description": "Toolbar component",
+      "importPath": "@cloudflare/kumo",
+      "category": "Other",
+      "props": {
+        "disabled": {
+          "type": "boolean",
+          "optional": true
+        },
+        "orientation": {
+          "type": "ToolbarRoot.Orientation",
+          "optional": true,
+          "description": "The orientation of the toolbar."
+        },
+        "loopFocus": {
+          "type": "boolean",
+          "optional": true,
+          "description": "If `true`, using keyboard navigation will wrap focus to the other end of the toolbar once the end is reached."
+        },
+        "id": {
+          "type": "string",
+          "optional": true
+        },
+        "lang": {
+          "type": "string",
+          "optional": true
+        },
+        "title": {
+          "type": "string",
+          "optional": true
+        },
+        "className": {
+          "type": "string | object",
+          "optional": true,
+          "description": "CSS class applied to the element, or a function that returns a class based on the component's state."
+        },
+        "render": {
+          "type": "ReactNode",
+          "optional": true,
+          "description": "Allows you to replace the component's HTML element with a different tag, or compose it with another component.\n\nAccepts a `ReactElement` or a function that returns the element to render."
+        },
+        "children": {
+          "type": "ReactNode",
+          "optional": true,
+          "description": "Toolbar controls rendered as one grouped card."
+        },
+        "size": {
+          "type": "enum",
+          "optional": true,
+          "description": "Locks every toolbar item to this size.",
+          "values": [
+            "xs",
+            "sm",
+            "base",
+            "lg"
+          ],
+          "descriptions": {
+            "xs": "Extra small toolbar for compact UIs",
+            "sm": "Small toolbar for secondary controls",
+            "base": "Default toolbar size",
+            "lg": "Large toolbar for prominent controls"
+          },
+          "classes": {
+            "xs": "text-xs",
+            "sm": "text-xs",
+            "base": "text-base",
+            "lg": "text-base"
+          },
+          "default": "base"
+        }
+      },
+      "examples": [
+        "<Toolbar className=\"w-full max-w-md\">\n      <Toolbar.InputGroup aria-label=\"Search DNS records\" className=\"flex-1\">\n        <InputGroup.Addon>\n          <MagnifyingGlassIcon />\n        </InputGroup.Addon>\n        <InputGroup.Input placeholder=\"Search DNS records\" />\n      </Toolbar.InputGroup>\n      <Toolbar.Button icon={FunnelSimpleIcon} aria-label=\"Filter\" />\n      <Toolbar.Button icon={GearSixIcon} aria-label=\"Settings\" />\n    </Toolbar>",
+        "<div className=\"grid gap-3\">\n      {([\"xs\", \"sm\", \"base\", \"lg\"] as const).map((size) => (\n        <div key={size} className=\"flex items-center gap-3\">\n          <span className=\"w-10 text-sm text-kumo-subtle\">{size}</span>\n          <Toolbar size={size} className=\"w-fit\">\n            <Toolbar.Input aria-label={`${size} search`} placeholder=\"Search...\" />\n            <Toolbar.Button>Apply</Toolbar.Button>\n          </Toolbar>\n        </div>\n      ))}\n    </div>",
+        "<Toolbar className=\"w-full max-w-md\">\n      <Toolbar.Input\n        aria-label=\"Search DNS records\"\n        placeholder=\"Search DNS records\"\n        className=\"flex-1\"\n      />\n      <Toolbar.Button icon={FunnelSimpleIcon} aria-label=\"Filter\" />\n      <Toolbar.Button icon={GearSixIcon} aria-label=\"Settings\" />\n    </Toolbar>",
+        "<Toolbar className=\"w-full max-w-lg\">\n      <Toolbar.InputGroup aria-label=\"Worker subdomain\" className=\"flex-1\">\n        <InputGroup.Input placeholder=\"my-worker\" />\n        <InputGroup.Suffix>.workers.dev</InputGroup.Suffix>\n      </Toolbar.InputGroup>\n      <Toolbar.Button>Visit</Toolbar.Button>\n    </Toolbar>",
+        "<Toolbar>\n      <Toolbar.Button icon={UploadSimpleIcon}>Upload</Toolbar.Button>\n      <Toolbar.Button icon={DownloadSimpleIcon}>Download</Toolbar.Button>\n    </Toolbar>",
+        "<Toolbar className=\"w-full max-w-lg\">\n      <Toolbar.Input aria-label=\"Search records\" className=\"flex-1\" placeholder=\"Search\" />\n      <Toolbar.Button icon={MagnifyingGlassIcon} aria-label=\"Search\" />\n    </Toolbar>"
+      ],
+      "colors": [
+        "bg-kumo-control",
+        "border-kumo-line",
+        "ring-kumo-brand",
+        "ring-kumo-focus",
+        "ring-kumo-line"
+      ],
+      "subComponents": {
+        "Button": {
+          "name": "Button",
+          "description": "Button sub-component",
+          "props": {}
+        },
+        "Input": {
+          "name": "Input",
+          "description": "Input sub-component",
+          "props": {}
+        },
+        "InputGroup": {
+          "name": "InputGroup",
+          "description": "InputGroup sub-component",
+          "props": {}
         }
       }
     },
@@ -6549,7 +6603,7 @@
     "ResourceListPage": {
       "name": "ResourceListPage",
       "type": "block",
-      "description": "ResourceListPage - A layout component for resource list pages  Layouts are page-level components that provide consistent structure for common page patterns like resource lists, dashboards, and settings.",
+      "description": "ResourceListPage - A layout component for resource list pages",
       "importPath": "@cloudflare/kumo",
       "category": "Layout",
       "props": {
@@ -6584,7 +6638,7 @@
       },
       "examples": [
         "<ResourceListPage\n      title=\"Databases\"\n      description=\"Manage your database instances and configurations\"\n      icon={<DatabaseIcon size={32} className=\"text-kumo-subtle\" />}\n    >\n      <Surface className=\"p-6\">\n        <p>Main content area - your resource list would go here</p>\n      </Surface>\n    </ResourceListPage>",
-        "<ResourceListPage\n      title=\"API Keys\"\n      description=\"Create and manage API keys for your applications\"\n      usage={\n        <Surface className=\"p-4\">\n          <h3 className=\"mb-2 font-semibold\">Quick Start</h3>\n          <p className=\"mb-3 text-sm text-kumo-subtle\">\n            Generate an API key to authenticate your requests\n          </p>\n          <Code\n            lang=\"bash\"\n            code='curl -H \"Authorization: Bearer <API_KEY>\" https://api.example.com'\n          />\n        </Surface>\n      }\n    >\n      <Surface className=\"p-6\">\n        <p>API keys list would appear here</p>\n      </Surface>\n    </ResourceListPage>",
+        "<ResourceListPage\n      title=\"API Keys\"\n      description=\"Create and manage API keys for your applications\"\n      usage={\n        <Surface className=\"p-4\">\n          <h3 className=\"mb-2 font-semibold\">Quick Start</h3>\n          <p className=\"mb-3 text-sm text-kumo-subtle\">\n            Generate an API key to authenticate your requests\n          </p>\n          <Code\n            lang=\"bash\"\n            code='curl -H \"Authorization: Bearer YOUR_API_KEY\" https://api.example.com'\n          />\n        </Surface>\n      }\n    >\n      <Surface className=\"p-6\">\n        <p>API keys list would appear here</p>\n      </Surface>\n    </ResourceListPage>",
         "<ResourceListPage\n      title=\"KV Namespaces\"\n      description=\"Store key-value data globally with low-latency access\"\n      icon={<DatabaseIcon size={32} className=\"text-kumo-subtle\" />}\n      usage={\n        <Surface className=\"p-4\">\n          <h3 className=\"mb-2 font-semibold\">Usage Example</h3>\n          <Code\n            lang=\"ts\"\n            code={`// Read from KV\nconst value = await KV.get('key');\n\n// Write to KV\nawait KV.put('key', 'value');`}\n          />\n        </Surface>\n      }\n      additionalContent={\n        <Surface className=\"p-4\">\n          <h3 className=\"mb-2 font-semibold\">Learn More</h3>\n          <p className=\"text-sm text-kumo-subtle\">\n            Check out our documentation to learn more about KV storage.\n          </p>\n        </Surface>\n      }\n    >\n      <div className=\"space-y-4\">\n        <Surface className=\"p-6\">\n          <h4 className=\"mb-2 font-semibold\">production-kv</h4>\n          <p className=\"text-sm text-kumo-subtle\">Created 2 days ago</p>\n        </Surface>\n        <Surface className=\"p-6\">\n          <h4 className=\"mb-2 font-semibold\">staging-kv</h4>\n          <p className=\"text-sm text-kumo-subtle\">Created 1 week ago</p>\n        </Surface>\n      </div>\n    </ResourceListPage>"
       ],
       "colors": [
@@ -6610,6 +6664,7 @@
         "Sidebar",
         "Table",
         "TableOfContents",
+        "Toolbar",
         "DeleteResource"
       ],
       "Display": [
@@ -6705,6 +6760,7 @@
       "Tabs",
       "Text",
       "Toasty",
+      "Toolbar",
       "Tooltip"
     ],
     "byType": {
@@ -6749,6 +6805,7 @@
         "Tabs",
         "Text",
         "Toasty",
+        "Toolbar",
         "Tooltip"
       ],
       "block": [

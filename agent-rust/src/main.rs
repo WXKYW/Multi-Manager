@@ -1,21 +1,30 @@
 mod config;
+use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
+mod cloudflared;
 mod collector;
 mod docker;
 mod file_manager;
 mod protocol;
+mod proxy_runtime;
+mod proxy_traffic;
 mod pty;
+mod remote_desktop;
 
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
-use tokio_tungstenite::{client_async_with_config, tungstenite::protocol::Message, MaybeTlsStream};
+use tokio_tungstenite::{
+    client_async_with_config, connect_async, tungstenite::protocol::Message, MaybeTlsStream,
+};
 
 use crate::collector::{Collector, DockerInfo, State};
 use crate::config::{CliArgs, Config};
@@ -23,13 +32,128 @@ use crate::docker::DockerBridge;
 use crate::file_manager::FileManager;
 use crate::protocol::*;
 use crate::pty::PtySession;
+use crate::remote_desktop::{
+    RemoteDesktopManager, SignalPayload as RemoteDesktopSignalPayload,
+    StartPayload as RemoteDesktopStartPayload, StopPayload as RemoteDesktopStopPayload,
+};
 use clap::Parser;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+fn agent_capabilities() -> Vec<String> {
+    #[allow(unused_mut)]
+    let mut capabilities = vec![
+        "terminal_stream_v2".to_string(),
+        "self_update_v1".to_string(),
+    ];
+    #[cfg(target_os = "linux")]
+    capabilities.push("proxy_runtime_v1".to_string());
+    #[cfg(target_os = "linux")]
+    capabilities.push("proxy_runtime_lifecycle_v2".to_string());
+    #[cfg(target_os = "linux")]
+    capabilities.push("proxy_user_traffic_v1".to_string());
+    #[cfg(target_os = "linux")]
+    capabilities.push("cloudflared_runtime_v1".to_string());
+    #[cfg(target_os = "linux")]
+    capabilities.push("self_uninstall_v1".to_string());
+    #[cfg(target_os = "windows")]
+    let capabilities = {
+        let mut capabilities = capabilities;
+        capabilities.push("remote_desktop_v1".to_string());
+        capabilities.push("remote_desktop_video_v2".to_string());
+        capabilities
+    };
+    capabilities
+}
+
+#[derive(Deserialize, Debug, Clone, Default)]
+struct UpgradePayload {
+    download_url: Option<String>,
+    download_base_url: Option<String>,
+}
+
 fn stamp_state(state: &mut State, sequence: u64, sample_interval_ms: u64) {
     state.sequence = sequence;
     state.sample_interval_ms = sample_interval_ms;
+}
+
+fn docker_summary(info: &DockerInfo) -> DockerInfo {
+    DockerInfo {
+        installed: info.installed,
+        running: info.running,
+        stopped: info.stopped,
+        containers: Vec::new(),
+    }
+}
+
+#[derive(Clone)]
+struct OutboundQueues {
+    high: mpsc::Sender<String>,
+    normal: mpsc::Sender<String>,
+    low: mpsc::Sender<String>,
+    latest_normal: Arc<Mutex<Option<String>>>,
+    dropped_low: Arc<AtomicU64>,
+}
+
+impl OutboundQueues {
+    fn new() -> (
+        Self,
+        mpsc::Receiver<String>,
+        mpsc::Receiver<String>,
+        mpsc::Receiver<String>,
+    ) {
+        let (high_tx, high_rx) = mpsc::channel::<String>(128);
+        let (normal_tx, normal_rx) = mpsc::channel::<String>(128);
+        let (low_tx, low_rx) = mpsc::channel::<String>(256);
+        (
+            Self {
+                high: high_tx,
+                normal: normal_tx,
+                low: low_tx,
+                latest_normal: Arc::new(Mutex::new(None)),
+                dropped_low: Arc::new(AtomicU64::new(0)),
+            },
+            high_rx,
+            normal_rx,
+            low_rx,
+        )
+    }
+
+    async fn send_high(&self, msg: String) -> Result<(), mpsc::error::SendError<String>> {
+        self.high.send(msg).await
+    }
+
+    async fn send_normal(&self, msg: String) -> Result<(), mpsc::error::SendError<String>> {
+        self.normal.send(msg).await
+    }
+
+    fn send_normal_latest(&self, msg: String) {
+        match self.normal.try_send(msg) {
+            Ok(()) => {}
+            Err(mpsc::error::TrySendError::Full(msg)) => {
+                *self.latest_normal.lock().unwrap() = Some(msg);
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {}
+        }
+    }
+
+    fn send_low_lossy(&self, msg: String) {
+        match self.low.try_send(msg) {
+            Ok(()) => {}
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                self.dropped_low.fetch_add(1, Ordering::Relaxed);
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {}
+        }
+    }
+
+    fn is_closed(&self) -> bool {
+        self.high.is_closed() || self.normal.is_closed() || self.low.is_closed()
+    }
+
+    fn take_latest_normal(&self) -> Option<String> {
+        self.latest_normal.lock().unwrap().take()
+    }
 }
 
 #[tokio::main]
@@ -37,7 +161,7 @@ async fn main() {
     let cli = CliArgs::parse();
 
     if let Some(ref action) = cli.action {
-        if let Err(e) = handle_action(action) {
+        if let Err(e) = handle_action(action, &cli) {
             eprintln!("执行操作失败: {}", e);
             std::process::exit(1);
         }
@@ -59,6 +183,7 @@ async fn main() {
             std::process::exit(1);
         }
     };
+    persist_runtime_config(&config);
 
     println!("  Server:   {}", config.server_url);
     println!("  ServerID: {}", config.server_id);
@@ -69,6 +194,10 @@ async fn main() {
     let docker_bridge = Arc::new(tokio::sync::Mutex::new(DockerBridge::new()));
     let pty_sessions = Arc::new(Mutex::new(HashMap::<String, Arc<PtySession>>::new()));
     let task_progress = Arc::new(Mutex::new(HashMap::<String, TaskProgress>::new()));
+    let remote_desktop = Arc::new(RemoteDesktopManager::new());
+
+    #[cfg(unix)]
+    tokio::spawn(proxy_traffic::run(config.clone()));
 
     // Keep dialing loop. A healthy long-lived connection resets the delay; only
     // repeated short failures back off to avoid hammering the control plane.
@@ -84,6 +213,7 @@ async fn main() {
             docker_bridge.clone(),
             pty_sessions.clone(),
             task_progress.clone(),
+            remote_desktop.clone(),
         )
         .await
         {
@@ -150,6 +280,7 @@ async fn run_client(
     docker_bridge: Arc<tokio::sync::Mutex<DockerBridge>>,
     pty_sessions: Arc<Mutex<HashMap<String, Arc<PtySession>>>>,
     task_progress: Arc<Mutex<HashMap<String, TaskProgress>>>,
+    remote_desktop: Arc<RemoteDesktopManager>,
 ) -> Result<(), String> {
     // 直接 WebSocket 连接（无需 polling handshake）
     let mut ws_url = if config.server_url.starts_with("https://") {
@@ -213,17 +344,40 @@ async fn run_client(
 
     let (mut ws_writer, mut ws_reader) = ws_stream.split();
 
-    // Channel for multiplexing outbound messages
-    let (tx, mut rx) = mpsc::channel::<String>(100);
+    // Priority queues for multiplexing outbound messages.
+    let (outbound, mut high_rx, mut normal_rx, mut low_rx) = OutboundQueues::new();
+    let outbound_writer = outbound.clone();
 
     // Task to write outgoing messages to websocket
     let mut write_task = tokio::spawn(async move {
-        while let Some(msg) = rx.recv().await {
+        loop {
+            let msg = if let Ok(msg) = high_rx.try_recv() {
+                msg
+            } else if let Ok(msg) = normal_rx.try_recv() {
+                msg
+            } else if let Some(msg) = outbound_writer.take_latest_normal() {
+                msg
+            } else {
+                tokio::select! {
+                    biased;
+                    msg = high_rx.recv() => match msg {
+                        Some(msg) => msg,
+                        None => return Err("高优先级发送通道已关闭".to_string()),
+                    },
+                    msg = normal_rx.recv() => match msg {
+                        Some(msg) => msg,
+                        None => return Err("普通发送通道已关闭".to_string()),
+                    },
+                    msg = low_rx.recv() => match msg {
+                        Some(msg) => msg,
+                        None => return Err("低优先级发送通道已关闭".to_string()),
+                    },
+                }
+            };
             if let Err(err) = ws_writer.send(Message::Text(msg.into())).await {
                 return Err(format!("WebSocket 写入失败: {}", err));
             }
         }
-        Err("发送通道已关闭".to_string())
     });
 
     // 等待服务器握手和认证
@@ -233,8 +387,8 @@ async fn run_client(
         Arc::new(tokio::sync::Mutex::new(None::<NetworkQualityProbeResponse>));
 
     // Handle WebSocket receiver loop
-    let tx_clone = tx.clone();
-    let auth_ok_tx = tx.clone();
+    let tx_clone = outbound.clone();
+    let auth_ok_tx = outbound.clone();
     let collector_clone = collector.clone();
     let docker_bridge_clone = docker_bridge.clone();
     let pty_sessions_clone = pty_sessions.clone();
@@ -242,6 +396,7 @@ async fn run_client(
     let config_clone = config.clone();
     let network_targets_clone = network_targets.clone();
     let latest_network_quality_clone = latest_network_quality.clone();
+    let remote_desktop_clone = remote_desktop.clone();
 
     let mut read_task = tokio::spawn(async move {
         while let Some(res) = ws_reader.next().await {
@@ -276,7 +431,7 @@ async fn run_client(
             let msg = parse_socketio_message(&text);
             match msg {
                 SocketIOMessage::Ping => {
-                    let _ = tx_clone.send("3".to_string()).await;
+                    let _ = tx_clone.send_high("3".to_string()).await;
                 }
                 SocketIOMessage::Event(event, data) => {
                     if event == EVENT_DASHBOARD_AUTH_OK {
@@ -309,7 +464,7 @@ async fn run_client(
                                 let docker_tx = auth_tx.clone();
                                 tokio::spawn(async move {
                                     let mut docker_timer =
-                                        tokio::time::interval(Duration::from_secs(5));
+                                        tokio::time::interval(Duration::from_secs(60));
                                     docker_timer.set_missed_tick_behavior(
                                         tokio::time::MissedTickBehavior::Delay,
                                     );
@@ -378,16 +533,19 @@ async fn run_client(
                             let host_info =
                                 collector_loop.lock().await.collect_host_info(VERSION).await;
                             let _ = auth_tx
-                                .send(format_event(EVENT_AGENT_HOST_INFO, &host_info))
+                                .send_normal(format_event(EVENT_AGENT_HOST_INFO, &host_info))
                                 .await;
 
                             let mut state = collector_loop.lock().await.collect_state();
                             stamp_state(&mut state, state_sequence, cfg.report_interval);
                             state_sequence = state_sequence.wrapping_add(1);
-                            state.docker = docker_cache.lock().await.clone();
+                            state.docker = {
+                                let docker = docker_cache.lock().await;
+                                docker_summary(&*docker)
+                            };
                             state.network_quality =
                                 latest_network_quality_probe.lock().await.take();
-                            let _ = auth_tx.send(format_event(EVENT_AGENT_STATE, &state)).await;
+                            auth_tx.send_normal_latest(format_event(EVENT_AGENT_STATE, &state));
 
                             let mut state_timer =
                                 tokio::time::interval(Duration::from_millis(cfg.report_interval));
@@ -406,18 +564,22 @@ async fn run_client(
                             loop {
                                 tokio::select! {
                                     _ = state_timer.tick() => {
+                                        if auth_tx.is_closed() {
+                                            break;
+                                        }
                                         let mut state = collector_loop.lock().await.collect_state();
                                         stamp_state(&mut state, state_sequence, cfg.report_interval);
                                         state_sequence = state_sequence.wrapping_add(1);
-                                        state.docker = docker_cache.lock().await.clone();
+                                        state.docker = {
+                                            let docker = docker_cache.lock().await;
+                                            docker_summary(&*docker)
+                                        };
                                         state.network_quality = latest_network_quality_probe.lock().await.take();
-                                        if auth_tx.send(format_event(EVENT_AGENT_STATE, &state)).await.is_err() {
-                                            break;
-                                        }
+                                        auth_tx.send_normal_latest(format_event(EVENT_AGENT_STATE, &state));
                                     }
                                     _ = host_timer.tick() => {
                                         let host_info = collector_loop.lock().await.collect_host_info(VERSION).await;
-                                        if auth_tx.send(format_event(EVENT_AGENT_HOST_INFO, &host_info)).await.is_err() {
+                                        if auth_tx.send_normal(format_event(EVENT_AGENT_HOST_INFO, &host_info)).await.is_err() {
                                             break;
                                         }
                                     }
@@ -443,6 +605,41 @@ async fn run_client(
                             .to_string();
                         eprintln!("[Agent] ❌ 认证失败: {}", reason);
                         std::process::exit(1);
+                    } else if event == EVENT_DASHBOARD_REMOTE_DESKTOP_START {
+                        if let Ok(payload) =
+                            serde_json::from_value::<RemoteDesktopStartPayload>(data)
+                        {
+                            let manager = remote_desktop_clone.clone();
+                            let outbound = tx_clone.clone();
+                            let session_id = payload.session_id.clone();
+                            if let Err(error) = manager.start(payload, outbound.clone()).await {
+                                let event = serde_json::json!({
+                                    "session_id": session_id,
+                                    "state": "error",
+                                    "signal": {"kind": "error", "message": error},
+                                });
+                                let _ = outbound
+                                    .send_normal(format_event(
+                                        EVENT_AGENT_REMOTE_DESKTOP_SIGNAL,
+                                        &event,
+                                    ))
+                                    .await;
+                            }
+                        }
+                    } else if event == EVENT_DASHBOARD_REMOTE_DESKTOP_SIGNAL {
+                        if let Ok(payload) =
+                            serde_json::from_value::<RemoteDesktopSignalPayload>(data)
+                        {
+                            let manager = remote_desktop_clone.clone();
+                            let _ = manager.signal(payload).await;
+                        }
+                    } else if event == EVENT_DASHBOARD_REMOTE_DESKTOP_STOP {
+                        if let Ok(payload) =
+                            serde_json::from_value::<RemoteDesktopStopPayload>(data)
+                        {
+                            let manager = remote_desktop_clone.clone();
+                            manager.stop(&payload.session_id).await;
+                        }
                     } else if event == EVENT_DASHBOARD_TASK {
                         if let Ok(task) = serde_json::from_value::<TaskPayload>(data) {
                             let tx_task = tx_clone.clone();
@@ -877,11 +1074,46 @@ async fn run_client(
                                             }
                                         }
                                     }
+                                    50 => match proxy_runtime::reconcile(&task.data) {
+                                        Ok(out) => {
+                                            successful = true;
+                                            res_data = out;
+                                        }
+                                        Err(err) => {
+                                            res_data = err;
+                                        }
+                                    },
+                                    51 => match cloudflared::reconcile(&task.data) {
+                                        Ok(out) => {
+                                            successful = true;
+                                            res_data = out;
+                                        }
+                                        Err(err) => {
+                                            res_data = err;
+                                        }
+                                    },
+                                    52 => match schedule_self_uninstall() {
+                                        Ok(()) => {
+                                            successful = true;
+                                            res_data = "Agent 卸载任务已在后台安排".to_string();
+                                        }
+                                        Err(err) => {
+                                            res_data = err;
+                                        }
+                                    },
                                     5 => {
                                         // UPGRADE
-                                        handle_upgrade(&task.id, &config_task).await;
-                                        successful = true;
-                                        res_data = "正在后台执行升级...".to_string();
+                                        match handle_upgrade(&task.id, &task.data, &config_task)
+                                            .await
+                                        {
+                                            Ok(message) => {
+                                                successful = true;
+                                                res_data = message;
+                                            }
+                                            Err(err) => {
+                                                res_data = err;
+                                            }
+                                        }
                                     }
                                     12 => {
                                         // PTY_START
@@ -890,6 +1122,7 @@ async fn run_client(
                                             &task.data,
                                             pty_sessions_task,
                                             tx_task.clone(),
+                                            config_task.clone(),
                                         )
                                         .await;
                                         return; // PTY runs in background long connection, does not yield instant TaskResult
@@ -908,7 +1141,10 @@ async fn run_client(
                                     delay,
                                 };
                                 let _ = tx_task
-                                    .send(format_event(EVENT_AGENT_TASK_RESULT, &res_payload))
+                                    .send_normal(format_event(
+                                        EVENT_AGENT_TASK_RESULT,
+                                        &res_payload,
+                                    ))
                                     .await;
                             });
                         }
@@ -940,7 +1176,7 @@ async fn run_client(
                             println!("[Agent] 收到握手包: {}", r);
                         }
                         // 发送 Socket.IO CONNECT
-                        let _ = tx_clone.send("40".to_string()).await;
+                        let _ = tx_clone.send_high("40".to_string()).await;
                         if config_clone.debug {
                             println!("[Agent] 发送 CONNECT: 40");
                         }
@@ -959,10 +1195,13 @@ async fn run_client(
                             key: config_clone.agent_key.clone(),
                             hostname,
                             version: VERSION.to_string(),
+                            platform: std::env::consts::OS.to_string(),
+                            arch: normalized_agent_arch(),
+                            capabilities: agent_capabilities(),
                         };
 
                         let msg = format_event(EVENT_AGENT_CONNECT, &auth);
-                        let _ = tx_clone.send(msg).await;
+                        let _ = tx_clone.send_high(msg).await;
 
                         if config_clone.debug {
                             println!("[Agent] 已发送认证信息");
@@ -1143,72 +1382,510 @@ async fn probe_network_quality_target(
     }
 }
 
-async fn handle_upgrade(_task_id: &str, config: &Config) {
+async fn handle_upgrade(_task_id: &str, data: &str, config: &Config) -> Result<String, String> {
     sleep(Duration::from_secs(1)).await;
-    println!("[Upgrade] 开始执行升级流程...");
+    println!("[Upgrade] 开始安排自更新流程...");
 
-    let install_url = if cfg!(target_os = "windows") {
-        format!(
-            "{}/api/server/agent/install/win/{}/{}",
-            config.server_url, config.server_id, config.agent_key
-        )
-    } else {
-        format!(
-            "{}/api/server/agent/install/linux/{}/{}",
-            config.server_url, config.server_id, config.agent_key
-        )
-    };
+    let payload = serde_json::from_str::<UpgradePayload>(data).unwrap_or_default();
+    let download_url = resolve_upgrade_download_url(config, &payload)?;
+    schedule_self_update(&download_url)?;
+
+    Ok(format!("自更新已在后台安排，下载地址: {}", download_url))
+}
+
+fn resolve_upgrade_download_url(
+    config: &Config,
+    payload: &UpgradePayload,
+) -> Result<String, String> {
+    if let Some(raw) = payload.download_url.as_deref() {
+        return validate_download_url(raw);
+    }
+
+    let base = payload
+        .download_base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(|v| v.trim_end_matches('/').to_string())
+        .unwrap_or_else(|| format!("{}/agent", config.server_url.trim_end_matches('/')));
+
+    validate_download_url(&format!("{}/{}", base, agent_binary_filename()?))
+}
+
+fn validate_download_url(raw: &str) -> Result<String, String> {
+    let value = raw.trim();
+    let parsed = url::Url::parse(value).map_err(|e| format!("升级下载地址无效: {}", e))?;
+    match parsed.scheme() {
+        "http" | "https" => Ok(value.to_string()),
+        other => Err(format!("不支持的升级下载协议: {}", other)),
+    }
+}
+
+fn agent_binary_filename() -> Result<&'static str, String> {
+    if cfg!(target_os = "windows") {
+        return Ok("agent-windows-amd64.exe");
+    }
+    match normalized_agent_arch().as_str() {
+        "amd64" => Ok("agent-linux-amd64"),
+        "arm64" => Ok("agent-linux-arm64"),
+        other => Err(format!("不支持的 Agent 架构: {}", other)),
+    }
+}
+
+fn normalized_agent_arch() -> String {
+    match std::env::consts::ARCH {
+        "x86_64" | "amd64" => "amd64".to_string(),
+        "aarch64" | "arm64" => "arm64".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn schedule_self_update(download_url: &str) -> Result<(), String> {
+    let exe_path =
+        std::env::current_exe().map_err(|e| format!("获取当前 Agent 路径失败: {}", e))?;
+    let timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
 
     if cfg!(target_os = "windows") {
-        let ps_cmd = format!("irm {} | iex", install_url);
-        let _ = Command::new("powershell")
-            .args([
-                "-Command",
-                "Start-Process",
-                "powershell",
-                "-ArgumentList",
-                &format!(
-                    "'-NoProfile -ExecutionPolicy Bypass -Command \"{}\"'",
-                    ps_cmd
-                ),
-                "-WindowStyle",
-                "Hidden",
-            ])
-            .spawn();
+        schedule_self_update_windows(&exe_path, download_url, timestamp_ms)
     } else {
-        let sh_cmd = format!(
-            "curl -fsSL {} > /tmp/agent_install.sh && (sudo systemd-run bash /tmp/agent_install.sh || sudo bash /tmp/agent_install.sh)",
-            install_url
-        );
-        let _ = Command::new("sh")
-            .args([
-                "-c",
-                &format!("nohup sh -c '{}' > /tmp/agent_upgrade.log 2>&1 &", sh_cmd),
-            ])
-            .spawn();
+        schedule_self_update_unix(&exe_path, download_url, timestamp_ms)
     }
+}
+
+#[cfg(target_os = "linux")]
+fn schedule_self_uninstall() -> Result<(), String> {
+    let exe_path =
+        std::env::current_exe().map_err(|e| format!("获取当前 Agent 路径失败: {}", e))?;
+    let install_dir = exe_path
+        .parent()
+        .ok_or_else(|| "无法获取 Agent 安装目录".to_string())?;
+    validate_self_uninstall_dir(install_dir)?;
+
+    let timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let script_path =
+        std::env::temp_dir().join(format!("api-monitor-agent-uninstall-{}.sh", timestamp_ms));
+    let unit_name = format!("api-monitor-agent-uninstall-{}", timestamp_ms);
+    let agent_pid = std::process::id();
+    let script = render_self_uninstall_script(install_dir, &script_path, agent_pid);
+    fs::write(&script_path, script).map_err(|e| format!("写入卸载脚本失败: {}", e))?;
+
+    if let Ok(status) = Command::new("systemd-run")
+        .args([
+            "--unit",
+            &unit_name,
+            "--collect",
+            "--quiet",
+            "sh",
+            &script_path.to_string_lossy(),
+        ])
+        .status()
+    {
+        if status.success() {
+            return Ok(());
+        }
+    }
+
+    Command::new("sh")
+        .args([
+            "-c",
+            &format!(
+                "nohup sh {} >/tmp/api-monitor-agent-uninstall.log 2>&1 &",
+                sh_quote(&script_path.to_string_lossy())
+            ),
+        ])
+        .spawn()
+        .map_err(|e| format!("启动 Agent 卸载进程失败: {}", e))?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn validate_self_uninstall_dir(install_dir: &std::path::Path) -> Result<(), String> {
+    let expected = std::path::Path::new("/opt/api-monitor-agent");
+    if install_dir != expected {
+        return Err(format!(
+            "拒绝清理非标准 Agent 安装目录: {}",
+            install_dir.display()
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn render_self_uninstall_script(
+    install_dir: &std::path::Path,
+    script_path: &std::path::Path,
+    agent_pid: u32,
+) -> String {
+    format!(
+        r#"#!/bin/sh
+set -eu
+LOG="/tmp/api-monitor-agent-uninstall.log"
+exec >>"$LOG" 2>&1
+echo "API Monitor Agent uninstall started at $(date -Is)"
+INSTALL_DIR={install_dir}
+SCRIPT_PATH={script_path}
+AGENT_PID={agent_pid}
+
+if [ "$(id -u)" -eq 0 ]; then
+    SUDO=""
+elif command -v sudo >/dev/null 2>&1; then
+    SUDO="sudo"
+else
+    echo "Error: Agent uninstall needs root or sudo"
+    exit 1
+fi
+
+case "$INSTALL_DIR" in
+    "/opt/api-monitor-agent") ;;
+    *)
+        echo "Error: unsafe Agent install directory"
+        exit 1
+        ;;
+esac
+
+# Give the Agent enough time to return the accepted task result before its
+# control connection is stopped.
+sleep 2
+if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files api-monitor-agent.service >/dev/null 2>&1; then
+    # Defensive cleanup: the control plane normally removes these resources
+    # first, but self-uninstall must never leave a publishable proxy service
+    # running if the orchestration sequence was interrupted.
+    for UNIT_PATH in /etc/systemd/system/api-monitor-proxy@*.service; do
+        [ -e "$UNIT_PATH" ] || continue
+        UNIT_NAME="$(basename "$UNIT_PATH")"
+        $SUDO systemctl disable --now "$UNIT_NAME" || true
+        $SUDO rm -f -- "$UNIT_PATH"
+    done
+    $SUDO systemctl disable --now api-monitor-cloudflared.service 2>/dev/null || true
+    $SUDO rm -f /etc/systemd/system/api-monitor-cloudflared.service
+    $SUDO rm -rf -- /opt/api-monitor/proxy /etc/api-monitor/proxy /var/lib/api-monitor/proxy
+    $SUDO rm -rf -- /opt/api-monitor/cloudflared /etc/api-monitor/cloudflared
+    # Remove only the now-empty managed parent. rmdir deliberately preserves it
+    # if another API Monitor component still owns files below it.
+    $SUDO rmdir /opt/api-monitor 2>/dev/null || true
+
+    # Remove the durable installation before stopping the running process. The
+    # control plane treats the socket disconnect as the uninstall confirmation,
+    # so the unit and install directory must already be gone at that point.
+    $SUDO systemctl disable api-monitor-agent.service || true
+    $SUDO rm -f /etc/systemd/system/api-monitor-agent.service /usr/lib/systemd/system/api-monitor-agent.service
+    $SUDO rm -rf -- "$INSTALL_DIR"
+    $SUDO systemctl stop api-monitor-agent.service || true
+    $SUDO systemctl daemon-reload || true
+    $SUDO systemctl reset-failed api-monitor-agent.service 2>/dev/null || true
+else
+    $SUDO rm -rf -- "$INSTALL_DIR"
+    $SUDO kill "$AGENT_PID" 2>/dev/null || true
+fi
+
+rm -f -- "$SCRIPT_PATH"
+echo "API Monitor Agent uninstall completed at $(date -Is)"
+"#,
+        install_dir = sh_quote(&install_dir.to_string_lossy()),
+        script_path = sh_quote(&script_path.to_string_lossy()),
+        agent_pid = agent_pid,
+    )
+}
+
+#[cfg(not(target_os = "linux"))]
+fn schedule_self_uninstall() -> Result<(), String> {
+    Err("当前平台暂不支持 Agent 自卸载".to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn schedule_self_update_windows(
+    exe_path: &std::path::Path,
+    download_url: &str,
+    timestamp_ms: u128,
+) -> Result<(), String> {
+    let install_dir = exe_path
+        .parent()
+        .ok_or_else(|| "无法获取 Agent 安装目录".to_string())?;
+    let script_path =
+        std::env::temp_dir().join(format!("api-monitor-agent-upgrade-{}.ps1", timestamp_ms));
+    let temp_agent = install_dir.join("api-monitor-agent.exe.download");
+    let launch_vbs = install_dir.join("launch.vbs");
+    let agent_pid = std::process::id();
+
+    let script = format!(
+        r#"$ErrorActionPreference = "Stop"
+$LogPath = Join-Path $env:TEMP "api-monitor-agent-upgrade.log"
+Start-Transcript -Path $LogPath -Append | Out-Null
+Write-Host "API Monitor Agent self-update started at $(Get-Date -Format o)"
+$AgentPath = {agent_path}
+$TempAgentPath = {temp_agent}
+$DownloadUrl = {download_url}
+$LaunchVbs = {launch_vbs}
+$AgentPid = {agent_pid}
+
+try {{
+    if (Test-Path $TempAgentPath) {{
+        Remove-Item -Path $TempAgentPath -Force -ErrorAction SilentlyContinue
+    }}
+    Invoke-WebRequest -Uri $DownloadUrl -OutFile $TempAgentPath -UseBasicParsing
+    & $TempAgentPath --version | Out-Host
+
+    Start-Sleep -Seconds 2
+    $running = Get-Process -Id $AgentPid -ErrorAction SilentlyContinue
+    if ($running) {{
+        Write-Host "Stopping current Agent PID $AgentPid"
+        Stop-Process -Id $AgentPid -Force -ErrorAction SilentlyContinue
+        Wait-Process -Id $AgentPid -Timeout 10 -ErrorAction SilentlyContinue
+    }}
+
+    for ($i = 0; $i -lt 20; $i++) {{
+        if (!(Get-Process -Id $AgentPid -ErrorAction SilentlyContinue)) {{
+            break
+        }}
+        Start-Sleep -Milliseconds 500
+    }}
+
+    if (Get-Process -Id $AgentPid -ErrorAction SilentlyContinue) {{
+        throw "current Agent process did not stop"
+    }}
+
+    if (Test-Path $AgentPath) {{
+        for ($i = 0; $i -lt 20; $i++) {{
+            try {{
+                Remove-Item -Path $AgentPath -Force
+                break
+            }} catch {{
+                if ($i -eq 19) {{ throw }}
+                Start-Sleep -Milliseconds 500
+            }}
+        }}
+    }}
+    Move-Item -Path $TempAgentPath -Destination $AgentPath -Force
+
+    if (Test-Path $LaunchVbs) {{
+        Start-Process -FilePath "wscript.exe" -ArgumentList "`"$LaunchVbs`"" -WindowStyle Hidden
+    }} else {{
+        Start-Process -FilePath $AgentPath -ArgumentList "-b" -WindowStyle Hidden
+    }}
+    Write-Host "API Monitor Agent self-update completed"
+}} catch {{
+    Write-Host "API Monitor Agent self-update failed: $_"
+    exit 1
+}} finally {{
+    Stop-Transcript | Out-Null
+}}
+"#,
+        agent_path = ps_quote(&exe_path.to_string_lossy()),
+        temp_agent = ps_quote(&temp_agent.to_string_lossy()),
+        download_url = ps_quote(download_url),
+        launch_vbs = ps_quote(&launch_vbs.to_string_lossy()),
+        agent_pid = agent_pid,
+    );
+    fs::write(&script_path, script).map_err(|e| format!("写入升级脚本失败: {}", e))?;
+    Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-WindowStyle",
+            "Hidden",
+            "-File",
+            &script_path.to_string_lossy(),
+        ])
+        .spawn()
+        .map_err(|e| format!("启动 Windows 自更新进程失败: {}", e))?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn schedule_self_update_windows(
+    _exe_path: &std::path::Path,
+    _download_url: &str,
+    _timestamp_ms: u128,
+) -> Result<(), String> {
+    Err("Windows self-update is not available on this platform".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn schedule_self_update_unix(
+    exe_path: &std::path::Path,
+    download_url: &str,
+    timestamp_ms: u128,
+) -> Result<(), String> {
+    let script_path =
+        std::env::temp_dir().join(format!("api-monitor-agent-upgrade-{}.sh", timestamp_ms));
+    let unit_name = format!("api-monitor-agent-upgrade-{}", timestamp_ms);
+    let agent_pid = std::process::id();
+    let script = format!(
+        r#"#!/bin/sh
+set -eu
+LOG="/tmp/api-monitor-agent-upgrade.log"
+exec >>"$LOG" 2>&1
+echo "API Monitor Agent self-update started at $(date -Is)"
+AGENT_PATH={agent_path}
+DOWNLOAD_URL={download_url}
+AGENT_PID={agent_pid}
+TMP_AGENT="$(mktemp /tmp/api-monitor-agent.XXXXXX)"
+cleanup() {{
+    rm -f "$TMP_AGENT"
+}}
+trap cleanup EXIT
+
+if command -v curl >/dev/null 2>&1; then
+    curl -fL --retry 3 --connect-timeout 20 -o "$TMP_AGENT" "$DOWNLOAD_URL"
+elif command -v wget >/dev/null 2>&1; then
+    wget -O "$TMP_AGENT" "$DOWNLOAD_URL"
+else
+    echo "Error: curl or wget is required for self-update"
+    exit 1
+fi
+
+chmod +x "$TMP_AGENT"
+"$TMP_AGENT" --version
+
+if [ "$(id -u)" -eq 0 ]; then
+    SUDO=""
+elif command -v sudo >/dev/null 2>&1; then
+    SUDO="sudo"
+else
+    echo "Error: self-update needs root or sudo to replace $AGENT_PATH"
+    exit 1
+fi
+
+sleep 2
+HAS_SYSTEMD_SERVICE=0
+if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files api-monitor-agent.service >/dev/null 2>&1; then
+    HAS_SYSTEMD_SERVICE=1
+    $SUDO systemctl stop api-monitor-agent.service || true
+else
+    kill "$AGENT_PID" 2>/dev/null || true
+fi
+
+sleep 1
+$SUDO install -m 0755 "$TMP_AGENT" "$AGENT_PATH"
+
+if [ "$HAS_SYSTEMD_SERVICE" = "1" ]; then
+    $SUDO systemctl daemon-reload || true
+    $SUDO systemctl start api-monitor-agent.service
+else
+    nohup "$AGENT_PATH" >/tmp/api-monitor-agent.log 2>&1 &
+fi
+
+echo "API Monitor Agent self-update completed at $(date -Is)"
+"#,
+        agent_path = sh_quote(&exe_path.to_string_lossy()),
+        download_url = sh_quote(download_url),
+        agent_pid = agent_pid,
+    );
+    fs::write(&script_path, script).map_err(|e| format!("写入升级脚本失败: {}", e))?;
+
+    if let Ok(status) = Command::new("systemd-run")
+        .args([
+            "--unit",
+            &unit_name,
+            "--collect",
+            "--quiet",
+            "sh",
+            &script_path.to_string_lossy(),
+        ])
+        .status()
+    {
+        if status.success() {
+            return Ok(());
+        }
+    }
+
+    Command::new("sh")
+        .args([
+            "-c",
+            &format!(
+                "nohup sh {} >/tmp/api-monitor-agent-upgrade.log 2>&1 &",
+                sh_quote(&script_path.to_string_lossy())
+            ),
+        ])
+        .spawn()
+        .map_err(|e| format!("启动自更新进程失败: {}", e))?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn schedule_self_update_unix(
+    _exe_path: &std::path::Path,
+    _download_url: &str,
+    _timestamp_ms: u128,
+) -> Result<(), String> {
+    Err("Unix self-update is not available on this platform".to_string())
+}
+
+fn persist_runtime_config(config: &Config) {
+    let Some(path) = agent_config_path() else {
+        return;
+    };
+    let body = serde_json::json!({
+        "serverUrl": config.server_url,
+        "serverId": config.server_id,
+        "agentKey": config.agent_key,
+        "reportInterval": config.report_interval,
+        "debug": config.debug,
+    });
+    if let Ok(json) = serde_json::to_string_pretty(&body) {
+        let _ = fs::write(&path, json);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+        }
+    }
+}
+
+fn agent_config_path() -> Option<PathBuf> {
+    let exe_path = std::env::current_exe().ok()?;
+    let exe_dir = exe_path.parent()?;
+    Some(exe_dir.join("config.json"))
+}
+
+#[cfg(target_os = "windows")]
+fn ps_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn sh_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
 async fn handle_pty_start(
     task_id: &str,
     data: &str,
     pty_sessions: Arc<Mutex<HashMap<String, Arc<PtySession>>>>,
-    tx: mpsc::Sender<String>,
+    tx: OutboundQueues,
+    config: Config,
 ) -> Result<(), String> {
-    #[derive(Deserialize)]
-    struct PtyResizeReq {
-        cols: Option<u32>,
-        rows: Option<u32>,
-        command: Option<String>,
-        args: Option<Vec<String>>,
-    }
-
-    let req: PtyResizeReq = serde_json::from_str(data).unwrap_or(PtyResizeReq {
+    let req: PtyStartPayload = serde_json::from_str(data).unwrap_or(PtyStartPayload {
         cols: None,
         rows: None,
         command: None,
         args: None,
+        terminal_stream_v2: None,
+        stream_id: None,
+        stream_token: None,
     });
+    if req.terminal_stream_v2.unwrap_or(false) {
+        if let (Some(stream_id), Some(stream_token)) =
+            (req.stream_id.clone(), req.stream_token.clone())
+        {
+            return handle_pty_start_v2(
+                task_id,
+                req,
+                pty_sessions,
+                config,
+                stream_id,
+                stream_token,
+            )
+            .await;
+        }
+    }
     let cols = req.cols.unwrap_or(80);
     let rows = req.rows.unwrap_or(24);
 
@@ -1222,7 +1899,7 @@ async fn handle_pty_start(
         Ok(session) => Arc::new(session),
         Err(err) => {
             let _ = tx
-                .send(format_event(
+                .send_high(format_event(
                     EVENT_AGENT_PTY_STATUS,
                     &PtyStatusPayload {
                         id: task_id.to_string(),
@@ -1247,7 +1924,7 @@ async fn handle_pty_start(
         Err(err) => {
             pty_sessions.lock().unwrap().remove(task_id);
             let _ = tx
-                .send(format_event(
+                .send_high(format_event(
                     EVENT_AGENT_PTY_STATUS,
                     &PtyStatusPayload {
                         id: task_id.to_string(),
@@ -1262,7 +1939,7 @@ async fn handle_pty_start(
     let task_id_str = task_id.to_string();
     let pty_sessions_cleanup = pty_sessions.clone();
     let _ = tx
-        .send(format_event(
+        .send_high(format_event(
             EVENT_AGENT_PTY_STATUS,
             &PtyStatusPayload {
                 id: task_id.to_string(),
@@ -1283,7 +1960,8 @@ async fn handle_pty_start(
                         data: text,
                     };
                     let msg = format_event(EVENT_AGENT_PTY_DATA, &payload);
-                    if tx.blocking_send(msg).is_err() {
+                    tx.send_low_lossy(msg);
+                    if tx.is_closed() {
                         break;
                     }
                 }
@@ -1295,6 +1973,180 @@ async fn handle_pty_start(
     });
 
     Ok(())
+}
+
+async fn handle_pty_start_v2(
+    task_id: &str,
+    req: PtyStartPayload,
+    pty_sessions: Arc<Mutex<HashMap<String, Arc<PtySession>>>>,
+    config: Config,
+    stream_id: String,
+    stream_token: String,
+) -> Result<(), String> {
+    let cols = req.cols.unwrap_or(80);
+    let rows = req.rows.unwrap_or(24);
+    let session_result = if let Some(command) = req.command {
+        PtySession::new_with_command(cols, rows, command, req.args.unwrap_or_default())
+    } else {
+        PtySession::new(cols, rows)
+    };
+    let session = Arc::new(session_result?);
+    pty_sessions
+        .lock()
+        .unwrap()
+        .insert(task_id.to_string(), session.clone());
+
+    let url = terminal_stream_url(&config, &stream_id, &stream_token)?;
+    let connect_result = tokio::time::timeout(Duration::from_secs(20), connect_async(url)).await;
+    let (ws_stream, _) = match connect_result {
+        Ok(Ok(pair)) => pair,
+        Ok(Err(err)) => {
+            pty_sessions.lock().unwrap().remove(task_id);
+            return Err(format!("终端独立通道连接失败: {}", err));
+        }
+        Err(_) => {
+            pty_sessions.lock().unwrap().remove(task_id);
+            return Err("终端独立通道连接超时".to_string());
+        }
+    };
+    let (mut ws_writer, mut ws_reader) = ws_stream.split();
+
+    send_terminal_stream_message(
+        &mut ws_writer,
+        TerminalStreamMessage {
+            message_type: "ready".to_string(),
+            data: None,
+            cols: None,
+            rows: None,
+        },
+    )
+    .await?;
+
+    let mut reader = match session.try_clone_reader() {
+        Ok(reader) => reader,
+        Err(err) => {
+            let _ = send_terminal_stream_message(
+                &mut ws_writer,
+                TerminalStreamMessage {
+                    message_type: "error".to_string(),
+                    data: Some(err.clone()),
+                    cols: None,
+                    rows: None,
+                },
+            )
+            .await;
+            pty_sessions.lock().unwrap().remove(task_id);
+            return Err(err);
+        }
+    };
+
+    let (pty_tx, mut pty_rx) = mpsc::channel::<String>(256);
+    let task_id_cleanup = task_id.to_string();
+    let pty_sessions_cleanup = pty_sessions.clone();
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 8192];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(n) if n > 0 => {
+                    let text = String::from_utf8_lossy(&buf[..n]).to_string();
+                    match pty_tx.try_send(text) {
+                        Ok(()) => {}
+                        Err(mpsc::error::TrySendError::Full(_)) => {}
+                        Err(mpsc::error::TrySendError::Closed(_)) => break,
+                    }
+                }
+                _ => break,
+            }
+        }
+        pty_sessions_cleanup
+            .lock()
+            .unwrap()
+            .remove(&task_id_cleanup);
+    });
+
+    loop {
+        tokio::select! {
+            Some(data) = pty_rx.recv() => {
+                if send_terminal_stream_message(
+                    &mut ws_writer,
+                    TerminalStreamMessage {
+                        message_type: "data".to_string(),
+                        data: Some(data),
+                        cols: None,
+                        rows: None,
+                    },
+                ).await.is_err() {
+                    break;
+                }
+            }
+            inbound = ws_reader.next() => {
+                match inbound {
+                    Some(Ok(Message::Text(text))) => {
+                        if let Ok(msg) = serde_json::from_str::<TerminalStreamMessage>(&text) {
+                            match msg.message_type.as_str() {
+                                "input" => {
+                                    if let Some(data) = msg.data {
+                                        let _ = session.write(data.as_bytes());
+                                    }
+                                }
+                                "resize" => {
+                                    if let (Some(cols), Some(rows)) = (msg.cols, msg.rows) {
+                                        let _ = session.resize(cols, rows);
+                                    }
+                                }
+                                "stop" => break,
+                                _ => {}
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Err(_)) => break,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    pty_sessions.lock().unwrap().remove(task_id);
+    Ok(())
+}
+
+async fn send_terminal_stream_message<W>(
+    writer: &mut W,
+    msg: TerminalStreamMessage,
+) -> Result<(), String>
+where
+    W: futures_util::Sink<Message> + Unpin,
+    W::Error: std::fmt::Display,
+{
+    let json = serde_json::to_string(&msg).map_err(|e| e.to_string())?;
+    writer
+        .send(Message::Text(json.into()))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+fn terminal_stream_url(
+    config: &Config,
+    stream_id: &str,
+    stream_token: &str,
+) -> Result<String, String> {
+    let mut url =
+        url::Url::parse(&config.server_url).map_err(|e| format!("服务端 URL 无效: {}", e))?;
+    let scheme = match url.scheme() {
+        "https" => "wss",
+        "http" => "ws",
+        other => return Err(format!("不支持的服务端 URL 协议: {}", other)),
+    };
+    url.set_scheme(scheme)
+        .map_err(|_| "设置终端 WebSocket 协议失败".to_string())?;
+    url.set_path("/ws/agent-terminal");
+    url.query_pairs_mut()
+        .clear()
+        .append_pair("server_id", &config.server_id)
+        .append_pair("stream_id", stream_id)
+        .append_pair("token", stream_token);
+    Ok(url.to_string())
 }
 
 async fn get_task_progress(
@@ -1321,7 +2173,7 @@ async fn handle_docker_container_update(
     task_id: String,
     data: String,
     task_progress: Arc<Mutex<HashMap<String, TaskProgress>>>,
-    tx: mpsc::Sender<String>,
+    tx: OutboundQueues,
     docker_bridge: Arc<tokio::sync::Mutex<DockerBridge>>,
 ) {
     #[derive(Deserialize)]
@@ -1491,7 +2343,7 @@ async fn handle_docker_container_update(
                 delay: 0,
             };
             let msg = format_event(EVENT_AGENT_TASK_RESULT, &res_payload);
-            let _ = tx.send(msg).await;
+            let _ = tx.send_normal(msg).await;
         }
         Err(e) => {
             let mut prog = TaskProgress {
@@ -1512,14 +2364,14 @@ async fn update_progress_state(
     task_id: &str,
     progress: TaskProgress,
     task_progress: Arc<Mutex<HashMap<String, TaskProgress>>>,
-    tx: mpsc::Sender<String>,
+    tx: OutboundQueues,
 ) {
     {
         let mut map = task_progress.lock().unwrap();
         map.insert(task_id.to_string(), progress.clone());
     }
     let msg = format_event(EVENT_AGENT_TASK_PROGRESS, &progress);
-    let _ = tx.send(msg).await;
+    let _ = tx.send_normal(msg).await;
 }
 
 async fn finish_with_error(
@@ -1527,7 +2379,7 @@ async fn finish_with_error(
     progress: &mut TaskProgress,
     err_msg: &str,
     task_progress: Arc<Mutex<HashMap<String, TaskProgress>>>,
-    tx: mpsc::Sender<String>,
+    tx: OutboundQueues,
 ) {
     progress.message = err_msg.to_string();
     progress.is_done = true;
@@ -1537,7 +2389,7 @@ async fn finish_with_error(
     send_task_error(task_id, err_msg, tx).await;
 }
 
-async fn send_task_error(task_id: &str, err_msg: &str, tx: mpsc::Sender<String>) {
+async fn send_task_error(task_id: &str, err_msg: &str, tx: OutboundQueues) {
     let res_payload = TaskResultPayload {
         id: task_id.to_string(),
         task_type: 24,
@@ -1546,10 +2398,10 @@ async fn send_task_error(task_id: &str, err_msg: &str, tx: mpsc::Sender<String>)
         delay: 0,
     };
     let msg = format_event(EVENT_AGENT_TASK_RESULT, &res_payload);
-    let _ = tx.send(msg).await;
+    let _ = tx.send_normal(msg).await;
 }
 
-fn handle_action(action: &str) -> Result<(), String> {
+fn handle_action(action: &str, cli: &CliArgs) -> Result<(), String> {
     if action == "sample" || action == "probe" {
         let mut collector = Collector::new();
         let state = collector.collect_state();
@@ -1560,6 +2412,22 @@ fn handle_action(action: &str) -> Result<(), String> {
     }
 
     match action {
+        "upgrade" | "self-update" => {
+            let config = Config::load(cli)?;
+            let download_url = resolve_upgrade_download_url(&config, &UpgradePayload::default())?;
+            schedule_self_update(&download_url)?;
+            println!("✅ Agent 自更新已在后台安排");
+            println!("   下载地址: {}", download_url);
+            println!(
+                "   日志: {}",
+                if cfg!(target_os = "windows") {
+                    "%TEMP%\\api-monitor-agent-upgrade.log"
+                } else {
+                    "/tmp/api-monitor-agent-upgrade.log"
+                }
+            );
+            Ok(())
+        }
         "install" => {
             #[cfg(target_os = "windows")]
             {
@@ -1684,5 +2552,58 @@ mod tests {
 
         assert!(addrs[0].is_ipv4());
         assert!(addrs[1].is_ipv6());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn self_uninstall_removes_installation_before_stopping_agent() {
+        let script = render_self_uninstall_script(
+            std::path::Path::new("/opt/api-monitor-agent"),
+            std::path::Path::new("/tmp/api-monitor-agent-uninstall-test.sh"),
+            1234,
+        );
+
+        let disable = script
+            .find("systemctl disable api-monitor-agent.service")
+            .expect("service must be disabled");
+        let remove_unit = script
+            .find("rm -f /etc/systemd/system/api-monitor-agent.service")
+            .expect("systemd unit must be removed");
+        let remove_install = script
+            .find("rm -rf -- \"$INSTALL_DIR\"")
+            .expect("install directory must be removed");
+        let safety_guard = script
+            .find("case \"$INSTALL_DIR\" in")
+            .expect("install directory must be guarded");
+        let stop = script
+            .find("systemctl stop api-monitor-agent.service")
+            .expect("service must be stopped");
+        let remove_proxy = script
+            .find("rm -rf -- /opt/api-monitor/proxy")
+            .expect("managed proxy resources must be removed");
+        let remove_empty_parent = script
+            .find("rmdir /opt/api-monitor")
+            .expect("empty managed parent must be removed");
+
+        assert!(safety_guard < remove_install);
+        assert!(safety_guard < remove_proxy);
+        assert!(remove_proxy < remove_empty_parent);
+        assert!(remove_proxy < stop);
+        assert!(disable < remove_unit);
+        assert!(remove_unit < remove_install);
+        assert!(remove_install < stop);
+        assert!(script.contains("\"/opt/api-monitor-agent\""));
+        assert!(script.contains("rm -f -- \"$SCRIPT_PATH\""));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn self_uninstall_only_accepts_managed_install_directory() {
+        assert!(
+            validate_self_uninstall_dir(std::path::Path::new("/opt/api-monitor-agent")).is_ok()
+        );
+        for unsafe_dir in ["/", "/opt", "/usr/bin", "/tmp/api-monitor-agent"] {
+            assert!(validate_self_uninstall_dir(std::path::Path::new(unsafe_dir)).is_err());
+        }
     }
 }

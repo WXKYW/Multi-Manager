@@ -75,9 +75,13 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case len(parts) == 6 && parts[0] == "accounts" && parts[2] == "r2" && parts[3] == "buckets" && parts[5] == "objects":
 		s.r2Objects(w, r, parts[1], parts[4])
 	case len(parts) == 7 && parts[0] == "accounts" && parts[2] == "r2" && parts[3] == "buckets" && parts[5] == "objects":
-		s.deleteR2Object(w, r, parts[1], parts[4], parts[6])
+		s.r2ObjectMutation(w, r, parts[1], parts[4], parts[6])
 	case len(parts) == 8 && parts[0] == "accounts" && parts[2] == "r2" && parts[3] == "buckets" && parts[5] == "objects" && parts[7] == "download-info":
 		s.r2ObjectDownloadInfo(w, r, parts[1], parts[4], parts[6])
+	case len(parts) == 8 && parts[0] == "accounts" && parts[2] == "r2" && parts[3] == "buckets" && parts[5] == "objects" && parts[7] == "download":
+		s.r2ObjectDownload(w, r, parts[1], parts[4], parts[6])
+	case len(parts) == 8 && parts[0] == "accounts" && parts[2] == "r2" && parts[3] == "buckets" && parts[5] == "objects" && parts[7] == "preview":
+		s.r2ObjectPreview(w, r, parts[1], parts[4], parts[6])
 
 	case len(parts) == 3 && parts[0] == "accounts" && parts[2] == "tunnels":
 		s.tunnels(w, r, parts[1])
@@ -188,6 +192,8 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			name TEXT NOT NULL,
 			api_token TEXT NOT NULL,
 			email TEXT,
+			user_email TEXT,
+			cf_account_id TEXT,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			last_used DATETIME,
 			is_active INTEGER DEFAULT 1
@@ -229,7 +235,38 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("ensure cloudflare schema: %w", err)
 		}
 	}
+	if err := ensureColumn(ctx, db, "cf_accounts", "cf_account_id", "TEXT"); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "cf_accounts", "user_email", "TEXT"); err != nil {
+		return err
+	}
 	return nil
+}
+
+func ensureColumn(ctx context.Context, db *sql.DB, table, name, definition string) error {
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var columnName, columnType string
+		var notNull, pk int
+		var defaultValue interface{}
+		if err := rows.Scan(&cid, &columnName, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if columnName == name {
+			return rows.Err()
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.ExecContext(ctx, `ALTER TABLE `+table+` ADD COLUMN `+name+` `+definition)
+	return err
 }
 
 func (s *Service) accounts(w http.ResponseWriter, r *http.Request) {
@@ -260,15 +297,24 @@ func (s *Service) accounts(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimSpace(stringValue(payload["name"], ""))
 		apiToken := strings.TrimSpace(stringValue(payload["apiToken"], stringValue(payload["api_token"], "")))
 		email := strings.TrimSpace(stringValue(payload["email"], ""))
+		userEmail := strings.TrimSpace(stringValue(payload["userEmail"], stringValue(payload["user_email"], "")))
+		cfAccountID := strings.TrimSpace(stringValue(payload["cfAccountId"], stringValue(payload["cf_account_id"], "")))
 		if name == "" || apiToken == "" {
 			response.JSON(w, http.StatusBadRequest, map[string]interface{}{"error": "名称和 API Token 必填"})
 			return
 		}
+		if err := validateCloudflareCredential(apiToken, cfAccountID); err != nil {
+			response.JSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
+			return
+		}
 		if !boolValue(payload["skipVerify"]) {
-			verification := s.verifyToken(r.Context(), apiToken, email)
+			verification := s.verifyToken(r.Context(), apiToken, email, cfAccountID)
 			if !verification.Valid {
 				response.JSON(w, http.StatusBadRequest, map[string]interface{}{"error": "Token 无效: " + verification.Error})
 				return
+			}
+			if verification.Email != "" {
+				userEmail = verification.Email
 			}
 		}
 		encrypted, err := secure.SecureEncrypt(apiToken)
@@ -286,11 +332,13 @@ func (s *Service) accounts(w http.ResponseWriter, r *http.Request) {
 		defer db.Close()
 		if _, err := db.ExecContext(
 			r.Context(),
-			`INSERT INTO cf_accounts (id, name, api_token, email, created_at, is_active) VALUES (?, ?, ?, ?, ?, 1)`,
+			`INSERT INTO cf_accounts (id, name, api_token, email, user_email, cf_account_id, created_at, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
 			id,
 			name,
 			encrypted,
 			nullableString(email),
+			nullableString(userEmail),
+			nullableString(cfAccountID),
 			createdAt,
 		); err != nil {
 			response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
@@ -299,10 +347,12 @@ func (s *Service) accounts(w http.ResponseWriter, r *http.Request) {
 		response.JSON(w, http.StatusOK, map[string]interface{}{
 			"success": true,
 			"account": map[string]interface{}{
-				"id":        id,
-				"name":      name,
-				"email":     email,
-				"createdAt": createdAt,
+				"id":          id,
+				"name":        name,
+				"email":       email,
+				"userEmail":   userEmail,
+				"cfAccountId": cfAccountID,
+				"createdAt":   createdAt,
 			},
 		})
 	default:
@@ -341,9 +391,11 @@ func (s *Service) exportedAccounts(ctx context.Context, includeID bool) ([]map[s
 	exported := make([]map[string]interface{}, 0, len(accounts))
 	for _, account := range accounts {
 		item := map[string]interface{}{
-			"name":     account["name"],
-			"email":    account["email"],
-			"apiToken": secure.SecureDecrypt(stringValue(account["api_token"], "")),
+			"name":        account["name"],
+			"email":       account["email"],
+			"userEmail":   stringValue(account["user_email"], ""),
+			"cfAccountId": stringValue(account["cf_account_id"], ""),
+			"apiToken":    secure.SecureDecrypt(stringValue(account["api_token"], "")),
 		}
 		if includeID {
 			item["id"] = account["id"]
@@ -389,9 +441,16 @@ func (s *Service) importAccounts(w http.ResponseWriter, r *http.Request) {
 		account := objectValue(item)
 		name := strings.TrimSpace(stringValue(account["name"], ""))
 		apiToken := strings.TrimSpace(stringValue(account["apiToken"], stringValue(account["api_token"], "")))
+		userEmail := strings.TrimSpace(stringValue(account["userEmail"], stringValue(account["user_email"], "")))
+		cfAccountID := strings.TrimSpace(stringValue(account["cfAccountId"], stringValue(account["cf_account_id"], "")))
 		if name == "" || apiToken == "" {
 			_ = tx.Rollback()
 			response.JSON(w, http.StatusBadRequest, map[string]interface{}{"error": "账号名称和 API Token 必填"})
+			return
+		}
+		if err := validateCloudflareCredential(apiToken, cfAccountID); err != nil {
+			_ = tx.Rollback()
+			response.JSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
 			return
 		}
 		encrypted, err := secure.SecureEncrypt(secure.SecureDecrypt(apiToken))
@@ -408,11 +467,13 @@ func (s *Service) importAccounts(w http.ResponseWriter, r *http.Request) {
 		lastUsed := stringValue(account["lastUsed"], stringValue(account["last_used"], ""))
 		if _, err := tx.ExecContext(
 			r.Context(),
-			`INSERT INTO cf_accounts (id, name, api_token, email, created_at, last_used, is_active) VALUES (?, ?, ?, ?, ?, ?, 1)`,
+			`INSERT INTO cf_accounts (id, name, api_token, email, user_email, cf_account_id, created_at, last_used, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
 			id,
 			name,
 			encrypted,
 			nullableString(strings.TrimSpace(stringValue(account["email"], ""))),
+			nullableString(userEmail),
+			nullableString(cfAccountID),
 			createdAt,
 			nullableString(lastUsed),
 		); err != nil {
@@ -759,14 +820,23 @@ func (s *Service) accountMutation(w http.ResponseWriter, r *http.Request, id str
 		}
 		name := strings.TrimSpace(stringValue(payload["name"], stringValue(existing["name"], "")))
 		email := strings.TrimSpace(stringValue(payload["email"], stringValue(existing["email"], "")))
+		userEmail := strings.TrimSpace(stringValue(payload["userEmail"], stringValue(payload["user_email"], stringValue(existing["user_email"], ""))))
+		cfAccountID := strings.TrimSpace(stringValue(payload["cfAccountId"], stringValue(payload["cf_account_id"], stringValue(existing["cf_account_id"], ""))))
 		apiToken := strings.TrimSpace(stringValue(payload["apiToken"], stringValue(payload["api_token"], "")))
 		if apiToken == "" || strings.Contains(apiToken, "****") {
 			apiToken = secure.SecureDecrypt(stringValue(existing["api_token"], ""))
 		} else {
-			verification := s.verifyToken(r.Context(), apiToken, email)
+			if err := validateCloudflareCredential(apiToken, cfAccountID); err != nil {
+				response.JSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
+				return
+			}
+			verification := s.verifyToken(r.Context(), apiToken, email, cfAccountID)
 			if !verification.Valid {
 				response.JSON(w, http.StatusBadRequest, map[string]interface{}{"error": "Token 无效: " + verification.Error})
 				return
+			}
+			if verification.Email != "" {
+				userEmail = verification.Email
 			}
 		}
 		encrypted, err := secure.SecureEncrypt(apiToken)
@@ -780,10 +850,12 @@ func (s *Service) accountMutation(w http.ResponseWriter, r *http.Request, id str
 		}
 		if _, err := db.ExecContext(
 			r.Context(),
-			`UPDATE cf_accounts SET name = ?, api_token = ?, email = ? WHERE id = ?`,
+			`UPDATE cf_accounts SET name = ?, api_token = ?, email = ?, user_email = ?, cf_account_id = ? WHERE id = ?`,
 			name,
 			encrypted,
 			nullableString(email),
+			nullableString(userEmail),
+			nullableString(cfAccountID),
 			id,
 		); err != nil {
 			response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
@@ -800,7 +872,7 @@ func (s *Service) verifyStoredAccount(w http.ResponseWriter, r *http.Request, id
 	if !ok {
 		return
 	}
-	verification := s.verifyToken(r.Context(), secure.SecureDecrypt(stringValue(account["api_token"], "")), stringValue(account["email"], ""))
+	verification := s.verifyToken(r.Context(), secure.SecureDecrypt(stringValue(account["api_token"], "")), stringValue(account["email"], ""), stringValue(account["cf_account_id"], ""))
 	if verification.Valid {
 		response.JSON(w, http.StatusOK, map[string]interface{}{"valid": true, "status": verification.Status, "expiresOn": verification.ExpiresOn})
 		return
@@ -838,7 +910,7 @@ func (s *Service) allZones(w http.ResponseWriter, r *http.Request) {
 		if token == "" {
 			continue
 		}
-		zones, _, err := s.listZones(r.Context(), authHeaders(token, stringValue(account["email"], "")), nil)
+		zones, _, err := s.listZones(r.Context(), cloudflareAuthForAccount(token, account), nil)
 		if err != nil {
 			continue
 		}
@@ -1727,25 +1799,52 @@ type verificationResult struct {
 	Valid     bool
 	Status    string
 	ExpiresOn interface{}
+	Email     string
 	Error     string
 }
 
-func (s *Service) verifyToken(ctx context.Context, apiToken, email string) verificationResult {
+func (s *Service) verifyToken(ctx context.Context, apiToken, email, cfAccountID string) verificationResult {
 	path := "/user/tokens/verify"
 	auth := authHeaders(apiToken, email)
 	if email != "" {
 		path = "/user"
 	}
+	if cfAccountID != "" && email == "" {
+		path = "/accounts/" + url.PathEscape(cfAccountID) + "/tokens/verify"
+	}
 	payload, err := s.cfRequest(ctx, http.MethodGet, path, auth, nil)
 	if err != nil {
-		return verificationResult{Valid: false, Error: err.Error()}
+		if cfAccountID != "" || email != "" {
+			return verificationResult{Valid: false, Error: err.Error()}
+		}
+		accountID, accountErr := s.cloudflareAccountID(ctx, auth)
+		if accountErr != nil {
+			return verificationResult{Valid: false, Error: err.Error()}
+		}
+		payload, err = s.cfRequest(ctx, http.MethodGet, "/accounts/"+url.PathEscape(accountID)+"/tokens/verify", auth, nil)
+		if err != nil {
+			return verificationResult{Valid: false, Error: err.Error()}
+		}
 	}
 	result := objectValue(payload["result"])
+	userEmail := stringValue(result["email"], "")
+	if userEmail == "" && email == "" && cfAccountID == "" {
+		userEmail = s.cloudflareUserEmail(ctx, auth)
+	}
 	return verificationResult{
 		Valid:     true,
 		Status:    stringValue(result["status"], "active"),
 		ExpiresOn: result["expires_on"],
+		Email:     userEmail,
 	}
+}
+
+func (s *Service) cloudflareUserEmail(ctx context.Context, auth map[string]string) string {
+	payload, err := s.cfRequest(ctx, http.MethodGet, "/user", auth, nil)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(stringValue(objectValue(payload["result"])["email"], ""))
 }
 
 func (s *Service) authForAccount(w http.ResponseWriter, r *http.Request, id string) (map[string]string, bool) {
@@ -1759,7 +1858,15 @@ func (s *Service) authForAccount(w http.ResponseWriter, r *http.Request, id stri
 		return nil, false
 	}
 	_ = s.touchAccount(r.Context(), id)
-	return authHeaders(token, stringValue(account["email"], "")), true
+	return cloudflareAuthForAccount(token, account), true
+}
+
+func cloudflareAuthForAccount(token string, account map[string]interface{}) map[string]string {
+	auth := authHeaders(token, stringValue(account["email"], ""))
+	if id := strings.TrimSpace(stringValue(account["cf_account_id"], "")); id != "" {
+		auth["__cf_account_id"] = id
+	}
+	return auth
 }
 
 func (s *Service) touchAccount(ctx context.Context, id string) error {
@@ -1943,6 +2050,9 @@ func (s *Service) addWorkerDomain(ctx context.Context, auth map[string]string, a
 }
 
 func (s *Service) cloudflareAccountID(ctx context.Context, auth map[string]string) (string, error) {
+	if id := strings.TrimSpace(auth["__cf_account_id"]); id != "" {
+		return id, nil
+	}
 	payload, err := s.cfRequest(ctx, http.MethodGet, "/accounts?page=1&per_page=1", auth, nil)
 	if err != nil {
 		return "", err
@@ -1974,6 +2084,9 @@ func (s *Service) cfRequest(ctx context.Context, method, path string, headers ma
 	}
 	req.Header.Set("Accept", "application/json")
 	for key, value := range headers {
+		if strings.HasPrefix(key, "__") {
+			continue
+		}
 		req.Header.Set(key, cleanHeader(value))
 	}
 	if body != nil {
@@ -2012,6 +2125,9 @@ func (s *Service) cfRawRequest(ctx context.Context, method, path string, headers
 		req.Header.Set("Content-Type", contentType)
 	}
 	for key, value := range headers {
+		if strings.HasPrefix(key, "__") {
+			continue
+		}
 		req.Header.Set(key, cleanHeader(value))
 	}
 	res, err := s.client.Do(req)
@@ -2073,7 +2189,7 @@ func (s *Service) accountForRequest(w http.ResponseWriter, r *http.Request, id s
 }
 
 func loadAccounts(ctx context.Context, db *sql.DB) ([]map[string]interface{}, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, name, api_token, email, created_at, last_used, is_active FROM cf_accounts WHERE COALESCE(is_active, 1) = 1 ORDER BY created_at DESC`)
+	rows, err := db.QueryContext(ctx, `SELECT id, name, api_token, email, user_email, cf_account_id, created_at, last_used, is_active FROM cf_accounts WHERE COALESCE(is_active, 1) = 1 ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -2090,7 +2206,7 @@ func loadAccounts(ctx context.Context, db *sql.DB) ([]map[string]interface{}, er
 }
 
 func loadAccount(ctx context.Context, db *sql.DB, id string) (map[string]interface{}, error) {
-	row := db.QueryRowContext(ctx, `SELECT id, name, api_token, email, created_at, last_used, is_active FROM cf_accounts WHERE id = ?`, id)
+	row := db.QueryRowContext(ctx, `SELECT id, name, api_token, email, user_email, cf_account_id, created_at, last_used, is_active FROM cf_accounts WHERE id = ?`, id)
 	return scanAccount(row)
 }
 
@@ -2142,30 +2258,34 @@ type accountScanner interface {
 
 func scanAccount(scanner accountScanner) (map[string]interface{}, error) {
 	var id, name, apiToken string
-	var email, createdAt, lastUsed sql.NullString
+	var email, userEmail, cfAccountID, createdAt, lastUsed sql.NullString
 	var isActive sql.NullInt64
-	if err := scanner.Scan(&id, &name, &apiToken, &email, &createdAt, &lastUsed, &isActive); err != nil {
+	if err := scanner.Scan(&id, &name, &apiToken, &email, &userEmail, &cfAccountID, &createdAt, &lastUsed, &isActive); err != nil {
 		return nil, err
 	}
 	return map[string]interface{}{
-		"id":         id,
-		"name":       name,
-		"api_token":  apiToken,
-		"email":      email.String,
-		"created_at": createdAt.String,
-		"last_used":  lastUsed.String,
-		"is_active":  isActive.Int64,
+		"id":            id,
+		"name":          name,
+		"api_token":     apiToken,
+		"email":         email.String,
+		"user_email":    userEmail.String,
+		"cf_account_id": cfAccountID.String,
+		"created_at":    createdAt.String,
+		"last_used":     lastUsed.String,
+		"is_active":     isActive.Int64,
 	}, nil
 }
 
 func safeAccount(account map[string]interface{}) map[string]interface{} {
 	return map[string]interface{}{
-		"id":        account["id"],
-		"name":      account["name"],
-		"email":     account["email"],
-		"createdAt": account["created_at"],
-		"lastUsed":  account["last_used"],
-		"hasToken":  stringValue(account["api_token"], "") != "",
+		"id":          account["id"],
+		"name":        account["name"],
+		"email":       account["email"],
+		"userEmail":   account["user_email"],
+		"cfAccountId": account["cf_account_id"],
+		"createdAt":   account["created_at"],
+		"lastUsed":    account["last_used"],
+		"hasToken":    stringValue(account["api_token"], "") != "",
 	}
 }
 
@@ -2481,6 +2601,16 @@ func authHeaders(apiToken, email string) map[string]string {
 	return map[string]string{"Authorization": "Bearer " + apiToken}
 }
 
+func validateCloudflareCredential(apiToken, cfAccountID string) error {
+	if strings.HasPrefix(strings.TrimSpace(apiToken), "v1.0-") {
+		return errors.New("Origin CA Key / Service Key 已被 Cloudflare 弃用，请改用 API Token；创建 Origin CA 证书需授予 Zone - SSL and Certificates - Edit 权限")
+	}
+	if strings.HasPrefix(strings.TrimSpace(apiToken), "cfat_") && strings.TrimSpace(cfAccountID) == "" {
+		return errors.New("账户 API 令牌需要填写 Cloudflare Account ID")
+	}
+	return nil
+}
+
 func cleanHeader(value string) string {
 	cleaned := strings.Map(func(r rune) rune {
 		if r < 0x20 || r > 0x7e {
@@ -2739,11 +2869,18 @@ func (s *Service) r2Objects(w http.ResponseWriter, r *http.Request, accountID, b
 	})
 }
 
-func (s *Service) deleteR2Object(w http.ResponseWriter, r *http.Request, accountID, bucketName, objectKey string) {
-	if r.Method != http.MethodDelete {
+func (s *Service) r2ObjectMutation(w http.ResponseWriter, r *http.Request, accountID, bucketName, objectKey string) {
+	switch r.Method {
+	case http.MethodDelete:
+		s.deleteR2Object(w, r, accountID, bucketName, objectKey)
+	case http.MethodPut:
+		s.uploadR2Object(w, r, accountID, bucketName, objectKey)
+	default:
 		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
 	}
+}
+
+func (s *Service) deleteR2Object(w http.ResponseWriter, r *http.Request, accountID, bucketName, objectKey string) {
 	auth, ok := s.authForAccount(w, r, accountID)
 	if !ok {
 		return
@@ -2760,6 +2897,37 @@ func (s *Service) deleteR2Object(w http.ResponseWriter, r *http.Request, account
 		return
 	}
 	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true})
+}
+
+func (s *Service) uploadR2Object(w http.ResponseWriter, r *http.Request, accountID, bucketName, objectKey string) {
+	if strings.Trim(objectKey, "/") == "" {
+		response.Error(w, http.StatusBadRequest, "对象路径必填")
+		return
+	}
+	auth, ok := s.authForAccount(w, r, accountID)
+	if !ok {
+		return
+	}
+	cfAccountID, err := s.cloudflareAccountID(r.Context(), auth)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	contentType := r.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	path := "/accounts/" + url.PathEscape(cfAccountID) + "/r2/buckets/" + url.PathEscape(bucketName) + "/objects/" + url.PathEscape(objectKey)
+	_, _, err = s.cfRawRequest(r.Context(), http.MethodPut, path, auth, "application/json", contentType, r.Body)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success":    true,
+		"objectKey":  objectKey,
+		"bucketName": bucketName,
+	})
 }
 
 func (s *Service) r2ObjectDownloadInfo(w http.ResponseWriter, r *http.Request, accountID, bucketName, objectKey string) {
@@ -2790,6 +2958,96 @@ func (s *Service) r2ObjectDownloadInfo(w http.ResponseWriter, r *http.Request, a
 		"objectKey":  objectKey,
 		"bucketName": bucketName,
 	})
+}
+
+func (s *Service) r2ObjectDownload(w http.ResponseWriter, r *http.Request, accountID, bucketName, objectKey string) {
+	if r.Method != http.MethodGet {
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	auth, ok := s.authForAccount(w, r, accountID)
+	if !ok {
+		return
+	}
+	cfAccountID, err := s.cloudflareAccountID(r.Context(), auth)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	path := "/accounts/" + url.PathEscape(cfAccountID) + "/r2/buckets/" + url.PathEscape(bucketName) + "/objects/" + url.PathEscape(objectKey)
+	raw, contentType, err := s.cfRawRequest(r.Context(), http.MethodGet, path, auth, "*/*", "", nil)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": objectFileName(objectKey)}))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "private, max-age=60")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(raw)
+}
+
+func (s *Service) r2ObjectPreview(w http.ResponseWriter, r *http.Request, accountID, bucketName, objectKey string) {
+	if r.Method != http.MethodGet {
+		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	auth, ok := s.authForAccount(w, r, accountID)
+	if !ok {
+		return
+	}
+	cfAccountID, err := s.cloudflareAccountID(r.Context(), auth)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	path := "/accounts/" + url.PathEscape(cfAccountID) + "/r2/buckets/" + url.PathEscape(bucketName) + "/objects/" + url.PathEscape(objectKey)
+	raw, contentType, err := s.cfRawRequest(r.Context(), http.MethodGet, path, auth, "*/*", "", nil)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
+	}
+	if contentType == "" || strings.HasPrefix(strings.ToLower(contentType), "application/octet-stream") {
+		if detected := mime.TypeByExtension(strings.ToLower(pathExt(objectKey))); detected != "" {
+			contentType = detected
+		} else if len(raw) > 0 {
+			contentType = http.DetectContentType(raw)
+		} else {
+			contentType = "application/octet-stream"
+		}
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": objectFileName(objectKey)}))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "private, max-age=60")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(raw)
+}
+
+func pathExt(value string) string {
+	name := objectFileName(value)
+	index := strings.LastIndex(name, ".")
+	if index < 0 {
+		return ""
+	}
+	return name[index:]
+}
+
+func objectFileName(value string) string {
+	trimmed := strings.Trim(value, "/")
+	if trimmed == "" {
+		return "object"
+	}
+	parts := strings.Split(trimmed, "/")
+	name := parts[len(parts)-1]
+	if name == "" {
+		return "object"
+	}
+	return name
 }
 
 // Tunnel Management

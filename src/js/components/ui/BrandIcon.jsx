@@ -1,5 +1,7 @@
 import React from 'react';
 
+import tencentCloudIcon from '../../../assets/brand-icons/tencentcloud.svg';
+
 export const BRAND_COLOR_FALLBACK = '#8b5cf6';
 export const BRAND_ICON_FALLBACK = 'fas fa-shield-alt';
 
@@ -101,7 +103,6 @@ export const SIMPLE_ICONS = {
   trello: 'si si-trello',
   figma: 'si si-figma',
   notion: 'si si-notion',
-  tencent: 'fab fa-qq',
   huawei: 'si si-huawei',
   aliyun: 'si si-alibabacloud',
   alibaba: 'si si-alibaba',
@@ -132,6 +133,13 @@ export const SIMPLE_ICONS = {
   oracle: 'si si-oracle',
   sentry: 'si si-sentry',
   cloudways: 'si si-cloudways',
+};
+
+export const BRAND_ICON_ASSETS = {
+  tencent: tencentCloudIcon,
+  tencentcloud: tencentCloudIcon,
+  'tencent cloud': tencentCloudIcon,
+  '腾讯云': tencentCloudIcon,
 };
 
 export const FA_ICONS = {
@@ -193,27 +201,132 @@ export const FA_ICONS = {
   dev: 'fas fa-laptop-code',
 };
 
+export const BRAND_ALIASES = {
+  gmail: 'google',
+  googlemail: 'google',
+  outlook: 'microsoft',
+  hotmail: 'microsoft',
+  live: 'microsoft',
+  office: 'microsoft',
+  office365: 'microsoft',
+  azure: 'microsoft',
+  onmicrosoft: 'microsoft',
+  microsoftonline: 'microsoft',
+  foxmail: 'tencent',
+  qqmail: 'tencent',
+  qcloud: 'tencent',
+  tencentcloud: 'tencent',
+  aliyun: 'aliyun',
+  alibabacloud: 'aliyun',
+};
+
 function findIssuerMatch(issuer, source) {
   const key = issuer?.toLowerCase() || '';
   return Object.entries(source).find(([name]) => key.includes(name))?.[1];
 }
 
+export function normalizeIssuerBrand(issuer) {
+  const key = issuer?.toLowerCase() || '';
+  const alias = Object.entries(BRAND_ALIASES).find(([name]) => key.includes(name))?.[1];
+  return alias || issuer;
+}
+
 export function getIssuerColor(issuer) {
-  return findIssuerMatch(issuer, ISSUER_COLORS) || BRAND_COLOR_FALLBACK;
+  const normalized = normalizeIssuerBrand(issuer);
+  return findIssuerMatch(normalized, ISSUER_COLORS) || findIssuerMatch(issuer, ISSUER_COLORS) || BRAND_COLOR_FALLBACK;
 }
 
 export function getIssuerIcon(issuer) {
-  return findIssuerMatch(issuer, SIMPLE_ICONS)
+  const normalized = normalizeIssuerBrand(issuer);
+  return findIssuerMatch(normalized, SIMPLE_ICONS)
+    || findIssuerMatch(issuer, SIMPLE_ICONS)
+    || findIssuerMatch(normalized, FA_ICONS)
     || findIssuerMatch(issuer, FA_ICONS)
     || BRAND_ICON_FALLBACK;
 }
 
-export default function BrandIcon({ issuer, className = '', style, ...props }) {
+export function getIssuerIconAsset(issuer) {
+  const normalized = normalizeIssuerBrand(issuer);
+  return findIssuerMatch(normalized, BRAND_ICON_ASSETS) || findIssuerMatch(issuer, BRAND_ICON_ASSETS);
+}
+
+export default function BrandIcon({
+  issuer,
+  icon,
+  className = '',
+  style,
+  color = 'brand',
+  ...props
+}) {
+  if (typeof icon === 'string' && icon.startsWith('letter:')) {
+    const letter = icon.slice('letter:'.length).trim().slice(0, 2).toUpperCase() || '?';
+    return (
+      <span
+        {...props}
+        aria-hidden={props['aria-label'] ? undefined : true}
+        className={`app-brand-icon app-brand-icon--font ${className}`.trim()}
+        style={style}
+      >
+        {letter}
+      </span>
+    );
+  }
+
+  if (typeof icon === 'string' && icon.startsWith('svgrepo:')) {
+    const key = icon.slice('svgrepo:'.length).replace(/[^a-z0-9-]/gi, '').toLowerCase();
+    if (key) {
+      return (
+        <img
+          {...props}
+          src={`/api/totp/icons/${key}.svg`}
+          alt=""
+          aria-hidden={props['aria-label'] ? undefined : true}
+          className={`app-brand-icon app-brand-icon--image ${className}`.trim()}
+          style={style}
+        />
+      );
+    }
+  }
+
+  if (typeof icon === 'string' && icon.startsWith('custom:')) {
+    const key = icon.slice('custom:'.length).replace(/[^a-z0-9-]/gi, '').toLowerCase();
+    if (key) {
+      return (
+        <img
+          {...props}
+          src={`/api/totp/icons/custom-${key}`}
+          alt=""
+          aria-hidden={props['aria-label'] ? undefined : true}
+          className={`app-brand-icon app-brand-icon--image ${className}`.trim()}
+          style={style}
+        />
+      );
+    }
+  }
+
+  const asset = getIssuerIconAsset(issuer);
+  const iconColor = color === 'inherit' ? undefined : getIssuerColor(issuer);
+
+  if (asset) {
+    return (
+      <span
+        {...props}
+        aria-hidden={props['aria-label'] ? undefined : true}
+        className={`app-brand-icon app-brand-icon--asset ${className}`.trim()}
+        style={{
+          '--app-brand-icon-url': `url("${asset}")`,
+          color: iconColor,
+          ...style,
+        }}
+      />
+    );
+  }
+
   return (
     <i
       {...props}
-      className={`${getIssuerIcon(issuer)} ${className}`.trim()}
-      style={{ color: getIssuerColor(issuer), ...style }}
+      className={`app-brand-icon app-brand-icon--font ${getIssuerIcon(issuer)} ${className}`.trim()}
+      style={{ color: iconColor, ...style }}
     />
   );
 }

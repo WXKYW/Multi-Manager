@@ -12,8 +12,10 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"mime/quotedprintable"
 	"net/http"
 	"net/smtp"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -25,9 +27,10 @@ import (
 )
 
 const (
-	defaultHistoryLimit = 100
-	maxHistoryLimit     = 500
-	requestTimeout      = 10 * time.Second
+	defaultHistoryLimit      = 100
+	maxHistoryLimit          = 500
+	requestTimeout           = 10 * time.Second
+	lifecycleRefreshInterval = 30 * time.Second
 )
 
 type Service struct {
@@ -54,6 +57,30 @@ type storedChannel struct {
 	ConfigRaw string
 	CreatedAt string
 	UpdatedAt string
+}
+
+type deliveryResult struct {
+	ChatID    string
+	MessageID int64
+}
+
+type messageLifecycle struct {
+	ResourceKey string
+	Kind        string
+	Phase       string
+}
+
+type telegramMessageState struct {
+	ChannelID    string
+	SourceModule string
+	ResourceKey  string
+	Kind         string
+	ChatID       string
+	MessageID    int64
+	EventType    string
+	LastData     string
+	CreatedAt    string
+	UpdatedAt    string
 }
 
 type Rule struct {
@@ -280,9 +307,10 @@ func (s *Service) testChannel(w http.ResponseWriter, r *http.Request, id string)
 		return
 	}
 	config := decryptConfig(channel.ConfigRaw)
-	title := "Notification connectivity test"
-	message := fmt.Sprintf("Sent at: %s\nStatus: configuration accepted", time.Now().Format(time.RFC3339))
-	if err := s.sendToChannel(r.Context(), channel, config, title, message); err != nil {
+	title := "🧪 通知渠道连通性测试"
+	loc, _ := s.systemLocation(r.Context())
+	message := fmt.Sprintf("状态: 配置有效\n发送时间: %s", time.Now().In(loc).Format(time.RFC3339))
+	if _, err := s.sendToChannel(r.Context(), channel, config, title, message); err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -373,10 +401,12 @@ func (s *Service) previewTemplate(w http.ResponseWriter, r *http.Request) {
 		TitleTemplate:   stringValue(payload["title_template"]),
 		MessageTemplate: stringValue(payload["message_template"]),
 	}
+	loc, _ := s.systemLocation(r.Context())
+	templateData := notificationTemplateData(data, loc)
 	response.OK(w, map[string]interface{}{
 		"title":     formatTitle(rule, data),
-		"message":   formatMessage(rule, data),
-		"variables": sortedKeys(data),
+		"message":   formatMessage(rule, data, loc),
+		"variables": sortedKeys(templateData),
 	})
 }
 
@@ -896,7 +926,8 @@ func (s *Service) UpdateConfig(ctx context.Context, payload map[string]interface
 }
 
 func (s *Service) DryRun(ctx context.Context, rule Rule, eventData map[string]interface{}) (map[string]interface{}, error) {
-	timeAllowed := checkTimeWindow(rule.TimeWindow)
+	loc, timeZoneName := s.systemLocation(ctx)
+	timeAllowed := checkTimeWindow(rule.TimeWindow, loc)
 	conditions := evaluateConditions(rule.Conditions, eventData)
 	maintenance, err := s.matchMaintenance(ctx, eventData)
 	if err != nil {
@@ -930,9 +961,10 @@ func (s *Service) DryRun(ctx context.Context, rule Rule, eventData map[string]in
 		"matched":         true,
 		"wouldNotify":     wouldNotify,
 		"title":           formatTitle(rule, eventData),
-		"message":         formatMessage(rule, eventData),
+		"message":         formatMessage(rule, eventData, loc),
 		"fingerprint":     generateFingerprint(rule, eventData),
 		"timeAllowed":     timeAllowed,
+		"timeZone":        timeZoneName,
 		"conditionResult": conditions,
 		"maintenance":     maintenance,
 		"channels":        channels,
@@ -948,6 +980,15 @@ func (s *Service) Trigger(ctx context.Context, sourceModule, eventType string, e
 	rules, err := s.loadEnabledRulesByEvent(ctx, sourceModule, eventType)
 	if err != nil {
 		return err
+	}
+	loc, _ := s.systemLocation(ctx)
+	lifecycle, hasLifecycle := notificationMessageLifecycle(sourceModule, eventType, eventData)
+	if hasLifecycle {
+		var err error
+		eventData, err = s.enrichLifecycleEventData(ctx, sourceModule, eventType, lifecycle, eventData, time.Now())
+		if err != nil {
+			return err
+		}
 	}
 	for _, rule := range rules {
 		dryRun, err := s.DryRun(ctx, rule, eventData)
@@ -966,21 +1007,208 @@ func (s *Service) Trigger(ctx context.Context, sourceModule, eventType string, e
 				continue
 			}
 			title := formatTitle(rule, eventData)
-			message := formatMessage(rule, eventData)
+			message := formatMessage(rule, eventData, loc)
 			logID, err := s.createHistory(ctx, rule.ID, channelID, "pending", title, message, eventData, nil)
 			if err != nil {
 				return err
 			}
-			sendErr := s.sendToChannel(ctx, channel, decryptConfig(channel.ConfigRaw), title, message)
+			channelConfig := decryptConfig(channel.ConfigRaw)
+			var delivery deliveryResult
+			var sendErr error
+			if channel.Type == "telegram" && hasLifecycle {
+				delivery, sendErr = s.deliverLifecycleTelegram(ctx, channel, channelConfig, sourceModule, eventType, lifecycle, title, message)
+			} else {
+				delivery, sendErr = s.sendToChannel(ctx, channel, channelConfig, title, message)
+			}
 			if sendErr != nil {
 				_ = s.updateHistoryStatus(ctx, logID, "failed", nil, ptr(sendErr.Error()))
 			} else {
-				now := time.Now().Format(time.RFC3339)
+				if channel.Type == "telegram" && hasLifecycle && lifecycle.Phase != "resolve" && delivery.MessageID != 0 {
+					_ = s.upsertTelegramMessageState(ctx, telegramMessageState{
+						ChannelID: channel.ID, SourceModule: sourceModule, ResourceKey: lifecycle.ResourceKey,
+						Kind: lifecycle.Kind, ChatID: delivery.ChatID, MessageID: delivery.MessageID,
+					}, eventType, eventData)
+				}
+				now := time.Now().In(loc).Format(time.RFC3339)
 				_ = s.updateHistoryStatus(ctx, logID, "sent", &now, nil)
 			}
 		}
 	}
+	if hasLifecycle && lifecycle.Phase == "resolve" {
+		_ = s.deleteTelegramMessageStates(ctx, sourceModule, lifecycle.ResourceKey, lifecycle.Kind)
+	}
 	return nil
+}
+
+// RefreshLifecycle updates an active Telegram lifecycle message without re-sending other channels.
+func (s *Service) RefreshLifecycle(ctx context.Context, sourceModule, eventType string, eventData map[string]interface{}) error {
+	lifecycle, ok := notificationMessageLifecycle(sourceModule, eventType, eventData)
+	if !ok || lifecycle.Phase != "open" {
+		return nil
+	}
+	var err error
+	eventData, err = s.enrichLifecycleEventData(ctx, sourceModule, eventType, lifecycle, eventData, time.Now())
+	if err != nil {
+		return err
+	}
+	eventData["lifecycleMutation"] = "refresh"
+	rules, err := s.loadEnabledRulesByEvent(ctx, sourceModule, eventType)
+	if err != nil {
+		return err
+	}
+	loc, _ := s.systemLocation(ctx)
+	for _, rule := range rules {
+		dryRun, err := s.DryRun(ctx, rule, eventData)
+		if err != nil {
+			return err
+		}
+		if dryRun["wouldNotify"] != true {
+			continue
+		}
+		for _, channelID := range rule.Channels {
+			channel, found, err := s.loadStoredChannel(ctx, channelID)
+			if err != nil {
+				return err
+			}
+			if !found || channel.Enabled == 0 || channel.Type != "telegram" {
+				continue
+			}
+			state, found, err := s.loadTelegramMessageState(ctx, channel.ID, sourceModule, lifecycle.ResourceKey, lifecycle.Kind)
+			if err != nil {
+				return err
+			}
+			if !found || !telegramLifecycleRefreshDue(state.UpdatedAt, time.Now()) {
+				continue
+			}
+			title := formatTitle(rule, eventData)
+			message := formatMessage(rule, eventData, loc)
+			config := decryptConfig(channel.ConfigRaw)
+			if err := s.editTelegram(ctx, config, state.ChatID, state.MessageID, title, message); err == nil {
+				_ = s.touchTelegramMessageState(ctx, state, eventType, eventData)
+				_ = s.recordLifecycleRefreshHistory(ctx, rule, channel.ID, title, message, eventData, loc)
+				continue
+			}
+			delivery, sendErr := s.sendTelegram(ctx, config, title, message)
+			if sendErr != nil {
+				continue
+			}
+			_ = s.upsertTelegramMessageState(ctx, telegramMessageState{
+				ChannelID: channel.ID, SourceModule: sourceModule, ResourceKey: lifecycle.ResourceKey,
+				Kind: lifecycle.Kind, ChatID: delivery.ChatID, MessageID: delivery.MessageID,
+			}, eventType, eventData)
+			_ = s.recordLifecycleRefreshHistory(ctx, rule, channel.ID, title, message, eventData, loc)
+		}
+	}
+	return nil
+}
+
+func (s *Service) enrichLifecycleEventData(ctx context.Context, sourceModule, eventType string, lifecycle messageLifecycle, eventData map[string]interface{}, now time.Time) (map[string]interface{}, error) {
+	result := cloneNotificationData(eventData)
+	state, found, err := s.loadAnyTelegramMessageState(ctx, sourceModule, lifecycle.ResourceKey, lifecycle.Kind)
+	if err != nil {
+		return nil, err
+	}
+	startedAt := now.UTC()
+	previousData := map[string]interface{}{}
+	if found {
+		if parsed, ok := parseLifecycleStateTime(state.CreatedAt); ok {
+			startedAt = parsed
+		}
+		previousData = parseObject(state.LastData)
+		result["lifecyclePreviousEvent"] = state.EventType
+		if stringValue(result["downDuration"]) == "" {
+			result["downDuration"] = formatNotificationDuration(now.Sub(startedAt))
+		}
+	}
+	result["lifecycleKind"] = lifecycle.Kind
+	result["lifecyclePhase"] = lifecycle.Phase
+	result["lifecycleMutation"] = lifecycle.Phase
+	result["lifecycleResourceKey"] = lifecycle.ResourceKey
+	result["lifecycleStartedAt"] = startedAt.Format(time.RFC3339)
+	if len(previousData) > 0 {
+		result["lifecycleChanges"] = notificationDataChanges(previousData, eventData)
+	}
+	return result, nil
+}
+
+func (s *Service) recordLifecycleRefreshHistory(ctx context.Context, rule Rule, channelID, title, message string, eventData map[string]interface{}, loc *time.Location) error {
+	logID, err := s.createHistory(ctx, rule.ID, channelID, "pending", title, message, eventData, nil)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	if loc != nil {
+		now = now.In(loc)
+	}
+	formatted := now.Format(time.RFC3339)
+	return s.updateHistoryStatus(ctx, logID, "sent", &formatted, nil)
+}
+
+func cloneNotificationData(data map[string]interface{}) map[string]interface{} {
+	result := make(map[string]interface{}, len(data)+8)
+	for key, value := range data {
+		result[key] = value
+	}
+	return result
+}
+
+func notificationDataChanges(previous, current map[string]interface{}) map[string]interface{} {
+	changes := map[string]interface{}{}
+	keys := map[string]struct{}{}
+	for key := range previous {
+		if !strings.HasPrefix(key, "lifecycle") && key != "downDuration" {
+			keys[key] = struct{}{}
+		}
+	}
+	for key := range current {
+		if !strings.HasPrefix(key, "lifecycle") && key != "downDuration" {
+			keys[key] = struct{}{}
+		}
+	}
+	for key := range keys {
+		before, beforeOK := previous[key]
+		after, afterOK := current[key]
+		if beforeOK == afterOK && jsonString(before) == jsonString(after) {
+			continue
+		}
+		changes[key] = map[string]interface{}{"from": before, "to": after}
+	}
+	return changes
+}
+
+func parseLifecycleStateTime(value string) (time.Time, bool) {
+	for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05"} {
+		parsed, err := time.ParseInLocation(layout, value, time.UTC)
+		if err == nil {
+			return parsed.UTC(), true
+		}
+	}
+	return time.Time{}, false
+}
+
+func formatNotificationDuration(duration time.Duration) string {
+	if duration < 0 {
+		duration = 0
+	}
+	totalSeconds := int64(duration.Round(time.Second) / time.Second)
+	days := totalSeconds / 86400
+	hours := (totalSeconds % 86400) / 3600
+	minutes := (totalSeconds % 3600) / 60
+	seconds := totalSeconds % 60
+	parts := make([]string, 0, 4)
+	if days > 0 {
+		parts = append(parts, fmt.Sprintf("%d 天", days))
+	}
+	if hours > 0 {
+		parts = append(parts, fmt.Sprintf("%d 小时", hours))
+	}
+	if minutes > 0 {
+		parts = append(parts, fmt.Sprintf("%d 分钟", minutes))
+	}
+	if seconds > 0 || len(parts) == 0 {
+		parts = append(parts, fmt.Sprintf("%d 秒", seconds))
+	}
+	return strings.Join(parts, " ")
 }
 
 func (s *Service) loadEnabledRulesByEvent(ctx context.Context, sourceModule, eventType string) ([]Rule, error) {
@@ -1104,14 +1332,223 @@ func (s *Service) matchMaintenance(ctx context.Context, eventData map[string]int
 	return nil, rows.Err()
 }
 
-func (s *Service) sendToChannel(ctx context.Context, channel storedChannel, cfg map[string]interface{}, title, message string) error {
+func notificationMessageLifecycle(sourceModule, eventType string, eventData map[string]interface{}) (messageLifecycle, bool) {
+	sourceModule = strings.ToLower(strings.TrimSpace(sourceModule))
+	eventType = strings.ToLower(strings.TrimSpace(eventType))
+	lifecycle := messageLifecycle{}
+	switch sourceModule {
+	case "uptime":
+		lifecycle.ResourceKey = stringValue(eventData["monitorId"])
+		lifecycle.Kind = "availability"
+		switch eventType {
+		case "down":
+			lifecycle.Phase = "open"
+		case "up":
+			lifecycle.Phase = "resolve"
+		}
+	case "server":
+		lifecycle.ResourceKey = stringValue(eventData["serverId"])
+		switch eventType {
+		case "interrupted", "offline", "degraded":
+			lifecycle.Kind = "availability"
+			lifecycle.Phase = "open"
+		case "online":
+			lifecycle.Kind = "availability"
+			lifecycle.Phase = "resolve"
+		case "traffic_high":
+			lifecycle.Kind = "traffic"
+			lifecycle.Phase = "open"
+		case "traffic_normal":
+			lifecycle.Kind = "traffic"
+			lifecycle.Phase = "resolve"
+		case "cpu_high":
+			lifecycle.Kind = "cpu"
+			lifecycle.Phase = "open"
+		case "cpu_normal":
+			lifecycle.Kind = "cpu"
+			lifecycle.Phase = "resolve"
+		case "memory_high":
+			lifecycle.Kind = "memory"
+			lifecycle.Phase = "open"
+		case "memory_normal":
+			lifecycle.Kind = "memory"
+			lifecycle.Phase = "resolve"
+		case "disk_high":
+			lifecycle.Kind = "disk"
+			lifecycle.Phase = "open"
+		case "disk_normal":
+			lifecycle.Kind = "disk"
+			lifecycle.Phase = "resolve"
+		}
+	case "system":
+		lifecycle.ResourceKey = firstNonEmpty(stringValue(eventData["serverId"]), "local-host")
+		lifecycle.Kind, lifecycle.Phase = metricNotificationLifecycle(eventType)
+	case "github":
+		lifecycle.ResourceKey = stringValue(eventData["repositoryId"])
+		lifecycle.Kind = "actions"
+		switch eventType {
+		case "action_failed":
+			lifecycle.Phase = "open"
+		case "action_recovered":
+			lifecycle.Phase = "resolve"
+		}
+	}
+	if lifecycle.ResourceKey == "" || lifecycle.Kind == "" || lifecycle.Phase == "" {
+		return messageLifecycle{}, false
+	}
+	return lifecycle, true
+}
+
+func metricNotificationLifecycle(eventType string) (string, string) {
+	for _, metric := range []string{"cpu", "memory", "disk", "traffic"} {
+		switch eventType {
+		case metric + "_high":
+			return metric, "open"
+		case metric + "_normal":
+			return metric, "resolve"
+		}
+	}
+	return "", ""
+}
+
+func (s *Service) deliverLifecycleTelegram(ctx context.Context, channel storedChannel, cfg map[string]interface{}, sourceModule, eventType string, lifecycle messageLifecycle, title, message string) (deliveryResult, error) {
+	state, found, err := s.loadTelegramMessageState(ctx, channel.ID, sourceModule, lifecycle.ResourceKey, lifecycle.Kind)
+	if err != nil {
+		return deliveryResult{}, err
+	}
+	if found {
+		if err := s.editTelegram(ctx, cfg, state.ChatID, state.MessageID, title, message); err == nil {
+			_ = s.touchTelegramMessageState(ctx, state, eventType, nil)
+			return deliveryResult{ChatID: state.ChatID, MessageID: state.MessageID}, nil
+		}
+	}
+	return s.sendTelegram(ctx, cfg, title, message)
+}
+
+func (s *Service) loadTelegramMessageState(ctx context.Context, channelID, sourceModule, resourceKey, kind string) (telegramMessageState, bool, error) {
+	db, err := s.open(ctx)
+	if err != nil {
+		return telegramMessageState{}, false, err
+	}
+	defer db.Close()
+	state := telegramMessageState{}
+	err = db.QueryRowContext(ctx, `
+		SELECT channel_id, source_module, resource_key, lifecycle_kind, chat_id, message_id,
+			event_type, COALESCE(last_data, '{}'), created_at, updated_at
+		FROM notification_message_state
+		WHERE channel_id = ? AND source_module = ? AND resource_key = ? AND lifecycle_kind = ?
+	`, channelID, sourceModule, resourceKey, kind).Scan(
+		&state.ChannelID, &state.SourceModule, &state.ResourceKey, &state.Kind, &state.ChatID, &state.MessageID,
+		&state.EventType, &state.LastData, &state.CreatedAt, &state.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return telegramMessageState{}, false, nil
+	}
+	if err != nil {
+		return telegramMessageState{}, false, fmt.Errorf("load telegram message state: %w", err)
+	}
+	return state, true, nil
+}
+
+func (s *Service) loadAnyTelegramMessageState(ctx context.Context, sourceModule, resourceKey, kind string) (telegramMessageState, bool, error) {
+	db, err := s.open(ctx)
+	if err != nil {
+		return telegramMessageState{}, false, err
+	}
+	defer db.Close()
+	state := telegramMessageState{}
+	err = db.QueryRowContext(ctx, `
+		SELECT channel_id, source_module, resource_key, lifecycle_kind, chat_id, message_id,
+			event_type, COALESCE(last_data, '{}'), created_at, updated_at
+		FROM notification_message_state
+		WHERE source_module = ? AND resource_key = ? AND lifecycle_kind = ?
+		ORDER BY created_at ASC
+		LIMIT 1
+	`, sourceModule, resourceKey, kind).Scan(
+		&state.ChannelID, &state.SourceModule, &state.ResourceKey, &state.Kind, &state.ChatID, &state.MessageID,
+		&state.EventType, &state.LastData, &state.CreatedAt, &state.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return telegramMessageState{}, false, nil
+	}
+	if err != nil {
+		return telegramMessageState{}, false, fmt.Errorf("load telegram lifecycle state: %w", err)
+	}
+	return state, true, nil
+}
+
+func telegramLifecycleRefreshDue(updatedAt string, now time.Time) bool {
+	for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05"} {
+		updated, err := time.Parse(layout, updatedAt)
+		if err == nil {
+			return now.UTC().Sub(updated.UTC()) >= lifecycleRefreshInterval
+		}
+	}
+	return true
+}
+
+func (s *Service) upsertTelegramMessageState(ctx context.Context, state telegramMessageState, eventType string, eventData map[string]interface{}) error {
+	db, err := s.open(ctx)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO notification_message_state (
+			channel_id, source_module, resource_key, lifecycle_kind, chat_id, message_id, event_type, last_data
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(channel_id, source_module, resource_key, lifecycle_kind) DO UPDATE SET
+			chat_id = excluded.chat_id,
+			message_id = excluded.message_id,
+			event_type = excluded.event_type,
+			last_data = excluded.last_data,
+			updated_at = CURRENT_TIMESTAMP
+	`, state.ChannelID, state.SourceModule, state.ResourceKey, state.Kind, state.ChatID, state.MessageID, eventType, jsonString(eventData))
+	if err != nil {
+		return fmt.Errorf("save telegram message state: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) touchTelegramMessageState(ctx context.Context, state telegramMessageState, eventType string, eventData map[string]interface{}) error {
+	db, err := s.open(ctx)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	lastData := ""
+	if eventData != nil {
+		lastData = jsonString(eventData)
+	}
+	_, err = db.ExecContext(ctx, `
+		UPDATE notification_message_state
+		SET event_type = ?, last_data = CASE WHEN ? = '' THEN last_data ELSE ? END, updated_at = CURRENT_TIMESTAMP
+		WHERE channel_id = ? AND source_module = ? AND resource_key = ? AND lifecycle_kind = ?
+	`, eventType, lastData, lastData, state.ChannelID, state.SourceModule, state.ResourceKey, state.Kind)
+	return err
+}
+
+func (s *Service) deleteTelegramMessageStates(ctx context.Context, sourceModule, resourceKey, kind string) error {
+	db, err := s.open(ctx)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	_, err = db.ExecContext(ctx, `
+		DELETE FROM notification_message_state
+		WHERE source_module = ? AND resource_key = ? AND lifecycle_kind = ?
+	`, sourceModule, resourceKey, kind)
+	return err
+}
+
+func (s *Service) sendToChannel(ctx context.Context, channel storedChannel, cfg map[string]interface{}, title, message string) (deliveryResult, error) {
 	switch channel.Type {
 	case "email":
-		return sendEmail(cfg, title, message)
+		return deliveryResult{}, sendEmail(cfg, title, message)
 	case "telegram":
 		return s.sendTelegram(ctx, cfg, title, message)
 	default:
-		return fmt.Errorf("unsupported channel type: %s", channel.Type)
+		return deliveryResult{}, fmt.Errorf("unsupported channel type: %s", channel.Type)
 	}
 }
 
@@ -1138,12 +1575,22 @@ func sendEmail(cfg map[string]interface{}, title, message string) error {
 		from = fmt.Sprintf("%s <%s>", encodeHeader(sender), user)
 	}
 
+	htmlBody := emailMessageHTML(title, message)
+	var encodedBody bytes.Buffer
+	encoder := quotedprintable.NewWriter(&encodedBody)
+	if _, err := encoder.Write([]byte(htmlBody)); err != nil {
+		return err
+	}
+	if err := encoder.Close(); err != nil {
+		return err
+	}
 	messageBytes := []byte("To: " + to + "\r\n" +
 		"From: " + from + "\r\n" +
 		"Subject: " + encodeHeader(title) + "\r\n" +
 		"MIME-Version: 1.0\r\n" +
-		"Content-Type: text/plain; charset=UTF-8\r\n\r\n" +
-		message + "\r\n")
+		"Content-Type: text/html; charset=UTF-8\r\n" +
+		"Content-Transfer-Encoding: quoted-printable\r\n\r\n" +
+		encodedBody.String() + "\r\n")
 	if boolValue(cfg["secure"], port == 465) {
 		conn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
 		if err != nil {
@@ -1180,43 +1627,269 @@ func sendEmail(cfg map[string]interface{}, title, message string) error {
 	return smtp.SendMail(addr, auth, user, []string{to}, messageBytes)
 }
 
-func (s *Service) sendTelegram(ctx context.Context, cfg map[string]interface{}, title, message string) error {
+type telegramAPIResponse struct {
+	OK          bool   `json:"ok"`
+	Description string `json:"description"`
+	Result      struct {
+		MessageID int64 `json:"message_id"`
+		Chat      struct {
+			ID int64 `json:"id"`
+		} `json:"chat"`
+	} `json:"result"`
+}
+
+func (s *Service) sendTelegram(ctx context.Context, cfg map[string]interface{}, title, message string) (deliveryResult, error) {
 	token := stringValue(cfg["bot_token"])
 	chatID := stringValue(cfg["chat_id"])
 	if token == "" || chatID == "" {
-		return errors.New("telegram channel config incomplete")
+		return deliveryResult{}, errors.New("telegram channel config incomplete")
 	}
 	payload := map[string]interface{}{
 		"chat_id":                  chatID,
-		"text":                     "<b>" + html.EscapeString(title) + "</b>\n\n" + html.EscapeString(message),
+		"text":                     telegramMessageText(title, message),
 		"parse_mode":               "HTML",
 		"disable_web_page_preview": true,
 	}
-	body, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.telegram.org/bot"+token+"/sendMessage", bytes.NewReader(body))
+	client, err := s.telegramHTTPClient(cfg)
+	if err != nil {
+		return deliveryResult{}, err
+	}
+	result, err := s.callTelegram(ctx, client, token, "sendMessage", payload)
+	if err != nil {
+		return deliveryResult{}, err
+	}
+	if result.Result.Chat.ID != 0 {
+		chatID = strconv.FormatInt(result.Result.Chat.ID, 10)
+	}
+	return deliveryResult{ChatID: chatID, MessageID: result.Result.MessageID}, nil
+}
+
+func (s *Service) editTelegram(ctx context.Context, cfg map[string]interface{}, chatID string, messageID int64, title, message string) error {
+	token := stringValue(cfg["bot_token"])
+	if token == "" || chatID == "" || messageID == 0 {
+		return errors.New("telegram message state incomplete")
+	}
+	payload := map[string]interface{}{
+		"chat_id":                  chatID,
+		"message_id":               messageID,
+		"text":                     telegramMessageText(title, message),
+		"parse_mode":               "HTML",
+		"disable_web_page_preview": true,
+	}
+	client, err := s.telegramHTTPClient(cfg)
 	if err != nil {
 		return err
+	}
+	_, err = s.callTelegram(ctx, client, token, "editMessageText", payload)
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "message is not modified") {
+		return nil
+	}
+	return err
+}
+
+func telegramMessageText(title, message string) string {
+	lines := strings.Split(strings.TrimSpace(message), "\n")
+	formatted := make([]string, 0, len(lines))
+	for _, line := range lines {
+		formatted = append(formatted, telegramMessageLine(line))
+	}
+	body := strings.Join(formatted, "\n")
+	if body == "" {
+		return "<b>" + html.EscapeString(title) + "</b>"
+	}
+	return "<b>" + html.EscapeString(title) + "</b>\n\n<blockquote>" + body + "</blockquote>\n\n<i>API Monitor</i>"
+}
+
+func telegramMessageLine(line string) string {
+	field := parseNotificationMessageLine(line)
+	if field.Empty {
+		return ""
+	}
+	if field.Label == "" {
+		return html.EscapeString(field.Value)
+	}
+	escapedValue := html.EscapeString(field.Value)
+	if field.Label == "状态" || strings.EqualFold(field.Label, "status") {
+		escapedValue = notificationStatusIcon(field.Value) + escapedValue
+	}
+	if isNotificationCodeField(field.Label) {
+		escapedValue = "<code>" + escapedValue + "</code>"
+	}
+	return "<b>" + html.EscapeString(field.Label) + ":</b> " + escapedValue
+}
+
+type notificationMessageField struct {
+	Label string
+	Value string
+	Empty bool
+}
+
+func parseNotificationMessageLine(line string) notificationMessageField {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return notificationMessageField{Empty: true}
+	}
+	separator := strings.Index(line, ":")
+	if chineseSeparator := strings.Index(line, "："); chineseSeparator >= 0 && (separator < 0 || chineseSeparator < separator) {
+		separator = chineseSeparator
+	}
+	if separator <= 0 {
+		return notificationMessageField{Value: line}
+	}
+	label := strings.TrimSpace(line[:separator])
+	if len([]rune(label)) > 32 {
+		return notificationMessageField{Value: line}
+	}
+	return notificationMessageField{Label: label, Value: strings.TrimSpace(line[separator+1:])}
+}
+
+func isNotificationCodeField(label string) bool {
+	return label == "地址" || label == "链接" || label == "云端链接" || strings.EqualFold(label, "url") ||
+		strings.EqualFold(label, "host") || strings.EqualFold(label, "address")
+}
+
+func notificationStatusIcon(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "online", "up", "recovered", "success", "在线", "恢复", "已恢复", "成功":
+		return "🟢 "
+	case "offline", "down", "failed", "failure", "离线", "故障", "失败":
+		return "🔴 "
+	case "interrupted", "degraded", "warning", "中断", "采集异常", "告警", "警告":
+		return "🟠 "
+	default:
+		return ""
+	}
+}
+
+func emailMessageHTML(title, message string) string {
+	accent := "#3b82f6"
+	statusBackground := "#eff6ff"
+	statusText := "#1d4ed8"
+	lowerMessage := strings.ToLower(message)
+	if strings.Contains(lowerMessage, "状态: 离线") || strings.Contains(lowerMessage, "状态: 故障") || strings.Contains(lowerMessage, "status: offline") || strings.Contains(lowerMessage, "status: down") {
+		accent, statusBackground, statusText = "#dc2626", "#fef2f2", "#b91c1c"
+	} else if strings.Contains(lowerMessage, "状态: 在线") || strings.Contains(lowerMessage, "状态: 已恢复") || strings.Contains(lowerMessage, "status: online") || strings.Contains(lowerMessage, "status: recovered") {
+		accent, statusBackground, statusText = "#16a34a", "#f0fdf4", "#15803d"
+	} else if strings.Contains(lowerMessage, "状态: 告警") || strings.Contains(lowerMessage, "状态: 中断") || strings.Contains(lowerMessage, "status: warning") {
+		accent, statusBackground, statusText = "#d97706", "#fffbeb", "#b45309"
+	}
+
+	var rows strings.Builder
+	for _, line := range strings.Split(strings.TrimSpace(message), "\n") {
+		field := parseNotificationMessageLine(line)
+		switch {
+		case field.Empty:
+			rows.WriteString(`<tr><td colspan="2" style="height:8px"></td></tr>`)
+		case field.Label == "":
+			rows.WriteString(`<tr><td colspan="2" style="padding:5px 0;color:#334155;font-size:14px;line-height:1.6">`)
+			rows.WriteString(html.EscapeString(field.Value))
+			rows.WriteString(`</td></tr>`)
+		default:
+			value := html.EscapeString(field.Value)
+			if field.Label == "状态" || strings.EqualFold(field.Label, "status") {
+				value = notificationStatusIcon(field.Value) + value
+			}
+			if isNotificationCodeField(field.Label) {
+				value = `<code style="font-family:Consolas,monospace;font-size:12px;color:#0f172a;word-break:break-all">` + value + `</code>`
+			}
+			rows.WriteString(`<tr><td style="width:104px;padding:5px 12px 5px 0;color:#64748b;font-size:13px;vertical-align:top">`)
+			rows.WriteString(html.EscapeString(field.Label))
+			rows.WriteString(`</td><td style="padding:5px 0;color:#0f172a;font-size:14px;font-weight:600;line-height:1.5">`)
+			rows.WriteString(value)
+			rows.WriteString(`</td></tr>`)
+		}
+	}
+
+	return `<!doctype html><html><body style="margin:0;padding:24px;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#0f172a">` +
+		`<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center">` +
+		`<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden">` +
+		`<tr><td style="height:5px;background:` + accent + `"></td></tr>` +
+		`<tr><td style="padding:24px 28px 10px"><div style="font-size:12px;font-weight:700;color:` + statusText + `;text-transform:uppercase">API Monitor</div>` +
+		`<h1 style="margin:8px 0 0;font-size:20px;line-height:1.4;color:#0f172a">` + html.EscapeString(title) + `</h1></td></tr>` +
+		`<tr><td style="padding:12px 28px 26px"><div style="padding:14px 16px;border-left:3px solid ` + accent + `;background:` + statusBackground + `;border-radius:4px">` +
+		`<table role="presentation" width="100%" cellspacing="0" cellpadding="0">` + rows.String() + `</table></div></td></tr>` +
+		`</table></td></tr></table></body></html>`
+}
+
+func (s *Service) telegramHTTPClient(cfg map[string]interface{}) (*http.Client, error) {
+	proxyAddress := strings.TrimSpace(stringValue(cfg["proxy_url"]))
+	if proxyAddress == "" {
+		return s.client, nil
+	}
+	proxyURL, err := url.Parse(proxyAddress)
+	if err != nil || proxyURL.Host == "" {
+		return nil, errors.New("telegram proxy URL is invalid")
+	}
+	switch strings.ToLower(proxyURL.Scheme) {
+	case "http", "https", "socks5", "socks5h":
+	default:
+		return nil, errors.New("telegram proxy scheme must be http, https, or socks5")
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = http.ProxyURL(proxyURL)
+	timeout := s.client.Timeout
+	if timeout <= 0 {
+		timeout = requestTimeout
+	}
+	return &http.Client{Timeout: timeout, Transport: transport}, nil
+}
+
+func (s *Service) callTelegram(ctx context.Context, client *http.Client, token, method string, payload map[string]interface{}) (telegramAPIResponse, error) {
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.telegram.org/bot"+token+"/"+method, bytes.NewReader(body))
+	if err != nil {
+		return telegramAPIResponse{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	res, err := s.client.Do(req)
+	res, err := client.Do(req)
 	if err != nil {
-		return err
+		var requestErr *url.Error
+		if errors.As(err, &requestErr) {
+			err = requestErr.Err
+		}
+		return telegramAPIResponse{}, fmt.Errorf("telegram API request failed: %w", err)
 	}
 	defer res.Body.Close()
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return fmt.Errorf("telegram API status %d", res.StatusCode)
-	}
-	var result struct {
-		OK          bool   `json:"ok"`
-		Description string `json:"description"`
-	}
+	var result telegramAPIResponse
 	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
-		return err
+		if res.StatusCode < 200 || res.StatusCode >= 300 {
+			return telegramAPIResponse{}, fmt.Errorf("telegram API status %d", res.StatusCode)
+		}
+		return telegramAPIResponse{}, err
+	}
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		if result.Description != "" {
+			return telegramAPIResponse{}, fmt.Errorf("telegram API status %d: %s", res.StatusCode, result.Description)
+		}
+		return telegramAPIResponse{}, fmt.Errorf("telegram API status %d", res.StatusCode)
 	}
 	if !result.OK {
-		return fmt.Errorf("telegram API error: %s", result.Description)
+		return telegramAPIResponse{}, fmt.Errorf("telegram API error: %s", result.Description)
 	}
-	return nil
+	return result, nil
+}
+
+func (s *Service) systemLocation(ctx context.Context) (*time.Location, string) {
+	db, err := s.store.Open(ctx)
+	if err != nil {
+		return time.Local, "system"
+	}
+	defer db.Close()
+
+	var zone sql.NullString
+	err = db.QueryRowContext(ctx, `SELECT time_zone FROM user_settings WHERE id = 1`).Scan(&zone)
+	if err != nil || !zone.Valid {
+		return time.Local, "system"
+	}
+	name := strings.TrimSpace(zone.String)
+	if name == "" || name == "system" {
+		return time.Local, "system"
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return time.Local, "system"
+	}
+	return loc, name
 }
 
 func (s *Service) open(ctx context.Context) (*sql.DB, error) {
@@ -1283,6 +1956,19 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			retry_count INTEGER DEFAULT 0,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
+		`CREATE TABLE IF NOT EXISTS notification_message_state (
+			channel_id TEXT NOT NULL,
+			source_module TEXT NOT NULL,
+			resource_key TEXT NOT NULL,
+			lifecycle_kind TEXT NOT NULL,
+			chat_id TEXT NOT NULL,
+			message_id INTEGER NOT NULL,
+			event_type TEXT NOT NULL,
+			last_data TEXT DEFAULT '{}',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (channel_id, source_module, resource_key, lifecycle_kind)
+		)`,
 		`CREATE TABLE IF NOT EXISTS alert_state_tracking (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			rule_id TEXT NOT NULL,
@@ -1314,6 +2000,7 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_alert_rules_source ON alert_rules(source_module, enabled)`,
 		`CREATE INDEX IF NOT EXISTS idx_notification_history_rule ON notification_history(rule_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_notification_history_status ON notification_history(status, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_notification_message_resource ON notification_message_state(source_module, resource_key, lifecycle_kind)`,
 		`CREATE INDEX IF NOT EXISTS idx_alert_state_tracking_rule ON alert_state_tracking(rule_id, fingerprint)`,
 		`CREATE INDEX IF NOT EXISTS idx_alert_state_tracking_triggered ON alert_state_tracking(last_triggered_at)`,
 	}
@@ -1333,6 +2020,7 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 		{"alert_rules", "quiet_until", "ALTER TABLE alert_rules ADD COLUMN quiet_until DATETIME"},
 		{"alert_state_tracking", "state_history", "ALTER TABLE alert_state_tracking ADD COLUMN state_history TEXT DEFAULT '[]'"},
 		{"alert_state_tracking", "is_flapping", "ALTER TABLE alert_state_tracking ADD COLUMN is_flapping INTEGER DEFAULT 0"},
+		{"notification_message_state", "last_data", "ALTER TABLE notification_message_state ADD COLUMN last_data TEXT DEFAULT '{}'"},
 		{"notification_global_config", "global_rate_limit_per_hour", "ALTER TABLE notification_global_config ADD COLUMN global_rate_limit_per_hour INTEGER DEFAULT 100"},
 		{"notification_global_config", "enable_auto_escalation", "ALTER TABLE notification_global_config ADD COLUMN enable_auto_escalation INTEGER DEFAULT 0"},
 		{"notification_global_config", "base_url", "ALTER TABLE notification_global_config ADD COLUMN base_url TEXT"},
@@ -1465,10 +2153,11 @@ func decryptConfig(raw string) map[string]interface{} {
 
 func eventCatalog() []map[string]interface{} {
 	return []map[string]interface{}{
-		{"module": "uptime", "events": []string{"down", "up", "pending", "resource.created", "resource.deleted", "ssl_expiry"}},
-		{"module": "server", "events": []string{"offline", "online", "cpu_high", "memory_high", "disk_high", "traffic_high", "traffic_normal"}},
-		{"module": "system", "events": []string{"database.backup", "database.import", "log.cleanup", "migration.failed", "cpu_high", "memory_high", "disk_high"}},
+		{"module": "uptime", "events": []string{"down", "up", "pending", "resource.created", "resource.deleted", "ssl_expiry"}, "dynamic_events": []string{"down", "up"}},
+		{"module": "server", "events": []string{"offline", "online", "interrupted", "degraded", "cpu_high", "cpu_normal", "memory_high", "memory_normal", "disk_high", "disk_normal", "traffic_high", "traffic_normal"}, "dynamic_events": []string{"offline", "online", "interrupted", "degraded", "cpu_high", "cpu_normal", "memory_high", "memory_normal", "disk_high", "disk_normal", "traffic_high", "traffic_normal"}},
+		{"module": "system", "events": []string{"database.backup", "database.import", "log.cleanup", "migration.failed", "cpu_high", "cpu_normal", "memory_high", "memory_normal", "disk_high", "disk_normal"}, "dynamic_events": []string{"cpu_high", "cpu_normal", "memory_high", "memory_normal", "disk_high", "disk_normal"}},
 		{"module": "filebox", "events": []string{"resource.created", "resource.deleted", "cleanup"}},
+		{"module": "github", "events": []string{"action_failed", "action_recovered", "release_published", "star_spike", "issue_opened", "pull_request_opened", "repository_unreachable", "token_invalid", "rate_limit_low", "webhook_delivery_failed", "webhook_ping"}, "dynamic_events": []string{"action_failed", "action_recovered"}},
 		{"module": "totp", "events": []string{"resource.created", "resource.updated", "resource.deleted", "security.revealed", "backup.imported", "backup.exported"}},
 	}
 }
@@ -1486,23 +2175,20 @@ func formatTitle(rule Rule, data map[string]interface{}) string {
 	if rule.TitleTemplate != "" {
 		return renderTemplate(rule.TitleTemplate, data)
 	}
-	icon := "🚨"
-	eventType := strings.ToLower(rule.EventType)
-	if eventType == "up" || eventType == "online" || strings.HasSuffix(eventType, "_normal") {
-		icon = "🟢"
-	} else if rule.Severity == "info" {
-		icon = "ℹ️"
-	}
-	subject := firstNonEmpty(stringValue(data["monitorName"]), stringValue(data["serverName"]))
+	icon := notificationEventIcon(rule.EventType, rule.Severity)
+	subject := notificationSubject(data)
 	if subject != "" {
 		return fmt.Sprintf("%s %s - %s", icon, subject, rule.Name)
 	}
 	return fmt.Sprintf("%s %s", icon, rule.Name)
 }
 
-func formatMessage(rule Rule, data map[string]interface{}) string {
+func formatMessage(rule Rule, data map[string]interface{}, loc *time.Location) string {
+	if loc == nil {
+		loc = time.Local
+	}
 	if rule.MessageTemplate != "" {
-		return renderTemplate(rule.MessageTemplate, data)
+		return renderTemplate(rule.MessageTemplate, notificationTemplateData(data, loc))
 	}
 	lines := []string{}
 	add := func(label string, value interface{}) {
@@ -1511,20 +2197,24 @@ func formatMessage(rule Rule, data map[string]interface{}) string {
 		}
 	}
 
-	// 状态汉化
+	statusAdded := false
 	if statusVal := data["status"]; statusVal != nil {
-		statusStr := stringValue(statusVal)
-		if statusStr == "success" {
-			statusStr = "成功"
-		} else if statusStr == "failed" {
-			statusStr = "失败"
-		}
-		add("状态", statusStr)
+		add("状态", notificationStatusLabel(stringValue(statusVal)))
+		statusAdded = true
 	}
+	if !statusAdded {
+		add("状态", notificationEventStatus(rule.EventType))
+	}
+	add("事件", notificationEventLabel(rule.EventType))
+	add("级别", notificationSeverityLabel(rule.Severity))
 
-	// 主机 (显示 monitorName 或 serverName)
-	subject := firstNonEmpty(stringValue(data["monitorName"]), stringValue(data["serverName"]))
-	add("主机", subject)
+	if monitorName := stringValue(data["monitorName"]); monitorName != "" {
+		add("监控项", monitorName)
+	} else {
+		add("主机", firstNonEmpty(stringValue(data["serverName"]), stringValue(data["hostname"])))
+	}
+	add("仓库", data["repositoryFullName"])
+	add("资源", firstNonEmpty(stringValue(data["resourceName"]), stringValue(data["name"])))
 
 	if data["url"] != nil {
 		add("地址", data["url"])
@@ -1534,19 +2224,34 @@ func formatMessage(rule Rule, data map[string]interface{}) string {
 
 	// 最后活跃时间
 	if lastActiveVal := data["lastActive"]; lastActiveVal != nil {
-		add("最后活跃", toLocalTimeStr(stringValue(lastActiveVal)))
+		add("最后活跃", toLocalTimeStr(stringValue(lastActiveVal), loc))
 	}
 
 	add("错误原因", data["error"])
 	add("延迟 (Ping)", data["ping"])
-	add("CPU 使用率", data["cpu_usage"])
-	add("内存使用率", data["mem_percent"])
-	add("磁盘使用率", data["disk_usage"])
-	add("流量使用率", data["traffic_percent"])
+	add("CPU 使用率", formatNotificationPercent(data["cpu_usage"]))
+	add("内存使用率", formatNotificationPercent(data["mem_percent"]))
+	add("磁盘使用率", formatNotificationPercent(data["disk_usage"]))
+	add("流量使用率", formatNotificationPercent(data["traffic_percent"]))
 	add("已用流量", data["traffic_used"])
 	add("流量配额", data["traffic_limit"])
-	add("报警阈值", data["threshold"])
+	add("报警阈值", formatNotificationPercent(data["threshold"]))
 	add("持续时间", data["downDuration"])
+	add("证书剩余天数", data["daysLeft"])
+	if expiry := stringValue(data["expiry"]); expiry != "" {
+		add("证书到期时间", toLocalTimeStr(expiry, loc))
+	}
+
+	add("当前值", data["current"])
+	add("之前值", data["previous"])
+	add("变化量", data["delta"])
+	add("Actions 状态", data["conclusion"])
+	add("剩余 API 额度", data["rateLimitRemaining"])
+	if reset := stringValue(data["rateLimitReset"]); reset != "" {
+		add("额度重置时间", toLocalTimeStr(reset, loc))
+	}
+	add("链接", data["htmlUrl"])
+	add("说明", firstNonEmpty(stringValue(data["message"]), stringValue(data["reason"])))
 
 	// 数据库备份相关字段
 	add("备份 ID", data["backupId"])
@@ -1573,13 +2278,130 @@ func formatMessage(rule Rule, data map[string]interface{}) string {
 	if len(lines) == 0 {
 		return jsonString(data)
 	}
-	lines = append(lines, "", "时间: "+time.Now().Format("2006/01/02 15:04:05"))
+	lines = append(lines, "", "时间: "+time.Now().In(loc).Format("2006/01/02 15:04:05"))
 	return strings.Join(lines, "\n")
 }
 
-func toLocalTimeStr(utcStr string) string {
+func notificationSubject(data map[string]interface{}) string {
+	return firstNonEmpty(
+		stringValue(data["monitorName"]), stringValue(data["serverName"]),
+		stringValue(data["repositoryFullName"]), stringValue(data["fileName"]),
+		stringValue(data["resourceName"]),
+	)
+}
+
+func notificationEventIcon(eventType, severity string) string {
+	eventType = strings.ToLower(strings.TrimSpace(eventType))
+	if eventType == "up" || eventType == "online" || eventType == "action_recovered" || strings.HasSuffix(eventType, "_normal") {
+		return "🟢"
+	}
+	if eventType == "database.backup" || eventType == "database.import" || eventType == "release_published" || strings.HasSuffix(eventType, ".created") || strings.HasSuffix(eventType, ".exported") || strings.HasSuffix(eventType, ".imported") {
+		return "✅"
+	}
+	switch strings.ToLower(strings.TrimSpace(severity)) {
+	case "critical":
+		return "🚨"
+	case "warning":
+		return "🟠"
+	default:
+		return "ℹ️"
+	}
+}
+
+func notificationEventStatus(eventType string) string {
+	eventType = strings.ToLower(strings.TrimSpace(eventType))
+	switch {
+	case eventType == "up", eventType == "online", eventType == "action_recovered", strings.HasSuffix(eventType, "_normal"):
+		return "已恢复"
+	case eventType == "down", eventType == "offline":
+		return "故障"
+	case eventType == "interrupted":
+		return "中断"
+	case eventType == "degraded":
+		return "采集异常"
+	case strings.HasSuffix(eventType, "_high"), strings.Contains(eventType, "failed"), eventType == "ssl_expiry":
+		return "告警"
+	case strings.HasSuffix(eventType, ".created"), strings.HasSuffix(eventType, ".imported"), strings.HasSuffix(eventType, ".exported"), eventType == "database.backup", eventType == "database.import":
+		return "成功"
+	default:
+		return "已触发"
+	}
+}
+
+func notificationStatusLabel(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "online", "up":
+		return "在线"
+	case "offline", "down":
+		return "离线"
+	case "interrupted":
+		return "中断"
+	case "degraded":
+		return "采集异常"
+	case "success":
+		return "成功"
+	case "failed", "failure":
+		return "失败"
+	default:
+		return status
+	}
+}
+
+func notificationSeverityLabel(severity string) string {
+	switch strings.ToLower(strings.TrimSpace(severity)) {
+	case "critical":
+		return "严重"
+	case "warning":
+		return "警告"
+	case "info":
+		return "信息"
+	default:
+		return severity
+	}
+}
+
+func notificationEventLabel(eventType string) string {
+	labels := map[string]string{
+		"down": "服务不可用", "up": "服务恢复", "pending": "状态待确认", "ssl_expiry": "SSL 证书即将到期",
+		"offline": "主机离线", "online": "主机上线", "interrupted": "连接中断", "degraded": "采集异常",
+		"cpu_high": "CPU 使用率过高", "cpu_normal": "CPU 恢复正常", "memory_high": "内存使用率过高", "memory_normal": "内存恢复正常",
+		"disk_high": "磁盘使用率过高", "disk_normal": "磁盘恢复正常", "traffic_high": "流量使用率过高", "traffic_normal": "流量恢复正常",
+		"action_failed": "GitHub Actions 执行失败", "action_recovered": "GitHub Actions 恢复正常", "release_published": "GitHub 新版本发布",
+		"star_spike": "GitHub Star 激增", "issue_opened": "GitHub Issue 新增", "pull_request_opened": "GitHub PR 新增",
+		"repository_unreachable": "GitHub 仓库无法访问", "token_invalid": "GitHub Token 已失效", "rate_limit_low": "GitHub API 额度偏低",
+		"webhook_delivery_failed": "GitHub Webhook 投递失败", "webhook_ping": "GitHub Webhook 连通成功",
+		"database.backup": "数据库备份", "database.import": "数据库恢复", "log.cleanup": "日志清理", "migration.failed": "数据库迁移失败",
+		"resource.created": "资源已创建", "resource.updated": "资源已更新", "resource.deleted": "资源已删除", "cleanup": "清理任务",
+		"security.revealed": "敏感信息已查看", "backup.imported": "备份已导入", "backup.exported": "备份已导出",
+	}
+	if label := labels[strings.ToLower(strings.TrimSpace(eventType))]; label != "" {
+		return label
+	}
+	return eventType
+}
+
+func notificationTemplateData(data map[string]interface{}, loc *time.Location) map[string]interface{} {
+	if loc == nil {
+		loc = time.Local
+	}
+	result := make(map[string]interface{}, len(data)+3)
+	for key, value := range data {
+		result[key] = value
+	}
+	result["time"] = time.Now().In(loc).Format("2006/01/02 15:04:05")
+	result["timeZone"] = loc.String()
+	if lastActive := stringValue(data["lastActive"]); lastActive != "" {
+		result["lastActiveLocal"] = toLocalTimeStr(lastActive, loc)
+	}
+	return result
+}
+
+func toLocalTimeStr(utcStr string, loc *time.Location) string {
 	if utcStr == "" {
 		return ""
+	}
+	if loc == nil {
+		loc = time.Local
 	}
 	var t time.Time
 	var err error
@@ -1590,7 +2412,7 @@ func toLocalTimeStr(utcStr string) string {
 	if err != nil {
 		return utcStr
 	}
-	return t.Local().Format("2006/01/02 15:04:05")
+	return t.In(loc).Format("2006/01/02 15:04:05")
 }
 
 func formatNotificationBytes(bytes int64) string {
@@ -1604,6 +2426,17 @@ func formatNotificationBytes(bytes int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.2f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+func formatNotificationPercent(value interface{}) interface{} {
+	if value == nil {
+		return nil
+	}
+	text := strings.TrimSpace(stringValue(value))
+	if text == "" || strings.HasSuffix(text, "%") {
+		return text
+	}
+	return text + "%"
 }
 
 func renderTemplate(template string, data map[string]interface{}) string {
@@ -1721,9 +2554,12 @@ func compare(actual, expected interface{}, operator string) bool {
 	}
 }
 
-func checkTimeWindow(window map[string]interface{}) bool {
+func checkTimeWindow(window map[string]interface{}, loc *time.Location) bool {
 	if !boolValue(window["enabled"], false) {
 		return true
+	}
+	if loc == nil {
+		loc = time.Local
 	}
 	start := stringDefault(window["start"], "00:00")
 	end := stringDefault(window["end"], "23:59")
@@ -1732,7 +2568,7 @@ func checkTimeWindow(window map[string]interface{}) bool {
 	if !okStart || !okEnd {
 		return true
 	}
-	now := time.Now()
+	now := time.Now().In(loc)
 	current := now.Hour()*60 + now.Minute()
 	if endMinutes < startMinutes {
 		return current >= startMinutes || current <= endMinutes

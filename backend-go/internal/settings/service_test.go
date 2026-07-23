@@ -150,11 +150,12 @@ func TestDatabaseStatsSelfCheckAndAnalysis(t *testing.T) {
 	var statsPayload struct {
 		Success bool `json:"success"`
 		Data    struct {
-			DBPath    string           `json:"dbPath"`
-			DBSize    int64            `json:"dbSize"`
-			TotalSize int64            `json:"totalSize"`
-			Tables    map[string]int64 `json:"tables"`
-			Storage   struct {
+			DBPath      string           `json:"dbPath"`
+			DBSize      int64            `json:"dbSize"`
+			TotalSize   int64            `json:"totalSize"`
+			Tables      map[string]int64 `json:"tables"`
+			CountsExact bool             `json:"countsExact"`
+			Storage     struct {
 				MainSizeBytes  int64 `json:"mainSizeBytes"`
 				TotalSizeBytes int64 `json:"totalSizeBytes"`
 				PageSize       int64 `json:"pageSize"`
@@ -169,8 +170,24 @@ func TestDatabaseStatsSelfCheckAndAnalysis(t *testing.T) {
 	if statsPayload.Data.Storage.MainSizeBytes == 0 || statsPayload.Data.Storage.TotalSizeBytes < statsPayload.Data.Storage.MainSizeBytes || statsPayload.Data.Storage.PageSize == 0 || statsPayload.Data.Storage.PageCount == 0 {
 		t.Fatalf("unexpected storage stats: %#v", statsPayload.Data.Storage)
 	}
-	if statsPayload.Data.Tables["chat_messages"] != 2 || statsPayload.Data.Tables["operation_logs"] != 1 {
-		t.Fatalf("unexpected table stats: %#v", statsPayload.Data.Tables)
+	if statsPayload.Data.CountsExact || statsPayload.Data.Tables["chat_messages"] != -1 || statsPayload.Data.Tables["operation_logs"] != -1 {
+		t.Fatalf("default stats should avoid table counts: %#v", statsPayload.Data)
+	}
+
+	deepStatsRes := performSettingsRequest(service, http.MethodGet, "/api/settings/database-stats?deep=1", "")
+	if deepStatsRes.Code != http.StatusOK {
+		t.Fatalf("deep database-stats status = %d body=%s", deepStatsRes.Code, deepStatsRes.Body.String())
+	}
+	var deepStatsPayload struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Tables      map[string]int64 `json:"tables"`
+			CountsExact bool             `json:"countsExact"`
+		} `json:"data"`
+	}
+	mustDecodeSettings(t, deepStatsRes, &deepStatsPayload)
+	if !deepStatsPayload.Data.CountsExact || deepStatsPayload.Data.Tables["chat_messages"] != 2 || deepStatsPayload.Data.Tables["operation_logs"] != 1 {
+		t.Fatalf("unexpected deep table stats: %#v", deepStatsPayload.Data)
 	}
 
 	selfCheckRes := performSettingsRequest(service, http.MethodGet, "/api/settings/migration-self-check", "")
@@ -207,6 +224,7 @@ func TestDatabaseStatsSelfCheckAndAnalysis(t *testing.T) {
 		Success bool `json:"success"`
 		Data    struct {
 			DBFileSizeMB string `json:"dbFileSizeMB"`
+			CountsExact  bool   `json:"countsExact"`
 			Storage      struct {
 				MainSizeBytes  int64 `json:"mainSizeBytes"`
 				TotalSizeBytes int64 `json:"totalSizeBytes"`
@@ -226,8 +244,32 @@ func TestDatabaseStatsSelfCheckAndAnalysis(t *testing.T) {
 		t.Fatalf("unexpected analysis payload: %#v", analysisPayload)
 	}
 	chatAnalysis := findAnalysisTable(analysisPayload.Data.Tables, "chat_messages")
-	if chatAnalysis == nil || chatAnalysis.Rows != 2 || chatAnalysis.EstimatedSizeBytes < 14 || chatAnalysis.AvgRowSizeBytes == 0 || chatAnalysis.SizeSource == "" {
+	if analysisPayload.Data.CountsExact || chatAnalysis == nil || chatAnalysis.Rows != -1 || chatAnalysis.EstimatedSizeBytes == 0 || chatAnalysis.SizeSource == "" {
 		t.Fatalf("unexpected chat analysis: %#v", chatAnalysis)
+	}
+
+	deepAnalysisRes := performSettingsRequest(service, http.MethodGet, "/api/settings/database-analysis?deep=1", "")
+	if deepAnalysisRes.Code != http.StatusOK {
+		t.Fatalf("deep database-analysis status = %d body=%s", deepAnalysisRes.Code, deepAnalysisRes.Body.String())
+	}
+	var deepAnalysisPayload struct {
+		Success bool `json:"success"`
+		Data    struct {
+			CountsExact bool `json:"countsExact"`
+			Tables      []struct {
+				Table              string `json:"table"`
+				Rows               int64  `json:"rows"`
+				EstimatedSizeBytes int64  `json:"estimatedSizeBytes"`
+				EstimatedSizeMB    string `json:"estimatedSizeMB"`
+				AvgRowSizeBytes    int64  `json:"avgRowSizeBytes"`
+				SizeSource         string `json:"sizeSource"`
+			} `json:"tables"`
+		} `json:"data"`
+	}
+	mustDecodeSettings(t, deepAnalysisRes, &deepAnalysisPayload)
+	deepChatAnalysis := findAnalysisTable(deepAnalysisPayload.Data.Tables, "chat_messages")
+	if !deepAnalysisPayload.Data.CountsExact || deepChatAnalysis == nil || deepChatAnalysis.Rows != 2 || deepChatAnalysis.EstimatedSizeBytes < 14 || deepChatAnalysis.AvgRowSizeBytes == 0 || deepChatAnalysis.SizeSource == "" {
+		t.Fatalf("unexpected deep chat analysis: %#v", deepChatAnalysis)
 	}
 }
 
@@ -755,6 +797,60 @@ func TestClearChatMessages(t *testing.T) {
 	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestClearLogTablesIncludesTelemetrySamples(t *testing.T) {
+	service := New(config.Config{
+		Version: "test",
+		Host:    "127.0.0.1",
+		Port:    0,
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	db, err := service.store.Open(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.ExecContext(context.Background(), `
+		CREATE TABLE server_network_quality_samples (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			checked_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE TABLE uptime_heartbeats (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE TABLE regular_records (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		INSERT INTO server_network_quality_samples DEFAULT VALUES;
+		INSERT INTO uptime_heartbeats DEFAULT VALUES;
+		INSERT INTO regular_records DEFAULT VALUES;
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deleted, err := clearLogTables(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 2 {
+		t.Fatalf("deleted telemetry rows = %d, want 2", deleted)
+	}
+	if countRowsForTest(t, db, "server_network_quality_samples") != 0 {
+		t.Fatal("network quality samples should be cleared")
+	}
+	if countRowsForTest(t, db, "uptime_heartbeats") != 0 {
+		t.Fatal("uptime heartbeats should be cleared")
+	}
+	if countRowsForTest(t, db, "regular_records") != 1 {
+		t.Fatal("non-log tables should remain")
 	}
 }
 

@@ -106,7 +106,7 @@ function createFillButton(input) {
   if (input.dataset.btnAdded === 'true') return;
   const btn = document.createElement('button');
   btn.className = 'api-monitor-2fa-btn';
-  btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>`;
+  btn.textContent = '2FA';
   btn.title = '一键填充 2FA 验证码';
   btn.type = 'button';
   
@@ -160,13 +160,33 @@ async function showCodePicker(input) {
   picker.style.width = `${Math.max(rect.width, 240)}px`;
   
   const listCont = picker.querySelector('#api-2fa-list');
-  safeSendMessage({ type: 'GET_ACCOUNTS', domain: window.location.hostname }, (response) => {
+  safeSendMessage({ type: 'GET_ACCOUNTS', frameHostname: window.location.hostname }, (response) => {
     if (!response || !response.success) { 
       listCont.innerHTML = `<div class="error"><p>${response?.error || '获取失败'}</p></div>`; return; 
     }
-    allAccounts = response.matched?.length > 0 ? response.matched : response.data;
-    if (!allAccounts || allAccounts.length === 0) { 
-      listCont.innerHTML = '<div class="empty">📭 暂无账号</div>'; return; 
+    allAccounts = Array.isArray(response.matched) ? response.matched : [];
+    if (allAccounts.length === 0) {
+      const availableAccounts = Array.isArray(response.data) ? response.data : [];
+      if (availableAccounts.length === 0) {
+        listCont.innerHTML = '<div class="empty">暂无账号</div>';
+        return;
+      }
+      const hostname = response.matchContext?.hostname || window.location.hostname;
+      listCont.replaceChildren();
+      const emptyState = document.createElement('div');
+      emptyState.className = 'empty';
+      emptyState.textContent = hostname ? `未找到与 ${hostname} 匹配的账号` : '未找到匹配账号';
+      const showAllButton = document.createElement('button');
+      showAllButton.className = 'api-monitor-2fa-show-all';
+      showAllButton.type = 'button';
+      showAllButton.textContent = '显示全部账号';
+      showAllButton.addEventListener('click', () => {
+        allAccounts = availableAccounts;
+        renderPickerList(listCont, allAccounts, input);
+      });
+      emptyState.appendChild(showAllButton);
+      listCont.appendChild(emptyState);
+      return;
     }
     renderPickerList(listCont, allAccounts, input);
   });

@@ -1,15 +1,29 @@
-import React, { lazy, Suspense, useEffect, useMemo } from 'react';
-import useStore, { MODULE_GROUPS, MODULE_CONFIG, getModuleName } from '../store.js';
+import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import useStore, { MODULE_GROUPS, MODULE_CONFIG, getGroupModuleIds, getModuleName } from '../store.js';
 import {
   Sidebar,
   useSidebar
 } from '@cloudflare/kumo/components/sidebar';
+import { Tooltip } from '@cloudflare/kumo/components/tooltip';
+import { Button } from '@cloudflare/kumo/components/button';
 import { Tabs } from '@cloudflare/kumo';
+import { TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import AppPageHeader, { AppBreadcrumbs } from './AppPageHeader.jsx';
+import { AppCard } from './ui/AppPrimitives.jsx';
 import {
+  Globe,
   Server,
   LogOut,
+  AppWindow,
+  Columns,
+  DesktopDisplay,
+  Maximize2,
+  Palette,
+  Rectangle,
+  Sun,
+  Moon,
   Settings,
+  MODULE_GROUP_ICON_MAP,
   getModuleIconComponent,
 } from './Icons.jsx';
 
@@ -20,12 +34,16 @@ const FileboxPage = lazy(() => import('../pages/FileboxPage.jsx'));
 const UptimePage = lazy(() => import('../pages/UptimePage.jsx'));
 const NotificationPage = lazy(() => import('../pages/NotificationPage.jsx'));
 const OpenAIPage = lazy(() => import('../pages/OpenAIPage.jsx'));
+const SubscriptionPage = lazy(() => import('../pages/SubscriptionPage.jsx'));
+const GitHubPage = lazy(() => import('../pages/GitHubPage.jsx'));
 
 
 const PaasPage = lazy(() => import('../pages/PaasPage.jsx'));
 const DnsPage = lazy(() => import('../pages/DnsPage.jsx'));
 const AliyunPage = lazy(() => import('../pages/AliyunPage.jsx'));
 const TencentPage = lazy(() => import('../pages/TencentPage.jsx'));
+const OraclePage = lazy(() => import('../pages/OraclePage.jsx'));
+const M365Page = lazy(() => import('../pages/M365Page.jsx'));
 const SettingsPage = lazy(() => import('../pages/SettingsPage.jsx'));
 const SchedulerPage = lazy(() => import('../pages/SchedulerPage.jsx'));
 const ApiDocsPage = lazy(() => import('../pages/ApiDocsPage.jsx'));
@@ -67,7 +85,7 @@ class ModuleErrorBoundary extends React.Component {
     }
     return (
       <div className="flex min-h-[360px] items-center justify-center">
-        <div className="app-card w-full max-w-xl p-5">
+        <AppCard padding="none" className="w-full max-w-xl p-5">
           <div className="mb-2 text-sm font-bold text-kumo-strong">模块加载失败</div>
           <div className="mb-4 text-xs leading-relaxed text-kumo-subtle">
             前端资源可能已更新或缓存仍指向旧文件。请重新加载当前页面后再试。
@@ -75,18 +93,20 @@ class ModuleErrorBoundary extends React.Component {
           <div className="mb-4 rounded-md border border-kumo-line bg-kumo-recessed/50 p-3 font-mono text-[11px] leading-relaxed text-kumo-subtle">
             {this.state.error?.message || '未知错误'}
           </div>
-          <button
+          <Button
             type="button"
+            size="sm"
+            variant="primary"
             onClick={() => {
               const url = new URL(window.location.href);
               url.searchParams.set('_reload', String(Date.now()));
               window.location.replace(url.toString());
             }}
-            className="h-8 rounded-md bg-kumo-brand px-3 text-xs font-bold text-white"
+            className="font-bold"
           >
             重新加载
-          </button>
-        </div>
+          </Button>
+        </AppCard>
       </div>
     );
   }
@@ -103,6 +123,9 @@ const LEGACY_MODULE_PATHS = {
 
 const getPathModule = (pathname) => {
   const normalized = pathname.replace(/\/+$/, '') || '/';
+  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mockDocker')) {
+    return 'server';
+  }
   if (normalized === '/') return 'dashboard';
   const route = normalized.slice(1);
   if (LEGACY_MODULE_PATHS[route]) return LEGACY_MODULE_PATHS[route];
@@ -115,17 +138,41 @@ const PAGE_WIDTH_CLASSES = {
   full: 'max-w-none',
 };
 
+const renderSidebarStyleIcon = (IconComponent, label) => (
+  <span
+    title={label}
+    aria-label={label}
+    className="inline-flex h-4 w-4 items-center justify-center"
+  >
+    <IconComponent className="h-3.5 w-3.5" />
+  </span>
+);
+
+const formatAppProcessUptime = (seconds) => {
+  const totalSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+
+  if (days > 0) return `${days}天 ${hours}小时`;
+  if (hours > 0) return `${hours}小时 ${minutes}分钟`;
+  if (minutes > 0) return `${minutes}分钟`;
+  return `${totalSeconds}秒`;
+};
+
 const PAGE_WIDTH_OPTIONS = [
-  { value: 'standard', label: '标准' },
-  { value: 'wide', label: '宽屏' },
-  { value: 'full', label: '全宽' },
+  { value: 'standard', label: renderSidebarStyleIcon(Rectangle, '标准宽度'), className: 'w-full !justify-center !px-0' },
+  { value: 'wide', label: renderSidebarStyleIcon(Columns, '宽屏宽度'), className: 'w-full !justify-center !px-0' },
+  { value: 'full', label: renderSidebarStyleIcon(Maximize2, '全宽'), className: 'w-full !justify-center !px-0' },
 ];
 
 const THEME_MODE_OPTIONS = [
-  { value: 'auto', label: '自动' },
-  { value: 'light', label: '浅色' },
-  { value: 'dark', label: '深色' },
+  { value: 'auto', label: renderSidebarStyleIcon(DesktopDisplay, '自动跟随系统'), className: 'w-full !justify-center !px-0' },
+  { value: 'light', label: renderSidebarStyleIcon(Sun, '浅色模式'), className: 'w-full !justify-center !px-0' },
+  { value: 'dark', label: renderSidebarStyleIcon(Moon, '深色模式'), className: 'w-full !justify-center !px-0' },
 ];
+
+const HAPTIC_INTERACTIVE_SELECTOR = 'button, a, [role="button"], [role="tab"], [role="switch"], input, select, textarea';
 
 const useMobileClosingNavigation = (onNavigate) => {
   const { isMobile, setOpenMobile } = useSidebar();
@@ -136,51 +183,142 @@ const useMobileClosingNavigation = (onNavigate) => {
   };
 };
 
-const SidebarModuleButton = ({ module, active, icon: IconComponent, onNavigate }) => {
-  const navigateAndClose = useMobileClosingNavigation(onNavigate);
-  const { isMobile } = useSidebar();
-  const config = MODULE_CONFIG[module];
-  if (!config) return null;
-  const tooltip = !isMobile ? config.name : undefined;
+const SidebarTooltipMenuButton = ({ label, children, ...props }) => {
+  const { isMobile, state } = useSidebar();
+  const [tooltipOpen, setTooltipOpen] = useState(false);
+  const allowTooltip = !isMobile && state === 'collapsed';
+
+  useEffect(() => {
+    if (!allowTooltip) setTooltipOpen(false);
+  }, [allowTooltip]);
 
   return (
-    <Sidebar.MenuButton
+    <Sidebar.MenuItem>
+      <Tooltip
+        content={label}
+        side="right"
+        open={allowTooltip ? tooltipOpen : false}
+        onOpenChange={(open) => setTooltipOpen(allowTooltip && open)}
+        render={(
+          <Sidebar.MenuButton {...props} aria-label={label}>
+            {children}
+          </Sidebar.MenuButton>
+        )}
+      />
+    </Sidebar.MenuItem>
+  );
+};
+
+const SidebarModuleButton = ({ module, active, icon: IconComponent, onNavigate }) => {
+  const navigateAndClose = useMobileClosingNavigation(onNavigate);
+  const config = MODULE_CONFIG[module];
+  if (!config) return null;
+
+  return (
+    <SidebarTooltipMenuButton
+      label={config.name}
       active={active}
       aria-current={active ? 'page' : undefined}
       onClick={() => navigateAndClose(module)}
       icon={IconComponent}
-      tooltip={tooltip}
     >
       {config.name}
-    </Sidebar.MenuButton>
+    </SidebarTooltipMenuButton>
+  );
+};
+
+const SidebarModuleSubButton = ({ module, active, onNavigate }) => {
+  const navigateAndClose = useMobileClosingNavigation(onNavigate);
+  const config = MODULE_CONFIG[module];
+  if (!config) return null;
+
+  return (
+    <Sidebar.MenuSubButton
+      active={active}
+      aria-current={active ? 'page' : undefined}
+      onClick={() => navigateAndClose(module)}
+    >
+      {config.name}
+    </Sidebar.MenuSubButton>
+  );
+};
+
+const SidebarModuleSubgroup = ({ subgroup, activeModule, onNavigate }) => {
+  const subgroupModules = subgroup.modules || [];
+  const active = subgroupModules.includes(activeModule);
+  const ParentIcon = subgroup.icon || MODULE_GROUP_ICON_MAP[subgroup.id] || Globe;
+  const quietTriggerClassName = [
+    '!bg-transparent',
+    '!shadow-none',
+    '!text-inherit',
+    'active:!bg-transparent',
+    'hover:!bg-transparent',
+    'hover:!text-inherit',
+    'focus-visible:!bg-transparent',
+    'focus-visible:!shadow-none',
+    'data-[active=true]:!bg-transparent',
+    'data-[selected=true]:!bg-transparent',
+    'data-[state=open]:!bg-transparent',
+    'data-[state=open]:!text-inherit',
+    '[&_[data-slot=sidebar-menu-button-label]]:!font-normal',
+  ].join(' ');
+
+  return (
+    <Sidebar.MenuItem>
+      <Sidebar.Collapsible defaultOpen={active}>
+        <Sidebar.CollapsibleTrigger
+          render={(
+            <Sidebar.MenuButton icon={ParentIcon} className={quietTriggerClassName}>
+              {subgroup.name}
+              <Sidebar.MenuChevron />
+            </Sidebar.MenuButton>
+          )}
+        />
+        <Sidebar.CollapsibleContent>
+          <Sidebar.MenuSub>
+            {subgroupModules.map((module) => (
+              <SidebarModuleSubButton
+                key={module}
+                module={module}
+                active={activeModule === module}
+                onNavigate={onNavigate}
+              />
+            ))}
+          </Sidebar.MenuSub>
+        </Sidebar.CollapsibleContent>
+      </Sidebar.Collapsible>
+    </Sidebar.MenuItem>
   );
 };
 
 const SidebarLogoutButton = ({ onLogout }) => {
-  const { isMobile } = useSidebar();
-  const tooltip = !isMobile ? '安全退出' : undefined;
-
   return (
-    <Sidebar.MenuButton
+    <SidebarTooltipMenuButton
+      label="安全退出"
       onClick={onLogout}
       className="text-kumo-danger hover:bg-kumo-danger/10"
       icon={LogOut}
-      tooltip={tooltip}
     >
       安全退出
-    </Sidebar.MenuButton>
+    </SidebarTooltipMenuButton>
   );
 };
 
-const SidebarBrand = () => (
-  <div className="flex h-full w-full min-w-0 items-center gap-2">
-    <span className="flex size-8.5 shrink-0 items-center justify-center">
-      <img src="/logo.svg" className="size-5 shrink-0 object-contain" alt="" />
+const SidebarBrand = ({ onHome }) => (
+  <Button
+    type="button"
+    variant="ghost"
+    onClick={onHome}
+    className="!h-full w-full min-w-0 justify-start gap-1 rounded-none text-left !bg-transparent !p-0 hover:!bg-transparent active:!bg-transparent focus:!bg-transparent focus-visible:!bg-transparent data-[active=true]:!bg-transparent data-[selected=true]:!bg-transparent"
+    aria-label="返回首页"
+  >
+    <span className="flex size-10 shrink-0 items-center justify-center transition-transform duration-250 ease-[cubic-bezier(0.4,0,0.2,1)]">
+      <img src="/logo.svg" className="size-7 shrink-0 object-contain" alt="" />
     </span>
-    <span className="min-w-0 truncate text-sm font-semibold text-kumo-strong">
+    <span className="min-w-0 max-w-32 overflow-hidden truncate whitespace-nowrap text-sm font-semibold text-kumo-strong opacity-100 transition-[max-width,opacity] duration-250 ease-[cubic-bezier(0.4,0,0.2,1)] group-data-[state=collapsed]/sidebar:max-w-0 group-data-[state=collapsed]/sidebar:opacity-0">
       API Monitor
     </span>
-  </div>
+  </Button>
 );
 
 const SidebarStyleSwitches = ({
@@ -189,33 +327,71 @@ const SidebarStyleSwitches = ({
   themeMode,
   onThemeModeChange,
 }) => {
-  const { isMobile, state } = useSidebar();
-
-  if (!isMobile && state === 'collapsed') return null;
+  const controlRowClassName = [
+    'group/menu-button relative flex w-full min-w-0 items-center gap-2.5 rounded-lg text-kumo-default',
+    'before:absolute before:inset-x-0 before:-inset-y-px',
+    'min-h-8.5 px-3 py-0 text-sm transition-[color,box-shadow,outline] duration-(--sidebar-animation-duration)',
+    'hover:bg-transparent',
+    'active:bg-transparent',
+    'focus-within:bg-transparent',
+  ].join(' ');
+  const controlRowInnerClassName = [
+    'flex flex-1 min-w-0 items-center gap-3',
+    'translate-x-[-3px] group-not-data-[state=collapsed]/sidebar:translate-x-0',
+    'transition-transform duration-(--sidebar-animation-duration)',
+  ].join(' ');
 
   return (
     <Sidebar.Group className="mt-auto">
       <Sidebar.GroupLabel>样式切换</Sidebar.GroupLabel>
-      <div className="flex flex-col gap-2 px-2">
-        <Tabs
-          variant="segmented"
-          size="sm"
-          className="w-fit max-w-full"
-          listClassName="w-fit max-w-full"
-          value={pageWidthMode}
-          onValueChange={onPageWidthChange}
-          tabs={PAGE_WIDTH_OPTIONS}
-        />
-        <Tabs
-          variant="segmented"
-          size="sm"
-          className="w-fit max-w-full"
-          listClassName="w-fit max-w-full"
-          value={themeMode}
-          onValueChange={onThemeModeChange}
-          tabs={THEME_MODE_OPTIONS}
-        />
-      </div>
+      <Sidebar.Menu>
+        <Sidebar.MenuItem>
+          <div className={controlRowClassName} data-sidebar="menu-button">
+            <div className={controlRowInnerClassName}>
+              <span
+                className="h-4 w-4 shrink-0 opacity-40"
+                title="页面宽度"
+                aria-label="页面宽度"
+              >
+                <AppWindow className="h-4 w-4" />
+              </span>
+              <div className="sidebar-style-tabs min-w-0 flex-1 group-data-[state=collapsed]/sidebar:hidden">
+                <Tabs
+                  {...TOOL_TABS_PROPS}
+                  className="w-full min-w-0"
+                  listClassName="grid w-full grid-cols-3"
+                  value={pageWidthMode}
+                  onValueChange={onPageWidthChange}
+                  tabs={PAGE_WIDTH_OPTIONS}
+                />
+              </div>
+            </div>
+          </div>
+        </Sidebar.MenuItem>
+        <Sidebar.MenuItem>
+          <div className={controlRowClassName} data-sidebar="menu-button">
+            <div className={controlRowInnerClassName}>
+              <span
+                className="h-4 w-4 shrink-0 opacity-40"
+                title="主题模式"
+                aria-label="主题模式"
+              >
+                <Palette className="h-4 w-4" />
+              </span>
+              <div className="sidebar-style-tabs min-w-0 flex-1 group-data-[state=collapsed]/sidebar:hidden">
+                <Tabs
+                  {...TOOL_TABS_PROPS}
+                  className="w-full min-w-0"
+                  listClassName="grid w-full grid-cols-3"
+                  value={themeMode}
+                  onValueChange={onThemeModeChange}
+                  tabs={THEME_MODE_OPTIONS}
+                />
+              </div>
+            </div>
+          </div>
+        </Sidebar.MenuItem>
+      </Sidebar.Menu>
     </Sidebar.Group>
   );
 };
@@ -230,21 +406,55 @@ function MainLayout() {
     setThemeMode,
     pageWidthMode,
     setPageWidthMode,
+    dashboardFooterVisible,
+    dashboardFooterRecordNumber,
+    appProcessUptimeSeconds,
+    appProcessUptimeMeasuredAt,
     moduleVisibility,
     moduleOrder,
     userSettingsLoaded,
     loadUserSettings,
+    triggerHaptic,
     logout,
   } = useStore();
+  const [runtimeClock, setRuntimeClock] = useState(() => Date.now());
   const pageWidthClass = PAGE_WIDTH_CLASSES[pageWidthMode] || PAGE_WIDTH_CLASSES.standard;
+  const displayedAppProcessUptime = appProcessUptimeSeconds > 0
+    ? appProcessUptimeSeconds + Math.max(0, runtimeClock - appProcessUptimeMeasuredAt) / 1000
+    : 0;
+
+  useEffect(() => {
+    if (mainActiveTab !== 'dashboard' || !dashboardFooterVisible) return undefined;
+    setRuntimeClock(Date.now());
+    const interval = window.setInterval(() => setRuntimeClock(Date.now()), 30000);
+    return () => window.clearInterval(interval);
+  }, [dashboardFooterVisible, mainActiveTab]);
 
   const visibleModuleGroups = useMemo(() => {
-    return MODULE_GROUPS.map((group) => ({
-      ...group,
-      modules: moduleOrder.filter(
-        (moduleId) => group.modules.includes(moduleId) && moduleVisibility[moduleId] !== false
-      ),
-    })).filter((group) => group.modules.length > 0 && group.id !== 'system');
+    return MODULE_GROUPS.map((group) => {
+      const directModules = moduleOrder.filter(
+        (moduleId) => (group.modules || []).includes(moduleId) && moduleVisibility[moduleId] !== false
+      );
+      const subgroups = (group.subgroups || []).map((subgroup) => ({
+        ...subgroup,
+        modules: moduleOrder.filter(
+          (moduleId) => (subgroup.modules || []).includes(moduleId) && moduleVisibility[moduleId] !== false
+        ),
+      })).filter((subgroup) => subgroup.modules.length > 0);
+      const trailingModules = moduleOrder.filter(
+        (moduleId) => (group.trailingModules || []).includes(moduleId) && moduleVisibility[moduleId] !== false
+      );
+
+      return {
+        ...group,
+        modules: directModules,
+        subgroups,
+        trailingModules,
+      };
+    }).filter((group) => {
+      if (group.id === 'system') return false;
+      return getGroupModuleIds(group).some((moduleId) => moduleVisibility[moduleId] !== false);
+    });
   }, [moduleOrder, moduleVisibility]);
 
   useEffect(() => {
@@ -260,6 +470,9 @@ function MainLayout() {
       const currentTab = useStore.getState().mainActiveTab;
       if (currentTab !== routeTab) {
         useStore.getState().setMainActiveTab(routeTab);
+      }
+      if (routeTab === 'server' && new URLSearchParams(window.location.search).has('mockDocker') && window.location.pathname !== '/server') {
+        window.history.replaceState({ module: 'server' }, '', `/server${window.location.search}`);
       }
     };
 
@@ -277,10 +490,18 @@ function MainLayout() {
   }, []);
 
   const navigateToModule = (module) => {
+    triggerHaptic();
     setMainActiveTab(module);
     const nextPath = MODULE_PATHS[module] || `/${module}`;
     if (window.location.pathname !== nextPath) {
       window.history.pushState({ module }, '', nextPath);
+    }
+  };
+
+  const navigateHome = () => {
+    setMainActiveTab('dashboard');
+    if (window.location.pathname !== '/' || window.location.search || window.location.hash) {
+      window.history.pushState({ module: 'dashboard' }, '', '/');
     }
   };
 
@@ -296,6 +517,44 @@ function MainLayout() {
     }
   }, [mainActiveTab, moduleOrder, moduleVisibility, setMainActiveTab, userSettingsLoaded]);
 
+  useEffect(() => {
+    const matchesInteractiveTarget = (target) => (
+      target instanceof Element && Boolean(target.closest(HAPTIC_INTERACTIVE_SELECTOR))
+    );
+
+    const handlePointerUp = (event) => {
+      if (event.pointerType && event.pointerType !== 'touch') return;
+      if (!matchesInteractiveTarget(event.target)) return;
+      triggerHaptic();
+    };
+
+    const handleClick = (event) => {
+      const hasTouchCapability = typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0;
+      if (!hasTouchCapability) return;
+      if (!matchesInteractiveTarget(event.target)) return;
+      triggerHaptic();
+    };
+
+    document.addEventListener('pointerup', handlePointerUp, true);
+    document.addEventListener('click', handleClick, true);
+
+    return () => {
+      document.removeEventListener('pointerup', handlePointerUp, true);
+      document.removeEventListener('click', handleClick, true);
+    };
+  }, [triggerHaptic]);
+
+  const responsiveWorkspaceModule = ['dns', 'settings'].includes(mainActiveTab);
+  const viewportWorkspaceModule = ['apidocs', 'systemlogs'].includes(mainActiveTab);
+  const mainCanvasClassName = responsiveWorkspaceModule
+    ? 'flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 md:overflow-hidden lg:px-8 lg:pb-6 lg:pt-3 scrollbar-thin'
+    : viewportWorkspaceModule
+      ? 'flex-1 overflow-hidden p-3 sm:p-4 lg:px-8 lg:pb-6 lg:pt-3'
+      : 'flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 lg:px-8 lg:pb-6 lg:pt-3 scrollbar-thin';
+  const mainCanvasInnerClassName = `mx-auto flex w-full min-w-0 flex-col ${
+    responsiveWorkspaceModule ? 'min-h-full md:h-full md:min-h-0' : viewportWorkspaceModule || mainActiveTab === 'server' ? 'h-full min-h-0' : 'min-h-full'
+  } ${pageWidthClass}`;
+
   // 渲染当前模块页
   const renderActivePage = () => {
     switch (mainActiveTab) {
@@ -303,6 +562,8 @@ function MainLayout() {
         return <DashboardPage onNavigate={navigateToModule} />;
       case 'openai':
         return <OpenAIPage />;
+      case 'subscription':
+        return <SubscriptionPage />;
 
 
       case 'paas':
@@ -313,6 +574,10 @@ function MainLayout() {
         return <AliyunPage />;
       case 'tencent':
         return <TencentPage />;
+      case 'oracle':
+        return <OraclePage />;
+      case 'm365':
+        return <M365Page />;
       case 'server':
         return <ServerPage />;
       case 'totp':
@@ -323,6 +588,8 @@ function MainLayout() {
         return <UptimePage />;
       case 'notification':
         return <NotificationPage />;
+      case 'github':
+        return <GitHubPage />;
       case 'settings':
         return <SettingsPage />;
       case 'scheduler':
@@ -334,8 +601,8 @@ function MainLayout() {
       default:
         const ActiveIcon = getModuleIconComponent(mainActiveTab, Server);
         return (
-          <div className="flex flex-col items-center justify-center h-[60vh] text-center p-6 app-card max-w-xl mx-auto">
-            <div className="w-16 h-16 rounded-full app-subcard bg-kumo-recessed flex items-center justify-center mb-5 text-kumo-brand">
+          <AppCard padding="none" className="mx-auto flex h-[60vh] max-w-xl flex-col items-center justify-center p-6 text-center">
+            <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full border border-kumo-line bg-kumo-recessed text-kumo-brand shadow-none">
               <ActiveIcon className="w-7 h-7" />
             </div>
             <h2 className="text-base font-bold text-kumo-strong mb-2.5">
@@ -344,7 +611,7 @@ function MainLayout() {
             <p className="text-xs text-kumo-subtle max-w-sm leading-relaxed">
               我们正在使用 React + Kumo + Tailwind v4 像素级重构该页面，在此期间原有逻辑将暂时不可用。
             </p>
-          </div>
+          </AppCard>
         );
     }
   };
@@ -354,121 +621,163 @@ function MainLayout() {
       defaultOpen={!sidebarCollapsed}
       open={!sidebarCollapsed}
       onOpenChange={(open) => setSidebarCollapsed(!open)}
-      style={{ '--sidebar-width': '12.5rem', '--sidebar-width-icon': '54px' }}
-      className="flex h-screen w-screen overflow-hidden bg-kumo-canvas text-kumo-default"
+      peekable
+      style={{
+        '--sidebar-width': '11.5rem',
+        '--sidebar-width-icon': '57px',
+      }}
+      className="app-main-shell flex h-screen w-screen overflow-hidden text-kumo-default"
     >
-      {/* ==================== 1. 侧边栏 (Sidebar) ==================== */}
-      <Sidebar>
-        {/* 顶部 Logo */}
-        <Sidebar.Header className="h-14! px-2.5!">
-          <SidebarBrand />
-        </Sidebar.Header>
+      <>
+        {/* ==================== 1. 侧边栏 (Sidebar) ==================== */}
+        <Sidebar>
+          {/* 顶部 Logo */}
+          <Sidebar.Header className="h-[58px]! shrink-0 overflow-hidden px-3! transition-[padding] duration-250 ease-[cubic-bezier(0.4,0,0.2,1)] group-data-[state=collapsed]/sidebar:px-2!">
+            <SidebarBrand onHome={navigateHome} />
+          </Sidebar.Header>
 
-        {/* 导航栏项 */}
-        <Sidebar.Content>
-          {visibleModuleGroups.map((group) => {
-            const groupLabel = group.id === 'overview' ? '总览' : group.name;
+          {/* 导航栏项 */}
+          <Sidebar.Content>
+            {visibleModuleGroups.map((group) => {
+              const groupLabel = group.id === 'overview' ? '总览' : group.name;
 
-            return (
-              <Sidebar.Group key={group.id}>
-                <Sidebar.GroupLabel>{groupLabel}</Sidebar.GroupLabel>
-                <Sidebar.Menu>
-                  {group.modules.map((module) => (
-                    <SidebarModuleButton
-                      key={module}
-                      module={module}
-                      active={mainActiveTab === module}
-                      icon={getModuleIconComponent(module, Server)}
-                      onNavigate={navigateToModule}
-                    />
-                  ))}
-                </Sidebar.Menu>
-              </Sidebar.Group>
-            );
-          })}
-          <Sidebar.Group>
-            <Sidebar.GroupLabel>系统</Sidebar.GroupLabel>
-            <Sidebar.Menu>
-              {moduleOrder.includes('apidocs') && moduleVisibility.apidocs !== false && (
-                <SidebarModuleButton
-                  module="apidocs"
-                  active={mainActiveTab === 'apidocs'}
-                  icon={getModuleIconComponent('apidocs', Server)}
+              return (
+                <Sidebar.Group key={group.id}>
+                  <Sidebar.GroupLabel>{groupLabel}</Sidebar.GroupLabel>
+                  <Sidebar.Menu>
+                    {group.modules.map((module) => (
+                      <SidebarModuleButton
+                        key={module}
+                        module={module}
+                        active={mainActiveTab === module}
+                        icon={getModuleIconComponent(module, Server)}
+                        onNavigate={navigateToModule}
+                      />
+                    ))}
+                    {(group.subgroups || []).map((subgroup) => (
+                      <SidebarModuleSubgroup
+                        key={subgroup.id}
+                        subgroup={subgroup}
+                        activeModule={mainActiveTab}
+                        onNavigate={navigateToModule}
+                      />
+                    ))}
+                    {(group.trailingModules || []).map((module) => (
+                      <SidebarModuleButton
+                        key={module}
+                        module={module}
+                        active={mainActiveTab === module}
+                        icon={getModuleIconComponent(module, Server)}
+                        onNavigate={navigateToModule}
+                      />
+                    ))}
+                  </Sidebar.Menu>
+                </Sidebar.Group>
+              );
+            })}
+            <Sidebar.Group>
+              <Sidebar.GroupLabel>系统</Sidebar.GroupLabel>
+              <Sidebar.Menu>
+                <SidebarModuleSubgroup
+                  subgroup={{
+                    id: 'configuration',
+                    name: '配置',
+                    icon: Settings,
+                    modules: ['apidocs', 'systemlogs', 'settings'].filter(
+                      (module) => module === 'settings' || (moduleOrder.includes(module) && moduleVisibility[module] !== false)
+                    ),
+                  }}
+                  activeModule={mainActiveTab}
                   onNavigate={navigateToModule}
                 />
-              )}
 
-              {moduleOrder.includes('systemlogs') && moduleVisibility.systemlogs !== false && (
-                <SidebarModuleButton
-                  module="systemlogs"
-                  active={mainActiveTab === 'systemlogs'}
-                  icon={getModuleIconComponent('systemlogs', Server)}
-                  onNavigate={navigateToModule}
-                />
-              )}
+                <SidebarLogoutButton onLogout={logout} />
+              </Sidebar.Menu>
+            </Sidebar.Group>
+            <SidebarStyleSwitches
+              pageWidthMode={pageWidthMode}
+              onPageWidthChange={setPageWidthMode}
+              themeMode={themeMode}
+              onThemeModeChange={setThemeMode}
+            />
+          </Sidebar.Content>
 
-              <SidebarModuleButton
-                module="settings"
-                active={mainActiveTab === 'settings'}
-                icon={Settings}
-                onNavigate={navigateToModule}
-              />
+          {/* 底部功能栏 */}
+          <Sidebar.Footer className="px-[11px]!">
+            <Sidebar.Trigger />
+          </Sidebar.Footer>
+        </Sidebar>
 
-              <SidebarLogoutButton onLogout={logout} />
-            </Sidebar.Menu>
-          </Sidebar.Group>
-          <SidebarStyleSwitches
-            pageWidthMode={pageWidthMode}
-            onPageWidthChange={setPageWidthMode}
-            themeMode={themeMode}
-            onThemeModeChange={setThemeMode}
-          />
-        </Sidebar.Content>
+        {/* ==================== 2. 主页面区 (Main Panel) ==================== */}
+        <div className="app-main-panel flex-1 flex flex-col h-full overflow-hidden">
+          {/* 顶部导航 */}
+          <header className="app-main-topbar box-border flex h-[58px] flex-shrink-0 items-center border-b border-kumo-line px-3 min-[450px]:px-4 md:px-6">
+            <div className="flex h-full min-w-0 flex-1 items-center gap-3.5">
+              <Sidebar.Trigger className="md:hidden" />
 
-        {/* 底部功能栏 */}
-        <Sidebar.Footer className="px-[11px]!">
-          <Sidebar.Trigger />
-        </Sidebar.Footer>
-      </Sidebar>
+              <AppPageHeader
+                className="flex-row items-center justify-between"
+                spacing="compact"
+                breadcrumbs={(
+                  <AppBreadcrumbs size="sm" className="mr-0 min-w-0 overflow-hidden">
+                    <AppBreadcrumbs.Link href="/">首页</AppBreadcrumbs.Link>
+                    <AppBreadcrumbs.Separator />
+                    <AppBreadcrumbs.Current>{getModuleName(mainActiveTab)}</AppBreadcrumbs.Current>
+                  </AppBreadcrumbs>
+                )}
+              >
+                {/* <div className="flex h-6.5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-kumo-success/20 bg-kumo-success/10 px-2 text-[11px] text-kumo-success">
+                  <span className="w-1 h-1 rounded-full bg-current animate-pulse"></span>
+                  <span className="hidden min-[520px]:inline">健康</span>
+                  <span className="min-[520px]:hidden">正常</span>
+                </div> */}
+              </AppPageHeader>
+            </div>
+          </header>
 
-      {/* ==================== 2. 主页面区 (Main Panel) ==================== */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden">
-        {/* 顶部导航 */}
-        <header className="flex h-14 flex-shrink-0 items-center border-b border-kumo-line bg-kumo-base px-3 min-[450px]:px-4 md:px-6">
-          <div className="flex h-full min-w-0 flex-1 items-center gap-3.5">
-            <Sidebar.Trigger className="md:hidden" />
-
-            <AppPageHeader
-              className="flex-row items-center justify-between"
-              spacing="compact"
-              breadcrumbs={(
-                <AppBreadcrumbs size="sm" className="mr-0 min-w-0 overflow-hidden">
-                  <AppBreadcrumbs.Link href={MODULE_PATHS.dashboard}>首页</AppBreadcrumbs.Link>
-                  <AppBreadcrumbs.Separator />
-                  <AppBreadcrumbs.Current>{getModuleName(mainActiveTab)}</AppBreadcrumbs.Current>
-                </AppBreadcrumbs>
-              )}
-            >
-              {/* <div className="flex h-6.5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-kumo-success/20 bg-kumo-success/10 px-2 text-[11px] text-kumo-success">
-                <span className="w-1 h-1 rounded-full bg-current animate-pulse"></span>
-                <span className="hidden min-[520px]:inline">健康</span>
-                <span className="min-[520px]:hidden">正常</span>
-              </div> */}
-            </AppPageHeader>
-          </div>
-        </header>
-
-        {/* 主内容画布 */}
-        <main className="flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 lg:px-8 lg:pb-6 lg:pt-3 scrollbar-thin">
-          <div className={`mx-auto flex min-h-full w-full min-w-0 flex-col ${pageWidthClass}`}>
-            <ModuleErrorBoundary moduleId={mainActiveTab}>
-              <Suspense fallback={<PageLoadingFallback />}>
-                {renderActivePage()}
-              </Suspense>
-            </ModuleErrorBoundary>
-          </div>
-        </main>
-      </div>
+          {/* 主内容画布 */}
+          <main className={mainCanvasClassName}>
+            <div className={mainCanvasInnerClassName}>
+              <ModuleErrorBoundary moduleId={mainActiveTab}>
+                <Suspense fallback={<PageLoadingFallback />}>
+                  {renderActivePage()}
+                </Suspense>
+              </ModuleErrorBoundary>
+            </div>
+          </main>
+          {mainActiveTab === 'dashboard' && dashboardFooterVisible && (
+            <footer className="app-main-footer flex h-12 shrink-0 items-center justify-between gap-4 border-t border-kumo-line px-3 text-[11px] text-kumo-subtle min-[450px]:px-4 md:px-6">
+              <div className="flex min-w-0 items-center gap-2">
+                <img src="/logo.svg" alt="" className="h-5 w-5 shrink-0 object-contain" />
+                <span className="truncate font-semibold text-kumo-strong">API Monitor</span>
+                <span className="hidden shrink-0 text-kumo-subtle min-[520px]:inline">
+                  · 已运行 {appProcessUptimeMeasuredAt > 0 ? formatAppProcessUptime(displayedAppProcessUptime) : '加载中'}
+                </span>
+              </div>
+              <div className="flex min-w-0 items-center justify-end gap-4">
+                {dashboardFooterRecordNumber ? (
+                  <a
+                    href="https://beian.miit.gov.cn/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="min-w-0 truncate text-right text-kumo-subtle transition-colors hover:text-kumo-strong hover:underline"
+                  >
+                    {dashboardFooterRecordNumber}
+                  </a>
+                ) : null}
+                <a
+                  href="https://github.com/iwvw/API-Monitor"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="shrink-0 text-kumo-subtle transition-colors hover:text-kumo-strong hover:underline"
+                >
+                  GitHub
+                </a>
+              </div>
+            </footer>
+          )}
+        </div>
+      </>
     </Sidebar.Provider>
   );
 }

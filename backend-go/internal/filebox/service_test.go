@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -46,7 +47,7 @@ func TestTextShareRetrieveVerifyDownloadAndExpire(t *testing.T) {
 		} `json:"data"`
 	}
 	mustDecodeFilebox(t, res, &createPayload)
-	if !createPayload.Success || createPayload.Code == "" || !createPayload.Data.RequiresPassword || createPayload.Data.Preview != "hello filebox" {
+	if !createPayload.Success || createPayload.Code == "" || !createPayload.Data.RequiresPassword || createPayload.Data.Preview != "" {
 		t.Fatalf("unexpected create payload: %#v", createPayload)
 	}
 
@@ -59,10 +60,11 @@ func TestTextShareRetrieveVerifyDownloadAndExpire(t *testing.T) {
 		Data    struct {
 			Code             string `json:"code"`
 			RequiresPassword bool   `json:"requiresPassword"`
+			Preview          string `json:"preview"`
 		} `json:"data"`
 	}
 	mustDecodeFilebox(t, res, &metadata)
-	if !metadata.Success || metadata.Data.Code != createPayload.Code || !metadata.Data.RequiresPassword {
+	if !metadata.Success || metadata.Data.Code != createPayload.Code || !metadata.Data.RequiresPassword || metadata.Data.Preview != "" {
 		t.Fatalf("unexpected metadata: %#v", metadata)
 	}
 
@@ -99,6 +101,71 @@ func TestTextShareRetrieveVerifyDownloadAndExpire(t *testing.T) {
 	mustDecodeFilebox(t, res, &logs)
 	if !logs.Success || len(logs.Data) < 2 {
 		t.Fatalf("expected access logs, got %#v", logs)
+	}
+}
+
+func TestMarkdownTextSharePreservesFormatAndDownloadMetadata(t *testing.T) {
+	service := newTestService(t, fakeAuth{ok: true})
+	markdown := "# Release notes\n\n- [x] GFM task\n\n| Name | Value |\n| --- | --- |\n| API | Ready |"
+	body, contentType := multipartBody(t, map[string]string{
+		"type":   "text",
+		"text":   markdown,
+		"expiry": "1",
+	}, nil)
+	res := performFileboxRequest(service, http.MethodPost, "/api/filebox/share", body, contentType)
+	if res.Code != http.StatusOK {
+		t.Fatalf("create markdown status = %d body=%s", res.Code, res.Body.String())
+	}
+	var created struct {
+		Success bool   `json:"success"`
+		Code    string `json:"code"`
+		Data    struct {
+			Filename   string `json:"filename"`
+			MIMEType   string `json:"mimetype"`
+			TextFormat string `json:"textFormat"`
+			Preview    string `json:"preview"`
+			Size       int64  `json:"size"`
+		} `json:"data"`
+	}
+	mustDecodeFilebox(t, res, &created)
+	if !created.Success || created.Code == "" || created.Data.TextFormat != textFormatMarkdown || !strings.HasSuffix(created.Data.Filename, ".md") || created.Data.MIMEType != "text/markdown; charset=utf-8" || created.Data.Preview == "" || created.Data.Size != int64(len([]byte(markdown))) {
+		t.Fatalf("unexpected markdown payload: %#v", created)
+	}
+
+	entry, err := service.GetEntry(context.Background(), created.Code, false)
+	if err != nil || entry == nil {
+		t.Fatalf("load markdown entry: entry=%#v err=%v", entry, err)
+	}
+	if entry.Metadata["textFormat"] != textFormatMarkdown {
+		t.Fatalf("markdown metadata = %#v", entry.Metadata)
+	}
+
+	res = performFileboxRequest(service, http.MethodGet, "/api/filebox/public/"+created.Code, nil, "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("markdown metadata status = %d body=%s", res.Code, res.Body.String())
+	}
+	var metadata struct {
+		Data struct {
+			TextFormat string `json:"textFormat"`
+			Filename   string `json:"filename"`
+		} `json:"data"`
+	}
+	mustDecodeFilebox(t, res, &metadata)
+	if metadata.Data.TextFormat != textFormatMarkdown || !strings.HasSuffix(metadata.Data.Filename, ".md") {
+		t.Fatalf("unexpected public markdown metadata: %#v", metadata)
+	}
+
+	res = performFileboxRequest(service, http.MethodGet, "/api/filebox/public/"+created.Code+"/download", nil, "")
+	if res.Code != http.StatusOK || res.Body.String() != markdown {
+		t.Fatalf("markdown download status=%d body=%q", res.Code, res.Body.String())
+	}
+
+	res = performFileboxRequest(service, http.MethodGet, "/api/filebox/d/"+created.Code, nil, "")
+	if res.Code != http.StatusOK || res.Body.String() != markdown {
+		t.Fatalf("markdown short direct link status=%d body=%q", res.Code, res.Body.String())
+	}
+	if got := res.Header().Get("Content-Type"); got != "text/markdown; charset=utf-8" {
+		t.Fatalf("markdown short direct link content type = %q", got)
 	}
 }
 
@@ -162,6 +229,313 @@ func TestSettingsRequireAuthAndCleanupExpired(t *testing.T) {
 	}
 	if found, err := service.GetEntry(context.Background(), permanent.Code, false); err != nil || found == nil {
 		t.Fatalf("expected permanent entry to survive cleanup, found=%#v err=%v", found, err)
+	}
+}
+
+func TestVoidRoomSignalsRequireTokensAndDoNotTouchFileboxStorage(t *testing.T) {
+	unauthenticated := newTestService(t, fakeAuth{ok: false})
+	res := performFileboxRequest(unauthenticated, http.MethodPost, "/api/filebox/void/rooms", strings.NewReader(`{}`), "application/json")
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated create room status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	service := newTestService(t, fakeAuth{ok: true})
+	res = performFileboxRequest(service, http.MethodPost, "/api/filebox/void/rooms", strings.NewReader(`{}`), "application/json")
+	if res.Code != http.StatusOK {
+		t.Fatalf("create room status = %d body=%s", res.Code, res.Body.String())
+	}
+	var createPayload struct {
+		Success bool `json:"success"`
+		Data    struct {
+			RoomID             string `json:"roomId"`
+			OwnerToken         string `json:"ownerToken"`
+			OwnerParticipantID string `json:"ownerParticipantId"`
+			Mode               string `json:"mode"`
+			ExpiresAt          int64  `json:"expiresAt"`
+		} `json:"data"`
+	}
+	mustDecodeFilebox(t, res, &createPayload)
+	if !createPayload.Success || createPayload.Data.RoomID == "" || createPayload.Data.OwnerToken == "" || createPayload.Data.OwnerParticipantID != "owner" || createPayload.Data.Mode != voidRoomModeTemporary || createPayload.Data.ExpiresAt == 0 {
+		t.Fatalf("unexpected create room payload: %#v", createPayload)
+	}
+
+	res = performFileboxRequest(service, http.MethodGet, "/api/filebox/void/rooms/"+createPayload.Data.RoomID, nil, "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("get room status = %d body=%s", res.Code, res.Body.String())
+	}
+	var roomPayload struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Participants []publicVoidParticipant `json:"participants"`
+		} `json:"data"`
+	}
+	mustDecodeFilebox(t, res, &roomPayload)
+	if len(roomPayload.Data.Participants) != 1 || roomPayload.Data.Participants[0].Role != "owner" {
+		t.Fatalf("expected owner first, got %#v", roomPayload.Data.Participants)
+	}
+
+	res = performFileboxRequest(service, http.MethodPost, "/api/filebox/void/rooms/"+createPayload.Data.RoomID+"/participants", strings.NewReader(`{"name":"phone"}`), "application/json")
+	if res.Code != http.StatusOK {
+		t.Fatalf("join room status = %d body=%s", res.Code, res.Body.String())
+	}
+	var joinPayload struct {
+		Success bool `json:"success"`
+		Data    struct {
+			ParticipantID    string `json:"participantId"`
+			ParticipantToken string `json:"participantToken"`
+		} `json:"data"`
+	}
+	mustDecodeFilebox(t, res, &joinPayload)
+	if !joinPayload.Success || joinPayload.Data.ParticipantID == "" || joinPayload.Data.ParticipantToken == "" {
+		t.Fatalf("unexpected join payload: %#v", joinPayload)
+	}
+	res = performFileboxRequest(service, http.MethodGet, "/api/filebox/void/rooms/"+createPayload.Data.RoomID, nil, "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("get joined room status = %d body=%s", res.Code, res.Body.String())
+	}
+	mustDecodeFilebox(t, res, &roomPayload)
+	if len(roomPayload.Data.Participants) < 2 || roomPayload.Data.Participants[0].Role != "owner" || roomPayload.Data.Participants[1].ID != joinPayload.Data.ParticipantID {
+		t.Fatalf("unexpected participant order: %#v", roomPayload.Data.Participants)
+	}
+
+	res = performFileboxRequest(service, http.MethodPost, "/api/filebox/void/rooms/"+createPayload.Data.RoomID+"/signals", strings.NewReader(`{"participantId":"`+joinPayload.Data.ParticipantID+`","type":"chat.text"}`), "application/json")
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("missing token signal status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	res = performFileboxRequest(service, http.MethodPost, "/api/filebox/void/rooms/"+createPayload.Data.RoomID+"/signals", strings.NewReader(`{"participantId":"`+joinPayload.Data.ParticipantID+`","participantToken":"bad","type":"participant.ready"}`), "application/json")
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("bad token signal status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	chatSignalBody := `{"participantId":"` + joinPayload.Data.ParticipantID + `","participantToken":"` + joinPayload.Data.ParticipantToken + `","to":"owner","type":"chat.text","payload":{"text":"hello"}}`
+	res = performFileboxRequest(service, http.MethodPost, "/api/filebox/void/rooms/"+createPayload.Data.RoomID+"/signals", strings.NewReader(chatSignalBody), "application/json")
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("payload signal status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	signalBody := `{"participantId":"` + joinPayload.Data.ParticipantID + `","participantToken":"` + joinPayload.Data.ParticipantToken + `","to":"owner","type":"participant.ready","payload":{"name":"phone"}}`
+	res = performFileboxRequest(service, http.MethodPost, "/api/filebox/void/rooms/"+createPayload.Data.RoomID+"/signals", strings.NewReader(signalBody), "application/json")
+	if res.Code != http.StatusOK {
+		t.Fatalf("post signal status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	res = performFileboxRequest(service, http.MethodGet, "/api/filebox/void/rooms/"+createPayload.Data.RoomID+"/signals?participantId=owner&participantToken="+createPayload.Data.OwnerToken+"&since=0", nil, "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("get signals status = %d body=%s", res.Code, res.Body.String())
+	}
+	var signalsPayload struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Signals []voidSignal `json:"signals"`
+		} `json:"data"`
+	}
+	mustDecodeFilebox(t, res, &signalsPayload)
+	if !signalsPayload.Success || len(signalsPayload.Data.Signals) < 2 {
+		t.Fatalf("expected join and ready signals, got %#v", signalsPayload)
+	}
+
+	db, err := service.open(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entries int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM filebox_entries`).Scan(&entries); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	if entries != 0 {
+		t.Fatalf("void room should not create filebox entries, got %d", entries)
+	}
+	files, err := os.ReadDir(service.uploadsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("void room should not write uploads, got %d files", len(files))
+	}
+}
+
+func TestPersistentVoidRoomPersistsMetadataOnly(t *testing.T) {
+	service := newTestService(t, fakeAuth{ok: true})
+	res := performFileboxRequest(service, http.MethodPost, "/api/filebox/void/rooms", strings.NewReader(`{"mode":"persistent"}`), "application/json")
+	if res.Code != http.StatusOK {
+		t.Fatalf("create persistent room status = %d body=%s", res.Code, res.Body.String())
+	}
+	var createPayload struct {
+		Success bool `json:"success"`
+		Data    struct {
+			RoomID     string `json:"roomId"`
+			OwnerToken string `json:"ownerToken"`
+			Mode       string `json:"mode"`
+			ExpiresAt  int64  `json:"expiresAt"`
+		} `json:"data"`
+	}
+	mustDecodeFilebox(t, res, &createPayload)
+	if !createPayload.Success || createPayload.Data.RoomID == "" || createPayload.Data.OwnerToken == "" || createPayload.Data.Mode != voidRoomModePersistent || createPayload.Data.ExpiresAt != 0 {
+		t.Fatalf("unexpected persistent room payload: %#v", createPayload)
+	}
+
+	db, err := service.open(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persistentRooms, entries int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM filebox_void_rooms WHERE deleted_at IS NULL`).Scan(&persistentRooms); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM filebox_entries`).Scan(&entries); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	if persistentRooms != 1 || entries != 0 {
+		t.Fatalf("expected one persistent room and no filebox entries, rooms=%d entries=%d", persistentRooms, entries)
+	}
+	files, err := os.ReadDir(service.uploadsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("persistent void room should not write uploads, got %d files", len(files))
+	}
+
+	restarted := New(service.cfg, fakeAuth{ok: true})
+	res = performFileboxRequest(restarted, http.MethodGet, "/api/filebox/void/rooms/"+createPayload.Data.RoomID, nil, "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("get persisted room status = %d body=%s", res.Code, res.Body.String())
+	}
+	var roomPayload struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Mode       string `json:"mode"`
+			Persistent bool   `json:"persistent"`
+			ExpiresAt  int64  `json:"expiresAt"`
+		} `json:"data"`
+	}
+	mustDecodeFilebox(t, res, &roomPayload)
+	if !roomPayload.Success || roomPayload.Data.Mode != voidRoomModePersistent || !roomPayload.Data.Persistent || roomPayload.Data.ExpiresAt != 0 {
+		t.Fatalf("unexpected persisted room: %#v", roomPayload)
+	}
+
+	res = performFileboxRequest(restarted, http.MethodGet, "/api/filebox/void/rooms", nil, "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("list rooms status = %d body=%s", res.Code, res.Body.String())
+	}
+	var listPayload struct {
+		Success bool `json:"success"`
+		Data    []struct {
+			RoomID     string `json:"roomId"`
+			OwnerToken string `json:"ownerToken"`
+			Mode       string `json:"mode"`
+		} `json:"data"`
+	}
+	mustDecodeFilebox(t, res, &listPayload)
+	if !listPayload.Success || len(listPayload.Data) != 1 || listPayload.Data[0].RoomID != createPayload.Data.RoomID || listPayload.Data[0].OwnerToken == "" || listPayload.Data[0].Mode != voidRoomModePersistent {
+		t.Fatalf("unexpected room list: %#v", listPayload)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/filebox/void/rooms/"+createPayload.Data.RoomID, nil)
+	req.Header.Set("X-Void-Owner-Token", createPayload.Data.OwnerToken)
+	res = httptest.NewRecorder()
+	restarted.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("delete persistent room status = %d body=%s", res.Code, res.Body.String())
+	}
+	afterDelete := New(service.cfg, fakeAuth{ok: true})
+	res = performFileboxRequest(afterDelete, http.MethodGet, "/api/filebox/void/rooms/"+createPayload.Data.RoomID, nil, "")
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("deleted persistent room status = %d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestVoidRoomMergesRepeatedClientDevice(t *testing.T) {
+	service := newTestService(t, fakeAuth{ok: true})
+	res := performFileboxRequest(service, http.MethodPost, "/api/filebox/void/rooms", strings.NewReader(`{}`), "application/json")
+	if res.Code != http.StatusOK {
+		t.Fatalf("create room status = %d body=%s", res.Code, res.Body.String())
+	}
+	var createPayload struct {
+		Data struct {
+			RoomID string `json:"roomId"`
+		} `json:"data"`
+	}
+	mustDecodeFilebox(t, res, &createPayload)
+
+	joinBody := `{"name":"phone","clientId":"phone-client-1"}`
+	res = performFileboxRequest(service, http.MethodPost, "/api/filebox/void/rooms/"+createPayload.Data.RoomID+"/participants", strings.NewReader(joinBody), "application/json")
+	if res.Code != http.StatusOK {
+		t.Fatalf("first join status = %d body=%s", res.Code, res.Body.String())
+	}
+	var firstJoin struct {
+		Data struct {
+			ParticipantID string `json:"participantId"`
+		} `json:"data"`
+	}
+	mustDecodeFilebox(t, res, &firstJoin)
+
+	res = performFileboxRequest(service, http.MethodPost, "/api/filebox/void/rooms/"+createPayload.Data.RoomID+"/participants", strings.NewReader(joinBody), "application/json")
+	if res.Code != http.StatusOK {
+		t.Fatalf("second join status = %d body=%s", res.Code, res.Body.String())
+	}
+	var secondJoin struct {
+		Data struct {
+			ParticipantID string `json:"participantId"`
+			Room          struct {
+				Participants []publicVoidParticipant `json:"participants"`
+			} `json:"room"`
+		} `json:"data"`
+	}
+	mustDecodeFilebox(t, res, &secondJoin)
+	if secondJoin.Data.ParticipantID != firstJoin.Data.ParticipantID {
+		t.Fatalf("expected same participant id, first=%s second=%s", firstJoin.Data.ParticipantID, secondJoin.Data.ParticipantID)
+	}
+	if len(secondJoin.Data.Room.Participants) != 2 {
+		t.Fatalf("expected owner plus one phone, got %#v", secondJoin.Data.Room.Participants)
+	}
+}
+
+func TestVoidRoomExpiryAndNetworkCandidates(t *testing.T) {
+	service := newTestService(t, fakeAuth{ok: true})
+	res := performFileboxRequest(service, http.MethodPost, "/api/filebox/void/rooms", strings.NewReader(`{}`), "application/json")
+	if res.Code != http.StatusOK {
+		t.Fatalf("create room status = %d body=%s", res.Code, res.Body.String())
+	}
+	var createPayload struct {
+		Data struct {
+			RoomID string `json:"roomId"`
+		} `json:"data"`
+	}
+	mustDecodeFilebox(t, res, &createPayload)
+	service.voidMu.Lock()
+	service.voidRooms[createPayload.Data.RoomID].ExpiresAt = time.Now().Add(-time.Minute).UnixMilli()
+	service.voidMu.Unlock()
+
+	res = performFileboxRequest(service, http.MethodGet, "/api/filebox/void/rooms/"+createPayload.Data.RoomID, nil, "")
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("expired room status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/filebox/void/network-candidates", nil)
+	req.Host = "localhost:3000"
+	res = httptest.NewRecorder()
+	service.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("network candidates status = %d body=%s", res.Code, res.Body.String())
+	}
+	var candidatesPayload struct {
+		Success bool `json:"success"`
+		Data    struct {
+			CurrentOrigin string                 `json:"currentOrigin"`
+			Candidates    []voidNetworkCandidate `json:"candidates"`
+			Warnings      []string               `json:"warnings"`
+		} `json:"data"`
+	}
+	mustDecodeFilebox(t, res, &candidatesPayload)
+	if !candidatesPayload.Success || candidatesPayload.Data.CurrentOrigin != "http://localhost:3000" || len(candidatesPayload.Data.Candidates) == 0 || len(candidatesPayload.Data.Warnings) == 0 {
+		t.Fatalf("unexpected network candidates payload: %#v", candidatesPayload)
 	}
 }
 

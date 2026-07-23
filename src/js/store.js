@@ -6,6 +6,7 @@
 import { create } from 'zustand';
 import { dialog } from './modules/dialog.js';
 import toastManager from './modules/toast.js';
+import { triggerHapticFeedback } from './modules/haptics.js';
 
 // ==================== 模块元数据配置 ====================
 export const MODULE_CONFIG = {
@@ -22,10 +23,16 @@ export const MODULE_CONFIG = {
     description: '全局配置、安全认证与外观主题',
   },
   openai: {
-    name: 'OpenAI',
-    shortName: 'OAI',
+    name: '模型网关',
+    shortName: '模型',
     icon: 'fa-robot',
-    description: 'OpenAI 兼容 API 管理与聊天',
+    description: '模型网关与 OpenAI 兼容 API 管理',
+  },
+  subscription: {
+    name: '订阅分发',
+    shortName: '订阅',
+    icon: 'fa-link',
+    description: 'Clash / v2ray 订阅链接、节点、模板与流量分发',
   },
 
   paas: {
@@ -46,17 +53,35 @@ export const MODULE_CONFIG = {
     icon: 'fa-cloud',
     description: '阿里云 DNS / ECS 管理',
   },
+  m365: {
+    name: 'Microsoft 365',
+    shortName: 'M365',
+    icon: 'fa-cloud',
+    description: 'Microsoft 365 租户、用户、许可证与使用情况管理',
+  },
   scheduler: {
     name: '定时任务',
     shortName: '任务',
     icon: 'fa-clock',
     description: '定时任务管理',
   },
+  github: {
+    name: 'GitHub',
+    shortName: 'GitHub',
+    icon: 'fa-github',
+    description: '仓库观察、Actions 活动、趋势和 DevOps 通知',
+  },
   tencent: {
     name: '腾讯云',
     shortName: '腾讯',
     icon: 'fa-hdd',
     description: '腾讯云 DNS / CVM 管理',
+  },
+  oracle: {
+    name: '甲骨文云',
+    shortName: 'Oracle',
+    icon: 'fa-cloud',
+    description: 'Oracle Cloud Infrastructure 实例管理',
   },
   server: {
     name: '主机实例',
@@ -112,22 +137,35 @@ export const MODULE_GROUPS = [
     modules: ['dashboard'],
   },
   {
-    id: 'api-gateway',
-    name: 'API 网关',
-    icon: 'fa-bolt',
-    modules: ['openai'],
-  },
-  {
     id: 'infrastructure',
     name: '云服务',
     icon: 'fa-cubes',
-    modules: ['paas', 'dns', 'aliyun', 'tencent', 'server'],
+    modules: ['paas'],
+    subgroups: [
+      {
+        id: 'cloud-vendors',
+        name: '云厂商',
+        modules: ['dns', 'aliyun', 'tencent', 'oracle', 'm365'],
+      },
+      {
+        id: 'devops',
+        name: 'DevOps',
+        modules: ['github'],
+      },
+    ],
+    trailingModules: ['server'],
   },
   {
     id: 'toolbox',
     name: '工具箱',
     icon: 'fa-toolbox',
     modules: ['scheduler', 'totp', 'uptime', 'filebox', 'notification'],
+  },
+  {
+    id: 'api-gateway',
+    name: 'API 服务',
+    icon: 'fa-bolt',
+    modules: ['openai', 'subscription'],
   },
   {
     id: 'system',
@@ -153,6 +191,8 @@ const THEME_STORAGE_KEY = 'app_theme_mode';
 const LEGACY_THEME_STORAGE_KEY = 'app_theme';
 const PAGE_WIDTH_STORAGE_KEY = 'app_page_width_mode';
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'app_sidebar_collapsed';
+const DASHBOARD_FOOTER_VISIBLE_STORAGE_KEY = 'app_dashboard_footer_visible';
+const DASHBOARD_FOOTER_RECORD_NUMBER_STORAGE_KEY = 'app_dashboard_footer_record_number';
 const AUTH_LOGGED_OUT_STORAGE_KEY = 'auth_explicitly_logged_out';
 
 export const THEME_MODE_OPTIONS = ['auto', 'light', 'dark'];
@@ -173,6 +213,10 @@ const normalizeSidebarCollapsed = (value, fallback = false) => {
   return fallback;
 };
 
+const normalizeDashboardFooterRecordNumber = (value, fallback = '') => (
+  typeof value === 'string' ? value.trim().slice(0, 80) : fallback
+);
+
 export const DEFAULT_TOTP_SETTINGS = {
   hideCode: false,
   allowRevealCode: true,
@@ -185,7 +229,13 @@ export const DEFAULT_TOTP_SETTINGS = {
   defaultInputMode: 'scan',
 };
 
-export const DEFAULT_MODULE_ORDER = MODULE_GROUPS.flatMap((group) => group.modules);
+export const getGroupModuleIds = (group) => [
+  ...(group.modules || []),
+  ...(group.subgroups || []).flatMap((subgroup) => subgroup.modules || []),
+  ...(group.trailingModules || []),
+];
+
+export const DEFAULT_MODULE_ORDER = MODULE_GROUPS.flatMap(getGroupModuleIds);
 
 export const DEFAULT_MODULE_VISIBILITY = DEFAULT_MODULE_ORDER.reduce((acc, moduleId) => {
   acc[moduleId] = true;
@@ -305,6 +355,14 @@ export const normalizeUserSettings = (settings = {}) => {
       settings.sidebarCollapsed ?? settings.sidebar_collapsed,
       typeof getInitialSidebarCollapsed === 'function' ? getInitialSidebarCollapsed() : false
     ),
+    dashboardFooterVisible: normalizeSidebarCollapsed(
+      settings.dashboardFooterVisible ?? settings.dashboard_footer_visible,
+      typeof getInitialDashboardFooterVisible === 'function' ? getInitialDashboardFooterVisible() : true
+    ),
+    dashboardFooterRecordNumber: normalizeDashboardFooterRecordNumber(
+      settings.dashboardFooterRecordNumber ?? settings.dashboard_footer_record_number,
+      typeof getInitialDashboardFooterRecordNumber === 'function' ? getInitialDashboardFooterRecordNumber() : ''
+    ),
     koyebRefreshInterval: Number(settings.koyebRefreshInterval) || 30000,
     flyRefreshInterval: Number(settings.flyRefreshInterval) || 30000,
     moduleVisibility,
@@ -324,6 +382,7 @@ export const normalizeUserSettings = (settings = {}) => {
     },
     agentDownloadUrl: settings.agentDownloadUrl || '',
     publicApiUrl: settings.publicApiUrl || '',
+    timezone: settings.timezone || settings.time_zone || 'system',
   };
 };
 
@@ -391,6 +450,28 @@ const getInitialSidebarCollapsed = () => {
 
 const initialSidebarCollapsed = getInitialSidebarCollapsed();
 
+const getInitialDashboardFooterVisible = () => {
+  try {
+    return normalizeSidebarCollapsed(localStorage.getItem(DASHBOARD_FOOTER_VISIBLE_STORAGE_KEY), true);
+  } catch (e) {
+    console.error('Failed to get dashboard footer visibility:', e);
+  }
+  return true;
+};
+
+const initialDashboardFooterVisible = getInitialDashboardFooterVisible();
+
+const getInitialDashboardFooterRecordNumber = () => {
+  try {
+    return normalizeDashboardFooterRecordNumber(localStorage.getItem(DASHBOARD_FOOTER_RECORD_NUMBER_STORAGE_KEY));
+  } catch (e) {
+    console.error('Failed to get dashboard footer record number:', e);
+  }
+  return '';
+};
+
+const initialDashboardFooterRecordNumber = getInitialDashboardFooterRecordNumber();
+
 const useStore = create((set, get) => ({
   // --- 1. 认证状态 ---
   isAuthenticated: false,
@@ -407,6 +488,10 @@ const useStore = create((set, get) => ({
   // --- 2. 界面与布局状态 ---
   mainActiveTab: 'dashboard',
   sidebarCollapsed: initialSidebarCollapsed,
+  dashboardFooterVisible: initialDashboardFooterVisible,
+  dashboardFooterRecordNumber: initialDashboardFooterRecordNumber,
+  appProcessUptimeSeconds: 0,
+  appProcessUptimeMeasuredAt: 0,
   themeMode: initialThemeMode,
   theme: resolveThemeMode(initialThemeMode),
   pageWidthMode: initialPageWidthMode,
@@ -425,6 +510,7 @@ const useStore = create((set, get) => ({
   totpSettings: DEFAULT_TOTP_SETTINGS,
   agentDownloadUrl: '',
   publicApiUrl: '',
+  timezone: 'system',
   koyebRefreshInterval: 30000,
   flyRefreshInterval: 30000,
 
@@ -452,6 +538,42 @@ const useStore = create((set, get) => ({
       }
     }
     set({ sidebarCollapsed: normalizedCollapsed });
+  },
+  setDashboardFooterVisible: (visible, persist = true) => {
+    const normalizedVisible = normalizeSidebarCollapsed(visible, true);
+    if (persist) {
+      try {
+        localStorage.setItem(DASHBOARD_FOOTER_VISIBLE_STORAGE_KEY, String(normalizedVisible));
+      } catch (e) {
+        console.error('Failed to save dashboard footer visibility:', e);
+      }
+      if (get().isAuthenticated) {
+        scheduleAppearanceSettingsSave({ dashboardFooterVisible: normalizedVisible });
+      }
+    }
+    set({ dashboardFooterVisible: normalizedVisible });
+  },
+  setDashboardFooterRecordNumber: (recordNumber, persist = true) => {
+    const normalizedRecordNumber = normalizeDashboardFooterRecordNumber(recordNumber);
+    if (persist) {
+      try {
+        localStorage.setItem(DASHBOARD_FOOTER_RECORD_NUMBER_STORAGE_KEY, normalizedRecordNumber);
+      } catch (e) {
+        console.error('Failed to save dashboard footer record number:', e);
+      }
+      if (get().isAuthenticated) {
+        scheduleAppearanceSettingsSave({ dashboardFooterRecordNumber: normalizedRecordNumber });
+      }
+    }
+    set({ dashboardFooterRecordNumber: normalizedRecordNumber });
+  },
+  setAppProcessUptimeSeconds: (seconds) => {
+    const normalizedSeconds = Number(seconds);
+    if (!Number.isFinite(normalizedSeconds) || normalizedSeconds < 0) return;
+    set({
+      appProcessUptimeSeconds: normalizedSeconds,
+      appProcessUptimeMeasuredAt: Date.now(),
+    });
   },
   setNavGroupExpanded: (group) => set({ navGroupExpanded: group }),
   setPageWidthMode: (mode, persist = true) => {
@@ -492,6 +614,19 @@ const useStore = create((set, get) => ({
     get().setThemeMode(theme, persist);
   },
 
+  setVibrationEnabled: (enabled, persist = true) => {
+    const nextEnabled = Boolean(enabled);
+    if (persist && get().isAuthenticated) {
+      scheduleAppearanceSettingsSave({ vibrationEnabled: nextEnabled });
+    }
+    set({ vibrationEnabled: nextEnabled });
+  },
+
+  triggerHaptic: (type = 'selection') => {
+    if (!get().vibrationEnabled) return false;
+    return triggerHapticFeedback(type);
+  },
+
   applyUserSettings: (settings) => {
     const normalized = normalizeUserSettings(settings);
     applyCustomCss(normalized.customCss);
@@ -501,6 +636,8 @@ const useStore = create((set, get) => ({
       localStorage.removeItem(LEGACY_THEME_STORAGE_KEY);
       localStorage.setItem(PAGE_WIDTH_STORAGE_KEY, normalized.pageWidthMode);
       localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(normalized.sidebarCollapsed));
+      localStorage.setItem(DASHBOARD_FOOTER_VISIBLE_STORAGE_KEY, String(normalized.dashboardFooterVisible));
+      localStorage.setItem(DASHBOARD_FOOTER_RECORD_NUMBER_STORAGE_KEY, normalized.dashboardFooterRecordNumber);
     } catch (e) {
       console.error('Failed to cache appearance settings:', e);
     }
@@ -510,6 +647,8 @@ const useStore = create((set, get) => ({
       theme: resolveThemeMode(normalized.themeMode),
       pageWidthMode: normalized.pageWidthMode,
       sidebarCollapsed: normalized.sidebarCollapsed,
+      dashboardFooterVisible: normalized.dashboardFooterVisible,
+      dashboardFooterRecordNumber: normalized.dashboardFooterRecordNumber,
       customCss: normalized.customCss,
       moduleVisibility: normalized.moduleVisibility,
       moduleOrder: normalized.moduleOrder,
@@ -522,6 +661,7 @@ const useStore = create((set, get) => ({
       totpSettings: normalized.totpSettings,
       agentDownloadUrl: normalized.agentDownloadUrl,
       publicApiUrl: normalized.publicApiUrl,
+      timezone: normalized.timezone,
       koyebRefreshInterval: normalized.koyebRefreshInterval,
       flyRefreshInterval: normalized.flyRefreshInterval,
     });
@@ -549,6 +689,15 @@ const useStore = create((set, get) => ({
       }
       if (rawSettings.sidebarCollapsed === undefined && rawSettings.sidebar_collapsed === undefined) {
         appearancePatch.sidebarCollapsed = normalized.sidebarCollapsed;
+      }
+      if (rawSettings.dashboardFooterVisible === undefined && rawSettings.dashboard_footer_visible === undefined) {
+        appearancePatch.dashboardFooterVisible = normalized.dashboardFooterVisible;
+      }
+      if (rawSettings.dashboardFooterRecordNumber === undefined && rawSettings.dashboard_footer_record_number === undefined) {
+        appearancePatch.dashboardFooterRecordNumber = normalized.dashboardFooterRecordNumber;
+      }
+      if (rawSettings.vibrationEnabled === undefined) {
+        appearancePatch.vibrationEnabled = normalized.vibrationEnabled;
       }
       if (Object.keys(appearancePatch).length > 0) {
         scheduleAppearanceSettingsSave(appearancePatch);

@@ -386,9 +386,13 @@ func (s *Service) writeDockerComposeActionResult(w http.ResponseWriter, r *http.
 }
 
 func normalizeDockerComposeActionBody(body map[string]interface{}, project, action string) {
+	configFile := dockerComposeConfigFileFromPayload(body)
+	for _, key := range []string{"configFile", "configFiles", "ConfigFiles", "configDir", "config_dir"} {
+		delete(body, key)
+	}
 	body["project"] = project
 	body["action"] = action
-	body["config_file"] = dockerComposeConfigFileFromPayload(body)
+	body["config_file"] = configFile
 }
 
 func dockerComposeConfigFileFromPayload(payload map[string]interface{}) string {
@@ -446,7 +450,7 @@ func isDockerContainerAction(action string) bool {
 
 func isDockerComposeAction(action string) bool {
 	switch action {
-	case "up", "down", "start", "stop", "restart", "pull":
+	case "up", "down", "start", "stop", "restart", "pull", "update":
 		return true
 	default:
 		return false
@@ -454,7 +458,7 @@ func isDockerComposeAction(action string) bool {
 }
 
 func dockerComposeActionTimeout(action string) time.Duration {
-	if action == "pull" {
+	if action == "pull" || action == "update" {
 		return 300 * time.Second
 	}
 	return 120 * time.Second

@@ -417,6 +417,55 @@ func TestUptimeRoutesAreGoOwnedWithInternalAuthSplit(t *testing.T) {
 	}
 }
 
+func TestM365PublicRegistrationRoutesBypassSessionAuth(t *testing.T) {
+	handler := testServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/m365/public/register?code=missing", nil)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("public register descriptor status = %d body=%s", res.Code, res.Body.String())
+	}
+	var descriptorPayload struct {
+		Success bool                   `json:"success"`
+		Data    map[string]interface{} `json:"data"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &descriptorPayload); err != nil {
+		t.Fatalf("decode public register descriptor: %v body=%s", err, res.Body.String())
+	}
+	if !descriptorPayload.Success || descriptorPayload.Data["method"] != "POST" {
+		t.Fatalf("unexpected public register descriptor payload: %#v", descriptorPayload)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/m365/public/invites/missing", nil)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("public invite descriptor status = %d body=%s", res.Code, res.Body.String())
+	}
+	if strings.Contains(res.Body.String(), "请先登录") {
+		t.Fatalf("public invite route should bypass session auth: %s", res.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/m365/public/register", strings.NewReader(`{"mailNickname":"user1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("public register post status = %d body=%s", res.Code, res.Body.String())
+	}
+	if strings.Contains(res.Body.String(), "请先登录") {
+		t.Fatalf("public register post should bypass session auth: %s", res.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/m365/accounts", nil)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("private m365 accounts status = %d body=%s", res.Code, res.Body.String())
+	}
+}
+
 func TestKoyebRoutesAreGoOwnedAndRequireSession(t *testing.T) {
 	handler := testServer(t)
 
@@ -769,13 +818,14 @@ func TestCoreSettingsRequireSessionAndAreServedByGo(t *testing.T) {
 	var statsPayload struct {
 		Success bool `json:"success"`
 		Data    struct {
-			Tables map[string]int64 `json:"tables"`
+			Tables      map[string]int64 `json:"tables"`
+			CountsExact bool             `json:"countsExact"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(res.Body.Bytes(), &statsPayload); err != nil {
 		t.Fatal(err)
 	}
-	if !statsPayload.Success || statsPayload.Data.Tables["user_settings"] != 1 {
+	if !statsPayload.Success || statsPayload.Data.CountsExact || statsPayload.Data.Tables["user_settings"] != -1 {
 		t.Fatalf("unexpected database stats payload: %#v", statsPayload)
 	}
 
@@ -1095,11 +1145,63 @@ func TestOpenAIServerRouting(t *testing.T) {
 		t.Fatalf("authenticated openai endpoints status = %d body=%s", res.Code, res.Body.String())
 	}
 
-	// 2. GET /v1/models is public
+	// 2. OpenAI-compatible routes require a managed gateway key.
 	req = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	res = httptest.NewRecorder()
 	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("v1 models without key status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/openai/keys", strings.NewReader(`{"name":"test client"}`))
+	req.AddCookie(cookie)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("create gateway key status = %d body=%s", res.Code, res.Body.String())
+	}
+	var keyPayload struct {
+		APIKey string `json:"apiKey"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &keyPayload); err != nil || keyPayload.APIKey == "" {
+		t.Fatalf("decode gateway key: %v body=%s", err, res.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/openai/keys", nil)
+	req.AddCookie(cookie)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
 	if res.Code != http.StatusOK {
-		t.Fatalf("v1 models status = %d body=%s", res.Code, res.Body.String())
+		t.Fatalf("list gateway keys status = %d body=%s", res.Code, res.Body.String())
+	}
+	var listedKeys []struct {
+		APIKey string `json:"apiKey"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &listedKeys); err != nil || len(listedKeys) != 1 || listedKeys[0].APIKey != keyPayload.APIKey {
+		t.Fatalf("listed gateway key is not recoverable: %v body=%s", err, res.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer "+keyPayload.APIKey)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("v1 models with key status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/openai/analytics/logs?days=1&page=1&pageSize=20", nil)
+	req.AddCookie(cookie)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("analytics logs status = %d body=%s", res.Code, res.Body.String())
+	}
+	var analyticsPayload struct {
+		Records []struct {
+			Route string `json:"route"`
+		} `json:"records"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &analyticsPayload); err != nil || len(analyticsPayload.Records) == 0 || analyticsPayload.Records[0].Route != "models" {
+		t.Fatalf("models request was not recorded in analytics: %v body=%s", err, res.Body.String())
 	}
 }

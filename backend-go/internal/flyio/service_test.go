@@ -134,6 +134,10 @@ func TestAppMachineLogsAndBatchOperations(t *testing.T) {
 				if payload["updated"] != float64(1) || payload["failed"] != float64(0) {
 					t.Fatalf("unexpected update payload: %#v", payload)
 				}
+				details := objectSlice(payload["details"])
+				if len(details) != 1 || details[0]["targetImage"] != "registry.example/app:latest" || details[0]["digestChanged"] != true {
+					t.Fatalf("unexpected update details: %#v", payload)
+				}
 			},
 		},
 		{
@@ -166,6 +170,14 @@ func TestAppMachineLogsAndBatchOperations(t *testing.T) {
 		field string
 	}{
 		{"machines", "/api/flyio/apps/app-smoke/machines?accountId=" + id, "data"},
+		{"machine detail", "/api/flyio/apps/app-smoke/machines/machine-1?accountId=" + id, "data"},
+		{"machine wait", "/api/flyio/apps/app-smoke/machines/machine-1/wait?accountId=" + id + "&state=started&timeout=5", "data"},
+		{"machine lease", "/api/flyio/apps/app-smoke/machines/machine-1/lease?accountId=" + id, "data"},
+		{"machine metadata", "/api/flyio/apps/app-smoke/machines/machine-1/metadata?accountId=" + id, "data"},
+		{"machine events", "/api/flyio/apps/app-smoke/machines/machine-1/events?accountId=" + id, "data"},
+		{"machine memory", "/api/flyio/apps/app-smoke/machines/machine-1/memory?accountId=" + id, "data"},
+		{"machine ps", "/api/flyio/apps/app-smoke/machines/machine-1/ps?accountId=" + id, "data"},
+		{"machine versions", "/api/flyio/apps/app-smoke/machines/machine-1/versions?accountId=" + id, "data"},
 		{"events", "/api/flyio/apps/app-smoke/events?accountId=" + id, "data"},
 		{"config", "/api/flyio/apps/app-smoke/config?accountId=" + id, "data"},
 		{"logs", "/api/flyio/apps/app-smoke/logs?accountId=" + id, "data"},
@@ -184,6 +196,44 @@ func TestAppMachineLogsAndBatchOperations(t *testing.T) {
 		})
 	}
 
+	actionChecks := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{"machine start", http.MethodPost, "/api/flyio/apps/app-smoke/machines/machine-1/start", `{"accountId":"` + id + `"}`},
+		{"machine stop", http.MethodPost, "/api/flyio/apps/app-smoke/machines/machine-1/stop", `{"accountId":"` + id + `","signal":"SIGTERM","timeout":"30s"}`},
+		{"machine suspend", http.MethodPost, "/api/flyio/apps/app-smoke/machines/machine-1/suspend", `{"accountId":"` + id + `"}`},
+		{"machine cordon", http.MethodPost, "/api/flyio/apps/app-smoke/machines/machine-1/cordon", `{"accountId":"` + id + `"}`},
+		{"machine uncordon", http.MethodPost, "/api/flyio/apps/app-smoke/machines/machine-1/uncordon", `{"accountId":"` + id + `"}`},
+		{"machine lease acquire", http.MethodPost, "/api/flyio/apps/app-smoke/machines/machine-1/lease", `{"accountId":"` + id + `","ttl":30}`},
+		{"machine lease release", http.MethodDelete, "/api/flyio/apps/app-smoke/machines/machine-1/lease", `{"accountId":"` + id + `","nonce":"lease-1"}`},
+		{"machine metadata set", http.MethodPost, "/api/flyio/apps/app-smoke/machines/machine-1/metadata/api-monitor", `{"accountId":"` + id + `","value":"enabled"}`},
+		{"machine metadata delete", http.MethodDelete, "/api/flyio/apps/app-smoke/machines/machine-1/metadata/api-monitor", `{"accountId":"` + id + `"}`},
+		{"machine restart", http.MethodPost, "/api/flyio/apps/app-smoke/machines/machine-1/restart", `{"accountId":"` + id + `"}`},
+		{"machine signal", http.MethodPost, "/api/flyio/apps/app-smoke/machines/machine-1/signal", `{"accountId":"` + id + `","signal":"SIGTERM"}`},
+		{"machine reclaim memory", http.MethodPost, "/api/flyio/apps/app-smoke/machines/machine-1/memory", `{"accountId":"` + id + `"}`},
+		{"machine reclaim memory official", http.MethodPost, "/api/flyio/apps/app-smoke/machines/machine-1/memory/reclaim", `{"accountId":"` + id + `"}`},
+		{"machine set memory", http.MethodPut, "/api/flyio/apps/app-smoke/machines/machine-1/memory", `{"accountId":"` + id + `","memory_mb":512}`},
+		{"machine set metadata", http.MethodPut, "/api/flyio/apps/app-smoke/machines/machine-1/metadata", `{"accountId":"` + id + `","metadata":{"api-monitor":"enabled"}}`},
+		{"machine create", http.MethodPost, "/api/flyio/apps/app-smoke/machines", `{"accountId":"` + id + `","image":"registry.example/app:latest","region":"sin"}`},
+		{"machine delete", http.MethodDelete, "/api/flyio/apps/app-smoke/machines/machine-1", `{"accountId":"` + id + `","force":true}`},
+	}
+	for _, check := range actionChecks {
+		t.Run(check.name, func(t *testing.T) {
+			res := perform(service, check.method, check.path, check.body)
+			if res.Code != http.StatusOK {
+				t.Fatalf("%s status = %d body=%s", check.name, res.Code, res.Body.String())
+			}
+			payload := map[string]interface{}{}
+			mustDecode(t, res, &payload)
+			if payload["success"] != true {
+				t.Fatalf("%s unexpected payload: %#v", check.name, payload)
+			}
+		})
+	}
+
 	res = perform(service, http.MethodPost, "/api/flyio/accounts/"+id+"/update-all-images", `{"image":"latest"}`)
 	if res.Code != http.StatusOK {
 		t.Fatalf("update all status = %d body=%s", res.Code, res.Body.String())
@@ -192,6 +242,33 @@ func TestAppMachineLogsAndBatchOperations(t *testing.T) {
 	mustDecode(t, res, &batch)
 	if batch["success"] != true || batch["total"] != float64(1) || batch["updated"] != float64(1) {
 		t.Fatalf("unexpected batch payload: %#v", batch)
+	}
+}
+
+func TestWithImageTagPreservesRepository(t *testing.T) {
+	tests := map[string]string{
+		"registry.example/app:old":          "registry.example/app:latest",
+		"registry.example:5000/ns/app:main": "registry.example:5000/ns/app:latest",
+		"library/nginx":                     "library/nginx:latest",
+		"ghcr.io/acme/app@sha256:abcdef":    "ghcr.io/acme/app:latest",
+	}
+	for input, want := range tests {
+		if got := withImageTag(input, "latest"); got != want {
+			t.Fatalf("withImageTag(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestNormalizeFlyImageForUpdateStripsDockerHubMirror(t *testing.T) {
+	tests := map[string]string{
+		"docker-hub-mirror.fly.io/iwvw/api-monitor:dev": "iwvw/api-monitor:dev",
+		"docker-hub-mirror.fly.io/library/nginx:latest": "library/nginx:latest",
+		"ghcr.io/acme/app:main":                         "ghcr.io/acme/app:main",
+	}
+	for input, want := range tests {
+		if got := normalizeFlyImageForUpdate(input); got != want {
+			t.Fatalf("normalizeFlyImageForUpdate(%q) = %q, want %q", input, got, want)
+		}
 	}
 }
 
@@ -286,12 +363,109 @@ func fakeFlyAPI(t *testing.T) *httptest.Server {
 			}
 		case r.Method == http.MethodGet && r.URL.Path == "/machines/apps/app-smoke/machines":
 			writeJSON(w, http.StatusOK, []map[string]interface{}{
-				{"id": "machine-1", "region": "sin", "state": "started", "config": map[string]interface{}{"image": "registry.example/app:old"}},
+				{"id": "machine-1", "region": "sin", "state": "started", "version": "1", "config": map[string]interface{}{"image": "registry.example/app:old"}, "image_ref": map[string]interface{}{"digest": "sha256:old"}},
 			})
+		case r.Method == http.MethodPost && r.URL.Path == "/machines/apps/app-smoke/machines":
+			var payload map[string]interface{}
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			if objectValue(payload["config"])["image"] != "registry.example/app:latest" || payload["region"] != "sin" {
+				t.Fatalf("unexpected create machine payload: %#v", payload)
+			}
+			writeJSON(w, http.StatusOK, map[string]interface{}{"id": "machine-new", "region": "sin", "state": "created"})
+		case r.Method == http.MethodGet && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1":
+			writeJSON(w, http.StatusOK, map[string]interface{}{"id": "machine-1", "region": "sin", "state": "started", "version": "2", "config": map[string]interface{}{"image": "registry.example/app:latest"}, "image_ref": map[string]interface{}{"digest": "sha256:new"}})
+		case r.Method == http.MethodGet && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1/wait":
+			if r.URL.Query().Get("state") != "started" || r.URL.Query().Get("timeout") != "5" {
+				t.Fatalf("unexpected wait query: %s", r.URL.RawQuery)
+			}
+			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
 		case r.Method == http.MethodPost && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1/restart":
 			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
-		case r.Method == http.MethodPost && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1":
+		case r.Method == http.MethodGet && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1/events":
+			writeJSON(w, http.StatusOK, []map[string]interface{}{{"type": "start"}})
+		case r.Method == http.MethodGet && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1/memory":
+			writeJSON(w, http.StatusOK, map[string]interface{}{"memory_mb": 512})
+		case r.Method == http.MethodPut && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1/memory":
 			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+		case r.Method == http.MethodPost && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1/memory/reclaim":
+			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1/ps":
+			writeJSON(w, http.StatusOK, []map[string]interface{}{{"pid": 1, "command": "app"}})
+		case r.Method == http.MethodGet && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1/versions":
+			writeJSON(w, http.StatusOK, []map[string]interface{}{{"version": 1}})
+		case r.Method == http.MethodPost && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1/signal":
+			var payload map[string]interface{}
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			if payload["signal"] != "SIGTERM" {
+				t.Fatalf("unexpected signal payload: %#v", payload)
+			}
+			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+		case r.Method == http.MethodPost && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1/start":
+			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+		case r.Method == http.MethodPost && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1/stop":
+			var payload map[string]interface{}
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			if payload["signal"] != "SIGTERM" || payload["timeout"] != "30s" {
+				t.Fatalf("unexpected stop payload: %#v", payload)
+			}
+			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+		case r.Method == http.MethodPost && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1/suspend":
+			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+		case r.Method == http.MethodPost && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1/cordon":
+			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+		case r.Method == http.MethodPost && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1/uncordon":
+			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1/lease":
+			writeJSON(w, http.StatusOK, map[string]interface{}{"nonce": "lease-1", "expires_at": "2026-01-01T00:00:15Z"})
+		case r.Method == http.MethodPost && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1/lease":
+			var payload map[string]interface{}
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			if payload["ttl"] != float64(30) {
+				t.Fatalf("unexpected lease payload: %#v", payload)
+			}
+			writeJSON(w, http.StatusOK, map[string]interface{}{"nonce": "lease-1"})
+		case r.Method == http.MethodDelete && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1/lease":
+			if r.Header.Get("fly-machine-lease-nonce") != "lease-1" {
+				t.Fatalf("missing lease nonce header: %#v", r.Header)
+			}
+			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1/metadata":
+			writeJSON(w, http.StatusOK, map[string]interface{}{"api-monitor": "enabled"})
+		case (r.Method == http.MethodPut || r.Method == http.MethodPatch) && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1/metadata":
+			var payload map[string]interface{}
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			if objectValue(payload["metadata"])["api-monitor"] != "enabled" {
+				t.Fatalf("unexpected full metadata payload: %#v", payload)
+			}
+			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+		case r.Method == http.MethodPost && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1/metadata/api-monitor":
+			var payload map[string]interface{}
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			if payload["value"] != "enabled" {
+				t.Fatalf("unexpected metadata payload: %#v", payload)
+			}
+			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+		case r.Method == http.MethodDelete && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1/metadata/api-monitor":
+			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+		case r.Method == http.MethodDelete && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1":
+			if r.URL.Query().Get("force") != "true" {
+				t.Fatalf("expected force delete query: %s", r.URL.RawQuery)
+			}
+			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+		case r.Method == http.MethodPost && r.URL.Path == "/machines/apps/app-smoke/machines/machine-1":
+			var payload map[string]interface{}
+			_ = json.NewDecoder(r.Body).Decode(&payload)
+			config := objectValue(payload["config"])
+			if config["image"] != "registry.example/app:latest" {
+				t.Fatalf("unexpected machine update image: %#v", payload)
+			}
+			if stringValue(objectValue(config["metadata"])["api-monitor-update"], "") == "" {
+				t.Fatalf("missing update marker: %#v", payload)
+			}
+			if payload["skip_launch"] != false {
+				t.Fatalf("expected skip_launch=false: %#v", payload)
+			}
+			writeJSON(w, http.StatusOK, map[string]interface{}{"id": "machine-1", "region": "sin", "state": "starting", "version": "2", "config": map[string]interface{}{"image": "registry.example/app:latest"}, "image_ref": map[string]interface{}{"digest": "sha256:new"}})
 		case r.Method == http.MethodGet && r.URL.Path == "/logsapi/apps/app-smoke/logs":
 			w.Header().Set("Content-Type", "text/plain")
 			_, _ = w.Write([]byte(`{"timestamp":"2026-01-01T00:00:00Z","message":"started","level":"info","instance":"machine-1","region":"sin"}` + "\n"))

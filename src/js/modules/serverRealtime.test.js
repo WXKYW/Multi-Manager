@@ -18,7 +18,7 @@ describe('server realtime health helpers', () => {
     expect(health.label).toBe('在线');
   });
 
-  it('separates stale metrics from a still-online connection', () => {
+  it('marks stale metrics from a still-online connection as interrupted', () => {
     const now = Date.parse('2026-06-29T01:30:00Z');
     const health = resolveServerMetricsHealth({
       status: 'online',
@@ -26,7 +26,7 @@ describe('server realtime health helpers', () => {
       metrics_last_seen_at: now - SERVER_METRICS_STALE_AFTER_MS - 1,
     }, now);
 
-    expect(health.state).toBe('stale');
+    expect(health.state).toBe('interrupted');
     expect(health.stale).toBe(true);
     expect(health.variant).toBe('warning');
     expect(health.label).toBe('中断');

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -15,10 +16,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/iwvw/api-monitor/backend-go/internal/applog"
+	"github.com/iwvw/api-monitor/backend-go/internal/cloudflare"
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
 	"github.com/iwvw/api-monitor/backend-go/internal/database"
+	"github.com/iwvw/api-monitor/backend-go/internal/managedproxy"
+	"github.com/iwvw/api-monitor/backend-go/internal/reconcilequeue"
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
 	"github.com/iwvw/api-monitor/backend-go/internal/secure"
+	"github.com/iwvw/api-monitor/backend-go/internal/subscriptionledger"
 )
 
 type Notifier interface {
@@ -33,30 +38,53 @@ type alertState struct {
 }
 
 type Service struct {
-	cfg              config.Config
-	store            *database.Store
-	taskRegistry     *TaskRegistry
-	agentBatches     *AgentBatchManager
-	engineIO         *EngineIOServer
-	registry         *ConnectionRegistry
-	metricsHub       *MetricsHub
-	ptyHub           *ptyDataHub
-	lastCollect      time.Time
-	lastCollectMu    sync.RWMutex
-	lastPersist      map[string]time.Time
-	lastPersistMu    sync.Mutex
-	agentTaskWaiters sync.Map
-	targetsCache     []networkQualityTarget
-	targetsCacheMu   sync.RWMutex
-	notifier         Notifier
-	alertStates      sync.Map // serverID -> *alertState
+	cfg                           config.Config
+	store                         *database.Store
+	taskRegistry                  *TaskRegistry
+	agentBatches                  *AgentBatchManager
+	engineIO                      *EngineIOServer
+	registry                      *ConnectionRegistry
+	metricsHub                    *MetricsHub
+	ptyHub                        *ptyDataHub
+	presence                      *agentPresenceManager
+	terminalBroker                *agentTerminalBroker
+	remoteDesktop                 *remoteDesktopManager
+	lastCollect                   time.Time
+	lastCollectMu                 sync.RWMutex
+	lastPersist                   map[string]time.Time
+	lastPersistMu                 sync.Mutex
+	lastNetworkQualityPersist     map[string]time.Time
+	lastNetworkQualityPersistMu   sync.Mutex
+	realtimePersistInterval       time.Duration
+	networkQualityPersistInterval time.Duration
+	agentTaskWaiters              sync.Map
+	autoLocationRefreshes         sync.Map
+	lastAutoLocationRefresh       sync.Map
+	targetsCache                  []networkQualityTarget
+	targetsCacheMu                sync.RWMutex
+	notifier                      Notifier
+	cloudflare                    cloudflare.ManagedTunnelAPI
+	alertStates                   sync.Map // serverID -> *alertState
+	backgroundCancel              context.CancelFunc
+	backgroundWG                  sync.WaitGroup
+	stopOnce                      sync.Once
+	startupErr                    error
 }
 
-const realtimeMetricsPersistInterval = 1500 * time.Millisecond
+const defaultRealtimeMetricsPersistInterval = 30 * time.Second
+const minRealtimeMetricsPersistInterval = 10 * time.Second
+const defaultNetworkQualityPersistInterval = time.Minute
+const minNetworkQualityPersistInterval = 30 * time.Second
 const agentMetricsStaleAfter = 45 * time.Second
 
 func (s *Service) SetNotifier(n Notifier) {
 	s.notifier = n
+}
+
+func (s *Service) StartupError() error { return s.startupErr }
+
+func (s *Service) SetCloudflareTunnelManager(manager cloudflare.ManagedTunnelAPI) {
+	s.cloudflare = manager
 }
 
 func (s *Service) validateAgentConnection(ctx context.Context, serverID, key string) error {
@@ -75,12 +103,8 @@ func (s *Service) validateAgentConnection(ctx context.Context, serverID, key str
 	}
 	defer db.Close()
 
-	expectedKey, err := s.getOrGenerateAgentKey(ctx, db)
-	if err != nil {
+	if err := s.validateAgentKeyForServer(ctx, db, serverID, key); err != nil {
 		return err
-	}
-	if key != expectedKey {
-		return errors.New("invalid agent key")
 	}
 
 	var exists int
@@ -96,6 +120,7 @@ func (s *Service) validateAgentConnection(ctx context.Context, serverID, key str
 func New(cfg config.Config) *Service {
 	registry := NewConnectionRegistry()
 	taskRegistry := NewTaskRegistry()
+	store := database.New(cfg)
 	agentBatches := NewAgentBatchManager()
 	metricsHub := NewMetricsHub()
 	ptyHub := newPtyDataHub()
@@ -103,17 +128,23 @@ func New(cfg config.Config) *Service {
 	engineIO.metricsHub = metricsHub
 
 	s := &Service{
-		cfg:          cfg,
-		store:        database.New(cfg),
-		taskRegistry: taskRegistry,
-		agentBatches: agentBatches,
-		engineIO:     engineIO,
-		registry:     registry,
-		metricsHub:   metricsHub,
-		ptyHub:       ptyHub,
-		lastPersist:  make(map[string]time.Time),
+		cfg:                           cfg,
+		store:                         store,
+		taskRegistry:                  taskRegistry,
+		agentBatches:                  agentBatches,
+		engineIO:                      engineIO,
+		registry:                      registry,
+		metricsHub:                    metricsHub,
+		ptyHub:                        ptyHub,
+		terminalBroker:                newAgentTerminalBroker(),
+		remoteDesktop:                 newRemoteDesktopManager(),
+		lastPersist:                   make(map[string]time.Time),
+		lastNetworkQualityPersist:     make(map[string]time.Time),
+		realtimePersistInterval:       resolveRealtimeMetricsPersistInterval(),
+		networkQualityPersistInterval: resolveNetworkQualityPersistInterval(),
 	}
 	engineIO.service = s
+	s.presence = newAgentPresenceManager(s)
 
 	// 绑定 Engine.IO 事件处理器
 	engineIO.SetHandlers(
@@ -122,52 +153,51 @@ func New(cfg config.Config) *Service {
 			applog.Info(context.Background(), "serveragent", "agent connected", "session_id", sessionID, "server_id", serverID)
 			if serverID != "" {
 				var socket interface{}
+				transport := ""
+				capabilities := map[string]bool{}
 				if sess := engineIO.getSession(sessionID); sess != nil {
 					sess.mu.RLock()
 					socket = sess
+					transport = sess.Transport
+					for _, capability := range sess.Capabilities {
+						capabilities[capability] = true
+					}
 					sess.mu.RUnlock()
 				}
-				registry.Register(serverID, socket) // 注册到连接池
-
-				// 异步更新数据库状态为 online 并发送通知
-				go func() {
-					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-					defer cancel()
-					db, err := s.open(ctx)
-					if err == nil {
-						defer db.Close()
-						now := time.Now().Format("2006-01-02 15:04:05")
-						_, _ = db.ExecContext(ctx, `UPDATE server_accounts
-							SET status = 'online', last_check_time = ?, last_check_status = 'success', response_time = 0, updated_at = ?
-							WHERE id = ?`, now, now, serverID)
-
-						// 获取主机名称和真实主机地址用于通知
-						var serverName, serverHost string
-						_ = db.QueryRowContext(ctx, `SELECT name, host FROM server_accounts WHERE id = ?`, serverID).Scan(&serverName, &serverHost)
-						if serverName == "" {
-							serverName = serverID
-						}
-						if serverHost == "" {
-							serverHost = serverName
-						}
-
-						if s.notifier != nil {
-							eventData := map[string]interface{}{
-								"serverId":   serverID,
-								"serverName": serverName,
-								"host":       serverHost,
-								"hostname":   serverName,
-								"status":     "online",
-							}
-							_ = s.notifier.Trigger(ctx, "server", "online", eventData)
-						}
-					}
-				}()
-
-				// 广播服务器上线状态给前端
-				if metricsHub != nil {
-					metricsHub.BroadcastServerStatus(serverID, "online", true)
+				conn := registry.Register(serverID, socket) // 注册到连接池
+				if len(capabilities) > 0 {
+					conn.UpdateCapabilities(capabilities)
 				}
+				if sess := engineIO.getSession(sessionID); sess != nil {
+					sess.mu.RLock()
+					if sess.Hostname != "" {
+						conn.SetMetadata("hostname", sess.Hostname)
+					}
+					if sess.Version != "" {
+						conn.SetMetadata("version", sess.Version)
+						conn.SetMetadata("agent_version", sess.Version)
+					}
+					if sess.Platform != "" {
+						conn.SetMetadata("platform", sess.Platform)
+					}
+					if sess.Arch != "" {
+						conn.SetMetadata("arch", sess.Arch)
+					}
+					if sess.RemoteIP != "" {
+						conn.SetMetadata("connection_ip", sess.RemoteIP)
+					}
+					sess.mu.RUnlock()
+				}
+				if s.presence != nil && s.presence.legacyMode() {
+					s.markAgentOnlineLegacy(serverID)
+				} else if s.presence != nil {
+					s.presence.recordConnect(serverID, transport)
+				}
+				go s.refreshAccountLocationFromAgentIfMissing(serverID)
+				go func(id string) {
+					time.Sleep(2 * time.Second)
+					s.reconcileManagedProxyFacts(id)
+				}(serverID)
 			}
 		},
 		// onMessage: 接收 Agent 消息
@@ -192,7 +222,7 @@ func New(cfg config.Config) *Service {
 						}
 					}
 					if serverID != "" {
-						registry.UpdateHeartbeat(serverID)
+						s.recordAgentSignal(serverID, "state", state)
 
 						// 提取并异步持久化 Agent 上报的网络波动质量指标
 						if nqData, hasNq := state["network_quality"]; hasNq && nqData != nil {
@@ -236,19 +266,26 @@ func New(cfg config.Config) *Service {
 
 						// 实时广播走内存；SQLite 落库按较低频率节流，避免 Agent 高频上报拖慢前端和后端。
 						if s.shouldPersistRealtimeMetrics(serverID, time.Now()) {
+							persistedInfoMap := cloneMap(cachedInfoMap)
 							go func() {
 								ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 								defer cancel()
 								db, err := s.open(ctx)
 								if err == nil {
 									defer db.Close()
+									persistedInfoMap = s.mergeCachedLocationFieldsFromDB(ctx, db, serverID, persistedInfoMap)
+									if host, changed, hostErr := backfillAccountHostFromAgent(ctx, db, serverID, persistedInfoMap); hostErr != nil {
+										applog.Warn(ctx, "serveragent", "failed to backfill host from Agent", "server_id", serverID, "error", hostErr.Error())
+									} else if changed {
+										applog.Info(ctx, "serveragent", "backfilled placeholder host from Agent", "server_id", serverID, "host", host)
+									}
 									now := time.Now().Format("2006-01-02 15:04:05")
-									cachedInfoJSON, _ := json.Marshal(cachedInfoMap)
+									cachedInfoJSON, _ := json.Marshal(persistedInfoMap)
 									_, _ = db.ExecContext(ctx, `UPDATE server_accounts
 									SET status = 'online', last_check_time = ?, last_check_status = 'success', response_time = 0, cached_info = ?, updated_at = ?
 									WHERE id = ?`, now, string(cachedInfoJSON), now, serverID)
 
-									if err := s.persistMetrics(ctx, db, serverID, cachedInfoMap); err != nil {
+									if err := s.persistMetrics(ctx, db, serverID, persistedInfoMap); err != nil {
 										s.markRealtimeMetricsPersistResult(serverID, false, err, time.Now())
 										applog.Warn(ctx, "serveragent", "failed to persist realtime metrics", "server_id", serverID, "error", err.Error())
 									} else {
@@ -274,6 +311,7 @@ func New(cfg config.Config) *Service {
 						}
 					}
 					if serverID != "" {
+						s.recordAgentSignal(serverID, "host_info", hostInfo)
 						var fullCachedInfo map[string]interface{}
 						if conn, exists := registry.Get(serverID); exists {
 							if platform, ok := hostInfo["platform"].(string); ok {
@@ -304,6 +342,12 @@ func New(cfg config.Config) *Service {
 							db, err := s.open(ctx)
 							if err == nil {
 								defer db.Close()
+								fullCachedInfo = s.mergeCachedLocationFieldsFromDB(ctx, db, serverID, fullCachedInfo)
+								if host, changed, hostErr := backfillAccountHostFromAgent(ctx, db, serverID, fullCachedInfo); hostErr != nil {
+									applog.Warn(ctx, "serveragent", "failed to backfill host from Agent", "server_id", serverID, "error", hostErr.Error())
+								} else if changed {
+									applog.Info(ctx, "serveragent", "backfilled placeholder host from Agent", "server_id", serverID, "host", host)
+								}
 								now := time.Now().Format("2006-01-02 15:04:05")
 								cachedInfoJSON, _ := json.Marshal(fullCachedInfo)
 								_, _ = db.ExecContext(ctx, `UPDATE server_accounts
@@ -323,6 +367,7 @@ func New(cfg config.Config) *Service {
 					Delay      int64  `json:"delay"`
 				}
 				if err := json.Unmarshal(data, &result); err == nil {
+					s.recordAgentSignal(serverID, "task_result", nil)
 					if result.Successful {
 						s.taskRegistry.Complete(result.ID, result.Data)
 					} else {
@@ -341,6 +386,7 @@ func New(cfg config.Config) *Service {
 					IsError    bool   `json:"is_error"`
 				}
 				if err := json.Unmarshal(data, &prog); err == nil {
+					s.recordAgentSignal(serverID, "task_result", nil)
 					s.taskRegistry.UpdateProgress(prog.TaskID, prog.Percentage, prog)
 				}
 			case "agent:pty_data":
@@ -349,7 +395,6 @@ func New(cfg config.Config) *Service {
 					Data string `json:"data"`
 				}
 				if err := json.Unmarshal(data, &ptyData); err == nil && ptyData.ID != "" {
-					registry.UpdateHeartbeat(serverID)
 					if s.ptyHub != nil {
 						s.ptyHub.Publish(ptyData.ID, ptyData.Data)
 					}
@@ -361,11 +406,13 @@ func New(cfg config.Config) *Service {
 					Error  string `json:"error"`
 				}
 				if err := json.Unmarshal(data, &ptyStatus); err == nil && ptyStatus.ID != "" {
-					registry.UpdateHeartbeat(serverID)
+					s.recordAgentSignal(serverID, "pty_status", nil)
 					if s.ptyHub != nil {
 						s.ptyHub.Publish("status:"+ptyStatus.ID, string(data))
 					}
 				}
+			case "agent:rd_signal":
+				s.handleRemoteDesktopAgentSignal(serverID, data)
 			case "agent:heartbeat":
 				// Agent 心跳
 				var hb struct {
@@ -377,7 +424,7 @@ func New(cfg config.Config) *Service {
 					}
 				}
 				if serverID != "" {
-					registry.UpdateHeartbeat(serverID)
+					s.recordAgentSignal(serverID, "heartbeat", nil)
 				}
 			case "metrics", "heartbeat":
 				// 兼容旧事件名称
@@ -389,7 +436,7 @@ func New(cfg config.Config) *Service {
 						}
 					}
 					if serverID != "" {
-						registry.UpdateHeartbeat(serverID)
+						s.recordAgentSignal(serverID, "metrics", state)
 					}
 				}
 			}
@@ -404,44 +451,13 @@ func New(cfg config.Config) *Service {
 				ns := sess.Namespace
 				sess.mu.RUnlock()
 				if ns != "/metrics" && sid != "" && registry.DisconnectIfSocket(sid, sess) {
-
-					go func(serverID string) {
-						ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-						defer cancel()
-						db, err := s.open(ctx)
-						if err != nil {
-							return
-						}
-						defer db.Close()
-						now := time.Now().Format("2006-01-02 15:04:05")
-						_, _ = db.ExecContext(ctx, `UPDATE server_accounts
-							SET status = 'offline', last_check_time = ?, last_check_status = 'disconnected', updated_at = ?
-							WHERE id = ?`, now, now, serverID)
-
-						// 获取主机名称和真实主机地址用于通知
-						var serverName, serverHost string
-						_ = db.QueryRowContext(ctx, `SELECT name, host FROM server_accounts WHERE id = ?`, serverID).Scan(&serverName, &serverHost)
-						if serverName == "" {
-							serverName = serverID
-						}
-						if serverHost == "" {
-							serverHost = serverName
-						}
-
-						if s.notifier != nil {
-							eventData := map[string]interface{}{
-								"serverId":   serverID,
-								"serverName": serverName,
-								"host":       serverHost,
-								"hostname":   serverName,
-								"status":     "offline",
-							}
-							_ = s.notifier.Trigger(ctx, "server", "offline", eventData)
-						}
-					}(sid)
-
-					if metricsHub != nil {
-						metricsHub.BroadcastServerStatus(sid, "offline", false)
+					if s.terminalBroker != nil {
+						s.terminalBroker.closeForServer(sid, "agent_control_disconnected")
+					}
+					if s.presence != nil && s.presence.legacyMode() {
+						s.markAgentOfflineLegacy(sid)
+					} else if s.presence != nil {
+						s.presence.recordDisconnect(sid, "socket_disconnected")
 					}
 				}
 			}
@@ -451,34 +467,238 @@ func New(cfg config.Config) *Service {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if db, err := s.store.Open(ctx); err == nil {
-		_ = ensureSchema(ctx, db)
+		if schemaErr := database.WithSchemaLock(ctx, func() error { return ensureSchema(ctx, db) }); schemaErr != nil {
+			applog.Error(context.Background(), "serveragent", "ensure schema failed", "error", schemaErr.Error())
+			s.startupErr = schemaErr
+		}
 		db.Close()
+	} else {
+		applog.Error(context.Background(), "serveragent", "open database during startup failed", "error", err.Error())
+		s.startupErr = err
+	}
+	if s.startupErr != nil {
+		return s
+	}
+	taskPersistence := newSQLiteTaskPersistence(store)
+	if err := taskPersistence.Ensure(ctx); err != nil {
+		applog.Error(context.Background(), "serveragent", "ensure task persistence failed", "error", err.Error())
+		s.startupErr = fmt.Errorf("ensure task persistence: %w", err)
+		return s
+	} else if err := taskRegistry.AttachPersistence(ctx, taskPersistence); err != nil {
+		applog.Error(context.Background(), "serveragent", "restore task persistence failed", "error", err.Error())
+		s.startupErr = fmt.Errorf("restore task persistence: %w", err)
+		return s
 	}
 
 	s.initTargetsCache()
 
 	// Start background telemetry metrics collection loop
-	go s.startMetricsCollectorLoop()
+	if s.presence != nil {
+		s.presence.start()
+	}
+	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
+	s.backgroundCancel = backgroundCancel
+	s.backgroundWG.Add(3)
+	go func() {
+		defer s.backgroundWG.Done()
+		s.startMetricsCollectorLoop(backgroundCtx)
+	}()
+	go func() {
+		defer s.backgroundWG.Done()
+		s.startManagedProxyFactsLoop(backgroundCtx)
+	}()
+	go func() {
+		defer s.backgroundWG.Done()
+		s.startSubscriptionReconcileLoop(backgroundCtx)
+	}()
 
 	return s
+}
+
+// Stop terminates background work owned by the service. It is idempotent so
+// tests and process shutdown can safely share the same cleanup path.
+func (s *Service) Stop() {
+	s.stopOnce.Do(func() {
+		if s.backgroundCancel != nil {
+			s.backgroundCancel()
+		}
+		s.backgroundWG.Wait()
+		if s.presence != nil {
+			s.presence.stop()
+		}
+		if s.registry != nil {
+			s.registry.Stop()
+		}
+	})
 }
 
 func (s *Service) open(ctx context.Context) (*sql.DB, error) {
 	return s.store.Open(ctx)
 }
 
+func (s *Service) recordAgentSignal(serverID, source string, payload map[string]interface{}) {
+	serverID = strings.TrimSpace(serverID)
+	if serverID == "" {
+		return
+	}
+	if s.registry != nil {
+		s.registry.UpdateHeartbeat(serverID)
+	}
+	sampleIntervalMs := int64(0)
+	if payload != nil {
+		sampleIntervalMs = getInt64Val(payload, "sample_interval_ms", 0)
+		if sampleIntervalMs <= 0 {
+			sampleIntervalMs = getInt64Val(payload, "metrics_sample_interval_ms", 0)
+		}
+	}
+	if s.presence != nil {
+		s.presence.recordHeartbeat(serverID, source, sampleIntervalMs)
+	}
+}
+
+func (s *Service) markAgentOnlineLegacy(serverID string) {
+	if serverID == "" {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		db, err := s.open(ctx)
+		if err != nil {
+			return
+		}
+		defer db.Close()
+		now := time.Now().Format("2006-01-02 15:04:05")
+		_, _ = db.ExecContext(ctx, `UPDATE server_accounts
+			SET status = 'online', last_check_time = ?, last_check_status = 'success', response_time = 0, updated_at = ?
+			WHERE id = ?`, now, now, serverID)
+		serverName, serverHost := s.serverIdentity(ctx, db, serverID)
+		s.triggerServerStatusNotification(ctx, serverID, serverName, serverHost, "online")
+	}()
+	if s.metricsHub != nil {
+		s.metricsHub.BroadcastServerStatus(serverID, "online", true)
+	}
+}
+
+func (s *Service) markAgentOfflineLegacy(serverID string) {
+	if serverID == "" {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		db, err := s.open(ctx)
+		if err != nil {
+			return
+		}
+		defer db.Close()
+		now := time.Now().Format("2006-01-02 15:04:05")
+		_, _ = db.ExecContext(ctx, `UPDATE server_accounts
+			SET status = 'offline', last_check_time = ?, last_check_status = 'disconnected', updated_at = ?
+			WHERE id = ?`, now, now, serverID)
+		serverName, serverHost := s.serverIdentity(ctx, db, serverID)
+		s.triggerServerStatusNotification(ctx, serverID, serverName, serverHost, "offline")
+	}()
+	if s.metricsHub != nil {
+		s.metricsHub.BroadcastServerStatus(serverID, "offline", false)
+	}
+}
+
+func (s *Service) serverIdentity(ctx context.Context, db *sql.DB, serverID string) (string, string) {
+	var serverName, serverHost string
+	_ = db.QueryRowContext(ctx, `SELECT name, host FROM server_accounts WHERE id = ?`, serverID).Scan(&serverName, &serverHost)
+	if serverName == "" {
+		serverName = serverID
+	}
+	if serverHost == "" {
+		serverHost = serverName
+	}
+	return serverName, serverHost
+}
+
+func (s *Service) triggerServerStatusNotification(ctx context.Context, serverID, serverName, serverHost, status string) {
+	if s.notifier == nil {
+		return
+	}
+	eventData := map[string]interface{}{
+		"serverId":   serverID,
+		"serverName": serverName,
+		"host":       serverHost,
+		"hostname":   serverName,
+		"status":     status,
+	}
+	_ = s.notifier.Trigger(ctx, "server", status, eventData)
+}
+
 func (s *Service) shouldPersistRealtimeMetrics(serverID string, now time.Time) bool {
 	if serverID == "" {
 		return false
 	}
+	interval := s.realtimePersistInterval
+	if interval <= 0 {
+		interval = defaultRealtimeMetricsPersistInterval
+	}
 	s.lastPersistMu.Lock()
 	defer s.lastPersistMu.Unlock()
 	last := s.lastPersist[serverID]
-	if !last.IsZero() && now.Sub(last) < realtimeMetricsPersistInterval {
+	if !last.IsZero() && now.Sub(last) < interval {
 		return false
 	}
 	s.lastPersist[serverID] = now
 	return true
+}
+
+func resolveRealtimeMetricsPersistInterval() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("API_MONITOR_AGENT_METRICS_PERSIST_INTERVAL_MS"))
+	if raw == "" {
+		return defaultRealtimeMetricsPersistInterval
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value <= 0 {
+		return defaultRealtimeMetricsPersistInterval
+	}
+	interval := time.Duration(value) * time.Millisecond
+	if interval < minRealtimeMetricsPersistInterval {
+		return minRealtimeMetricsPersistInterval
+	}
+	return interval
+}
+
+func (s *Service) shouldPersistNetworkQuality(serverID string, now time.Time) bool {
+	if serverID == "" {
+		return false
+	}
+	interval := s.networkQualityPersistInterval
+	if interval <= 0 {
+		return false
+	}
+	s.lastNetworkQualityPersistMu.Lock()
+	defer s.lastNetworkQualityPersistMu.Unlock()
+	last := s.lastNetworkQualityPersist[serverID]
+	if !last.IsZero() && now.Sub(last) < interval {
+		return false
+	}
+	s.lastNetworkQualityPersist[serverID] = now
+	return true
+}
+
+func resolveNetworkQualityPersistInterval() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("API_MONITOR_AGENT_NETWORK_QUALITY_PERSIST_INTERVAL_MS"))
+	if raw == "" {
+		return defaultNetworkQualityPersistInterval
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value < 0 {
+		return defaultNetworkQualityPersistInterval
+	}
+	if value == 0 {
+		return 0
+	}
+	interval := time.Duration(value) * time.Millisecond
+	if interval < minNetworkQualityPersistInterval {
+		return minNetworkQualityPersistInterval
+	}
+	return interval
 }
 
 func (s *Service) BroadcastUptimeHeartbeat(monitorID int64, beat map[string]interface{}) {
@@ -516,8 +736,13 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			starts_at DATETIME,
 			expires_at DATETIME,
 			traffic_limit_bytes INTEGER DEFAULT 0,
+			traffic_limit_mode TEXT DEFAULT 'total',
 			traffic_alert_enabled INTEGER DEFAULT 0,
 			traffic_alert_percent REAL DEFAULT 100,
+			traffic_cycle_type TEXT DEFAULT 'none',
+			traffic_cycle_day INTEGER DEFAULT 1,
+			traffic_cycle_start DATETIME,
+			traffic_cycle_end DATETIME,
 			order_index INTEGER DEFAULT 0,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -611,6 +836,103 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (server_id) REFERENCES server_accounts(id) ON DELETE CASCADE
 		)`,
+		`CREATE TABLE IF NOT EXISTS server_agent_credentials (
+			server_id TEXT PRIMARY KEY,
+			secret_encrypted TEXT NOT NULL,
+			created_at TEXT DEFAULT (datetime('now')),
+			updated_at TEXT DEFAULT (datetime('now'))
+		)`,
+		`CREATE TABLE IF NOT EXISTS server_proxy_desired_state (
+			server_id TEXT PRIMARY KEY,
+			revision INTEGER NOT NULL DEFAULT 1,
+			runtime TEXT NOT NULL,
+			config_encrypted TEXT NOT NULL,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			applied_revision INTEGER NOT NULL DEFAULT 0,
+			apply_status TEXT NOT NULL DEFAULT 'pending',
+			last_error TEXT NOT NULL DEFAULT '',
+			assigned_port INTEGER NOT NULL DEFAULT 0,
+			stats_port INTEGER NOT NULL DEFAULT 0,
+			transport TEXT NOT NULL DEFAULT 'tcp',
+			updated_at TEXT DEFAULT (datetime('now'))
+		)`,
+		`CREATE TABLE IF NOT EXISTS server_proxy_traffic_reports (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			server_id TEXT NOT NULL,
+			boot_id TEXT NOT NULL,
+			sequence INTEGER NOT NULL,
+			node_id TEXT NOT NULL,
+			upload_bytes INTEGER NOT NULL DEFAULT 0,
+			download_bytes INTEGER NOT NULL DEFAULT 0,
+			reported_at TEXT DEFAULT (datetime('now')),
+			UNIQUE(server_id, boot_id, sequence, node_id)
+		)`,
+		managedproxy.NodeTableDDL,
+		`CREATE TABLE IF NOT EXISTS managed_proxy_runtimes (
+			server_id TEXT PRIMARY KEY,
+			runtime TEXT NOT NULL DEFAULT 'sing-box',
+			version TEXT NOT NULL DEFAULT '',
+			desired_status TEXT NOT NULL DEFAULT 'running',
+			apply_status TEXT NOT NULL DEFAULT 'not_installed',
+			last_stage TEXT NOT NULL DEFAULT '',
+			last_error TEXT NOT NULL DEFAULT '',
+			observed_status TEXT NOT NULL DEFAULT 'unknown',
+			observed_version TEXT NOT NULL DEFAULT '',
+			observed_at TEXT,
+			installed_at TEXT,
+			updated_at TEXT DEFAULT (datetime('now')),
+			FOREIGN KEY (server_id) REFERENCES server_accounts(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS managed_proxy_tunnels (
+			server_id TEXT PRIMARY KEY,
+			account_id TEXT NOT NULL,
+			zone_id TEXT NOT NULL,
+			zone_name TEXT NOT NULL DEFAULT '',
+			tunnel_id TEXT NOT NULL DEFAULT '',
+			tunnel_name TEXT NOT NULL DEFAULT '',
+			hostname TEXT NOT NULL,
+			dns_record_id TEXT NOT NULL DEFAULT '',
+			token_encrypted TEXT NOT NULL DEFAULT '',
+			revision INTEGER NOT NULL DEFAULT 1,
+			desired_status TEXT NOT NULL DEFAULT 'running',
+			apply_status TEXT NOT NULL DEFAULT 'pending',
+			last_stage TEXT NOT NULL DEFAULT '',
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at TEXT DEFAULT (datetime('now')),
+			updated_at TEXT DEFAULT (datetime('now')),
+			FOREIGN KEY (server_id) REFERENCES server_accounts(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS managed_proxy_preferences (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			address TEXT NOT NULL,
+			port INTEGER NOT NULL DEFAULT 443,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			is_default INTEGER NOT NULL DEFAULT 0,
+			sort_order INTEGER NOT NULL DEFAULT 0,
+			last_status TEXT NOT NULL DEFAULT 'unknown',
+			last_latency_ms INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			checked_at TEXT,
+			created_at TEXT DEFAULT (datetime('now')),
+			updated_at TEXT DEFAULT (datetime('now'))
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_managed_proxy_node_name_server ON managed_proxy_nodes(server_id, name)`,
+		`CREATE INDEX IF NOT EXISTS idx_managed_proxy_nodes_server ON managed_proxy_nodes(server_id, updated_at DESC)`,
+		`CREATE TRIGGER IF NOT EXISTS trg_managed_proxy_node_port_insert
+			BEFORE INSERT ON managed_proxy_nodes
+			WHEN NEW.assigned_port > 0 AND EXISTS (
+				SELECT 1 FROM managed_proxy_nodes WHERE server_id=NEW.server_id AND assigned_port=NEW.assigned_port
+			)
+			BEGIN SELECT RAISE(ABORT, 'managed proxy port already reserved'); END`,
+		`CREATE TRIGGER IF NOT EXISTS trg_managed_proxy_node_port_update
+			BEFORE UPDATE OF server_id,assigned_port ON managed_proxy_nodes
+			WHEN NEW.assigned_port > 0 AND EXISTS (
+				SELECT 1 FROM managed_proxy_nodes WHERE server_id=NEW.server_id AND assigned_port=NEW.assigned_port AND id<>NEW.id
+			)
+			BEGIN SELECT RAISE(ABORT, 'managed proxy port already reserved'); END`,
+		`CREATE INDEX IF NOT EXISTS idx_managed_proxy_preferences_order ON managed_proxy_preferences(enabled DESC, is_default DESC, sort_order ASC)`,
+		`CREATE INDEX IF NOT EXISTS idx_proxy_traffic_server_time ON server_proxy_traffic_reports(server_id, reported_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS server_network_quality_targets (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			name TEXT NOT NULL UNIQUE,
@@ -685,9 +1007,23 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("ensure server schema: %w", err)
 		}
 	}
+	if err := reconcilequeue.EnsureSchema(ctx, db); err != nil {
+		return err
+	}
+	if err := subscriptionledger.EnsureSchema(ctx, db); err != nil {
+		return err
+	}
+	// Existing managed nodes are evidence that the sing-box runtime was
+	// already installed before the runtime inventory was introduced.
+	if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO managed_proxy_runtimes(server_id,runtime,version,desired_status,apply_status,last_stage,last_error,installed_at,updated_at) SELECT DISTINCT server_id,'sing-box','','running','running','legacy_detected','',datetime('now'),datetime('now') FROM managed_proxy_nodes WHERE apply_status='running'`); err != nil {
+		return fmt.Errorf("backfill managed proxy runtime inventory: %w", err)
+	}
 
 	// Dynamic column migrations check
 	if err := migrateColumns(ctx, db); err != nil {
+		return err
+	}
+	if err := repairLegacyTunnelSubscriberFlow(ctx, db); err != nil {
 		return err
 	}
 
@@ -695,6 +1031,32 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 }
 
 func migrateColumns(ctx context.Context, db *sql.DB) error {
+	proxyFields := []struct{ Name, SQL string }{
+		{"assigned_port", "ALTER TABLE server_proxy_desired_state ADD COLUMN assigned_port INTEGER NOT NULL DEFAULT 0"},
+		{"transport", "ALTER TABLE server_proxy_desired_state ADD COLUMN transport TEXT NOT NULL DEFAULT 'tcp'"},
+	}
+	for _, f := range proxyFields {
+		if exists, err := hasColumn(ctx, db, "server_proxy_desired_state", f.Name); err == nil && !exists {
+			if _, err := db.ExecContext(ctx, f.SQL); err != nil {
+				return fmt.Errorf("migrate managed proxy %s: %w", f.Name, err)
+			}
+		}
+	}
+	if err := managedproxy.EnsureNodeColumns(ctx, db); err != nil {
+		return err
+	}
+	runtimeFields := []struct{ Name, SQL string }{
+		{"observed_status", "ALTER TABLE managed_proxy_runtimes ADD COLUMN observed_status TEXT NOT NULL DEFAULT 'unknown'"},
+		{"observed_version", "ALTER TABLE managed_proxy_runtimes ADD COLUMN observed_version TEXT NOT NULL DEFAULT ''"},
+		{"observed_at", "ALTER TABLE managed_proxy_runtimes ADD COLUMN observed_at TEXT"},
+	}
+	for _, f := range runtimeFields {
+		if exists, err := hasColumn(ctx, db, "managed_proxy_runtimes", f.Name); err == nil && !exists {
+			if _, err := db.ExecContext(ctx, f.SQL); err != nil {
+				return fmt.Errorf("migrate managed proxy runtime %s: %w", f.Name, err)
+			}
+		}
+	}
 	if exists, err := hasColumn(ctx, db, "server_monitor_config", "metrics_retention_days"); err == nil && !exists {
 		_, _ = db.ExecContext(ctx, `ALTER TABLE server_monitor_config ADD COLUMN metrics_retention_days INTEGER DEFAULT 30`)
 	}
@@ -703,8 +1065,13 @@ func migrateColumns(ctx context.Context, db *sql.DB) error {
 	}
 	accountFields := []struct{ Name, SQL string }{
 		{"traffic_limit_bytes", "ALTER TABLE server_accounts ADD COLUMN traffic_limit_bytes INTEGER DEFAULT 0"},
+		{"traffic_limit_mode", "ALTER TABLE server_accounts ADD COLUMN traffic_limit_mode TEXT DEFAULT 'total'"},
 		{"traffic_alert_enabled", "ALTER TABLE server_accounts ADD COLUMN traffic_alert_enabled INTEGER DEFAULT 0"},
 		{"traffic_alert_percent", "ALTER TABLE server_accounts ADD COLUMN traffic_alert_percent REAL DEFAULT 100"},
+		{"traffic_cycle_type", "ALTER TABLE server_accounts ADD COLUMN traffic_cycle_type TEXT DEFAULT 'none'"},
+		{"traffic_cycle_day", "ALTER TABLE server_accounts ADD COLUMN traffic_cycle_day INTEGER DEFAULT 1"},
+		{"traffic_cycle_start", "ALTER TABLE server_accounts ADD COLUMN traffic_cycle_start DATETIME"},
+		{"traffic_cycle_end", "ALTER TABLE server_accounts ADD COLUMN traffic_cycle_end DATETIME"},
 	}
 	for _, f := range accountFields {
 		if exists, err := hasColumn(ctx, db, "server_accounts", f.Name); err == nil && !exists {
@@ -740,6 +1107,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/ws/ssh" {
 		s.handleSSHTerminal(w, r)
+		return
+	}
+	if r.URL.Path == "/ws/agent-terminal" {
+		s.handleAgentTerminalStream(w, r)
 		return
 	}
 
@@ -821,6 +1192,9 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case len(parts) >= 1 && parts[0] == "agent":
 		s.handleAgentRoutes(w, r, db, parts[1:])
 
+	case len(parts) >= 1 && parts[0] == "remote-desktop":
+		s.handleRemoteDesktopRoutes(w, r, parts[1:])
+
 	// Metrics routes (Wave 5b)
 	case len(parts) >= 1 && parts[0] == "metrics":
 		s.handleMetricsRoutes(w, r, db, parts[1:])
@@ -860,6 +1234,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.listAccounts(w, r, db)
 	case len(parts) == 1 && parts[0] == "accounts" && r.Method == http.MethodPost:
 		s.createAccount(w, r, db)
+	case len(parts) == 2 && parts[0] == "accounts" && parts[1] == "refresh-locations" && r.Method == http.MethodPost:
+		s.refreshAccountLocations(w, r, db)
 	case len(parts) == 2 && parts[0] == "accounts" && parts[1] == "export" && r.Method == http.MethodGet:
 		s.exportAccounts(w, r, db)
 	case len(parts) == 2 && parts[0] == "accounts" && parts[1] == "import" && r.Method == http.MethodPost:
@@ -1097,7 +1473,7 @@ func (s *Service) getPublicServerStatusItems(ctx context.Context, db *sql.DB, id
 		args = append(args, id)
 	}
 	where := "WHERE id IN (" + strings.Join(holders, ",") + ")"
-	rows, err := db.QueryContext(ctx, `SELECT id, name, host, status, COALESCE(cached_info, '{}'), COALESCE(description, ''), COALESCE(resolved_country, ''), traffic_limit_bytes, COALESCE(response_time, 0), updated_at FROM server_accounts `+where+` ORDER BY order_index ASC, created_at DESC`, args...)
+	rows, err := db.QueryContext(ctx, `SELECT id, name, host, status, COALESCE(cached_info, '{}'), COALESCE(description, ''), COALESCE(resolved_country, ''), COALESCE(country, ''), traffic_limit_bytes, COALESCE(traffic_limit_mode, 'total'), COALESCE(response_time, 0), updated_at FROM server_accounts `+where+` ORDER BY order_index ASC, created_at DESC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1105,9 +1481,9 @@ func (s *Service) getPublicServerStatusItems(ctx context.Context, db *sql.DB, id
 	historyServerIDs := []string{}
 	latencyServerIDs := []string{}
 	for rows.Next() {
-		var id, name, host, status, cachedInfo, description, location, updatedAt string
+		var id, name, host, status, cachedInfo, description, location, country, trafficLimitMode, updatedAt string
 		var trafficLimit, responseTime int64
-		if err := rows.Scan(&id, &name, &host, &status, &cachedInfo, &description, &location, &trafficLimit, &responseTime, &updatedAt); err != nil {
+		if err := rows.Scan(&id, &name, &host, &status, &cachedInfo, &description, &location, &country, &trafficLimit, &trafficLimitMode, &responseTime, &updatedAt); err != nil {
 			return nil, err
 		}
 		cached := map[string]interface{}{}
@@ -1129,13 +1505,6 @@ func (s *Service) getPublicServerStatusItems(ctx context.Context, db *sql.DB, id
 			status = "offline"
 		}
 		network := mapValue(cached["network"])
-		trafficUsed := int64(firstFloatValue(cached, "traffic_used_bytes"))
-		if trafficUsed == 0 {
-			trafficUsed = int64(firstFloatValue(cached, "net_in_transfer", "net_rx_total", "rx_total_bytes") + firstFloatValue(cached, "net_out_transfer", "net_tx_total", "tx_total_bytes"))
-		}
-		if networkUsed := getFloatFromMap(network, "traffic_used_bytes"); networkUsed > 0 {
-			trafficUsed = int64(networkUsed)
-		}
 		trafficRxBytes := firstFloatValue(cached, "net_in_transfer", "net_rx_total", "rx_total_bytes")
 		trafficTxBytes := firstFloatValue(cached, "net_out_transfer", "net_tx_total", "tx_total_bytes")
 		if networkRx := getFloatFromMap(network, "rx_total_bytes"); networkRx > 0 {
@@ -1144,6 +1513,7 @@ func (s *Service) getPublicServerStatusItems(ctx context.Context, db *sql.DB, id
 		if networkTx := getFloatFromMap(network, "tx_total_bytes"); networkTx > 0 {
 			trafficTxBytes = networkTx
 		}
+		trafficUsed := trafficUsedBytesForMode(trafficRxBytes, trafficTxBytes, trafficLimitMode)
 		uptimeSeconds := firstFloatValue(cached, "uptime_seconds", "uptime_raw")
 		if uptimeSeconds == 0 {
 			uptimeSeconds = getFloatValue(cached, "uptime")
@@ -1152,17 +1522,17 @@ func (s *Service) getPublicServerStatusItems(ctx context.Context, db *sql.DB, id
 		if uptimeSeconds > 0 {
 			uptimeLabel = formatUptime(int64(uptimeSeconds))
 		}
+		lat, hasLat := firstOptionalFloatValue(cached, "lat", "latitude")
+		lon, hasLon := firstOptionalFloatValue(cached, "lon", "longitude")
 		item := map[string]interface{}{
 			"id":               id,
 			"name":             name,
 			"status":           status,
 			"online":           status == "online",
 			"description":      description,
-			"location":         firstNonEmpty(location, getString(cached, "location"), getString(cached, "resolved_country"), getString(cached, "country_code"), getString(cached, "country")),
+			"location":         firstNonEmpty(location, getString(cached, "location"), getString(cached, "resolved_country"), cleanCountryCode(getString(cached, "country_code")), cleanCountryCode(getString(cached, "country"))),
 			"region":           getString(cached, "region"),
-			"countryCode":      firstNonEmpty(getString(cached, "country_code"), getString(cached, "country")),
-			"latitude":         firstFloatValue(cached, "lat", "latitude"),
-			"longitude":        firstFloatValue(cached, "lon", "longitude"),
+			"countryCode":      firstNonEmpty(cleanCountryCode(getString(cached, "country_code")), cleanCountryCode(getString(cached, "country")), cleanCountryCode(country)),
 			"platform":         firstNonEmpty(getString(cached, "platform"), getString(cached, "os")),
 			"platformVersion":  getString(cached, "platform_version"),
 			"agentVersion":     getString(cached, "agent_version"),
@@ -1193,6 +1563,12 @@ func (s *Service) getPublicServerStatusItems(ctx context.Context, db *sql.DB, id
 			"responseTime":     responseTime,
 			"updatedAt":        firstNonEmpty(lastHeartbeat, getString(cached, "metrics_last_seen"), updatedAt),
 		}
+		if hasLat && hasUsableCoordinates(lat, lon) {
+			item["latitude"] = lat
+		}
+		if hasLon && hasUsableCoordinates(lat, lon) {
+			item["longitude"] = lon
+		}
 		if !hideHosts {
 			item["host"] = host
 		}
@@ -1201,6 +1577,7 @@ func (s *Service) getPublicServerStatusItems(ctx context.Context, db *sql.DB, id
 			item["trafficRxBytes"] = trafficRxBytes
 			item["trafficTxBytes"] = trafficTxBytes
 			item["trafficLimitBytes"] = trafficLimit
+			item["trafficLimitMode"] = normalizeTrafficLimitMode(trafficLimitMode)
 		}
 		if showCharts {
 			historyServerIDs = append(historyServerIDs, id)
@@ -2296,19 +2673,29 @@ func (s *Service) collectMonitorMetrics(w http.ResponseWriter, r *http.Request, 
 	})
 }
 
-func (s *Service) startMetricsCollectorLoop() {
+func (s *Service) startMetricsCollectorLoop(ctx context.Context) {
 	// Wait a moment for database initialization and server startup
-	time.Sleep(5 * time.Second)
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(5 * time.Second):
+	}
 
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	var lastCollected time.Time
 
-	for range ticker.C {
-		ctx := context.Background()
-		db, err := s.open(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		loopCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		db, err := s.open(loopCtx)
 		if err != nil {
+			cancel()
 			continue
 		}
 
@@ -2316,14 +2703,16 @@ func (s *Service) startMetricsCollectorLoop() {
 		var interval int
 		var autoStart int
 		var retentionDays int
-		err = db.QueryRowContext(ctx, "SELECT metrics_collect_interval, auto_start, metrics_retention_days FROM server_monitor_config WHERE id = 1").Scan(&interval, &autoStart, &retentionDays)
+		err = db.QueryRowContext(loopCtx, "SELECT metrics_collect_interval, auto_start, metrics_retention_days FROM server_monitor_config WHERE id = 1").Scan(&interval, &autoStart, &retentionDays)
 		if err != nil {
 			db.Close()
+			cancel()
 			continue
 		}
 
 		if autoStart != 1 {
 			db.Close()
+			cancel()
 			continue
 		}
 
@@ -2331,16 +2720,18 @@ func (s *Service) startMetricsCollectorLoop() {
 		// If it's time to collect
 		if lastCollected.IsZero() || now.Sub(lastCollected) >= time.Duration(interval)*time.Second {
 			// Trigger collection
-			s.runPeriodicCollection(ctx, db)
+			s.runPeriodicCollection(loopCtx, db)
 			lastCollected = now
 
 			// Clean up old metrics
 			if retentionDays > 0 {
-				_, _ = db.ExecContext(ctx, "DELETE FROM server_metrics_history WHERE recorded_at < datetime('now', '-' || ? || ' days')", retentionDays)
+				_, _ = db.ExecContext(loopCtx, "DELETE FROM server_metrics_history WHERE recorded_at < datetime('now', '-' || ? || ' days')", retentionDays)
+				_, _ = db.ExecContext(loopCtx, "DELETE FROM server_network_quality_samples WHERE checked_at < datetime('now', '-' || ? || ' days')", retentionDays)
 			}
 		}
 
 		db.Close()
+		cancel()
 	}
 }
 
@@ -2542,11 +2933,7 @@ func writeLogsWithPagination(w http.ResponseWriter, logs []map[string]interface{
 // ==========================================
 
 func (s *Service) listAccounts(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	if err := s.refreshMissingAccountLocations(r.Context(), db); err != nil {
-		applog.Warn(r.Context(), "serveragent", "failed to refresh server locations", "error", err.Error())
-	}
-
-	rows, err := db.QueryContext(r.Context(), "SELECT id, name, host, port, username, auth_type, password, private_key, passphrase, status, monitor_mode, last_check_time, last_check_status, response_time, cached_info, tags, description, country, resolved_country, starts_at, expires_at, order_index, created_at, traffic_limit_bytes, traffic_alert_enabled, traffic_alert_percent, updated_at FROM server_accounts ORDER BY order_index ASC, created_at DESC")
+	rows, err := db.QueryContext(r.Context(), "SELECT id, name, host, port, username, auth_type, password, private_key, passphrase, status, monitor_mode, last_check_time, last_check_status, response_time, cached_info, tags, description, country, resolved_country, starts_at, expires_at, order_index, created_at, traffic_limit_bytes, COALESCE(traffic_limit_mode, 'total'), traffic_alert_enabled, traffic_alert_percent, traffic_cycle_type, traffic_cycle_day, traffic_cycle_start, traffic_cycle_end, updated_at FROM server_accounts ORDER BY order_index ASC, created_at DESC")
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2560,6 +2947,7 @@ func (s *Service) listAccounts(w http.ResponseWriter, r *http.Request, db *sql.D
 			response.Error(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		s.refreshAccountLocationIfMissingFromList(account)
 		list = append(list, account)
 	}
 	if list == nil {
@@ -2568,56 +2956,157 @@ func (s *Service) listAccounts(w http.ResponseWriter, r *http.Request, db *sql.D
 	response.OK(w, list)
 }
 
-func (s *Service) refreshMissingAccountLocations(ctx context.Context, db *sql.DB) error {
-	rows, err := db.QueryContext(ctx, "SELECT id, host, country, resolved_country, cached_info FROM server_accounts")
+func (s *Service) refreshAccountLocations(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	updated, skipped, err := s.refreshAccountLocationsFromAgents(r.Context(), db)
 	if err != nil {
-		return err
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.OK(w, map[string]interface{}{"updated": updated, "skipped": skipped})
+}
+
+func (s *Service) refreshAccountLocationsFromAgents(ctx context.Context, db *sql.DB) (int, int, error) {
+	rows, err := db.QueryContext(ctx, "SELECT id, cached_info FROM server_accounts")
+	if err != nil {
+		return 0, 0, err
 	}
 	defer rows.Close()
 
 	type candidate struct {
-		id              string
-		host            string
-		country         sql.NullString
-		resolvedCountry sql.NullString
-		cachedInfo      sql.NullString
+		id         string
+		cachedInfo sql.NullString
 	}
 	var candidates []candidate
 	for rows.Next() {
 		var item candidate
-		if err := rows.Scan(&item.id, &item.host, &item.country, &item.resolvedCountry, &item.cachedInfo); err != nil {
-			return err
+		if err := rows.Scan(&item.id, &item.cachedInfo); err != nil {
+			return 0, 0, err
 		}
-		if accountNeedsLocation(item.country, item.resolvedCountry, item.cachedInfo) {
-			candidates = append(candidates, item)
-		}
+		candidates = append(candidates, item)
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return 0, 0, err
 	}
 
 	now := time.Now().Format(time.RFC3339)
+	updated := 0
+	skipped := 0
 	for _, item := range candidates {
-		geo, ok := s.lookupHostLocation(ctx, item.host)
-		if !ok {
-			continue
-		}
-		cachedInfo := mergeCachedInfo(item.cachedInfo, geo)
-		_, err := db.ExecContext(ctx, `
-			UPDATE server_accounts
-			SET resolved_country = ?, cached_info = ?, updated_at = ?
-			WHERE id = ?`,
-			getString(geo, "region"), cachedInfo, now, item.id,
-		)
+		ok, err := s.refreshAccountLocationFromAgent(ctx, db, item.id, item.cachedInfo, now, true)
 		if err != nil {
-			return err
+			return updated, skipped, err
+		}
+		if ok {
+			updated++
+		} else {
+			skipped++
 		}
 	}
-	return nil
+	return updated, skipped, nil
+}
+
+func (s *Service) refreshAccountLocationIfMissingFromList(account map[string]interface{}) {
+	if account == nil || !getBoolVal(account, "agent_online", false) {
+		return
+	}
+	serverID := strings.TrimSpace(getString(account, "id"))
+	if serverID == "" {
+		return
+	}
+	if countryCode := cleanCountryCode(getString(account, "countryCode")); countryCode != "" {
+		lat, hasLat := firstOptionalFloatValue(account, "lat", "latitude")
+		lon, hasLon := firstOptionalFloatValue(account, "lon", "longitude")
+		if hasLat && hasLon && hasUsableCoordinates(lat, lon) {
+			return
+		}
+	}
+	if last, ok := s.lastAutoLocationRefresh.Load(serverID); ok {
+		if lastAt, ok := last.(time.Time); ok && time.Since(lastAt) < 5*time.Minute {
+			return
+		}
+	}
+	s.lastAutoLocationRefresh.Store(serverID, time.Now())
+	go s.refreshAccountLocationFromAgentIfMissing(serverID)
+}
+
+func (s *Service) refreshAccountLocationFromAgentIfMissing(serverID string) {
+	serverID = strings.TrimSpace(serverID)
+	if serverID == "" {
+		return
+	}
+	if _, loaded := s.autoLocationRefreshes.LoadOrStore(serverID, struct{}{}); loaded {
+		return
+	}
+	defer s.autoLocationRefreshes.Delete(serverID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	db, err := s.open(ctx)
+	if err != nil {
+		return
+	}
+
+	var cachedInfo sql.NullString
+	var country, resolvedCountry sql.NullString
+	if err := db.QueryRowContext(ctx, "SELECT country, resolved_country, cached_info FROM server_accounts WHERE id = ?", serverID).Scan(&country, &resolvedCountry, &cachedInfo); err != nil {
+		return
+	}
+	_ = db.Close()
+	if !accountNeedsLocation(country, resolvedCountry, cachedInfo) {
+		return
+	}
+	if _, err := s.refreshAccountLocationFromAgent(ctx, nil, serverID, cachedInfo, time.Now().Format(time.RFC3339), false); err != nil {
+		applog.Warn(ctx, "serveragent", "failed to refresh initial location from agent", "server_id", serverID, "error", err.Error())
+	}
+}
+
+func (s *Service) refreshAccountLocationFromAgent(ctx context.Context, db *sql.DB, serverID string, cachedInfo sql.NullString, now string, force bool) (bool, error) {
+	if _, ok := s.registry.Get(serverID); !ok {
+		return false, nil
+	}
+	if !force && !accountNeedsLocation(sql.NullString{}, sql.NullString{}, cachedInfo) {
+		return false, nil
+	}
+	output, err := s.RunCommandTaskAndWait(serverID, "curl -fsSL https://64.ipcheck.ing/geo", 15*time.Second)
+	if err != nil {
+		applog.Warn(ctx, "serveragent", "failed to refresh location from agent", "server_id", serverID, "error", err.Error())
+		return false, nil
+	}
+	geo, ok := parseIPCheckGeo(output)
+	if !ok {
+		return false, nil
+	}
+	s.mergeConnectionLocationMetadata(serverID, geo)
+	openedDB := false
+	if db == nil {
+		var err error
+		db, err = s.open(ctx)
+		if err != nil {
+			return false, err
+		}
+		openedDB = true
+	}
+	if openedDB {
+		defer db.Close()
+	}
+	nextCachedInfo := mergeCachedInfo(cachedInfo, geo)
+	_, err = db.ExecContext(ctx, `
+		UPDATE server_accounts
+		SET resolved_country = ?, cached_info = ?, updated_at = ?
+		WHERE id = ?`,
+		firstNonEmpty(getString(geo, "location"), getString(geo, "region"), getString(geo, "country_code")), nextCachedInfo, now, serverID,
+	)
+	if err != nil {
+		return false, err
+	}
+	if s.metricsHub != nil {
+		s.metricsHub.BroadcastMetrics(serverID, geo)
+	}
+	return true, nil
 }
 
 func (s *Service) getAccount(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {
-	rows, err := db.QueryContext(r.Context(), "SELECT id, name, host, port, username, auth_type, password, private_key, passphrase, status, monitor_mode, last_check_time, last_check_status, response_time, cached_info, tags, description, country, resolved_country, starts_at, expires_at, order_index, created_at, traffic_limit_bytes, traffic_alert_enabled, traffic_alert_percent, updated_at FROM server_accounts WHERE id = ?", id)
+	rows, err := db.QueryContext(r.Context(), "SELECT id, name, host, port, username, auth_type, password, private_key, passphrase, status, monitor_mode, last_check_time, last_check_status, response_time, cached_info, tags, description, country, resolved_country, starts_at, expires_at, order_index, created_at, traffic_limit_bytes, COALESCE(traffic_limit_mode, 'total'), traffic_alert_enabled, traffic_alert_percent, traffic_cycle_type, traffic_cycle_day, traffic_cycle_start, traffic_cycle_end, updated_at FROM server_accounts WHERE id = ?", id)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2654,8 +3143,13 @@ func (s *Service) createAccount(w http.ResponseWriter, r *http.Request, db *sql.
 		ExpiresAt           string      `json:"expires_at"`
 		MonitorMode         string      `json:"monitor_mode"`
 		TrafficLimitBytes   int64       `json:"traffic_limit_bytes"`
+		TrafficLimitMode    string      `json:"traffic_limit_mode"`
 		TrafficAlertEnabled bool        `json:"traffic_alert_enabled"`
 		TrafficAlertPercent float64     `json:"traffic_alert_percent"`
+		TrafficCycleType    string      `json:"traffic_cycle_type"`
+		TrafficCycleDay     int         `json:"traffic_cycle_day"`
+		TrafficCycleStart   string      `json:"traffic_cycle_start"`
+		TrafficCycleEnd     string      `json:"traffic_cycle_end"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "invalid request body")
@@ -2670,6 +3164,7 @@ func (s *Service) createAccount(w http.ResponseWriter, r *http.Request, db *sql.
 
 	id := uuid.NewString()
 	now := time.Now().Format(time.RFC3339)
+	country := cleanCountryCode(req.Country)
 
 	// Max order_index
 	var maxOrder sql.NullInt64
@@ -2681,21 +3176,24 @@ func (s *Service) createAccount(w http.ResponseWriter, r *http.Request, db *sql.
 	encPassphrase := s.encryptField(req.Passphrase)
 	resolvedCountry := ""
 	cachedInfo := sql.NullString{}
-	if req.Country == "" || req.Country == "auto" {
+	if country == "" {
 		if geo, ok := s.lookupHostLocation(r.Context(), req.Host); ok {
 			resolvedCountry = getString(geo, "region")
 			cachedInfo = sql.NullString{String: mergeCachedInfo(sql.NullString{}, geo), Valid: true}
 		}
 	}
 	trafficLimitBytes := normalizeTrafficLimitBytes(req.TrafficLimitBytes)
+	trafficLimitMode := normalizeTrafficLimitMode(req.TrafficLimitMode)
 	trafficAlertPercent := normalizeTrafficAlertPercent(req.TrafficAlertPercent)
+	trafficCycleType := normalizeTrafficCycleType(req.TrafficCycleType)
+	trafficCycleDay := normalizeTrafficCycleDay(req.TrafficCycleDay)
 
 	_, err := db.ExecContext(r.Context(), `
 		INSERT INTO server_accounts (
-			id, name, host, port, username, auth_type, password, private_key, passphrase, status, tags, description, monitor_mode, country, resolved_country, starts_at, expires_at, traffic_limit_bytes, traffic_alert_enabled, traffic_alert_percent, order_index, created_at, updated_at, cached_info
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, name, host, port, username, auth_type, password, private_key, passphrase, status, tags, description, monitor_mode, country, resolved_country, starts_at, expires_at, traffic_limit_bytes, traffic_limit_mode, traffic_alert_enabled, traffic_alert_percent, traffic_cycle_type, traffic_cycle_day, traffic_cycle_start, traffic_cycle_end, order_index, created_at, updated_at, cached_info
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, req.Name, req.Host, coalesceInt(req.Port, 22), coalesceStr(req.Username, "agent"), coalesceStr(req.AuthType, "password"),
-		encPassword, encPrivateKey, encPassphrase, "unknown", SerializeList(req.Tags), req.Description, coalesceStr(req.MonitorMode, "agent"), req.Country, nullStr(resolvedCountry), nullStr(req.StartsAt), nullStr(req.ExpiresAt), trafficLimitBytes, boolToInt(req.TrafficAlertEnabled), trafficAlertPercent, orderIndex, now, now, nullStr(cachedInfo.String),
+		encPassword, encPrivateKey, encPassphrase, "unknown", SerializeList(req.Tags), req.Description, coalesceStr(req.MonitorMode, "agent"), nullStr(country), nullStr(resolvedCountry), nullStr(req.StartsAt), nullStr(req.ExpiresAt), trafficLimitBytes, trafficLimitMode, boolToInt(req.TrafficAlertEnabled), trafficAlertPercent, trafficCycleType, trafficCycleDay, nullStr(req.TrafficCycleStart), nullStr(req.TrafficCycleEnd), orderIndex, now, now, nullStr(cachedInfo.String),
 	)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
@@ -2727,15 +3225,18 @@ func (s *Service) updateAccount(w http.ResponseWriter, r *http.Request, db *sql.
 		name, host, username, authType, status, monitorMode, tags, createdAt string
 		password, privateKey, passphrase                                     sql.NullString
 		description, country, resolvedCountry, startsAt, expiresAt           sql.NullString
+		trafficCycleType, trafficCycleStart, trafficCycleEnd                 sql.NullString
 		port, orderIndex                                                     int
 		trafficLimitBytes                                                    int64
+		trafficLimitMode                                                     string
 		trafficAlertEnabled                                                  int
 		trafficAlertPercent                                                  float64
+		trafficCycleDay                                                      int
 		responseTime                                                         sql.NullInt64
 		lastCheckTime, lastCheckStatus, cachedInfo                           sql.NullString
 	}
-	err := db.QueryRowContext(r.Context(), "SELECT name, host, port, username, auth_type, password, private_key, passphrase, status, monitor_mode, tags, description, country, resolved_country, starts_at, expires_at, traffic_limit_bytes, traffic_alert_enabled, traffic_alert_percent, order_index, created_at, response_time, last_check_time, last_check_status, cached_info FROM server_accounts WHERE id = ?", id).
-		Scan(&raw.name, &raw.host, &raw.port, &raw.username, &raw.authType, &raw.password, &raw.privateKey, &raw.passphrase, &raw.status, &raw.monitorMode, &raw.tags, &raw.description, &raw.country, &raw.resolvedCountry, &raw.startsAt, &raw.expiresAt, &raw.trafficLimitBytes, &raw.trafficAlertEnabled, &raw.trafficAlertPercent, &raw.orderIndex, &raw.createdAt, &raw.responseTime, &raw.lastCheckTime, &raw.lastCheckStatus, &raw.cachedInfo)
+	err := db.QueryRowContext(r.Context(), "SELECT name, host, port, username, auth_type, password, private_key, passphrase, status, monitor_mode, tags, description, country, resolved_country, starts_at, expires_at, traffic_limit_bytes, COALESCE(traffic_limit_mode, 'total'), traffic_alert_enabled, traffic_alert_percent, traffic_cycle_type, traffic_cycle_day, traffic_cycle_start, traffic_cycle_end, order_index, created_at, response_time, last_check_time, last_check_status, cached_info FROM server_accounts WHERE id = ?", id).
+		Scan(&raw.name, &raw.host, &raw.port, &raw.username, &raw.authType, &raw.password, &raw.privateKey, &raw.passphrase, &raw.status, &raw.monitorMode, &raw.tags, &raw.description, &raw.country, &raw.resolvedCountry, &raw.startsAt, &raw.expiresAt, &raw.trafficLimitBytes, &raw.trafficLimitMode, &raw.trafficAlertEnabled, &raw.trafficAlertPercent, &raw.trafficCycleType, &raw.trafficCycleDay, &raw.trafficCycleStart, &raw.trafficCycleEnd, &raw.orderIndex, &raw.createdAt, &raw.responseTime, &raw.lastCheckTime, &raw.lastCheckStatus, &raw.cachedInfo)
 	if err == sql.ErrNoRows {
 		response.Error(w, http.StatusNotFound, "服务器不存在")
 		return
@@ -2751,10 +3252,10 @@ func (s *Service) updateAccount(w http.ResponseWriter, r *http.Request, db *sql.
 	authType := getStringVal(req, "auth_type", raw.authType)
 	description := getStringVal(req, "description", raw.description.String)
 	monitorMode := getStringVal(req, "monitor_mode", raw.monitorMode)
-	country := getStringVal(req, "country", raw.country.String)
+	country := cleanCountryCode(getStringVal(req, "country", raw.country.String))
 	resolvedCountry := getStringVal(req, "resolved_country", raw.resolvedCountry.String)
 	cachedInfo := raw.cachedInfo
-	if country == "" || country == "auto" {
+	if country == "" {
 		hostChanged := host != raw.host
 		if hostChanged || resolvedCountry == "" || accountNeedsLocation(sql.NullString{String: country, Valid: country != ""}, sql.NullString{String: resolvedCountry, Valid: resolvedCountry != ""}, cachedInfo) {
 			if geo, ok := s.lookupHostLocation(r.Context(), host); ok {
@@ -2767,8 +3268,13 @@ func (s *Service) updateAccount(w http.ResponseWriter, r *http.Request, db *sql.
 	expiresAt := getStringVal(req, "expires_at", raw.expiresAt.String)
 	orderIndex := getIntVal(req, "order_index", raw.orderIndex)
 	trafficLimitBytes := normalizeTrafficLimitBytes(getInt64Val(req, "traffic_limit_bytes", raw.trafficLimitBytes))
+	trafficLimitMode := normalizeTrafficLimitMode(getStringVal(req, "traffic_limit_mode", raw.trafficLimitMode))
 	trafficAlertEnabled := getBoolVal(req, "traffic_alert_enabled", raw.trafficAlertEnabled != 0)
 	trafficAlertPercent := normalizeTrafficAlertPercent(getFloatVal(req, "traffic_alert_percent", raw.trafficAlertPercent))
+	trafficCycleType := normalizeTrafficCycleType(getStringVal(req, "traffic_cycle_type", raw.trafficCycleType.String))
+	trafficCycleDay := normalizeTrafficCycleDay(getIntVal(req, "traffic_cycle_day", raw.trafficCycleDay))
+	trafficCycleStart := getStringVal(req, "traffic_cycle_start", raw.trafficCycleStart.String)
+	trafficCycleEnd := getStringVal(req, "traffic_cycle_end", raw.trafficCycleEnd.String)
 
 	password := raw.password.String
 	if p, ok := req["password"].(string); ok {
@@ -2792,9 +3298,9 @@ func (s *Service) updateAccount(w http.ResponseWriter, r *http.Request, db *sql.
 
 	_, err = db.ExecContext(r.Context(), `
 		UPDATE server_accounts
-		SET name = ?, host = ?, port = ?, username = ?, auth_type = ?, password = ?, private_key = ?, passphrase = ?, tags = ?, description = ?, monitor_mode = ?, country = ?, resolved_country = ?, starts_at = ?, expires_at = ?, traffic_limit_bytes = ?, traffic_alert_enabled = ?, traffic_alert_percent = ?, order_index = ?, cached_info = ?, updated_at = ?
+		SET name = ?, host = ?, port = ?, username = ?, auth_type = ?, password = ?, private_key = ?, passphrase = ?, tags = ?, description = ?, monitor_mode = ?, country = ?, resolved_country = ?, starts_at = ?, expires_at = ?, traffic_limit_bytes = ?, traffic_limit_mode = ?, traffic_alert_enabled = ?, traffic_alert_percent = ?, traffic_cycle_type = ?, traffic_cycle_day = ?, traffic_cycle_start = ?, traffic_cycle_end = ?, order_index = ?, cached_info = ?, updated_at = ?
 		WHERE id = ?`,
-		name, host, port, username, authType, password, privateKey, passphrase, tags, description, monitorMode, nullStr(country), nullStr(resolvedCountry), nullStr(startsAt), nullStr(expiresAt), trafficLimitBytes, boolToInt(trafficAlertEnabled), trafficAlertPercent, orderIndex, nullStr(cachedInfo.String), now, id,
+		name, host, port, username, authType, password, privateKey, passphrase, tags, description, monitorMode, nullStr(country), nullStr(resolvedCountry), nullStr(startsAt), nullStr(expiresAt), trafficLimitBytes, trafficLimitMode, boolToInt(trafficAlertEnabled), trafficAlertPercent, trafficCycleType, trafficCycleDay, nullStr(trafficCycleStart), nullStr(trafficCycleEnd), orderIndex, nullStr(cachedInfo.String), now, id,
 	)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
@@ -2826,13 +3332,14 @@ func (s *Service) testTrafficAlert(w http.ResponseWriter, r *http.Request, db *s
 
 	var serverName, serverHost string
 	var trafficLimitBytes int64
+	var trafficLimitMode string
 	var trafficAlertPercent float64
 	var cachedInfo sql.NullString
 	err := db.QueryRowContext(r.Context(), `
-		SELECT name, host, traffic_limit_bytes, traffic_alert_percent, cached_info
+		SELECT name, host, traffic_limit_bytes, COALESCE(traffic_limit_mode, 'total'), traffic_alert_percent, cached_info
 		FROM server_accounts
 		WHERE id = ?`, id).
-		Scan(&serverName, &serverHost, &trafficLimitBytes, &trafficAlertPercent, &cachedInfo)
+		Scan(&serverName, &serverHost, &trafficLimitBytes, &trafficLimitMode, &trafficAlertPercent, &cachedInfo)
 	if err == sql.ErrNoRows {
 		response.Error(w, http.StatusNotFound, "服务器不存在")
 		return
@@ -2856,10 +3363,7 @@ func (s *Service) testTrafficAlert(w http.ResponseWriter, r *http.Request, db *s
 	if cachedInfo.Valid && cachedInfo.String != "" {
 		var cached map[string]interface{}
 		if err := json.Unmarshal([]byte(cachedInfo.String), &cached); err == nil {
-			trafficUsedBytes = int64(getFloatValue(cached, "net_in_transfer") + getFloatValue(cached, "net_out_transfer"))
-			if trafficUsedBytes < 0 {
-				trafficUsedBytes = 0
-			}
+			trafficUsedBytes = trafficUsedBytesFromMetrics(cached, trafficLimitMode)
 		}
 	}
 	if trafficLimitBytes <= 0 {
@@ -2881,6 +3385,7 @@ func (s *Service) testTrafficAlert(w http.ResponseWriter, r *http.Request, db *s
 		"eventType":           "traffic_high",
 		"traffic_used_bytes":  trafficUsedBytes,
 		"traffic_limit_bytes": trafficLimitBytes,
+		"traffic_limit_mode":  normalizeTrafficLimitMode(trafficLimitMode),
 		"traffic_percent":     fmt.Sprintf("%.2f", trafficPercent),
 		"traffic_used":        formatBytes(trafficUsedBytes),
 		"traffic_limit":       formatBytes(trafficLimitBytes),
@@ -2894,27 +3399,425 @@ func (s *Service) testTrafficAlert(w http.ResponseWriter, r *http.Request, db *s
 	response.OK(w, map[string]interface{}{"sent": true})
 }
 
+type accountDeleteDependencies struct {
+	Nodes       int
+	Runtimes    int
+	Tunnels     int
+	StatusPages int
+}
+
+func (d accountDeleteDependencies) responseData() map[string]int {
+	return map[string]int{
+		"nodes":        d.Nodes,
+		"runtimes":     d.Runtimes,
+		"tunnels":      d.Tunnels,
+		"status_pages": d.StatusPages,
+	}
+}
+
 func (s *Service) deleteAccount(w http.ResponseWriter, r *http.Request, db *sql.DB, id string) {
-	res, err := db.ExecContext(r.Context(), "DELETE FROM server_accounts WHERE id = ?", id)
+	var name, lastCheckStatus, lastCheckTime string
+	if err := db.QueryRowContext(r.Context(), `SELECT name,COALESCE(last_check_status,''),COALESCE(last_check_time,'') FROM server_accounts WHERE id=?`, id).Scan(&name, &lastCheckStatus, &lastCheckTime); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			response.Error(w, http.StatusNotFound, "服务器不存在")
+		} else {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	dependencies, err := loadAccountDeleteDependencies(r.Context(), db, id)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	forceRequested := r.URL.Query().Get("force") == "1" || strings.EqualFold(r.URL.Query().Get("force"), "true")
+	connection, online := s.registry.Get(id)
+	agentObserved := lastCheckTime != "" && !strings.EqualFold(lastCheckStatus, "uninstalled")
+	requiresHostCleanup := online || agentObserved || dependencies.Nodes > 0 || dependencies.Runtimes > 0 || dependencies.Tunnels > 0
+	forceDetach := forceRequested
+	if requiresHostCleanup {
+		if !online {
+			if !forceRequested {
+				response.JSON(w, http.StatusConflict, map[string]interface{}{
+					"success": false,
+					"error":   "Agent 离线，无法确认主机上的节点、代理程序和 Agent 已卸载",
+					"data": map[string]interface{}{
+						"can_force_delete": true,
+						"server_id":        id,
+						"dependencies":     dependencies.responseData(),
+					},
+				})
+				return
+			}
+		} else {
+			capabilities := connection.GetCapabilities()
+			missing := []string{}
+			if dependencies.Nodes > 0 && !capabilities["proxy_runtime_v1"] {
+				missing = append(missing, "节点卸载")
+			}
+			if (dependencies.Runtimes > 0 || dependencies.Nodes > 0) && !capabilities["proxy_runtime_lifecycle_v2"] {
+				missing = append(missing, "代理程序卸载")
+			}
+			if dependencies.Tunnels > 0 && !capabilities["cloudflared_runtime_v1"] {
+				missing = append(missing, "Tunnel 卸载")
+			}
+			if !capabilities["self_uninstall_v1"] {
+				missing = append(missing, "Agent 自卸载")
+			}
+			if len(missing) == 0 {
+				// A force query must not bypass verified cleanup when a capable
+				// Agent is online. Force is reserved for genuine recovery paths.
+				forceDetach = false
+			} else if !forceRequested {
+				response.JSON(w, http.StatusConflict, map[string]interface{}{
+					"success": false,
+					"error":   "Agent 版本过旧，缺少安全级联删除能力：" + strings.Join(missing, "、") + "；请先升级 Agent",
+					"data": map[string]interface{}{
+						"can_force_delete": true,
+						"server_id":        id,
+						"dependencies":     dependencies.responseData(),
+					},
+				})
+				return
+			}
+		}
+	}
 
-	affected, _ := res.RowsAffected()
-	if affected == 0 {
-		response.Error(w, http.StatusNotFound, "服务器不存在")
+	task, ok := s.createExclusiveProxyTask(w, id, "server.delete", "cascade-delete")
+	if !ok {
+		return
+	}
+	if _, err := db.ExecContext(r.Context(), `UPDATE managed_proxy_nodes SET enabled=0,publishable=0,apply_status='removing',updated_at=datetime('now') WHERE server_id=?`, id); err != nil {
+		s.taskRegistry.Fail(task.ID, err.Error())
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.JSON(w, http.StatusAccepted, map[string]interface{}{
+		"success": true,
+		"data": map[string]interface{}{
+			"task_id":      task.ID,
+			"status":       task.Status,
+			"server_id":    id,
+			"dependencies": dependencies.responseData(),
+		},
+	})
+	go s.runAccountCascadeDelete(task.ID, id, name, dependencies, requiresHostCleanup, forceDetach)
+}
+
+func loadAccountDeleteDependencies(ctx context.Context, db *sql.DB, serverID string) (accountDeleteDependencies, error) {
+	var dependencies accountDeleteDependencies
+	for _, check := range []struct {
+		query string
+		value *int
+	}{
+		{`SELECT COUNT(*) FROM managed_proxy_nodes WHERE server_id=?`, &dependencies.Nodes},
+		{`SELECT COUNT(*) FROM managed_proxy_runtimes WHERE server_id=?`, &dependencies.Runtimes},
+		{`SELECT COUNT(*) FROM managed_proxy_tunnels WHERE server_id=?`, &dependencies.Tunnels},
+	} {
+		if err := db.QueryRowContext(ctx, check.query, serverID).Scan(check.value); err != nil {
+			return dependencies, err
+		}
+	}
+	rows, err := db.QueryContext(ctx, `SELECT COALESCE(server_ids_json,'[]') FROM server_status_pages`)
+	if err != nil {
+		return dependencies, err
+	}
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			rows.Close()
+			return dependencies, err
+		}
+		var serverIDs []string
+		if err := json.Unmarshal([]byte(raw), &serverIDs); err != nil {
+			rows.Close()
+			return dependencies, fmt.Errorf("decode status page server references: %w", err)
+		}
+		for _, candidate := range serverIDs {
+			if candidate == serverID {
+				dependencies.StatusPages++
+				break
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return dependencies, err
+	}
+	return dependencies, rows.Close()
+}
+
+func (s *Service) runAccountCascadeDelete(taskID, serverID, serverName string, dependencies accountDeleteDependencies, requiresHostCleanup, forceDetach bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	db, err := s.open(ctx)
+	if err != nil {
+		s.taskRegistry.Fail(taskID, err.Error())
+		return
+	}
+	defer db.Close()
+	progress := func(value int, stage, message string) {
+		s.taskRegistry.UpdateProgress(taskID, value, map[string]interface{}{
+			"stage": stage, "message": message, "server_id": serverID, "server_name": serverName,
+		})
+	}
+	fail := func(stage string, cause error) {
+		progress(100, stage, cause.Error())
+		s.taskRegistry.Fail(taskID, cause.Error())
+	}
+
+	progress(5, "unpublish", "已停止发布该主机的全部节点")
+	if requiresHostCleanup && !forceDetach {
+		if _, online := s.registry.Get(serverID); !online {
+			fail("agent_offline", errors.New("Agent 在级联删除期间离线；节点已停止发布，请重试或选择强制移除"))
+			return
+		}
+		progress(15, "remove_nodes", "正在清理主机上的节点服务与防火墙规则")
+		if err := s.removeAccountManagedProxyResources(ctx, db, serverID, dependencies); err != nil {
+			fail("remove_host_resources", err)
+			return
+		}
+	}
+
+	progress(58, "remove_cloudflare", "正在清理 Tunnel DNS 与 Cloudflare 资源")
+	if err := s.removeAccountManagedTunnelControlPlane(ctx, db, serverID); err != nil {
+		fail("remove_cloudflare", err)
 		return
 	}
 
-	response.JSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-		"message": "服务器删除成功",
-	})
+	if requiresHostCleanup && !forceDetach {
+		progress(72, "uninstall_agent", "正在卸载主机 Agent")
+		if _, err := s.uninstallAgentAndWait(ctx, serverID); err != nil {
+			fail("uninstall_agent", err)
+			return
+		}
+		progress(82, "agent_uninstalled", "Agent 已卸载并断开连接")
+	}
+
+	progress(86, "delete_records", "正在删除主机及全部面板关联记录")
+	if err := deleteAccountRecords(ctx, db, serverID); err != nil {
+		fail("delete_records", err)
+		return
+	}
+	if s.presence != nil {
+		s.presence.suppress(serverID, 10*time.Minute)
+		s.presence.recordDisconnect(serverID, "deleted")
+	}
+	s.registry.Disconnect(serverID)
+	if s.metricsHub != nil {
+		s.metricsHub.BroadcastServerStatus(serverID, "offline", false)
+	}
+	message := "主机、节点、代理程序、Agent 与全部面板关联资源已删除"
+	if forceDetach {
+		message = "主机与全部面板关联资源已删除；Agent 离线或版本过旧，主机本地可能仍有残留"
+	}
+	s.taskRegistry.Complete(taskID, message)
+}
+
+func (s *Service) removeAccountManagedProxyResources(ctx context.Context, db *sql.DB, serverID string, dependencies accountDeleteDependencies) error {
+	rows, err := db.QueryContext(ctx, `SELECT id,runtime,revision,assigned_port,apply_status FROM managed_proxy_nodes WHERE server_id=? ORDER BY created_at`, serverID)
+	if err != nil {
+		return err
+	}
+	type nodeState struct {
+		ID, Runtime, ApplyStatus string
+		Revision                 int64
+		AssignedPort             int
+	}
+	nodes := []nodeState{}
+	for rows.Next() {
+		var node nodeState
+		if err := rows.Scan(&node.ID, &node.Runtime, &node.Revision, &node.AssignedPort, &node.ApplyStatus); err != nil {
+			rows.Close()
+			return err
+		}
+		nodes = append(nodes, node)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, node := range nodes {
+		if node.AssignedPort <= 0 && node.ApplyStatus != "running" && node.ApplyStatus != "removing" {
+			continue
+		}
+		release, ok := managedProxyRuntime(node.Runtime)
+		if !ok {
+			return fmt.Errorf("node %s uses an unpinned proxy runtime", node.ID)
+		}
+		payload, _ := json.Marshal(map[string]interface{}{
+			"node_id": node.ID, "revision": node.Revision + 1, "runtime": release.Runtime,
+			"runtime_version": release.Version, "asset_url_amd64": release.AMD64URL,
+			"asset_sha256_amd64": release.AMD64SHA256, "asset_url_arm64": release.ARM64URL,
+			"asset_sha256_arm64": release.ARM64SHA256, "config": "{}", "remove": true,
+			"asset_format": release.AssetFormat,
+			"port_min":     45654, "port_max": 55654,
+		})
+		if _, err := s.RunProxyRuntimeTaskAndWait(serverID, string(payload)); err != nil {
+			return fmt.Errorf("remove node %s: %w", node.ID, err)
+		}
+	}
+	if dependencies.Tunnels > 0 {
+		payload, _ := json.Marshal(cloudflaredTaskPayload("remove", ""))
+		if _, err := s.RunCloudflaredTaskAndWait(serverID, string(payload)); err != nil {
+			return fmt.Errorf("remove cloudflared: %w", err)
+		}
+	}
+	if dependencies.Runtimes > 0 || len(nodes) > 0 {
+		release, ok := managedProxyRuntime("sing-box")
+		if !ok {
+			return errors.New("managed proxy runtime is not pinned")
+		}
+		payload, _ := json.Marshal(map[string]interface{}{
+			"operation": "remove_runtime", "node_id": "runtime-" + serverID, "revision": 1,
+			"runtime": release.Runtime, "runtime_version": release.Version,
+			"asset_url_amd64": release.AMD64URL, "asset_sha256_amd64": release.AMD64SHA256,
+			"asset_url_arm64": release.ARM64URL, "asset_sha256_arm64": release.ARM64SHA256,
+			"asset_format": release.AssetFormat,
+			"config":       `{}`, "enabled": false, "port_min": 45654, "port_max": 55654, "transport": "tcp",
+		})
+		if _, err := s.RunProxyRuntimeTaskAndWait(serverID, string(payload)); err != nil {
+			return fmt.Errorf("remove sing-box runtime: %w", err)
+		}
+	}
+	return nil
+}
+
+func (s *Service) removeAccountManagedTunnelControlPlane(ctx context.Context, db *sql.DB, serverID string) error {
+	var accountID, zoneID, tunnelID, dnsRecordID string
+	err := db.QueryRowContext(ctx, `SELECT account_id,zone_id,tunnel_id,dns_record_id FROM managed_proxy_tunnels WHERE server_id=?`, serverID).Scan(&accountID, &zoneID, &tunnelID, &dnsRecordID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if (dnsRecordID != "" || tunnelID != "") && s.cloudflare == nil {
+		return errors.New("Cloudflare Tunnel 管理器不可用，无法安全删除远端资源")
+	}
+	if dnsRecordID != "" {
+		if err := s.cloudflare.DeleteManagedTunnelDNS(ctx, accountID, zoneID, dnsRecordID); err != nil {
+			return fmt.Errorf("delete Tunnel DNS record: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE managed_proxy_tunnels SET dns_record_id='',updated_at=datetime('now') WHERE server_id=?`, serverID); err != nil {
+			return err
+		}
+	}
+	if tunnelID != "" {
+		if err := s.cloudflare.DeleteManagedTunnel(ctx, accountID, tunnelID); err != nil {
+			return fmt.Errorf("delete Cloudflare Tunnel: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE managed_proxy_tunnels SET tunnel_id='',token_encrypted='',updated_at=datetime('now') WHERE server_id=?`, serverID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func deleteAccountRecords(ctx context.Context, db *sql.DB, serverID string) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := removeServerFromStatusPages(ctx, tx, serverID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM subscription_plan_nodes WHERE source='internal' AND node_id IN (SELECT id FROM managed_proxy_nodes WHERE server_id=?)`, serverID); err != nil && !isMissingTableError(err) {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM subscription_runtime_reconcile WHERE node_id IN (SELECT id FROM managed_proxy_nodes WHERE server_id=?)`, serverID); err != nil && !isMissingTableError(err) {
+		return err
+	}
+	for _, statement := range []string{
+		`DELETE FROM managed_proxy_nodes WHERE server_id=?`,
+		`DELETE FROM managed_proxy_runtimes WHERE server_id=?`,
+		`DELETE FROM managed_proxy_tunnels WHERE server_id=?`,
+		`DELETE FROM server_monitor_logs WHERE server_id=?`,
+		`DELETE FROM server_metrics_history WHERE server_id=?`,
+		`DELETE FROM server_network_quality_samples WHERE server_id=?`,
+		`DELETE FROM docker_stacks WHERE server_id=?`,
+		`DELETE FROM server_agent_credentials WHERE server_id=?`,
+		`DELETE FROM server_proxy_desired_state WHERE server_id=?`,
+		`DELETE FROM server_proxy_traffic_reports WHERE server_id=?`,
+		`DELETE FROM subscription_usage_reports WHERE server_id=?`,
+		`DELETE FROM subscription_usage_report_keys WHERE server_id=?`,
+		`UPDATE server_command_history SET server_id=NULL WHERE server_id=?`,
+	} {
+		if _, err := tx.ExecContext(ctx, statement, serverID); err != nil && !isMissingTableError(err) {
+			return err
+		}
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM server_accounts WHERE id=?`, serverID)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return sql.ErrNoRows
+	}
+	return tx.Commit()
+}
+
+func removeServerFromStatusPages(ctx context.Context, tx *sql.Tx, serverID string) error {
+	rows, err := tx.QueryContext(ctx, `SELECT id,COALESCE(server_ids_json,'[]') FROM server_status_pages`)
+	if err != nil {
+		return err
+	}
+	type update struct {
+		ID   int64
+		JSON string
+	}
+	updates := []update{}
+	for rows.Next() {
+		var id int64
+		var raw string
+		if err := rows.Scan(&id, &raw); err != nil {
+			rows.Close()
+			return err
+		}
+		var serverIDs []string
+		if err := json.Unmarshal([]byte(raw), &serverIDs); err != nil {
+			rows.Close()
+			return fmt.Errorf("decode status page %d server references: %w", id, err)
+		}
+		filtered := make([]string, 0, len(serverIDs))
+		changed := false
+		for _, candidate := range serverIDs {
+			if candidate == serverID {
+				changed = true
+				continue
+			}
+			filtered = append(filtered, candidate)
+		}
+		if changed {
+			encoded, err := json.Marshal(filtered)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			updates = append(updates, update{ID: id, JSON: string(encoded)})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, item := range updates {
+		if _, err := tx.ExecContext(ctx, `UPDATE server_status_pages SET server_ids_json=?,updated_at=datetime('now') WHERE id=?`, item.JSON, item.ID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Service) exportAccounts(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	rows, err := db.QueryContext(r.Context(), "SELECT name, host, port, username, auth_type, password, private_key, passphrase, tags, description, country, resolved_country, starts_at, expires_at FROM server_accounts ORDER BY order_index ASC")
+	rows, err := db.QueryContext(r.Context(), "SELECT name, host, port, username, auth_type, password, private_key, passphrase, tags, description, country, resolved_country, starts_at, expires_at, traffic_limit_bytes, COALESCE(traffic_limit_mode, 'total'), traffic_alert_enabled, traffic_alert_percent, traffic_cycle_type, traffic_cycle_day, traffic_cycle_start, traffic_cycle_end FROM server_accounts ORDER BY order_index ASC")
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -2925,28 +3828,42 @@ func (s *Service) exportAccounts(w http.ResponseWriter, r *http.Request, db *sql
 	for rows.Next() {
 		var name, host, username, authType, tagsStr string
 		var password, privateKey, passphrase, description, country, resolvedCountry, startsAt, expiresAt sql.NullString
+		var trafficCycleType, trafficCycleStart, trafficCycleEnd sql.NullString
 		var port int
-		err := rows.Scan(&name, &host, &port, &username, &authType, &password, &privateKey, &passphrase, &tagsStr, &description, &country, &resolvedCountry, &startsAt, &expiresAt)
+		var trafficLimitBytes int64
+		var trafficLimitMode string
+		var trafficAlertEnabled int
+		var trafficAlertPercent float64
+		var trafficCycleDay int
+		err := rows.Scan(&name, &host, &port, &username, &authType, &password, &privateKey, &passphrase, &tagsStr, &description, &country, &resolvedCountry, &startsAt, &expiresAt, &trafficLimitBytes, &trafficLimitMode, &trafficAlertEnabled, &trafficAlertPercent, &trafficCycleType, &trafficCycleDay, &trafficCycleStart, &trafficCycleEnd)
 		if err != nil {
 			response.Error(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 
 		exportList = append(exportList, map[string]interface{}{
-			"name":             name,
-			"host":             host,
-			"port":             port,
-			"username":         username,
-			"auth_type":        authType,
-			"password":         s.decryptField(password),
-			"private_key":      s.decryptField(privateKey),
-			"passphrase":       s.decryptField(passphrase),
-			"tags":             parseJSONTags(tagsStr),
-			"description":      nullStringVal(description),
-			"country":          nullStringVal(country),
-			"resolved_country": nullStringVal(resolvedCountry),
-			"starts_at":        nullStringVal(startsAt),
-			"expires_at":       nullStringVal(expiresAt),
+			"name":                  name,
+			"host":                  host,
+			"port":                  port,
+			"username":              username,
+			"auth_type":             authType,
+			"password":              s.decryptField(password),
+			"private_key":           s.decryptField(privateKey),
+			"passphrase":            s.decryptField(passphrase),
+			"tags":                  parseJSONTags(tagsStr),
+			"description":           nullStringVal(description),
+			"country":               nullStringVal(country),
+			"resolved_country":      nullStringVal(resolvedCountry),
+			"starts_at":             nullStringVal(startsAt),
+			"expires_at":            nullStringVal(expiresAt),
+			"traffic_limit_bytes":   trafficLimitBytes,
+			"traffic_limit_mode":    normalizeTrafficLimitMode(trafficLimitMode),
+			"traffic_alert_enabled": trafficAlertEnabled != 0,
+			"traffic_alert_percent": normalizeTrafficAlertPercent(trafficAlertPercent),
+			"traffic_cycle_type":    normalizeTrafficCycleType(trafficCycleType.String),
+			"traffic_cycle_day":     normalizeTrafficCycleDay(trafficCycleDay),
+			"traffic_cycle_start":   nullStringVal(trafficCycleStart),
+			"traffic_cycle_end":     nullStringVal(trafficCycleEnd),
 		})
 	}
 	if exportList == nil {
@@ -2982,6 +3899,14 @@ func (s *Service) importAccounts(w http.ResponseWriter, r *http.Request, db *sql
 		country, _ := item["country"].(string)
 		startsAt, _ := item["starts_at"].(string)
 		expiresAt, _ := item["expires_at"].(string)
+		trafficLimitBytes := normalizeTrafficLimitBytes(getInt64Val(item, "traffic_limit_bytes", 0))
+		trafficLimitMode := normalizeTrafficLimitMode(getStringVal(item, "traffic_limit_mode", "total"))
+		trafficAlertEnabled := getBoolVal(item, "traffic_alert_enabled", false)
+		trafficAlertPercent := normalizeTrafficAlertPercent(getFloatVal(item, "traffic_alert_percent", 100))
+		trafficCycleType := normalizeTrafficCycleType(getStringVal(item, "traffic_cycle_type", "none"))
+		trafficCycleDay := normalizeTrafficCycleDay(getIntVal(item, "traffic_cycle_day", 1))
+		trafficCycleStart := getStringVal(item, "traffic_cycle_start", "")
+		trafficCycleEnd := getStringVal(item, "traffic_cycle_end", "")
 
 		port := 22
 		if portVal != nil {
@@ -3009,10 +3934,10 @@ func (s *Service) importAccounts(w http.ResponseWriter, r *http.Request, db *sql
 
 		_, err := db.ExecContext(r.Context(), `
 			INSERT INTO server_accounts (
-				id, name, host, port, username, auth_type, password, private_key, passphrase, status, tags, description, monitor_mode, country, resolved_country, starts_at, expires_at, order_index, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				id, name, host, port, username, auth_type, password, private_key, passphrase, status, tags, description, monitor_mode, country, resolved_country, starts_at, expires_at, traffic_limit_bytes, traffic_limit_mode, traffic_alert_enabled, traffic_alert_percent, traffic_cycle_type, traffic_cycle_day, traffic_cycle_start, traffic_cycle_end, order_index, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, name, host, port, coalesceStr(username, "agent"), coalesceStr(authType, "password"),
-			encPassword, encPrivateKey, encPassphrase, "unknown", SerializeList(tags), description, "agent", country, nil, nullStr(startsAt), nullStr(expiresAt), orderIndex, now, now,
+			encPassword, encPrivateKey, encPassphrase, "unknown", SerializeList(tags), description, "agent", country, nil, nullStr(startsAt), nullStr(expiresAt), trafficLimitBytes, trafficLimitMode, boolToInt(trafficAlertEnabled), trafficAlertPercent, trafficCycleType, trafficCycleDay, nullStr(trafficCycleStart), nullStr(trafficCycleEnd), orderIndex, now, now,
 		)
 
 		if err != nil {
@@ -3087,11 +4012,14 @@ func (s *Service) scanAccount(row *sql.Rows) (map[string]interface{}, error) {
 	var responseTime sql.NullInt64
 	var port, orderIndex int
 	var trafficLimitBytes int64
+	var trafficLimitMode string
 	var trafficAlertEnabled int
 	var trafficAlertPercent float64
+	var trafficCycleType, trafficCycleStart, trafficCycleEnd sql.NullString
+	var trafficCycleDay int
 	var tagsStr string
 
-	err := row.Scan(&id, &name, &host, &port, &username, &authType, &password, &privateKey, &passphrase, &status, &monitorMode, &lastCheckTime, &lastCheckStatus, &responseTime, &cachedInfo, &tagsStr, &description, &country, &resolvedCountry, &startsAt, &expiresAt, &orderIndex, &createdAt, &trafficLimitBytes, &trafficAlertEnabled, &trafficAlertPercent, &updatedAt)
+	err := row.Scan(&id, &name, &host, &port, &username, &authType, &password, &privateKey, &passphrase, &status, &monitorMode, &lastCheckTime, &lastCheckStatus, &responseTime, &cachedInfo, &tagsStr, &description, &country, &resolvedCountry, &startsAt, &expiresAt, &orderIndex, &createdAt, &trafficLimitBytes, &trafficLimitMode, &trafficAlertEnabled, &trafficAlertPercent, &trafficCycleType, &trafficCycleDay, &trafficCycleStart, &trafficCycleEnd, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -3102,7 +4030,8 @@ func (s *Service) scanAccount(row *sql.Rows) (map[string]interface{}, error) {
 		status, monitorMode, lastCheckTime, lastCheckStatus, responseTime, cachedInfo,
 		tagsStr,
 		description, country, resolvedCountry, startsAt, expiresAt, orderIndex, createdAt, updatedAt,
-		trafficLimitBytes, trafficAlertEnabled != 0, trafficAlertPercent,
+		trafficLimitBytes, trafficLimitMode, trafficAlertEnabled != 0, trafficAlertPercent,
+		trafficCycleType, trafficCycleDay, trafficCycleStart, trafficCycleEnd,
 	), nil
 }
 
@@ -3113,12 +4042,15 @@ func (s *Service) queryAccountByID(ctx context.Context, db *sql.DB, id string) (
 	var responseTime sql.NullInt64
 	var port, orderIndex int
 	var trafficLimitBytes int64
+	var trafficLimitMode string
 	var trafficAlertEnabled int
 	var trafficAlertPercent float64
+	var trafficCycleType, trafficCycleStart, trafficCycleEnd sql.NullString
+	var trafficCycleDay int
 	var tagsStr string
 
-	err := db.QueryRowContext(ctx, "SELECT id, name, host, port, username, auth_type, password, private_key, passphrase, status, monitor_mode, last_check_time, last_check_status, response_time, cached_info, tags, description, country, resolved_country, starts_at, expires_at, order_index, created_at, traffic_limit_bytes, traffic_alert_enabled, traffic_alert_percent, updated_at FROM server_accounts WHERE id = ?", id).
-		Scan(&id, &name, &host, &port, &username, &authType, &password, &privateKey, &passphrase, &status, &monitorMode, &lastCheckTime, &lastCheckStatus, &responseTime, &cachedInfo, &tagsStr, &description, &country, &resolvedCountry, &startsAt, &expiresAt, &orderIndex, &createdAt, &trafficLimitBytes, &trafficAlertEnabled, &trafficAlertPercent, &updatedAt)
+	err := db.QueryRowContext(ctx, "SELECT id, name, host, port, username, auth_type, password, private_key, passphrase, status, monitor_mode, last_check_time, last_check_status, response_time, cached_info, tags, description, country, resolved_country, starts_at, expires_at, order_index, created_at, traffic_limit_bytes, COALESCE(traffic_limit_mode, 'total'), traffic_alert_enabled, traffic_alert_percent, traffic_cycle_type, traffic_cycle_day, traffic_cycle_start, traffic_cycle_end, updated_at FROM server_accounts WHERE id = ?", id).
+		Scan(&id, &name, &host, &port, &username, &authType, &password, &privateKey, &passphrase, &status, &monitorMode, &lastCheckTime, &lastCheckStatus, &responseTime, &cachedInfo, &tagsStr, &description, &country, &resolvedCountry, &startsAt, &expiresAt, &orderIndex, &createdAt, &trafficLimitBytes, &trafficLimitMode, &trafficAlertEnabled, &trafficAlertPercent, &trafficCycleType, &trafficCycleDay, &trafficCycleStart, &trafficCycleEnd, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -3129,7 +4061,8 @@ func (s *Service) queryAccountByID(ctx context.Context, db *sql.DB, id string) (
 		status, monitorMode, lastCheckTime, lastCheckStatus, responseTime, cachedInfo,
 		tagsStr,
 		description, country, resolvedCountry, startsAt, expiresAt, orderIndex, createdAt, updatedAt,
-		trafficLimitBytes, trafficAlertEnabled != 0, trafficAlertPercent,
+		trafficLimitBytes, trafficLimitMode, trafficAlertEnabled != 0, trafficAlertPercent,
+		trafficCycleType, trafficCycleDay, trafficCycleStart, trafficCycleEnd,
 	), nil
 }
 
@@ -3145,10 +4078,14 @@ func (s *Service) buildAccountResponse(
 	orderIndex int,
 	createdAt, updatedAt string,
 	trafficLimitBytes int64,
+	trafficLimitMode string,
 	trafficAlertEnabled bool,
 	trafficAlertPercent float64,
+	trafficCycleType sql.NullString,
+	trafficCycleDay int,
+	trafficCycleStart, trafficCycleEnd sql.NullString,
 ) map[string]interface{} {
-	_, agentOnline := s.registry.Get(id)
+	conn, agentOnline := s.registry.Get(id)
 	health := s.resolveAgentMetricsHealth(id, cachedInfo, agentOnline, time.Now())
 	effectiveStatus := status
 	if agentOnline {
@@ -3179,13 +4116,18 @@ func (s *Service) buildAccountResponse(
 		"response_time":         nullIntVal(responseTime),
 		"tags":                  parseJSONTags(tagsStr),
 		"description":           nullStringVal(description),
-		"country":               nullStringVal(country),
+		"country":               nullStr(cleanCountryCode(country.String)),
 		"resolved_country":      nullStringVal(resolvedCountry),
 		"starts_at":             nullStringVal(startsAt),
 		"expires_at":            nullStringVal(expiresAt),
 		"traffic_limit_bytes":   trafficLimitBytes,
+		"traffic_limit_mode":    normalizeTrafficLimitMode(trafficLimitMode),
 		"traffic_alert_enabled": trafficAlertEnabled,
 		"traffic_alert_percent": normalizeTrafficAlertPercent(trafficAlertPercent),
+		"traffic_cycle_type":    normalizeTrafficCycleType(trafficCycleType.String),
+		"traffic_cycle_day":     normalizeTrafficCycleDay(trafficCycleDay),
+		"traffic_cycle_start":   nullStringVal(trafficCycleStart),
+		"traffic_cycle_end":     nullStringVal(trafficCycleEnd),
 		"order_index":           orderIndex,
 		"created_at":            createdAt,
 		"updated_at":            updatedAt,
@@ -3196,6 +4138,9 @@ func (s *Service) buildAccountResponse(
 	}
 	res["agent_online"] = agentOnline
 	res["agent_connected"] = agentOnline
+	if agentOnline && conn != nil {
+		res["agent_capabilities"] = conn.GetCapabilities()
+	}
 	res["supports_metrics"] = agentOnline && health["state"] == "fresh"
 	res["metrics_health"] = health["state"]
 	res["metrics_stale"] = health["stale"]
@@ -3204,12 +4149,45 @@ func (s *Service) buildAccountResponse(
 	res["metrics_age_ms"] = health["age_ms"]
 
 	// Metrics mapping
+	cachedMetrics := map[string]interface{}{}
+	hasMetricsPayload := cachedInfo.Valid && cachedInfo.String != ""
 	if cachedInfo.Valid && cachedInfo.String != "" {
-		var cachedMetrics map[string]interface{}
-		if err := json.Unmarshal([]byte(cachedInfo.String), &cachedMetrics); err == nil {
-			info := s.buildInfoField(cachedMetrics)
-			enrichTrafficQuota(info, cachedMetrics, trafficLimitBytes, trafficAlertEnabled, trafficAlertPercent)
-			res["info"] = info
+		var parsed map[string]interface{}
+		if err := json.Unmarshal([]byte(cachedInfo.String), &parsed); err == nil {
+			cachedMetrics = parsed
+		}
+	}
+	if agentOnline && conn != nil {
+		metadata := conn.GetMetadata()
+		for key, value := range metadata {
+			if !isEmptyHeartbeatInfoValue(value) {
+				cachedMetrics[key] = value
+			}
+		}
+		normalizePublicServerLiveMetrics(cachedMetrics, metadata)
+		hasMetricsPayload = true
+	}
+	if hasMetricsPayload {
+		info := s.buildInfoField(cachedMetrics)
+		enrichTrafficQuota(info, cachedMetrics, trafficLimitBytes, trafficLimitMode, trafficAlertEnabled, trafficAlertPercent)
+		res["info"] = info
+		resolvedCountryText := ""
+		if resolvedCountry.Valid {
+			resolvedCountryText = resolvedCountry.String
+		}
+		countryText := ""
+		if country.Valid {
+			countryText = country.String
+		}
+		res["location"] = firstNonEmpty(getString(cachedMetrics, "location"), getString(cachedMetrics, "region"), resolvedCountryText)
+		res["countryCode"] = firstNonEmpty(cleanCountryCode(getString(cachedMetrics, "country_code")), cleanCountryCode(getString(cachedMetrics, "country")), cleanCountryCode(countryText))
+		lat, hasLat := firstOptionalFloatValue(cachedMetrics, "lat", "latitude")
+		lon, hasLon := firstOptionalFloatValue(cachedMetrics, "lon", "longitude")
+		if hasLat && hasUsableCoordinates(lat, lon) {
+			res["latitude"] = lat
+		}
+		if hasLon && hasUsableCoordinates(lat, lon) {
+			res["longitude"] = lon
 		}
 	}
 
@@ -3242,6 +4220,10 @@ func (s *Service) markRealtimeMetricsPersistResult(serverID string, ok bool, err
 	if !exists {
 		return
 	}
+	previousStatus := ""
+	if metadata := conn.GetMetadata(); metadata != nil {
+		previousStatus, _ = metadata["metrics_persist_status"].(string)
+	}
 	status := "ok"
 	errorText := ""
 	if !ok {
@@ -3253,6 +4235,96 @@ func (s *Service) markRealtimeMetricsPersistResult(serverID string, ok bool, err
 	conn.SetMetadata("metrics_persist_status", status)
 	conn.SetMetadata("metrics_persist_error", errorText)
 	conn.SetMetadata("metrics_persist_at", now.UTC().Format(time.RFC3339Nano))
+	if !ok && previousStatus != "error" {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			db, openErr := s.open(ctx)
+			if openErr != nil {
+				return
+			}
+			defer db.Close()
+			serverName, serverHost := s.serverIdentity(ctx, db, serverID)
+			s.triggerServerStatusNotification(ctx, serverID, serverName, serverHost, "degraded")
+		}()
+	}
+}
+
+func (s *Service) mergeConnectionLocationMetadata(serverID string, geo map[string]interface{}) {
+	if geo == nil {
+		return
+	}
+	conn, exists := s.registry.Get(serverID)
+	if !exists {
+		return
+	}
+	for _, key := range cachedLocationFieldNames() {
+		if value, ok := geo[key]; ok && !isEmptyHeartbeatInfoValue(value) {
+			conn.SetMetadata(key, value)
+		}
+	}
+}
+
+func (s *Service) mergeCachedLocationFieldsFromDB(ctx context.Context, db *sql.DB, serverID string, metrics map[string]interface{}) map[string]interface{} {
+	if metrics == nil {
+		metrics = map[string]interface{}{}
+	}
+	var raw string
+	if err := db.QueryRowContext(ctx, "SELECT COALESCE(cached_info, '{}') FROM server_accounts WHERE id = ?", serverID).Scan(&raw); err != nil {
+		return metrics
+	}
+	existing := map[string]interface{}{}
+	if err := json.Unmarshal([]byte(raw), &existing); err != nil {
+		return metrics
+	}
+	preserveCachedLocationFields(metrics, existing)
+	s.mergeConnectionLocationMetadata(serverID, metrics)
+	return metrics
+}
+
+func cachedLocationFieldNames() []string {
+	return []string{
+		"ip",
+		"country_code",
+		"country",
+		"resolved_country",
+		"region",
+		"location",
+		"city",
+		"latitude",
+		"longitude",
+		"lat",
+		"lon",
+		"isp",
+		"org",
+		"asn",
+		"timezone",
+		"geo_source",
+	}
+}
+
+func preserveCachedLocationFields(target map[string]interface{}, existing map[string]interface{}) {
+	if target == nil || existing == nil {
+		return
+	}
+	for _, key := range cachedLocationFieldNames() {
+		if value, ok := existing[key]; ok && !isEmptyHeartbeatInfoValue(value) {
+			if current, exists := target[key]; !exists || isEmptyHeartbeatInfoValue(current) {
+				target[key] = value
+			}
+		}
+	}
+}
+
+func cloneMap(source map[string]interface{}) map[string]interface{} {
+	if source == nil {
+		return map[string]interface{}{}
+	}
+	cloned := make(map[string]interface{}, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func (s *Service) resolveAgentMetricsHealth(serverID string, cachedInfo sql.NullString, agentOnline bool, now time.Time) map[string]interface{} {
@@ -3455,9 +4527,11 @@ func (s *Service) buildInfoField(metrics map[string]interface{}) map[string]inte
 	if i, ok := metrics["ip"].(string); ok {
 		ip = i
 	}
-	countryCode := firstNonEmpty(getString(metrics, "country_code"), getString(metrics, "country"))
+	countryCode := firstNonEmpty(cleanCountryCode(getString(metrics, "country_code")), cleanCountryCode(getString(metrics, "country")))
 	resolvedCountry := firstNonEmpty(getString(metrics, "resolved_country"), countryCode)
 	location := firstNonEmpty(getString(metrics, "location"), getString(metrics, "region"), resolvedCountry)
+	latitude, hasLatitude := firstOptionalFloatValue(metrics, "lat", "latitude")
+	longitude, hasLongitude := firstOptionalFloatValue(metrics, "lon", "longitude")
 	uptime := ""
 	if u, ok := metrics["uptime"].(string); ok {
 		uptime = u
@@ -3514,6 +4588,12 @@ func (s *Service) buildInfoField(metrics map[string]interface{}) map[string]inte
 		"metrics_stale_after_ms": getIntValue(metrics, "metrics_stale_after_ms"),
 		"metrics_sequence":       getIntValue(metrics, "sequence"),
 		"sample_interval_ms":     getIntValue(metrics, "sample_interval_ms"),
+	}
+	if hasLatitude && hasUsableCoordinates(latitude, longitude) {
+		cachedInfo["latitude"] = latitude
+	}
+	if hasLongitude && hasUsableCoordinates(latitude, longitude) {
+		cachedInfo["longitude"] = longitude
 	}
 	return cachedInfo
 }
@@ -3577,6 +4657,14 @@ func nullStr(s string) interface{} {
 		return nil
 	}
 	return s
+}
+
+func cleanCountryCode(value string) string {
+	code := strings.TrimSpace(value)
+	if code == "" || strings.EqualFold(code, "auto") {
+		return ""
+	}
+	return strings.ToLower(code)
 }
 
 func nullStringVal(s sql.NullString) interface{} {
@@ -3673,6 +4761,47 @@ func normalizeTrafficLimitBytes(value int64) int64 {
 	return value
 }
 
+func normalizeTrafficLimitMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "upload", "download":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "total"
+	}
+}
+
+func trafficUsedBytesForMode(rxTotal, txTotal float64, mode string) int64 {
+	var used float64
+	switch normalizeTrafficLimitMode(mode) {
+	case "upload":
+		used = txTotal
+	case "download":
+		used = rxTotal
+	default:
+		used = rxTotal + txTotal
+	}
+	if used < 0 {
+		return 0
+	}
+	return int64(used)
+}
+
+func trafficUsedBytesFromMetrics(metrics map[string]interface{}, mode string) int64 {
+	if metrics == nil {
+		return 0
+	}
+	network := mapValue(metrics["network"])
+	rxTotal := firstFloatValue(metrics, "net_in_transfer", "net_rx_total", "rx_total_bytes")
+	txTotal := firstFloatValue(metrics, "net_out_transfer", "net_tx_total", "tx_total_bytes")
+	if networkRx := getFloatFromMap(network, "rx_total_bytes"); networkRx > 0 {
+		rxTotal = networkRx
+	}
+	if networkTx := getFloatFromMap(network, "tx_total_bytes"); networkTx > 0 {
+		txTotal = networkTx
+	}
+	return trafficUsedBytesForMode(rxTotal, txTotal, mode)
+}
+
 func normalizeTrafficAlertPercent(value float64) float64 {
 	if value <= 0 {
 		return 100
@@ -3683,7 +4812,27 @@ func normalizeTrafficAlertPercent(value float64) float64 {
 	return value
 }
 
-func enrichTrafficQuota(info map[string]interface{}, metrics map[string]interface{}, limitBytes int64, alertEnabled bool, alertPercent float64) {
+func normalizeTrafficCycleType(value string) string {
+	normalized := strings.TrimSpace(value)
+	switch normalized {
+	case "calendar_month", "monthly", "custom", "none":
+		return normalized
+	default:
+		return "none"
+	}
+}
+
+func normalizeTrafficCycleDay(value int) int {
+	if value < 1 {
+		return 1
+	}
+	if value > 28 {
+		return 28
+	}
+	return value
+}
+
+func enrichTrafficQuota(info map[string]interface{}, metrics map[string]interface{}, limitBytes int64, limitMode string, alertEnabled bool, alertPercent float64) {
 	if info == nil || limitBytes <= 0 {
 		return
 	}
@@ -3701,10 +4850,7 @@ func enrichTrafficQuota(info map[string]interface{}, metrics map[string]interfac
 	if txTotal == 0 {
 		txTotal = getFloatValue(metrics, "net_out_transfer")
 	}
-	usedBytes := int64(rxTotal + txTotal)
-	if usedBytes < 0 {
-		usedBytes = 0
-	}
+	usedBytes := trafficUsedBytesForMode(rxTotal, txTotal, limitMode)
 	percent := 0.0
 	if limitBytes > 0 {
 		percent = (float64(usedBytes) / float64(limitBytes)) * 100
@@ -3712,6 +4858,7 @@ func enrichTrafficQuota(info map[string]interface{}, metrics map[string]interfac
 
 	network["traffic_used_bytes"] = usedBytes
 	network["traffic_limit_bytes"] = limitBytes
+	network["traffic_limit_mode"] = normalizeTrafficLimitMode(limitMode)
 	network["traffic_percent"] = percent
 	network["traffic_alert_enabled"] = alertEnabled
 	network["traffic_alert_percent"] = normalizeTrafficAlertPercent(alertPercent)
@@ -3986,6 +5133,24 @@ func firstFloatValue(m map[string]interface{}, keys ...string) float64 {
 	return 0
 }
 
+func firstOptionalFloatValue(m map[string]interface{}, keys ...string) (float64, bool) {
+	for _, key := range keys {
+		raw, exists := m[key]
+		if !exists || raw == nil {
+			continue
+		}
+		value, err := toFloat(raw)
+		if err == nil {
+			return value, true
+		}
+	}
+	return 0, false
+}
+
+func hasUsableCoordinates(lat, lon float64) bool {
+	return !(lat == 0 && lon == 0)
+}
+
 func getIntValue(m map[string]interface{}, key string) int {
 	return int(getFloatValue(m, key))
 }
@@ -4206,10 +5371,11 @@ func (s *Service) checkMetricAlerts(ctx context.Context, db *sql.DB, serverID st
 
 	var serverName, serverHost string
 	var trafficLimitBytes int64
+	var trafficLimitMode string
 	var trafficAlertEnabled int
 	var trafficAlertPercent float64
 	var cachedInfo sql.NullString
-	_ = db.QueryRowContext(ctx, `SELECT name, host, traffic_limit_bytes, traffic_alert_enabled, traffic_alert_percent, cached_info FROM server_accounts WHERE id = ?`, serverID).Scan(&serverName, &serverHost, &trafficLimitBytes, &trafficAlertEnabled, &trafficAlertPercent, &cachedInfo)
+	_ = db.QueryRowContext(ctx, `SELECT name, host, traffic_limit_bytes, COALESCE(traffic_limit_mode, 'total'), traffic_alert_enabled, traffic_alert_percent, cached_info FROM server_accounts WHERE id = ?`, serverID).Scan(&serverName, &serverHost, &trafficLimitBytes, &trafficLimitMode, &trafficAlertEnabled, &trafficAlertPercent, &cachedInfo)
 	if serverName == "" {
 		serverName = serverID
 	}
@@ -4222,10 +5388,7 @@ func (s *Service) checkMetricAlerts(ctx context.Context, db *sql.DB, serverID st
 	if trafficLimitBytes > 0 && cachedInfo.Valid && cachedInfo.String != "" {
 		var cached map[string]interface{}
 		if err := json.Unmarshal([]byte(cachedInfo.String), &cached); err == nil {
-			trafficUsedBytes = int64(getFloatValue(cached, "net_in_transfer") + getFloatValue(cached, "net_out_transfer"))
-			if trafficUsedBytes < 0 {
-				trafficUsedBytes = 0
-			}
+			trafficUsedBytes = trafficUsedBytesFromMetrics(cached, trafficLimitMode)
 			trafficPercent = (float64(trafficUsedBytes) / float64(trafficLimitBytes)) * 100
 		}
 	}
@@ -4240,6 +5403,7 @@ func (s *Service) checkMetricAlerts(ctx context.Context, db *sql.DB, serverID st
 		"disk_usage":          disk,
 		"traffic_used_bytes":  trafficUsedBytes,
 		"traffic_limit_bytes": trafficLimitBytes,
+		"traffic_limit_mode":  normalizeTrafficLimitMode(trafficLimitMode),
 		"traffic_percent":     trafficPercent,
 		"traffic_used":        formatBytes(trafficUsedBytes),
 		"traffic_limit":       formatBytes(trafficLimitBytes),

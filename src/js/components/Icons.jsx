@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  AppWindow as PhAppWindow,
   ArrowClockwise,
   ArrowCounterClockwise,
   ArrowLeft as PhArrowLeft,
@@ -20,12 +21,15 @@ import {
   Clock as PhClock,
   ClockCounterClockwise,
   Cloud as PhCloud,
+  Columns as PhColumns,
   Compass as PhCompass,
   Copy as PhCopy,
   Cpu as PhCpu,
+  Cursor as PhCursor,
   Cube,
   Database as PhDatabase,
   DotsThreeVertical,
+  Desktop as PhDesktop,
   DownloadSimple,
   EnvelopeSimple,
   Eye as PhEye,
@@ -52,16 +56,19 @@ import {
   Lock as PhLock,
   MagnifyingGlass,
   Moon as PhMoon,
+  Palette as PhPalette,
   PaperPlaneTilt,
   Paperclip as PhPaperclip,
   Pause as PhPause,
   PencilSimple,
   Play as PhPlay,
+  PlayCircle as PhPlayCircle,
   Plugs,
   Plus as PhPlus,
   Power,
   Pulse,
   PushPin,
+  Rectangle as PhRectangle,
   Repeat as PhRepeat,
   RepeatOnce,
   Robot,
@@ -92,6 +99,8 @@ import {
   X as PhX,
 } from '@phosphor-icons/react';
 
+import tencentCloudIcon from '../../assets/brand-icons/tencentcloud.svg';
+
 const createIcon = (Icon) => {
   const AppIcon = ({
     className = '',
@@ -115,7 +124,43 @@ const createIcon = (Icon) => {
   return AppIcon;
 };
 
+const createFontIcon = (iconClass, label) => {
+  const FontIcon = ({ className = '', style, ...props }) => {
+    const fontSize = className.includes('size-3.5') ? '0.875rem' : '1rem';
+
+    return (
+      <i
+        {...props}
+        className={`app-icon app-font-icon ${iconClass} ${className}`.trim()}
+        aria-hidden={props['aria-label'] ? undefined : true}
+        style={{ fontSize, ...style }}
+      />
+    );
+  };
+
+  FontIcon.displayName = `AppIcon(${label})`;
+  return FontIcon;
+};
+
+const createAssetIcon = (asset, label) => {
+  const AssetIcon = ({ className = '', style, ...props }) => (
+    <span
+      {...props}
+      className={`app-icon app-brand-icon app-brand-icon--asset ${className}`.trim()}
+      aria-hidden={props['aria-label'] ? undefined : true}
+      style={{
+        '--app-brand-icon-url': `url("${asset}")`,
+        ...style,
+      }}
+    />
+  );
+
+  AssetIcon.displayName = `AppIcon(${label})`;
+  return AssetIcon;
+};
+
 export const LayoutDashboard = createIcon(SquaresFour);
+export const AppWindow = createIcon(PhAppWindow);
 export const Bot = createIcon(Robot);
 export const Terminal = createIcon(TerminalWindow);
 export const Cpu = createIcon(PhCpu);
@@ -133,6 +178,8 @@ export const MessageSquare = createIcon(ChatCircle);
 export const Settings = createIcon(GearSix);
 export const Sun = createIcon(PhSun);
 export const Moon = createIcon(PhMoon);
+export const DesktopDisplay = createIcon(PhDesktop);
+export const Palette = createIcon(PhPalette);
 export const LogOut = createIcon(SignOut);
 export const Menu = createIcon(List);
 export const Clock = createIcon(PhClock);
@@ -156,6 +203,7 @@ export const LayoutSidebar = createIcon(PhSidebar);
 export const Plus = createIcon(PhPlus);
 export const Trash = createIcon(PhTrash);
 export const Play = createIcon(PhPlay);
+export const PlayCircle = createIcon(PhPlayCircle);
 export const Pause = createIcon(PhPause);
 export const Folder = createIcon(PhFolder);
 export const FileText = createIcon(PhFileText);
@@ -184,8 +232,10 @@ export const Check = createIcon(PhCheck);
 export const Paperclip = createIcon(PhPaperclip);
 export const PieChart = createIcon(ChartPie);
 export const Heart = createIcon(PhHeart);
+export const Columns = createIcon(PhColumns);
 export const Grid = createIcon(GridFour);
 export const Google = createIcon(GoogleLogo);
+export const Rectangle = createIcon(PhRectangle);
 export const Sliders = createIcon(SlidersHorizontal);
 export const Layers = createIcon(Stack);
 export const GitBranch = createIcon(PhGitBranch);
@@ -200,21 +250,32 @@ export const Shuffle = createIcon(PhShuffle);
 export const Volume2 = createIcon(SpeakerHigh);
 export const VolumeX = createIcon(SpeakerSlash);
 export const Compass = createIcon(PhCompass);
+export const Cursor = createIcon(PhCursor);
 export const Home = createIcon(House);
 export const User = createIcon(PhUser);
 export const Maximize2 = createIcon(ArrowsOutSimple);
 export const ExternalLink = createIcon(ArrowSquareOut);
 export const ArrowLeft = createIcon(PhArrowLeft);
 export const Undo = createIcon(ArrowCounterClockwise);
+export const CloudflareBrand = createFontIcon('si si-cloudflare', 'Cloudflare');
+export const AlibabaCloudBrand = createFontIcon('si si-alibabacloud', 'AlibabaCloud');
+export const TencentCloudBrand = createAssetIcon(tencentCloudIcon, 'TencentCloud');
+export const KoyebBrand = createFontIcon('si si-koyeb', 'Koyeb');
+export const FlyIoBrand = createFontIcon('si si-flydotio', 'Fly.io');
+export const GitHubBrand = createFontIcon('si si-github', 'GitHub');
 
 export const MODULE_ICON_MAP = {
   dashboard: LayoutDashboard,
   settings: Settings,
   openai: Bot,
+  subscription: Plug,
   paas: Cloud,
-  dns: Globe,
-  aliyun: Database,
-  tencent: Hexagon,
+  dns: CloudflareBrand,
+  aliyun: AlibabaCloudBrand,
+  tencent: TencentCloudBrand,
+  oracle: Cloud,
+  m365: Cloud,
+  github: GitHubBrand,
   server: Server,
   scheduler: Clock,
   totp: ShieldCheck,
@@ -229,6 +290,7 @@ export const MODULE_GROUP_ICON_MAP = {
   overview: LayoutDashboard,
   'api-gateway': TrendingUp,
   infrastructure: Layers,
+  devops: GitBranch,
   toolbox: Grid,
   system: Settings,
 };

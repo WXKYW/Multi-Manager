@@ -1,37 +1,49 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Switch } from '@cloudflare/kumo/components/switch';
+import { CalendarDotsIcon } from '@phosphor-icons/react';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
-import { Table } from '@cloudflare/kumo/components/table';
+import { Switch } from '@cloudflare/kumo/components/switch';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Autocomplete } from '@cloudflare/kumo/components/autocomplete';
-import { Tabs } from '@cloudflare/kumo';
-import useTableResize from '../composables/useTableResize.js';
-import useStore from '../store.js';
+import {
+  Banner,
+  ClipboardText,
+  DatePicker,
+  Label,
+  LayerCard,
+  Loader,
+  Meter,
+  Pagination,
+  Popover,
+  Table,
+  Tabs,
+} from '@cloudflare/kumo';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
 import { renderMarkdown, formatDateTime } from '../modules/utils.js';
-import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
+import {
+  countModelHealthResults,
+  endpointModelIds,
+  modelHealthKey,
+  modelHealthTargets,
+  normalizeModelHealthRecord,
+} from '../modules/openaiModelHealth.js';
 import {
   PageStack,
   PageToolbar,
   AppCard,
-  DataTableFrame,
-  AppTable,
   InlineStatusPill,
   EmptyState,
-  SectionHeader,
   iconButtonIconClass,
   actionIconClass,
   cx,
 } from '../components/ui/AppPrimitives.jsx';
 import {
   Server,
-  Users,
   MessageSquare,
   Plus,
   Trash,
@@ -41,8 +53,6 @@ import {
   Download,
   Edit,
   X,
-  ChevronDown,
-  ChevronUp,
   RefreshCw,
   History,
   PieChart,
@@ -53,172 +63,79 @@ import {
   Send,
   Check,
   Paperclip,
-  Eye,
-  EyeOff,
-  Plug,
   Brain,
   Sliders,
   Settings as SettingsIcon,
   Copy,
   AlertTriangle,
+  Key,
+  Reboot,
 } from '../components/Icons.jsx';
 
-function SVGAnalyticsChart({ dailyData }) {
-  if (!dailyData || dailyData.length === 0) {
-    return (
-      <div className="h-full flex items-center justify-center text-kumo-subtle text-xs">
-        暂无趋势数据
-      </div>
-    );
-  }
+function createHealthCheckProgress(total = 0, running = false) {
+  return { running, total, completed: 0, healthy: 0, degraded: 0, failed: 0 };
+}
 
-  const width = 500;
-  const height = 180;
-  const paddingLeft = 40;
-  const paddingRight = 40;
-  const paddingTop = 20;
-  const paddingBottom = 30;
+const GATEWAY_EXPIRY_HOURS = Array.from({ length: 24 }, (_, hour) => {
+  const value = String(hour).padStart(2, '0');
+  return { value, label: value };
+});
 
-  const maxCount = Math.max(...dailyData.map(d => d.count), 5);
-  const maxLatency = Math.max(...dailyData.map(d => d.avgLatency), 500);
+const GATEWAY_EXPIRY_MINUTES = Array.from({ length: 60 }, (_, minute) => {
+  const value = String(minute).padStart(2, '0');
+  return { value, label: value };
+});
 
-  const pointsCount = dailyData.map((d, index) => {
-    const x =
-      paddingLeft + (index / (dailyData.length - 1 || 1)) * (width - paddingLeft - paddingRight);
-    const y = height - paddingBottom - (d.count / maxCount) * (height - paddingTop - paddingBottom);
-    return { x, y, label: d.count, day: d.day };
-  });
+function toLocalDateTimeValue(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+  const pad = value => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
+    date.getHours()
+  )}:${pad(date.getMinutes())}`;
+}
 
-  const pointsLatency = dailyData.map((d, index) => {
-    const x =
-      paddingLeft + (index / (dailyData.length - 1 || 1)) * (width - paddingLeft - paddingRight);
-    const y =
-      height - paddingBottom - (d.avgLatency / maxLatency) * (height - paddingTop - paddingBottom);
-    return { x, y, label: d.avgLatency, day: d.day };
-  });
+function parseLocalDateTime(value) {
+  if (!value) return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
 
-  const countPath = pointsCount.reduce(
-    (path, p, i) => (i === 0 ? `M ${p.x} ${p.y}` : `${path} L ${p.x} ${p.y}`),
-    ''
-  );
-  const latencyPath = pointsLatency.reduce(
-    (path, p, i) => (i === 0 ? `M ${p.x} ${p.y}` : `${path} L ${p.x} ${p.y}`),
-    ''
-  );
-
+function GatewaySection({
+  title,
+  description,
+  icon,
+  actions,
+  className = '',
+  bodyClassName = '',
+  children,
+}) {
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full text-kumo-strong">
-      {/* Grid Lines */}
-      {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
-        const y = height - paddingBottom - ratio * (height - paddingTop - paddingBottom);
-        return (
-          <g key={i}>
-            <line
-              x1={paddingLeft}
-              y1={y}
-              x2={width - paddingRight}
-              y2={y}
-              stroke="var(--kumo-line, #e2e8f0)"
-              strokeDasharray="3 3"
-              strokeWidth="0.5"
-            />
-            {/* Left Axis (Requests) */}
-            <text
-              x={paddingLeft - 8}
-              y={y + 4}
-              textAnchor="end"
-              className="text-[9px] fill-kumo-subtle font-mono"
-            >
-              {Math.round(ratio * maxCount)}
-            </text>
-            {/* Right Axis (Latency) */}
-            <text
-              x={width - paddingRight + 8}
-              y={y + 4}
-              textAnchor="start"
-              className="text-[9px] fill-kumo-subtle font-mono"
-            >
-              {Math.round(ratio * maxLatency)} ms
-            </text>
-          </g>
-        );
-      })}
-
-      {/* X Axis Labels */}
-      {dailyData.map((d, index) => {
-        const x =
-          paddingLeft +
-          (index / (dailyData.length - 1 || 1)) * (width - paddingLeft - paddingRight);
-        return (
-          <text
-            key={index}
-            x={x}
-            y={height - 10}
-            textAnchor="middle"
-            className="text-[9px] fill-kumo-subtle font-mono"
-          >
-            {d.day}
-          </text>
-        );
-      })}
-
-      {/* Paths */}
-      <path
-        d={countPath}
-        fill="none"
-        stroke="var(--kumo-brand, #3b82f6)"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d={latencyPath}
-        fill="none"
-        stroke="var(--kumo-warning, #f59e0b)"
-        strokeWidth="2"
-        strokeDasharray="4 2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-
-      {/* Dots & Tooltips */}
-      {pointsCount.map((p, i) => (
-        <g key={`count-dot-${i}`} className="group/dot cursor-pointer">
-          <circle
-            cx={p.x}
-            cy={p.y}
-            r="3.5"
-            className="fill-kumo-brand stroke-kumo-base"
-            strokeWidth="1.5"
-          />
-          <circle cx={p.x} cy={p.y} r="8" className="fill-transparent hover:fill-kumo-brand/10" />
-          <title>{`日期: ${p.day}\n请求数: ${p.label} 次`}</title>
-        </g>
-      ))}
-
-      {pointsLatency.map((p, i) => (
-        <g key={`latency-dot-${i}`} className="group/dot cursor-pointer">
-          <circle
-            cx={p.x}
-            cy={p.y}
-            r="3"
-            className="fill-kumo-warning stroke-kumo-base"
-            strokeWidth="1.5"
-          />
-          <circle cx={p.x} cy={p.y} r="8" className="fill-transparent hover:fill-kumo-warning/10" />
-          <title>{`日期: ${p.day}\n延迟: ${p.label.toFixed(0)} ms`}</title>
-        </g>
-      ))}
-    </svg>
+    <section className={cx('flex flex-col gap-3', className)}>
+      <header className="flex min-h-10 flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+          <h2 className="flex items-center gap-2 font-semibold text-kumo-strong">
+            {icon}
+            <span>{title}</span>
+          </h2>
+          {description && <p className="text-kumo-subtle">{description}</p>}
+        </div>
+        {actions && <div className="flex flex-wrap items-center justify-end gap-2">{actions}</div>}
+      </header>
+      <div className={bodyClassName}>{children}</div>
+    </section>
   );
 }
 
 function OpenAIPage() {
-  const { theme } = useStore();
-  const [colWidths, startResize] = useTableResize([150, 250, 150, 80, 80, 100, 120]);
+  const gatewayOrigin = useMemo(() => {
+    if (typeof window === 'undefined') return 'http://localhost:3000';
+    const url = new URL(window.location.origin);
+    if (url.port === '5173' || url.port === '4173') url.port = '3000';
+    return url.origin;
+  }, []);
 
   // Tab State
-  const [activeTab, setActiveTab] = useState('endpoints'); // 'endpoints' | 'accounts' | 'chat'
+  const [activeTab, setActiveTab] = useState('endpoints'); // 'endpoints' | 'keys' | 'analytics'
 
   // Gateway Analytics States
   const [analyticsDays, setAnalyticsDays] = useState(7);
@@ -229,14 +146,13 @@ function OpenAIPage() {
     errorRate: 0,
   });
   const [analyticsCharts, setAnalyticsCharts] = useState({
-    daily: [],
     models: [],
   });
   const [analyticsLogs, setAnalyticsLogs] = useState([]);
   const [analyticsPage, setAnalyticsPage] = useState(1);
+  const [analyticsPageSize, setAnalyticsPageSize] = useState(20);
   const [analyticsTotal, setAnalyticsTotal] = useState(0);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
-
   const getAuthHeaders = useCallback(() => {
     const password = localStorage.getItem('admin_password') || '';
     return {
@@ -252,7 +168,10 @@ function OpenAIPage() {
       const [sumRes, chartsRes, logsRes] = await Promise.all([
         fetch(`/api/openai/analytics/summary?days=${analyticsDays}`, { headers }),
         fetch(`/api/openai/analytics/charts?days=${analyticsDays}`, { headers }),
-        fetch(`/api/openai/analytics/logs?page=${analyticsPage}&pageSize=10`, { headers }),
+        fetch(
+          `/api/openai/analytics/logs?days=${analyticsDays}&page=${analyticsPage}&pageSize=${analyticsPageSize}`,
+          { headers }
+        ),
       ]);
 
       if (sumRes.ok) {
@@ -274,33 +193,13 @@ function OpenAIPage() {
     } finally {
       setAnalyticsLoading(false);
     }
-  }, [analyticsDays, analyticsPage, getAuthHeaders]);
+  }, [analyticsDays, analyticsPage, analyticsPageSize, getAuthHeaders]);
 
   useEffect(() => {
     if (activeTab === 'analytics') {
       fetchAnalytics();
     }
   }, [activeTab, fetchAnalytics]);
-
-  // IP/Address Masking Helper
-  const maskAddress = address => {
-    if (!address) return '';
-    try {
-      const url = new URL(address);
-      return `${url.protocol}//${url.hostname.slice(0, 3)}****${url.hostname.slice(-3)}${url.port ? ':' + url.port : ''}${url.pathname}`;
-    } catch {
-      if (address.length > 15) {
-        return address.slice(0, 6) + '****' + address.slice(-6);
-      }
-      return address;
-    }
-  };
-
-  const maskApiKey = key => {
-    if (!key) return '';
-    if (key.length <= 8) return '****';
-    return key.substring(0, 4) + '****' + key.substring(key.length - 4);
-  };
 
   const chatStorage = useMemo(() => {
     const personasKey = 'openai_chat_personas_v2';
@@ -358,11 +257,12 @@ function OpenAIPage() {
     };
   }, []);
 
-  // ==================== 1. Endpoints & Accounts State ====================
+  // ==================== 1. Endpoints & Gateway Keys State ====================
   const [endpoints, setEndpoints] = useState([]);
   const [endpointsLoading, setEndpointsLoading] = useState(false);
   const [endpointsRefreshing, setEndpointsRefreshing] = useState(false);
-  const [expandedEndpoints, setExpandedEndpoints] = useState({});
+  const [endpointToggleLoading, setEndpointToggleLoading] = useState({});
+  const [selectedEndpointId, setSelectedEndpointId] = useState('');
   const [endpointFormOpen, setEndpointFormOpen] = useState(false);
   const [editingEndpoint, setEditingEndpoint] = useState(null);
   const [endpointForm, setEndpointForm] = useState({
@@ -373,13 +273,17 @@ function OpenAIPage() {
   });
   const [endpointFormError, setEndpointFormError] = useState('');
   const [endpointSaving, setEndpointSaving] = useState(false);
+  const [gatewayKeys, setGatewayKeys] = useState([]);
+  const [gatewayKeysLoading, setGatewayKeysLoading] = useState(false);
+  const [gatewayKeyToggleLoading, setGatewayKeyToggleLoading] = useState({});
+  const [gatewayKeyDialogOpen, setGatewayKeyDialogOpen] = useState(false);
+  const [editingGatewayKey, setEditingGatewayKey] = useState(null);
+  const [gatewayKeyForm, setGatewayKeyForm] = useState({ name: '', expiresAt: '' });
+  const [gatewayKeyFormError, setGatewayKeyFormError] = useState('');
+  const [gatewayKeySaving, setGatewayKeySaving] = useState(false);
+  const [newGatewayKey, setNewGatewayKey] = useState(null);
 
   // Batch adding endpoints
-  const [batchText, setBatchText] = useState('');
-  const [batchError, setBatchError] = useState('');
-  const [batchSuccess, setBatchSuccess] = useState('');
-  const [batchAdding, setBatchAdding] = useState(false);
-
   // Load Endpoints
   const loadEndpoints = useCallback(
     async (silent = false) => {
@@ -391,13 +295,6 @@ function OpenAIPage() {
         const data = await response.json();
         if (Array.isArray(data)) {
           setEndpoints(data.map(ep => ({ ...ep, showKey: false, refreshing: false })));
-          localStorage.setItem(
-            'openai_endpoints_cache',
-            JSON.stringify({
-              endpoints: data,
-              timestamp: Date.now(),
-            })
-          );
         }
       } catch (error) {
         console.error('Failed to load endpoints:', error);
@@ -410,25 +307,44 @@ function OpenAIPage() {
   );
 
   useEffect(() => {
-    // Try cache first
-    try {
-      const cached = localStorage.getItem('openai_endpoints_cache');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (parsed && Array.isArray(parsed.endpoints)) {
-          setEndpoints(parsed.endpoints.map(ep => ({ ...ep, showKey: false, refreshing: false })));
-        }
-      }
-    } catch (e) {
-      console.warn('Load endpoints cache failed:', e);
-    }
-    loadEndpoints(true);
+    localStorage.removeItem('openai_endpoints_cache');
+    loadEndpoints();
   }, [loadEndpoints]);
 
-  // Expand endpoint models grid
-  const toggleEndpointExpand = id => {
-    setExpandedEndpoints(prev => ({ ...prev, [id]: !prev[id] }));
-  };
+  const loadGatewayKeys = useCallback(async () => {
+    setGatewayKeysLoading(true);
+    try {
+      const response = await fetch('/api/openai/keys', { headers: getAuthHeaders() });
+      const data = await response.json().catch(() => []);
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      setGatewayKeys(Array.isArray(data) ? data : []);
+    } catch (error) {
+      toast.error('加载网关密钥失败: ' + error.message);
+    } finally {
+      setGatewayKeysLoading(false);
+    }
+  }, [getAuthHeaders]);
+
+  useEffect(() => {
+    if (activeTab === 'keys') {
+      loadGatewayKeys();
+    }
+  }, [activeTab, loadGatewayKeys]);
+
+  const selectedEndpoint = useMemo(
+    () => endpoints.find(endpoint => endpoint.id === selectedEndpointId) || endpoints[0] || null,
+    [endpoints, selectedEndpointId]
+  );
+
+  useEffect(() => {
+    if (endpoints.length === 0) {
+      setSelectedEndpointId('');
+      return;
+    }
+    if (!endpoints.some(endpoint => endpoint.id === selectedEndpointId)) {
+      setSelectedEndpointId(endpoints[0].id);
+    }
+  }, [endpoints, selectedEndpointId]);
 
   // Endpoint Verification & Model Refresh
   const verifyEndpoint = async endpoint => {
@@ -496,33 +412,29 @@ function OpenAIPage() {
   };
 
   const toggleEndpointEnabled = async endpoint => {
+    if (endpointToggleLoading[endpoint.id]) return;
     const updatedEnabled = !endpoint.enabled;
-    // Optimistic UI update
-    setEndpoints(prev =>
-      prev.map(e => (e.id === endpoint.id ? { ...e, enabled: updatedEnabled } : e))
-    );
+    setEndpointToggleLoading(prev => ({ ...prev, [endpoint.id]: true }));
     try {
       const response = await fetch(`/api/openai/endpoints/${endpoint.id}/toggle`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({ enabled: updatedEnabled }),
       });
-      const data = await response.json();
-      if (!data.success) {
-        toast.error('操作失败: ' + (data.error || '未知错误'));
-        // Rollback
-        setEndpoints(prev =>
-          prev.map(e => (e.id === endpoint.id ? { ...e, enabled: !updatedEnabled } : e))
-        );
-      } else {
-        toast.success(updatedEnabled ? '端点已启用' : '端点已禁用');
-        loadAllModels(true);
-      }
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) throw new Error(data.error || '未知错误');
+
+      const confirmedEnabled = Boolean(data.enabled);
+      setEndpoints(prev =>
+        prev.map(e => (e.id === endpoint.id ? { ...e, enabled: confirmedEnabled } : e))
+      );
+      const endpointName = endpoint.name || '端点';
+      toast.success(confirmedEnabled ? `${endpointName} 已启用` : `${endpointName} 已停用`);
+      await loadAllModels(true);
     } catch (error) {
       toast.error('操作失败: ' + error.message);
-      setEndpoints(prev =>
-        prev.map(e => (e.id === endpoint.id ? { ...e, enabled: !updatedEnabled } : e))
-      );
+    } finally {
+      setEndpointToggleLoading(prev => ({ ...prev, [endpoint.id]: false }));
     }
   };
 
@@ -599,121 +511,6 @@ function OpenAIPage() {
     }
   };
 
-  const batchAddEndpoints = async () => {
-    setBatchError('');
-    setBatchSuccess('');
-    if (!batchText.trim()) {
-      setBatchError('请输入端点信息');
-      return;
-    }
-    setBatchAdding(true);
-    try {
-      let payload = { text: batchText };
-      try {
-        const parsed = JSON.parse(batchText);
-        if (Array.isArray(parsed)) {
-          payload = { endpoints: parsed };
-        }
-      } catch (e) {
-        // Fallback to text format
-      }
-
-      const response = await fetch('/api/openai/batch-add', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify(payload),
-      });
-      const data = await response.json();
-      if (data.success) {
-        setBatchSuccess(`成功添加 ${data.added || 0} 个端点`);
-        setBatchText('');
-        await loadEndpoints(true);
-        loadAllModels(true);
-      } else {
-        setBatchError(data.error || '添加失败');
-      }
-    } catch (error) {
-      setBatchError('添加失败: ' + error.message);
-    } finally {
-      setBatchAdding(false);
-    }
-  };
-
-  const exportEndpoints = () => {
-    if (endpoints.length === 0) {
-      toast.warning('没有可导出的端点');
-      return;
-    }
-    try {
-      const exportData = {
-        version: '1.0',
-        exportTime: new Date().toISOString(),
-        endpoints: endpoints.map(ep => ({
-          name: ep.name,
-          baseUrl: ep.baseUrl,
-          apiKey: ep.apiKey,
-          notes: ep.notes,
-        })),
-      };
-      const dataStr = JSON.stringify(exportData, null, 2);
-      const dataBlob = new Blob([dataStr], { type: 'application/json' });
-      const url = URL.createObjectURL(dataBlob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `openai-endpoints-${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      toast.success('端点导出成功');
-    } catch (error) {
-      toast.error('导出失败: ' + error.message);
-    }
-  };
-
-  const importEndpoints = async () => {
-    if (!(await dialog.confirm('确认导入？导入端点将添加到现有列表中。'))) {
-      return;
-    }
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    input.onchange = async event => {
-      const file = event.target.files[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = async e => {
-        try {
-          const importedData = JSON.parse(e.target.result);
-          if (!importedData.endpoints) {
-            toast.error('无效的备份文件格式');
-            return;
-          }
-          const response = await fetch('/api/openai/import', {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ endpoints: importedData.endpoints }),
-          });
-          const data = await response.json();
-          if (data.success) {
-            let msg = `成功导入 ${data.imported || 0} 个端点`;
-            if (data.skipped > 0) msg += `，跳过 ${data.skipped} 个重复项`;
-            toast.success(msg);
-            await loadEndpoints(true);
-            loadAllModels(true);
-          } else {
-            toast.error('导入失败: ' + (data.error || '未知错误'));
-          }
-        } catch (error) {
-          toast.error('导入失败: ' + error.message);
-        }
-      };
-      reader.readAsText(file);
-    };
-    input.click();
-  };
-
   // ==================== 2. Health Checking ====================
   const [openaiModelHealth, setOpenaiModelHealth] = useState(() => {
     try {
@@ -724,125 +521,395 @@ function OpenAIPage() {
     }
   });
 
-  const saveModelHealth = health => {
-    setOpenaiModelHealth(health);
-    localStorage.setItem('openai_model_health_cache', JSON.stringify(health));
-  };
+  useEffect(() => {
+    localStorage.setItem('openai_model_health_cache', JSON.stringify(openaiModelHealth));
+  }, [openaiModelHealth]);
 
   const [modelHealthBatchLoading, setModelHealthBatchLoading] = useState(false);
+  const [healthCheckProgress, setHealthCheckProgress] = useState(() => createHealthCheckProgress());
   const [healthCheckModal, setHealthCheckModal] = useState(false);
   const [healthCheckForm, setHealthCheckForm] = useState({
-    useKey: 'single', // 'single' | 'all'
-    concurrency: false,
-    timeout: 10,
+    timeout: 30,
+  });
+  const modelHealthAbortControllersRef = useRef(new Map());
+
+  const markModelsChecking = targets => {
+    const checkedAt = Date.now();
+    setOpenaiModelHealth(prev => {
+      const next = { ...prev };
+      targets.forEach(({ endpointId, modelId }) => {
+        next[modelHealthKey(endpointId, modelId)] = {
+          status: 'checking',
+          loading: true,
+          latency: null,
+          checkedAt,
+        };
+      });
+      return next;
+    });
+  };
+
+  const openAddGatewayKeyModal = () => {
+    setEditingGatewayKey(null);
+    setGatewayKeyForm({ name: '', expiresAt: '' });
+    setGatewayKeyFormError('');
+    setGatewayKeyDialogOpen(true);
+  };
+
+  const openEditGatewayKeyModal = key => {
+    setEditingGatewayKey(key);
+    setGatewayKeyForm({
+      name: key.name || '',
+      expiresAt: key.expiresAt ? toLocalDateTimeValue(new Date(key.expiresAt)) : '',
+    });
+    setGatewayKeyFormError('');
+    setGatewayKeyDialogOpen(true);
+  };
+
+  const normalizeGatewayKeyForm = () => ({
+    name: gatewayKeyForm.name.trim(),
+    expiresAt: gatewayKeyForm.expiresAt ? new Date(gatewayKeyForm.expiresAt).toISOString() : '',
   });
 
-  const testModelHealth = async (model, targetEndpointId = null) => {
-    const modelId = model.id;
-    saveModelHealth(prev => ({
-      ...prev,
-      [modelId]: { status: 'checking', loading: true, latency: null, checkedAt: Date.now() },
-    }));
+  const updateGatewayKeyExpiryDate = date => {
+    if (!date) return;
+    setGatewayKeyForm(current => {
+      const existing = parseLocalDateTime(current.expiresAt);
+      const next = new Date(date);
+      next.setHours(existing?.getHours() ?? 23, existing?.getMinutes() ?? 59, 0, 0);
+      return { ...current, expiresAt: toLocalDateTimeValue(next) };
+    });
+  };
 
+  const updateGatewayKeyExpiryTime = (part, value) => {
+    setGatewayKeyForm(current => {
+      const next = parseLocalDateTime(current.expiresAt);
+      if (!next) return current;
+      if (part === 'hour') next.setHours(Number(value));
+      if (part === 'minute') next.setMinutes(Number(value));
+      return { ...current, expiresAt: toLocalDateTimeValue(next) };
+    });
+  };
+
+  const saveGatewayKey = async () => {
+    const payload = normalizeGatewayKeyForm();
+    if (!payload.name) {
+      setGatewayKeyFormError('请填写密钥名称');
+      return;
+    }
+    setGatewayKeySaving(true);
+    setGatewayKeyFormError('');
     try {
-      const headers = { ...getAuthHeaders(), 'Content-Type': 'application/json' };
-      if (targetEndpointId) {
-        headers['x-endpoint-id'] = targetEndpointId;
+      const response = await fetch(
+        editingGatewayKey ? `/api/openai/keys/${editingGatewayKey.id}` : '/api/openai/keys',
+        {
+          method: editingGatewayKey ? 'PUT' : 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify(payload),
+        }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) throw new Error(data.error || '保存失败');
+      setGatewayKeyDialogOpen(false);
+      if (data.apiKey) {
+        setNewGatewayKey({ name: payload.name, apiKey: data.apiKey });
       }
-      const startTime = Date.now();
-      const response = await fetch('/api/openai/v1/chat/completions', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          model: modelId,
-          messages: [{ role: 'user', content: 'ping' }],
-          max_tokens: 5,
-        }),
-      });
+      toast.success(editingGatewayKey ? '密钥已更新' : '密钥已创建');
+      await loadGatewayKeys();
+    } catch (error) {
+      setGatewayKeyFormError(error.message);
+    } finally {
+      setGatewayKeySaving(false);
+    }
+  };
 
-      const latency = Date.now() - startTime;
-      if (response.ok) {
-        saveModelHealth(prev => ({
-          ...prev,
-          [modelId]: { status: 'healthy', loading: false, latency, checkedAt: Date.now() },
-        }));
-      } else {
-        saveModelHealth(prev => ({
-          ...prev,
-          [modelId]: {
-            status: 'error',
-            loading: false,
-            latency: null,
-            checkedAt: Date.now(),
-            error: `HTTP ${response.status}`,
-          },
-        }));
-      }
-    } catch (e) {
-      saveModelHealth(prev => ({
+  const toggleGatewayKey = async key => {
+    if (gatewayKeyToggleLoading[key.id]) return;
+    const nextEnabled = !key.enabled;
+    setGatewayKeyToggleLoading(prev => ({ ...prev, [key.id]: true }));
+    try {
+      const response = await fetch(`/api/openai/keys/${key.id}/toggle`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ enabled: nextEnabled }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) throw new Error(data.error || '更新失败');
+      const confirmedEnabled = Boolean(data.enabled);
+      setGatewayKeys(prev =>
+        prev.map(item => (item.id === key.id ? { ...item, enabled: confirmedEnabled } : item))
+      );
+      toast.success(confirmedEnabled ? `${key.name} 已启用` : `${key.name} 已停用`);
+    } catch (error) {
+      toast.error('更新密钥状态失败: ' + error.message);
+    } finally {
+      setGatewayKeyToggleLoading(prev => ({ ...prev, [key.id]: false }));
+    }
+  };
+
+  const rotateGatewayKey = async key => {
+    if (!(await dialog.confirm(`确认轮换 "${key.name}"？旧密钥会立即失效。`))) return;
+    try {
+      const response = await fetch(`/api/openai/keys/${key.id}/rotate`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) throw new Error(data.error || '轮换失败');
+      setNewGatewayKey({ name: key.name, apiKey: data.apiKey });
+      toast.success('密钥已轮换');
+      await loadGatewayKeys();
+    } catch (error) {
+      toast.error('轮换密钥失败: ' + error.message);
+    }
+  };
+
+  const deleteGatewayKey = async key => {
+    if (!(await dialog.confirm(`确定删除网关密钥 "${key.name}" 吗？`))) return;
+    try {
+      const response = await fetch(`/api/openai/keys/${key.id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) throw new Error(data.error || '删除失败');
+      toast.success('密钥已删除');
+      await loadGatewayKeys();
+    } catch (error) {
+      toast.error('删除密钥失败: ' + error.message);
+    }
+  };
+
+  const applyEndpointHealthResults = (endpointId, modelIds, records, fallbackError) => {
+    const recordsByModel = new Map(
+      (Array.isArray(records) ? records : []).map(record => [
+        String(record?.model || '').trim(),
+        record,
+      ])
+    );
+    const results = modelIds.map(modelId =>
+      normalizeModelHealthRecord(recordsByModel.get(modelId), fallbackError)
+    );
+
+    setOpenaiModelHealth(prev => {
+      const next = { ...prev };
+      modelIds.forEach((modelId, index) => {
+        next[modelHealthKey(endpointId, modelId)] = results[index];
+      });
+      return next;
+    });
+
+    return results;
+  };
+
+  const testModelHealth = async (model, targetEndpointId) => {
+    const modelId = String(model?.id || '').trim();
+    if (!modelId || !targetEndpointId) return null;
+    const healthKey = modelHealthKey(targetEndpointId, modelId);
+    const activeController = modelHealthAbortControllersRef.current.get(healthKey);
+    if (activeController) {
+      activeController.abort();
+      modelHealthAbortControllersRef.current.delete(healthKey);
+      setOpenaiModelHealth(prev => ({
         ...prev,
-        [modelId]: {
-          status: 'error',
+        [healthKey]: {
+          status: 'cancelled',
           loading: false,
           latency: null,
           checkedAt: Date.now(),
-          error: e.message,
+          error: '检测已停止',
         },
       }));
+      toast.warning(`${modelId} 检测已停止`);
+      return null;
+    }
+
+    const controller = new AbortController();
+    modelHealthAbortControllersRef.current.set(healthKey, controller);
+
+    markModelsChecking([{ endpointId: targetEndpointId, modelId }]);
+
+    try {
+      const response = await fetch(
+        `/api/openai/endpoints/${encodeURIComponent(targetEndpointId)}/health-check`,
+        {
+          method: 'POST',
+          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            model: modelId,
+            timeout: Math.max(1, Number(healthCheckForm.timeout) || 30) * 1000,
+          }),
+        }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || `HTTP ${response.status}`);
+      }
+
+      const result = applyEndpointHealthResults(targetEndpointId, [modelId], [data])[0];
+      if (result.status === 'healthy') {
+        toast.success(`${modelId} 可用，延迟 ${result.latency ?? '-'} ms`);
+      } else if (result.status === 'degraded') {
+        toast.warning(`${modelId} 响应较慢，延迟 ${result.latency ?? '-'} ms`);
+      } else {
+        toast.error(`${modelId} 检测失败: ${result.error || '未知错误'}`);
+      }
+      return result;
+    } catch (e) {
+      if (controller.signal.aborted) return null;
+      const result = applyEndpointHealthResults(targetEndpointId, [modelId], [], e.message)[0];
+      toast.error(`${modelId} 检测失败: ${result.error || e.message}`);
+      return result;
+    } finally {
+      if (modelHealthAbortControllersRef.current.get(healthKey) === controller) {
+        modelHealthAbortControllersRef.current.delete(healthKey);
+      }
+    }
+  };
+
+  const runEndpointHealthCheck = async (endpoint, trackProgress = false) => {
+    const modelIds = endpointModelIds(endpoint);
+    let results;
+
+    try {
+      const response = await fetch(
+        `/api/openai/endpoints/${encodeURIComponent(endpoint.id)}/health-check-all`,
+        {
+          method: 'POST',
+          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            timeout: Math.max(1, Number(healthCheckForm.timeout) || 30) * 1000,
+            concurrency: Math.max(1, modelIds.length),
+          }),
+        }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || `HTTP ${response.status}`);
+      }
+      results = applyEndpointHealthResults(
+        endpoint.id,
+        modelIds,
+        data.summary?.results,
+        '检测未返回结果'
+      );
+    } catch (error) {
+      results = applyEndpointHealthResults(endpoint.id, modelIds, [], error.message);
+    }
+
+    if (trackProgress) {
+      const counts = countModelHealthResults(results);
+      setHealthCheckProgress(prev => ({
+        ...prev,
+        completed: Math.min(prev.total, prev.completed + results.length),
+        healthy: prev.healthy + counts.healthy,
+        degraded: prev.degraded + counts.degraded,
+        failed: prev.failed + counts.failed,
+      }));
+    }
+
+    return results;
+  };
+
+  const runAllEndpointHealthChecks = async endpointTargets => {
+    try {
+      const response = await fetch('/api/openai/health-check-all', {
+        method: 'POST',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          timeout: Math.max(1, Number(healthCheckForm.timeout) || 30) * 1000,
+          concurrency: 12,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || `HTTP ${response.status}`);
+      }
+      return endpointTargets.flatMap(endpoint => {
+        const endpointResult = (data.endpoints || []).find(item => item.endpointId === endpoint.id);
+        const modelIds = endpointModelIds(endpoint);
+        return applyEndpointHealthResults(
+          endpoint.id,
+          modelIds,
+          endpointResult?.results,
+          endpointResult?.skipped ? '该端点没有可检测模型' : '检测未返回结果'
+        );
+      });
+    } catch (error) {
+      return endpointTargets.flatMap(endpoint =>
+        applyEndpointHealthResults(endpoint.id, endpointModelIds(endpoint), [], error.message)
+      );
     }
   };
 
   const startBatchHealthCheck = async () => {
-    setHealthCheckModal(false);
-    setModelHealthBatchLoading(true);
-    toast.info('已启动后台模型可用性健康检测，请稍候...');
-
-    // Collect all unique models
-    const allModelsMap = new Map();
-    endpoints.forEach(ep => {
-      if (ep.enabled && ep.models) {
-        ep.models.forEach(m => {
-          const id = typeof m === 'string' ? m : m.id;
-          if (id) allModelsMap.set(id, ep.id);
-        });
-      }
-    });
-
-    const modelsToCheck = Array.from(allModelsMap.entries()).map(([id, epId]) => ({ id, epId }));
-    if (modelsToCheck.length === 0) {
+    const endpointTargets = endpoints.filter(
+      endpoint => endpoint.enabled && endpointModelIds(endpoint).length > 0
+    );
+    const targets = modelHealthTargets(endpointTargets);
+    if (targets.length === 0) {
       toast.warning('没有找到任何启用的端点或模型');
-      setModelHealthBatchLoading(false);
       return;
     }
 
-    if (healthCheckForm.concurrency) {
-      // Parallel execution
-      await Promise.all(modelsToCheck.map(m => testModelHealth(m, m.epId)));
-    } else {
-      // Sequential execution
-      for (const m of modelsToCheck) {
-        await testModelHealth(m, m.epId);
-      }
-    }
+    setHealthCheckModal(false);
+    setModelHealthBatchLoading(true);
+    setHealthCheckProgress(createHealthCheckProgress(targets.length, true));
+    setExpandedEndpoints(prev => ({
+      ...prev,
+      ...Object.fromEntries(endpointTargets.map(endpoint => [endpoint.id, true])),
+    }));
+    markModelsChecking(targets);
+    toast.info(`正在同时检测 ${targets.length} 个模型...`);
 
-    toast.success('所有模型可用性健康检测完成');
-    setModelHealthBatchLoading(false);
+    try {
+      const results = await runAllEndpointHealthChecks(endpointTargets);
+      const counts = countModelHealthResults(results);
+      setHealthCheckProgress({
+        running: false,
+        total: targets.length,
+        completed: results.length,
+        ...counts,
+      });
+
+      const message = `检测完成：可用 ${counts.healthy}，较慢 ${counts.degraded}，失败 ${counts.failed}`;
+      if (counts.failed > 0) toast.warning(message);
+      else toast.success(message);
+    } finally {
+      setModelHealthBatchLoading(false);
+    }
   };
 
   const openHealthCheckForEndpoint = async endpointId => {
     const ep = endpoints.find(e => e.id === endpointId);
-    if (!ep || !ep.models || ep.models.length === 0) {
+    const modelIds = endpointModelIds(ep);
+    if (!ep || modelIds.length === 0) {
       toast.warning('该端点无可用模型');
       return;
     }
+
     setModelHealthBatchLoading(true);
-    toast.info(`正在检测 ${ep.name || '端点'} 的所有模型...`);
-    for (const m of ep.models) {
-      const modelId = typeof m === 'string' ? m : m.id;
-      await testModelHealth({ id: modelId }, ep.id);
+    setExpandedEndpoints(prev => ({ ...prev, [ep.id]: true }));
+    setHealthCheckProgress(createHealthCheckProgress(modelIds.length, true));
+    markModelsChecking(modelIds.map(modelId => ({ endpointId: ep.id, modelId })));
+    toast.info(`正在同时检测 ${ep.name || '端点'} 的 ${modelIds.length} 个模型...`);
+
+    try {
+      const results = await runEndpointHealthCheck(ep, true);
+      const counts = countModelHealthResults(results);
+      setHealthCheckProgress({
+        running: false,
+        total: modelIds.length,
+        completed: results.length,
+        ...counts,
+      });
+      const message = `${ep.name || '端点'}：可用 ${counts.healthy}，较慢 ${counts.degraded}，失败 ${counts.failed}`;
+      if (counts.failed > 0) toast.warning(message);
+      else toast.success(message);
+    } finally {
+      setModelHealthBatchLoading(false);
     }
-    toast.success(`${ep.name || '端点'} 模型检测完成`);
-    setModelHealthBatchLoading(false);
   };
 
   // ==================== 3. Models List & Pinning ====================
@@ -2109,9 +2176,9 @@ function OpenAIPage() {
   };
 
   return (
-    <PageStack>
+    <PageStack className="h-[calc(100dvh-5.125rem)] min-h-0 max-w-full flex-none sm:h-[calc(100dvh-5.625rem)] lg:h-[calc(100dvh-5.875rem)]">
       {/* Tab Navigation */}
-      <PageToolbar className="select-none">
+      <PageToolbar className="shrink-0 select-none">
         <Tabs
           {...MODULE_TABS_PROPS}
           value={activeTab}
@@ -2127,11 +2194,11 @@ function OpenAIPage() {
               ),
             },
             {
-              value: 'accounts',
+              value: 'keys',
               label: (
                 <span className="inline-flex items-center gap-1.5">
-                  <Users className="w-3.5 h-3.5" />
-                  账号管理
+                  <Key className="w-3.5 h-3.5" />
+                  API 密钥
                 </span>
               ),
             },
@@ -2150,443 +2217,641 @@ function OpenAIPage() {
 
       {/* ==================== 1. API 端点 Tab ==================== */}
       {activeTab === 'endpoints' && (
-        <div className="space-y-3">
-          <SectionHeader
-            title="API 端点"
-            description={
-              modelHealthBatchLoading
-                ? '正在批量检测模型可用性...'
-                : `共 ${endpoints.length} 个端点`
-            }
-            action={
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  onClick={() => setHealthCheckModal(true)}
-                  className="flex items-center gap-1.5"
-                >
-                  <Activity className={iconButtonIconClass} />
-                  <span>健康检测</span>
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={refreshAllEndpoints}
-                  disabled={endpointsRefreshing}
-                  className="flex items-center gap-1.5"
-                >
-                  <RefreshCw
-                    className={cx(iconButtonIconClass, endpointsRefreshing && 'animate-spin')}
-                  />
-                  <span>刷新列表</span>
-                </Button>
-              </div>
-            }
-          />
-
-          <div className="space-y-2.5">
-            {endpointsLoading ? (
-              <div className="space-y-2.5">
-                {[...Array(2)].map((_, i) => (
-                  <AppCard key={i} padding="md" className="space-y-2.5">
-                    <div className="flex items-center gap-3">
-                      <SkeletonLine className="w-10 h-10 rounded-lg" />
-                      <div className="flex-1 space-y-1.5">
-                        <SkeletonLine className="w-1/4 h-3.5" />
-                        <SkeletonLine className="w-1/2 h-2.5" />
-                      </div>
-                    </div>
-                  </AppCard>
-                ))}
-              </div>
-            ) : endpoints.length === 0 ? (
-              <EmptyState
-                icon={Bot}
-                title="暂无 API 端点"
-                description="请先在账号管理中添加您的 OpenAI 兼容 API 端点"
-              />
-            ) : (
-              endpoints.map(endpoint => {
-                const isExpanded = !!expandedEndpoints[endpoint.id];
-                const validStatus = endpoint.status === 'valid';
-                const invalidStatus = endpoint.status === 'invalid';
-
-                return (
-                  <AppCard key={endpoint.id} padding="none" className="overflow-hidden">
-                    {/* Header */}
+        <GatewaySection
+          className="min-h-0 flex-1"
+          title="API 端点"
+          description={
+            modelHealthBatchLoading ? '正在批量检测模型可用性...' : `共 ${endpoints.length} 个端点`
+          }
+          icon={<Server className="h-4 w-4 text-kumo-brand" />}
+          actions={
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                onClick={() => setHealthCheckModal(true)}
+                disabled={modelHealthBatchLoading}
+                className="flex items-center gap-1.5"
+              >
+                <Activity
+                  className={cx(iconButtonIconClass, modelHealthBatchLoading && 'animate-pulse')}
+                />
+                <span>健康检测</span>
+              </Button>
+              <Button
+                size="sm"
+                onClick={refreshAllEndpoints}
+                disabled={endpointsRefreshing}
+                className="flex items-center gap-1.5"
+              >
+                <RefreshCw
+                  className={cx(iconButtonIconClass, endpointsRefreshing && 'animate-spin')}
+                />
+                <span>刷新列表</span>
+              </Button>
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={openAddEndpointModal}
+                className="flex items-center gap-1.5"
+              >
+                <Plus className={iconButtonIconClass} />
+                <span>新增端点</span>
+              </Button>
+            </div>
+          }
+          bodyClassName="flex min-h-0 flex-1 flex-col gap-2.5"
+        >
+          {healthCheckProgress.total > 0 && (
+            <Banner
+              size="sm"
+              variant={
+                healthCheckProgress.failed > 0
+                  ? 'alert'
+                  : healthCheckProgress.running
+                    ? 'default'
+                    : 'secondary'
+              }
+              icon={
+                <Activity
+                  className={cx('h-4 w-4', healthCheckProgress.running && 'animate-pulse')}
+                />
+              }
+              title={
+                healthCheckProgress.running
+                  ? `检测中 ${healthCheckProgress.completed}/${healthCheckProgress.total}`
+                  : '最近一次检测'
+              }
+              description={
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                    <span>可用 {healthCheckProgress.healthy}</span>
+                    <span>较慢 {healthCheckProgress.degraded}</span>
+                    <span>失败 {healthCheckProgress.failed}</span>
+                  </div>
+                  <div
+                    className="h-1.5 overflow-hidden rounded-full bg-kumo-line"
+                    aria-hidden="true"
+                  >
                     <div
-                      onClick={() => toggleEndpointExpand(endpoint.id)}
-                      className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-kumo-recessed/10 transition-colors"
-                    >
-                      <div className="flex min-w-0 items-center gap-3">
-                        <ChevronDown
-                          className={cx(
-                            iconButtonIconClass,
-                            'text-kumo-subtle transition-transform duration-200',
-                            isExpanded && 'transform rotate-180'
-                          )}
-                        />
-                        <div className="w-10 h-10 rounded-lg flex items-center justify-center font-bold text-kumo-inverse text-sm bg-kumo-brand">
-                          {(endpoint.name || 'A').charAt(0).toUpperCase()}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <InlineStatusPill
-                              tone={validStatus ? 'success' : invalidStatus ? 'danger' : 'neutral'}
-                            >
-                              {validStatus ? '有效' : invalidStatus ? '无效' : '未验证'}
-                            </InlineStatusPill>
-                            <span className="min-w-0 truncate font-semibold text-kumo-strong text-xs">
-                              {endpoint.name || '未命名端点'}
-                            </span>
-                          </div>
-                          <span className="block mt-0.5 truncate text-[10px] text-kumo-subtle font-mono">
-                            {maskAddress(endpoint.baseUrl)}
-                          </span>
-                        </div>
-                      </div>
+                      className={cx(
+                        'h-full rounded-full transition-all duration-300',
+                        healthCheckProgress.failed > 0 ? 'bg-kumo-warning' : 'bg-kumo-success'
+                      )}
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          (healthCheckProgress.completed / Math.max(1, healthCheckProgress.total)) *
+                            100
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              }
+            />
+          )}
+          <LayerCard className="flex flex-col gap-2 p-2 shadow-none sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-center gap-2">
+              <Server className="h-4 w-4 shrink-0 text-kumo-brand" />
+              <span className="shrink-0 text-xs font-medium text-kumo-subtle">OpenAI 兼容入口</span>
+              <ClipboardText
+                size="sm"
+                text={`${gatewayOrigin}/v1`}
+                className="min-w-0 max-w-md flex-1 font-mono text-[0.9em]"
+                tooltip={{ text: '复制 API Base URL', copiedText: '地址已复制' }}
+                labels={{ copyAction: '复制 API Base URL' }}
+              />
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <InlineStatusPill tone="neutral">
+                {endpoints.filter(endpoint => endpoint.enabled).length} 个启用端点
+              </InlineStatusPill>
+              <InlineStatusPill tone="brand">
+                {
+                  Array.from(
+                    new Set(
+                      endpoints
+                        .filter(endpoint => endpoint.enabled)
+                        .flatMap(endpoint => endpoint.models || [])
+                        .map(model => (typeof model === 'string' ? model : model.id))
+                        .filter(Boolean)
+                    )
+                  ).length
+                }{' '}
+                个模型
+              </InlineStatusPill>
+            </div>
+          </LayerCard>
+          {endpointsLoading ? (
+            <div className="space-y-2.5">
+              {[...Array(2)].map((_, i) => (
+                <AppCard key={i} padding="md" className="space-y-2.5">
+                  <div className="flex items-center gap-3">
+                    <SkeletonLine className="w-10 h-10 rounded-lg" />
+                    <div className="flex-1 space-y-1.5">
+                      <SkeletonLine className="w-1/4 h-3.5" />
+                      <SkeletonLine className="w-1/2 h-2.5" />
+                    </div>
+                  </div>
+                </AppCard>
+              ))}
+            </div>
+          ) : endpoints.length === 0 ? (
+            <EmptyState
+              icon={Bot}
+              title="暂无 API 端点"
+              description="点击新增端点，配置 OpenAI 兼容 API 地址与上游密钥"
+            />
+          ) : (
+            (() => {
+              const endpoint = selectedEndpoint;
+              const validStatus = endpoint.status === 'valid';
+              const invalidStatus = endpoint.status === 'invalid';
 
-                      <div className="flex items-center gap-2">
-                        <Button
-                          shape="square"
-                          size="sm"
-                          variant="ghost"
-                          aria-label="模型健康检测"
-                          onClick={e => {
-                            e.stopPropagation();
-                            openHealthCheckForEndpoint(endpoint.id);
-                          }}
-                          className="text-kumo-subtle hover:text-kumo-strong"
-                          title="模型健康检测"
+              return (
+                <div className="grid min-h-0 min-w-0 flex-1 gap-3 lg:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]">
+                  <section className="flex min-h-0 min-w-0 flex-col gap-2">
+                    <div className="flex min-h-8 items-center justify-between gap-2 px-1">
+                      <div className="flex items-center gap-2 text-xs text-kumo-subtle">
+                        <Server className="h-3.5 w-3.5" />
+                        <span className="font-medium text-kumo-strong">上游端点</span>
+                      </div>
+                      <span className="text-xs text-kumo-subtle">{endpoints.length} 个</span>
+                    </div>
+                    <LayerCard className="min-h-0 flex-1 overflow-hidden p-0 shadow-none">
+                      <div className="h-full overflow-auto scrollbar-thin">
+                        <Table layout="fixed" className="w-full text-xs">
+                          <colgroup>
+                            <col />
+                            <col style={{ width: 64 }} />
+                            <col style={{ width: 58 }} />
+                          </colgroup>
+                          <Table.Header sticky variant="compact">
+                            <Table.Row className="h-8">
+                              <Table.Head className="!px-2.5 !py-1.5">端点</Table.Head>
+                              <Table.Head className="!px-2 !py-1.5 text-center">状态</Table.Head>
+                              <Table.Head className="!px-2 !py-1.5 text-right">模型</Table.Head>
+                            </Table.Row>
+                          </Table.Header>
+                          <Table.Body>
+                            {endpoints.map(item => (
+                              <Table.Row
+                                key={item.id}
+                                variant={item.id === endpoint.id ? 'selected' : 'default'}
+                                className="h-11 cursor-pointer"
+                                onClick={() => setSelectedEndpointId(item.id)}
+                              >
+                                <Table.Cell className="!px-2.5 !py-1.5">
+                                  <div className="min-w-0">
+                                    <div
+                                      className="truncate font-semibold text-kumo-strong"
+                                      title={item.name}
+                                    >
+                                      {item.name || '未命名端点'}
+                                    </div>
+                                    <div
+                                      className="truncate font-mono text-[10px] text-kumo-subtle"
+                                      title={item.baseUrl}
+                                    >
+                                      {item.baseUrl}
+                                    </div>
+                                  </div>
+                                </Table.Cell>
+                                <Table.Cell className="!px-2 !py-1.5 text-center">
+                                  <InlineStatusPill
+                                    tone={
+                                      item.enabled && item.status === 'valid'
+                                        ? 'success'
+                                        : item.status === 'invalid'
+                                          ? 'danger'
+                                          : 'neutral'
+                                    }
+                                  >
+                                    {item.enabled
+                                      ? item.status === 'valid'
+                                        ? '可用'
+                                        : '待检'
+                                      : '停用'}
+                                  </InlineStatusPill>
+                                </Table.Cell>
+                                <Table.Cell className="!px-2 !py-1.5 text-right font-mono text-kumo-strong">
+                                  {item.models?.length || 0}
+                                </Table.Cell>
+                              </Table.Row>
+                            ))}
+                          </Table.Body>
+                        </Table>
+                      </div>
+                    </LayerCard>
+                  </section>
+
+                  <section className="flex min-h-0 min-w-0 flex-col gap-2">
+                    <div className="flex min-h-8 flex-wrap items-center justify-between gap-2 px-1">
+                      <div className="flex min-w-0 items-center gap-2 text-xs">
+                        <span className="truncate font-medium text-kumo-strong">
+                          {endpoint.name || '未命名端点'}
+                        </span>
+                        <InlineStatusPill
+                          tone={validStatus ? 'success' : invalidStatus ? 'danger' : 'neutral'}
                         >
-                          <Activity className={actionIconClass} />
-                        </Button>
-                        <Button
-                          shape="square"
-                          size="sm"
-                          variant="ghost"
-                          aria-label="刷新模型列表"
-                          onClick={e => {
-                            e.stopPropagation();
-                            refreshEndpointModels(endpoint);
-                          }}
-                          className="text-kumo-subtle hover:text-kumo-strong"
-                          title="刷新模型列表"
-                        >
-                          <RefreshCw
-                            className={cx(actionIconClass, endpoint.refreshing && 'animate-spin')}
-                          />
-                        </Button>
-                        <InlineStatusPill tone="neutral">
-                          模型: {endpoint.models ? endpoint.models.length : 0}
+                          {validStatus ? '有效' : invalidStatus ? '无效' : '待检测'}
                         </InlineStatusPill>
+                        <span
+                          className="hidden truncate font-mono text-[10px] text-kumo-subtle sm:block"
+                          title={endpoint.baseUrl}
+                        >
+                          {endpoint.baseUrl}
+                        </span>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <Switch
+                          size="sm"
+                          label={endpoint.enabled ? '已启用' : '已停用'}
+                          checked={endpoint.enabled}
+                          onCheckedChange={() => toggleEndpointEnabled(endpoint)}
+                          disabled={!!endpointToggleLoading[endpoint.id]}
+                        />
+                        <Button
+                          shape="square"
+                          size="sm"
+                          variant="secondary"
+                          aria-label="模型健康检测"
+                          onClick={() => openHealthCheckForEndpoint(endpoint.id)}
+                          disabled={modelHealthBatchLoading}
+                          title="模型健康检测"
+                          icon={
+                            modelHealthBatchLoading ? (
+                              <Loader size="sm" />
+                            ) : (
+                              <Activity className={actionIconClass} />
+                            )
+                          }
+                        />
+                        <Button
+                          shape="square"
+                          size="sm"
+                          variant="secondary"
+                          aria-label="刷新模型列表"
+                          onClick={() => refreshEndpointModels(endpoint)}
+                          disabled={endpoint.refreshing}
+                          title="刷新模型列表"
+                          icon={
+                            <RefreshCw
+                              className={cx(actionIconClass, endpoint.refreshing && 'animate-spin')}
+                            />
+                          }
+                        />
+                        <Button
+                          shape="square"
+                          size="sm"
+                          variant="secondary"
+                          aria-label="编辑端点"
+                          onClick={() => openEditEndpointModal(endpoint)}
+                          title="编辑端点"
+                        >
+                          <Edit className={actionIconClass} />
+                        </Button>
+                        <Button
+                          shape="square"
+                          size="sm"
+                          variant="secondary-destructive"
+                          aria-label="删除端点"
+                          onClick={() => deleteEndpoint(endpoint)}
+                          title="删除端点"
+                        >
+                          <Trash className={actionIconClass} />
+                        </Button>
                       </div>
                     </div>
 
-                    {/* Expandable Model Tags */}
-                    <AnimatedCollapse open={isExpanded}>
-                      <div className="border-t border-kumo-line bg-kumo-recessed/10 px-4 py-3">
-                        {endpoint.models && endpoint.models.length > 0 ? (
-                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3">
-                            {endpoint.models.map(model => {
-                              const modelId =
-                                typeof model === 'string' ? model.trim() : (model.id || '').trim();
-                              const health = openaiModelHealth[modelId];
+                    <LayerCard className="min-h-0 min-w-0 flex-1 overflow-hidden p-0 shadow-none">
+                      <div className="h-full overflow-auto scrollbar-thin">
+                        <Table layout="fixed" className="min-w-[640px] text-xs">
+                          <colgroup>
+                            <col />
+                            <col style={{ width: 92 }} />
+                            <col style={{ width: 96 }} />
+                            <col style={{ width: 150 }} />
+                            <col style={{ width: 88 }} />
+                          </colgroup>
+                          <Table.Header sticky variant="compact">
+                            <Table.Row className="h-8">
+                              <Table.Head className="!px-2.5 !py-1.5">模型</Table.Head>
+                              <Table.Head className="!px-2 !py-1.5 text-center">健康</Table.Head>
+                              <Table.Head className="!px-2 !py-1.5 text-right">延迟</Table.Head>
+                              <Table.Head className="!px-2 !py-1.5">最近检测</Table.Head>
+                              <Table.Head className="app-table-action !px-2 !py-1.5">操作</Table.Head>
+                            </Table.Row>
+                          </Table.Header>
+                          <Table.Body>
+                            {endpoint.models && endpoint.models.length > 0 ? (
+                              endpoint.models.map(model => {
+                                const modelId =
+                                  typeof model === 'string'
+                                    ? model.trim()
+                                    : (model.id || '').trim();
+                                const healthKey = modelHealthKey(endpoint.id, modelId);
+                                const health = openaiModelHealth[healthKey];
+                                const canStopHealthCheck =
+                                  health?.loading &&
+                                  modelHealthAbortControllersRef.current.has(healthKey);
+                                const healthCheckAnimating =
+                                  modelHealthBatchLoading || health?.loading;
+                                const healthTone = health?.loading
+                                  ? 'info'
+                                  : health?.status === 'healthy'
+                                    ? 'success'
+                                    : health?.status === 'degraded'
+                                      ? 'warning'
+                                      : health?.status === 'error'
+                                        ? 'danger'
+                                        : 'neutral';
+                                const healthLabel = health?.loading
+                                  ? '检测中'
+                                  : health?.status === 'healthy'
+                                    ? '可用'
+                                    : health?.status === 'degraded'
+                                      ? '较慢'
+                                      : health?.status === 'error'
+                                        ? '失败'
+                                        : health?.status === 'cancelled'
+                                          ? '已停止'
+                                          : '未检测';
 
-                              return (
-                                <AppCard
-                                  key={modelId}
-                                  padding="sm"
-                                  className="flex items-center justify-between text-xs group"
+                                return (
+                                  <Table.Row key={modelId} className="h-9">
+                                    <Table.Cell className="!px-2.5 !py-1.5">
+                                      <span
+                                        className="block truncate font-medium text-kumo-strong"
+                                        title={modelId}
+                                      >
+                                        {modelId}
+                                      </span>
+                                    </Table.Cell>
+                                    <Table.Cell className="!px-2 !py-1.5 text-center">
+                                      <InlineStatusPill tone={healthTone}>
+                                        {healthLabel}
+                                      </InlineStatusPill>
+                                    </Table.Cell>
+                                    <Table.Cell className="!px-2 !py-1.5 text-right font-mono text-kumo-strong">
+                                      {health?.latency != null ? `${health.latency} ms` : '-'}
+                                    </Table.Cell>
+                                    <Table.Cell className="!px-2 !py-1.5 text-kumo-subtle">
+                                      {health?.checkedAt ? formatDateTime(health.checkedAt) : '-'}
+                                    </Table.Cell>
+                                    <Table.Cell className="!px-2 !py-1.5 text-center">
+                                      <div className="inline-flex gap-1">
+                                        <Button
+                                          shape="square"
+                                          size="sm"
+                                          variant={
+                                            canStopHealthCheck
+                                              ? 'secondary-destructive'
+                                              : 'secondary'
+                                          }
+                                          aria-label={
+                                            canStopHealthCheck
+                                              ? `停止检测 ${modelId}`
+                                              : `检测 ${modelId}`
+                                          }
+                                          onClick={() =>
+                                            testModelHealth({ id: modelId }, endpoint.id)
+                                          }
+                                          disabled={modelHealthBatchLoading && !canStopHealthCheck}
+                                          title={
+                                            health?.error ||
+                                            (canStopHealthCheck
+                                              ? '停止检测'
+                                              : modelHealthBatchLoading
+                                                ? '批量检测中'
+                                                : '检测模型')
+                                          }
+                                          icon={
+                                            healthCheckAnimating ? (
+                                              <Loader size="sm" />
+                                            ) : (
+                                              <Activity className="h-3.5 w-3.5" />
+                                            )
+                                          }
+                                        />
+                                        <Button
+                                          shape="square"
+                                          size="sm"
+                                          variant="secondary"
+                                          aria-label={`复制 ${modelId}`}
+                                          onClick={() => {
+                                            navigator.clipboard.writeText(modelId);
+                                            toast.success('已复制模型名称');
+                                          }}
+                                          title="复制模型名称"
+                                          icon={<Copy className="h-3.5 w-3.5" />}
+                                        />
+                                      </div>
+                                    </Table.Cell>
+                                  </Table.Row>
+                                );
+                              })
+                            ) : (
+                              <Table.Row>
+                                <Table.Cell
+                                  colSpan={5}
+                                  className="py-10 text-center text-kumo-subtle"
                                 >
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    {/* Health indicator dot */}
-                                    <div
-                                      onClick={() => testModelHealth({ id: modelId }, endpoint.id)}
-                                      className={`w-2 h-2 rounded-full cursor-pointer ${
-                                        health?.loading
-                                          ? 'bg-kumo-brand animate-pulse'
-                                          : health?.status === 'healthy'
-                                            ? 'bg-kumo-success'
-                                            : health?.status === 'error'
-                                              ? 'bg-kumo-danger'
-                                              : 'bg-kumo-subtle'
-                                      }`}
-                                      title={
-                                        health
-                                          ? `检测时间: ${formatDateTime(health.checkedAt)}\n延迟: ${health.latency || '-'}ms`
-                                          : '点击测试模型健康'
-                                      }
-                                    />
-                                    <span
-                                      onClick={() => {
-                                        selectEndpoint(endpoint.id);
-                                        selectChatModel(modelId);
-                                        setActiveTab('chat');
-                                      }}
-                                      className="font-mono text-[11px] text-kumo-strong hover:text-kumo-brand cursor-pointer truncate"
-                                      title="点击进入对话"
-                                    >
-                                      {modelId}
-                                    </span>
-                                  </div>
-                                  <Button
-                                    shape="square"
-                                    size="sm"
-                                    variant="ghost"
-                                    aria-label="复制模型名称"
-                                    onClick={() => {
-                                      navigator.clipboard.writeText(modelId);
-                                      toast.success('已复制模型名称');
-                                    }}
-                                    className="text-kumo-subtle hover:text-kumo-strong opacity-0 group-hover:opacity-100 transition-opacity"
-                                    title="复制名称"
-                                  >
-                                    <Copy className="w-3.5 h-3.5" />
-                                  </Button>
-                                </AppCard>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <div className="py-4 text-center text-xs text-kumo-subtle">
-                            暂无模型数据，可在账号管理中刷新获取
-                          </div>
-                        )}
+                                  暂无模型数据，可刷新端点获取
+                                </Table.Cell>
+                              </Table.Row>
+                            )}
+                          </Table.Body>
+                        </Table>
                       </div>
-                    </AnimatedCollapse>
-                  </AppCard>
-                );
-              })
-            )}
-          </div>
-        </div>
+                    </LayerCard>
+                  </section>
+                </div>
+              );
+            })()
+          )}
+        </GatewaySection>
       )}
 
-      {/* ==================== 2. 账号管理 Tab ==================== */}
-      {activeTab === 'accounts' && (
-        <div className="space-y-4">
-          {/* Toolbar */}
-          <SectionHeader
-            title="API 端点管理"
-            description="管理和配置您的 OpenAI 兼容 API 端点"
-            action={
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  onClick={() => setHealthCheckModal(true)}
-                  className="flex items-center gap-1"
-                >
-                  <Activity className={iconButtonIconClass} />
-                  <span>健康检测</span>
-                </Button>
-                <Button
-                  size="sm"
-                  variant="primary"
-                  onClick={openAddEndpointModal}
-                  className="flex items-center gap-1"
-                >
-                  <Plus className={iconButtonIconClass} />
-                  <span>添加账号</span>
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={refreshAllEndpoints}
-                  disabled={endpointsRefreshing}
-                  className="flex items-center gap-1"
-                >
-                  <RefreshCw
-                    className={cx(iconButtonIconClass, endpointsRefreshing && 'animate-spin')}
-                  />
-                  <span>刷新全部</span>
-                </Button>
-                <Button size="sm" onClick={exportEndpoints} className="flex items-center gap-1">
-                  <Upload className={iconButtonIconClass} />
-                  <span>导出</span>
-                </Button>
-                <Button size="sm" onClick={importEndpoints} className="flex items-center gap-1">
-                  <Download className={iconButtonIconClass} />
-                  <span>导入</span>
-                </Button>
-              </div>
-            }
-          />
-
-          {/* Table */}
-          <DataTableFrame>
-            <AppTable widths={colWidths}>
+      {/* ==================== 2. API 密钥 Tab ==================== */}
+      {activeTab === 'keys' && (
+        <GatewaySection
+          title="API 密钥"
+          description="管理调用模型网关的客户端凭据"
+          icon={<Key className="h-4 w-4 text-kumo-brand" />}
+          actions={
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                onClick={loadGatewayKeys}
+                disabled={gatewayKeysLoading}
+                className="flex items-center gap-1.5"
+              >
+                <RefreshCw
+                  className={cx(iconButtonIconClass, gatewayKeysLoading && 'animate-spin')}
+                />
+                <span>刷新</span>
+              </Button>
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={openAddGatewayKeyModal}
+                className="flex items-center gap-1.5"
+              >
+                <Plus className={iconButtonIconClass} />
+                <span>新建密钥</span>
+              </Button>
+            </div>
+          }
+          bodyClassName="space-y-3"
+        >
+          <LayerCard className="w-full overflow-x-auto p-0 shadow-none">
+            <Table layout="fixed" className="min-w-[1084px]">
+              <colgroup>
+                <col style={{ width: 180 }} />
+                <col style={{ width: 320 }} />
+                <col style={{ width: 92 }} />
+                <col style={{ width: 140 }} />
+                <col style={{ width: 140 }} />
+                <col style={{ width: 96 }} />
+                <col style={{ width: 156 }} />
+              </colgroup>
               <Table.Header variant="compact">
                 <Table.Row>
-                  <Table.Head className="relative group pr-6">
-                    名称
-                    <Table.ResizeHandle onMouseDown={e => startResize(0, e)} />
-                  </Table.Head>
-                  <Table.Head className="relative group pr-6">
-                    API 地址
-                    <Table.ResizeHandle onMouseDown={e => startResize(1, e)} />
-                  </Table.Head>
-                  <Table.Head className="relative group pr-6">
-                    API Key
-                    <Table.ResizeHandle onMouseDown={e => startResize(2, e)} />
-                  </Table.Head>
-                  <Table.Head className="text-center relative group pr-6">
-                    状态
-                    <Table.ResizeHandle onMouseDown={e => startResize(3, e)} />
-                  </Table.Head>
-                  <Table.Head className="text-center relative group pr-6">
-                    启用
-                    <Table.ResizeHandle onMouseDown={e => startResize(4, e)} />
-                  </Table.Head>
-                  <Table.Head className="text-center relative group pr-6">
-                    模型数量
-                    <Table.ResizeHandle onMouseDown={e => startResize(5, e)} />
-                  </Table.Head>
-                  <Table.Head className="text-center">操作</Table.Head>
+                  <Table.Head>名称</Table.Head>
+                  <Table.Head>密钥</Table.Head>
+                  <Table.Head className="text-center">状态</Table.Head>
+                  <Table.Head>最近使用</Table.Head>
+                  <Table.Head>过期时间</Table.Head>
+                  <Table.Head className="text-right">请求数</Table.Head>
+                  <Table.Head className="app-table-action">操作</Table.Head>
                 </Table.Row>
               </Table.Header>
               <Table.Body>
-                {endpointsLoading ? (
+                {gatewayKeysLoading ? (
                   [...Array(3)].map((_, i) => (
                     <Table.Row key={i}>
                       <Table.Cell>
-                        <SkeletonLine className="w-20 h-4" />
+                        <SkeletonLine className="h-4 w-24" />
                       </Table.Cell>
                       <Table.Cell>
-                        <SkeletonLine className="w-40 h-4" />
+                        <SkeletonLine className="h-4 w-28" />
+                      </Table.Cell>
+                      <Table.Cell className="text-center">
+                        <SkeletonLine className="mx-auto h-4 w-12" />
                       </Table.Cell>
                       <Table.Cell>
-                        <SkeletonLine className="w-32 h-4" />
-                      </Table.Cell>
-                      <Table.Cell className="text-center">
-                        <SkeletonLine className="w-12 h-4 mx-auto" />
-                      </Table.Cell>
-                      <Table.Cell className="text-center">
-                        <SkeletonLine className="w-8 h-4 mx-auto" />
-                      </Table.Cell>
-                      <Table.Cell className="text-center">
-                        <SkeletonLine className="w-6 h-4 mx-auto" />
+                        <SkeletonLine className="h-4 w-24" />
                       </Table.Cell>
                       <Table.Cell>
-                        <SkeletonLine className="w-24 h-4 mx-auto" />
+                        <SkeletonLine className="h-4 w-24" />
+                      </Table.Cell>
+                      <Table.Cell className="text-right">
+                        <SkeletonLine className="ml-auto h-4 w-12" />
+                      </Table.Cell>
+                      <Table.Cell>
+                        <SkeletonLine className="mx-auto h-4 w-24" />
                       </Table.Cell>
                     </Table.Row>
                   ))
-                ) : endpoints.length === 0 ? (
+                ) : gatewayKeys.length === 0 ? (
                   <Table.Row>
                     <Table.Cell colSpan={7} className="p-8 text-center text-kumo-subtle">
-                      暂无 API 账号，点击上方按钮添加
+                      暂无网关 API 密钥
                     </Table.Cell>
                   </Table.Row>
                 ) : (
-                  endpoints.map(endpoint => (
+                  gatewayKeys.map(key => (
                     <Table.Row
-                      key={endpoint.id}
+                      key={key.id}
                       className="hover:bg-kumo-recessed/5 cursor-pointer"
-                      title="双击编辑端点"
+                      title="双击编辑密钥"
                       onDoubleClick={event =>
-                        handleEditableRowDoubleClick(event, () => openEditEndpointModal(endpoint))
+                        handleEditableRowDoubleClick(event, () => openEditGatewayKeyModal(key))
                       }
                     >
-                      <Table.Cell className="font-bold text-kumo-strong">
-                        {endpoint.name || '未命名'}
+                      <Table.Cell
+                        className="truncate font-semibold text-kumo-strong"
+                        title={key.name}
+                      >
+                        {key.name || '未命名密钥'}
                       </Table.Cell>
-                      <Table.Cell className="font-mono">{maskAddress(endpoint.baseUrl)}</Table.Cell>
                       <Table.Cell>
-                        <div className="flex items-center gap-1.5 font-mono">
-                          <span>
-                            {endpoint.showKey ? endpoint.apiKey : maskApiKey(endpoint.apiKey)}
-                          </span>
-                          <Button
-                            shape="square"
+                        {key.apiKey ? (
+                          <ClipboardText
                             size="sm"
-                            variant="ghost"
-                            aria-label={endpoint.showKey ? '隐藏 API Key' : '显示 API Key'}
-                            onClick={() =>
-                              setEndpoints(prev =>
-                                prev.map(e =>
-                                  e.id === endpoint.id ? { ...e, showKey: !e.showKey } : e
-                                )
-                              )
-                            }
-                            className="text-kumo-subtle"
-                          >
-                            {endpoint.showKey ? (
-                              <EyeOff className="w-3.5 h-3.5" />
-                            ) : (
-                              <Eye className="w-3.5 h-3.5" />
-                            )}
-                          </Button>
-                        </div>
+                            text={key.apiKey}
+                            className="min-w-0 w-full font-mono text-[0.9em]"
+                            tooltip={{ text: '复制 API Key', copiedText: 'API Key 已复制' }}
+                            labels={{ copyAction: `复制 ${key.name} 的 API Key` }}
+                          />
+                        ) : (
+                          <span className="text-sm text-kumo-subtle">轮换后可查看并复制</span>
+                        )}
                       </Table.Cell>
                       <Table.Cell className="text-center">
-                        <InlineStatusPill
-                          tone={
-                            endpoint.status === 'valid'
-                              ? 'success'
-                              : endpoint.status === 'invalid'
-                                ? 'danger'
-                                : 'neutral'
-                          }
-                        >
-                          {endpoint.status === 'valid'
-                            ? '有效'
-                            : endpoint.status === 'invalid'
-                              ? '无效'
-                              : '未验证'}
+                        <InlineStatusPill tone={key.enabled ? 'success' : 'neutral'}>
+                          {key.enabled ? '已启用' : '已停用'}
                         </InlineStatusPill>
                       </Table.Cell>
-                      <Table.Cell className="text-center">
-                        <Switch
-                          checked={!!endpoint.enabled}
-                          onCheckedChange={() => toggleEndpointEnabled(endpoint)}
-                          size="sm"
-                        />
+                      <Table.Cell className="truncate text-sm text-kumo-subtle">
+                        {key.lastUsed ? formatDateTime(key.lastUsed) : '从未使用'}
                       </Table.Cell>
-                      <Table.Cell className="text-center text-kumo-strong font-semibold">
-                        {endpoint.models ? endpoint.models.length : 0}
+                      <Table.Cell className="truncate text-sm text-kumo-subtle">
+                        {key.expiresAt ? formatDateTime(key.expiresAt) : '永不过期'}
+                      </Table.Cell>
+                      <Table.Cell className="text-right font-mono text-[0.9em] text-kumo-strong">
+                        {(key.requestCount || 0).toLocaleString()}
                       </Table.Cell>
                       <Table.Cell>
                         <div className="flex justify-center gap-1.5">
                           <Button
                             shape="square"
                             size="sm"
-                            variant="ghost"
-                            aria-label="验证连接"
-                            onClick={() => verifyEndpoint(endpoint)}
-                            className="hover:text-kumo-brand text-kumo-subtle"
-                            title="验证连接"
+                            variant={key.enabled ? 'secondary-destructive' : 'primary'}
+                            aria-label={key.enabled ? '停用密钥' : '启用密钥'}
+                            onClick={() => toggleGatewayKey(key)}
+                            title={key.enabled ? '停用密钥' : '启用密钥'}
+                            disabled={!!gatewayKeyToggleLoading[key.id]}
                           >
-                            <Plug className="w-3.5 h-3.5" />
+                            <span className="flex h-4 w-4 items-center justify-center">
+                              <Reboot
+                                className={cx(
+                                  'h-3.5 w-3.5',
+                                  gatewayKeyToggleLoading[key.id] && 'animate-spin'
+                                )}
+                              />
+                            </span>
                           </Button>
                           <Button
                             shape="square"
                             size="sm"
-                            variant="ghost"
-                            aria-label="健康检测"
-                            onClick={() => openHealthCheckForEndpoint(endpoint.id)}
-                            className="hover:text-kumo-brand text-kumo-subtle"
-                            title="健康检测"
+                            variant="outline"
+                            aria-label="轮换密钥"
+                            onClick={() => rotateGatewayKey(key)}
+                            className="text-kumo-subtle hover:text-kumo-brand"
+                            title="轮换密钥"
                           >
-                            <Activity className="w-3.5 h-3.5" />
+                            <RotateCw className="w-3.5 h-3.5" />
                           </Button>
                           <Button
                             shape="square"
                             size="sm"
-                            variant="ghost"
-                            aria-label="编辑配置"
-                            onClick={() => openEditEndpointModal(endpoint)}
+                            variant="outline"
+                            aria-label="编辑密钥"
+                            onClick={() => openEditGatewayKeyModal(key)}
                             className="hover:text-kumo-brand text-kumo-subtle"
-                            title="编辑配置"
+                            title="编辑密钥"
                           >
                             <Edit className="w-3.5 h-3.5" />
                           </Button>
                           <Button
                             shape="square"
                             size="sm"
-                            variant="ghost"
-                            aria-label="删除端点"
-                            onClick={() => deleteEndpoint(endpoint)}
-                            className="hover:text-kumo-danger text-kumo-subtle"
-                            title="删除账号"
+                            variant="secondary-destructive"
+                            aria-label="删除密钥"
+                            onClick={() => deleteGatewayKey(key)}
+                            title="删除密钥"
                           >
                             <Trash className="w-3.5 h-3.5" />
                           </Button>
@@ -2596,308 +2861,324 @@ function OpenAIPage() {
                   ))
                 )}
               </Table.Body>
-            </AppTable>
-          </DataTableFrame>
-
-          {/* Batch add panel */}
-          <AppCard padding="lg" className="space-y-4">
-            <h4 className="text-xs font-bold text-kumo-strong flex items-center gap-2">
-              <Plus className="w-4 h-4 text-kumo-brand" />
-              批量添加端点
-            </h4>
-            <p className="text-[11px] text-kumo-subtle leading-relaxed">
-              每行一个端点，格式：<code>名称:API地址:API_Key</code>
-            </p>
-            <Textarea
-              aria-label="批量添加端点"
-              value={batchText}
-              onChange={e => setBatchText(e.target.value)}
-              placeholder="每行一个：名称:https://api.example.com:sk-xxx"
-              rows={4}
-              className="w-full text-kumo-strong text-xs font-mono p-3 resize-none"
-            />
-            {batchError && <p className="text-xs text-kumo-danger font-semibold">{batchError}</p>}
-            {batchSuccess && (
-              <p className="text-xs text-kumo-success font-semibold">{batchSuccess}</p>
-            )}
-            <Button
-              size="sm"
-              variant="primary"
-              disabled={batchAdding || !batchText.trim()}
-              onClick={batchAddEndpoints}
-              className="w-full font-semibold"
-            >
-              {batchAdding ? '添加中...' : '批量添加'}
-            </Button>
-          </AppCard>
-        </div>
+            </Table>
+          </LayerCard>
+        </GatewaySection>
       )}
 
       {/* ==================== 3. 网关分析 Tab ==================== */}
       {activeTab === 'analytics' && (
-        <div className="space-y-4">
-          {/* Header & Controls */}
-          <SectionHeader
-            title="网关分析"
-            description="API 代理流量与性能多维分析"
-            action={
-              <div className="flex items-center gap-3">
-                <Select
-                  size="sm"
-                  aria-label="选择分析范围"
-                  value={String(analyticsDays)}
-                  onValueChange={val => setAnalyticsDays(Number(val))}
-                  items={[
-                    { value: '1', label: '最近 24 小时' },
-                    { value: '7', label: '最近 7 天' },
-                    { value: '30', label: '最近 30 天' },
-                  ]}
-                  className="w-36 text-xs text-kumo-strong"
-                />
-                <Button
-                  size="sm"
-                  onClick={fetchAnalytics}
-                  disabled={analyticsLoading}
-                  className="flex items-center gap-1.5"
-                >
-                  <RefreshCw className={cx('w-3.5 h-3.5', analyticsLoading && 'animate-spin')} />
-                  <span>刷新</span>
-                </Button>
+        <GatewaySection
+          className="min-h-0 flex-1"
+          title="网关分析"
+          description="可靠性、Token 用量与调用方归因"
+          icon={<Activity className="h-4 w-4 text-kumo-brand" />}
+          actions={
+            <div className="flex items-center gap-3">
+              <Select
+                size="sm"
+                aria-label="选择分析范围"
+                value={String(analyticsDays)}
+                onValueChange={val => {
+                  setAnalyticsDays(Number(val));
+                  setAnalyticsPage(1);
+                }}
+                items={[
+                  { value: '1', label: '最近 24 小时' },
+                  { value: '7', label: '最近 7 天' },
+                  { value: '30', label: '最近 30 天' },
+                ]}
+                className="w-36 text-sm text-kumo-strong"
+              />
+              <Button
+                size="sm"
+                onClick={fetchAnalytics}
+                disabled={analyticsLoading}
+                className="flex items-center gap-1.5"
+              >
+                <RefreshCw className={cx('w-3.5 h-3.5', analyticsLoading && 'animate-spin')} />
+                <span>刷新</span>
+              </Button>
+            </div>
+          }
+          bodyClassName="flex min-h-0 flex-1 flex-col gap-3"
+        >
+          <div className="grid shrink-0 gap-3 xl:h-44 xl:grid-cols-[minmax(24rem,1.15fr)_minmax(18rem,0.85fr)_minmax(18rem,0.85fr)]">
+            <LayerCard className="grid overflow-hidden p-0 shadow-none sm:grid-cols-2">
+              <div className="flex min-w-0 items-center justify-between gap-3 border-b border-kumo-line px-4 py-3 sm:border-r">
+                <span className="text-sm font-medium text-kumo-subtle">网关请求</span>
+                <span className="font-mono text-lg font-semibold text-kumo-strong">
+                  {analyticsLoading ? (
+                    <SkeletonLine className="h-5 w-16" />
+                  ) : (
+                    analyticsSummary.totalRequests
+                  )}
+                </span>
               </div>
-            }
-          />
-
-          {/* Analytics Summary Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-            <AppCard padding="md" className="flex flex-col">
-              <span className="text-[10px] font-bold text-kumo-subtle uppercase tracking-wider">
-                总请求次数
-              </span>
-              <span className="text-xl font-bold text-kumo-strong mt-1 font-mono">
-                {analyticsLoading ? (
-                  <SkeletonLine className="w-16 h-5" />
-                ) : (
-                  analyticsSummary.totalRequests
-                )}
-              </span>
-            </AppCard>
-            <AppCard padding="md" className="flex flex-col">
-              <span className="text-[10px] font-bold text-kumo-subtle uppercase tracking-wider">
-                平均响应延迟
-              </span>
-              <span className="text-xl font-bold text-kumo-warning mt-1 font-mono">
-                {analyticsLoading ? (
-                  <SkeletonLine className="w-16 h-5" />
-                ) : (
-                  `${analyticsSummary.avgLatency.toFixed(0)} ms`
-                )}
-              </span>
-            </AppCard>
-            <AppCard padding="md" className="flex flex-col">
-              <span className="text-[10px] font-bold text-kumo-subtle uppercase tracking-wider">
-                Token 消耗量
-              </span>
-              <span className="text-xl font-bold text-kumo-brand mt-1 font-mono">
-                {analyticsLoading ? (
-                  <SkeletonLine className="w-20 h-5" />
-                ) : (
-                  analyticsSummary.totalTokens.toLocaleString()
-                )}
-              </span>
-            </AppCard>
-            <AppCard padding="md" className="flex flex-col">
-              <span className="text-[10px] font-bold text-kumo-subtle uppercase tracking-wider">
-                请求错误率
-              </span>
-              <span className="text-xl font-bold text-kumo-danger mt-1 font-mono">
-                {analyticsLoading ? (
-                  <SkeletonLine className="w-16 h-5" />
-                ) : (
-                  `${(analyticsSummary.errorRate * 100).toFixed(1)}%`
-                )}
-              </span>
-            </AppCard>
-          </div>
-
-          {/* Charts Row */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {/* SVG Line Chart */}
-            <AppCard padding="lg" className="col-span-2 space-y-3">
-              <div className="flex justify-between items-center">
-                <h4 className="text-xs font-bold text-kumo-strong">请求量与耗时趋势</h4>
-                <div className="flex gap-4 text-[10px]">
-                  <span className="flex items-center gap-1.5 text-kumo-brand font-semibold">
-                    <span className="w-2 h-2 rounded-full bg-kumo-brand" />
-                    请求数 (次)
-                  </span>
-                  <span className="flex items-center gap-1.5 text-kumo-warning font-semibold">
-                    <span className="w-2.5 h-0.5 border-t-2 border-dashed border-kumo-warning" />
-                    延迟 (ms)
-                  </span>
-                </div>
+              <div className="flex min-w-0 items-center justify-between gap-3 border-b border-kumo-line px-4 py-3">
+                <span className="text-sm font-medium text-kumo-subtle">平均端到端延迟</span>
+                <span className="font-mono text-lg font-semibold text-kumo-warning">
+                  {analyticsLoading ? (
+                    <SkeletonLine className="h-5 w-16" />
+                  ) : (
+                    `${analyticsSummary.avgLatency.toFixed(0)} ms`
+                  )}
+                </span>
               </div>
-              <div className="h-56">
-                {analyticsLoading ? (
-                  <div className="h-full flex items-center justify-center">
-                    <SkeletonLine className="w-full h-full" />
-                  </div>
-                ) : (
-                  <SVGAnalyticsChart dailyData={analyticsCharts.daily} />
-                )}
+              <div className="flex min-w-0 items-center justify-between gap-3 border-b border-kumo-line px-4 py-3 sm:border-b-0 sm:border-r">
+                <span className="text-sm font-medium text-kumo-subtle">Token 用量</span>
+                <span className="font-mono text-lg font-semibold text-kumo-brand">
+                  {analyticsLoading ? (
+                    <SkeletonLine className="h-5 w-20" />
+                  ) : (
+                    analyticsSummary.totalTokens.toLocaleString()
+                  )}
+                </span>
               </div>
-            </AppCard>
+              <div className="flex min-w-0 items-center justify-between gap-3 px-4 py-3">
+                <span className="text-sm font-medium text-kumo-subtle">上游错误率</span>
+                <span className="font-mono text-lg font-semibold text-kumo-danger">
+                  {analyticsLoading ? (
+                    <SkeletonLine className="h-5 w-16" />
+                  ) : (
+                    `${(analyticsSummary.errorRate * 100).toFixed(1)}%`
+                  )}
+                </span>
+              </div>
+            </LayerCard>
 
-            {/* Model Tokens share */}
-            <AppCard padding="lg" className="space-y-4">
+            <AppCard padding="md" className="flex min-h-0 flex-col gap-3 xl:h-full">
               <div className="flex items-center gap-1.5">
                 <PieChart className="w-4 h-4 text-kumo-brand" />
-                <h4 className="text-xs font-bold text-kumo-strong">模型消耗分布 (Tokens)</h4>
+                <h4 className="text-sm font-semibold text-kumo-strong">模型 Token 分布</h4>
               </div>
-              <div className="space-y-3.5 max-h-56 overflow-y-auto pr-1">
+              <div className="max-h-44 min-h-0 flex-1 space-y-2.5 overflow-y-auto pr-1 scrollbar-thin xl:max-h-none">
                 {analyticsLoading ? (
                   <div className="space-y-2">
                     <SkeletonLine className="w-full h-4" />
                     <SkeletonLine className="w-full h-4" />
                   </div>
                 ) : !analyticsCharts.models || analyticsCharts.models.length === 0 ? (
-                  <div className="text-center py-16 text-kumo-subtle text-xs">暂无模型数据</div>
+                  <div className="text-center py-16 text-kumo-subtle text-sm">暂无模型数据</div>
                 ) : (
                   (() => {
                     const totalTokens =
-                      analyticsCharts.models.reduce((sum, m) => sum + m.tokens, 0) || 1;
-                    return analyticsCharts.models.map(m => {
-                      const pct = ((m.tokens / totalTokens) * 100).toFixed(1);
-                      return (
-                        <div key={m.model} className="space-y-1 text-xs">
-                          <div className="flex justify-between text-kumo-strong">
-                            <span className="font-mono font-semibold truncate max-w-[150px]">
-                              {m.model}
-                            </span>
-                            <span className="font-mono text-kumo-subtle">
-                              {m.tokens.toLocaleString()} ({pct}%)
-                            </span>
-                          </div>
-                          <div className="w-full bg-kumo-recessed rounded-full h-2 overflow-hidden">
-                            <div
-                              className="bg-gradient-to-r from-kumo-brand/80 to-kumo-brand h-full rounded-full"
-                              style={{ width: `${pct}%` }}
+                      analyticsCharts.models.reduce(
+                        (sum, model) => sum + (Number(model.tokens) || 0),
+                        0
+                      ) || 1;
+                    return [...analyticsCharts.models]
+                      .sort((a, b) => (Number(b.tokens) || 0) - (Number(a.tokens) || 0))
+                      .map(model => {
+                        const tokens = Number(model.tokens) || 0;
+                        const percent = (tokens / totalTokens) * 100;
+                        const pct = percent.toFixed(1);
+                        return (
+                          <div key={model.model} className="space-y-1 text-sm">
+                            <Meter
+                              label={model.model}
+                              value={percent}
+                              customValue={`${tokens.toLocaleString()} Token (${pct}%)`}
+                              trackClassName="h-2 bg-kumo-recessed"
+                              indicatorClassName="bg-kumo-brand"
                             />
                           </div>
-                        </div>
-                      );
-                    });
+                        );
+                      });
+                  })()
+                )}
+              </div>
+            </AppCard>
+
+            <AppCard padding="md" className="flex min-h-0 flex-col gap-3 xl:h-full">
+              <div className="flex items-center gap-1.5">
+                <Activity className="h-4 w-4 text-kumo-brand" />
+                <h4 className="text-sm font-semibold text-kumo-strong">模型调用次数</h4>
+              </div>
+              <div className="max-h-44 min-h-0 flex-1 space-y-2.5 overflow-y-auto pr-1 scrollbar-thin xl:max-h-none">
+                {analyticsLoading ? (
+                  <div className="space-y-2">
+                    <SkeletonLine className="h-4 w-full" />
+                    <SkeletonLine className="h-4 w-full" />
+                  </div>
+                ) : !analyticsCharts.models || analyticsCharts.models.length === 0 ? (
+                  <div className="py-16 text-center text-sm text-kumo-subtle">暂无模型数据</div>
+                ) : (
+                  (() => {
+                    const totalCount =
+                      analyticsCharts.models.reduce(
+                        (sum, model) => sum + (Number(model.count) || 0),
+                        0
+                      ) || 1;
+                    return [...analyticsCharts.models]
+                      .sort((a, b) => (Number(b.count) || 0) - (Number(a.count) || 0))
+                      .map(model => {
+                        const count = Number(model.count) || 0;
+                        const percent = (count / totalCount) * 100;
+                        return (
+                          <div key={model.model} className="space-y-1 text-sm">
+                            <Meter
+                              label={model.model}
+                              value={percent}
+                              customValue={`${count.toLocaleString()} 次 (${percent.toFixed(1)}%)`}
+                              trackClassName="h-2 bg-kumo-recessed"
+                              indicatorClassName="bg-kumo-brand"
+                            />
+                          </div>
+                        );
+                      });
                   })()
                 )}
               </div>
             </AppCard>
           </div>
 
-          {/* Logs Table */}
-          <DataTableFrame>
-            <AppTable>
-              <Table.Header>
-                <Table.Row>
-                  <Table.Head className="text-left text-xs font-bold">时间</Table.Head>
-                  <Table.Head className="text-left text-xs font-bold">
-                    端点渠道
-                  </Table.Head>
-                  <Table.Head className="text-left text-xs font-bold">
-                    使用模型
-                  </Table.Head>
-                  <Table.Head className="text-center text-xs font-bold">
-                    状态
-                  </Table.Head>
-                  <Table.Head className="text-right text-xs font-bold">延迟</Table.Head>
-                  <Table.Head className="text-right text-xs font-bold">
-                    Prompt / Completion
-                  </Table.Head>
-                  <Table.Head className="text-right text-xs font-bold">
-                    总消耗
-                  </Table.Head>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {analyticsLoading && analyticsLogs.length === 0 ? (
+          {/* Logs table and pagination */}
+          <LayerCard className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden p-0 shadow-none">
+            <div className="min-h-0 min-w-0 flex-1 overflow-auto scrollbar-thin">
+              <Table layout="fixed" className="min-w-[1128px]">
+                <colgroup>
+                  <col style={{ width: 156 }} />
+                  <col style={{ width: 112 }} />
+                  <col style={{ width: 136 }} />
+                  <col style={{ width: 132 }} />
+                  <col style={{ width: 220 }} />
+                  <col style={{ width: 84 }} />
+                  <col style={{ width: 92 }} />
+                  <col style={{ width: 132 }} />
+                  <col style={{ width: 92 }} />
+                </colgroup>
+                <Table.Header sticky variant="compact">
                   <Table.Row>
-                    <Table.Cell colSpan={7} className="text-center py-8">
-                      <RotateCw className="w-5 h-5 animate-spin mx-auto text-kumo-subtle" />
-                    </Table.Cell>
+                    <Table.Head>时间</Table.Head>
+                    <Table.Head>路由</Table.Head>
+                    <Table.Head>端点</Table.Head>
+                    <Table.Head>调用密钥</Table.Head>
+                    <Table.Head>模型</Table.Head>
+                    <Table.Head className="text-center">状态</Table.Head>
+                    <Table.Head className="text-right">延迟</Table.Head>
+                    <Table.Head className="text-right">Prompt / Completion</Table.Head>
+                    <Table.Head className="text-right">总消耗</Table.Head>
                   </Table.Row>
-                ) : analyticsLogs.length === 0 ? (
-                  <Table.Row>
-                    <Table.Cell colSpan={7} className="text-center py-8 text-kumo-subtle text-xs">
-                      暂无网关日志记录
-                    </Table.Cell>
-                  </Table.Row>
-                ) : (
-                  analyticsLogs.map(log => (
-                    <Table.Row key={log.id} className="text-xs">
-                      <Table.Cell className="text-kumo-subtle font-mono">
-                        {formatDateTime(log.timestamp)}
-                      </Table.Cell>
-                      <Table.Cell className="text-kumo-strong font-semibold">
-                        {log.endpointName}
-                      </Table.Cell>
-                      <Table.Cell className="text-kumo-strong font-mono font-medium">
-                        {log.model}
-                      </Table.Cell>
-                      <Table.Cell className="text-center">
-                        <InlineStatusPill tone={log.statusCode < 400 ? 'success' : 'danger'}>
-                          {log.statusCode}
-                        </InlineStatusPill>
-                      </Table.Cell>
-                      <Table.Cell className="text-right text-kumo-strong font-mono font-semibold">
-                        {log.latencyMs} ms
-                      </Table.Cell>
-                      <Table.Cell className="text-right text-kumo-subtle font-mono">
-                        {log.promptTokens} / {log.completionTokens}
-                      </Table.Cell>
-                      <Table.Cell className="text-right text-kumo-brand font-mono font-bold">
-                        {log.totalTokens}
+                </Table.Header>
+                <Table.Body>
+                  {analyticsLoading && analyticsLogs.length === 0 ? (
+                    <Table.Row>
+                      <Table.Cell colSpan={9} className="text-center py-8">
+                        <RotateCw className="w-5 h-5 animate-spin mx-auto text-kumo-subtle" />
                       </Table.Cell>
                     </Table.Row>
-                  ))
-                )}
-              </Table.Body>
-            </AppTable>
-          </DataTableFrame>
-
-          {/* Table Pagination */}
-          {analyticsTotal > 10 && (
-            <div className="flex justify-between items-center px-4 py-2 bg-kumo-base border border-kumo-line rounded-xl shadow-sm text-xs">
-              <span className="text-kumo-subtle">
-                共 {analyticsTotal} 条记录，第 {analyticsPage} / {Math.ceil(analyticsTotal / 10)} 页
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  disabled={analyticsPage === 1 || analyticsLoading}
-                  onClick={() => setAnalyticsPage(p => Math.max(1, p - 1))}
-                >
-                  上一页
-                </Button>
-                <Button
-                  size="sm"
-                  disabled={analyticsPage * 10 >= analyticsTotal || analyticsLoading}
-                  onClick={() => setAnalyticsPage(p => p + 1)}
-                >
-                  下一页
-                </Button>
-              </div>
+                  ) : analyticsLogs.length === 0 ? (
+                    <Table.Row>
+                      <Table.Cell colSpan={9} className="text-center py-8 text-kumo-subtle text-sm">
+                        暂无网关日志记录
+                      </Table.Cell>
+                    </Table.Row>
+                  ) : (
+                    analyticsLogs.map(log => (
+                      <Table.Row key={log.id} className="text-sm">
+                        <Table.Cell className="truncate text-kumo-subtle font-mono">
+                          {formatDateTime(log.timestamp)}
+                        </Table.Cell>
+                        <Table.Cell
+                          className="truncate font-mono text-kumo-subtle"
+                          title={log.route}
+                        >
+                          {log.route === 'chat.completions'
+                            ? '对话完成'
+                            : log.route === 'models'
+                              ? '模型列表'
+                              : log.route || '-'}
+                        </Table.Cell>
+                        <Table.Cell
+                          className="truncate text-kumo-strong font-semibold"
+                          title={log.endpointName}
+                        >
+                          {log.endpointName}
+                        </Table.Cell>
+                        <Table.Cell
+                          className="truncate text-kumo-subtle"
+                          title={log.gatewayKeyName}
+                        >
+                          {log.gatewayKeyName || '未识别密钥'}
+                        </Table.Cell>
+                        <Table.Cell
+                          className="truncate text-kumo-strong font-mono font-medium"
+                          title={log.model}
+                        >
+                          {log.model}
+                        </Table.Cell>
+                        <Table.Cell className="text-center">
+                          <InlineStatusPill tone={log.statusCode < 400 ? 'success' : 'danger'}>
+                            {log.statusCode}
+                          </InlineStatusPill>
+                        </Table.Cell>
+                        <Table.Cell className="text-right text-kumo-strong font-mono font-semibold">
+                          {log.latencyMs} ms
+                        </Table.Cell>
+                        <Table.Cell className="text-right text-kumo-subtle font-mono">
+                          {log.promptTokens} / {log.completionTokens}
+                        </Table.Cell>
+                        <Table.Cell className="text-right text-kumo-brand font-mono font-semibold">
+                          {log.totalTokens}
+                        </Table.Cell>
+                      </Table.Row>
+                    ))
+                  )}
+                </Table.Body>
+              </Table>
             </div>
-          )}
-        </div>
+
+            {analyticsTotal > 0 && (
+              <Pagination
+                page={analyticsPage}
+                setPage={setAnalyticsPage}
+                perPage={analyticsPageSize}
+                totalCount={analyticsTotal}
+                labels={{
+                  navigation: '网关日志分页',
+                  firstPage: '第一页',
+                  previousPage: '上一页',
+                  nextPage: '下一页',
+                  lastPage: '最后一页',
+                  pageNumber: '页码',
+                  pageSize: '每页数量',
+                }}
+                className="shrink-0 border-x-0 border-b-0 border-t border-kumo-line bg-kumo-base px-3 py-2 text-sm shadow-none"
+              >
+                <Pagination.Info>
+                  {({ pageShowingRange, totalCount }) => (
+                    <span className="text-kumo-subtle">
+                      显示 {pageShowingRange}，共 {totalCount} 条
+                    </span>
+                  )}
+                </Pagination.Info>
+                <Pagination.Separator />
+                <Pagination.PageSize
+                  value={analyticsPageSize}
+                  onChange={size => {
+                    setAnalyticsPageSize(size);
+                    setAnalyticsPage(1);
+                  }}
+                  options={[10, 20, 50, 100]}
+                  label="每页"
+                />
+                <Pagination.Controls />
+              </Pagination>
+            )}
+          </LayerCard>
+        </GatewaySection>
       )}
 
       {/* ==================== dialogs & modals ==================== */}
 
       {/* 1. Endpoint Add/Edit Dialog */}
       <Dialog.Root open={endpointFormOpen} onOpenChange={setEndpointFormOpen}>
-        <Dialog className="p-6 sm:max-w-md">
-          <Dialog.Title className="text-sm font-bold text-kumo-strong mb-1">
+        <Dialog className="!w-[min(32rem,calc(100vw-2rem))] !max-w-[min(32rem,calc(100vw-2rem))] p-6">
+          <Dialog.Title className="text-sm font-semibold text-kumo-strong mb-1">
             {editingEndpoint ? '编辑端点' : '添加 API 端点'}
           </Dialog.Title>
-          <Dialog.Description className="text-xs text-kumo-subtle mb-4">
+          <Dialog.Description className="text-sm text-kumo-subtle mb-4">
             配置 OpenAI 兼容的 API 端点以供中转或对话使用。
           </Dialog.Description>
 
@@ -2909,7 +3190,7 @@ function OpenAIPage() {
               value={endpointForm.name}
               onChange={e => setEndpointForm({ ...endpointForm, name: e.target.value })}
               placeholder="例如：DeepSeek 官方"
-              className="w-full text-kumo-strong text-xs font-sans"
+              className="w-full text-kumo-strong text-sm font-sans"
             />
 
             <Input
@@ -2919,17 +3200,23 @@ function OpenAIPage() {
               value={endpointForm.baseUrl}
               onChange={e => setEndpointForm({ ...endpointForm, baseUrl: e.target.value })}
               placeholder="https://api.openai.com/v1"
-              className="w-full text-kumo-strong text-xs font-mono"
+              className="w-full text-kumo-strong text-[0.9em] font-mono"
             />
 
             <Input
               size="sm"
               label="API Key"
-              type="password"
+              type="text"
               value={endpointForm.apiKey}
               onChange={e => setEndpointForm({ ...endpointForm, apiKey: e.target.value })}
               placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-              className="w-full text-kumo-strong text-xs font-mono"
+              autoComplete="off"
+              data-1p-ignore
+              data-lpignore="true"
+              data-bwignore="true"
+              data-form-type="other"
+              spellCheck={false}
+              className="w-full text-kumo-strong text-[0.9em] font-mono"
             />
 
             <Input
@@ -2939,11 +3226,11 @@ function OpenAIPage() {
               value={endpointForm.notes}
               onChange={e => setEndpointForm({ ...endpointForm, notes: e.target.value })}
               placeholder="选填"
-              className="w-full text-kumo-strong text-xs font-sans"
+              className="w-full text-kumo-strong text-sm font-sans"
             />
 
             {endpointFormError && (
-              <p className="text-xs text-kumo-danger font-semibold">{endpointFormError}</p>
+              <p className="text-sm text-kumo-danger font-semibold">{endpointFormError}</p>
             )}
 
             <div className="flex justify-end gap-3 pt-2">
@@ -2962,66 +3249,167 @@ function OpenAIPage() {
         </Dialog>
       </Dialog.Root>
 
-      {/* 2. Health Check Config Dialog */}
-      <Dialog.Root open={healthCheckModal} onOpenChange={setHealthCheckModal}>
-        <Dialog className="p-6 sm:max-w-md">
-          <Dialog.Title className="text-sm font-bold text-kumo-strong mb-1">
-            模型健康检测
+      {/* 2. Gateway Key Dialogs */}
+      <Dialog.Root open={gatewayKeyDialogOpen} onOpenChange={setGatewayKeyDialogOpen}>
+        <Dialog className="!w-[min(30rem,calc(100vw-2rem))] !max-w-[min(30rem,calc(100vw-2rem))] p-6">
+          <Dialog.Title className="mb-1 text-sm font-semibold text-kumo-strong">
+            {editingGatewayKey ? '编辑 API 密钥' : '新建 API 密钥'}
           </Dialog.Title>
-          <Dialog.Description className="text-xs text-kumo-subtle mb-4">
-            设置健康检测参数，批量发送轻量请求测试连接可用性与延迟。
+          <Dialog.Description className="mb-4 text-sm text-kumo-subtle">
+            此密钥用于客户端调用 /v1 兼容接口，不会暴露上游供应商 API Key。
           </Dialog.Description>
 
           <div className="space-y-4">
-            <div className="bg-kumo-warning/10 border border-kumo-warning/20 text-kumo-warning p-3 rounded text-xs space-y-1">
-              <p className="font-bold flex items-center gap-1.5">
+            <Input
+              size="sm"
+              label="名称"
+              value={gatewayKeyForm.name}
+              onChange={e => setGatewayKeyForm({ ...gatewayKeyForm, name: e.target.value })}
+              placeholder="例如：生产环境、Open WebUI、自动化任务"
+              className="w-full text-sm text-kumo-strong"
+            />
+            <div className="space-y-1.5">
+              <Label showOptional>过期时间</Label>
+              <div className="grid grid-cols-[minmax(0,1fr)_4.5rem_0.75rem_4.5rem] items-center gap-2">
+                <Popover>
+                  <Popover.Trigger
+                    render={
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        icon={CalendarDotsIcon}
+                        className="min-w-0 justify-start font-normal"
+                      />
+                    }
+                  >
+                    <span className="truncate">
+                      {gatewayKeyForm.expiresAt
+                        ? formatDateTime(gatewayKeyForm.expiresAt)
+                        : '永不过期'}
+                    </span>
+                  </Popover.Trigger>
+                  <Popover.Content className="p-3">
+                    <DatePicker
+                      size="sm"
+                      mode="single"
+                      selected={parseLocalDateTime(gatewayKeyForm.expiresAt)}
+                      onChange={updateGatewayKeyExpiryDate}
+                    />
+                    {gatewayKeyForm.expiresAt && (
+                      <div className="mt-2 flex justify-end border-t border-kumo-line pt-2">
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          onClick={() =>
+                            setGatewayKeyForm(current => ({ ...current, expiresAt: '' }))
+                          }
+                        >
+                          清除
+                        </Button>
+                      </div>
+                    )}
+                  </Popover.Content>
+                </Popover>
+                <Select
+                  size="sm"
+                  aria-label="过期小时"
+                  disabled={!gatewayKeyForm.expiresAt}
+                  value={gatewayKeyForm.expiresAt.slice(11, 13)}
+                  onValueChange={value => updateGatewayKeyExpiryTime('hour', value)}
+                  items={GATEWAY_EXPIRY_HOURS}
+                />
+                <span className="text-center text-sm text-kumo-subtle">:</span>
+                <Select
+                  size="sm"
+                  aria-label="过期分钟"
+                  disabled={!gatewayKeyForm.expiresAt}
+                  value={gatewayKeyForm.expiresAt.slice(14, 16)}
+                  onValueChange={value => updateGatewayKeyExpiryTime('minute', value)}
+                  items={GATEWAY_EXPIRY_MINUTES}
+                />
+              </div>
+            </div>
+            {gatewayKeyFormError && (
+              <p className="text-sm font-semibold text-kumo-danger">{gatewayKeyFormError}</p>
+            )}
+            <div className="flex justify-end gap-3 pt-2">
+              <Dialog.Close
+                render={props => (
+                  <Button size="sm" {...props} variant="secondary">
+                    取消
+                  </Button>
+                )}
+              />
+              <Button
+                size="sm"
+                variant="primary"
+                disabled={gatewayKeySaving}
+                onClick={saveGatewayKey}
+              >
+                {gatewayKeySaving ? '保存中...' : '保存密钥'}
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      </Dialog.Root>
+
+      <Dialog.Root open={!!newGatewayKey} onOpenChange={open => !open && setNewGatewayKey(null)}>
+        <Dialog className="!w-[min(34rem,calc(100vw-2rem))] !max-w-[min(34rem,calc(100vw-2rem))] p-6">
+          <Dialog.Title className="mb-1 text-sm font-semibold text-kumo-strong">
+            API 密钥已创建
+          </Dialog.Title>
+          <Dialog.Description className="mb-4 text-sm text-kumo-subtle">
+            可立即复制，也可稍后从 API 密钥列表查看并复制。
+          </Dialog.Description>
+          <div className="space-y-4">
+            <p className="text-sm font-medium text-kumo-strong">
+              {newGatewayKey?.name || 'API Key'}
+            </p>
+            <ClipboardText
+              size="sm"
+              text={newGatewayKey?.apiKey || ''}
+              className="min-w-0 w-full"
+              tooltip={{ text: '复制 API Key', copiedText: 'API Key 已复制' }}
+              labels={{ copyAction: '复制 API Key' }}
+            />
+            <div className="flex justify-end">
+              <Dialog.Close
+                render={props => (
+                  <Button size="sm" variant="primary" {...props}>
+                    我已保存
+                  </Button>
+                )}
+              />
+            </div>
+          </div>
+        </Dialog>
+      </Dialog.Root>
+
+      {/* 3. Health Check Config Dialog */}
+      <Dialog.Root open={healthCheckModal} onOpenChange={setHealthCheckModal}>
+        <Dialog className="!w-[min(32rem,calc(100vw-2rem))] !max-w-[min(32rem,calc(100vw-2rem))] p-6">
+          <Dialog.Title className="text-sm font-semibold text-kumo-strong mb-1">
+            模型健康检测
+          </Dialog.Title>
+          <Dialog.Description className="text-sm text-kumo-subtle mb-4">
+            向所有启用端点同时发送轻量请求，测试每个模型的可用性与延迟。
+          </Dialog.Description>
+
+          <div className="space-y-4">
+            <div className="bg-kumo-warning/10 border border-kumo-warning/20 text-kumo-warning px-3 py-2 text-sm space-y-1">
+              <p className="font-semibold flex items-center gap-1.5">
                 <AlertTriangle className="w-3.5 h-3.5" />
                 警告
               </p>
-              <p>
-                健康检测需要向 API
-                发送真实请求，按令牌或次数收费的模型可能会产生小额账单，请谨慎使用。
-              </p>
+              <p>所有模型会同时收到真实请求，可能产生小额账单，也可能触发供应商并发或速率限制。</p>
             </div>
 
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-kumo-strong">使用密钥</span>
-              <div className="flex border border-kumo-line rounded bg-kumo-recessed p-0.5">
-                <Button
-                  size="sm"
-                  variant={healthCheckForm.useKey === 'single' ? 'secondary' : 'ghost'}
-                  onClick={() => setHealthCheckForm({ ...healthCheckForm, useKey: 'single' })}
-                  className={`px-3 py-1 text-[10px] font-semibold ${
-                    healthCheckForm.useKey === 'single' ? 'text-kumo-strong' : 'text-kumo-subtle'
-                  }`}
-                >
-                  单个
-                </Button>
-                <Button
-                  size="sm"
-                  variant={healthCheckForm.useKey === 'all' ? 'secondary' : 'ghost'}
-                  onClick={() => setHealthCheckForm({ ...healthCheckForm, useKey: 'all' })}
-                  className={`px-3 py-1 text-[10px] font-semibold ${
-                    healthCheckForm.useKey === 'all' ? 'text-kumo-strong' : 'text-kumo-subtle'
-                  }`}
-                >
-                  所有
-                </Button>
-              </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-semibold text-kumo-strong">检测方式</span>
+              <InlineStatusPill tone="info">全部模型同时检测</InlineStatusPill>
             </div>
 
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-kumo-strong">并发检测</span>
-              <Switch
-                checked={healthCheckForm.concurrency}
-                onCheckedChange={checked =>
-                  setHealthCheckForm({ ...healthCheckForm, concurrency: checked })
-                }
-                size="sm"
-              />
-            </div>
-
-            <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center justify-between text-sm">
               <span className="font-semibold text-kumo-strong">超时限制</span>
               <div className="flex items-center gap-1.5">
                 <Input
@@ -3034,7 +3422,7 @@ function OpenAIPage() {
                   }
                   min={1}
                   max={60}
-                  className="w-16 text-kumo-strong text-xs px-2 py-1 text-center"
+                  className="w-16 text-kumo-strong text-sm px-2 py-1 text-center"
                 />
                 <span className="text-kumo-subtle">秒</span>
               </div>
@@ -3048,8 +3436,13 @@ function OpenAIPage() {
                   </Button>
                 )}
               />
-              <Button size="sm" variant="primary" onClick={startBatchHealthCheck}>
-                开始检测
+              <Button
+                size="sm"
+                variant="primary"
+                disabled={modelHealthBatchLoading}
+                onClick={startBatchHealthCheck}
+              >
+                {modelHealthBatchLoading ? '检测中...' : '开始检测'}
               </Button>
             </div>
           </div>

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Breadcrumbs, Tabs } from '@cloudflare/kumo';
+import { TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 
 const spacingClass = {
   compact: 'gap-1',
@@ -23,8 +24,8 @@ function AppPageHeader({
         <div className="flex shrink-0 items-center justify-end gap-2 min-[520px]:gap-3">
           {tabs && (
             <Tabs
-              variant="segmented"
-              size="sm"
+              {...TOOL_TABS_PROPS}
+              listClassName="w-fit max-w-full"
               value={value}
               onValueChange={onValueChange}
               tabs={tabs}

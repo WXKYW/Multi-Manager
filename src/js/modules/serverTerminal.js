@@ -70,6 +70,17 @@ export function resolveTerminalProtocol(server = {}) {
   return null;
 }
 
+export function resolveTerminalSocketTransport(server = {}, requested = '') {
+  const transports = getTerminalTransports(server);
+  // Let the backend choose from its live Agent registry when both transports
+  // are configured. This avoids retrying a stale Agent route after the Agent
+  // disconnects while the page still shows its last online snapshot.
+  if (transports.includes('agent') && transports.includes('ssh')) return 'auto';
+  if (requested === 'ssh' && transports.includes('ssh')) return 'ssh';
+  if (requested === 'agent' && transports.includes('agent')) return 'agent';
+  return resolveTerminalProtocol(server) || 'auto';
+}
+
 export function canOpenTerminal(server = {}) {
   return Boolean(resolveTerminalProtocol(server));
 }

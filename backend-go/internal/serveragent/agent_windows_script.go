@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
@@ -23,7 +24,7 @@ func (s *Service) getWindowsAgentInstallScript(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	storedKey, err := s.getOrGenerateAgentKey(r.Context(), db)
+	storedKey, err := s.getOrGenerateAgentKeyForServer(r.Context(), db, accountID)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "Failed to get agent key: "+err.Error())
 		return
@@ -34,6 +35,9 @@ func (s *Service) getWindowsAgentInstallScript(w http.ResponseWriter, r *http.Re
 	}
 
 	proto, serverURL := resolveInstallOrigin(r)
+	serverBaseURL := fmt.Sprintf("%s://%s", proto, serverURL)
+	agentDownloadBaseURL := s.resolveAgentDownloadBaseURL(r.Context(), db, serverBaseURL)
+	installScriptURL := fmt.Sprintf("%s/api/server/agent/install/win/%s/%s?protocol=%s&base_url=%s", serverBaseURL, accountID, agentKey, proto, url.QueryEscape(serverBaseURL))
 
 	script := fmt.Sprintf(`# API Monitor Agent - Windows install script
 # Host: %s (%s:%d)
@@ -44,20 +48,35 @@ $ErrorActionPreference = "Stop"
 $AGENT_VERSION = "latest"
 $INSTALL_DIR = "$env:ProgramFiles\APIMonitorAgent"
 $SERVER_URL = "%s://%s"
+$AGENT_DOWNLOAD_BASE_URL = "%s"
 $SERVER_ID = "%s"
 $AGENT_KEY = "%s"
+$INSTALL_SCRIPT_URL = "%s"
 
 Write-Host "Installing API Monitor Agent..."
 Write-Host "Target host: %s"
 Write-Host "Server: $SERVER_URL"
 
+# A script launched inside the Agent terminal must outlive the Agent process
+# that it is about to replace. Start a hidden, independent PowerShell updater
+# before stopping the current Agent, then return from the terminal-bound copy.
+if ($env:API_MONITOR_AGENT_INSTALL_DETACHED -ne "1" -and (Get-Process -Name "api-monitor-agent" -ErrorAction SilentlyContinue)) {
+    Write-Host "Detected a running Agent process. Scheduling detached installer..."
+    $DETACHED_COMMAND = '$env:API_MONITOR_AGENT_INSTALL_DETACHED = "1"; irm "' + $INSTALL_SCRIPT_URL + '" | iex'
+    $ENCODED_COMMAND = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($DETACHED_COMMAND))
+    Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $ENCODED_COMMAND -WindowStyle Hidden
+    Write-Host "Detached installer scheduled. The Agent terminal may disconnect; installation will continue in the background."
+    return
+}
+
 if (!(Test-Path $INSTALL_DIR)) {
     New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null
 }
 
-$AGENT_URL = "$SERVER_URL/agent/agent-windows-amd64.exe"
+$AGENT_URL = "$AGENT_DOWNLOAD_BASE_URL/agent-windows-amd64.exe"
 $AGENT_PATH = "$INSTALL_DIR\api-monitor-agent.exe"
-$TEMP_AGENT_PATH = "$INSTALL_DIR\api-monitor-agent.exe.download"
+$TEMP_AGENT_PATH = "$INSTALL_DIR\api-monitor-agent.download.exe"
+$CONFIG_PATH = "$INSTALL_DIR\config.json"
 
 Write-Host "Downloading Agent..."
 
@@ -85,16 +104,25 @@ if (Test-Path $TEMP_AGENT_PATH) {
     Remove-Item -Path $TEMP_AGENT_PATH -Force -ErrorAction SilentlyContinue
 }
 
+if (Test-Path $CONFIG_PATH) {
+    Write-Host "Removing old Agent config..."
+    Remove-Item -Path $CONFIG_PATH -Force -ErrorAction SilentlyContinue
+}
+
 try {
-    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
     Invoke-WebRequest -Uri $AGENT_URL -OutFile $TEMP_AGENT_PATH -UseBasicParsing
+
+    $DOWNLOADED_VERSION = (& $TEMP_AGENT_PATH --version 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $DOWNLOADED_VERSION -notmatch '^api-monitor-agent\s+\S+$') {
+        throw "Downloaded file is not a valid API Monitor Agent binary: $DOWNLOADED_VERSION"
+    }
 
     if (Test-Path $AGENT_PATH) {
         Remove-Item -Path $AGENT_PATH -Force
     }
 
     Move-Item -Path $TEMP_AGENT_PATH -Destination $AGENT_PATH -Force
-    Write-Host "Agent download completed"
+    Write-Host "Agent download completed: $DOWNLOADED_VERSION"
 } catch {
     Write-Host "Error: failed to download Agent binary"
     Write-Host "URL: $AGENT_URL"
@@ -110,6 +138,19 @@ WshShell.Run """$AGENT_PATH"" -s ""$SERVER_URL"" --id ""$SERVER_ID"" -k ""$AGENT
 "@
 
 Set-Content -Path $VBS_PATH -Value $VBS_CONTENT -Encoding ASCII
+
+Write-Host "Writing Agent config..."
+$CONFIG_CONTENT = @"
+{
+  "agentKey": "$AGENT_KEY",
+  "debug": false,
+  "reportInterval": 1500,
+  "serverId": "$SERVER_ID",
+  "serverUrl": "$SERVER_URL"
+}
+"@
+
+Set-Content -Path $CONFIG_PATH -Value $CONFIG_CONTENT -Encoding ASCII
 
 Write-Host "Configuring startup..."
 $REG_PATH = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
@@ -141,8 +182,10 @@ Write-Host ""
 		name, host, port,
 		time.Now().Format("2006-01-02 15:04:05"),
 		proto, serverURL,
+		agentDownloadBaseURL,
 		accountID,
 		agentKey,
+		installScriptURL,
 		name,
 	)
 

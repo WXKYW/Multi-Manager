@@ -1,16 +1,27 @@
 @source "../../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
-@import "@cloudflare/kumo/styles/tailwind";
-@import "tailwindcss";
+@import 'tailwindcss';
+@import '@cloudflare/kumo/styles/tailwind';
+
+@theme inline {
+  --font-mono: var(--font-sans);
+}
 
 /* ==================== Base Resets ==================== */
 html {
-  font-size: 15px; /* Make the UI slightly more compact globally */
+  font-size: 16px;
+  min-height: 100%;
+  min-height: 100dvh;
+  background: var(--app-main-bg);
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 :root {
   color-scheme: light dark;
   --app-terminal-bg: var(--color-kumo-neutral-1000, #050505);
   --app-terminal-fg: var(--color-kumo-neutral-50, #f8f8f8);
+  --app-main-bg: color-mix(in oklab, var(--color-kumo-canvas) 92%, #dbeafe 8%);
+  --app-main-surface: color-mix(in oklab, var(--color-kumo-base) 92%, var(--color-kumo-canvas) 8%);
 }
 
 :root[data-mode='light'] {
@@ -19,13 +30,25 @@ html {
 
 :root[data-mode='dark'] {
   color-scheme: dark;
+  --app-main-bg: color-mix(in oklab, var(--color-kumo-canvas) 90%, #0f172a 10%);
+  --app-main-surface: color-mix(in oklab, var(--color-kumo-base) 88%, var(--color-kumo-canvas) 12%);
+  background: var(--app-main-bg);
 }
 
 body {
-  background-color: var(--color-kumo-canvas);
+  min-height: 100%;
+  min-height: 100dvh;
+  margin: 0;
+  background: var(--app-main-bg);
   color: var(--text-color-kumo-default);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+:root[data-mode='dark'] body {
+  background: var(--app-main-bg);
 }
 
 * {
@@ -41,6 +64,51 @@ body {
 
 .tabular-nums {
   font-variant-numeric: tabular-nums;
+}
+
+.cf-ai-background-surface {
+  --cf-ai-spotlight-x: -1000px;
+  --cf-ai-spotlight-y: -1000px;
+  --cf-ai-spotlight-opacity: 0;
+}
+
+.cf-ai-background {
+  background: var(--color-kumo-overlay);
+}
+
+:root[data-mode='dark'] .cf-ai-background {
+  background: oklch(0.145 0 0);
+}
+
+.cf-ai-background::before,
+.cf-ai-background::after {
+  position: absolute;
+  inset: 0;
+  content: '';
+}
+
+.cf-ai-background::before {
+  background-image: radial-gradient(circle, rgba(125, 125, 125, 0.1) 1px, transparent 1px);
+  background-size: 12px 12px;
+  opacity: 1;
+}
+
+.cf-ai-background::after {
+  background: radial-gradient(
+    60px at var(--cf-ai-spotlight-x) var(--cf-ai-spotlight-y),
+    rgba(251, 146, 60, 0.7),
+    rgba(125, 125, 125, 0.1)
+  );
+  mask-image: radial-gradient(circle, black 1px, transparent 1px);
+  mask-size: 12px 12px;
+  opacity: var(--cf-ai-spotlight-opacity);
+  transition: opacity 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cf-ai-background::after {
+    transition: none;
+  }
 }
 
 [data-sidebar='trigger'] svg path[d='M6.25 7.25v9.5'] {
@@ -62,48 +130,107 @@ body {
   display: none !important;
 }
 
-.app-card {
-  border: 1px solid var(--color-kumo-line);
-  border-radius: 0.5rem;
-  background-color: var(--color-kumo-base);
-  box-shadow: none;
-  outline: 1px solid color-mix(in oklab, var(--color-kumo-line) 72%, transparent);
-  outline-offset: -1px;
-}
-
-.app-card-md {
-  border-radius: 0.375rem;
-}
-
-.app-subcard {
-  border: 1px solid var(--color-kumo-line);
-  border-radius: 0.5rem;
-  background-color: color-mix(in oklab, var(--color-kumo-recessed) 40%, transparent);
-  box-shadow: none;
-  outline: 1px solid color-mix(in oklab, var(--color-kumo-line) 66%, transparent);
-  outline-offset: -1px;
-}
-
 .app-table-frame {
   overflow-x: auto;
 }
 
-.app-status-pill {
+.app-brand-icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  flex: none;
+  line-height: 1;
+  vertical-align: -0.125em;
+}
+
+.app-brand-icon--asset {
+  background-color: currentColor;
+  mask: var(--app-brand-icon-url) center / contain no-repeat;
+}
+
+.app-brand-icon--font {
   display: inline-flex;
   align-items: center;
-  border-width: 1px;
-  border-style: solid;
-  border-radius: 0.25rem;
-  padding: 0.125rem 0.5rem;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1.25;
+  justify-content: center;
+  font-size: 1em;
+}
+
+.app-brand-icon--image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.app-totp-brand-mark {
+  overflow: hidden;
+}
+
+.app-totp-brand-mark--remote {
+  background: transparent;
+}
+
+.app-totp-brand-mark--remote .app-brand-icon--image {
+  width: 100%;
+  height: 100%;
+  transform: none;
+}
+
+.app-font-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
 .app-empty-panel {
   border: 1px dashed var(--color-kumo-line);
   border-radius: 0.75rem;
   background-color: color-mix(in oklab, var(--color-kumo-recessed) 10%, transparent);
+}
+
+.scheduler-workflow-canvas {
+  min-height: 14rem;
+  background:
+    linear-gradient(
+      to right,
+      color-mix(in oklab, var(--color-kumo-line) 46%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--color-kumo-line) 46%, transparent) 1px,
+      transparent 1px
+    ),
+    color-mix(in oklab, var(--color-kumo-recessed) 18%, transparent);
+  background-size:
+    32px 32px,
+    32px 32px,
+    auto;
+}
+
+.scheduler-workflow-canvas-compact {
+  min-height: 14rem;
+}
+
+@media (min-width: 1024px) {
+  .scheduler-workflow-card {
+    height: 100%;
+  }
+
+  .scheduler-workflow-card > div {
+    height: 100%;
+    align-items: stretch;
+  }
+
+  .scheduler-workflow-card .scheduler-workflow-canvas-compact {
+    height: 100%;
+    min-height: 100%;
+  }
+}
+
+.scheduler-workflow-canvas-editor {
+  height: clamp(24rem, 48dvh, 34rem);
+  min-height: 24rem;
 }
 
 [role='dialog'] {
@@ -153,6 +280,7 @@ th > button[aria-label='Resize column'] > span {
 }
 
 .dns-table-frame {
+  min-height: 0;
   position: relative;
   overflow: hidden;
   border-radius: 0.5rem;
@@ -170,6 +298,8 @@ th > button[aria-label='Resize column'] > span {
 }
 
 .dns-table-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
   position: relative;
   z-index: 0;
   height: 100%;
@@ -194,146 +324,152 @@ th > button[aria-label='Resize column'] > span {
 
 @container (min-width: 980px) {
   .dns-split {
-    grid-template-columns: clamp(300px, 38%, 424px) minmax(0, 1fr);
+    grid-template-columns: clamp(292px, 36%, 396px) minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
   }
 }
 
 .app-os-windows {
-  color: #0078d4;
+  color: var(--color-kumo-info);
 }
 
-.auth-ambient-layer {
-  --auth-cursor-opacity: 0;
-  --auth-cursor-x: 50vw;
-  --auth-cursor-y: 50vh;
+.app-main-shell {
+  height: 100dvh;
+  min-height: 100dvh;
+  background: var(--app-main-bg);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+}
 
+.app-main-panel {
+  min-width: 0;
+  background: var(--color-kumo-overlay);
+}
+
+.app-main-topbar {
+  background-color: var(--app-main-surface);
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.app-main-footer {
+  background-color: var(--app-main-surface);
+}
+
+:root[data-display-mode='standalone'] body {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+:root[data-display-mode='standalone'] input,
+:root[data-display-mode='standalone'] textarea,
+:root[data-display-mode='standalone'] [contenteditable='true'],
+:root[data-display-mode='standalone'] [role='textbox'] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+:root[data-display-mode='standalone'] .app-main-topbar {
+  -webkit-app-region: drag;
+}
+
+:root[data-display-mode='standalone'] button,
+:root[data-display-mode='standalone'] a,
+:root[data-display-mode='standalone'] input,
+:root[data-display-mode='standalone'] select,
+:root[data-display-mode='standalone'] textarea,
+:root[data-display-mode='standalone'] [role='button'],
+:root[data-display-mode='standalone'] [role='menuitem'],
+:root[data-display-mode='standalone'] [role='tab'] {
+  -webkit-app-region: no-drag;
+}
+
+@supports (top: env(titlebar-area-height)) {
+  :root[data-display-mode='standalone'] .app-main-topbar {
+    min-height: max(58px, env(titlebar-area-height, 0px));
+    padding-top: env(titlebar-area-y, 0px);
+  }
+}
+
+:root[data-mode='dark'] .app-main-shell {
+  background: var(--app-main-bg);
+}
+
+:root[data-mode='dark'] .app-main-panel {
+  background: oklch(0.145 0 0);
+}
+
+:root[data-mode='dark'] .app-main-topbar {
+  background-color: var(--app-main-surface);
+}
+
+:root[data-mode='dark'] .app-main-footer {
+  background-color: var(--app-main-surface);
+}
+
+.public-server-status-page {
+  background: var(--app-main-bg);
+}
+
+.public-github-page {
+  background: var(--app-main-bg);
+}
+
+.public-status-page {
+  background: var(--app-main-bg);
+}
+
+.public-server-status-card {
+  box-shadow:
+    0 1px 2px color-mix(in oklab, var(--color-kumo-line) 38%, transparent),
+    0 10px 24px color-mix(in oklab, var(--color-kumo-canvas) 18%, transparent);
+}
+
+.public-github-card {
+  box-shadow:
+    0 1px 2px color-mix(in oklab, var(--color-kumo-line) 38%, transparent),
+    0 10px 24px color-mix(in oklab, var(--color-kumo-canvas) 18%, transparent);
+}
+
+.public-status-card {
+  box-shadow:
+    0 1px 2px color-mix(in oklab, var(--color-kumo-line) 38%, transparent),
+    0 10px 24px color-mix(in oklab, var(--color-kumo-canvas) 18%, transparent);
+}
+
+:root[data-mode='dark'] .public-server-status-card {
+  box-shadow:
+    0 1px 0 color-mix(in oklab, var(--color-kumo-line) 82%, transparent),
+    0 12px 28px color-mix(in oklab, var(--color-kumo-canvas) 34%, transparent);
+}
+
+:root[data-mode='dark'] .public-github-card {
+  box-shadow:
+    0 1px 0 color-mix(in oklab, var(--color-kumo-line) 82%, transparent),
+    0 12px 28px color-mix(in oklab, var(--color-kumo-canvas) 34%, transparent);
+}
+
+:root[data-mode='dark'] .public-status-card {
+  box-shadow:
+    0 1px 0 color-mix(in oklab, var(--color-kumo-line) 82%, transparent),
+    0 12px 28px color-mix(in oklab, var(--color-kumo-canvas) 34%, transparent);
+}
+
+.public-status-meter-compact {
+  gap: 0;
+}
+
+.public-status-meter-compact > div:first-child {
   position: absolute;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: auto;
-}
-
-.auth-ambient-grid {
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(
-      to right,
-      color-mix(in oklab, var(--color-kumo-line) 58%, transparent) 1px,
-      transparent 1px
-    ),
-    linear-gradient(
-      to bottom,
-      color-mix(in oklab, var(--color-kumo-line) 58%, transparent) 1px,
-      transparent 1px
-    );
-  background-position: 0 0;
-  background-size: 44px 44px;
-  mask-image: radial-gradient(ellipse at 62% 48%, black 0%, transparent 72%);
-  opacity: 0.28;
-  pointer-events: none;
-}
-
-.auth-ambient-grid::after {
-  position: absolute;
-  inset: 0;
-  content: '';
-  background-image:
-    linear-gradient(
-      to right,
-      color-mix(in oklab, var(--color-kumo-brand) 46%, transparent) 1px,
-      transparent 1px
-    ),
-    linear-gradient(
-      to bottom,
-      color-mix(in oklab, var(--color-kumo-info) 30%, transparent) 1px,
-      transparent 1px
-    );
-  background-position: 0 0;
-  background-size: inherit;
-  mask-image: radial-gradient(
-    circle 280px at var(--auth-cursor-x) var(--auth-cursor-y),
-    black 0%,
-    transparent 72%
-  );
-  opacity: var(--auth-cursor-opacity);
-  transition: opacity 220ms ease-out;
-  will-change: opacity, mask-image;
-}
-
-.auth-particles-canvas {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  mask-image: radial-gradient(ellipse at 60% 48%, black 0%, transparent 78%);
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.auth-particles-canvas canvas {
-  filter: saturate(1.14) contrast(1.04);
-}
-
-.auth-cursor-light {
-  position: absolute;
-  top: 0;
-  left: 0;
-  z-index: 2;
   width: 1px;
   height: 1px;
-  pointer-events: none;
-  opacity: var(--auth-cursor-opacity);
-  transform: translate3d(var(--auth-cursor-x), var(--auth-cursor-y), 0);
-  transition: opacity 220ms ease-out;
-  box-shadow:
-    0 0 126px 58px color-mix(in oklab, var(--color-kumo-brand) 17%, transparent),
-    0 0 236px 104px color-mix(in oklab, var(--color-kumo-info) 8%, transparent);
-  mix-blend-mode: screen;
-  will-change: transform, opacity;
-}
-
-:root[data-mode='dark'] .auth-ambient-grid {
-  opacity: 0.34;
-}
-
-:root[data-mode='dark'] .auth-ambient-grid::after {
-  background-image:
-    linear-gradient(
-      to right,
-      color-mix(in oklab, var(--color-kumo-brand) 58%, transparent) 1px,
-      transparent 1px
-    ),
-    linear-gradient(
-      to bottom,
-      color-mix(in oklab, var(--color-kumo-info) 42%, transparent) 1px,
-      transparent 1px
-    );
-  mask-image: radial-gradient(
-    circle 320px at var(--auth-cursor-x) var(--auth-cursor-y),
-    black 0%,
-    transparent 74%
-  );
-}
-
-:root[data-mode='dark'] .auth-particles-canvas canvas {
-  filter: saturate(1.26) brightness(1.2) contrast(1.08);
-}
-
-:root[data-mode='dark'] .auth-cursor-light {
-  box-shadow:
-    0 0 142px 68px color-mix(in oklab, var(--color-kumo-brand) 22%, transparent),
-    0 0 268px 116px color-mix(in oklab, var(--color-kumo-info) 11%, transparent);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .auth-particles-canvas {
-    display: none;
-  }
-
-  .auth-cursor-light {
-    display: none;
-  }
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
 }
 
 .agent-command-textarea {
@@ -342,9 +478,365 @@ th > button[aria-label='Resize column'] > span {
   max-width: 100%;
 }
 
+.app-code-editor {
+  position: relative;
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--color-kumo-fill);
+  border-radius: 6px;
+  background: var(--color-kumo-base);
+}
+
+.app-code-editor:focus-within {
+  border-color: color-mix(in oklab, var(--color-kumo-brand) 76%, var(--color-kumo-fill));
+  outline: 2px solid color-mix(in oklab, var(--color-kumo-brand) 18%, transparent);
+  outline-offset: 1px;
+}
+
+.app-code-editor > [class^='cm-theme'] {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  width: 100%;
+  overflow: hidden;
+}
+
+.app-code-editor > [class^='cm-theme'] > .cm-editor {
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+}
+
+.app-code-editor .cm-scroller {
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+  max-width: 100%;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.app-code-editor .cm-content,
+.app-code-editor .cm-line {
+  max-width: none;
+}
+
+.app-code-editor-header,
+.app-code-editor-status {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: color-mix(in oklab, var(--color-kumo-base) 90%, var(--color-kumo-overlay));
+  padding: 2px 8px;
+  color: var(--text-color-kumo-subtle);
+  font-size: 10px;
+  line-height: 18px;
+}
+
+.app-code-editor-header {
+  border-bottom: 1px solid var(--color-kumo-fill);
+}
+
+.app-code-editor-status {
+  justify-content: flex-end;
+  border-top: 1px solid var(--color-kumo-fill);
+  font-family: ui-monospace, monospace;
+}
+
+.app-markdown-editor {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--color-kumo-fill);
+  border-radius: 6px;
+  background: var(--color-kumo-base);
+}
+
+.app-markdown-editor:focus-within {
+  border-color: color-mix(in oklab, var(--color-kumo-brand) 76%, var(--color-kumo-fill));
+  outline: 2px solid color-mix(in oklab, var(--color-kumo-brand) 18%, transparent);
+  outline-offset: 1px;
+}
+
+.app-markdown-editor-header {
+  display: flex;
+  min-height: 34px;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  border-bottom: 1px solid var(--color-kumo-fill);
+  background: color-mix(in oklab, var(--color-kumo-base) 90%, var(--color-kumo-overlay));
+  padding: 4px 8px;
+}
+
+.app-markdown-editor-body,
+.app-markdown-editor-visual,
+.app-markdown-editor-crepe {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.app-markdown-editor-body > .app-code-editor {
+  border: 0;
+  border-radius: 0;
+}
+
+.app-markdown-editor-visual {
+  position: relative;
+}
+
+.app-markdown-editor-crepe .milkdown {
+  --crepe-color-background: var(--color-kumo-base);
+  --crepe-color-on-background: var(--text-color-kumo-default);
+  --crepe-color-surface: var(--color-kumo-overlay);
+  --crepe-color-surface-low: var(--color-kumo-recessed);
+  --crepe-color-on-surface: var(--text-color-kumo-strong);
+  --crepe-color-on-surface-variant: var(--text-color-kumo-subtle);
+  --crepe-color-outline: var(--color-kumo-line);
+  --crepe-color-primary: var(--color-kumo-brand);
+  --crepe-color-secondary: color-mix(in oklab, var(--color-kumo-brand) 16%, var(--color-kumo-base));
+  --crepe-color-on-secondary: var(--text-color-kumo-strong);
+  --crepe-color-inverse: var(--text-color-kumo-strong);
+  --crepe-color-on-inverse: var(--color-kumo-base);
+  --crepe-color-inline-code: var(--color-kumo-danger);
+  --crepe-color-error: var(--color-kumo-danger);
+  --crepe-color-hover: color-mix(in oklab, var(--color-kumo-brand) 8%, var(--color-kumo-base));
+  --crepe-color-selected: color-mix(in oklab, var(--color-kumo-brand) 14%, var(--color-kumo-base));
+  --crepe-color-inline-area: var(--color-kumo-recessed);
+  --crepe-font-title: ui-sans-serif, system-ui, sans-serif;
+  --crepe-font-default: ui-sans-serif, system-ui, sans-serif;
+  --crepe-font-code: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  min-height: 100%;
+  flex: 1;
+  background: var(--color-kumo-base);
+  color: var(--text-color-kumo-default);
+}
+
+.app-markdown-editor-crepe .milkdown .ProseMirror {
+  min-height: 15rem;
+  padding: 18px 20px 32px;
+}
+
+.app-markdown-editor-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-kumo-base);
+  color: var(--text-color-kumo-subtle);
+  font-size: 12px;
+}
+
+.app-markdown-rendered {
+  overflow-wrap: anywhere;
+  border: 1px solid var(--color-kumo-line);
+  border-radius: 6px;
+  background: var(--color-kumo-base);
+  padding: 18px;
+  color: var(--text-color-kumo-default);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.app-markdown-rendered > :first-child {
+  margin-top: 0;
+}
+
+.app-markdown-rendered > :last-child {
+  margin-bottom: 0;
+}
+
+.app-markdown-rendered h1,
+.app-markdown-rendered h2,
+.app-markdown-rendered h3,
+.app-markdown-rendered h4,
+.app-markdown-rendered h5,
+.app-markdown-rendered h6 {
+  margin: 1.25em 0 0.55em;
+  color: var(--text-color-kumo-strong);
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.app-markdown-rendered h1 {
+  font-size: 1.65em;
+}
+.app-markdown-rendered h2 {
+  font-size: 1.4em;
+}
+.app-markdown-rendered h3 {
+  font-size: 1.2em;
+}
+.app-markdown-rendered h4,
+.app-markdown-rendered h5,
+.app-markdown-rendered h6 {
+  font-size: 1em;
+}
+
+.app-markdown-rendered p,
+.app-markdown-rendered ul,
+.app-markdown-rendered ol,
+.app-markdown-rendered blockquote,
+.app-markdown-rendered pre,
+.app-markdown-rendered table {
+  margin: 0 0 1em;
+}
+
+.app-markdown-rendered ul,
+.app-markdown-rendered ol {
+  padding-left: 1.5rem;
+}
+
+.app-markdown-rendered ul {
+  list-style: disc;
+}
+.app-markdown-rendered ol {
+  list-style: decimal;
+}
+.app-markdown-rendered li + li {
+  margin-top: 0.2em;
+}
+
+.app-markdown-rendered blockquote {
+  border-left: 3px solid var(--color-kumo-brand);
+  background: var(--color-kumo-recessed);
+  padding: 8px 12px;
+  color: var(--text-color-kumo-subtle);
+}
+
+.app-markdown-rendered a {
+  color: var(--color-kumo-brand);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.app-markdown-rendered code {
+  border-radius: 4px;
+  background: var(--color-kumo-recessed);
+  padding: 0.12em 0.35em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+.app-markdown-rendered pre {
+  overflow: auto;
+  border: 1px solid var(--color-kumo-line);
+  border-radius: 6px;
+  background: var(--color-kumo-recessed);
+  padding: 12px;
+}
+
+.app-markdown-rendered pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.app-markdown-rendered table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.app-markdown-rendered th,
+.app-markdown-rendered td {
+  border: 1px solid var(--color-kumo-line);
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.app-markdown-rendered th {
+  background: var(--color-kumo-recessed);
+  color: var(--text-color-kumo-strong);
+}
+
+.app-markdown-rendered img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+
+.app-markdown-rendered hr {
+  margin: 1.25rem 0;
+  border: 0;
+  border-top: 1px solid var(--color-kumo-line);
+}
+
+.public-share-source {
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+}
+
 .app-terminal-surface {
   background-color: var(--app-terminal-bg);
   color: var(--app-terminal-fg);
+}
+
+.app-log-surface {
+  --app-log-text: color-mix(in oklab, var(--app-terminal-fg) 92%, transparent);
+  --app-log-muted: color-mix(in oklab, var(--app-terminal-fg) 56%, transparent);
+  --app-log-row-border: color-mix(in oklab, var(--app-terminal-fg) 14%, transparent);
+  --app-log-row-hover: color-mix(in oklab, var(--app-terminal-fg) 12%, transparent);
+  --app-log-match-bg: color-mix(in oklab, var(--color-kumo-warning) 22%, transparent);
+}
+
+.app-log-text {
+  color: var(--app-log-text);
+}
+
+.app-log-muted {
+  color: var(--app-log-muted);
+}
+
+.app-log-source {
+  color: var(--color-kumo-warning);
+}
+
+.app-log-module,
+.app-log-info {
+  color: var(--color-kumo-info);
+}
+
+.app-log-success {
+  color: var(--color-kumo-success);
+}
+
+.app-log-warning {
+  color: var(--color-kumo-warning);
+}
+
+.app-log-danger {
+  color: var(--color-kumo-danger);
+}
+
+.app-log-row {
+  border-bottom: 1px solid var(--app-log-row-border);
+}
+
+.app-log-row:hover {
+  background-color: var(--app-log-row-hover);
+}
+
+.app-log-match {
+  color: var(--color-kumo-warning);
+  background-color: var(--app-log-match-bg);
 }
 
 .app-terminal-surface .xterm {
@@ -370,9 +862,32 @@ table td > * {
   min-width: 0;
 }
 
+/* Keep operation headers and their row actions on the same visual axis. */
+.app-table-action {
+  text-align: center !important;
+}
+
+table:has(th.app-table-action) tbody > tr > td:last-child {
+  text-align: center !important;
+}
+
+table:has(th.app-table-action) tbody > tr > td:last-child button,
+table:has(th.app-table-action) tbody > tr > td:last-child a[role='button'] {
+  display: inline-flex !important;
+}
+
+table:has(th.app-table-action) tbody > tr > td:last-child .justify-end {
+  justify-content: center !important;
+}
+
 /* Hidden scrollbar compatibility for legacy scrollbar-thin usages */
 .scrollbar-thin::-webkit-scrollbar {
   width: 0;
   height: 0;
   display: none;
+}
+
+button[aria-label='\6DFB\52A0\65B0\79DF\6237'] {
+  min-height: 11.8rem;
+  padding: 0.875rem 1rem;
 }

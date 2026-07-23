@@ -5,6 +5,8 @@ import { Select } from '@cloudflare/kumo/components/select';
 import { Table } from '@cloudflare/kumo/components/table';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { toast } from '../modules/toast.js';
+import { dialog } from '../modules/dialog.js';
+import { SectionCard } from '../components/ui/AppPrimitives.jsx';
 import { Clock, Database, Download, Play, RefreshCw, Save, Trash } from '../components/Icons.jsx';
 
 const PROVIDERS = [
@@ -149,7 +151,7 @@ export function BackupPanel({ embedded = false } = {}) {
   };
 
   const remove = async (record) => {
-    if (!window.confirm(`删除备份 ${record.file_name}？`)) return;
+    if (!(await dialog.confirm(`删除备份 ${record.file_name}？`))) return;
     const res = await fetch(`/api/backup/records/${encodeURIComponent(record.id)}`, { method: 'DELETE', headers: authHeaders() });
     const data = await res.json();
     if (!data.success) return toast.error(data.error || '删除失败');
@@ -157,7 +159,7 @@ export function BackupPanel({ embedded = false } = {}) {
   };
 
   const restore = async (record) => {
-    if (!window.confirm(`确认从 ${record.file_name} 恢复？当前数据库和文件柜会被覆盖。`)) return;
+    if (!(await dialog.confirm(`确认从 ${record.file_name} 恢复？当前数据库和文件柜会被覆盖。`))) return;
     const res = await fetch('/api/backup/restore', {
       method: 'POST',
       headers: authHeaders(),
@@ -170,22 +172,26 @@ export function BackupPanel({ embedded = false } = {}) {
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4">
-      <section className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
-        {!embedded && (
-          <div>
-            <h1 className="text-lg font-semibold text-kumo-strong">备份中心</h1>
-            <p className="mt-1 text-xs text-kumo-subtle">打包 SQLite 数据库与文件柜目录，支持本地保留和云端同步。</p>
-          </div>
-        )}
-        <div className={embedded ? 'flex flex-wrap gap-2' : 'flex flex-wrap gap-2 lg:justify-end'}>
-          <Button size="sm" variant="secondary" onClick={load} disabled={loading}><RefreshCw className="h-3.5 w-3.5" />刷新备份</Button>
-          <Button size="sm" variant="primary" onClick={run} disabled={running}><Play className="h-3.5 w-3.5" />立即完整备份</Button>
-        </div>
-      </section>
+      {!embedded && (
+        <section className="grid gap-3">
+          <h1 className="text-lg font-semibold text-kumo-strong">备份中心</h1>
+          <p className="text-xs text-kumo-subtle">打包 SQLite 数据库与文件柜目录，支持本地保留和云端同步。</p>
+        </section>
+      )}
 
-      <section className="grid gap-3">
-        <div className="rounded-md border border-kumo-line p-3">
-          <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-kumo-strong"><Database className="h-4 w-4" />自动备份配置</div>
+      <section className="grid items-start gap-3">
+        <SectionCard
+          title="自动备份配置"
+          description={scheduleSummary(schedule)}
+          icon={<Database className="h-4 w-4 text-kumo-brand" />}
+          actions={(
+            <>
+              <Button size="sm" variant="secondary" onClick={load} disabled={loading}><RefreshCw className="h-3.5 w-3.5" />刷新备份</Button>
+              <Button size="sm" variant="primary" onClick={run} disabled={running}><Play className="h-3.5 w-3.5" />立即完整备份</Button>
+            </>
+          )}
+          bodyClassName="space-y-3"
+        >
           <div className="space-y-3">
             <Select size="sm" label="存储渠道" className="w-full" value={config.provider} onValueChange={(value) => setConfig((prev) => ({ ...prev, provider: value }))} items={PROVIDERS} />
             <Input size="sm" label="本地目录" value={config.local_dir || ''} onChange={(event) => setConfig((prev) => ({ ...prev, local_dir: event.target.value }))} />
@@ -201,22 +207,25 @@ export function BackupPanel({ embedded = false } = {}) {
                 </div>
               )}
               {schedule.type === 'custom' && <Input size="sm" label="Cron 表达式" value={schedule.custom} onChange={(event) => setSchedule((prev) => ({ ...prev, custom: event.target.value }))} />}
-              <div className="text-[11px] text-kumo-subtle">{scheduleSummary(schedule)}</div>
             </div>
             {cloudMode && (
               <>
-                <Input size="sm" label="Endpoint" value={config.endpoint || ''} onChange={(event) => setConfig((prev) => ({ ...prev, endpoint: event.target.value }))} />
-                <Input size="sm" label="Bucket" value={config.bucket || ''} onChange={(event) => setConfig((prev) => ({ ...prev, bucket: event.target.value }))} />
-                <Input size="sm" label="AccessKeyID" value={config.access_key_id || ''} onChange={(event) => setConfig((prev) => ({ ...prev, access_key_id: event.target.value }))} />
-                <Input size="sm" type="password" label="AccessKeySecret" value={config.access_key_secret || ''} onChange={(event) => setConfig((prev) => ({ ...prev, access_key_secret: event.target.value }))} />
+                <Input size="sm" label="服务端点" value={config.endpoint || ''} onChange={(event) => setConfig((prev) => ({ ...prev, endpoint: event.target.value }))} />
+                <Input size="sm" label="存储桶" value={config.bucket || ''} onChange={(event) => setConfig((prev) => ({ ...prev, bucket: event.target.value }))} />
+                <Input size="sm" label="访问密钥 ID" value={config.access_key_id || ''} onChange={(event) => setConfig((prev) => ({ ...prev, access_key_id: event.target.value }))} />
+                <Input size="sm" type="text" label="访问密钥 Secret" value={config.access_key_secret || ''} onChange={(event) => setConfig((prev) => ({ ...prev, access_key_secret: event.target.value }))} autoComplete="off" data-1p-ignore data-lpignore="true" data-bwignore="true" data-form-type="other" spellCheck={false} />
               </>
             )}
             <Button size="sm" variant="primary" onClick={save}><Save className="h-3.5 w-3.5" />保存配置</Button>
           </div>
-        </div>
+        </SectionCard>
 
-        <div className="overflow-hidden rounded-md border border-kumo-line">
-          <div className="border-b border-kumo-line px-3 py-2 text-sm font-semibold text-kumo-strong">备份历史</div>
+        <SectionCard
+          title="备份历史"
+          description="完整备份生成后可下载、恢复或删除。"
+          icon={<Clock className="h-4 w-4 text-kumo-brand" />}
+          bodyPadding="none"
+        >
           {records.length === 0 ? (
             <div className="flex min-h-40 flex-col items-center justify-center gap-2 bg-kumo-control px-6 py-8 text-center text-kumo-default">
               <Database className="h-8 w-8 text-kumo-inactive" />
@@ -226,7 +235,7 @@ export function BackupPanel({ embedded = false } = {}) {
           ) : (
             <div className="max-h-80 overflow-auto">
             <Table layout="fixed" className={embedded ? 'min-w-[560px]' : 'min-w-[720px]'}>
-              <Table.Header><Table.Row><Table.Head>文件</Table.Head><Table.Head>大小</Table.Head><Table.Head>时间</Table.Head><Table.Head>操作</Table.Head></Table.Row></Table.Header>
+              <Table.Header><Table.Row><Table.Head>文件</Table.Head><Table.Head>大小</Table.Head><Table.Head>时间</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row></Table.Header>
               <Table.Body>
                 {records.map((record) => (
                   <Table.Row key={record.id}>
@@ -240,7 +249,7 @@ export function BackupPanel({ embedded = false } = {}) {
             </Table>
             </div>
           )}
-        </div>
+        </SectionCard>
       </section>
     </div>
   );

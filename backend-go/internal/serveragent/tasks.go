@@ -1,7 +1,9 @@
 package serveragent
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -36,6 +38,7 @@ type Task struct {
 	StartedAt   *time.Time
 	CompletedAt *time.Time
 	subscribers []chan TaskEvent
+	transient   bool
 	mu          sync.RWMutex
 }
 
@@ -49,23 +52,98 @@ type TaskEvent struct {
 	Error    string      `json:"error,omitempty"`
 }
 
+// Snapshot returns a consistent, serializable view of a task. Terminal
+// results are included so a client that reconnects after completion can still
+// render the outcome.
+func (t *Task) Snapshot() TaskEvent {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	event := TaskEvent{Type: "status", TaskID: t.ID, Status: t.Status, Progress: t.Progress}
+	if t.Status == TaskCompleted {
+		event.Type = "completed"
+		event.Data = t.Result
+	} else if t.Status == TaskFailed {
+		event.Type = "failed"
+		event.Error = t.Error
+	}
+	return event
+}
+
 // TaskRegistry 任务注册表
 type TaskRegistry struct {
 	tasks       map[string]*Task
 	subscribers map[chan TaskEvent]struct{}
+	leases      map[string]string
+	resources   map[string][]string
+	persistence taskPersistence
+	lastPrune   time.Time
 	mu          sync.RWMutex
 }
+
+var ErrTaskResourceBusy = errors.New("task resource is busy")
+
+type TaskResourceBusyError struct {
+	Resource string
+	TaskID   string
+}
+
+func (e *TaskResourceBusyError) Error() string {
+	return fmt.Sprintf("%s is owned by task %s", e.Resource, e.TaskID)
+}
+
+func (e *TaskResourceBusyError) Unwrap() error { return ErrTaskResourceBusy }
 
 // NewTaskRegistry 创建任务注册表
 func NewTaskRegistry() *TaskRegistry {
 	return &TaskRegistry{
 		tasks:       make(map[string]*Task),
 		subscribers: make(map[chan TaskEvent]struct{}),
+		leases:      make(map[string]string),
+		resources:   make(map[string][]string),
 	}
+}
+
+func (r *TaskRegistry) AttachPersistence(ctx context.Context, persistence taskPersistence) error {
+	if persistence == nil {
+		return nil
+	}
+	tasks, err := persistence.LoadRecent(ctx, 7*24*time.Hour)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.persistence = persistence
+	for _, task := range tasks {
+		if task.Status == TaskPending || task.Status == TaskRunning {
+			task.Status = TaskFailed
+			task.Error = "backend restarted before task completion; host facts will be reconciled"
+			now := time.Now()
+			task.CompletedAt = &now
+			_ = persistence.Save(context.Background(), task)
+		}
+		task.subscribers = []chan TaskEvent{}
+		r.tasks[task.ID] = task
+	}
+	r.mu.Unlock()
+	return nil
 }
 
 // Create 创建任务
 func (r *TaskRegistry) Create(serverID, taskType, command string) *Task {
+	task, _ := r.create(serverID, taskType, command, nil, false)
+	return task
+}
+
+func (r *TaskRegistry) CreateTransient(serverID, taskType, command string) *Task {
+	task, _ := r.create(serverID, taskType, command, nil, true)
+	return task
+}
+
+func (r *TaskRegistry) CreateExclusive(serverID, taskType, command string, resources ...string) (*Task, error) {
+	return r.create(serverID, taskType, command, resources, false)
+}
+
+func (r *TaskRegistry) create(serverID, taskType, command string, resources []string, transient bool) (*Task, error) {
 	task := &Task{
 		ID:          uuid.New().String(),
 		ServerID:    serverID,
@@ -75,11 +153,40 @@ func (r *TaskRegistry) Create(serverID, taskType, command string) *Task {
 		Progress:    0,
 		CreatedAt:   time.Now(),
 		subscribers: []chan TaskEvent{},
+		transient:   transient,
 	}
 
 	r.mu.Lock()
+	for _, resource := range resources {
+		if owner := r.leases[resource]; owner != "" {
+			r.mu.Unlock()
+			return nil, &TaskResourceBusyError{Resource: resource, TaskID: owner}
+		}
+	}
 	r.tasks[task.ID] = task
+	for _, resource := range resources {
+		r.leases[resource] = task.ID
+	}
+	if len(resources) > 0 {
+		r.resources[task.ID] = append([]string(nil), resources...)
+	}
+	persistence := r.persistence
 	r.mu.Unlock()
+	if persistence != nil && !task.transient {
+		if err := persistence.Save(context.Background(), task); err != nil && len(resources) > 0 {
+			r.mu.Lock()
+			delete(r.tasks, task.ID)
+			for _, resource := range resources {
+				if r.leases[resource] == task.ID {
+					delete(r.leases, resource)
+				}
+			}
+			delete(r.resources, task.ID)
+			r.mu.Unlock()
+			return nil, fmt.Errorf("persist orchestration task: %w", err)
+		}
+		r.pruneIfDue()
+	}
 
 	r.broadcast(TaskEvent{
 		Type:     "created",
@@ -94,7 +201,52 @@ func (r *TaskRegistry) Create(serverID, taskType, command string) *Task {
 		},
 	})
 
-	return task
+	return task, nil
+}
+
+func (r *TaskRegistry) ActiveTask(resource string) (*Task, bool) {
+	r.mu.RLock()
+	owner := r.leases[resource]
+	task := r.tasks[owner]
+	r.mu.RUnlock()
+	return task, task != nil
+}
+
+func proxyTaskResource(serverID string) string { return "proxy:" + serverID }
+
+func (s *Service) requireAgentCapability(w http.ResponseWriter, serverID, capability string) bool {
+	connection, online := s.registry.Get(serverID)
+	if !online {
+		response.Error(w, http.StatusBadGateway, "agent offline")
+		return false
+	}
+	if !connection.GetCapabilities()[capability] {
+		response.Error(w, http.StatusConflict, "Agent 版本过旧，不支持该编排操作，请先升级 Agent")
+		return false
+	}
+	return true
+}
+
+func (s *Service) createExclusiveProxyTask(w http.ResponseWriter, serverID, taskType, command string) (*Task, bool) {
+	task, err := s.taskRegistry.CreateExclusive(serverID, taskType, command, proxyTaskResource(serverID))
+	if err == nil {
+		return task, true
+	}
+	if errors.Is(err, ErrTaskResourceBusy) {
+		data := map[string]interface{}{"server_id": serverID}
+		if active, ok := s.taskRegistry.ActiveTask(proxyTaskResource(serverID)); ok {
+			data["task_id"] = active.ID
+			data["task"] = active.Snapshot()
+		}
+		response.JSON(w, http.StatusConflict, map[string]interface{}{
+			"success": false,
+			"error":   "该实例已有代理编排任务正在执行，请等待完成后重试",
+			"data":    data,
+		})
+		return nil, false
+	}
+	response.Error(w, http.StatusInternalServerError, err.Error())
+	return nil, false
 }
 
 // Get 获取任务
@@ -120,6 +272,7 @@ func (r *TaskRegistry) UpdateProgress(taskID string, progress int, data interfac
 		task.StartedAt = &now
 	}
 	task.mu.Unlock()
+	r.persist(task)
 
 	// 通知订阅者
 	event := TaskEvent{
@@ -147,6 +300,8 @@ func (r *TaskRegistry) Complete(taskID string, result string) {
 	now := time.Now()
 	task.CompletedAt = &now
 	task.mu.Unlock()
+	r.persist(task)
+	r.release(taskID)
 
 	event := TaskEvent{
 		Type:     "completed",
@@ -158,6 +313,7 @@ func (r *TaskRegistry) Complete(taskID string, result string) {
 	task.notifySubscribers(event)
 	r.broadcast(event)
 	task.closeSubscribers()
+	r.removeTransient(task)
 }
 
 // Fail 失败任务
@@ -173,6 +329,8 @@ func (r *TaskRegistry) Fail(taskID string, errorMsg string) {
 	now := time.Now()
 	task.CompletedAt = &now
 	task.mu.Unlock()
+	r.persist(task)
+	r.release(taskID)
 
 	event := TaskEvent{
 		Type:   "failed",
@@ -183,6 +341,63 @@ func (r *TaskRegistry) Fail(taskID string, errorMsg string) {
 	task.notifySubscribers(event)
 	r.broadcast(event)
 	task.closeSubscribers()
+	r.removeTransient(task)
+}
+
+func (r *TaskRegistry) persist(task *Task) {
+	if task.transient {
+		return
+	}
+	r.mu.RLock()
+	persistence := r.persistence
+	r.mu.RUnlock()
+	if persistence != nil {
+		_ = persistence.Save(context.Background(), task)
+	}
+}
+
+func (r *TaskRegistry) removeTransient(task *Task) {
+	if task == nil || !task.transient {
+		return
+	}
+	r.mu.Lock()
+	delete(r.tasks, task.ID)
+	r.mu.Unlock()
+}
+
+func (r *TaskRegistry) release(taskID string) {
+	r.mu.Lock()
+	for _, resource := range r.resources[taskID] {
+		if r.leases[resource] == taskID {
+			delete(r.leases, resource)
+		}
+	}
+	delete(r.resources, taskID)
+	r.mu.Unlock()
+}
+
+func (r *TaskRegistry) pruneIfDue() {
+	r.mu.Lock()
+	if time.Since(r.lastPrune) < time.Hour {
+		r.mu.Unlock()
+		return
+	}
+	r.lastPrune = time.Now()
+	cutoff := time.Now().Add(-7 * 24 * time.Hour)
+	for id, task := range r.tasks {
+		task.mu.RLock()
+		terminal := task.Status == TaskCompleted || task.Status == TaskFailed || task.Status == TaskCancelled
+		completedAt := task.CompletedAt
+		task.mu.RUnlock()
+		if terminal && completedAt != nil && completedAt.Before(cutoff) {
+			delete(r.tasks, id)
+		}
+	}
+	persistence := r.persistence
+	r.mu.Unlock()
+	if persistence != nil {
+		_ = persistence.Prune(context.Background(), cutoff)
+	}
 }
 
 func (r *TaskRegistry) SubscribeAll() (<-chan TaskEvent, func()) {
@@ -233,8 +448,25 @@ func (t *Task) Subscribe() <-chan TaskEvent {
 	defer t.mu.Unlock()
 
 	ch := make(chan TaskEvent, 10)
+	// Complete/Fail may have happened before the HTTP stream was opened. Queue
+	// the terminal event for this late subscriber instead of losing feedback.
+	if t.Status == TaskCompleted || t.Status == TaskFailed {
+		ch <- t.snapshotLocked()
+		close(ch)
+		return ch
+	}
 	t.subscribers = append(t.subscribers, ch)
 	return ch
+}
+
+func (t *Task) snapshotLocked() TaskEvent {
+	event := TaskEvent{Type: "status", TaskID: t.ID, Status: t.Status, Progress: t.Progress}
+	if t.Status == TaskCompleted {
+		event.Type, event.Data = "completed", t.Result
+	} else if t.Status == TaskFailed {
+		event.Type, event.Error = "failed", t.Error
+	}
+	return event
 }
 
 // notifySubscribers 通知订阅者
@@ -315,18 +547,15 @@ func (s *Service) streamTask(w http.ResponseWriter, r *http.Request, taskRegistr
 		return
 	}
 
-	// 发送当前状态
-	initialEvent := TaskEvent{
-		Type:     "status",
-		TaskID:   task.ID,
-		Status:   task.Status,
-		Progress: task.Progress,
-	}
+	// Subscribe before reading the snapshot. This closes the completion race
+	// between the initial status response and registration of the listener.
+	eventCh := task.Subscribe()
+	initialEvent := task.Snapshot()
 	s.writeSSE(w, initialEvent)
 	flusher.Flush()
-
-	// 订阅事件
-	eventCh := task.Subscribe()
+	if initialEvent.Status == TaskCompleted || initialEvent.Status == TaskFailed {
+		return
+	}
 	ctx := r.Context()
 
 	for {

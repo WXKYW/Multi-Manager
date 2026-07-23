@@ -78,6 +78,67 @@ func TestEngineIOPollingHandshakeAndWebSocketUpgrade(t *testing.T) {
 	}
 }
 
+func TestEngineIOWebSocketClosesWhenClientMissesPong(t *testing.T) {
+	engine := NewEngineIOServer(NewConnectionRegistry())
+	engine.pingInterval = 20 * time.Millisecond
+	engine.pingTimeout = 30 * time.Millisecond
+	disconnected := make(chan string, 1)
+	engine.SetHandlers(nil, nil, func(sessionID string) {
+		disconnected <- sessionID
+	})
+	server := httptest.NewServer(engine)
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/socket.io/?EIO=4&transport=websocket"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("websocket connect: %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	_, msg, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read handshake: %v", err)
+	}
+	if !strings.HasPrefix(string(msg), "0") {
+		t.Fatalf("handshake = %q", msg)
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, []byte("40")); err != nil {
+		t.Fatalf("write connect: %v", err)
+	}
+	_, msg, err = conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read ack: %v", err)
+	}
+	if !strings.HasPrefix(string(msg), `40{"sid":`) {
+		t.Fatalf("ack = %q", msg)
+	}
+
+	_, msg, err = conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read ping: %v", err)
+	}
+	if string(msg) != "2" {
+		t.Fatalf("ping = %q", msg)
+	}
+
+	select {
+	case <-disconnected:
+	case <-time.After(time.Second):
+		t.Fatal("disconnect callback was not called after missed pong")
+	}
+
+	if err := conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+		t.Fatalf("set close read deadline: %v", err)
+	}
+	if _, _, err := conn.ReadMessage(); err == nil {
+		t.Fatal("connection stayed readable after missed pong")
+	}
+}
+
 func waitForRootClient(t *testing.T, hub *MetricsHub, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -164,6 +225,26 @@ func TestEngineIOPollingWaitsForQueuedMessages(t *testing.T) {
 	}
 }
 
+func TestEngineIOPendingMessagesAreBounded(t *testing.T) {
+	engine := NewEngineIOServer(NewConnectionRegistry())
+	session := &EngineIOSession{
+		ID:              "slow-client",
+		Transport:       "polling",
+		PendingMessages: []string{},
+		LastActivity:    time.Now(),
+	}
+
+	for i := 0; i < maxPendingMessagesPerSession+25; i++ {
+		engine.queueMessage(session, "msg-"+string(rune('a'+(i%26))))
+	}
+
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+	if len(session.PendingMessages) != maxPendingMessagesPerSession {
+		t.Fatalf("pending message count = %d, want %d", len(session.PendingMessages), maxPendingMessagesPerSession)
+	}
+}
+
 func TestMetricsHubQueuesPollingClientMessages(t *testing.T) {
 	hub := NewMetricsHub()
 	session := &EngineIOSession{
@@ -184,6 +265,31 @@ func TestMetricsHubQueuesPollingClientMessages(t *testing.T) {
 	}
 	if !strings.Contains(session.PendingMessages[0], "metrics:update") {
 		t.Fatalf("pending message = %q", session.PendingMessages[0])
+	}
+}
+
+func TestMetricsHubPollingClientQueueIsBounded(t *testing.T) {
+	hub := NewMetricsHub()
+	session := &EngineIOSession{
+		ID:              "slow-polling-client",
+		Transport:       "polling",
+		Namespace:       "/metrics",
+		PendingMessages: []string{},
+		LastActivity:    time.Now(),
+	}
+	hub.Register(session.ID, session)
+
+	for i := 0; i < maxPendingMessagesPerSession+25; i++ {
+		hub.BroadcastMetrics("srv-1", map[string]interface{}{"cpu": float64(i)})
+	}
+
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+	if len(session.PendingMessages) != maxPendingMessagesPerSession {
+		t.Fatalf("pending message count = %d, want %d", len(session.PendingMessages), maxPendingMessagesPerSession)
+	}
+	if !strings.Contains(session.PendingMessages[len(session.PendingMessages)-1], `"cpu":152`) {
+		t.Fatalf("latest pending message was not retained: %q", session.PendingMessages[len(session.PendingMessages)-1])
 	}
 }
 

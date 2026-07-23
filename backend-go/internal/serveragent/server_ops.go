@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
@@ -1239,7 +1240,6 @@ func (s *Service) handleV2TasksRoutes(w http.ResponseWriter, r *http.Request, db
 				return
 			}
 		}
-		return
 	}
 
 	response.Error(w, http.StatusNotFound, "v2 tasks route not found")
@@ -1367,168 +1367,179 @@ func (s *Service) handleDockerOverview(w http.ResponseWriter, r *http.Request, d
 		}
 	}
 
-	servers := []map[string]interface{}{}
-	for _, d := range rawServers {
-		var info map[string]interface{}
-		_ = json.Unmarshal([]byte(d.cachedInfo), &info)
-		dockerInfo, _ := info["docker"].(map[string]interface{})
-		installed := false
-		if v, ok := dockerInfo["installed"].(bool); ok {
-			installed = v
-		}
+	servers := make([]map[string]interface{}, len(rawServers))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8)
+	for idx, d := range rawServers {
+		idx, d := idx, d
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
 
-		// Extract containers list
-		containers := []interface{}{}
-		if cList, ok := dockerInfo["containers"].([]interface{}); ok {
-			containers = cList
-		}
-
-		// If online, dynamically fetch requested resources based on scope.
-		var images interface{} = []interface{}{}
-		var networks interface{} = []interface{}{}
-		var volumes interface{} = []interface{}{}
-		var stats interface{} = []interface{}{}
-		var composeProjects interface{} = []interface{}{}
-
-		var errOverview, errImages, errNetworks, errVolumes, errStats, errCompose string
-		containersSource := "cache"
-
-		if d.status == "online" {
-			// Query in parallel
-			type taskRes struct {
-				key  string
-				val  interface{}
-				errS string
+			var info map[string]interface{}
+			_ = json.Unmarshal([]byte(d.cachedInfo), &info)
+			dockerInfo, _ := info["docker"].(map[string]interface{})
+			installed := false
+			if v, ok := dockerInfo["installed"].(bool); ok {
+				installed = v
 			}
-			ch := make(chan taskRes, 6)
-			tasksCount := 0
 
-			runTask := func(key string, taskType int) {
-				tasksCount++
-				go func() {
-					resStr, err := s.runAgentTaskAndWait(d.id, taskType, "", 10*time.Second)
-					if err != nil {
-						ch <- taskRes{key: key, val: []interface{}{}, errS: err.Error()}
-						return
+			// Extract containers list
+			containers := []interface{}{}
+			if cList, ok := dockerInfo["containers"].([]interface{}); ok {
+				containers = cList
+			}
+
+			// If online, dynamically fetch requested resources based on scope.
+			var images interface{} = []interface{}{}
+			var networks interface{} = []interface{}{}
+			var volumes interface{} = []interface{}{}
+			var stats interface{} = []interface{}{}
+			var composeProjects interface{} = []interface{}{}
+
+			var errOverview, errImages, errNetworks, errVolumes, errStats, errCompose string
+			containersSource := "cache"
+
+			if d.status == "online" {
+				// Query in parallel
+				type taskRes struct {
+					key  string
+					val  interface{}
+					errS string
+				}
+				ch := make(chan taskRes, 6)
+				tasksCount := 0
+
+				runTask := func(key string, taskType int) {
+					tasksCount++
+					go func() {
+						resStr, err := s.runAgentTaskAndWait(d.id, taskType, "", 10*time.Second)
+						if err != nil {
+							ch <- taskRes{key: key, val: []interface{}{}, errS: err.Error()}
+							return
+						}
+						var parsed interface{}
+						if err := json.Unmarshal([]byte(resStr), &parsed); err != nil {
+							ch <- taskRes{key: key, val: []interface{}{}, errS: "agent returned invalid docker json: " + err.Error()}
+							return
+						}
+						ch <- taskRes{key: key, val: parsed, errS: ""}
+					}()
+				}
+
+				if scopes["containers"] {
+					runTask("containers", 27) // DOCKER_CONTAINERS
+				}
+				if scopes["images"] {
+					runTask("images", 13) // DOCKER_IMAGES
+				}
+				if scopes["networks"] {
+					runTask("networks", 15) // DOCKER_NETWORKS
+				}
+				if scopes["volumes"] {
+					runTask("volumes", 17) // DOCKER_VOLUMES
+				}
+				if scopes["stats"] {
+					runTask("stats", 20) // DOCKER_STATS
+				}
+				if scopes["compose"] {
+					runTask("compose", 21) // DOCKER_COMPOSE_LIST
+				}
+
+				for i := 0; i < tasksCount; i++ {
+					res := <-ch
+					switch res.key {
+					case "containers":
+						if res.errS == "" {
+							containers = asInterfaceList(res.val)
+							containersSource = "live"
+						}
+						errOverview = res.errS
+					case "images":
+						images = res.val
+						errImages = res.errS
+					case "networks":
+						networks = res.val
+						errNetworks = res.errS
+					case "volumes":
+						volumes = res.val
+						errVolumes = res.errS
+					case "stats":
+						stats = res.val
+						errStats = res.errS
+					case "compose":
+						composeProjects = res.val
+						errCompose = res.errS
+						if res.errS == "" {
+							upsertDockerStackSnapshot(r.Context(), db, d.id, res.val)
+						}
 					}
-					var parsed interface{}
-					if err := json.Unmarshal([]byte(resStr), &parsed); err != nil {
-						ch <- taskRes{key: key, val: []interface{}{}, errS: "agent returned invalid docker json: " + err.Error()}
-						return
-					}
-					ch <- taskRes{key: key, val: parsed, errS: ""}
-				}()
+				}
+
+				// Installed can be inferred only from a Docker task that was actually requested and succeeded.
+				dockerTaskSucceeded := containersSource == "live" ||
+					(scopes["images"] && errImages == "") ||
+					(scopes["networks"] && errNetworks == "") ||
+					(scopes["volumes"] && errVolumes == "") ||
+					(scopes["stats"] && errStats == "") ||
+					(scopes["compose"] && errCompose == "")
+				if dockerTaskSucceeded {
+					installed = true
+				}
 			}
 
-			if scopes["containers"] {
-				runTask("containers", 27) // DOCKER_CONTAINERS
-			}
-			if scopes["images"] {
-				runTask("images", 13) // DOCKER_IMAGES
-			}
-			if scopes["networks"] {
-				runTask("networks", 15) // DOCKER_NETWORKS
-			}
-			if scopes["volumes"] {
-				runTask("volumes", 17) // DOCKER_VOLUMES
-			}
-			if scopes["stats"] {
-				runTask("stats", 20) // DOCKER_STATS
-			}
-			if scopes["compose"] {
-				runTask("compose", 21) // DOCKER_COMPOSE_LIST
-			}
+			running := getInt(dockerInfo, "running")
+			stopped := getInt(dockerInfo, "stopped")
 
-			for i := 0; i < tasksCount; i++ {
-				res := <-ch
-				switch res.key {
-				case "containers":
-					if res.errS == "" {
-						containers = asInterfaceList(res.val)
-						containersSource = "live"
-					}
-					errOverview = res.errS
-				case "images":
-					images = res.val
-					errImages = res.errS
-				case "networks":
-					networks = res.val
-					errNetworks = res.errS
-				case "volumes":
-					volumes = res.val
-					errVolumes = res.errS
-				case "stats":
-					stats = res.val
-					errStats = res.errS
-				case "compose":
-					composeProjects = res.val
-					errCompose = res.errS
-					if res.errS == "" {
-						upsertDockerStackSnapshot(r.Context(), db, d.id, res.val)
+			// If running/stopped are 0, we can infer them from containers list if present
+			if running == 0 && stopped == 0 && len(containers) > 0 {
+				for _, c := range containers {
+					if cMap, ok := c.(map[string]interface{}); ok {
+						state, _ := cMap["state"].(string)
+						if state == "running" {
+							running++
+						} else {
+							stopped++
+						}
 					}
 				}
 			}
 
-			// Installed can be inferred only from a Docker task that was actually requested and succeeded.
-			dockerTaskSucceeded := containersSource == "live" ||
-				(scopes["images"] && errImages == "") ||
-				(scopes["networks"] && errNetworks == "") ||
-				(scopes["volumes"] && errVolumes == "") ||
-				(scopes["stats"] && errStats == "") ||
-				(scopes["compose"] && errCompose == "")
-			if dockerTaskSucceeded {
-				installed = true
+			servers[idx] = map[string]interface{}{
+				"id":     d.id,
+				"name":   d.name,
+				"status": d.status,
+				"docker": map[string]interface{}{
+					"installed":  installed,
+					"running":    running,
+					"stopped":    stopped,
+					"containers": containers,
+				},
+				"resources": map[string]interface{}{
+					"containers":      containers,
+					"images":          images,
+					"networks":        networks,
+					"volumes":         volumes,
+					"stats":           stats,
+					"composeProjects": composeProjects,
+				},
+				"errors": map[string]interface{}{
+					"overview":        errOverview,
+					"images":          errImages,
+					"networks":        errNetworks,
+					"volumes":         errVolumes,
+					"stats":           errStats,
+					"composeProjects": errCompose,
+				},
+				"source": map[string]interface{}{
+					"containers": containersSource,
+				},
 			}
-		}
-
-		running := getInt(dockerInfo, "running")
-		stopped := getInt(dockerInfo, "stopped")
-
-		// If running/stopped are 0, we can infer them from containers list if present
-		if running == 0 && stopped == 0 && len(containers) > 0 {
-			for _, c := range containers {
-				if cMap, ok := c.(map[string]interface{}); ok {
-					state, _ := cMap["state"].(string)
-					if state == "running" {
-						running++
-					} else {
-						stopped++
-					}
-				}
-			}
-		}
-
-		servers = append(servers, map[string]interface{}{
-			"id":     d.id,
-			"name":   d.name,
-			"status": d.status,
-			"docker": map[string]interface{}{
-				"installed":  installed,
-				"running":    running,
-				"stopped":    stopped,
-				"containers": containers,
-			},
-			"resources": map[string]interface{}{
-				"containers":      containers,
-				"images":          images,
-				"networks":        networks,
-				"volumes":         volumes,
-				"stats":           stats,
-				"composeProjects": composeProjects,
-			},
-			"errors": map[string]interface{}{
-				"overview":        errOverview,
-				"images":          errImages,
-				"networks":        errNetworks,
-				"volumes":         errVolumes,
-				"stats":           errStats,
-				"composeProjects": errCompose,
-			},
-			"source": map[string]interface{}{
-				"containers": containersSource,
-			},
-		})
+		}()
 	}
+	wg.Wait()
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
@@ -1757,7 +1768,7 @@ func (s *Service) handleCreateV2Task(w http.ResponseWriter, r *http.Request, db 
 		mappedData = ""
 		timeoutSec = 60
 
-	case "compose.up", "compose.down", "compose.start", "compose.stop", "compose.restart", "compose.pull":
+	case "compose.up", "compose.down", "compose.start", "compose.stop", "compose.restart", "compose.pull", "compose.update":
 		actionPart := strings.Split(req.Action, ".")[1]
 		project, _ := req.Payload["project"].(string)
 		if project == "" {
@@ -1780,7 +1791,7 @@ func (s *Service) handleCreateV2Task(w http.ResponseWriter, r *http.Request, db 
 			"project":     project,
 			"config_file": configFile,
 		}
-		if actionPart == "pull" {
+		if actionPart == "pull" || actionPart == "update" {
 			timeoutSec = 300
 		} else {
 			timeoutSec = 120
@@ -1905,12 +1916,31 @@ func stringFromAny(value interface{}) string {
 }
 
 func (s *Service) runAgentTaskAndWait(serverID string, taskType int, command string, timeout time.Duration) (string, error) {
+	return s.runAgentTaskAndWaitMode(serverID, taskType, command, timeout, false)
+}
+
+func (s *Service) runAgentTaskAndWaitMode(serverID string, taskType int, command string, timeout time.Duration, transient bool) (string, error) {
 	conn, ok := s.registry.Get(serverID)
 	if !ok {
 		return "", fmt.Errorf("agent offline")
 	}
 
-	task := s.taskRegistry.Create(serverID, fmt.Sprintf("docker.internal.%d", taskType), command)
+	taskTypeName := fmt.Sprintf("docker.internal.%d", taskType)
+	if taskType == 51 {
+		taskTypeName = "proxy.cloudflared"
+	} else if taskType == 50 {
+		taskTypeName = "proxy.runtime"
+	}
+	displayCommand := command
+	if taskType == 50 || taskType == 51 {
+		displayCommand = "structured managed-runtime payload"
+	}
+	var task *Task
+	if transient {
+		task = s.taskRegistry.CreateTransient(serverID, taskTypeName, displayCommand)
+	} else {
+		task = s.taskRegistry.Create(serverID, taskTypeName, displayCommand)
+	}
 	eventCh := task.Subscribe()
 
 	err := conn.SendEvent("dashboard:task", map[string]interface{}{
@@ -1920,6 +1950,7 @@ func (s *Service) runAgentTaskAndWait(serverID string, taskType int, command str
 		"timeout": int(timeout.Seconds()),
 	})
 	if err != nil {
+		s.taskRegistry.Fail(task.ID, err.Error())
 		return "", err
 	}
 
@@ -1942,6 +1973,7 @@ func (s *Service) runAgentTaskAndWait(serverID string, taskType int, command str
 				return "", fmt.Errorf("%s", event.Error)
 			}
 		case <-timer.C:
+			s.taskRegistry.Fail(task.ID, "task timeout")
 			return "", fmt.Errorf("task timeout")
 		}
 	}
@@ -1949,4 +1981,25 @@ func (s *Service) runAgentTaskAndWait(serverID string, taskType int, command str
 
 func (s *Service) RunCommandTaskAndWait(serverID string, command string, timeout time.Duration) (string, error) {
 	return s.runAgentTaskAndWait(serverID, 1, command, timeout)
+}
+
+// RunProxyRuntimeTaskAndWait exposes a structured, non-shell task seam for the
+// managed proxy module. Callers cannot vary the task type or timeout.
+func (s *Service) RunProxyRuntimeTaskAndWait(serverID, desiredState string) (string, error) {
+	return s.runAgentTaskAndWait(serverID, 50, desiredState, 3*time.Minute)
+}
+
+func (s *Service) runProxyRuntimeProbeAndWait(serverID, desiredState string) (string, error) {
+	return s.runAgentTaskAndWaitMode(serverID, 50, desiredState, 30*time.Second, true)
+}
+
+func (s *Service) RunCloudflaredTaskAndWait(serverID, desiredState string) (string, error) {
+	return s.runAgentTaskAndWait(serverID, 51, desiredState, 3*time.Minute)
+}
+
+// RunAgentSelfUninstallTaskAndWait schedules removal from a detached helper
+// owned by the Agent. The helper acknowledges before stopping the Agent
+// service, so the control-plane task can complete deterministically.
+func (s *Service) RunAgentSelfUninstallTaskAndWait(serverID string) (string, error) {
+	return s.runAgentTaskAndWait(serverID, 52, "{}", 30*time.Second)
 }

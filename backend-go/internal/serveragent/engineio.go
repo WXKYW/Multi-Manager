@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -27,6 +28,8 @@ const (
 	PacketUpgrade EngineIOPacketType = 5 // 协议升级
 	PacketNoop    EngineIOPacketType = 6 // 无操作
 )
+
+const maxPendingMessagesPerSession = 128
 
 // SocketIOPacketType Socket.IO 包类型
 type SocketIOPacketType int
@@ -51,6 +54,12 @@ type EngineIOSession struct {
 	Authenticated   bool
 	ServerID        string
 	Namespace       string // Socket.IO 命名空间，"" = 默认(Agent), "/metrics" = 前端
+	Capabilities    []string
+	Hostname        string
+	Version         string
+	Platform        string
+	Arch            string
+	RemoteIP        string
 	PendingMessages []string
 	wsConn          *websocket.Conn
 	mu              sync.RWMutex
@@ -77,7 +86,7 @@ func NewEngineIOServer(registry *ConnectionRegistry) *EngineIOServer {
 	server := &EngineIOServer{
 		sessions:     make(map[string]*EngineIOSession),
 		pingInterval: 25 * time.Second,
-		pingTimeout:  20 * time.Second,
+		pingTimeout:  envDurationMs("API_MONITOR_AGENT_PING_TIMEOUT_MS", 75*time.Second),
 		pollTimeout:  20 * time.Second,
 		pollInterval: 50 * time.Millisecond,
 		registry:     registry,
@@ -120,6 +129,7 @@ func (s *EngineIOServer) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 		session := &EngineIOSession{
 			ID:           sid,
 			Transport:    "websocket",
+			RemoteIP:     requestRemoteIP(r),
 			LastActivity: time.Now(),
 		}
 
@@ -172,6 +182,9 @@ func (s *EngineIOServer) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 	// 更新传输类型和 WebSocket 连接
 	session.mu.Lock()
 	session.Transport = "websocket"
+	if session.RemoteIP == "" {
+		session.RemoteIP = requestRemoteIP(r)
+	}
 	session.wsConn = conn
 	session.mu.Unlock()
 
@@ -311,16 +324,57 @@ func (s *EngineIOServer) handleWebSocketMessages(session *EngineIOSession, conn 
 func (s *EngineIOServer) writeLoop(session *EngineIOSession, conn *websocket.Conn, done <-chan struct{}) {
 	ticker := time.NewTicker(s.pingInterval)
 	defer ticker.Stop()
+	pongTimeout := time.NewTimer(s.pingTimeout)
+	if !pongTimeout.Stop() {
+		<-pongTimeout.C
+	}
+	defer pongTimeout.Stop()
+
+	var awaitingPong bool
+	var pingSentAt time.Time
 
 	for {
 		select {
 		case <-done:
 			return
 		case <-ticker.C:
+			if awaitingPong {
+				session.mu.RLock()
+				lastActivity := session.LastActivity
+				session.mu.RUnlock()
+				if !lastActivity.After(pingSentAt) {
+					_ = conn.Close()
+					return
+				}
+				awaitingPong = false
+			}
+
 			// 发送 ping
 			if err := s.safeWrite(session, websocket.TextMessage, []byte("2")); err != nil {
+				_ = conn.Close()
 				return
 			}
+			awaitingPong = true
+			pingSentAt = time.Now()
+			if !pongTimeout.Stop() {
+				select {
+				case <-pongTimeout.C:
+				default:
+				}
+			}
+			pongTimeout.Reset(s.pingTimeout)
+		case <-pongTimeout.C:
+			if !awaitingPong {
+				continue
+			}
+			session.mu.RLock()
+			lastActivity := session.LastActivity
+			session.mu.RUnlock()
+			if !lastActivity.After(pingSentAt) {
+				_ = conn.Close()
+				return
+			}
+			awaitingPong = false
 		default:
 			// 检查是否有待发送的消息
 			session.mu.Lock()
@@ -331,6 +385,7 @@ func (s *EngineIOServer) writeLoop(session *EngineIOSession, conn *websocket.Con
 
 				for _, msg := range messages {
 					if err := s.safeWrite(session, websocket.TextMessage, []byte(msg)); err != nil {
+						_ = conn.Close()
 						return
 					}
 				}
@@ -380,6 +435,7 @@ func (s *EngineIOServer) handleHandshake(w http.ResponseWriter, r *http.Request)
 		Upgrades:        []string{"websocket"},
 		CreatedAt:       time.Now(),
 		LastActivity:    time.Now(),
+		RemoteIP:        requestRemoteIP(r),
 		PendingMessages: []string{},
 	}
 
@@ -402,6 +458,18 @@ func (s *EngineIOServer) handleHandshake(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Access-Control-Allow-Credentials", "true")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(packet))
+}
+
+func requestRemoteIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err != nil {
+		host = strings.Trim(strings.TrimSpace(r.RemoteAddr), "[]")
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return ""
+	}
+	return ip.String()
 }
 
 // handlePoll 处理 GET polling
@@ -455,7 +523,7 @@ func drainPendingMessages(session *EngineIOSession) []string {
 		return nil
 	}
 	messages := session.PendingMessages
-	session.PendingMessages = []string{}
+	session.PendingMessages = nil
 	return messages
 }
 
@@ -593,10 +661,13 @@ func (s *EngineIOServer) handleSocketIOMessage(session *EngineIOSession, payload
 		// 处理认证事件
 		if eventName == "authenticate" || eventName == "agent:connect" {
 			var authData struct {
-				ServerID string `json:"server_id"`
-				Key      string `json:"key"`
-				Hostname string `json:"hostname"`
-				Version  string `json:"version"`
+				ServerID     string   `json:"server_id"`
+				Key          string   `json:"key"`
+				Hostname     string   `json:"hostname"`
+				Version      string   `json:"version"`
+				Platform     string   `json:"platform"`
+				Arch         string   `json:"arch"`
+				Capabilities []string `json:"capabilities"`
 			}
 			if err := json.Unmarshal(eventPayload, &authData); err == nil {
 				if s.service != nil {
@@ -624,6 +695,11 @@ func (s *EngineIOServer) handleSocketIOMessage(session *EngineIOSession, payload
 				session.mu.Lock()
 				session.ServerID = authData.ServerID
 				session.Authenticated = true
+				session.Capabilities = normalizeAgentCapabilities(authData.Capabilities)
+				session.Hostname = authData.Hostname
+				session.Version = authData.Version
+				session.Platform = authData.Platform
+				session.Arch = authData.Arch
 				session.mu.Unlock()
 				if s.metricsHub != nil {
 					s.metricsHub.UnregisterRoot(session.ID)
@@ -664,10 +740,42 @@ func (s *EngineIOServer) handleSocketIOMessage(session *EngineIOSession, payload
 	}
 }
 
+func normalizeAgentCapabilities(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		capability := strings.TrimSpace(value)
+		if capability == "" {
+			continue
+		}
+		if _, exists := seen[capability]; exists {
+			continue
+		}
+		seen[capability] = struct{}{}
+		out = append(out, capability)
+	}
+	return out
+}
+
 // queueMessage 排队消息
 func (s *EngineIOServer) queueMessage(session *EngineIOSession, message string) {
+	enqueuePendingMessage(session, message)
+}
+
+func enqueuePendingMessage(session *EngineIOSession, message string) {
+	if session == nil {
+		return
+	}
 	session.mu.Lock()
 	defer session.mu.Unlock()
+	if len(session.PendingMessages) >= maxPendingMessagesPerSession {
+		copy(session.PendingMessages, session.PendingMessages[1:])
+		session.PendingMessages[len(session.PendingMessages)-1] = message
+		return
+	}
 	session.PendingMessages = append(session.PendingMessages, message)
 }
 
@@ -761,5 +869,10 @@ func (s *EngineIOServer) safeWrite(session *EngineIOSession, messageType int, da
 	if session.wsConn == nil {
 		return fmt.Errorf("connection closed")
 	}
+	writeTimeout := s.pingTimeout
+	if writeTimeout <= 0 {
+		writeTimeout = 10 * time.Second
+	}
+	_ = session.wsConn.SetWriteDeadline(time.Now().Add(writeTimeout))
 	return session.wsConn.WriteMessage(messageType, data)
 }

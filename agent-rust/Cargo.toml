@@ -1,6 +1,6 @@
 [package]
 name = "api-monitor-agent"
-version = "0.1.6"
+version = "0.5.0"
 edition = "2021"
 
 [dependencies]
@@ -22,6 +22,24 @@ webpki-roots = "0.26"
 url = { version = "2.5" }
 chrono = { version = "0.4", features = ["serde"] }
 hostname = { version = "0.4" }
+prost = "0.13"
+tonic = { version = "0.12", default-features = false, features = ["codegen", "prost", "transport"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+bytes = "1.10"
+enigo = { version = "0.6.1", default-features = false, features = ["platform_specific"] }
+rand = "0.8"
+rtp = "0.8.0"
+webrtc = "0.8.0"
+win-native-media = { version = "0.1.1", path = "vendor/win-native-media-0.1.1" }
+windows-sys = { version = "0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_UI_Input_Pointer",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_System_Threading",
+  "Win32_System_ProcessStatus",
+  "Win32_System_Diagnostics_ToolHelp",
+] }
 
 [features]
 default = ["nvidia"]

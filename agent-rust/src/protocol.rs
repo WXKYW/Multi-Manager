@@ -15,6 +15,10 @@ pub const EVENT_DASHBOARD_PTY_STOP: &str = "dashboard:pty_stop";
 pub const EVENT_AGENT_PTY_DATA: &str = "agent:pty_data";
 pub const EVENT_AGENT_PTY_STATUS: &str = "agent:pty_status";
 pub const EVENT_AGENT_TASK_PROGRESS: &str = "agent:task_progress";
+pub const EVENT_AGENT_REMOTE_DESKTOP_SIGNAL: &str = "agent:rd_signal";
+pub const EVENT_DASHBOARD_REMOTE_DESKTOP_START: &str = "dashboard:rd_start";
+pub const EVENT_DASHBOARD_REMOTE_DESKTOP_SIGNAL: &str = "dashboard:rd_signal";
+pub const EVENT_DASHBOARD_REMOTE_DESKTOP_STOP: &str = "dashboard:rd_stop";
 
 #[derive(Serialize, Debug, Clone)]
 pub struct AuthPayload {
@@ -22,6 +26,32 @@ pub struct AuthPayload {
     pub key: String,
     pub hostname: String,
     pub version: String,
+    pub platform: String,
+    pub arch: String,
+    pub capabilities: Vec<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct PtyStartPayload {
+    pub cols: Option<u32>,
+    pub rows: Option<u32>,
+    pub command: Option<String>,
+    pub args: Option<Vec<String>>,
+    pub terminal_stream_v2: Option<bool>,
+    pub stream_id: Option<String>,
+    pub stream_token: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TerminalStreamMessage {
+    #[serde(rename = "type")]
+    pub message_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cols: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rows: Option<u32>,
 }
 
 #[derive(Deserialize, Debug, Clone)]

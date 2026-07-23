@@ -14,6 +14,8 @@ import {
 import { CanvasRenderer } from 'echarts/renderers';
 import { io } from 'socket.io-client';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
+import PublicOverviewStats from '../components/public/PublicOverviewStats.jsx';
+import { useCloudflareSpotlight } from '../hooks/useCloudflareSpotlight.js';
 import useStore from '../store.js';
 import {
   Activity,
@@ -48,17 +50,17 @@ echarts.use([
 ]);
 
 const toneClass = {
-  success: 'border-kumo-success/30 bg-kumo-success/10 text-kumo-success',
-  danger: 'border-kumo-danger/30 bg-kumo-danger/10 text-kumo-danger',
-  warning: 'border-kumo-warning/30 bg-kumo-warning/10 text-kumo-warning',
-  neutral: 'border-kumo-line bg-kumo-recessed text-kumo-subtle',
+  success: 'border-kumo-success/55 bg-kumo-success/15 text-kumo-success',
+  danger: 'border-kumo-danger/55 bg-kumo-danger/15 text-kumo-danger',
+  warning: 'border-kumo-warning/55 bg-kumo-warning/15 text-kumo-warning',
+  neutral: 'border-kumo-interact/80 bg-kumo-recessed/45 text-kumo-subtle',
 };
 
 const statusPanelClass = {
-  success: 'border-kumo-success/30 bg-kumo-success/10 text-kumo-success',
-  danger: 'border-kumo-danger/30 bg-kumo-danger/10 text-kumo-danger',
-  warning: 'border-kumo-warning/30 bg-kumo-warning/10 text-kumo-warning',
-  neutral: 'border-kumo-line bg-kumo-base text-kumo-strong',
+  success: 'border-kumo-success/45 bg-kumo-base text-kumo-success',
+  danger: 'border-kumo-danger/45 bg-kumo-base text-kumo-danger',
+  warning: 'border-kumo-warning/45 bg-kumo-base text-kumo-warning',
+  neutral: 'border-kumo-interact/80 bg-kumo-base text-kumo-strong',
 };
 
 const normalizePublicPath = () => {
@@ -81,11 +83,11 @@ const formatDateTime = (value) => {
   });
 };
 
-const formatUptimePercent = (value, fallback = '100.00') => {
+const formatUptimePercent = (value, fallback = '100') => {
   if (value === null || value === undefined || value === '') return fallback;
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return fallback;
-  return numeric.toFixed(2);
+  return String(Math.round(numeric));
 };
 
 const formatChartTime = (timestamp) => {
@@ -149,17 +151,6 @@ const heartbeatClass = (status) => {
   return 'bg-kumo-line opacity-25';
 };
 
-const getHeartbeatRangeLabel = (heartbeats) => {
-  if (!heartbeats.length) return '--';
-  const oldest = heartbeats[Math.min(heartbeats.length, 60) - 1];
-  if (!oldest?.timestamp) return '--';
-  const seconds = Math.max(0, Math.floor((Date.now() - oldest.timestamp) / 1000));
-  if (seconds < 60) return `${seconds}秒`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}分钟`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}小时`;
-  return `${Math.floor(seconds / 86400)}天`;
-};
-
 const isHttpUrl = (value) => /^https?:\/\//i.test(String(value || ''));
 
 function HeartbeatLatencyChart({ beats, isDarkMode }) {
@@ -184,7 +175,7 @@ function HeartbeatLatencyChart({ beats, isDarkMode }) {
     <div className="min-w-0">
       <div className="mb-1.5 flex items-center justify-between gap-3 text-xs">
         <span className="font-semibold text-kumo-strong">延迟趋势</span>
-        <span className="font-mono text-kumo-subtle">最近 {chartData[0].data.length} 次</span>
+        <span className="tabular-nums text-kumo-subtle">最近 {chartData[0].data.length} 次</span>
       </div>
       <div className="min-w-0 overflow-hidden" style={{ height: 96 }}>
         <TimeseriesChart
@@ -207,14 +198,34 @@ function HeartbeatLatencyChart({ beats, isDarkMode }) {
   );
 }
 
+function CompactHeartbeatStrip({ beats }) {
+  const compactBeats = Array.from({ length: 30 }, (_, index) => beats[29 - index] || { status: 'empty' });
+  return (
+    <div className="flex min-w-0 items-center gap-2">
+      <span className="shrink-0 text-[10px] font-semibold leading-none text-kumo-subtle">1h</span>
+      <div className="grid h-5 shrink-0 grid-cols-[repeat(30,4px)] items-center gap-[4px]">
+        {compactBeats.map((beat, index) => (
+          <div
+            key={index}
+            className={`h-[14px] w-[4px] rounded-full ${heartbeatClass(beat.status)}`}
+            title={beat.time ? `${formatDateTime(beat.time)} ${beat.ping ? `${beat.ping}ms` : ''}` : ''}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
   const slug = useMemo(() => normalizePublicPath(), []);
+  const surfaceRef = useCloudflareSpotlight();
   const theme = useStore((state) => state.theme);
   const isDarkMode = theme === 'dark';
   const [page, setPage] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [expandedMonitorId, setExpandedMonitorId] = useState(null);
+  const [monitorFilter, setMonitorFilter] = useState('all');
 
   const load = async () => {
     setLoading(true);
@@ -293,6 +304,13 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
   const downCount = monitors.filter((item) => getStateMeta(item.state).tone === 'danger').length;
   const warningCount = monitors.filter((item) => getStateMeta(item.state).tone === 'warning').length;
   const operationalCount = monitors.length - downCount - warningCount;
+  const visibleMonitors = monitorFilter === 'up'
+    ? monitors.filter((item) => getStateMeta(item.state).tone === 'success')
+    : monitorFilter === 'down'
+      ? monitors.filter((item) => getStateMeta(item.state).tone === 'danger')
+      : monitorFilter === 'warning'
+        ? monitors.filter((item) => getStateMeta(item.state).tone === 'warning')
+        : monitors;
   const pageConfig = page?.config || {};
   const hideTargets = !!pageConfig.hideTargets;
   const linkMonitorNames = !!pageConfig.linkMonitorNames;
@@ -306,11 +324,12 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
       : '全部服务运行正常';
 
   return (
-    <div className="min-h-screen bg-kumo-canvas text-kumo-default">
-      <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-4 py-6 sm:px-6 lg:px-8">
+    <div ref={surfaceRef} className="cf-ai-background-surface public-status-page relative isolate min-h-screen text-kumo-default">
+      <div aria-hidden="true" className="cf-ai-background pointer-events-none absolute inset-0" />
+      <main className="relative z-10 mx-auto flex min-h-screen w-full max-w-5xl flex-col px-4 py-6 sm:px-6 lg:px-8">
         <div className="mb-6 flex items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-kumo-line bg-kumo-base text-kumo-brand">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-kumo-interact/80 bg-kumo-base text-kumo-brand">
               <Activity className="h-4 w-4" />
             </div>
             <div className="min-w-0">
@@ -322,14 +341,8 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
           </Button>
         </div>
 
-        {loading && (
-          <div className="flex flex-1 items-center justify-center rounded-lg border border-kumo-line bg-kumo-base p-10 text-sm text-kumo-subtle">
-            正在加载状态页...
-          </div>
-        )}
-
         {!loading && error && (
-          <div className="flex flex-1 flex-col items-center justify-center rounded-lg border border-kumo-line bg-kumo-base p-10 text-center">
+          <div className="public-status-card flex flex-1 flex-col items-center justify-center rounded-lg border border-kumo-interact/80 bg-kumo-base p-10 text-center">
             <AlertTriangle className="mb-3 h-9 w-9 text-kumo-warning" />
             <h1 className="text-lg font-bold text-kumo-strong">无法显示状态页</h1>
             <p className="mt-2 max-w-md text-sm leading-relaxed text-kumo-subtle">{error}</p>
@@ -341,7 +354,7 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
 
         {!loading && page && (
           <div className="flex flex-col gap-4">
-            <section className={`rounded-lg border px-4 py-3.5 ${statusPanelClass[statusTone]}`}>
+            <section className={`public-status-card rounded-lg border px-4 py-3.5 ${statusPanelClass[statusTone]}`}>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <div className="flex items-center gap-2 text-base font-bold">
@@ -352,41 +365,32 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
                     <p className="mt-2 max-w-2xl text-sm leading-relaxed opacity-90">{page.description}</p>
                   )}
                 </div>
-                <div className="grid grid-cols-4 gap-2 text-center text-xs">
-                  <div className="rounded-md border border-current/20 bg-kumo-base/50 px-2.5 py-1.5">
-                    <div className="font-mono text-sm font-bold">{monitors.length}</div>
-                    <div className="opacity-80">监测项</div>
-                  </div>
-                  <div className="rounded-md border border-current/20 bg-kumo-base/50 px-2.5 py-1.5">
-                    <div className="font-mono text-sm font-bold">{operationalCount}</div>
-                    <div className="opacity-80">正常</div>
-                  </div>
-                  <div className="rounded-md border border-current/20 bg-kumo-base/50 px-2.5 py-1.5">
-                    <div className="font-mono text-sm font-bold">{downCount}</div>
-                    <div className="opacity-80">故障</div>
-                  </div>
-                  <div className="rounded-md border border-current/20 bg-kumo-base/50 px-2.5 py-1.5">
-                    <div className="font-mono text-sm font-bold">{warningCount}</div>
-                    <div className="opacity-80">关注</div>
-                  </div>
-                </div>
+                <PublicOverviewStats
+                  activeKey={monitorFilter}
+                  onChange={setMonitorFilter}
+                  items={[
+                    { key: 'all', label: '监测项', value: monitors.length },
+                    { key: 'up', label: '正常', value: operationalCount },
+                    { key: 'down', label: '故障', value: downCount },
+                    { key: 'warning', label: '关注', value: warningCount },
+                  ]}
+                />
               </div>
             </section>
 
-            <section className="overflow-hidden rounded-lg border border-kumo-line bg-kumo-base">
-              <div className="flex items-center justify-between gap-3 border-b border-kumo-line px-4 py-3">
+            <section className="public-status-card overflow-hidden rounded-lg border border-kumo-interact/80 bg-kumo-base">
+              <div className="flex items-center justify-between gap-3 border-b border-kumo-interact/70 px-4 py-3">
                 <h2 className="text-sm font-bold text-kumo-strong">服务状态</h2>
                 <span className="text-xs text-kumo-subtle">24h 可用率</span>
               </div>
               {monitors.length === 0 ? (
                 <div className="p-8 text-center text-sm text-kumo-subtle">这个状态页还没有绑定监测目标。</div>
               ) : (
-                <div className="divide-y divide-kumo-line">
-                  {monitors.map((monitor) => {
+                <div className="divide-y divide-kumo-interact/60">
+                  {visibleMonitors.map((monitor) => {
                     const meta = getStateMeta(monitor.state);
                     const isExpanded = expandedMonitorId === monitor.id;
                     const heartbeats = Array.isArray(monitor.heartbeats) ? monitor.heartbeats.map(normalizeHeartbeat) : [];
-                    const detailedBeats = Array.from({ length: 60 }, (_, index) => heartbeats[59 - index] || { status: 'empty' });
                     const targetUrl = isHttpUrl(monitor.targetUrl) ? monitor.targetUrl : '';
                     return (
                       <div key={monitor.id}>
@@ -410,13 +414,13 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
                                   href={targetUrl}
                                   target="_blank"
                                   rel="noreferrer"
-                                  className="truncate text-sm font-semibold text-kumo-strong hover:text-kumo-brand hover:underline"
+                                  className="truncate text-base font-bold text-kumo-strong hover:text-kumo-brand hover:underline"
                                   onClick={(event) => event.stopPropagation()}
                                 >
                                   {monitor.name}
                                 </a>
                               ) : (
-                                <div className="truncate text-sm font-semibold text-kumo-strong">{monitor.name}</div>
+                                <div className="truncate text-base font-bold text-kumo-strong">{monitor.name}</div>
                               )}
                               <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-kumo-subtle transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                             </div>
@@ -424,48 +428,36 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
                               <div className="mt-1 truncate text-xs text-kumo-subtle">{monitor.target || monitor.type}</div>
                             )}
                           </div>
-                          <div className="grid grid-cols-[5.25rem_5.5rem_5.5rem] items-center gap-2 sm:justify-end">
-                            <span className={`inline-flex h-8 items-center justify-center rounded border px-2 text-xs font-semibold ${toneClass[meta.tone]}`}>
-                              {meta.label}
-                            </span>
-                            <span className="inline-flex h-8 items-center justify-center gap-1 rounded border border-kumo-line bg-kumo-recessed px-2 font-mono text-xs text-kumo-subtle">
-                              <Clock className="h-3 w-3" />
-                              {monitor.lastPing ? `${monitor.lastPing}ms` : '--'}
-                            </span>
-                            <span className="inline-flex h-8 items-center justify-center rounded border border-kumo-line bg-kumo-recessed px-2 font-mono text-xs text-kumo-subtle">
-                              {formatUptimePercent(monitor.uptime24h)}%
-                            </span>
+                          <div className="flex min-w-0 flex-wrap items-center justify-start gap-2 sm:justify-end">
+                            <CompactHeartbeatStrip beats={heartbeats} />
+                            <div className="flex min-w-0 items-center gap-1.5">
+                              <span className={`inline-flex h-7 w-[4.25rem] items-center justify-center rounded-full border px-2 text-[11px] font-semibold ${toneClass[meta.tone]}`}>
+                                {meta.label}
+                              </span>
+                              <span className="inline-flex h-7 w-[4.5rem] items-center justify-center gap-1 rounded-full border border-kumo-interact/75 bg-kumo-recessed/45 px-2 tabular-nums text-[11px] text-kumo-subtle">
+                                <Clock className="h-3 w-3" />
+                                {monitor.lastPing ? `${monitor.lastPing}ms` : '--'}
+                              </span>
+                              <span className="inline-flex h-7 w-[4.5rem] items-center justify-center rounded-full border border-kumo-interact/75 bg-kumo-recessed/45 px-2 tabular-nums text-[11px] text-kumo-subtle">
+                                {formatUptimePercent(monitor.uptime24h)}%
+                              </span>
+                            </div>
                           </div>
                         </div>
                         <AnimatedCollapse open={isExpanded}>
-                          <div className="border-t border-kumo-line bg-kumo-recessed/25 px-4 py-3">
+                          <div className="border-t border-kumo-interact/70 bg-kumo-recessed/30 px-4 py-3">
                             <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_12rem]">
                               <div className="min-w-0">
                                 <HeartbeatLatencyChart beats={heartbeats} isDarkMode={isDarkMode} />
                               </div>
                               <div className="grid grid-cols-2 gap-2 lg:grid-cols-1 lg:self-start">
-                                <div className="rounded-md border border-kumo-line bg-kumo-base p-2">
+                                <div className="rounded-md border border-kumo-interact/75 bg-kumo-base p-2">
                                   <div className="text-[10px] text-kumo-subtle">24小时可用率</div>
-                                  <div className="mt-1 font-mono text-sm font-bold text-kumo-strong">{formatUptimePercent(monitor.uptime24h)}%</div>
+                                  <div className="mt-1 tabular-nums text-sm font-bold text-kumo-strong">{formatUptimePercent(monitor.uptime24h)}%</div>
                                 </div>
-                                <div className="rounded-md border border-kumo-line bg-kumo-base p-2">
+                                <div className="rounded-md border border-kumo-interact/75 bg-kumo-base p-2">
                                   <div className="text-[10px] text-kumo-subtle">30天可用率</div>
-                                  <div className="mt-1 font-mono text-sm font-bold text-kumo-strong">{formatUptimePercent(monitor.uptime30d, '--')}%</div>
-                                </div>
-                              </div>
-                              <div className="min-w-0 lg:col-span-2">
-                                <div className="mb-1.5 flex items-center justify-between gap-3 text-xs">
-                                  <span className="font-semibold text-kumo-strong">最近心跳</span>
-                                  <span className="font-mono text-kumo-subtle">{getHeartbeatRangeLabel(heartbeats)}前 - 现在</span>
-                                </div>
-                                <div className="flex h-4 w-full items-center gap-[3px]">
-                                  {detailedBeats.map((beat, index) => (
-                                    <div
-                                      key={index}
-                                      className={`h-3.5 min-w-[3px] flex-1 rounded-sm ${heartbeatClass(beat.status)}`}
-                                      title={beat.time ? `${formatDateTime(beat.time)} ${beat.ping ? `${beat.ping}ms` : ''}` : ''}
-                                    />
-                                  ))}
+                                  <div className="mt-1 tabular-nums text-sm font-bold text-kumo-strong">{formatUptimePercent(monitor.uptime30d, '--')}%</div>
                                 </div>
                               </div>
                             </div>
@@ -474,6 +466,7 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
                       </div>
                     );
                   })}
+                  {visibleMonitors.length === 0 && <div className="p-8 text-center text-sm text-kumo-subtle">当前筛选没有匹配的监测项。</div>}
                 </div>
               )}
             </section>

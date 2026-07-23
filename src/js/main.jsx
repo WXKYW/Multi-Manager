@@ -3,12 +3,15 @@ import { createRoot } from 'react-dom/client';
 import { Toasty } from '@cloudflare/kumo/components/toast';
 import App from './App.jsx';
 import GlobalDialogHost from './components/GlobalDialogHost.jsx';
+import { setupPwa } from './modules/pwa.js';
 import { kumoToastManager } from './modules/toast.js';
 import '../css/app.css';
 import '@fortawesome/fontawesome-free/css/all.min.css';
 import 'simple-icons-font/font/simple-icons.min.css';
 import 'flag-icons/css/flag-icons.min.css';
 import '@xterm/xterm/css/xterm.css';
+
+setupPwa();
 
 const container = document.getElementById('root');
 if (container) {

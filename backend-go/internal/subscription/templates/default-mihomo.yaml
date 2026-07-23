@@ -1,0 +1,177 @@
+port: 7890                         # 本机 HTTP 代理端口
+socks-port: 7891                   # 本机 SOCKS5 代理端口
+allow-lan: true                    # 允许局域网设备连接（如不共享，建议改为 false）
+mode: rule                         # 按规则分流（global 会全局走同一路由）
+log-level: info                    # 生产默认 info；排障需要改 debug
+geodata-mode: true
+geo-auto-update: true
+geodata-loader: standard
+geo-update-interval: 24
+unified-delay: true                # 以“完成握手后”的 RTT 统计延迟，更贴近真实体验
+tcp-concurrent: true               # 并发拨号择优保留，跨境网络通常更稳更快
+find-process-mode: strict          # 更精准地识别连接来源进程（Windows 需管理员权限）
+geox-url:
+  geoip: https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat
+  geosite: https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat
+  mmdb: https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb
+  asn: https://github.com/xishang0128/geoip/releases/download/latest/GeoLite2-ASN.mmdb
+
+proxies:
+{{ proxies_yaml }}
+
+proxy-groups:
+  - name: 🚀 手动
+    type: select
+    url: http://www.gstatic.com/generate_204
+    interval: 300
+    proxies:
+{{ proxy_names_yaml | indent 6 }}
+  - name: 😇 稳定
+    type: select
+    proxies:
+{{ stable_proxy_names_yaml | indent 6 }}
+  - name: 🐟 漏网
+    type: select
+    proxies:
+      - 🚀 手动
+      - 🎯 直连
+  - name: 🎯 直连
+    type: select
+    proxies:
+      - DIRECT
+      - 🚀 手动
+  - name: 🛑 阻断
+    type: select
+    hidden: true
+    proxies:
+      - REJECT
+      - DIRECT
+      - 🚀 手动
+
+rule-providers:
+  reject:
+    type: http
+    behavior: domain
+    url: https://raw.gitmirror.com/Loyalsoldier/clash-rules/release/reject.txt
+    path: ./ruleset/reject.yaml
+    interval: 86400
+  icloud:
+    type: http
+    behavior: domain
+    url: https://raw.gitmirror.com/Loyalsoldier/clash-rules/release/icloud.txt
+    path: ./ruleset/icloud.yaml
+    interval: 86400
+  apple:
+    type: http
+    behavior: domain
+    url: https://raw.gitmirror.com/Loyalsoldier/clash-rules/release/apple.txt
+    path: ./ruleset/apple.yaml
+    interval: 86400
+  google:
+    type: http
+    behavior: domain
+    url: https://raw.gitmirror.com/Loyalsoldier/clash-rules/release/google.txt
+    path: ./ruleset/google.yaml
+    interval: 86400
+  proxy:
+    type: http
+    behavior: domain
+    url: https://raw.gitmirror.com/Loyalsoldier/clash-rules/release/proxy.txt
+    path: ./ruleset/proxy.yaml
+    interval: 86400
+  direct:
+    type: http
+    behavior: domain
+    url: https://raw.gitmirror.com/Loyalsoldier/clash-rules/release/direct.txt
+    path: ./ruleset/direct.yaml
+    interval: 86400
+  private:
+    type: http
+    behavior: domain
+    url: https://raw.gitmirror.com/Loyalsoldier/clash-rules/release/private.txt
+    path: ./ruleset/private.yaml
+    interval: 86400
+  gfw:
+    type: http
+    behavior: domain
+    url: https://raw.gitmirror.com/Loyalsoldier/clash-rules/release/gfw.txt
+    path: ./ruleset/gfw.yaml
+    interval: 86400
+  tld-not-cn:
+    type: http
+    behavior: domain
+    url: https://raw.gitmirror.com/Loyalsoldier/clash-rules/release/tld-not-cn.txt
+    path: ./ruleset/tld-not-cn.yaml
+    interval: 86400
+  telegramcidr:
+    type: http
+    behavior: ipcidr
+    url: https://raw.gitmirror.com/Loyalsoldier/clash-rules/release/telegramcidr.txt
+    path: ./ruleset/telegramcidr.yaml
+    interval: 86400
+  cncidr:
+    type: http
+    behavior: ipcidr
+    url: https://raw.gitmirror.com/Loyalsoldier/clash-rules/release/cncidr.txt
+    path: ./ruleset/cncidr.yaml
+    interval: 86400
+  lancidr:
+    type: http
+    behavior: ipcidr
+    url: https://raw.gitmirror.com/Loyalsoldier/clash-rules/release/lancidr.txt
+    path: ./ruleset/lancidr.yaml
+    interval: 86400
+  applications:
+    type: http
+    behavior: classical
+    url: https://raw.gitmirror.com/Loyalsoldier/clash-rules/release/applications.txt
+    path: ./ruleset/applications.yaml
+    interval: 86400
+    
+rules:
+  - PROCESS-NAME,agy.exe,🚀 手动
+  - DOMAIN-SUFFIX,googleapis.com,🚀 手动
+  - DOMAIN-SUFFIX,google.com,😇 稳定
+  - DOMAIN-SUFFIX,gstatic.com,😇 稳定
+
+  - DOMAIN-SUFFIX,worldofwarships.jp,🚀 手动 # 战舰世界
+  - DOMAIN-SUFFIX,login1.worldofwarships.jp,🚀 手动 # 战舰世界
+  - DOMAIN-SUFFIX,worldoftanks.asia,🚀 手动 # 战舰世界
+  - PROCESS-NAME,WorldOfWarships64.exe,🚀 手动 # 战舰世界
+  - DOMAIN-SUFFIX,wargaming.net,🚀 手动 # 战舰世界
+  - IP-CIDR,92.223.16.187/32,🚀 手动 # 战舰世界
+  - IP-CIDR,92.223.16.186/32,🚀 手动 # 战舰世界
+  - IP-CIDR,92.223.16.154/32,🚀 手动 # 战舰世界
+
+  - DOMAIN-SUFFIX,pan.dsuk.top,🚀 手动
+  - DOMAIN-SUFFIX,discord.com,😇 稳定
+  - DOMAIN-SUFFIX,nvidia.com,😇 稳定
+  - DOMAIN-SUFFIX,linux.do,😇 稳定
+  - DOMAIN-SUFFIX,sharepoint.com,🚀 手动
+  - DOMAIN-SUFFIX,oracle.com,🎯 直连
+  - DOMAIN-SUFFIX,sharedchat.cc,🎯 直连
+  - DOMAIN-SUFFIX,nigx.cn,🎯 直连
+  - DOMAIN-SUFFIX,steamcontent.com,🎯 直连
+  - DOMAIN-SUFFIX,muyuan.do,🎯 直连
+  - DOMAIN-SUFFIX,bing.com,🎯 直连
+  - DOMAIN,nz.dsuk.top,🎯 直连
+  - DOMAIN,mnt.dsuk.top,🎯 直连
+  - DOMAIN-SUFFIX,salen.eu.org,🎯 直连
+  - DOMAIN-KEYWORD,twitch,🚀 手动
+  - DOMAIN-KEYWORD,zeabur,🚀 手动
+  - RULE-SET,applications,🎯 直连
+  - DOMAIN,clash.razord.top,🎯 直连
+  - DOMAIN,yacd.haishan.me,🎯 直连
+  - RULE-SET,private,🎯 直连
+  - RULE-SET,reject,🛑 阻断
+  - RULE-SET,icloud,🎯 直连
+  - RULE-SET,apple,🎯 直连
+  - RULE-SET,google,🚀 手动
+  - RULE-SET,proxy,🚀 手动
+  - RULE-SET,direct,🎯 直连
+  - RULE-SET,lancidr,🎯 直连,no-resolve
+  - RULE-SET,cncidr,🎯 直连,no-resolve
+  - RULE-SET,telegramcidr,🚀 手动,no-resolve
+  - GEOIP,LAN,🎯 直连,no-resolve
+  - GEOIP,CN,🎯 直连,no-resolve
+  - MATCH,🚀 手动

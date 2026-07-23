@@ -7,7 +7,7 @@ This file is generated from `node_modules/@cloudflare/kumo/ai/component-registry
 - Registry version: `1.0.0`
 - Component count: `42`
 - Block count: `3`
-- Package declaration: `@cloudflare/kumo ^2.5.0`
+- Package declaration: `@cloudflare/kumo ^2.7.0`
 
 ## Important Notes
 

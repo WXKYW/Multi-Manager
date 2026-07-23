@@ -24,7 +24,10 @@ export function reuseRealtimeValueIfEqual(previousValue, nextValue) {
 export const SERVER_METRICS_STALE_AFTER_MS = 45 * 1000;
 
 export function resolveServerMetricsHealth(server = {}, now = Date.now()) {
-  if (server.status !== 'online' && server.agent_online !== true) {
+  const connectionStatus = String(server.status || '').toLowerCase();
+  const interruptedConnection = connectionStatus === 'interrupted' || connectionStatus === 'suspect';
+
+  if (connectionStatus === 'offline' && server.agent_online !== true) {
     return {
       state: 'offline',
       stale: false,
@@ -45,6 +48,17 @@ export function resolveServerMetricsHealth(server = {}, now = Date.now()) {
   const staleAfterMs = Number(server.info?.metrics_stale_after_ms || SERVER_METRICS_STALE_AFTER_MS);
   const ageMs = lastSeenAt > 0 ? Math.max(0, now - lastSeenAt) : Number(server.metrics_age_ms || 0);
 
+  if (interruptedConnection) {
+    return {
+      state: 'interrupted',
+      stale: true,
+      label: '中断',
+      variant: 'warning',
+      dotClassName: 'bg-kumo-warning',
+      ageMs,
+    };
+  }
+
   if (explicitState === 'degraded') {
     return {
       state: 'degraded',
@@ -53,6 +67,17 @@ export function resolveServerMetricsHealth(server = {}, now = Date.now()) {
       variant: 'warning',
       dotClassName: 'bg-kumo-warning',
       ageMs,
+    };
+  }
+
+  if (connectionStatus !== 'online' && server.agent_online !== true && server.agent_connected !== true) {
+    return {
+      state: 'offline',
+      stale: false,
+      label: '离线',
+      variant: 'error',
+      dotClassName: 'bg-kumo-danger',
+      ageMs: 0,
     };
   }
 
@@ -69,7 +94,7 @@ export function resolveServerMetricsHealth(server = {}, now = Date.now()) {
 
   if (explicitState === 'stale' || server.metrics_stale === true || (lastSeenAt > 0 && ageMs > staleAfterMs)) {
     return {
-      state: 'stale',
+      state: 'interrupted',
       stale: true,
       label: '中断',
       variant: 'warning',
@@ -79,13 +104,21 @@ export function resolveServerMetricsHealth(server = {}, now = Date.now()) {
   }
 
   return {
-    state: 'missing',
+    state: 'interrupted',
     stale: true,
-    label: '无指标',
+    label: '中断',
     variant: 'warning',
     dotClassName: 'bg-kumo-warning',
     ageMs,
   };
+}
+
+export function resolveServerDisplayStatus(server = {}, now = Date.now()) {
+  const health = resolveServerMetricsHealth(server, now);
+  if (health.state === 'offline') return { ...health, state: 'offline', label: '离线' };
+  if (health.state === 'degraded') return { ...health, state: 'degraded', label: '采集异常' };
+  if (health.state === 'interrupted') return { ...health, state: 'interrupted', label: '中断' };
+  return { ...health, state: 'online', label: '在线' };
 }
 
 export function mergeRealtimeDiskInfo(previousDisk, metrics = {}) {

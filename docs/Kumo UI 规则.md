@@ -2,7 +2,7 @@
 
 最后更新：2026-06-09
 
-本文档是 API Monitor 前端 UI 的硬约束。当前项目以 `@cloudflare/kumo` 2.5.0 为唯一设计系统基线。
+本文档是 API Monitor 前端 UI 的硬约束。当前项目以 `@cloudflare/kumo` 2.7.0 为唯一设计系统基线。
 
 ## 总规则
 
@@ -104,9 +104,9 @@ import { PageHeader } from '@cloudflare/kumo';
 以下扫描在 2026-06-09 的工作区用于判断是否回潮：
 
 ```bash
+npm run ui:governance
 rg -n --pcre2 '<(?-i:button|select|input|textarea)\b' src/js/pages src/js/components -S
 rg -n 'DialogContent|TabsList|TabsTrigger|@cloudflare/kumo/components/tabs' src -S
-rg -n 'vue|pinia|chart\.js|createApp\(|new Vue|from .vue.|from .pinia.|Chart\.' src package.json package-lock.json -S
 rg -n 'quick-fade-in|motion-pop-in|app-collapse-panel|transition-shadow|hover:shadow|shadow-(xs|sm|md|lg|xl|2xl)' src/js src/css -S
 ```
 

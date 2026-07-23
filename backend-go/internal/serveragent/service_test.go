@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +15,9 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
+	"github.com/iwvw/api-monitor/backend-go/internal/secure"
+	subscriptionservice "github.com/iwvw/api-monitor/backend-go/internal/subscription"
+	"github.com/iwvw/api-monitor/backend-go/internal/subscriptionledger"
 )
 
 func testService(t *testing.T) (*Service, *sql.DB) {
@@ -25,12 +27,429 @@ func testService(t *testing.T) (*Service, *sql.DB) {
 		DataDir: t.TempDir(),
 		DBName:  "data.db",
 	})
+	t.Cleanup(service.Stop)
 	db, err := service.open(context.Background())
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	return service, db
+}
+
+func TestDeleteAccountRequiresForceWhenAgentOfflineWithManagedDependencies(t *testing.T) {
+	service, db := testService(t)
+	if _, err := db.Exec(`INSERT INTO server_accounts(id,name,host,username,auth_type) VALUES('delete-host','待删除主机','192.0.2.10','root','password')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO managed_proxy_runtimes(server_id,runtime,apply_status) VALUES('delete-host','sing-box','running')`); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/server/accounts/delete-host", nil)
+	service.deleteAccount(rec, req, db, "delete-host")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"can_force_delete":true`) {
+		t.Fatalf("force delete recovery is missing: %s", rec.Body.String())
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM server_accounts WHERE id='delete-host'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("host was deleted with managed resources: count=%d err=%v", count, err)
+	}
+}
+
+func TestDeleteAccountForceCascadesPanelRecordsAndStatusPageMembership(t *testing.T) {
+	service, db := testService(t)
+	if err := subscriptionservice.New(service.cfg).Initialize(context.Background()); err != nil {
+		t.Fatalf("initialize subscription schema: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO server_accounts(id,name,host,username,auth_type) VALUES('clean-host','可删除主机','192.0.2.11','root','password')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO managed_proxy_runtimes(server_id,runtime,apply_status) VALUES('clean-host','sing-box','running')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO managed_proxy_nodes(id,server_id,name,protocol,runtime,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted,apply_status) VALUES('clean-node','clean-host','测试节点','vless-reality','sing-box','192.0.2.11',45654,'tcp','{}','','running')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_plans(id,name) VALUES('cascade-plan','级联套餐')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_subscriptions(id,plan_id,name,public_token) VALUES('cascade-sub','cascade-plan','级联订阅','cascade-token')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_usage_reports(server_id,node_id,subscription_id,credential_id,boot_id,sequence,upload_bytes,download_bytes) VALUES('clean-host','clean-node','cascade-sub','cascade-sub','boot',1,2,3)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO subscription_usage_report_keys(server_id,node_id,subscription_id,boot_id,sequence) VALUES('clean-host','clean-node','cascade-sub','boot',1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO server_status_pages(slug,title,server_ids_json) VALUES('cascade-page','级联页','["clean-host","other-host"]')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO server_agent_credentials(server_id,secret_encrypted) VALUES('clean-host','secret')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO server_proxy_traffic_reports(server_id,boot_id,sequence,node_id) VALUES('clean-host','boot',1,'node')`); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/server/accounts/clean-host?force=1", nil)
+	service.deleteAccount(rec, req, db, "clean-host")
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var accepted struct {
+		Data struct {
+			TaskID string `json:"task_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &accepted); err != nil || accepted.Data.TaskID == "" {
+		t.Fatalf("decode delete task: task=%q err=%v body=%s", accepted.Data.TaskID, err, rec.Body.String())
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		task, ok := service.taskRegistry.Get(accepted.Data.TaskID)
+		if !ok {
+			t.Fatal("delete task disappeared")
+		}
+		snapshot := task.Snapshot()
+		if snapshot.Status == TaskCompleted {
+			break
+		}
+		if snapshot.Status == TaskFailed {
+			t.Fatalf("delete task failed: %s", snapshot.Error)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("delete task did not complete")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	for _, query := range []string{
+		`SELECT COUNT(*) FROM server_accounts WHERE id='clean-host'`,
+		`SELECT COUNT(*) FROM managed_proxy_nodes WHERE server_id='clean-host'`,
+		`SELECT COUNT(*) FROM managed_proxy_runtimes WHERE server_id='clean-host'`,
+		`SELECT COUNT(*) FROM server_agent_credentials WHERE server_id='clean-host'`,
+		`SELECT COUNT(*) FROM server_proxy_traffic_reports WHERE server_id='clean-host'`,
+		`SELECT COUNT(*) FROM subscription_usage_reports WHERE server_id='clean-host'`,
+		`SELECT COUNT(*) FROM subscription_usage_report_keys WHERE server_id='clean-host'`,
+	} {
+		var count int
+		if err := db.QueryRow(query).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("query %q count=%d err=%v", query, count, err)
+		}
+	}
+	var statusPageServers string
+	if err := db.QueryRow(`SELECT server_ids_json FROM server_status_pages WHERE slug='cascade-page'`).Scan(&statusPageServers); err != nil {
+		t.Fatal(err)
+	}
+	if statusPageServers != `["other-host"]` {
+		t.Fatalf("status page references = %s", statusPageServers)
+	}
+}
+
+func TestDeleteManagedNodeRemovesRelationsAndRawTrafficHistory(t *testing.T) {
+	service, db := testService(t)
+	ctx := context.Background()
+	if err := subscriptionservice.New(service.cfg).Initialize(ctx); err != nil {
+		t.Fatalf("initialize subscription schema: %v", err)
+	}
+	for _, statement := range []string{
+		`INSERT INTO server_accounts(id,name,host,username,auth_type) VALUES('node-host','节点主机','192.0.2.20','agent','password')`,
+		`INSERT INTO managed_proxy_nodes(id,server_id,name,protocol,runtime,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted,apply_status) VALUES('deleted-node','node-host','待删除节点','vless-reality','sing-box','192.0.2.20',45654,'tcp','{}','','running')`,
+		`INSERT INTO subscription_plans(id,name) VALUES('node-plan','节点套餐')`,
+		`INSERT INTO subscription_subscriptions(id,plan_id,name,public_token) VALUES('node-sub','node-plan','节点订阅','node-token')`,
+		`INSERT INTO subscription_plan_nodes(plan_id,node_id,source) VALUES('node-plan','deleted-node','internal')`,
+		`INSERT INTO subscription_runtime_reconcile(node_id,state) VALUES('deleted-node','pending')`,
+		`INSERT INTO subscription_usage_reports(server_id,node_id,subscription_id,credential_id,boot_id,sequence) VALUES('node-host','deleted-node','node-sub','node-sub','boot',1)`,
+		`INSERT INTO subscription_usage_report_keys(server_id,node_id,subscription_id,boot_id,sequence) VALUES('node-host','deleted-node','node-sub','boot',1)`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("fixture %q: %v", statement, err)
+		}
+	}
+	task := service.taskRegistry.Create("node-host", "proxy.node.delete", "deleted-node")
+	service.runManagedProxyNodeDelete(task.ID, "deleted-node", "node-host", "sing-box", 1, false, true, "direct")
+	for _, query := range []string{
+		`SELECT COUNT(*) FROM managed_proxy_nodes WHERE id='deleted-node'`,
+		`SELECT COUNT(*) FROM subscription_plan_nodes WHERE node_id='deleted-node' AND source='internal'`,
+		`SELECT COUNT(*) FROM subscription_runtime_reconcile WHERE node_id='deleted-node'`,
+		`SELECT COUNT(*) FROM subscription_usage_reports WHERE node_id='deleted-node'`,
+		`SELECT COUNT(*) FROM subscription_usage_report_keys WHERE node_id='deleted-node'`,
+	} {
+		var count int
+		if err := db.QueryRowContext(ctx, query).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("query %q count=%d err=%v", query, count, err)
+		}
+	}
+	var subscriptionCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_subscriptions WHERE id='node-sub'`).Scan(&subscriptionCount); err != nil || subscriptionCount != 1 {
+		t.Fatalf("subscription should survive node deletion: count=%d err=%v", subscriptionCount, err)
+	}
+}
+
+func TestDeleteAccountUninstallsAgentBeforeDeletingHostRecord(t *testing.T) {
+	service, db := testService(t)
+	if _, err := db.Exec(`INSERT INTO server_accounts(id,name,host,username,auth_type) VALUES('online-delete-host','在线主机','192.0.2.12','root','password')`); err != nil {
+		t.Fatal(err)
+	}
+	recordPresentBeforeDisconnect := make(chan bool, 1)
+	socket := &selfUninstallReplySocket{
+		t:               t,
+		service:         service,
+		serverID:        "online-delete-host",
+		disconnectDelay: 20 * time.Millisecond,
+		beforeDisconnect: func() {
+			var count int
+			err := db.QueryRow(`SELECT COUNT(*) FROM server_accounts WHERE id='online-delete-host'`).Scan(&count)
+			recordPresentBeforeDisconnect <- err == nil && count == 1
+		},
+	}
+	connection := service.registry.Register("online-delete-host", socket)
+	connection.UpdateCapabilities(map[string]bool{"self_uninstall_v1": true})
+
+	rec := httptest.NewRecorder()
+	// Even an explicit force query must use the verified cleanup path while a
+	// capable Agent is online.
+	req := httptest.NewRequest(http.MethodDelete, "/api/server/accounts/online-delete-host?force=1", nil)
+	service.deleteAccount(rec, req, db, "online-delete-host")
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var accepted struct {
+		Data struct {
+			TaskID string `json:"task_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &accepted); err != nil || accepted.Data.TaskID == "" {
+		t.Fatalf("decode delete task: task=%q err=%v body=%s", accepted.Data.TaskID, err, rec.Body.String())
+	}
+
+	select {
+	case present := <-recordPresentBeforeDisconnect:
+		if !present {
+			t.Fatal("host record was deleted before the Agent disconnected")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("self-uninstall task was not sent")
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		task, ok := service.taskRegistry.Get(accepted.Data.TaskID)
+		if !ok {
+			t.Fatal("delete task disappeared")
+		}
+		snapshot := task.Snapshot()
+		if snapshot.Status == TaskCompleted {
+			break
+		}
+		if snapshot.Status == TaskFailed {
+			t.Fatalf("delete task failed: %s", snapshot.Error)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("delete task did not complete")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM server_accounts WHERE id='online-delete-host'`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("host record remains after Agent uninstall: count=%d err=%v", count, err)
+	}
+}
+
+func TestAgentUninstallRequiresOnlineCapableAgentUnlessForced(t *testing.T) {
+	service, db := testService(t)
+	if _, err := db.Exec(`INSERT INTO server_accounts(id,name,host,username,auth_type) VALUES('uninstall-host','卸载测试','192.0.2.13','root','password')`); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/server/agent/uninstall/uninstall-host", nil)
+	service.handleAgentUninstall(rec, req, db, "uninstall-host")
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), `"can_force_detach":true`) {
+		t.Fatalf("offline status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	connection := service.registry.Register("uninstall-host", &taskReplySocket{
+		t:       t,
+		service: service,
+		reply:   func(int, string) string { return "scheduled" },
+	})
+	connection.UpdateCapabilities(map[string]bool{"self_update_v1": true})
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/server/agent/uninstall/uninstall-host", nil)
+	service.handleAgentUninstall(rec, req, db, "uninstall-host")
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "Agent 版本过旧") {
+		t.Fatalf("legacy status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	service.registry.Disconnect("uninstall-host")
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/server/agent/uninstall/uninstall-host?force=1", nil)
+	service.handleAgentUninstall(rec, req, db, "uninstall-host")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "未确认主机本地程序已清理") {
+		t.Fatalf("force status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var status string
+	if err := db.QueryRow(`SELECT last_check_status FROM server_accounts WHERE id='uninstall-host'`).Scan(&status); err != nil || status != "uninstalled" {
+		t.Fatalf("last_check_status=%q err=%v", status, err)
+	}
+}
+
+func TestAgentUninstallRefusesToOrphanManagedProxyResources(t *testing.T) {
+	service, db := testService(t)
+	if _, err := db.Exec(`INSERT INTO server_accounts(id,name,host,username,auth_type) VALUES('managed-uninstall','托管资源主机','192.0.2.16','root','password')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO managed_proxy_runtimes(server_id,runtime,apply_status) VALUES('managed-uninstall','sing-box','running')`); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{
+		"/api/server/agent/uninstall/managed-uninstall",
+		"/api/server/agent/uninstall/managed-uninstall?force=1",
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		service.handleAgentUninstall(rec, req, db, "managed-uninstall")
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "安全级联流程") {
+			t.Fatalf("path=%s status=%d body=%s", path, rec.Code, rec.Body.String())
+		}
+		if strings.Contains(rec.Body.String(), `"can_force_detach":true`) {
+			t.Fatalf("managed resources must not allow force detach: %s", rec.Body.String())
+		}
+	}
+}
+
+func TestAgentUninstallWaitsForDisconnectConfirmation(t *testing.T) {
+	t.Setenv("API_MONITOR_AGENT_UNINSTALL_VERIFY_TIMEOUT_MS", "1000")
+	service, db := testService(t)
+	if _, err := db.Exec(`INSERT INTO server_accounts(id,name,host,username,auth_type) VALUES('confirmed-uninstall','确认卸载','192.0.2.14','root','password')`); err != nil {
+		t.Fatal(err)
+	}
+	socket := &selfUninstallReplySocket{
+		t:               t,
+		service:         service,
+		serverID:        "confirmed-uninstall",
+		disconnectDelay: 20 * time.Millisecond,
+	}
+	connection := service.registry.Register("confirmed-uninstall", socket)
+	connection.UpdateCapabilities(map[string]bool{"self_uninstall_v1": true})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/server/agent/uninstall/confirmed-uninstall", nil)
+	service.handleAgentUninstall(rec, req, db, "confirmed-uninstall")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if _, online := service.registry.Get("confirmed-uninstall"); online {
+		t.Fatal("Agent remained connected after uninstall returned success")
+	}
+	var status string
+	if err := db.QueryRow(`SELECT last_check_status FROM server_accounts WHERE id='confirmed-uninstall'`).Scan(&status); err != nil || status != "uninstalled" {
+		t.Fatalf("last_check_status=%q err=%v", status, err)
+	}
+}
+
+func TestAgentUninstallDoesNotDetachWhenDisconnectCannotBeConfirmed(t *testing.T) {
+	t.Setenv("API_MONITOR_AGENT_UNINSTALL_VERIFY_TIMEOUT_MS", "20")
+	service, db := testService(t)
+	if _, err := db.Exec(`INSERT INTO server_accounts(id,name,host,username,auth_type) VALUES('stuck-uninstall','卸载超时','192.0.2.15','root','password')`); err != nil {
+		t.Fatal(err)
+	}
+	connection := service.registry.Register("stuck-uninstall", &taskReplySocket{
+		t:       t,
+		service: service,
+		reply:   func(int, string) string { return "scheduled" },
+	})
+	connection.UpdateCapabilities(map[string]bool{"self_uninstall_v1": true})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/server/agent/uninstall/stuck-uninstall", nil)
+	service.handleAgentUninstall(rec, req, db, "stuck-uninstall")
+	if rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), "未在") {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var status string
+	if err := db.QueryRow(`SELECT COALESCE(last_check_status,'') FROM server_accounts WHERE id='stuck-uninstall'`).Scan(&status); err != nil || status == "uninstalled" {
+		t.Fatalf("unconfirmed uninstall changed status=%q err=%v", status, err)
+	}
+}
+
+func TestResolveRealtimeMetricsPersistInterval(t *testing.T) {
+	t.Setenv("API_MONITOR_AGENT_METRICS_PERSIST_INTERVAL_MS", "")
+	if got := resolveRealtimeMetricsPersistInterval(); got != defaultRealtimeMetricsPersistInterval {
+		t.Fatalf("default interval = %v, want %v", got, defaultRealtimeMetricsPersistInterval)
+	}
+
+	t.Setenv("API_MONITOR_AGENT_METRICS_PERSIST_INTERVAL_MS", "1500")
+	if got := resolveRealtimeMetricsPersistInterval(); got != minRealtimeMetricsPersistInterval {
+		t.Fatalf("minimum interval = %v, want %v", got, minRealtimeMetricsPersistInterval)
+	}
+
+	t.Setenv("API_MONITOR_AGENT_METRICS_PERSIST_INTERVAL_MS", "60000")
+	if got := resolveRealtimeMetricsPersistInterval(); got != time.Minute {
+		t.Fatalf("custom interval = %v, want %v", got, time.Minute)
+	}
+}
+
+func TestShouldPersistRealtimeMetricsUsesConfiguredInterval(t *testing.T) {
+	service := &Service{
+		lastPersist:             make(map[string]time.Time),
+		realtimePersistInterval: 30 * time.Second,
+	}
+	now := time.Date(2026, 7, 7, 8, 0, 0, 0, time.UTC)
+
+	if !service.shouldPersistRealtimeMetrics("server-1", now) {
+		t.Fatal("first sample should persist")
+	}
+	if service.shouldPersistRealtimeMetrics("server-1", now.Add(29*time.Second)) {
+		t.Fatal("sample inside configured interval should be skipped")
+	}
+	if !service.shouldPersistRealtimeMetrics("server-1", now.Add(30*time.Second)) {
+		t.Fatal("sample at configured interval should persist")
+	}
+}
+
+func TestResolveNetworkQualityPersistIntervalDefaultsToOneMinute(t *testing.T) {
+	t.Setenv("API_MONITOR_AGENT_NETWORK_QUALITY_PERSIST_INTERVAL_MS", "")
+	if got := resolveNetworkQualityPersistInterval(); got != time.Minute {
+		t.Fatalf("default network quality interval = %v, want %v", got, time.Minute)
+	}
+
+	t.Setenv("API_MONITOR_AGENT_NETWORK_QUALITY_PERSIST_INTERVAL_MS", "0")
+	if got := resolveNetworkQualityPersistInterval(); got != 0 {
+		t.Fatalf("zero network quality interval = %v, want disabled", got)
+	}
+
+	t.Setenv("API_MONITOR_AGENT_NETWORK_QUALITY_PERSIST_INTERVAL_MS", "10000")
+	if got := resolveNetworkQualityPersistInterval(); got != minNetworkQualityPersistInterval {
+		t.Fatalf("minimum network quality interval = %v, want %v", got, minNetworkQualityPersistInterval)
+	}
+}
+
+func TestShouldPersistNetworkQualityCanBeDisabled(t *testing.T) {
+	service := &Service{
+		lastNetworkQualityPersist:     make(map[string]time.Time),
+		networkQualityPersistInterval: 0,
+	}
+	now := time.Date(2026, 7, 7, 8, 0, 0, 0, time.UTC)
+	if service.shouldPersistNetworkQuality("server-1", now) {
+		t.Fatal("network quality samples should not persist when interval is disabled")
+	}
+
+	service.networkQualityPersistInterval = time.Minute
+	if !service.shouldPersistNetworkQuality("server-1", now) {
+		t.Fatal("first network quality sample should persist when enabled")
+	}
+	if service.shouldPersistNetworkQuality("server-1", now.Add(59*time.Second)) {
+		t.Fatal("network quality sample inside configured interval should be skipped")
+	}
+	if !service.shouldPersistNetworkQuality("server-1", now.Add(time.Minute)) {
+		t.Fatal("network quality sample at configured interval should persist")
+	}
 }
 
 func perform(service *Service, method, path, body string) *httptest.ResponseRecorder {
@@ -48,6 +467,18 @@ func decodePayload(t *testing.T, res *httptest.ResponseRecorder) map[string]inte
 		t.Fatalf("decode response: %v body=%s", err, res.Body.String())
 	}
 	return payload
+}
+
+func TestResolveInstallOriginPrefersPublicBaseURL(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/server/agent/install/linux/id/key?protocol=http&base_url=https%3A%2F%2Fpanel.example.com%2Fnested", nil)
+	req.Host = "127.0.0.1:3000"
+	req.Header.Set("X-Forwarded-Host", "internal.local:8080")
+	req.Header.Set("X-Forwarded-Proto", "http")
+
+	proto, host := resolveInstallOrigin(req)
+	if proto != "https" || host != "panel.example.com" {
+		t.Fatalf("origin = %s://%s, want https://panel.example.com", proto, host)
+	}
 }
 
 type taskReplySocket struct {
@@ -80,6 +511,46 @@ func (s *taskReplySocket) WriteMessage(_ int, data []byte) error {
 	return nil
 }
 
+type selfUninstallReplySocket struct {
+	t                *testing.T
+	service          *Service
+	serverID         string
+	disconnectDelay  time.Duration
+	beforeDisconnect func()
+}
+
+func (s *selfUninstallReplySocket) WriteMessage(_ int, data []byte) error {
+	raw := string(data)
+	if !strings.HasPrefix(raw, "42") {
+		s.t.Fatalf("unexpected socket frame: %s", raw)
+	}
+	var frame []interface{}
+	if err := json.Unmarshal([]byte(raw[2:]), &frame); err != nil {
+		s.t.Fatalf("decode socket frame: %v frame=%s", err, raw)
+	}
+	if len(frame) != 2 || frame[0] != "dashboard:task" {
+		s.t.Fatalf("unexpected socket event: %#v", frame)
+	}
+	payload, ok := frame[1].(map[string]interface{})
+	if !ok {
+		s.t.Fatalf("unexpected socket payload: %#v", frame[1])
+	}
+	taskID, _ := payload["id"].(string)
+	taskType, _ := payload["type"].(float64)
+	if int(taskType) != 52 {
+		s.t.Fatalf("task type = %d, want self-uninstall task 52", int(taskType))
+	}
+	go func() {
+		s.service.taskRegistry.Complete(taskID, "scheduled")
+		time.Sleep(s.disconnectDelay)
+		if s.beforeDisconnect != nil {
+			s.beforeDisconnect()
+		}
+		s.service.registry.Disconnect(s.serverID)
+	}()
+	return nil
+}
+
 type terminalCaptureSocket struct {
 	t       *testing.T
 	service *Service
@@ -93,9 +564,17 @@ type capturedSocketEvent struct {
 }
 
 type recordingNotifier struct {
-	mu     sync.Mutex
-	events []string
-	data   []map[string]interface{}
+	mu        sync.Mutex
+	events    []string
+	data      []map[string]interface{}
+	refreshes []string
+}
+
+func (n *recordingNotifier) RefreshLifecycle(_ context.Context, _ string, eventType string, _ map[string]interface{}) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.refreshes = append(n.refreshes, eventType)
+	return nil
 }
 
 func (n *recordingNotifier) Trigger(_ context.Context, _ string, eventType string, eventData map[string]interface{}) error {
@@ -112,6 +591,12 @@ func (n *recordingNotifier) snapshot() ([]string, []map[string]interface{}) {
 	events := append([]string(nil), n.events...)
 	data := append([]map[string]interface{}(nil), n.data...)
 	return events, data
+}
+
+func (n *recordingNotifier) refreshSnapshot() []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]string(nil), n.refreshes...)
 }
 
 func (s *terminalCaptureSocket) WriteMessage(_ int, data []byte) error {
@@ -168,8 +653,12 @@ func (s *reconnectOnUpgradeSocket) WriteMessage(_ int, data []byte) error {
 	if !ok {
 		s.t.Fatalf("unexpected socket payload: %#v", frame[1])
 	}
+	taskID, _ := payload["id"].(string)
 	taskType, _ := payload["type"].(float64)
 	if int(taskType) == 5 {
+		if taskID != "" {
+			go s.service.taskRegistry.Complete(taskID, "scheduled")
+		}
 		go func() {
 			time.Sleep(20 * time.Millisecond)
 			s.service.registry.Register(s.serverID, s)
@@ -186,10 +675,30 @@ func (s *terminalCaptureSocket) Events() []capturedSocketEvent {
 	return out
 }
 
+func TestAgentBatchSnapshotPreservesRequestOrder(t *testing.T) {
+	manager := NewAgentBatchManager()
+	batch := manager.Create(AgentBatchUpgrade, "https", false, false, 4, []serverIdentity{
+		{ID: "server-b", Name: "Beta"},
+		{ID: "server-a", Name: "Alpha"},
+		{ID: "server-c", Name: "Gamma"},
+	})
+
+	for i := 0; i < 20; i++ {
+		snapshot := batch.snapshot()
+		got := make([]string, 0, len(snapshot.Items))
+		for _, item := range snapshot.Items {
+			got = append(got, item.ServerID)
+		}
+		if strings.Join(got, ",") != "server-b,server-a,server-c" {
+			t.Fatalf("snapshot order drifted: %v", got)
+		}
+	}
+}
+
 func TestAccountsLifecycleAndNullableUpdate(t *testing.T) {
 	service, _ := testService(t)
 
-	res := perform(service, http.MethodPost, "/api/server/accounts", `{"name":"edge","host":"127.0.0.1","port":22,"username":"root","auth_type":"password","password":"secret","tags":["prod"],"traffic_limit_bytes":1099511627776,"traffic_alert_enabled":true}`)
+	res := perform(service, http.MethodPost, "/api/server/accounts", `{"name":"edge","host":"127.0.0.1","port":22,"username":"root","auth_type":"password","password":"secret","tags":["prod"],"traffic_limit_bytes":1099511627776,"traffic_alert_enabled":true,"traffic_cycle_type":"monthly","traffic_cycle_day":15}`)
 	if res.Code != http.StatusOK {
 		t.Fatalf("create status=%d body=%s", res.Code, res.Body.String())
 	}
@@ -201,6 +710,9 @@ func TestAccountsLifecycleAndNullableUpdate(t *testing.T) {
 	}
 	if data["traffic_limit_bytes"] != float64(1099511627776) || data["traffic_alert_enabled"] != true || data["traffic_alert_percent"] != float64(100) {
 		t.Fatalf("unexpected traffic quota fields after create: %#v", data)
+	}
+	if data["traffic_cycle_type"] != "monthly" || data["traffic_cycle_day"] != float64(15) {
+		t.Fatalf("unexpected traffic cycle fields after create: %#v", data)
 	}
 
 	res = perform(service, http.MethodPut, "/api/server/accounts/"+id, `{"description":"updated","tags":["prod","go"]}`)
@@ -214,6 +726,9 @@ func TestAccountsLifecycleAndNullableUpdate(t *testing.T) {
 	}
 	if data["traffic_limit_bytes"] != float64(1099511627776) || data["traffic_alert_enabled"] != true {
 		t.Fatalf("traffic quota should be preserved by partial update: %#v", data)
+	}
+	if data["traffic_cycle_type"] != "monthly" || data["traffic_cycle_day"] != float64(15) {
+		t.Fatalf("traffic cycle should be preserved by partial update: %#v", data)
 	}
 
 	res = perform(service, http.MethodPut, "/api/server/accounts/"+id, `{"traffic_limit_bytes":2199023255552,"traffic_alert_enabled":false}`)
@@ -275,6 +790,9 @@ func TestCredentialsAcceptFrontendDefaultPost(t *testing.T) {
 
 func TestSnippetsPreviewHistoryAndMonitorLogs(t *testing.T) {
 	service, db := testService(t)
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id,name,host,username,auth_type) VALUES ('server-1','测试主机','127.0.0.1','root','password')`); err != nil {
+		t.Fatal(err)
+	}
 
 	res := perform(service, http.MethodPost, "/api/server/snippets", `{"title":"echo","content":"echo {host}","tags":["ops"]}`)
 	if res.Code != http.StatusOK {
@@ -464,6 +982,145 @@ func TestPublicServerStatusPageUsesLiveAgentMetadata(t *testing.T) {
 	}
 }
 
+func TestListAccountsUsesLiveAgentLocationMetadata(t *testing.T) {
+	service, db := testService(t)
+	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, status, tags, cached_info) VALUES ('server-geo', 'geo', '127.0.0.1', 'root', 'password', 'offline', '[]', '{"cpu":1,"mem_percent":2}')`)
+	if err != nil {
+		t.Fatalf("insert account: %v", err)
+	}
+	conn := service.registry.Register("server-geo", &taskReplySocket{t: t, service: service})
+	conn.UpdateMetadata(map[string]interface{}{
+		"country_code":      "us",
+		"country":           "US",
+		"location":          "San Jose, California, US",
+		"region":            "San Jose, California, US",
+		"latitude":          37.33939,
+		"longitude":         -121.89496,
+		"metrics_last_seen": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+
+	res := perform(service, http.MethodGet, "/api/server/accounts", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", res.Code, res.Body.String())
+	}
+	payload := decodePayload(t, res)
+	list := payload["data"].([]interface{})
+	account := list[0].(map[string]interface{})
+	if account["countryCode"] != "us" || account["location"] != "San Jose, California, US" {
+		t.Fatalf("expected live location fields on account, account=%#v", account)
+	}
+	if account["latitude"] != 37.33939 || account["longitude"] != -121.89496 {
+		t.Fatalf("expected live coordinates on account, account=%#v", account)
+	}
+	info := account["info"].(map[string]interface{})
+	if info["country_code"] != "us" || info["location"] != "San Jose, California, US" {
+		t.Fatalf("expected live location fields in info, info=%#v", info)
+	}
+	if info["latitude"] != 37.33939 || info["longitude"] != -121.89496 {
+		t.Fatalf("expected live coordinates in info, info=%#v", info)
+	}
+}
+
+func TestListAccountsUsesLiveAgentLocationMetadataWithoutCachedInfo(t *testing.T) {
+	service, db := testService(t)
+	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, status, tags) VALUES ('server-geo-empty', 'geo', '127.0.0.1', 'root', 'password', 'offline', '[]')`)
+	if err != nil {
+		t.Fatalf("insert account: %v", err)
+	}
+	conn := service.registry.Register("server-geo-empty", &taskReplySocket{t: t, service: service})
+	conn.UpdateMetadata(map[string]interface{}{
+		"country_code":      "us",
+		"country":           "US",
+		"location":          "San Jose, California, US",
+		"latitude":          37.33939,
+		"longitude":         -121.89496,
+		"metrics_last_seen": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+
+	res := perform(service, http.MethodGet, "/api/server/accounts", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", res.Code, res.Body.String())
+	}
+	payload := decodePayload(t, res)
+	list := payload["data"].([]interface{})
+	account := list[0].(map[string]interface{})
+	if account["countryCode"] != "us" || account["location"] != "San Jose, California, US" {
+		t.Fatalf("expected live location fields on account without cached info, account=%#v", account)
+	}
+	if account["latitude"] != 37.33939 || account["longitude"] != -121.89496 {
+		t.Fatalf("expected live coordinates on account without cached info, account=%#v", account)
+	}
+	info := account["info"].(map[string]interface{})
+	if info["country_code"] != "us" || info["location"] != "San Jose, California, US" {
+		t.Fatalf("expected live location fields in info without cached info, info=%#v", info)
+	}
+}
+
+func TestListAccountsQueuesMissingAgentLocationRefresh(t *testing.T) {
+	service, db := testService(t)
+	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, status, tags, cached_info) VALUES ('server-ip', 'ip', '127.0.0.1', 'root', 'password', 'online', '[]', '{"cpu":1,"mem_percent":2}')`)
+	if err != nil {
+		t.Fatalf("insert account: %v", err)
+	}
+	service.registry.Register("server-ip", &taskReplySocket{t: t, service: service, reply: func(_ int, command string) string {
+		if command != "curl -fsSL https://64.ipcheck.ing/geo" {
+			t.Fatalf("unexpected command: %s", command)
+		}
+		return `IP: 64.181.246.5
+City: San Jose
+Region: California
+Country: US
+Latitude: 37.33939
+Longitude: -121.89496
+Org: Oracle Corporation
+Timezone: America/Los_Angeles
+ASN: AS31898`
+	}})
+
+	res := perform(service, http.MethodGet, "/api/server/accounts", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", res.Code, res.Body.String())
+	}
+
+	var cachedRaw string
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := db.QueryRowContext(context.Background(), "SELECT COALESCE(cached_info, '{}') FROM server_accounts WHERE id = 'server-ip'").Scan(&cachedRaw); err != nil {
+			t.Fatalf("read cached info: %v", err)
+		}
+		cached := map[string]interface{}{}
+		_ = json.Unmarshal([]byte(cachedRaw), &cached)
+		if cached["country_code"] == "us" && cached["latitude"] == 37.33939 && cached["longitude"] == -121.89496 {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("expected location refresh to update cached_info, got %s", cachedRaw)
+}
+
+func TestMergeCachedLocationFieldsFromDBPreservesGeoOnHostInfoUpdate(t *testing.T) {
+	service, db := testService(t)
+	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, cached_info) VALUES ('server-geo', 'geo', '127.0.0.1', 'root', 'password', '{"country_code":"us","location":"San Jose, California, US","latitude":37.33939,"longitude":-121.89496}')`)
+	if err != nil {
+		t.Fatalf("insert account: %v", err)
+	}
+
+	next := service.mergeCachedLocationFieldsFromDB(context.Background(), db, "server-geo", map[string]interface{}{
+		"platform":      "Windows",
+		"agent_version": "1.2.3",
+	})
+
+	if next["country_code"] != "us" || next["location"] != "San Jose, California, US" {
+		t.Fatalf("expected location fields to be preserved, next=%#v", next)
+	}
+	if next["latitude"] != 37.33939 || next["longitude"] != -121.89496 {
+		t.Fatalf("expected coordinates to be preserved, next=%#v", next)
+	}
+	if next["platform"] != "Windows" || next["agent_version"] != "1.2.3" {
+		t.Fatalf("expected host info fields to be preserved, next=%#v", next)
+	}
+}
+
 func TestPublicServerStatusPageWithNoServersDoesNotExposeAllHosts(t *testing.T) {
 	service, db := testService(t)
 	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, status, cached_info) VALUES ('server-1', 'edge', '127.0.0.1', 'root', 'password', 'online', '{"cpu":12.5}')`)
@@ -559,6 +1216,65 @@ func TestDockerOverviewInvalidLiveJSONDoesNotInferInstalled(t *testing.T) {
 	}
 }
 
+func TestDockerOverviewQueriesServersConcurrently(t *testing.T) {
+	service, db := testService(t)
+	_, err := db.ExecContext(context.Background(), `
+		INSERT INTO server_accounts (id, name, host, username, auth_type, status, cached_info) VALUES
+		('docker-one', 'docker one', '', 'root', 'password', 'online', '{"docker":{"installed":false}}'),
+		('docker-two', 'docker two', '', 'root', 'password', 'online', '{"docker":{"installed":false}}')
+	`)
+	if err != nil {
+		t.Fatalf("insert accounts: %v", err)
+	}
+
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	reply := func(taskType int, data string) string {
+		if taskType != dockerTaskContainers {
+			t.Fatalf("unexpected task type: %d data=%s", taskType, data)
+		}
+		started <- struct{}{}
+		<-release
+		return `[{"id":"abc123","name":"web","state":"running"}]`
+	}
+	service.registry.Register("docker-one", &taskReplySocket{t: t, service: service, reply: reply})
+	service.registry.Register("docker-two", &taskReplySocket{t: t, service: service, reply: reply})
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- perform(service, http.MethodGet, "/api/server/v2/docker/overview?scope=containers", "")
+	}()
+
+	bothStarted := true
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	for count := 0; count < 2; count++ {
+		select {
+		case <-started:
+		case <-timer.C:
+			bothStarted = false
+		}
+		if !bothStarted {
+			break
+		}
+	}
+	close(release)
+	res := <-done
+	if !bothStarted {
+		t.Fatal("overview did not start both server queries concurrently")
+	}
+	if res.Code != http.StatusOK {
+		t.Fatalf("overview status=%d body=%s", res.Code, res.Body.String())
+	}
+
+	payload := decodePayload(t, res)
+	data := payload["data"].(map[string]interface{})
+	servers := data["servers"].([]interface{})
+	if len(servers) != 2 {
+		t.Fatalf("expected 2 servers, got %#v", servers)
+	}
+}
+
 func TestDockerProxyRoutesUseDockerSemanticsOverAgentTasks(t *testing.T) {
 	service, db := testService(t)
 	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, cached_info) VALUES ('docker-agent', 'docker', '', 'root', 'password', '{"docker":{"installed":true}}')`)
@@ -596,11 +1312,16 @@ func TestDockerProxyRoutesUseDockerSemanticsOverAgentTasks(t *testing.T) {
 					t.Fatalf("decode compose action: %v data=%s", err, data)
 				}
 				action, _ := req["action"].(string)
-				if action != "up" && action != "start" && action != "stop" {
+				if action != "up" && action != "start" && action != "stop" && action != "update" {
 					t.Fatalf("unexpected compose action: %s data=%s", action, data)
 				}
 				if req["project"] != "edge" || req["config_file"] != "/srv/edge/docker-compose.yml" {
 					t.Fatalf("unexpected compose action data: %s", data)
+				}
+				for _, alias := range []string{"configFile", "configFiles", "ConfigFiles", "configDir", "config_dir"} {
+					if _, exists := req[alias]; exists {
+						t.Fatalf("compose action kept alias field %s: %s", alias, data)
+					}
 				}
 				return "compose " + action + " success"
 			default:
@@ -668,6 +1389,11 @@ func TestDockerProxyRoutesUseDockerSemanticsOverAgentTasks(t *testing.T) {
 	stacks = payload["data"].([]interface{})
 	if len(stacks) != 1 || stacks[0].(map[string]interface{})["status"] != "running" {
 		t.Fatalf("expected stack status to be updated, payload=%#v", payload)
+	}
+
+	res = perform(service, http.MethodPost, "/api/server/v2/docker/docker-agent/stacks/edge/update", `{"configFiles":["/srv/edge/docker-compose.yml"]}`)
+	if res.Code != http.StatusOK {
+		t.Fatalf("stack update status=%d body=%s", res.Code, res.Body.String())
 	}
 
 	res = perform(service, http.MethodPost, "/api/server/v2/docker/docker-agent/compose/edge/start", `{"configFile":"/srv/edge/docker-compose.yml"}`)
@@ -748,6 +1474,15 @@ func TestDockerComposeTaskNormalizesConfigFiles(t *testing.T) {
 	res := perform(service, http.MethodPost, "/api/server/v2/tasks", `{"serverId":"compose-agent","domain":"docker","action":"compose.restart","payload":{"project":"edge","configFiles":["/srv/app/compose.yml","/srv/app/compose.prod.yml"]}}`)
 	if res.Code != http.StatusOK {
 		t.Fatalf("compose task status=%d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestDockerComposeUpdateActionUsesLongTimeout(t *testing.T) {
+	if !isDockerComposeAction("update") {
+		t.Fatal("compose update action should be supported")
+	}
+	if got := dockerComposeActionTimeout("update"); got != 300*time.Second {
+		t.Fatalf("compose update timeout=%s, want=5m", got)
 	}
 }
 
@@ -845,13 +1580,91 @@ func TestServerDetailResolvesCountryFromCachedAgentMetadata(t *testing.T) {
 	}
 }
 
+func TestAgentHeartbeatPreservesCachedLocationMetadata(t *testing.T) {
+	service, db := testService(t)
+	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, cached_info) VALUES ('server-geo', 'geo', '127.0.0.1', 'root', 'password', '{"country_code":"us","location":"San Jose, California, US","latitude":37.33939,"longitude":-121.89496,"platform":"Windows"}')`)
+	if err != nil {
+		t.Fatalf("insert account: %v", err)
+	}
+	_, err = db.ExecContext(context.Background(), `INSERT OR REPLACE INTO system_config (key, value, updated_at) VALUES ('global_agent_key', 'good-key', datetime('now'))`)
+	if err != nil {
+		t.Fatalf("insert key: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/server/agent/heartbeat", strings.NewReader(`{"server_id":"server-geo","status":"online","info":{"cpu":18,"country_code":"","location":""}}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer good-key")
+	res := httptest.NewRecorder()
+	service.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("heartbeat status=%d body=%s", res.Code, res.Body.String())
+	}
+
+	var cached string
+	if err := db.QueryRowContext(context.Background(), `SELECT COALESCE(cached_info, '{}') FROM server_accounts WHERE id = 'server-geo'`).Scan(&cached); err != nil {
+		t.Fatalf("read cached info: %v", err)
+	}
+	var info map[string]interface{}
+	if err := json.Unmarshal([]byte(cached), &info); err != nil {
+		t.Fatalf("decode cached info: %v", err)
+	}
+	if info["country_code"] != "us" || info["location"] != "San Jose, California, US" {
+		t.Fatalf("expected heartbeat to preserve location metadata, info=%#v", info)
+	}
+	if info["latitude"] != 37.33939 || info["longitude"] != -121.89496 {
+		t.Fatalf("expected heartbeat to preserve coordinates, info=%#v", info)
+	}
+	if info["cpu"] != float64(18) {
+		t.Fatalf("expected heartbeat metrics to update, info=%#v", info)
+	}
+}
+
+func TestRealtimeMetricsPersistPreservesCachedLocationMetadata(t *testing.T) {
+	service, db := testService(t)
+	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, cached_info) VALUES ('server-geo', 'geo', '127.0.0.1', 'root', 'password', '{"country_code":"us","country":"US","location":"San Jose, California, US","latitude":37.33939,"longitude":-121.89496,"geo_source":"ipcheck-agent"}')`)
+	if err != nil {
+		t.Fatalf("insert account: %v", err)
+	}
+	service.registry.Register("server-geo", &taskReplySocket{t: t, service: service, reply: func(taskType int, data string) string {
+		return ""
+	}})
+
+	metrics := map[string]interface{}{
+		"cpu":         12.5,
+		"mem_used":    float64(512 * 1024 * 1024),
+		"mem_total":   float64(1024 * 1024 * 1024),
+		"disk_used":   float64(10 * 1024 * 1024),
+		"disk_total":  float64(20 * 1024 * 1024),
+		"uptime":      float64(60),
+		"server_id":   "server-geo",
+		"countryCode": "",
+	}
+
+	merged := service.mergeCachedLocationFieldsFromDB(context.Background(), db, "server-geo", metrics)
+	if merged["country_code"] != "us" || merged["country"] != "US" || merged["location"] != "San Jose, California, US" {
+		t.Fatalf("expected realtime metrics to preserve cached location, merged=%#v", merged)
+	}
+	if merged["latitude"] != 37.33939 || merged["longitude"] != -121.89496 {
+		t.Fatalf("expected realtime metrics to preserve coordinates, merged=%#v", merged)
+	}
+
+	conn, ok := service.registry.Get("server-geo")
+	if !ok {
+		t.Fatal("expected registered agent")
+	}
+	metadata := conn.GetMetadata()
+	if metadata["country_code"] != "us" || metadata["location"] != "San Jose, California, US" {
+		t.Fatalf("expected preserved location in connection metadata, metadata=%#v", metadata)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
-func TestListAccountsResolvesMissingLocationFromIPSB(t *testing.T) {
+func TestListAccountsDoesNotResolveMissingLocationAutomatically(t *testing.T) {
 	service, db := testService(t)
 	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, tags, country, cached_info) VALUES ('server-ip', 'edge', '185.255.55.55', 'root', 'password', '[]', 'auto', '{}')`)
 	if err != nil {
@@ -860,11 +1673,8 @@ func TestListAccountsResolvesMissingLocationFromIPSB(t *testing.T) {
 
 	previousClient := geoHTTPClient
 	geoHTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if !strings.Contains(req.URL.String(), "api.ip.sb/geoip/185.255.55.55") {
-			return &http.Response{StatusCode: http.StatusBadGateway, Body: io.NopCloser(strings.NewReader(`{}`)), Header: http.Header{}}, nil
-		}
-		body := `{"ip":"185.255.55.55","country_code":"NL","country":"Netherlands","latitude":52.3824,"longitude":4.8995,"asn":"3214","organization":"xTom GmbH","timezone":"Europe/Amsterdam"}`
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
+		t.Fatalf("list accounts should not call geo provider: %s", req.URL.String())
+		return nil, nil
 	})}
 	t.Cleanup(func() { geoHTTPClient = previousClient })
 
@@ -875,13 +1685,145 @@ func TestListAccountsResolvesMissingLocationFromIPSB(t *testing.T) {
 	payload := decodePayload(t, res)
 	list := payload["data"].([]interface{})
 	account := list[0].(map[string]interface{})
-	if account["resolved_country"] != "Netherlands" {
+	if value, _ := account["resolved_country"].(string); value != "" {
+		t.Fatalf("resolved_country = %#v", account["resolved_country"])
+	}
+	if value, _ := account["countryCode"].(string); value != "" {
+		t.Fatalf("countryCode should not expose auto country: %#v", account)
+	}
+	if value, _ := account["location"].(string); value == "auto" {
+		t.Fatalf("location should not expose auto country: %#v", account)
+	}
+	info := account["info"].(map[string]interface{})
+	if info["country_code"] != "" || info["location"] != "" {
+		t.Fatalf("expected empty cached location info, info=%#v", info)
+	}
+	if _, ok := account["latitude"]; ok {
+		t.Fatalf("account should not expose missing latitude as zero: %#v", account)
+	}
+	if _, ok := account["longitude"]; ok {
+		t.Fatalf("account should not expose missing longitude as zero: %#v", account)
+	}
+	if _, ok := info["latitude"]; ok {
+		t.Fatalf("info should not expose missing latitude as zero: %#v", info)
+	}
+	if _, ok := info["longitude"]; ok {
+		t.Fatalf("info should not expose missing longitude as zero: %#v", info)
+	}
+}
+
+func TestRefreshAccountLocationsQueriesOnlineAgentIPCheck(t *testing.T) {
+	service, db := testService(t)
+	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, tags, country, cached_info) VALUES ('server-ip', 'edge', '185.255.55.55', 'root', 'password', '[]', 'auto', '{}')`)
+	if err != nil {
+		t.Fatalf("insert account: %v", err)
+	}
+
+	service.registry.Register("server-ip", &taskReplySocket{t: t, service: service, reply: func(taskType int, data string) string {
+		if taskType != 1 {
+			t.Fatalf("task type = %d, want 1", taskType)
+		}
+		if !strings.Contains(data, "curl -fsSL https://64.ipcheck.ing/geo") {
+			t.Fatalf("unexpected command: %s", data)
+		}
+		return `IP: 64.181.246.5
+City: San Jose
+Region: California
+Country: US
+Latitude: 37.33939
+Longitude: -121.89496
+Org: Oracle Corporation
+Timezone: America/Los_Angeles
+ASN: AS31898`
+	}})
+
+	res := perform(service, http.MethodPost, "/api/server/accounts/refresh-locations", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("refresh status=%d body=%s", res.Code, res.Body.String())
+	}
+
+	res = perform(service, http.MethodGet, "/api/server/accounts", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", res.Code, res.Body.String())
+	}
+	payload := decodePayload(t, res)
+	list := payload["data"].([]interface{})
+	account := list[0].(map[string]interface{})
+	if account["resolved_country"] != "San Jose, California, US" {
 		t.Fatalf("resolved_country = %#v", account["resolved_country"])
 	}
 	info := account["info"].(map[string]interface{})
-	if info["country_code"] != "nl" || info["location"] != "Netherlands" {
-		t.Fatalf("expected IP.SB location in info, info=%#v", info)
+	if info["country_code"] != "us" || info["location"] != "San Jose, California, US" {
+		t.Fatalf("expected ipcheck location in info, info=%#v", info)
 	}
+	if account["countryCode"] != "us" || account["location"] != "San Jose, California, US" {
+		t.Fatalf("expected location fields on account, account=%#v", account)
+	}
+	if account["latitude"] != 37.33939 || account["longitude"] != -121.89496 {
+		t.Fatalf("expected coordinates on account, account=%#v", account)
+	}
+}
+
+func TestInitialAgentConnectRefreshesMissingLocationOnce(t *testing.T) {
+	service, db := testService(t)
+	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, tags, country, cached_info) VALUES ('server-ip', 'edge', '185.255.55.55', 'root', 'password', '[]', 'auto', '{}')`)
+	if err != nil {
+		t.Fatalf("insert account: %v", err)
+	}
+
+	calls := 0
+	service.registry.Register("server-ip", &taskReplySocket{t: t, service: service, reply: func(taskType int, data string) string {
+		calls++
+		if taskType != 1 {
+			t.Fatalf("task type = %d, want 1", taskType)
+		}
+		if !strings.Contains(data, "curl -fsSL https://64.ipcheck.ing/geo") {
+			t.Fatalf("unexpected command: %s", data)
+		}
+		return `IP: 64.181.246.5
+City: San Jose
+Region: California
+Country: US
+Latitude: 37.33939
+Longitude: -121.89496
+Org: Oracle Corporation
+Timezone: America/Los_Angeles
+ASN: AS31898`
+	}})
+
+	service.refreshAccountLocationFromAgentIfMissing("server-ip")
+
+	if calls != 1 {
+		t.Fatalf("initial refresh calls = %d, want 1", calls)
+	}
+	var cached string
+	if err := db.QueryRowContext(context.Background(), `SELECT COALESCE(cached_info, '{}') FROM server_accounts WHERE id = 'server-ip'`).Scan(&cached); err != nil {
+		t.Fatalf("read cached info: %v", err)
+	}
+	var info map[string]interface{}
+	if err := json.Unmarshal([]byte(cached), &info); err != nil {
+		t.Fatalf("decode cached info: %v", err)
+	}
+	if info["country_code"] != "us" || info["location"] != "San Jose, California, US" {
+		t.Fatalf("expected initial refresh location, info=%#v", info)
+	}
+	if info["latitude"] != 37.33939 || info["longitude"] != -121.89496 {
+		t.Fatalf("expected initial refresh coordinates, info=%#v", info)
+	}
+}
+
+func TestInitialAgentConnectSkipsCachedLocation(t *testing.T) {
+	service, db := testService(t)
+	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, tags, cached_info) VALUES ('server-ip', 'edge', '185.255.55.55', 'root', 'password', '[]', '{"country_code":"us","location":"San Jose, California, US","latitude":37.33939,"longitude":-121.89496}')`)
+	if err != nil {
+		t.Fatalf("insert account: %v", err)
+	}
+	service.registry.Register("server-ip", &taskReplySocket{t: t, service: service, reply: func(taskType int, data string) string {
+		t.Fatalf("initial refresh should not run when location is cached: type=%d data=%s", taskType, data)
+		return ""
+	}})
+
+	service.refreshAccountLocationFromAgentIfMissing("server-ip")
 }
 
 func TestNetworkQualityCollectAndReadback(t *testing.T) {
@@ -1096,7 +2038,8 @@ func TestListAccountsUsesLiveAgentConnectionAsOnlineStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("insert account: %v", err)
 	}
-	service.registry.Register("live-agent", &taskReplySocket{t: t, service: service, reply: func(int, string) string { return "" }})
+	connection := service.registry.Register("live-agent", &taskReplySocket{t: t, service: service, reply: func(int, string) string { return "" }})
+	connection.UpdateCapabilities(map[string]bool{"remote_desktop_v1": true})
 
 	res := perform(service, http.MethodGet, "/api/server/accounts", "")
 	if res.Code != http.StatusOK {
@@ -1110,6 +2053,10 @@ func TestListAccountsUsesLiveAgentConnectionAsOnlineStatus(t *testing.T) {
 	server := list[0].(map[string]interface{})
 	if server["status"] != "online" || server["agent_online"] != true {
 		t.Fatalf("live agent should override stale offline db status: %#v", server)
+	}
+	agentCapabilities, ok := server["agent_capabilities"].(map[string]interface{})
+	if !ok || agentCapabilities["remote_desktop_v1"] != true {
+		t.Fatalf("live agent capabilities should be included in account list: %#v", server)
 	}
 }
 
@@ -1139,8 +2086,8 @@ func TestConnectionRegistryIgnoresStaleSocketDisconnect(t *testing.T) {
 
 func TestAgentSocketAuthenticationRequiresValidServerAndKey(t *testing.T) {
 	service, db := testService(t)
-	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, status, cached_info, tags, order_index) VALUES
-		('auth-agent', 'auth', '0.0.0.0', 'agent', 'password', 'offline', '{}', '[]', 1)`)
+	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, status, country, resolved_country, cached_info, tags, order_index) VALUES
+		('auth-agent', 'auth', '0.0.0.0', 'agent', 'password', 'offline', 'us', 'San Jose, California, US', '{"country_code":"us","location":"San Jose, California, US","latitude":37.33939,"longitude":-121.89496}', '[]', 1)`)
 	if err != nil {
 		t.Fatalf("insert account: %v", err)
 	}
@@ -1189,6 +2136,300 @@ func TestAgentSocketAuthenticationRequiresValidServerAndKey(t *testing.T) {
 	}
 	if joined := strings.Join(goodSession.PendingMessages, "\n"); !strings.Contains(joined, "dashboard:auth_ok") || strings.Contains(joined, "dashboard:auth_fail") {
 		t.Fatalf("expected auth_ok for valid agent, messages=%s", joined)
+	}
+}
+
+func TestAgentCredentialsAreScopedPerServer(t *testing.T) {
+	service, db := testService(t)
+	for _, id := range []string{"agent-a", "agent-b"} {
+		if _, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type) VALUES (?, ?, '0.0.0.0', 'agent', 'password')`, id, id); err != nil {
+			t.Fatalf("insert account %s: %v", id, err)
+		}
+	}
+	keyA, err := service.getOrGenerateAgentKeyForServer(context.Background(), db, "agent-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyB, err := service.getOrGenerateAgentKeyForServer(context.Background(), db, "agent-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keyA == keyB {
+		t.Fatal("different servers must not share an agent credential")
+	}
+	if err := service.validateAgentKeyForServer(context.Background(), db, "agent-a", keyA); err != nil {
+		t.Fatalf("own credential rejected: %v", err)
+	}
+	if err := service.validateAgentKeyForServer(context.Background(), db, "agent-a", keyB); err == nil {
+		t.Fatal("credential from another server must be rejected")
+	}
+}
+
+func TestProxyTrafficReportsAreIdempotent(t *testing.T) {
+	service, db := testService(t)
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type) VALUES ('proxy-agent', 'proxy-agent', '0.0.0.0', 'agent', 'password')`); err != nil {
+		t.Fatal(err)
+	}
+	key, err := service.getOrGenerateAgentKeyForServer(context.Background(), db, "proxy-agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := `{"boot_id":"boot-1","sequence":1,"node_id":"node-1","upload_bytes":100,"download_bytes":200}`
+	for attempt := 0; attempt < 2; attempt++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/server/agent/proxy/proxy-agent/traffic", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+key)
+		res := httptest.NewRecorder()
+		service.ServeHTTP(res, req)
+		if res.Code != http.StatusOK {
+			t.Fatalf("attempt %d status=%d body=%s", attempt, res.Code, res.Body.String())
+		}
+	}
+	var count int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM server_proxy_traffic_reports WHERE server_id = 'proxy-agent'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("traffic report count=%d, want 1", count)
+	}
+}
+
+func TestProxyTrafficHTTPBatchValidatesScopeAndQuota(t *testing.T) {
+	service, db := testService(t)
+	ctx := context.Background()
+	if err := subscriptionservice.New(service.cfg).Initialize(ctx); err != nil {
+		t.Fatalf("initialize subscription schema: %v", err)
+	}
+	for _, statement := range []string{
+		`INSERT INTO server_accounts (id,name,host,username,auth_type) VALUES ('traffic-host','traffic-host','192.0.2.40','agent','password'),('other-host','other-host','192.0.2.41','agent','password')`,
+		`INSERT INTO managed_proxy_nodes (id,server_id,name,protocol,runtime,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted,revision,enabled,publishable,apply_status,stats_port) VALUES ('traffic-node','traffic-host','traffic-node','vless-reality','sing-box','192.0.2.40',45654,'tcp','{}','',1,1,1,'running',21000),('other-node','other-host','other-node','vless-reality','sing-box','192.0.2.41',45655,'tcp','{}','',1,1,1,'running',21001)`,
+		`INSERT INTO subscription_plans (id,name,enabled,total_bytes,cycle_type,cycle_day,selection_mode,include_internal_nodes,include_external_nodes) VALUES ('traffic-plan','Traffic plan',1,100,'monthly',1,'explicit',1,0)`,
+		`INSERT INTO subscription_subscriptions (id,profile_id,plan_id,name,public_token,vless_uuid,hysteria2_password,enabled,created_at) VALUES ('traffic-sub','traffic-sub','traffic-plan','Traffic subscription','public-token','11111111-1111-4111-8111-111111111111','traffic-password',1,'2026-01-01 00:00:00')`,
+		`INSERT INTO subscription_plan_nodes (plan_id,node_id,source) VALUES ('traffic-plan','traffic-node','internal')`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("fixture %q: %v", statement, err)
+		}
+	}
+	key, err := service.getOrGenerateAgentKeyForServer(ctx, db, "traffic-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	post := func(serverID, body string) (int, map[string]interface{}) {
+		req := httptest.NewRequest(http.MethodPost, "/api/server/agent/proxy/"+serverID+"/traffic", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+key)
+		req.Header.Set("Content-Type", "application/json")
+		res := httptest.NewRecorder()
+		service.ServeHTTP(res, req)
+		return res.Code, decodePayload(t, res)
+	}
+	status, payload := post("traffic-host", `{"boot_id":"boot-batch","sequence":1,"reports":[{"node_id":"traffic-node","credential_id":"traffic-sub","upload_bytes":80,"download_bytes":50}]}`)
+	if status != http.StatusOK || payload["data"].(map[string]interface{})["accepted"] != float64(1) {
+		t.Fatalf("accepted batch status=%d payload=%#v", status, payload)
+	}
+	usage, err := subscriptionledger.Current(ctx, db, "traffic-sub", "monthly", 1, "2026-01-01 00:00:00", time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC))
+	if err != nil || usage.UploadBytes != 80 || usage.DownloadBytes != 20 {
+		t.Fatalf("clamped usage=%#v err=%v", usage, err)
+	}
+	status, payload = post("traffic-host", `{"boot_id":"boot-batch","sequence":1,"reports":[{"node_id":"traffic-node","credential_id":"11111111-1111-4111-8111-111111111111","upload_bytes":1,"download_bytes":1}]}`)
+	data := payload["data"].(map[string]interface{})
+	if status != http.StatusOK || data["duplicates"] != float64(1) {
+		t.Fatalf("canonical duplicate status=%d payload=%#v", status, payload)
+	}
+	status, payload = post("traffic-host", `{"boot_id":"boot-batch","sequence":2,"reports":[{"node_id":"traffic-node","credential_id":"traffic-password","upload_bytes":1,"download_bytes":1}]}`)
+	data = payload["data"].(map[string]interface{})
+	if status != http.StatusOK || data["ignored"] != float64(1) {
+		t.Fatalf("exhausted report status=%d payload=%#v", status, payload)
+	}
+	status, payload = post("traffic-host", `{"boot_id":"boot-stale","sequence":1,"reports":[{"node_id":"removed-node","credential_id":"traffic-sub","upload_bytes":1,"download_bytes":1}]}`)
+	data = payload["data"].(map[string]interface{})
+	if status != http.StatusOK || data["ignored"] != float64(1) {
+		t.Fatalf("stale report status=%d payload=%#v", status, payload)
+	}
+	status, _ = post("other-host", `{"boot_id":"boot-cross","sequence":1,"reports":[{"node_id":"traffic-node","credential_id":"traffic-sub","upload_bytes":1,"download_bytes":1}]}`)
+	if status != http.StatusUnauthorized {
+		t.Fatalf("cross-server credential status=%d, want unauthorized", status)
+	}
+	otherKey, err := service.getOrGenerateAgentKeyForServer(ctx, db, "other-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/server/agent/proxy/other-host/traffic", strings.NewReader(`{"boot_id":"boot-cross","sequence":1,"reports":[{"node_id":"traffic-node","credential_id":"traffic-sub","upload_bytes":1,"download_bytes":1}]}`))
+	req.Header.Set("Authorization", "Bearer "+otherKey)
+	res := httptest.NewRecorder()
+	service.ServeHTTP(res, req)
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "does not belong") {
+		t.Fatalf("cross-server node status=%d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestManagedProxyBindingUsesHighPortsAndProtocolTransport(t *testing.T) {
+	tests := []struct {
+		name      string
+		config    string
+		wantPort  int
+		transport string
+	}{
+		{"vless default allocation", `{"inbounds":[{"port":443,"protocol":"vless"}]}`, 0, "tcp"},
+		{"vless retained high port", `{"inbounds":[{"port":50001,"protocol":"vless"}]}`, 50001, "tcp"},
+		{"hysteria2 udp", `{"inbounds":[{"listen_port":443,"type":"hysteria2"}]}`, 0, "udp"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			port, transport, err := managedProxyBinding(test.config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if port != test.wantPort || transport != test.transport {
+				t.Fatalf("binding=(%d,%s), want=(%d,%s)", port, transport, test.wantPort, test.transport)
+			}
+		})
+	}
+}
+
+func TestManagedProxyBindingRejectsMultipleInbounds(t *testing.T) {
+	if _, _, err := managedProxyBinding(`{"inbounds":[{},{}]}`); err == nil {
+		t.Fatal("multiple inbounds should be rejected because one managed node owns one port")
+	}
+}
+
+func TestManagedProxyNodesRouteIsNotCapturedAsLegacyServerID(t *testing.T) {
+	service, _ := testService(t)
+	res := perform(service, http.MethodGet, "/api/server/agent/proxy/nodes", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("managed node list route status=%d body=%s", res.Code, res.Body.String())
+	}
+	payload := decodePayload(t, res)
+	if _, ok := payload["data"].([]interface{}); !ok {
+		t.Fatalf("managed node list should return an array: %#v", payload)
+	}
+}
+
+func TestManagedProxyNodeListIncludesHostNetworkQuality(t *testing.T) {
+	service, db := testService(t)
+	ctx := context.Background()
+	statements := []string{
+		`INSERT INTO server_accounts (id,name,host,username,auth_type) VALUES ('quality-host','东京','192.0.2.90','agent','password')`,
+		`INSERT INTO managed_proxy_nodes (id,server_id,name,protocol,runtime,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted,enabled,publishable,apply_status) VALUES ('quality-node','quality-host','东京节点','vless-reality','sing-box','192.0.2.90',45654,'tcp','{}','',1,1,'running')`,
+		`INSERT INTO server_network_quality_samples (server_id,target_name,target_host,success,latency_ms,checked_at) VALUES ('quality-host','联通','cu.example',1,80,datetime('now','-5 minutes'))`,
+		`INSERT INTO server_network_quality_samples (server_id,target_name,target_host,success,latency_ms,checked_at) VALUES ('quality-host','联通','cu.example',1,120,datetime('now','-10 minutes'))`,
+	}
+	for _, statement := range statements {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	res := perform(service, http.MethodGet, "/api/server/agent/proxy/nodes", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("managed node list status=%d body=%s", res.Code, res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), `"quality"`) || !strings.Contains(res.Body.String(), `"avg_latency_ms":100`) {
+		t.Fatalf("managed node list should include aggregated host quality: %s", res.Body.String())
+	}
+}
+
+func TestGeneratedRealityNodeHasMihomoCompatibleFields(t *testing.T) {
+	config, raw, transport, err := generateManagedNode("mnode-test", "Tokyo", "vless-reality", "edge.example.com", "www.cloudflare.com", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transport != "tcp" {
+		t.Fatalf("transport=%s", transport)
+	}
+	var root map[string]interface{}
+	if err := json.Unmarshal([]byte(config), &root); err != nil {
+		t.Fatal(err)
+	}
+	inbound := root["inbounds"].([]interface{})[0].(map[string]interface{})
+	reality := inbound["tls"].(map[string]interface{})["reality"].(map[string]interface{})
+	shortIDs := reality["short_id"].([]interface{})
+	if len(shortIDs) != 1 || len(shortIDs[0].(string)) != 8 {
+		t.Fatalf("invalid short IDs: %#v", shortIDs)
+	}
+	if !strings.Contains(raw, "security=reality") || !strings.Contains(raw, "flow=xtls-rprx-vision") || !strings.Contains(raw, "pbk=") || !strings.Contains(raw, "sid=") {
+		t.Fatalf("invalid client URI: %s", raw)
+	}
+}
+
+func TestFailedManagedProxyNodeCanBeDeletedWithoutAgentCleanup(t *testing.T) {
+	service, db := testService(t)
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id,name,host,username,auth_type) VALUES ('failed-proxy-host','Debian 11','192.0.2.10','agent','password')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO managed_proxy_nodes (id,server_id,name,protocol,runtime,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted,revision,enabled,publishable,apply_status,last_error) VALUES ('failed-node','failed-proxy-host','JP VLESS','vless-reality','sing-box','192.0.2.10',0,'tcp','{}','vless://example',1,1,0,'failed','unsupported managed proxy host: debian 11')`); err != nil {
+		t.Fatal(err)
+	}
+
+	res := perform(service, http.MethodDelete, "/api/server/agent/proxy/nodes/failed-node", "")
+	if res.Code != http.StatusAccepted {
+		t.Fatalf("delete failed node status=%d body=%s", res.Code, res.Body.String())
+	}
+	var count int
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM managed_proxy_nodes WHERE id='failed-node'`).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count == 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if count != 0 {
+		t.Fatalf("failed node was not deleted, count=%d", count)
+	}
+}
+
+func TestManagedProxyNodeListResolvesPreferredAddressWithoutNestedQueryDeadlock(t *testing.T) {
+	service, db := testService(t)
+	ctx := context.Background()
+	encrypted, err := secure.SecureEncrypt("vless://user@origin.example:45654?security=tls#edge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []struct {
+		query string
+		args  []interface{}
+	}{
+		{`INSERT INTO server_accounts (id,name,host,username,auth_type) VALUES ('preferred-host','edge','192.0.2.80','agent','password')`, nil},
+		{`INSERT INTO managed_proxy_preferences (id,name,address,port,enabled,is_default) VALUES ('preferred-one','优选','saas.sin.fan',443,1,1)`, nil},
+		{`INSERT INTO managed_proxy_nodes (id,server_id,name,protocol,runtime,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted,enabled,publishable,apply_status,access_mode) VALUES ('preferred-node','preferred-host','edge','vless-reality','sing-box','origin.example',45654,'tcp','{}',?,1,1,'running','cloudflare_tunnel')`, []interface{}{encrypted}},
+	} {
+		if _, err := db.ExecContext(ctx, statement.query, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result := make(chan *httptest.ResponseRecorder, 1)
+	go func() { result <- perform(service, http.MethodGet, "/api/server/agent/proxy/nodes", "") }()
+	select {
+	case response := <-result:
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "saas.sin.fan:443") {
+			t.Fatalf("node list status=%d body=%s", response.Code, response.Body.String())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("managed node list deadlocked while resolving preferred address")
+	}
+}
+
+func TestManagedProxyReconcileDoesNotAdvanceRevisionWhileAgentOffline(t *testing.T) {
+	service, db := testService(t)
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id,name,host,username,auth_type,status) VALUES ('proxy-reconcile-host','edge','192.0.2.11','agent','password','online')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO managed_proxy_nodes (id,server_id,name,protocol,runtime,public_host,assigned_port,transport,config_encrypted,client_uri_encrypted,revision,enabled,publishable,apply_status) VALUES ('reconcile-node','proxy-reconcile-host','edge VLESS','vless-reality','sing-box','192.0.2.11',45654,'tcp','{"inbounds":[{"type":"vless","listen_port":45654}]}','vless://example@192.0.2.11:45654#edge',1,1,1,'running')`); err != nil {
+		t.Fatal(err)
+	}
+
+	res := perform(service, http.MethodPost, "/api/server/agent/proxy/nodes/reconcile-node/reconcile", "")
+	if res.Code != http.StatusBadGateway {
+		t.Fatalf("offline reconcile status=%d body=%s", res.Code, res.Body.String())
+	}
+	var revision int
+	if err := db.QueryRowContext(context.Background(), `SELECT revision FROM managed_proxy_nodes WHERE id='reconcile-node'`).Scan(&revision); err != nil {
+		t.Fatal(err)
+	}
+	if revision != 1 {
+		t.Fatalf("stored revision=%d, want 1", revision)
 	}
 }
 
@@ -1288,6 +2529,12 @@ func TestAgentQuickInstallCreatesHostFromName(t *testing.T) {
 	if !strings.Contains(resLinux.Body.String(), `SERVER_URL="http://189.1.217.109:3010"`) {
 		t.Fatalf("linux install script should use http server url: %s", resLinux.Body.String())
 	}
+	if !strings.Contains(resLinux.Body.String(), `TARGET_HOST_NAME="edge-agent"`) || !strings.Contains(resLinux.Body.String(), `cat >/dev/null || true`) {
+		t.Fatalf("linux installer should preserve the host label and drain its curl pipe after detached upgrade: %s", resLinux.Body.String())
+	}
+	if strings.Contains(resLinux.Body.String(), "Debian 12+ is required") || strings.Contains(resLinux.Body.String(), "unsupported managed host distribution") {
+		t.Fatalf("agent installer must not impose distribution-version policy: %s", resLinux.Body.String())
+	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/server/agent/install/win/"+serverID+"/"+agentKey+"?protocol=http", nil)
 	req.Host = "189.1.217.109:3010"
@@ -1302,14 +2549,46 @@ func TestAgentQuickInstallCreatesHostFromName(t *testing.T) {
 	if !strings.Contains(resWin.Body.String(), `$AGENT_PATH = "$INSTALL_DIR\api-monitor-agent.exe"`) {
 		t.Fatalf("windows install script should use a valid agent path: %s", resWin.Body.String())
 	}
-	if !strings.Contains(resWin.Body.String(), `$TEMP_AGENT_PATH = "$INSTALL_DIR\api-monitor-agent.exe.download"`) {
+	if !strings.Contains(resWin.Body.String(), `$TEMP_AGENT_PATH = "$INSTALL_DIR\api-monitor-agent.download.exe"`) {
 		t.Fatalf("windows install script should use a temp download path: %s", resWin.Body.String())
+	}
+	if !strings.Contains(resWin.Body.String(), `$CONFIG_PATH = "$INSTALL_DIR\config.json"`) ||
+		!strings.Contains(resWin.Body.String(), `Remove-Item -Path $CONFIG_PATH -Force`) ||
+		!strings.Contains(resWin.Body.String(), `"serverUrl": "$SERVER_URL"`) ||
+		!strings.Contains(resWin.Body.String(), `"serverId": "$SERVER_ID"`) {
+		t.Fatalf("windows install script should replace stale agent config: %s", resWin.Body.String())
+	}
+	if !strings.Contains(resWin.Body.String(), `API_MONITOR_AGENT_INSTALL_DETACHED`) ||
+		!strings.Contains(resWin.Body.String(), `-EncodedCommand`) ||
+		!strings.Contains(resWin.Body.String(), `installation will continue in the background`) {
+		t.Fatalf("windows install script should detach before replacing a running Agent: %s", resWin.Body.String())
 	}
 	if !strings.Contains(resWin.Body.String(), `Move-Item -Path $TEMP_AGENT_PATH -Destination $AGENT_PATH -Force`) {
 		t.Fatalf("windows install script should atomically replace the agent binary: %s", resWin.Body.String())
 	}
+	if !strings.Contains(resWin.Body.String(), `$DOWNLOADED_VERSION = (& $TEMP_AGENT_PATH --version 2>&1 | Out-String).Trim()`) ||
+		!strings.Contains(resWin.Body.String(), `Agent download completed: $DOWNLOADED_VERSION`) {
+		t.Fatalf("windows install script should validate and report the downloaded agent version: %s", resWin.Body.String())
+	}
 	if strings.ContainsRune(resWin.Body.String(), '\a') {
 		t.Fatalf("windows install script should not contain bell characters: %q", resWin.Body.String())
+	}
+
+	_, err = db.ExecContext(context.Background(), `UPDATE user_settings SET agent_download_url = 'https://cdn.example.com/custom-agent' WHERE id = 1`)
+	if err != nil {
+		t.Fatalf("set custom agent download url: %v", err)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/api/server/agent/install/linux/"+serverID+"/"+agentKey+"?protocol=http", nil)
+	req.Host = "189.1.217.109:3010"
+	resLinux = httptest.NewRecorder()
+	service.ServeHTTP(resLinux, req)
+	if resLinux.Code != http.StatusOK {
+		t.Fatalf("custom linux install status=%d body=%s", resLinux.Code, resLinux.Body.String())
+	}
+	if !strings.Contains(resLinux.Body.String(), `AGENT_DOWNLOAD_BASE_URL="https://cdn.example.com/custom-agent"`) ||
+		!strings.Contains(resLinux.Body.String(), `AGENT_URL="$AGENT_DOWNLOAD_BASE_URL/agent-linux-$AGENT_ARCH"`) ||
+		!strings.Contains(resLinux.Body.String(), "systemd-run") {
+		t.Fatalf("linux install script should use custom download base and detached systemd install: %s", resLinux.Body.String())
 	}
 
 	res = perform(service, http.MethodPost, "/api/server/agent/quick-install", `{"name":"edge-agent"}`)
@@ -1320,6 +2599,43 @@ func TestAgentQuickInstallCreatesHostFromName(t *testing.T) {
 	data = payload["data"].(map[string]interface{})
 	if data["serverId"] != serverID || data["isNew"] != false {
 		t.Fatalf("expected existing host reuse, data=%#v", data)
+	}
+}
+
+func TestAgentUpgradeTaskUsesSelfUpdateDownloadURL(t *testing.T) {
+	service, db := testService(t)
+	_, err := db.ExecContext(context.Background(), `UPDATE user_settings SET agent_download_url = 'https://cdn.example.com/agent' WHERE id = 1`)
+	if err != nil {
+		t.Fatalf("set custom agent download url: %v", err)
+	}
+
+	socket := &terminalCaptureSocket{t: t, service: service}
+	conn := service.registry.Register("upgrade-agent", socket)
+	conn.SetMetadata("platform", "linux")
+	conn.SetMetadata("arch", "arm64")
+
+	downloadURL := service.agentUpgradeDownloadURL(context.Background(), db, conn, agentInstallOrigin{Proto: "https", Host: "panel.example.com"})
+	if downloadURL != "https://cdn.example.com/agent/agent-linux-arm64" {
+		t.Fatalf("downloadURL = %q", downloadURL)
+	}
+	if !service.sendUpgradeTask(conn, downloadURL) {
+		t.Fatal("sendUpgradeTask failed")
+	}
+
+	events := socket.Events()
+	if len(events) != 1 || events[0].Name != "dashboard:task" {
+		t.Fatalf("unexpected events: %#v", events)
+	}
+	if events[0].Data["type"] != float64(5) {
+		t.Fatalf("task type = %#v, want 5", events[0].Data["type"])
+	}
+	var data map[string]string
+	rawData, _ := events[0].Data["data"].(string)
+	if err := json.Unmarshal([]byte(rawData), &data); err != nil {
+		t.Fatalf("decode upgrade task data: %v raw=%q", err, rawData)
+	}
+	if data["download_url"] != downloadURL {
+		t.Fatalf("upgrade task download_url = %#v, want %q", data, downloadURL)
 	}
 }
 
@@ -1373,6 +2689,119 @@ func TestAgentBatchUpgradeUsesServerSideBatchAndVerifiesReconnect(t *testing.T) 
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatalf("batch did not complete in time, last payload=%#v", lastPayload)
+}
+
+func TestAgentBatchUpgradeNeverForcesOnlineWindowsAgentThroughSSH(t *testing.T) {
+	service, _ := testService(t)
+
+	res := perform(service, http.MethodPost, "/api/server/agent/quick-install", `{"name":"windows-agent"}`)
+	if res.Code != http.StatusOK {
+		t.Fatalf("quick install status=%d body=%s", res.Code, res.Body.String())
+	}
+	payload := decodePayload(t, res)
+	serverID := payload["data"].(map[string]interface{})["serverId"].(string)
+
+	socket := &reconnectOnUpgradeSocket{t: t, service: service, serverID: serverID}
+	connection := service.registry.Register(serverID, socket)
+	connection.SetMetadata("platform", "windows")
+	connection.SetMetadata("arch", "amd64")
+
+	res = perform(service, http.MethodPost, "/api/server/agent/batch-upgrade?protocol=http", `{"serverIds":["`+serverID+`"],"force_ssh":true,"fallback_ssh":true,"concurrency":1}`)
+	if res.Code != http.StatusOK {
+		t.Fatalf("batch upgrade status=%d body=%s", res.Code, res.Body.String())
+	}
+	payload = decodePayload(t, res)
+	batchID := payload["data"].(map[string]interface{})["id"].(string)
+
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		res = perform(service, http.MethodGet, "/api/server/agent/batch/"+batchID, "")
+		payload = decodePayload(t, res)
+		data := payload["data"].(map[string]interface{})
+		if data["status"] == string(AgentBatchSucceeded) {
+			items := data["items"].([]interface{})
+			item := items[0].(map[string]interface{})
+			if item["status"] != string(AgentBatchSucceeded) {
+				t.Fatalf("unexpected completed item: %#v", item)
+			}
+			logs, _ := item["log"].([]interface{})
+			for _, rawLine := range logs {
+				line, _ := rawLine.(string)
+				if strings.Contains(line, "SSH") {
+					t.Fatalf("online Windows Agent must not use SSH: %#v", logs)
+				}
+			}
+			return
+		}
+		if data["status"] == string(AgentBatchFailed) {
+			t.Fatalf("Windows Agent upgrade failed: %#v", data)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("Windows Agent batch upgrade did not complete")
+}
+
+func TestAgentBatchUpgradeVerificationTimeoutMarksItemFailed(t *testing.T) {
+	t.Setenv("API_MONITOR_AGENT_UPGRADE_VERIFY_TIMEOUT_MS", "40")
+	t.Setenv("API_MONITOR_AGENT_UPGRADE_ACK_TIMEOUT_MS", "40")
+
+	service, _ := testService(t)
+
+	res := perform(service, http.MethodPost, "/api/server/agent/quick-install", `{"name":"timeout-agent"}`)
+	if res.Code != http.StatusOK {
+		t.Fatalf("quick install status=%d body=%s", res.Code, res.Body.String())
+	}
+	payload := decodePayload(t, res)
+	serverID := payload["data"].(map[string]interface{})["serverId"].(string)
+
+	service.registry.Register(serverID, &taskReplySocket{
+		t:       t,
+		service: service,
+		reply: func(taskType int, data string) string {
+			if taskType != 5 {
+				t.Fatalf("task type = %d, want 5", taskType)
+			}
+			if !strings.Contains(data, "download_url") {
+				t.Fatalf("upgrade task should include download_url, got %s", data)
+			}
+			return "scheduled"
+		},
+	})
+
+	res = perform(service, http.MethodPost, "/api/server/agent/batch-upgrade?protocol=http", `{"serverIds":["`+serverID+`"],"concurrency":1}`)
+	if res.Code != http.StatusOK {
+		t.Fatalf("batch upgrade status=%d body=%s", res.Code, res.Body.String())
+	}
+	payload = decodePayload(t, res)
+	batchID := payload["data"].(map[string]interface{})["id"].(string)
+
+	deadline := time.Now().Add(2 * time.Second)
+	var lastPayload map[string]interface{}
+	for time.Now().Before(deadline) {
+		res = perform(service, http.MethodGet, "/api/server/agent/batch/"+batchID, "")
+		if res.Code != http.StatusOK {
+			t.Fatalf("batch status code=%d body=%s", res.Code, res.Body.String())
+		}
+		payload = decodePayload(t, res)
+		lastPayload = payload
+		data := payload["data"].(map[string]interface{})
+		if data["status"] == string(AgentBatchFailed) {
+			items := data["items"].([]interface{})
+			if len(items) != 1 {
+				t.Fatalf("unexpected items: %#v", items)
+			}
+			item := items[0].(map[string]interface{})
+			if item["status"] != string(AgentBatchFailed) {
+				t.Fatalf("item should fail after verify timeout: %#v", item)
+			}
+			if !strings.Contains(item["error"].(string), "验证超时") {
+				t.Fatalf("item error should mention verify timeout: %#v", item)
+			}
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("batch did not fail in time, last payload=%#v", lastPayload)
 }
 
 func TestSFTPRequiresValidServerConfig(t *testing.T) {

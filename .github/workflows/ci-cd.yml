@@ -94,10 +94,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.2.2
 
-      - name: Setup Go 1.23
+      - name: Setup Go from backend-go/go.mod
         uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v5.2.0
         with:
-          go-version: '1.23'
+          go-version-file: backend-go/go.mod
           cache-dependency-path: backend-go/go.sum
 
       - name: Run Go Tests
@@ -162,6 +162,8 @@ jobs:
       - name: Install musl-tools (Linux amd64)
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: |
+          sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \( -iname '*microsoft*' -o -iname '*azure*' \) -delete
+          sudo sed -i.bak '/packages\.microsoft\.com/d' /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
           sudo apt-get update
           sudo apt-get install -y musl-tools
 
@@ -195,20 +197,30 @@ jobs:
           else
             cp agent-rust/target/${{ matrix.target }}/release/api-monitor-agent dist/${{ matrix.output_name }}
           fi
+          if command -v sha256sum >/dev/null 2>&1; then
+            (cd dist && sha256sum "${{ matrix.output_name }}" | awk '{print $1}' > "${{ matrix.output_name }}.sha256")
+          else
+            (cd dist && shasum -a 256 "${{ matrix.output_name }}" | awk '{print $1}' > "${{ matrix.output_name }}.sha256")
+          fi
           ls -lh dist/
 
       - name: Upload agent artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.0
         with:
           name: ${{ matrix.output_name }}
-          path: dist/${{ matrix.output_name }}
+          path: |
+            dist/${{ matrix.output_name }}
+            dist/${{ matrix.output_name }}.sha256
           retention-days: 1
 
   # ==========================================
   # 阶段 3: 多架构 Docker 镜像分平台构建 (仅 push 触发)
   # ==========================================
   build-docker:
-    needs: [ci-frontend, ci-backend, build-agent]
+    # Dockerfile builds the frontend and Go backend inside the image. The only
+    # upstream artifacts needed here are the prebuilt Agent binaries, so start
+    # image builds as soon as Agent builds complete and keep CI as a publish gate.
+    needs: build-agent
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
@@ -254,24 +266,6 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.6.1
-        with:
-          images: |
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
-            ${{ env.DOCKERHUB_REPO }}
-          tags: |
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/dev' }}
-            type=sha,prefix=
-            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '' }}
-          labels: |
-            org.opencontainers.image.title=API Monitor
-            org.opencontainers.image.description=API聚合监控面板
-            org.opencontainers.image.vendor=iwvw
-            maintainer=iwvw
-
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.13.0
@@ -284,7 +278,13 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:build-${{ github.run_id }}-${{ matrix.suffix }}
             ${{ env.DOCKERHUB_REPO }}:build-${{ github.run_id }}-${{ matrix.suffix }}
-          labels: ${{ steps.meta.outputs.labels }}
+          labels: |
+            org.opencontainers.image.title=API Monitor
+            org.opencontainers.image.description=API聚合监控面板
+            org.opencontainers.image.vendor=iwvw
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            maintainer=iwvw
           cache-from: type=gha,scope=${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
           build-args: |
@@ -307,7 +307,7 @@ jobs:
   # 阶段 4: 合并多架构 manifest 并打上分支对应标签 (latest / dev)
   # ==========================================
   merge-docker:
-    needs: build-docker
+    needs: [ci-frontend, ci-backend, build-docker]
     runs-on: ubuntu-latest
     steps:
       - name: Download digests
@@ -334,18 +334,38 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract metadata
+      - name: Generate image tags
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.6.1
-        with:
-          images: |
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
-            ${{ env.DOCKERHUB_REPO }}
-          tags: |
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/dev' }}
-            type=sha,prefix=
-            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag != '' }}
+        shell: bash
+        env:
+          CUSTOM_TAG: ${{ github.event.inputs.tag }}
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: |
+          IMAGES=(
+            "$REGISTRY/$REPO_OWNER/$IMAGE_NAME"
+            "$DOCKERHUB_REPO"
+          )
+          TAG_NAMES=("${GITHUB_SHA::7}")
+
+          if [ "$GITHUB_REF" = "refs/heads/main" ]; then
+            TAG_NAMES+=("latest")
+          elif [ "$GITHUB_REF" = "refs/heads/dev" ]; then
+            TAG_NAMES+=("dev")
+          fi
+
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ -n "$CUSTOM_TAG" ]; then
+            TAG_NAMES+=("$CUSTOM_TAG")
+          fi
+
+          {
+            echo "tags<<EOF"
+            for image in "${IMAGES[@]}"; do
+              for tag in "${TAG_NAMES[@]}"; do
+                echo "$image:$tag"
+              done
+            done
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create and push manifest
         env:
@@ -423,10 +443,28 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
+      - name: Select image tag to scan
+        id: scan-tag
+        shell: bash
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.ref }}" = "refs/heads/dev" ]; then
+            echo "tag=dev" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ github.event.inputs.tag }}" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest
+          scan-type: "image"
+          image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.scan-tag.outputs.tag }}
+          severity: "HIGH,CRITICAL"
+          ignore-unfixed: true
+          limit-severities-for-sarif: true
           format: "sarif"
           output: "trivy-results.sarif"
 

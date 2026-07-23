@@ -19,10 +19,10 @@ import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
-import { ChartPalette, Tabs, TimeseriesChart } from '@cloudflare/kumo';
+import { ChartPalette, ClipboardText, Tabs, TimeseriesChart } from '@cloudflare/kumo';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { AnimatedCollapse, DeferredRender } from '../components/AnimatedCollapse.jsx';
-import { AppCard, ChartCard, ChartWarmupSkeleton, DataTableFrame } from '../components/ui/AppPrimitives.jsx';
+import { AppCard, ChartCard, ChartWarmupSkeleton, DataTableFrame, EmptyState, SectionCard, StatusBadge } from '../components/ui/AppPrimitives.jsx';
 import useStore from '../store.js';
 import {
   Activity,
@@ -129,6 +129,66 @@ const normalizeUptimeBeat = (beat = {}) => {
 };
 
 const getUptimeChartColor = (isDarkMode) => ChartPalette.semantic('Success', isDarkMode);
+
+const getUptimeImportActionMeta = (action) => (
+  action === 'update'
+    ? { tone: 'warning', label: '更新' }
+    : { tone: 'success', label: '创建' }
+);
+
+const buildUptimeImportSections = (preview) => {
+  if (!preview) return [];
+
+  const sections = [
+    {
+      key: 'monitors',
+      title: '监测目标',
+      description: '按名称、类型和地址匹配已有目标。',
+      emptyLabel: '本次配置不包含监测目标。',
+      items: (preview.monitors || []).map((item, index) => ({
+        id: `monitor-${index}-${item.name || 'unnamed'}`,
+        label: item.name || '未命名监测',
+        detail: item.type ? `类型: ${String(item.type).toUpperCase()}` : '监测配置',
+        action: item.action,
+      })),
+    },
+    {
+      key: 'statusPages',
+      title: '状态页',
+      description: '按 slug 匹配已有状态页。',
+      emptyLabel: '本次配置不包含状态页。',
+      items: (preview.statusPages || []).map((item, index) => ({
+        id: `status-page-${index}-${item.slug || item.title || 'untitled'}`,
+        label: item.title || item.slug || '未命名状态页',
+        detail: item.slug ? `Slug: ${item.slug}` : '状态页配置',
+        action: item.action,
+      })),
+    },
+    {
+      key: 'maintenanceWindows',
+      title: '维护窗口',
+      description: '按标题匹配已有维护窗口。',
+      emptyLabel: '本次配置不包含维护窗口。',
+      items: (preview.maintenanceWindows || []).map((item, index) => ({
+        id: `maintenance-${index}-${item.title || 'untitled'}`,
+        label: item.title || '未命名维护窗口',
+        detail: '维护通知与时间窗口配置',
+        action: item.action,
+      })),
+    },
+  ];
+
+  return sections.map((section) => {
+    const creates = section.items.filter((item) => item.action !== 'update').length;
+    const updates = section.items.length - creates;
+    return {
+      ...section,
+      total: section.items.length,
+      creates,
+      updates,
+    };
+  });
+};
 
 function UptimeResponseChart({ points = [], loading = false }) {
   const chartRef = useRef(null);
@@ -242,9 +302,12 @@ function SslCertificatePanel({ monitorId }) {
 
   return (
     <div className="rounded-lg border border-kumo-line bg-kumo-base overflow-hidden">
-      <button
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
         onClick={loadSslInfo}
-        className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-kumo-recessed/50 transition-colors"
+        className="h-auto w-full justify-between rounded-none px-3 py-2 text-left"
       >
         <span className="text-[11px] font-bold text-kumo-strong uppercase tracking-wider flex items-center gap-1.5 select-none">
           <Shield className="w-3.5 h-3.5" />
@@ -253,7 +316,7 @@ function SslCertificatePanel({ monitorId }) {
         <span className="text-[10px] text-kumo-subtle">
           {sslLoading ? '加载中...' : sslExpanded ? '收起' : '展开'}
         </span>
-      </button>
+      </Button>
       <AnimatedCollapse open={sslExpanded}>
         <div className="px-3 pb-3 space-y-2">
           {sslData && !sslData.ssl && (
@@ -341,25 +404,8 @@ function UptimeMonitorDetails({
   onPauseResume,
   onEdit,
   onDelete,
-  formatDateTime,
   expanded = true,
 }) {
-  // 处理心跳时间范围标签
-  const getHeartbeatTimeLabel = () => {
-    if (heartbeats.length === 0) return '--';
-    const count = heartbeats.length > 60 ? 60 : heartbeats.length;
-    const oldestBeat = heartbeats[count - 1];
-    if (!oldestBeat || !oldestBeat.time) return '--';
-
-    const diffMs = Date.now() - new Date(oldestBeat.time).getTime();
-    const seconds = Math.floor(diffMs / 1000);
-
-    if (seconds < 60) return `${seconds}秒`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}分钟`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}小时`;
-    return `${Math.floor(seconds / 86400)}天`;
-  };
-
   const chartData = useMemo(() => {
     return [{
       name: '响应时间',
@@ -372,22 +418,8 @@ function UptimeMonitorDetails({
     }];
   }, [heartbeats, isDarkMode]);
 
-  // 生成 60 颗心跳丸
-  const detailedBeats = useMemo(() => {
-    const result = [];
-    for (let i = 0; i < 60; i++) {
-      const beat = heartbeats[i];
-      if (beat) {
-        result.unshift(beat);
-      } else {
-        result.unshift({ status: 'empty', time: null, ping: null });
-      }
-    }
-    return result;
-  }, [heartbeats]);
-
   return (
-    <div className="space-y-3 border-t border-kumo-line bg-kumo-recessed/25 p-3">
+    <div className="space-y-3 border-t border-kumo-interact/80 bg-kumo-recessed/40 p-3">
       {/* 头部操作栏 */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h5 className="flex items-center gap-1.5 text-xs font-semibold text-kumo-strong">
@@ -428,7 +460,7 @@ function UptimeMonitorDetails({
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_15rem]">
         {/* 图表主栏 (Span 3) */}
-        <ChartCard className="relative h-36">
+        <ChartCard className="relative h-36 !border-kumo-interact/90 !bg-kumo-base">
           {(tooltipBoundary) => (
             <DeferredRender open={expanded} fallback={<ChartWarmupSkeleton height={120} />}>
               <TimeseriesChart
@@ -454,13 +486,13 @@ function UptimeMonitorDetails({
 
         {/* 右侧可用率统计指标 */}
         <div className="grid grid-cols-2 gap-2 lg:grid-cols-1">
-          <div className="rounded-md border border-kumo-line bg-kumo-base p-2">
+          <div className="rounded-md border border-kumo-interact/85 bg-kumo-base p-2">
             <span className="text-[10px] text-kumo-subtle select-none">24小时可用率</span>
-            <span className="mt-1 block font-mono text-base font-semibold text-kumo-strong">{uptime24h}%</span>
+            <span className="mt-1 block text-base font-semibold tabular-nums text-kumo-strong">{uptime24h}%</span>
           </div>
-          <div className="rounded-md border border-kumo-line bg-kumo-base p-2">
+          <div className="rounded-md border border-kumo-interact/85 bg-kumo-base p-2">
             <span className="text-[10px] text-kumo-subtle select-none">30天可用率</span>
-            <span className="mt-1 block font-mono text-base font-semibold text-kumo-strong">{uptime30d}%</span>
+            <span className="mt-1 block text-base font-semibold tabular-nums text-kumo-strong">{uptime30d}%</span>
           </div>
         </div>
       </div>
@@ -470,34 +502,6 @@ function UptimeMonitorDetails({
         <SslCertificatePanel monitorId={monitor.id} />
       )}
 
-      {/* 心跳可视化图表 (60 pills) */}
-      <div>
-        <div className="flex gap-[3px] h-4 items-center">
-          {detailedBeats.map((beat, idx) => {
-            let colorClass = 'bg-kumo-line opacity-20';
-            if (beat.status === 'up') colorClass = 'bg-kumo-success';
-            if (beat.status === 'down') colorClass = 'bg-kumo-danger';
-            if (beat.status === 'pending') colorClass = 'bg-kumo-warning';
-
-            let tooltipText = '';
-            if (beat.status !== 'empty') {
-              tooltipText = `${formatDateTime(beat.time)} - ${beat.status === 'up' ? `正常 (${beat.ping}ms)` : `故障 (${beat.msg || 'Timeout'})`}`;
-            }
-
-            return (
-              <div
-                key={idx}
-                className={`flex-1 h-3.5 rounded-sm transition-all ${colorClass}`}
-                title={tooltipText}
-              />
-            );
-          })}
-        </div>
-        <div className="flex justify-between text-[9px] text-kumo-subtle mt-1.5 font-mono select-none">
-          <span>{getHeartbeatTimeLabel()}前</span>
-          <span>现在</span>
-        </div>
-      </div>
     </div>
   );
 }
@@ -530,6 +534,24 @@ function UptimePage() {
 
   // 通知渠道配置
   const [notificationChannels, setNotificationChannels] = useState([]);
+
+  const uptimeImportSections = useMemo(
+    () => buildUptimeImportSections(uptimeImportPreview),
+    [uptimeImportPreview]
+  );
+
+  const uptimeImportSummary = useMemo(() => {
+    const totals = uptimeImportSections.reduce((acc, section) => ({
+      total: acc.total + section.total,
+      creates: acc.creates + section.creates,
+      updates: acc.updates + section.updates,
+    }), { total: 0, creates: 0, updates: 0 });
+
+    return {
+      ...totals,
+      nonEmptySections: uptimeImportSections.filter((section) => section.total > 0),
+    };
+  }, [uptimeImportSections]);
 
   // 表单状态
   const [uptimeForm, setUptimeForm] = useState({
@@ -1054,6 +1076,11 @@ function UptimePage() {
     return 'text-kumo-danger';
   };
 
+  const formatUptimeRateCompact = (rateStr) => {
+    const rate = Number(rateStr);
+    return Number.isFinite(rate) ? String(Math.round(rate)) : '--';
+  };
+
   // 格式化连接地址
   const getDisplayUrl = (monitor) => {
     if (monitor.type === 'http' || monitor.type === 'keyword' || monitor.type === 'json') {
@@ -1343,7 +1370,7 @@ function UptimePage() {
             { value: 'add', label: <span className="inline-flex items-center gap-1.5"><Plus className="w-3.5 h-3.5" />添加监测</span> },
             { value: 'status-pages', label: <span className="inline-flex items-center gap-1.5"><Globe className="w-3.5 h-3.5" />状态页</span> },
             { value: 'maintenance', label: <span className="inline-flex items-center gap-1.5"><Shield className="w-3.5 h-3.5" />维护窗口</span> },
-            { value: 'stats', label: <span className="inline-flex items-center gap-1.5"><TrendingUp className="w-3.5 h-3.5" />统计报表</span> },
+            { value: 'stats', label: <span className="inline-flex items-center gap-1.5"><Upload className="w-3.5 h-3.5" />配置迁移</span> },
           ]}
         />
 
@@ -1452,7 +1479,7 @@ function UptimePage() {
             <div className="space-y-3">
               {/* 批量控制条 */}
               {showMonitorSelectionControls && (
-                <div className="flex items-center justify-between app-subcard bg-kumo-recessed/30 px-4 py-2.5">
+                <AppCard padding="none" className="flex items-center justify-between bg-kumo-recessed/30 px-4 py-2.5">
                   <Checkbox
                     checked={isAllSelected}
                     onCheckedChange={handleToggleSelectAll}
@@ -1467,7 +1494,7 @@ function UptimePage() {
                       批量删除
                     </Button>
                   )}
-                </div>
+                </AppCard>
               )}
 
               {/* 监测卡片列表 */}
@@ -1478,25 +1505,25 @@ function UptimePage() {
                   const isExpanded = expandedMonitorId === monitor.id;
 
                   // 状态指示
-                  let statusClass = 'border-kumo-line';
+                  let statusClass = 'border-kumo-interact/75';
                   let statusPillClass = 'bg-kumo-line/20 text-kumo-subtle';
                   let statusText = '暂停/未激活';
 
                   if (monitor.active) {
                     if (!lastBeat) {
-                      statusClass = 'border-kumo-line';
+                      statusClass = 'border-kumo-interact/75';
                       statusPillClass = 'bg-kumo-line/20 text-kumo-subtle';
                       statusText = '等待中';
                     } else if (lastBeat.status === 'up') {
-                      statusClass = 'border-kumo-line';
+                      statusClass = 'border-kumo-interact/75';
                       statusPillClass = 'bg-kumo-success/10 text-kumo-success border border-kumo-success/20';
                       statusText = '正常';
                     } else if (lastBeat.status === 'down') {
-                      statusClass = 'border-kumo-line';
+                      statusClass = 'border-kumo-interact/75';
                       statusPillClass = 'bg-kumo-danger/10 text-kumo-danger border border-kumo-danger/20';
                       statusText = '故障';
                     } else if (lastBeat.status === 'pending') {
-                      statusClass = 'border-kumo-line';
+                      statusClass = 'border-kumo-interact/75';
                       statusPillClass = 'bg-kumo-warning/10 text-kumo-warning border border-kumo-warning/20';
                       statusText = '检测中';
                     }
@@ -1516,12 +1543,12 @@ function UptimePage() {
                   return (
                     <div
                       key={monitor.id}
-                      className={`bg-kumo-base border rounded-lg overflow-hidden    ${statusClass}`}
+                      className={`overflow-hidden rounded-lg border bg-kumo-base ${statusClass}`}
                     >
                       {/* 卡片头部行 */}
                       <div
                         onClick={() => setExpandedMonitorId(isExpanded ? null : monitor.id)}
-                        className="flex flex-col md:flex-row items-start md:items-center justify-between p-2 gap-4 cursor-pointer"
+                        className="flex flex-col md:flex-row items-start md:items-center justify-between p-2 gap-4 cursor-pointer transition-colors hover:bg-kumo-recessed/25"
                       >
                         {/* 左侧选择复选框 & 图标 & 核心信息 */}
                         <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -1539,7 +1566,7 @@ function UptimePage() {
                           )}
 
                           {/* 类型图标 */}
-                          <div className="w-8 h-8 rounded-lg bg-kumo-recessed flex items-center justify-center text-kumo-strong flex-shrink-0">
+                          <div className="w-8 h-8 rounded-lg border border-kumo-line/70 bg-kumo-recessed flex items-center justify-center text-kumo-strong flex-shrink-0">
                             {getUptimeTypeIcon(monitor.type)}
                           </div>
 
@@ -1553,9 +1580,9 @@ function UptimePage() {
                               </span>
                               {/* 标签 */}
                               {monitor.tags && monitor.tags.map(t => (
-                                <span key={t} className="text-[9px] app-subcard bg-kumo-recessed text-kumo-subtle px-1.5 py-0.5 rounded font-medium">
+                                <StatusBadge key={t} tone="neutral" className="text-[9px] font-medium">
                                   {t}
-                                </span>
+                                </StatusBadge>
                               ))}
                               {/* SSL 证书到期徽章 */}
                               {monitor.sslExpiry && (() => {
@@ -1585,27 +1612,27 @@ function UptimePage() {
                           <div className="flex items-center gap-3 text-right">
                             <div className="flex flex-col">
                               <span className="text-[9px] text-kumo-subtle select-none">时延</span>
-                              <span className="text-xs font-bold text-kumo-strong font-mono">
+                              <span className="text-xs font-bold tabular-nums text-kumo-strong">
                                 {lastBeat && lastBeat.status === 'up' ? `${lastBeat.ping}ms` : '--'}
                               </span>
                             </div>
                             <div className="flex flex-col">
                               <span className="text-[9px] text-kumo-subtle select-none">可用率</span>
-                              <span className={`text-xs font-bold font-mono ${getUptimeRateClass(getUptimeRate(monitor.id, 1))}`}>
-                                {getUptimeRate(monitor.id, 1)}%
+                              <span className={`text-xs font-bold tabular-nums ${getUptimeRateClass(getUptimeRate(monitor.id, 1))}`}>
+                                {formatUptimeRateCompact(getUptimeRate(monitor.id, 1))}%
                               </span>
                             </div>
                           </div>
 
                           {/* 30 心跳丸小条 */}
-                          <div className="flex gap-[2px] items-center h-3.5 select-none flex-shrink-0">
+                          <div className="grid h-4 shrink-0 grid-cols-[repeat(30,4px)] items-center gap-[4px] select-none">
                             {miniBeats.map((beat, idx) => {
                               let colorClass = 'bg-kumo-line opacity-20';
                               if (beat.status === 'up') colorClass = 'bg-kumo-success';
                               if (beat.status === 'down') colorClass = 'bg-kumo-danger';
                               if (beat.status === 'pending') colorClass = 'bg-kumo-warning';
                               return (
-                                <div key={idx} className={`w-[4px] h-3.5 rounded-sm ${colorClass} flex-shrink-0`} />
+                                <div key={idx} className={`h-[14px] w-[4px] rounded-full ${colorClass}`} />
                               );
                             })}
                           </div>
@@ -1618,13 +1645,12 @@ function UptimePage() {
                           monitor={monitor}
                           heartbeats={beats}
                           loading={!!uptimeHeartbeatLoading[monitor.id]}
-                          uptime24h={getUptimeRate(monitor.id, 1)}
-                          uptime30d={getUptimeRate(monitor.id, 30)}
+                          uptime24h={formatUptimeRateCompact(getUptimeRate(monitor.id, 1))}
+                          uptime30d={formatUptimeRateCompact(getUptimeRate(monitor.id, 30))}
                           isDarkMode={isDarkMode}
                           onPauseResume={handleToggleActive}
                           onEdit={handleOpenEdit}
                           onDelete={handleDeleteMonitor}
-                          formatDateTime={formatDateTime}
                           expanded={isExpanded}
                         />
                       </AnimatedCollapse>
@@ -1638,22 +1664,17 @@ function UptimePage() {
       )}
 
       {uptimeCurrentTab === 'status-pages' && (
-        <div className="grid gap-4 xl:grid-cols-[minmax(24rem,0.9fr)_minmax(0,1.1fr)]">
-          <AppCard padding="lg" className="space-y-4">
-            <div className="flex items-start justify-between gap-3 border-b border-kumo-line pb-4">
-              <div className="min-w-0">
-                <h3 className="flex items-center gap-2 text-sm font-semibold text-kumo-strong">
-                  <Globe className="h-4 w-4" />
-                  {statusPageForm.id ? '编辑状态页' : '新建状态页'}
-                </h3>
-                <p className="mt-1 text-xs leading-relaxed text-kumo-subtle">
-                  生成可公开访问的单页状态看板，可绑定独立域名或使用 /status/slug。
-                </p>
-              </div>
-              {statusPageForm.id && (
-                <Button size="sm" variant="secondary" shape="square" icon={<X className="h-3.5 w-3.5" />} onClick={resetStatusPageForm} aria-label="取消编辑" />
-              )}
-            </div>
+        <div className="grid items-start gap-4 xl:grid-cols-[minmax(24rem,0.9fr)_minmax(0,1.1fr)]">
+          <SectionCard
+            title={statusPageForm.id ? '编辑状态页' : '新建状态页'}
+            description="生成可公开访问的单页状态看板，可绑定独立域名或使用 /status/slug。"
+            icon={<Globe className="h-4 w-4 text-kumo-brand" />}
+            action={statusPageForm.id ? (
+              <Button size="sm" variant="secondary" shape="square" icon={<X className="h-3.5 w-3.5" />} onClick={resetStatusPageForm} aria-label="取消编辑" />
+            ) : null}
+            bodyPadding="lg"
+            bodyClassName="space-y-4"
+          >
 
             <div className="grid gap-3 sm:grid-cols-2">
               <Input
@@ -1781,22 +1802,22 @@ function UptimePage() {
                 {statusPageForm.id ? '保存状态页' : '创建状态页'}
               </Button>
             </div>
-          </AppCard>
+          </SectionCard>
 
-          <AppCard padding="lg" className="space-y-4">
-            <div className="flex flex-col gap-3 border-b border-kumo-line pb-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h3 className="flex items-center gap-2 text-sm font-semibold text-kumo-strong">
-                  <Globe className="h-4 w-4" />
-                  已发布状态页
-                </h3>
-                <p className="mt-1 text-xs text-kumo-subtle">公开单页会显示整体状态、监测项、延迟和 24h 可用率。</p>
-              </div>
-              <div className="flex flex-wrap gap-2">
+          <SectionCard
+            title="已发布状态页"
+            description="公开单页会显示整体状态、监测项、延迟和 24h 可用率。"
+            icon={<Globe className="h-4 w-4 text-kumo-brand" />}
+            className="self-start"
+            actions={(
+              <>
                 <Button size="sm" variant="secondary" icon={<RotateCw className="h-3.5 w-3.5" />} onClick={loadUptimeStatusPages} disabled={uptimeMetaLoading}>刷新</Button>
                 <Button size="sm" variant="secondary" icon={<Plus className="h-3.5 w-3.5" />} onClick={createDefaultStatusPage} disabled={uptimeMetaLoading}>默认页</Button>
-              </div>
-            </div>
+              </>
+            )}
+            bodyPadding="lg"
+            bodyClassName="space-y-4"
+          >
 
             {uptimeMetaLoading && uptimeStatusPages.length === 0 ? (
               <div className="space-y-3">
@@ -1835,16 +1856,10 @@ function UptimePage() {
                         </div>
                       </div>
                       <div className="mt-3 grid gap-2 text-xs">
-                        <button type="button" onClick={() => copyStatusUrl(statusUrl)} className="truncate rounded border border-kumo-line bg-kumo-recessed px-2 py-1 text-left font-mono text-kumo-subtle hover:text-kumo-brand">
-                          {statusUrl}
-                        </button>
-                        <button type="button" onClick={() => copyStatusUrl(compactUrl, '/u 地址')} className="truncate rounded border border-kumo-line bg-kumo-recessed px-2 py-1 text-left font-mono text-kumo-subtle hover:text-kumo-brand">
-                          {compactUrl}
-                        </button>
+                        <ClipboardText size="sm" text={statusUrl} className="min-w-0 w-full" tooltip={{ text: '复制状态页地址', copiedText: '地址已复制' }} />
+                        <ClipboardText size="sm" text={compactUrl} className="min-w-0 w-full" tooltip={{ text: '复制 /u 地址', copiedText: '地址已复制' }} />
                         {domainUrl && (
-                          <button type="button" onClick={() => copyStatusUrl(domainUrl, '自定义域名')} className="truncate rounded border border-kumo-line bg-kumo-recessed px-2 py-1 text-left font-mono text-kumo-subtle hover:text-kumo-brand">
-                            {domainUrl}
-                          </button>
+                          <ClipboardText size="sm" text={domainUrl} className="min-w-0 w-full" tooltip={{ text: '复制自定义域名', copiedText: '地址已复制' }} />
                         )}
                       </div>
                     </div>
@@ -1852,23 +1867,17 @@ function UptimePage() {
                 })}
               </div>
             )}
-          </AppCard>
+          </SectionCard>
         </div>
       )}
 
       {uptimeCurrentTab === 'maintenance' && (
-        <AppCard padding="lg" className="space-y-4">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-kumo-line pb-4">
-            <div>
-              <h3 className="text-sm font-semibold text-kumo-strong flex items-center gap-2">
-                <Shield className="w-4 h-4" />
-                维护窗口
-              </h3>
-              <p className="text-xs text-kumo-subtle mt-1">
-                维护期内仍记录检测结果，但会抑制对应告警通知。
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
+        <SectionCard
+          title="维护窗口"
+          description="维护期内仍记录检测结果，但会抑制对应告警通知。"
+          icon={<Shield className="h-4 w-4 text-kumo-brand" />}
+          actions={(
+            <>
               <Button
                 size="sm"
                 variant="secondary"
@@ -1887,78 +1896,126 @@ function UptimePage() {
               >
                 创建 1 小时窗口
               </Button>
+            </>
+          )}
+          bodyPadding="lg"
+          bodyClassName="space-y-5"
+        >
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-kumo-subtle">
+            <span>已选 <span className="font-semibold text-kumo-strong">{selectedMonitorIds.length}</span> 个监测目标，可直接用于快速维护窗口。</span>
+            <span>当前共 <span className="font-semibold text-kumo-strong">{uptimeMaintenanceWindows.length}</span> 个维护窗口。</span>
+            <span>
+              当前生效{' '}
+              <span className={`font-semibold ${uptimeMaintenanceWindows.filter((item) => {
+                const start = item.startAt ? new Date(item.startAt).getTime() : null;
+                const end = item.endAt ? new Date(item.endAt).getTime() : null;
+                const now = Date.now();
+                return item.active && Number.isFinite(start) && Number.isFinite(end) && start <= now && end >= now;
+              }).length > 0 ? 'text-kumo-warning' : 'text-kumo-strong'}`}>
+                {uptimeMaintenanceWindows.filter((item) => {
+                  const start = item.startAt ? new Date(item.startAt).getTime() : null;
+                  const end = item.endAt ? new Date(item.endAt).getTime() : null;
+                  const now = Date.now();
+                  return item.active && Number.isFinite(start) && Number.isFinite(end) && start <= now && end >= now;
+                }).length}
+              </span>{' '}
+              个。
+            </span>
+          </div>
+
+          {uptimeMetaLoading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 3 }).map((_, index) => <SkeletonLine key={index} className="h-14 w-full" />)}
             </div>
-          </div>
+          ) : uptimeMaintenanceWindows.length === 0 ? (
+            <EmptyState
+              icon={Shield}
+              title="暂无维护窗口"
+              description="创建维护窗口后，命中的监测目标会继续记录结果，但会在指定时间段内抑制告警通知。"
+              action={(
+                <Button size="sm" variant="primary" icon={<Plus className="w-3.5 h-3.5" />} onClick={createQuickMaintenance}>
+                  创建 1 小时窗口
+                </Button>
+              )}
+            />
+          ) : (
+            <AppCard padding="none" className="overflow-hidden">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-kumo-line bg-kumo-recessed/20 px-4 py-3">
+                <div>
+                  <div className="text-sm font-semibold text-kumo-strong">维护窗口列表</div>
+                  <div className="mt-1 text-xs text-kumo-subtle">按时间窗口查看当前所有维护计划与临时窗口。</div>
+                </div>
+                <div className="text-xs text-kumo-subtle">
+                  共 <span className="font-semibold text-kumo-strong">{uptimeMaintenanceWindows.length}</span> 条记录
+                </div>
+              </div>
 
-          <div className="text-[11px] text-kumo-subtle">
-            已选择 {selectedMonitorIds.length} 个监测目标用于快速维护窗口。
-          </div>
-
-          <DataTableFrame>
-            <Table layout="fixed">
-              <Table.Header variant="compact">
-                <Table.Row>
-                  <Table.Head className="w-48">标题</Table.Head>
-                  <Table.Head className="w-24 text-center">状态</Table.Head>
-                  <Table.Head>时间窗口</Table.Head>
-                  <Table.Head className="w-28">策略</Table.Head>
-                  <Table.Head className="w-32">时区</Table.Head>
-                  <Table.Head className="w-36">更新时间</Table.Head>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {uptimeMetaLoading ? (
-                  Array.from({ length: 3 }).map((_, index) => (
-                    <Table.Row key={index}>
-                      <Table.Cell colSpan={6}>
-                        <SkeletonLine className="h-4 w-full" />
-                      </Table.Cell>
+              <DataTableFrame variant="embedded">
+                <Table layout="fixed">
+                  <Table.Header variant="compact">
+                    <Table.Row>
+                      <Table.Head className="w-52">标题</Table.Head>
+                      <Table.Head className="w-24 text-center">状态</Table.Head>
+                      <Table.Head>时间窗口</Table.Head>
+                      <Table.Head className="w-28">策略</Table.Head>
+                      <Table.Head className="w-24">时区</Table.Head>
+                      <Table.Head className="w-36">更新时间</Table.Head>
                     </Table.Row>
-                  ))
-                ) : uptimeMaintenanceWindows.length === 0 ? (
-                  <Table.Row>
-                    <Table.Cell colSpan={6} className="py-10 text-center text-kumo-subtle">
-                      暂无维护窗口。
-                    </Table.Cell>
-                  </Table.Row>
-                ) : (
-                  uptimeMaintenanceWindows.map((item) => (
-                    <Table.Row key={item.id}>
-                      <Table.Cell className="font-semibold text-kumo-strong truncate">
-                        {item.title}
-                      </Table.Cell>
-                      <Table.Cell className="text-center">
-                        <span className={`text-[10px] px-2 py-0.5 rounded font-semibold ${item.active ? 'bg-kumo-success/10 text-kumo-success' : 'bg-kumo-line/30 text-kumo-subtle'}`}>
-                          {item.active ? '启用' : '停用'}
-                        </span>
-                      </Table.Cell>
-                      <Table.Cell className="font-mono text-xs text-kumo-subtle truncate">
-                        {formatDateTime(item.startAt)} - {formatDateTime(item.endAt)}
-                      </Table.Cell>
-                      <Table.Cell className="text-xs">
-                        {item.strategy || 'manual'}
-                      </Table.Cell>
-                      <Table.Cell className="text-xs">
-                        {item.timezone || 'UTC'}
-                      </Table.Cell>
-                      <Table.Cell className="text-xs text-kumo-subtle">
-                        {formatDateTime(item.updatedAt || item.createdAt)}
-                      </Table.Cell>
-                    </Table.Row>
-                  ))
-                )}
-              </Table.Body>
-            </Table>
-          </DataTableFrame>
-        </AppCard>
+                  </Table.Header>
+                  <Table.Body>
+                    {uptimeMaintenanceWindows.map((item) => {
+                      const start = item.startAt ? new Date(item.startAt).getTime() : null;
+                      const end = item.endAt ? new Date(item.endAt).getTime() : null;
+                      const now = Date.now();
+                      const isActiveNow = item.active && Number.isFinite(start) && Number.isFinite(end) && start <= now && end >= now;
+                      const isUpcoming = item.active && Number.isFinite(start) && start > now;
+                      return (
+                        <Table.Row key={item.id}>
+                          <Table.Cell className="font-semibold text-kumo-strong truncate">
+                            {item.title}
+                          </Table.Cell>
+                          <Table.Cell className="text-center">
+                            {isActiveNow ? (
+                              <StatusBadge tone="warning">生效中</StatusBadge>
+                            ) : isUpcoming ? (
+                              <StatusBadge tone="info">待开始</StatusBadge>
+                            ) : item.active ? (
+                              <StatusBadge tone="success">启用</StatusBadge>
+                            ) : (
+                              <StatusBadge tone="neutral">停用</StatusBadge>
+                            )}
+                          </Table.Cell>
+                          <Table.Cell className="font-mono text-xs text-kumo-subtle truncate">
+                            {formatDateTime(item.startAt)} - {formatDateTime(item.endAt)}
+                          </Table.Cell>
+                          <Table.Cell className="text-xs">
+                            {item.strategy || 'manual'}
+                          </Table.Cell>
+                          <Table.Cell className="text-xs">
+                            {item.timezone || 'UTC'}
+                          </Table.Cell>
+                          <Table.Cell className="text-xs text-kumo-subtle">
+                            {formatDateTime(item.updatedAt || item.createdAt)}
+                          </Table.Cell>
+                        </Table.Row>
+                      );
+                    })}
+                  </Table.Body>
+                </Table>
+              </DataTableFrame>
+            </AppCard>
+          )}
+        </SectionCard>
       )}
 
       {/* ==================== 2. 添加/修改监测目标 ==================== */}
       {uptimeCurrentTab === 'add' && (
-        <AppCard padding="xl" className="space-y-6">
-          <h3 className="text-sm font-semibold text-kumo-strong border-b border-kumo-line pb-3 select-none">
-            {uptimeForm.id ? '编辑监测目标' : '新建监测目标'}
-          </h3>
+        <SectionCard
+          title={uptimeForm.id ? '编辑监测目标' : '新建监测目标'}
+          icon={<Activity className="h-4 w-4 text-kumo-brand" />}
+          bodyPadding="xl"
+          bodyClassName="space-y-6"
+        >
 
           <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
             {/* 监控类型选择 (Full Width) */}
@@ -2006,12 +2063,12 @@ function UptimePage() {
               </div>
             ) : uptimeForm.type === 'push' ? (
               <div className="md:col-span-8">
-                <div className="app-subcard p-3">
+                <AppCard padding="none" className="bg-kumo-recessed/40 p-3">
                   <div className="text-[10px] font-semibold text-kumo-subtle">Push URL</div>
                   <div className="mt-1 truncate font-mono text-xs text-kumo-strong">
                     {uptimeForm.pushToken ? `/api/uptime/push/${uptimeForm.pushToken}` : '保存后自动生成 token URL'}
                   </div>
-                </div>
+                </AppCard>
               </div>
             ) : (
               <>
@@ -2166,7 +2223,7 @@ function UptimePage() {
             </div>
 
             <div className="md:col-span-12 space-y-2">
-              <div className="flex flex-wrap gap-4 p-3.5 app-subcard bg-kumo-recessed/50">
+              <AppCard padding="none" className="flex flex-wrap gap-4 bg-kumo-recessed/50 p-3.5">
                 {notificationChannels.filter(c => c.enabled).map((channel) => (
                   <Checkbox
                     key={channel.id}
@@ -2190,7 +2247,7 @@ function UptimePage() {
                     <span>暂无启用的告警通道。请先在 "通知渠道" 标签中配置并启用。</span>
                   </div>
                 )}
-              </div>
+              </AppCard>
             </div>
 
             {/* 标签管理 */}
@@ -2213,24 +2270,18 @@ function UptimePage() {
               保存目标
             </Button>
           </div>
-        </AppCard>
+        </SectionCard>
       )}
 
-      {/* ==================== 3. 统计报表 Tab ==================== */}
+      {/* ==================== 3. 配置迁移 Tab ==================== */}
       {uptimeCurrentTab === 'stats' && (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
-          <AppCard padding="lg" className="space-y-4">
-            <div className="flex flex-col gap-3 border-b border-kumo-line pb-4 md:flex-row md:items-center md:justify-between">
-              <div>
-                <h3 className="text-sm font-semibold text-kumo-strong flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4" />
-                  配置迁移预览
-                </h3>
-                <p className="text-xs text-kumo-subtle mt-1">
-                  导入前会先比对监测目标、状态页和维护窗口，确认后才写入。
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
+        <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
+          <SectionCard
+            title="配置导入预览"
+            description="用于导出当前 Uptime 配置，或预览外部配置导入后将创建、更新的内容。"
+            icon={<Upload className="h-4 w-4 text-kumo-brand" />}
+            actions={(
+              <>
                 <Input
                   ref={uptimeImportInputRef}
                   type="file"
@@ -2239,102 +2290,161 @@ function UptimePage() {
                   className="hidden"
                   onChange={previewUptimeImportFile}
                 />
-                <Button size="sm" variant="secondary" onClick={exportUptimeConfig} loading={uptimeMetaLoading} icon={<Download className="w-3.5 h-3.5" />}>
-                  导出配置
+                <Button size="sm" variant="secondary" onClick={exportUptimeConfig} loading={uptimeMetaLoading} icon={<Upload className="w-3.5 h-3.5" />}>
+                  导出当前配置
                 </Button>
-                <Button size="sm" variant="primary" onClick={() => uptimeImportInputRef.current?.click()} loading={uptimeMetaLoading} icon={<Upload className="w-3.5 h-3.5" />}>
-                  选择导入文件
+                <Button size="sm" variant="primary" onClick={() => uptimeImportInputRef.current?.click()} loading={uptimeMetaLoading} icon={<Download className="w-3.5 h-3.5" />}>
+                  选择配置文件
                 </Button>
+              </>
+            )}
+            bodyPadding="lg"
+            bodyClassName="space-y-4"
+          >
+
+            {!uptimeImportPreview ? (
+              <EmptyState
+                card={false}
+                icon={Upload}
+                title="尚未选择配置文件"
+                description="支持导入由本页面导出的 Uptime JSON 备份配置，预览后会按对象类型展示将创建或更新的内容。"
+                className="min-h-[20rem] py-16"
+              />
+            ) : (
+              <div className="space-y-4">
+                <AppCard padding="none" className="bg-kumo-recessed/40 px-4 py-3.5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-1">
+                      <div className="text-sm font-semibold text-kumo-strong">
+                        本次将同步 {uptimeImportSummary.total} 个配置对象
+                      </div>
+                      <div className="text-xs leading-relaxed text-kumo-subtle">
+                        系统会根据现有监测、状态页和维护窗口自动判断创建或更新，确认前可先检查每一类对象的影响范围。
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge tone="success">创建 {uptimeImportSummary.creates}</StatusBadge>
+                      <StatusBadge tone="warning">更新 {uptimeImportSummary.updates}</StatusBadge>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs">
+                    {uptimeImportSections.map((section) => (
+                      <div key={section.key} className="flex items-center gap-2 text-kumo-subtle">
+                        <span className="font-semibold text-kumo-strong">{section.title}</span>
+                        <span>{section.total} 项</span>
+                        {section.updates > 0 && <span>更新 {section.updates}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </AppCard>
+
+                <div className="grid gap-3 xl:grid-cols-3">
+                  {uptimeImportSections.map((section) => (
+                    <AppCard key={section.key} padding="none" className="overflow-hidden bg-kumo-recessed/40">
+                      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-kumo-line/70 bg-kumo-recessed/20 px-4 py-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-kumo-strong">{section.title}</div>
+                          <div className="mt-1 text-xs leading-relaxed text-kumo-subtle">{section.description}</div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <StatusBadge tone="neutral">{section.total} 项</StatusBadge>
+                          {section.creates > 0 && <StatusBadge tone="success">创建 {section.creates}</StatusBadge>}
+                          {section.updates > 0 && <StatusBadge tone="warning">更新 {section.updates}</StatusBadge>}
+                        </div>
+                      </div>
+
+                      {section.total === 0 ? (
+                        <div className="px-4 py-6 text-xs text-kumo-subtle">{section.emptyLabel}</div>
+                      ) : (
+                        <div className="max-h-80 overflow-y-auto">
+                          {section.items.map((item) => {
+                            const actionMeta = getUptimeImportActionMeta(item.action);
+                            return (
+                              <div
+                                key={item.id}
+                                className="flex items-start justify-between gap-3 border-b border-kumo-line/60 px-4 py-3 last:border-b-0"
+                              >
+                                <div className="min-w-0">
+                                  <div className="truncate text-sm font-semibold text-kumo-strong">{item.label}</div>
+                                  <div className="mt-1 truncate text-xs text-kumo-subtle">{item.detail}</div>
+                                </div>
+                                <StatusBadge tone={actionMeta.tone}>{actionMeta.label}</StatusBadge>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </AppCard>
+                  ))}
+                </div>
+              </div>
+            )}
+          </SectionCard>
+
+          <SectionCard
+            title="导入执行"
+            icon={<Download className="h-4 w-4 text-kumo-brand" />}
+            className="self-start"
+            bodyPadding="lg"
+            bodyClassName="space-y-3.5"
+          >
+            <AppCard padding="none" className="bg-kumo-recessed/40 px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-sm font-semibold text-kumo-strong">执行状态</div>
+                {uptimeImportPreview ? (
+                  <StatusBadge tone="info">预览就绪</StatusBadge>
+                ) : (
+                  <StatusBadge tone="neutral">等待文件</StatusBadge>
+                )}
+              </div>
+              <div className="mt-2 text-xs leading-relaxed text-kumo-subtle">
+                {uptimeImportPreview
+                  ? `已完成导入预览，当前涉及 ${uptimeImportSummary.total} 个对象，确认后会按匹配规则执行创建或更新。`
+                  : '先选择配置文件生成预览，再决定是否将配置写入当前 Uptime 环境。'}
+              </div>
+              {uptimeImportPreview && (
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  <StatusBadge tone="success">创建 {uptimeImportSummary.creates}</StatusBadge>
+                  <StatusBadge tone="warning">更新 {uptimeImportSummary.updates}</StatusBadge>
+                  <StatusBadge tone="neutral">{uptimeImportSummary.nonEmptySections.length} 类对象</StatusBadge>
+                </div>
+              )}
+            </AppCard>
+
+            <div className="space-y-2 rounded-lg border border-kumo-line/70 bg-kumo-recessed/20 px-4 py-3">
+              <div className="text-xs font-semibold text-kumo-strong">匹配规则</div>
+              <div className="space-y-1.5 text-xs leading-relaxed text-kumo-subtle">
+                <div>监测目标会按名称、类型、地址等字段匹配已有对象。</div>
+                <div>状态页按 `slug` 匹配，维护窗口按标题匹配；命中后会执行更新。</div>
               </div>
             </div>
 
-            {!uptimeImportPreview ? (
-              <div className="flex flex-col items-center justify-center py-16 text-kumo-subtle">
-                <Upload className="w-12 h-12 opacity-30 mb-3" />
-                <div className="text-sm font-semibold text-kumo-strong">尚未选择导入文件</div>
-                <div className="mt-1 text-xs">支持由本页面导出的 Uptime JSON 配置。</div>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="app-subcard p-3">
-                    <div className="text-[10px] text-kumo-subtle">监测目标</div>
-                    <div className="mt-1 font-mono text-lg font-bold text-kumo-strong">{uptimeImportPreview.counts?.monitors || 0}</div>
-                  </div>
-                  <div className="app-subcard p-3">
-                    <div className="text-[10px] text-kumo-subtle">状态页</div>
-                    <div className="mt-1 font-mono text-lg font-bold text-kumo-strong">{uptimeImportPreview.counts?.statusPages || 0}</div>
-                  </div>
-                  <div className="app-subcard p-3">
-                    <div className="text-[10px] text-kumo-subtle">维护窗口</div>
-                    <div className="mt-1 font-mono text-lg font-bold text-kumo-strong">{uptimeImportPreview.counts?.maintenanceWindows || 0}</div>
-                  </div>
-                </div>
-
-                <DataTableFrame>
-                  <Table layout="fixed">
-                    <Table.Header variant="compact">
-                      <Table.Row>
-                        <Table.Head>对象</Table.Head>
-                        <Table.Head className="w-32">类型</Table.Head>
-                        <Table.Head className="w-24">动作</Table.Head>
-                      </Table.Row>
-                    </Table.Header>
-                    <Table.Body>
-                      {[
-                        ...(uptimeImportPreview.monitors || []).map(item => ({ ...item, label: item.name, kind: '监测' })),
-                        ...(uptimeImportPreview.statusPages || []).map(item => ({ ...item, label: item.title || item.slug, kind: '状态页' })),
-                        ...(uptimeImportPreview.maintenanceWindows || []).map(item => ({ ...item, label: item.title, kind: '维护' })),
-                      ].map((item, index) => (
-                        <Table.Row key={`${item.kind}-${item.label}-${index}`}>
-                          <Table.Cell className="truncate text-xs font-semibold text-kumo-strong">{item.label}</Table.Cell>
-                          <Table.Cell className="text-xs text-kumo-subtle">{item.kind}</Table.Cell>
-                          <Table.Cell>
-                            <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${item.action === 'create'
-                                ? 'bg-kumo-success/10 text-kumo-success'
-                                : 'bg-kumo-warning/10 text-kumo-warning'
-                              }`}>
-                              {item.action === 'create' ? '创建' : '更新'}
-                            </span>
-                          </Table.Cell>
-                        </Table.Row>
-                      ))}
-                    </Table.Body>
-                  </Table>
-                </DataTableFrame>
-              </div>
-            )}
-          </AppCard>
-
-          <AppCard padding="lg" className="space-y-4">
-            <h3 className="text-sm font-semibold text-kumo-strong">导入确认</h3>
-            <p className="text-xs leading-relaxed text-kumo-subtle">
-              导入会按名称、类型、地址等字段匹配已有监测目标；同 slug 状态页、同标题维护窗口会更新。
-            </p>
-            <Button
-              size="sm"
-              variant="primary"
-              className="w-full"
-              onClick={commitUptimeImport}
-              disabled={!uptimeImportPreview}
-              loading={uptimeMetaLoading}
-            >
-              确认导入预览配置
-            </Button>
-            {uptimeImportPreview && (
+            <div className="space-y-2">
               <Button
                 size="sm"
-                variant="secondary"
+                variant="primary"
                 className="w-full"
-                onClick={() => {
-                  setUptimeImportPreview(null);
-                  setUptimeImportPayload(null);
-                }}
+                onClick={commitUptimeImport}
+                disabled={!uptimeImportPreview}
+                loading={uptimeMetaLoading}
               >
-                清除预览
+                确认导入配置
               </Button>
-            )}
-          </AppCard>
+              {uptimeImportPreview && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="w-full"
+                  onClick={() => {
+                    setUptimeImportPreview(null);
+                    setUptimeImportPayload(null);
+                  }}
+                >
+                  清除预览
+                </Button>
+              )}
+            </div>
+          </SectionCard>
         </div>
       )}
     </div>

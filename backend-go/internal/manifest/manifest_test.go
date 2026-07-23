@@ -1,6 +1,9 @@
 package manifest
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestMatchPrefersMostSpecificPrefix(t *testing.T) {
 	route, ok := Match("/api/server/agent/quick-install")
@@ -19,6 +22,16 @@ func TestMatchAgentLinuxInstallWithKey(t *testing.T) {
 	}
 	if route.Owner != OwnerGo || route.Auth != AuthPublic || route.Prefix != "/api/server/agent/install/linux/{id}/{key}" {
 		t.Fatalf("expected public keyed linux install route, got prefix=%s owner=%s auth=%s", route.Prefix, route.Owner, route.Auth)
+	}
+}
+
+func TestGitHubPublicRealtimeStreamIsPublicAndStreaming(t *testing.T) {
+	route, ok := Match("/api/github/public/pages/status/stream")
+	if !ok {
+		t.Fatal("expected GitHub public realtime stream route")
+	}
+	if route.Owner != OwnerGo || route.Auth != AuthPublic || route.ResponseMode != ResponseStream {
+		t.Fatalf("unexpected public stream governance: owner=%s auth=%s response=%s", route.Owner, route.Auth, route.ResponseMode)
 	}
 }
 
@@ -197,6 +210,32 @@ func TestTOTPRoutesAreGoOwned(t *testing.T) {
 	}
 }
 
+func TestM365RoutesAreGoOwned(t *testing.T) {
+	route, ok := Match("/api/m365/accounts")
+	if !ok {
+		t.Fatal("expected m365 route match")
+	}
+	if route.Owner != OwnerGo || route.Auth != AuthSession || route.ResponseMode != ResponseJSON {
+		t.Fatalf("expected session JSON go owner for m365 route, got owner=%s auth=%s response=%s", route.Owner, route.Auth, route.ResponseMode)
+	}
+
+	route, ok = Match("/api/m365/public/register")
+	if !ok {
+		t.Fatal("expected m365 public register route match")
+	}
+	if route.Owner != OwnerGo || route.Auth != AuthPublic || route.ResponseMode != ResponseJSON || route.Prefix != "/api/m365/public/register" {
+		t.Fatalf("expected public exact go owner for m365 public register, got prefix=%s owner=%s auth=%s response=%s", route.Prefix, route.Owner, route.Auth, route.ResponseMode)
+	}
+
+	route, ok = Match("/api/m365/public/invites/demo-code")
+	if !ok {
+		t.Fatal("expected m365 public invite route match")
+	}
+	if route.Owner != OwnerGo || route.Auth != AuthPublic || route.ResponseMode != ResponseJSON || route.Prefix != "/api/m365/public/invites/{code}" {
+		t.Fatalf("expected public pattern go owner for m365 public invite, got prefix=%s owner=%s auth=%s response=%s", route.Prefix, route.Owner, route.Auth, route.ResponseMode)
+	}
+}
+
 func TestCronRoutesAreGoOwned(t *testing.T) {
 	route, ok := Match("/api/cron/tasks")
 	if !ok {
@@ -311,6 +350,7 @@ func TestCloudflareAccountDNSAndZoneResourceRoutesAreGoOwnedWithoutSwallowingOth
 		"/api/cloudflare/accounts/cf_123/r2/buckets/bucket_name/objects",
 		"/api/cloudflare/accounts/cf_123/r2/buckets/bucket_name/objects/key_123",
 		"/api/cloudflare/accounts/cf_123/r2/buckets/bucket_name/objects/key_123/download-info",
+		"/api/cloudflare/accounts/cf_123/r2/buckets/bucket_name/objects/key_123/preview",
 		"/api/cloudflare/accounts/cf_123/tunnels",
 		"/api/cloudflare/accounts/cf_123/tunnels/tunnel_123",
 		"/api/cloudflare/accounts/cf_123/tunnels/tunnel_123/configuration",
@@ -321,8 +361,12 @@ func TestCloudflareAccountDNSAndZoneResourceRoutesAreGoOwnedWithoutSwallowingOth
 		if !ok {
 			t.Fatalf("expected cloudflare go route match for %s", path)
 		}
-		if route.Owner != OwnerGo || route.Auth != AuthSession || route.ResponseMode != ResponseJSON {
-			t.Fatalf("expected session JSON go owner for %s, got owner=%s auth=%s response=%s", path, route.Owner, route.Auth, route.ResponseMode)
+		expectedResponse := ResponseJSON
+		if strings.HasSuffix(path, "/preview") {
+			expectedResponse = ResponseProxy
+		}
+		if route.Owner != OwnerGo || route.Auth != AuthSession || route.ResponseMode != expectedResponse {
+			t.Fatalf("expected session %s go owner for %s, got owner=%s auth=%s response=%s", expectedResponse, path, route.Owner, route.Auth, route.ResponseMode)
 		}
 	}
 

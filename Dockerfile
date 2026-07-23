@@ -36,7 +36,7 @@ ENV PATH=/app/node_modules/.bin:$PATH \
 RUN npm run build
 
 # 阶段 2: 构建 Go 后端 (Go Backend Builder)
-FROM --platform=$BUILDPLATFORM golang:1.23-alpine AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.26.5-alpine3.24 AS go-builder
 
 # 安装必要的构建工具
 RUN apk add --no-cache gcc musl-dev
@@ -110,7 +110,7 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
 # 注意：deps-builder 阶段已移除，Go 后端不需要 Node.js 依赖
 
 # 阶段 4: 运行时镜像 (Runner) - 纯净的运行环境
-FROM --platform=$TARGETPLATFORM alpine:3.20 AS runner
+FROM --platform=$TARGETPLATFORM alpine:3.24.1 AS runner
 
 LABEL org.opencontainers.image.title="API Monitor"
 LABEL org.opencontainers.image.description="API聚合监控面板"
@@ -122,8 +122,8 @@ LABEL maintainer="iwvw"
 RUN apk add --no-cache \
     ca-certificates \
     tzdata \
-    curl \
     tini \
+    && apk upgrade --no-cache \
     && addgroup -g 1001 appuser \
     && adduser -D -u 1001 -G appuser appuser
 
@@ -143,6 +143,10 @@ COPY --from=go-builder --chown=appuser:appuser /app/backend-go/api-monitor /app/
 COPY --from=agent-builder --chown=appuser:appuser /app/agent-rust/agent-linux-amd64 /app/dist/agent/
 COPY --from=agent-builder --chown=appuser:appuser /app/agent-rust/agent-linux-arm64 /app/dist/agent/
 COPY --from=agent-builder --chown=appuser:appuser /app/agent-rust/agent-windows-amd64.exe /app/dist/agent/
+RUN cd /app/dist/agent && \
+    sha256sum agent-linux-amd64 | awk '{print $1}' > agent-linux-amd64.sha256 && \
+    sha256sum agent-linux-arm64 | awk '{print $1}' > agent-linux-arm64.sha256 && \
+    sha256sum agent-windows-amd64.exe | awk '{print $1}' > agent-windows-amd64.exe.sha256
 
 # 4. 复制 2FA 浏览器插件目录
 COPY --chown=appuser:appuser plugin /app/plugin
@@ -158,7 +162,7 @@ ENV PORT=3000 \
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3000/health || exit 1
+    CMD wget -q -T 5 -O - http://localhost:3000/health >/dev/null || exit 1
 
 USER appuser
 

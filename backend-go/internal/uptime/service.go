@@ -14,6 +14,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,6 +38,9 @@ const (
 	stateMaintenance = "maintenance"
 	statePaused      = "paused"
 	stateUnknown     = "unknown"
+
+	defaultHeartbeatRetentionDays = 30
+	minHeartbeatRetentionDays     = 1
 )
 
 type Authenticator interface {
@@ -116,6 +120,7 @@ func New(cfg config.Config, auth Authenticator, notifier Notifier) *Service {
 		_ = service.migrateLegacyMonitors(ctx, db)
 		db.Close()
 	}
+	go service.startHeartbeatCleanupLoop()
 	_ = service.RestartAll(context.Background())
 	return service
 }
@@ -132,6 +137,56 @@ func (s *Service) Stop() {
 		timer.Stop()
 		delete(s.timers, id)
 	}
+}
+
+func (s *Service) startHeartbeatCleanupLoop() {
+	timer := time.NewTimer(30 * time.Second)
+	defer timer.Stop()
+
+	for {
+		<-timer.C
+		if s.isStopped() {
+			return
+		}
+		s.cleanupOldHeartbeats(context.Background())
+		timer.Reset(time.Hour)
+	}
+}
+
+func (s *Service) isStopped() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stopped
+}
+
+func (s *Service) cleanupOldHeartbeats(ctx context.Context) {
+	retentionDays := resolveHeartbeatRetentionDays()
+	if retentionDays <= 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	db, err := s.open(ctx)
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	_, _ = db.ExecContext(ctx, "DELETE FROM uptime_heartbeats WHERE created_at < datetime('now', '-' || ? || ' days')", retentionDays)
+}
+
+func resolveHeartbeatRetentionDays() int {
+	raw := strings.TrimSpace(os.Getenv("API_MONITOR_UPTIME_HEARTBEAT_RETENTION_DAYS"))
+	if raw == "" {
+		return defaultHeartbeatRetentionDays
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return defaultHeartbeatRetentionDays
+	}
+	if value < minHeartbeatRetentionDays {
+		return minHeartbeatRetentionDays
+	}
+	return value
 }
 
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -1598,7 +1653,18 @@ func (s *Service) processState(ctx context.Context, db *sql.DB, monitor map[stri
 		next["active_incident_id"] = nil
 		s.notify(ctx, "up", monitor, beat, duration)
 	}
-	return saveState(ctx, db, monitorID, next)
+	if err := saveState(ctx, db, monitorID, next); err != nil {
+		return err
+	}
+	if action == "" && stateText(next["state"]) == stateDown {
+		duration := int64(0)
+		if incident, _ := getOpenIncident(ctx, db, monitorID); incident != nil {
+			started := parseTimeFallback(stringValue(incident["started_at"], ""), time.Now())
+			duration = time.Since(started).Milliseconds()
+		}
+		s.refreshNotification(ctx, monitor, beat, duration)
+	}
+	return nil
 }
 
 func transitionState(previous, monitor map[string]interface{}, result probeResult, inMaintenance bool) (map[string]interface{}, string) {
@@ -1685,6 +1751,20 @@ func (s *Service) notify(ctx context.Context, eventType string, monitor, beat ma
 	if s.notifier == nil {
 		return
 	}
+	_ = s.notifier.Trigger(ctx, "uptime", eventType, uptimeNotificationData(eventType, monitor, beat, durationMs))
+}
+
+func (s *Service) refreshNotification(ctx context.Context, monitor, beat map[string]interface{}, durationMs int64) {
+	updater, ok := s.notifier.(interface {
+		RefreshLifecycle(context.Context, string, string, map[string]interface{}) error
+	})
+	if !ok {
+		return
+	}
+	_ = updater.RefreshLifecycle(ctx, "uptime", "down", uptimeNotificationData("down", monitor, beat, durationMs))
+}
+
+func uptimeNotificationData(eventType string, monitor, beat map[string]interface{}, durationMs int64) map[string]interface{} {
 	data := map[string]interface{}{
 		"monitorId":   int64Value(monitor["id"], 0),
 		"monitorName": stringValue(monitor["name"], ""),
@@ -1696,12 +1776,16 @@ func (s *Service) notify(ctx context.Context, eventType string, monitor, beat ma
 	}
 	if eventType == "down" {
 		data["error"] = stringValue(beat["msg"], "")
+		if durationMs > 0 {
+			data["downDurationMs"] = durationMs
+			data["downDuration"] = formatDuration(durationMs)
+		}
 	} else {
 		data["ping"] = intValue(beat["ping"], 0)
 		data["downDurationMs"] = durationMs
 		data["downDuration"] = formatDuration(durationMs)
 	}
-	_ = s.notifier.Trigger(ctx, "uptime", eventType, data)
+	return data
 }
 
 func createIncident(ctx context.Context, db *sql.DB, monitorID int64, cause string) (int64, error) {

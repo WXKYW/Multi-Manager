@@ -19,13 +19,17 @@ import (
 	"github.com/iwvw/api-monitor/backend-go/internal/cronjobs"
 	"github.com/iwvw/api-monitor/backend-go/internal/filebox"
 	"github.com/iwvw/api-monitor/backend-go/internal/flyio"
+	githubmodule "github.com/iwvw/api-monitor/backend-go/internal/github"
 	"github.com/iwvw/api-monitor/backend-go/internal/koyeb"
+	"github.com/iwvw/api-monitor/backend-go/internal/m365"
 	"github.com/iwvw/api-monitor/backend-go/internal/manifest"
 	"github.com/iwvw/api-monitor/backend-go/internal/notification"
 	"github.com/iwvw/api-monitor/backend-go/internal/openai"
+	"github.com/iwvw/api-monitor/backend-go/internal/oracle"
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
 	"github.com/iwvw/api-monitor/backend-go/internal/serveragent"
 	"github.com/iwvw/api-monitor/backend-go/internal/settings"
+	"github.com/iwvw/api-monitor/backend-go/internal/subscription"
 	systemmetrics "github.com/iwvw/api-monitor/backend-go/internal/system"
 	"github.com/iwvw/api-monitor/backend-go/internal/systemlogs"
 	"github.com/iwvw/api-monitor/backend-go/internal/tencent"
@@ -45,13 +49,17 @@ type Server struct {
 	uptime   *uptime.Service
 	koyeb    *koyeb.Service
 	flyio    *flyio.Service
+	github   *githubmodule.Service
 	aliyun   *aliyun.Service
 	tencent  *tencent.Service
+	oracle   *oracle.Service
 	cf       *cloudflare.Service
+	m365     *m365.Service
 	openai   *openai.Service
 	server   *serveragent.Service
 	backup   *backup.Service
 	logs     *systemlogs.Service
+	sub      *subscription.Service
 }
 
 func New(cfg config.Config) http.Handler {
@@ -59,14 +67,44 @@ func New(cfg config.Config) http.Handler {
 }
 
 func NewServer(cfg config.Config) *Server {
+	server, err := newServer(cfg)
+	if err != nil {
+		panic(err)
+	}
+	return server
+}
+
+// NewChecked is the production constructor. Schema initialization failures
+// are fatal because serving a partially migrated subscription API only turns a
+// deterministic startup problem into repeated HTTP 500 responses.
+func NewChecked(cfg config.Config) (*Server, error) {
+	return newServer(cfg)
+}
+
+func newServer(cfg config.Config) (*Server, error) {
+	subscriptionService := subscription.New(cfg)
+	initCtx, initCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	err := subscriptionService.Initialize(initCtx)
+	initCancel()
+	if err != nil {
+		return nil, fmt.Errorf("initialize subscription schema: %w", err)
+	}
 	authService := auth.New(cfg)
 	notifyService := notification.New(cfg)
 	serverAgentService := serveragent.New(cfg)
+	if err := serverAgentService.StartupError(); err != nil {
+		serverAgentService.Stop()
+		return nil, fmt.Errorf("initialize server agent schema: %w", err)
+	}
 	serverAgentService.SetNotifier(notifyService)
+	cloudflareService := cloudflare.New(cfg)
+	serverAgentService.SetCloudflareTunnelManager(cloudflareService)
 	cronService := cronjobs.New(cfg)
 	cronService.SetAgentRunner(serverAgentService)
 	uptimeService := uptime.New(cfg, authService, notifyService)
 	uptimeService.SetHeartbeatBroadcaster(serverAgentService.BroadcastUptimeHeartbeat)
+	githubService := githubmodule.New(cfg)
+	githubService.SetNotifier(notifyService)
 	systemService := systemmetrics.New(cfg)
 	systemService.SetNotifier(notifyService)
 	backupService := backup.New(cfg)
@@ -83,24 +121,34 @@ func NewServer(cfg config.Config) *Server {
 		uptime:   uptimeService,
 		koyeb:    koyeb.New(cfg),
 		flyio:    flyio.New(cfg),
+		github:   githubService,
 		aliyun:   aliyun.New(cfg),
 		tencent:  tencent.New(cfg),
-		cf:       cloudflare.New(cfg),
+		oracle:   oracle.New(cfg),
+		cf:       cloudflareService,
+		m365:     m365.New(cfg),
 		openai:   openai.New(cfg),
 		server:   serverAgentService,
 		backup:   backupService,
 		logs:     systemlogs.New(cfg),
+		sub:      subscriptionService,
 	}
 	systemService.SetAICaller(server.callAPIFromAI)
-	return server
+	return server, nil
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.server != nil {
+		s.server.Stop()
+	}
 	if s.uptime != nil {
 		s.uptime.Stop()
 	}
 	if s.system != nil {
 		s.system.Shutdown()
+	}
+	if s.github != nil {
+		s.github.Stop()
 	}
 	if s.cron == nil {
 		return nil
@@ -123,6 +171,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.serveSystemControlRoute(w, r) {
+		return
+	}
+
+	if strings.HasPrefix(r.URL.Path, "/sub/") {
+		s.system.RecordAPICall(r.Method, r.URL.Path)
+		s.sub.ServeHTTP(w, r)
 		return
 	}
 
@@ -205,6 +259,20 @@ func (s *Server) serveSystemControlRoute(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) authorizeGoRoute(w http.ResponseWriter, r *http.Request, route manifest.Route) bool {
+	if route.Auth == manifest.AuthAPIKey && route.Module == "openai-compatible" {
+		authorizedRequest, err := s.openai.AuthorizeGatewayRequest(r)
+		if err != nil {
+			response.JSON(w, http.StatusUnauthorized, map[string]interface{}{
+				"error": map[string]string{
+					"message": err.Error(),
+					"type":    "authentication_error",
+				},
+			})
+			return false
+		}
+		*r = *authorizedRequest
+		return true
+	}
 	if route.Auth != manifest.AuthSession {
 		return true
 	}
@@ -262,23 +330,45 @@ func (s *Server) serveGoRoute(w http.ResponseWriter, r *http.Request, route mani
 		s.koyeb.ServeHTTP(w, r)
 	case "/api/flyio":
 		s.flyio.ServeHTTP(w, r)
+	case "/api/github", "/api/github/webhook/{repositoryId}", "/api/github/webhook", "/api/github/events/stream":
+		s.github.ServeHTTP(w, r)
 	case "/api/aliyun":
 		s.aliyun.ServeHTTP(w, r)
 	case "/api/tencent":
 		s.tencent.ServeHTTP(w, r)
-	case "/api/cloudflare/accounts", "/api/cloudflare/accounts/export", "/api/cloudflare/export/accounts", "/api/cloudflare/import/accounts", "/api/cloudflare/templates", "/api/cloudflare/templates/{id}", "/api/cloudflare/templates/{templateId}/apply", "/api/cloudflare/import/templates", "/api/cloudflare/accounts/{id}", "/api/cloudflare/accounts/{id}/verify", "/api/cloudflare/accounts/{id}/token", "/api/cloudflare/accounts/{id}/cf-account-id", "/api/cloudflare/accounts/{id}/pages", "/api/cloudflare/accounts/{id}/pages/{projectName}", "/api/cloudflare/accounts/{id}/pages/{projectName}/deployments", "/api/cloudflare/accounts/{id}/pages/{projectName}/deployments/{deploymentId}", "/api/cloudflare/accounts/{id}/pages/{projectName}/domains", "/api/cloudflare/accounts/{id}/pages/{projectName}/domains/{domain}", "/api/cloudflare/accounts/{id}/workers", "/api/cloudflare/accounts/{id}/workers/{scriptName}", "/api/cloudflare/accounts/{id}/workers/{scriptName}/toggle", "/api/cloudflare/accounts/{id}/workers/{scriptName}/analytics", "/api/cloudflare/accounts/{id}/workers/{scriptName}/domains", "/api/cloudflare/accounts/{id}/workers/{scriptName}/domains/{domainId}", "/api/cloudflare/accounts/{accountId}/r2/buckets", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}/download-info", "/api/cloudflare/accounts/{id}/tunnels", "/api/cloudflare/accounts/{accountId}/tunnels/{tunnelId}", "/api/cloudflare/accounts/{accountId}/tunnels/{tunnelId}/configuration", "/api/cloudflare/accounts/{accountId}/tunnels/{tunnelId}/token", "/api/cloudflare/accounts/{accountId}/tunnels/{tunnelId}/connections", "/api/cloudflare/record-types", "/api/cloudflare/zones", "/api/cloudflare/accounts/{id}/zones", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/workers/routes", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/workers/routes/{routeId}", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/records", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/records/{recordId}", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/purge", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/ssl", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/analytics", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/switch", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/batch":
+	case "/api/oracle":
+		s.oracle.ServeHTTP(w, r)
+	case "/api/m365":
+		s.m365.ServeHTTP(w, r)
+	case "/api/cloudflare/accounts", "/api/cloudflare/accounts/export", "/api/cloudflare/export/accounts", "/api/cloudflare/import/accounts", "/api/cloudflare/templates", "/api/cloudflare/templates/{id}", "/api/cloudflare/templates/{templateId}/apply", "/api/cloudflare/import/templates", "/api/cloudflare/accounts/{id}", "/api/cloudflare/accounts/{id}/verify", "/api/cloudflare/accounts/{id}/token", "/api/cloudflare/accounts/{id}/cf-account-id", "/api/cloudflare/accounts/{id}/pages", "/api/cloudflare/accounts/{id}/pages/{projectName}", "/api/cloudflare/accounts/{id}/pages/{projectName}/deployments", "/api/cloudflare/accounts/{id}/pages/{projectName}/deployments/{deploymentId}", "/api/cloudflare/accounts/{id}/pages/{projectName}/domains", "/api/cloudflare/accounts/{id}/pages/{projectName}/domains/{domain}", "/api/cloudflare/accounts/{id}/workers", "/api/cloudflare/accounts/{id}/workers/{scriptName}", "/api/cloudflare/accounts/{id}/workers/{scriptName}/toggle", "/api/cloudflare/accounts/{id}/workers/{scriptName}/analytics", "/api/cloudflare/accounts/{id}/workers/{scriptName}/domains", "/api/cloudflare/accounts/{id}/workers/{scriptName}/domains/{domainId}", "/api/cloudflare/accounts/{accountId}/r2/buckets", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}/download-info", "/api/cloudflare/accounts/{accountId}/r2/buckets/{bucketName}/objects/{objectKey}/preview", "/api/cloudflare/accounts/{id}/tunnels", "/api/cloudflare/accounts/{accountId}/tunnels/{tunnelId}", "/api/cloudflare/accounts/{accountId}/tunnels/{tunnelId}/configuration", "/api/cloudflare/accounts/{accountId}/tunnels/{tunnelId}/token", "/api/cloudflare/accounts/{accountId}/tunnels/{tunnelId}/connections", "/api/cloudflare/record-types", "/api/cloudflare/zones", "/api/cloudflare/accounts/{id}/zones", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/workers/routes", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/workers/routes/{routeId}", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/records", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/records/{recordId}", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/purge", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/ssl", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/analytics", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/switch", "/api/cloudflare/accounts/{accountId}/zones/{zoneId}/batch":
 		s.cf.ServeHTTP(w, r)
 	case "/api/openai":
 		s.openai.ServeHTTP(w, r)
+	case "/api/subscription":
+		s.sub.ServeHTTP(w, r)
+	case "/sub/{token}":
+		s.sub.ServeHTTP(w, r)
 	case "/v1":
 		s.serveV1Route(w, r)
-	case "/ws/ssh":
+	case "/ws/ssh", "/ws/agent-terminal":
 		s.server.ServeHTTP(w, r)
 	case "/socket.io/":
 		s.server.ServeHTTP(w, r)
 	default:
+		if strings.HasPrefix(route.Prefix, "/sub/") || strings.HasPrefix(r.URL.Path, "/sub/") {
+			s.sub.ServeHTTP(w, r)
+			return
+		}
+		if strings.HasPrefix(route.Prefix, "/api/m365") {
+			s.m365.ServeHTTP(w, r)
+			return
+		}
 		if strings.HasPrefix(route.Prefix, "/api/server/") {
 			s.server.ServeHTTP(w, r)
+			return
+		}
+		if strings.HasPrefix(route.Prefix, "/api/github") {
+			s.github.ServeHTTP(w, r)
 			return
 		}
 		response.Error(w, http.StatusNotFound, "go route not implemented: "+route.Prefix)
@@ -437,10 +527,12 @@ func (s *Server) applySecurityHeaders(w http.ResponseWriter) {
 func (s *Server) serveV1Route(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	method := r.Method
+	startedAt := time.Now()
 
 	// 1. Models endpoint
 	if method == http.MethodGet && (path == "/v1/models" || path == "/v1/model") {
-		s.serveV1Models(w, r)
+		statusCode := s.serveV1Models(w, r)
+		s.openai.RecordAnalytics(r.Context(), "models", "", "", statusCode, time.Since(startedAt).Milliseconds(), 0, 0, 0)
 		return
 	}
 
@@ -451,14 +543,18 @@ func (s *Server) serveV1Route(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.Error(w, http.StatusNotFound, "v1 endpoint not found")
+	s.openai.RecordAnalytics(r.Context(), strings.TrimPrefix(path, "/v1/"), "", "", http.StatusNotFound, time.Since(startedAt).Milliseconds(), 0, 0, 0)
 }
 
-func (s *Server) serveV1Models(w http.ResponseWriter, r *http.Request) {
+func (s *Server) serveV1Models(w http.ResponseWriter, r *http.Request) int {
 	ctx := r.Context()
 	var mergedModels []map[string]interface{}
 
 	if oaiModels, err := s.openai.GetModelsList(ctx); err == nil {
 		mergedModels = append(mergedModels, oaiModels...)
+	} else {
+		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return http.StatusInternalServerError
 	}
 
 	sort.Slice(mergedModels, func(i, j int) bool {
@@ -471,4 +567,5 @@ func (s *Server) serveV1Models(w http.ResponseWriter, r *http.Request) {
 		"object": "list",
 		"data":   mergedModels,
 	})
+	return http.StatusOK
 }

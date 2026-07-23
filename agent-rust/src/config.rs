@@ -7,7 +7,9 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct CliArgs {
-    #[arg(help = "Action to perform (install, uninstall, svc-install, svc-uninstall, sample)")]
+    #[arg(
+        help = "Action to perform (upgrade, self-update, install, uninstall, svc-install, svc-uninstall, sample)"
+    )]
     pub action: Option<String>,
 
     #[arg(short = 's', long = "server", help = "Dashboard server URL")]

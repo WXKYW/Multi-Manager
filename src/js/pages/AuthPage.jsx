@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { Banner } from '@cloudflare/kumo/components/banner';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Input } from '@cloudflare/kumo/components/input';
-import { LayerCard } from '@cloudflare/kumo/components/layer-card';
 import useStore from '../store.js';
+import { SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { useCloudflareSpotlight } from '../hooks/useCloudflareSpotlight.js';
 import {
   AlertTriangle,
   ArrowRight,
@@ -20,290 +21,13 @@ const AUTH_FEATURES = [
   '多目标支持',
 ];
 
-let authParticlesEnginePromise = null;
-
-const getCssColor = (name, fallback) => {
-  if (typeof window === 'undefined') return fallback;
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
-};
-
-const createAuthParticleOptions = () => {
-  const brand = getCssColor('--color-kumo-brand', '#dc7d40');
-  const info = getCssColor('--color-kumo-info', '#4d8df7');
-  const line = getCssColor('--color-kumo-line', '#6b7280');
-  const subtle = getCssColor('--text-color-kumo-subtle', '#9ca3af');
-  const isSmallViewport = typeof window !== 'undefined' && window.innerWidth < 640;
-  const isDarkMode =
-    typeof document !== 'undefined' && document.documentElement.dataset.mode === 'dark';
-  const particleNeutral = isDarkMode ? subtle : line;
-  const linkOpacity = isDarkMode ? 0.36 : 0.24;
-  const particleOpacity = isDarkMode
-    ? { min: 0.34, max: 0.72 }
-    : { min: 0.24, max: 0.58 };
-  const particleSize = isDarkMode ? { min: 1, max: 2.9 } : { min: 0.9, max: 2.55 };
-
-  return {
-    autoPlay: true,
-    background: { color: { value: 'transparent' } },
-    clear: true,
-    detectRetina: true,
-    fpsLimit: 30,
-    fullScreen: { enable: false },
-    pauseOnBlur: true,
-    pauseOnOutsideViewport: true,
-    smooth: true,
-    zLayers: 3,
-    interactivity: {
-      detectsOn: 'canvas',
-      events: {
-        onHover: {
-          enable: true,
-          mode: ['grab', 'repulse', 'bubble', 'parallax'],
-        },
-        resize: {
-          enable: true,
-        },
-      },
-      modes: {
-        bubble: {
-          distance: 95,
-          duration: 0.35,
-          opacity: 0.62,
-          size: 3.2,
-        },
-        grab: {
-          distance: isSmallViewport ? 92 : 150,
-          links: {
-            blink: false,
-            consent: false,
-            opacity: isDarkMode ? 0.58 : 0.48,
-          },
-        },
-        parallax: {
-          force: isSmallViewport ? 18 : 28,
-          smooth: 18,
-        },
-        repulse: {
-          distance: isSmallViewport ? 54 : 82,
-          duration: 0.35,
-          factor: 42,
-          speed: 0.72,
-        },
-      },
-    },
-    particles: {
-      color: {
-        value: [brand, info, particleNeutral],
-      },
-      links: {
-        blink: false,
-        color: {
-          value: brand,
-        },
-        consent: false,
-        distance: isSmallViewport ? 112 : 156,
-        enable: true,
-        frequency: 1,
-        opacity: linkOpacity,
-        shadow: {
-          blur: isDarkMode ? 14 : 10,
-          color: {
-            value: brand,
-          },
-          enable: true,
-        },
-        width: isDarkMode ? 1.15 : 1,
-      },
-      move: {
-        direction: 'none',
-        enable: true,
-        outModes: {
-          default: 'bounce',
-        },
-        random: true,
-        speed: {
-          min: 0.12,
-          max: 0.46,
-        },
-        straight: false,
-      },
-      number: {
-        density: {
-          enable: true,
-          height: 620,
-          width: 960,
-        },
-        limit: {
-          value: isSmallViewport ? 42 : 82,
-        },
-        value: isSmallViewport ? 40 : 78,
-      },
-      opacity: {
-        value: particleOpacity,
-        animation: {
-          enable: true,
-          speed: 0.32,
-          sync: false,
-        },
-      },
-      shape: {
-        type: 'circle',
-      },
-      size: {
-        value: particleSize,
-        animation: {
-          enable: true,
-          speed: 0.8,
-          sync: false,
-        },
-      },
-      twinkle: {
-        links: {
-          color: {
-            value: info,
-          },
-          enable: true,
-          frequency: isDarkMode ? 0.12 : 0.09,
-          opacity: {
-            min: isDarkMode ? 0.46 : 0.36,
-            max: isDarkMode ? 0.82 : 0.68,
-          },
-        },
-      },
-      zIndex: {
-        value: {
-          min: 0,
-          max: 100,
-        },
-        opacityRate: 0.42,
-        sizeRate: 0.78,
-        velocityRate: 0.55,
-      },
-    },
-  };
-};
-
-const loadAuthParticlesEngine = async () => {
-  if (!authParticlesEnginePromise) {
-    authParticlesEnginePromise = Promise.all([
-      import('@tsparticles/engine'),
-      import('@tsparticles/slim'),
-    ]).then(async ([engineModule, slimModule]) => {
-      await slimModule.loadSlim(engineModule.tsParticles);
-      return engineModule.tsParticles;
-    });
-  }
-
-  return authParticlesEnginePromise;
-};
-
-function usePrefersReducedMotion() {
-  const [prefersReducedMotion, setPrefersReducedMotion] = useState(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) return false;
-    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  });
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) return undefined;
-
-    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const handleChange = () => setPrefersReducedMotion(mediaQuery.matches);
-    handleChange();
-    mediaQuery.addEventListener('change', handleChange);
-
-    return () => mediaQuery.removeEventListener('change', handleChange);
-  }, []);
-
-  return prefersReducedMotion;
-}
-
-function AuthAmbientBackground() {
-  const layerRef = useRef(null);
-  const containerRef = useRef(null);
-  const prefersReducedMotion = usePrefersReducedMotion();
-  const particlesId = useMemo(
-    () => `auth-particles-${Math.random().toString(36).slice(2, 10)}`,
-    []
-  );
-
-  useEffect(() => {
-    const layer = layerRef.current;
-    if (prefersReducedMotion || !layer || typeof window === 'undefined') return undefined;
-
-    let animationFrame = 0;
-    const setCursorLight = (clientX, clientY) => {
-      if (animationFrame) window.cancelAnimationFrame(animationFrame);
-
-      animationFrame = window.requestAnimationFrame(() => {
-        layer.style.setProperty('--auth-cursor-x', `${clientX}px`);
-        layer.style.setProperty('--auth-cursor-y', `${clientY}px`);
-        layer.style.setProperty('--auth-cursor-opacity', '1');
-        animationFrame = 0;
-      });
-    };
-    const hideCursorLight = () => {
-      layer.style.setProperty('--auth-cursor-opacity', '0');
-    };
-    const handlePointerMove = (event) => setCursorLight(event.clientX, event.clientY);
-
-    window.addEventListener('pointermove', handlePointerMove, { passive: true });
-    window.addEventListener('blur', hideCursorLight);
-    document.documentElement.addEventListener('pointerleave', hideCursorLight);
-
-    return () => {
-      if (animationFrame) window.cancelAnimationFrame(animationFrame);
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('blur', hideCursorLight);
-      document.documentElement.removeEventListener('pointerleave', hideCursorLight);
-    };
-  }, [prefersReducedMotion]);
-
-  useEffect(() => {
-    if (prefersReducedMotion || !containerRef.current) return undefined;
-
-    let cancelled = false;
-    let particlesContainer = null;
-
-    loadAuthParticlesEngine()
-      .then(async (tsParticles) => {
-        if (cancelled) return;
-
-        particlesContainer = await tsParticles.load({
-          id: particlesId,
-          options: createAuthParticleOptions(),
-        });
-
-        if (cancelled) {
-          particlesContainer?.destroy();
-        }
-      })
-      .catch((error) => {
-        console.error('Failed to load auth particles:', error);
-      });
-
-    return () => {
-      cancelled = true;
-      particlesContainer?.destroy();
-    };
-  }, [particlesId, prefersReducedMotion]);
-
-  return (
-    <div ref={layerRef} className="auth-ambient-layer" aria-hidden="true">
-      <div className="auth-ambient-grid" />
-      <div ref={containerRef} id={particlesId} className="auth-particles-canvas" />
-      <div className="auth-cursor-light" />
-    </div>
-  );
-}
-
 function AuthShell({ mode, title, description, children }) {
   const modeLabel = mode === 'setup' ? '初始化' : mode === '2fa' ? '二次验证' : '安全登录';
+  const surfaceRef = useCloudflareSpotlight();
 
   return (
-    <main className="auth-ambient-root relative isolate flex min-h-dvh w-screen overflow-hidden bg-kumo-canvas text-kumo-default">
-      <AuthAmbientBackground />
-
-      <section className="relative z-10 hidden w-[380px] shrink-0 flex-col justify-between border-r border-kumo-line bg-kumo-base/95 px-8 py-7 backdrop-blur-sm lg:flex">
+    <main className="relative flex min-h-dvh w-screen overflow-hidden bg-kumo-canvas text-kumo-default">
+      <section className="hidden w-[380px] shrink-0 flex-col justify-between border-r border-kumo-line bg-kumo-base px-8 py-7 lg:flex">
         <div className="flex items-center gap-3">
           <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-kumo-line bg-kumo-recessed">
             <img src="/logo.svg" alt="" className="size-5 object-contain" />
@@ -336,10 +60,15 @@ function AuthShell({ mode, title, description, children }) {
         </div>
       </section>
 
-      <section className="relative z-10 flex min-w-0 flex-1 items-center justify-center px-4 py-8 sm:px-6">
-        <div className="w-full max-w-[400px]">
+      <section
+        ref={surfaceRef}
+        className="cf-ai-background-surface relative isolate flex min-w-0 flex-1 items-center justify-center overflow-hidden bg-kumo-recessed/30 px-4 py-8 sm:px-6"
+      >
+        <div aria-hidden="true" className="cf-ai-background pointer-events-none absolute inset-0" />
+
+        <div className="relative z-10 w-full max-w-[400px]">
           <div className="mb-5 flex items-center justify-start gap-3 lg:hidden">
-            <span className="flex size-10 shrink-0 items-center justify-center app-card">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-kumo-line bg-kumo-base">
               <img src="/logo.svg" alt="" className="size-6 object-contain" />
             </span>
             <div className="min-w-0">
@@ -348,20 +77,16 @@ function AuthShell({ mode, title, description, children }) {
             </div>
           </div>
 
-          <LayerCard className="w-full app-card/95 p-5 backdrop-blur-sm sm:p-6">
-            <div className="mb-5 flex items-start justify-between gap-4 border-b border-kumo-line pb-4">
-              <div className="min-w-0">
-                <div className="mb-1 text-[11px] font-medium text-kumo-subtle">{modeLabel}</div>
-                <h2 className="text-lg font-semibold text-kumo-strong">{title}</h2>
-                <p className="mt-1 text-xs leading-relaxed text-kumo-subtle">{description}</p>
-              </div>
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-kumo-line bg-kumo-recessed text-kumo-brand">
-                {mode === 'setup' ? <Rocket className="size-4" /> : <Shield className="size-4" />}
-              </span>
-            </div>
-
+          <SectionCard
+            title={title}
+            description={description}
+            icon={mode === 'setup' ? <Rocket className="size-4 text-kumo-brand" /> : <Shield className="size-4 text-kumo-brand" />}
+            meta={<span className="text-[11px] font-medium text-kumo-subtle">{modeLabel}</span>}
+            className="w-full"
+            bodyPadding="lg"
+          >
             {children}
-          </LayerCard>
+          </SectionCard>
         </div>
       </section>
     </main>
@@ -468,7 +193,12 @@ function AuthPage() {
             placeholder="设置管理员密码"
             value={newPassword}
             onChange={(event) => setNewPassword(event.target.value)}
-            autoComplete="new-password"
+            autoComplete="off"
+            data-1p-ignore
+            data-lpignore="true"
+            data-bwignore="true"
+            data-form-type="other"
+            spellCheck={false}
             className="w-full"
             autoFocus
           />
@@ -480,7 +210,12 @@ function AuthPage() {
             placeholder="再次输入密码"
             value={confirmPassword}
             onChange={(event) => setConfirmPassword(event.target.value)}
-            autoComplete="new-password"
+            autoComplete="off"
+            data-1p-ignore
+            data-lpignore="true"
+            data-bwignore="true"
+            data-form-type="other"
+            spellCheck={false}
             className="w-full"
           />
 
@@ -506,7 +241,7 @@ function AuthPage() {
     ? '当前环境无需密码，确认后可直接进入控制台。'
     : loginRequire2FA
       ? '请输入 Authenticator App 中显示的 6 位动态验证码。'
-      : '输入管理员密码以访问监控面板';
+      : '输入管理员密码以访问面板';
 
   return (
     <AuthShell
@@ -529,11 +264,16 @@ function AuthPage() {
           <Input
             size="base"
             type="password"
-            // label="管理员密码"
+            aria-label="管理员密码"
             placeholder="请输入管理员密码"
             value={loginPassword}
             onChange={(event) => setLoginPassword(event.target.value)}
-            autoComplete="current-password"
+            autoComplete="off"
+            data-1p-ignore
+            data-lpignore="true"
+            data-bwignore="true"
+            data-form-type="other"
+            spellCheck={false}
             className="w-full"
             autoFocus
           />

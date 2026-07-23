@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
+import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input, Textarea } from '@cloudflare/kumo/components/input';
@@ -10,6 +11,7 @@ import { Checkbox } from '@cloudflare/kumo/components/checkbox';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Tabs } from '@cloudflare/kumo';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
+import { AppCard, SectionCard } from '../components/ui/AppPrimitives.jsx';
 import {
   Bell,
   Plus,
@@ -39,6 +41,7 @@ const getSourceModuleName = (module) => {
   const names = {
     uptime: '可用性监测',
     server: '主机实例',
+    github: 'GitHub',
     openai: 'OpenAI 接口',
     system: '系统设置',
     filebox: '文件柜',
@@ -53,6 +56,8 @@ const getEventTypeName = (type) => {
     up: '服务恢复 (Up)',
     offline: '主机离线',
     online: '主机上线',
+    interrupted: '连接中断',
+    degraded: '采集异常',
     cpu_high: 'CPU高负载',
     cpu_normal: 'CPU恢复正常',
     memory_high: '内存不足',
@@ -80,6 +85,17 @@ const getEventTypeName = (type) => {
     logout: '登出',
     'playback.error': '播放错误',
     'proxy.blocked': '代理拦截',
+    action_failed: 'Actions 执行失败',
+    action_recovered: 'Actions 恢复正常',
+    release_published: '发布新版本',
+    star_spike: 'Star 激增',
+    issue_opened: '新增 Issue',
+    pull_request_opened: '新增拉取请求',
+    repository_unreachable: '仓库无法访问',
+    token_invalid: 'Token 已失效',
+    rate_limit_low: 'API 限额偏低',
+    webhook_delivery_failed: 'Webhook 投递失败',
+    webhook_ping: 'Webhook 连通成功',
     created: '已创建',
     updated: '已更新',
     deleted: '已删除',
@@ -91,9 +107,10 @@ const getEventTypeName = (type) => {
 };
 
 const FALLBACK_EVENT_CATALOG = [
-  { module: 'uptime', events: ['down', 'up', 'pending', 'resource.created', 'resource.deleted', 'ssl_expiry'] },
-  { module: 'server', events: ['offline', 'online', 'cpu_high', 'memory_high', 'disk_high', 'traffic_high', 'traffic_normal'] },
-  { module: 'system', events: ['database.backup', 'database.import', 'log.cleanup', 'migration.failed', 'cpu_high', 'memory_high', 'disk_high'] },
+  { module: 'uptime', events: ['down', 'up', 'pending', 'resource.created', 'resource.deleted', 'ssl_expiry'], dynamic_events: ['down', 'up'] },
+  { module: 'server', events: ['offline', 'online', 'interrupted', 'degraded', 'cpu_high', 'cpu_normal', 'memory_high', 'memory_normal', 'disk_high', 'disk_normal', 'traffic_high', 'traffic_normal'], dynamic_events: ['offline', 'online', 'interrupted', 'degraded', 'cpu_high', 'cpu_normal', 'memory_high', 'memory_normal', 'disk_high', 'disk_normal', 'traffic_high', 'traffic_normal'] },
+  { module: 'github', events: ['action_failed', 'action_recovered', 'release_published', 'star_spike', 'issue_opened', 'pull_request_opened', 'repository_unreachable', 'token_invalid', 'rate_limit_low', 'webhook_delivery_failed', 'webhook_ping'], dynamic_events: ['action_failed', 'action_recovered'] },
+  { module: 'system', events: ['database.backup', 'database.import', 'log.cleanup', 'migration.failed', 'cpu_high', 'cpu_normal', 'memory_high', 'memory_normal', 'disk_high', 'disk_normal'], dynamic_events: ['cpu_high', 'cpu_normal', 'memory_high', 'memory_normal', 'disk_high', 'disk_normal'] },
   { module: 'filebox', events: ['resource.created', 'resource.deleted', 'cleanup'] },
   { module: 'totp', events: ['resource.created', 'resource.updated', 'resource.deleted', 'security.revealed', 'backup.imported', 'backup.exported'] },
 ];
@@ -117,6 +134,46 @@ const buildSampleEventData = (rule = {}) => ({
   threshold: 90,
   downDuration: '3 分钟',
 });
+
+const parseNotificationPreviewLine = (line = '') => {
+  const trimmed = line.trim();
+  if (!trimmed) return { empty: true };
+  const asciiIndex = trimmed.indexOf(':');
+  const chineseIndex = trimmed.indexOf('：');
+  const separator = asciiIndex < 0
+    ? chineseIndex
+    : (chineseIndex < 0 ? asciiIndex : Math.min(asciiIndex, chineseIndex));
+  if (separator <= 0) return { value: trimmed };
+  const label = trimmed.slice(0, separator).trim();
+  const rawValue = trimmed.slice(separator + 1).trim();
+  const statusIcons = {
+    在线: '🟢', 已恢复: '🟢', 成功: '🟢',
+    离线: '🔴', 故障: '🔴', 失败: '🔴',
+    中断: '🟠', 告警: '🟠', 警告: '🟠', 采集异常: '🟠',
+  };
+  return {
+    label,
+    value: label === '状态' && statusIcons[rawValue]
+      ? `${statusIcons[rawValue]} ${rawValue}`
+      : rawValue,
+    code: ['地址', '链接', '云端链接', 'URL', 'Host'].includes(label),
+  };
+};
+
+const parseLifecycleHistoryMeta = (rawData) => {
+  try {
+    const data = typeof rawData === 'string' ? JSON.parse(rawData || '{}') : (rawData || {});
+    if (!data.lifecycleKind) return null;
+    return {
+      mutation: data.lifecycleMutation || data.lifecyclePhase || '',
+      kind: data.lifecycleKind,
+      duration: data.downDuration || '',
+      changedFields: Object.keys(data.lifecycleChanges || {}),
+    };
+  } catch (_) {
+    return null;
+  }
+};
 
 function NotificationPage() {
   const [notificationCurrentTab, setNotificationCurrentTab] = useState('channels'); // 'channels' | 'rules' | 'history' | 'settings'
@@ -159,6 +216,7 @@ function NotificationPage() {
       to: '',
       bot_token: '',
       chat_id: '',
+      proxy_url: '',
     }
   });
 
@@ -291,6 +349,7 @@ function NotificationPage() {
         to: '',
         bot_token: '',
         chat_id: '',
+        proxy_url: '',
       }
     });
     setChannelModalMode('add');
@@ -307,6 +366,7 @@ function NotificationPage() {
       to: '',
       bot_token: '',
       chat_id: '',
+      proxy_url: '',
     };
 
     let config = { ...defaultConfig };
@@ -350,6 +410,17 @@ function NotificationPage() {
       if (!config.bot_token || !config.chat_id) {
         toast.warning('请填写完整的 Telegram Bot 令牌与 Chat ID');
         return;
+      }
+      if (config.proxy_url) {
+        try {
+          const proxy = new URL(config.proxy_url);
+          if (!['http:', 'https:', 'socks5:', 'socks5h:'].includes(proxy.protocol)) {
+            throw new Error('unsupported proxy scheme');
+          }
+        } catch {
+          toast.warning('请输入有效的 HTTP、HTTPS 或 SOCKS5 代理地址');
+          return;
+        }
       }
     }
 
@@ -708,6 +779,11 @@ function NotificationPage() {
     return events.map(event => ({ value: event, label: getEventTypeName(event) }));
   }, [notificationEventCatalog, ruleForm.source_module]);
 
+  const ruleFilterItems = useMemo(() => ([
+    { value: '', label: '所有模块' },
+    ...catalogModuleItems,
+  ]), [catalogModuleItems]);
+
   return (
     <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4">
       {/* ==================== 顶部 Tab 导航 ==================== */}
@@ -744,7 +820,7 @@ function NotificationPage() {
           {notificationLoading && notificationChannels.length === 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {[...Array(4)].map((_, i) => (
-                <div key={i} className="app-card p-4 space-y-4">
+                <AppCard key={i} padding="none" className="space-y-4 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <SkeletonLine className="w-8 h-8 rounded-lg" />
                     <div className="flex-1 space-y-1.5">
@@ -753,7 +829,7 @@ function NotificationPage() {
                     </div>
                   </div>
                   <SkeletonLine className="w-full h-1" />
-                </div>
+                </AppCard>
               ))}
             </div>
           ) : notificationChannels.length === 0 ? (
@@ -767,9 +843,11 @@ function NotificationPage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {notificationChannels.map((channel) => (
-                <div
+                <AppCard
                   key={channel.id}
-                  className="app-card hover:border-kumo-brand p-4 transition-all flex flex-col justify-between min-h-[128px]"
+                  padding="none"
+                  interactive
+                  className="flex min-h-[128px] flex-col justify-between p-4 transition-all hover:border-kumo-brand"
                 >
                   <div className="flex items-start justify-between gap-3">
                     {/* Icon */}
@@ -832,7 +910,7 @@ function NotificationPage() {
                       {channel.enabled ? '启用中' : '已禁用'}
                     </span>
                   </div>
-                </div>
+                </AppCard>
               ))}
             </div>
           )}
@@ -849,11 +927,7 @@ function NotificationPage() {
               value={notificationRuleFilter}
               onValueChange={setNotificationRuleFilter}
               placeholder="所有模块"
-              items={[
-                { value: '', label: '所有模块' },
-                { value: 'uptime', label: 'Uptime 监测' },
-                { value: 'server', label: '主机实例' },
-              ]}
+              items={ruleFilterItems}
             />
 
             <Button
@@ -871,7 +945,7 @@ function NotificationPage() {
           {notificationLoading && notificationRules.length === 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {[...Array(3)].map((_, i) => (
-                <div key={i} className="app-card p-4 space-y-4">
+                <AppCard key={i} padding="none" className="space-y-4 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <SkeletonLine className="w-8 h-8 rounded-lg" />
                     <div className="flex-1 space-y-1.5">
@@ -880,7 +954,7 @@ function NotificationPage() {
                     </div>
                   </div>
                   <SkeletonLine className="w-full h-1" />
-                </div>
+                </AppCard>
               ))}
             </div>
           ) : filteredRules.length === 0 ? (
@@ -894,9 +968,11 @@ function NotificationPage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredRules.map((rule) => (
-                <div
+                <AppCard
                   key={rule.id}
-                  className="app-card hover:border-kumo-brand p-4 transition-all flex flex-col justify-between min-h-[148px]"
+                  padding="none"
+                  interactive
+                  className="flex min-h-[148px] flex-col justify-between p-4 transition-all hover:border-kumo-brand"
                 >
                   <div className="flex items-start justify-between gap-3">
                     {/* Severity Indicator */}
@@ -926,12 +1002,12 @@ function NotificationPage() {
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5 mt-2 flex-wrap select-none">
-                        <span className="text-[9px] app-subcard bg-kumo-recessed text-kumo-subtle px-1.5 py-0.5 rounded font-medium">
+                        <Badge className="bg-kumo-recessed text-[9px] font-medium text-kumo-subtle">
                           {getSourceModuleName(rule.source_module)}
-                        </span>
-                        <span className="text-[9px] app-subcard bg-kumo-recessed text-kumo-subtle px-1.5 py-0.5 rounded font-medium">
+                        </Badge>
+                        <Badge className="bg-kumo-recessed text-[9px] font-medium text-kumo-subtle">
                           {getEventTypeName(rule.event_type)}
-                        </span>
+                        </Badge>
                       </div>
                     </div>
 
@@ -1007,7 +1083,7 @@ function NotificationPage() {
                       </div>
                     )}
                   </div>
-                </div>
+                </AppCard>
               ))}
             </div>
           )}
@@ -1016,27 +1092,42 @@ function NotificationPage() {
 
       {/* ==================== 事件目录 Tab ==================== */}
       {notificationCurrentTab === 'events' && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="col-span-full flex flex-wrap items-center gap-2 text-[10px] text-kumo-subtle">
+            <Badge className="border border-kumo-brand/25 bg-kumo-brand/10 text-kumo-brand">↻ 动态消息</Badge>
+            <span>同一 Telegram 消息会随告警打开、变化和恢复持续更新；每次变化仍会写入通知历史。</span>
+          </div>
           {notificationEventCatalog.map((item) => (
-            <div key={item.module} className="app-card p-4">
-              <div className="flex items-center justify-between gap-3 border-b border-kumo-line pb-3">
-                <div className="flex items-center gap-2">
-                  <Info className="w-4 h-4 text-kumo-brand" />
-                  <h3 className="text-sm font-bold text-kumo-strong">{getSourceModuleName(item.module)}</h3>
-                </div>
-                <span className="text-[10px] font-mono text-kumo-subtle">{item.events?.length || 0}</span>
+            <SectionCard
+              key={item.module}
+              title={getSourceModuleName(item.module)}
+              icon={<Info className="w-4 h-4 text-kumo-brand" />}
+              meta={<span className="text-[10px] font-mono text-kumo-subtle">{item.events?.length || 0}</span>}
+              className="self-start"
+              bodyClassName="p-4"
+            >
+              <div className="flex flex-wrap gap-2">
+                {(item.events || []).map((eventName) => {
+                  const isDynamic = (item.dynamic_events || []).includes(eventName);
+                  return isDynamic ? (
+                    <Badge
+                      key={`${item.module}-${eventName}`}
+                      title="支持 Telegram 动态消息"
+                      className="border border-kumo-brand/25 bg-kumo-brand/10 text-[10px] font-semibold text-kumo-brand"
+                    >
+                      ↻ {getEventTypeName(eventName)}
+                    </Badge>
+                  ) : (
+                    <span
+                      key={`${item.module}-${eventName}`}
+                      className="rounded border border-kumo-line bg-kumo-recessed px-2 py-1 text-[10px] font-semibold text-kumo-subtle"
+                    >
+                      {getEventTypeName(eventName)}
+                    </span>
+                  );
+                })}
               </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {(item.events || []).map((eventName) => (
-                  <span
-                    key={`${item.module}-${eventName}`}
-                    className="rounded border border-kumo-line bg-kumo-recessed px-2 py-1 text-[10px] font-semibold text-kumo-subtle"
-                  >
-                    {getEventTypeName(eventName)}
-                  </span>
-                ))}
-              </div>
-            </div>
+            </SectionCard>
           ))}
         </div>
       )}
@@ -1086,13 +1177,13 @@ function NotificationPage() {
           {notificationLoading && notificationHistory.length === 0 ? (
             <div className="space-y-3">
               {[...Array(3)].map((_, i) => (
-                <div key={i} className="app-card p-4 space-y-3">
+                <AppCard key={i} padding="none" className="space-y-3 p-4">
                   <div className="flex items-center justify-between">
                     <SkeletonLine className="w-1/4 h-3.5" />
                     <SkeletonLine className="w-1/6 h-2.5" />
                   </div>
                   <SkeletonLine className="w-full h-12 rounded-md" />
-                </div>
+                </AppCard>
               ))}
             </div>
           ) : filteredHistory.length === 0 ? (
@@ -1103,9 +1194,10 @@ function NotificationPage() {
           ) : (
             <div className="flex flex-col gap-3">
               {filteredHistory.map((log) => (
-                <div
+                <AppCard
                   key={log.id}
-                  className="app-card p-4 flex items-start gap-3.5"
+                  padding="none"
+                  className="flex items-start gap-3.5 p-4"
                 >
                   {/* Status indicator pill */}
                   <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs flex-shrink-0 select-none ${
@@ -1127,10 +1219,35 @@ function NotificationPage() {
                         {new Date(log.created_at).toLocaleString()}
                       </span>
                     </div>
+                    {(() => {
+                      const lifecycleMeta = parseLifecycleHistoryMeta(log.data);
+                      if (!lifecycleMeta) return null;
+                      const mutationLabel = {
+                        open: '告警打开',
+                        refresh: '动态更新',
+                        resolve: '告警恢复',
+                      }[lifecycleMeta.mutation] || lifecycleMeta.mutation;
+                      return (
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          <Badge className="border border-kumo-brand/25 bg-kumo-brand/10 text-[9px] text-kumo-brand">
+                            ↻ {mutationLabel}
+                          </Badge>
+                          <span className="font-mono text-[9px] text-kumo-subtle">{lifecycleMeta.kind}</span>
+                          {lifecycleMeta.duration && (
+                            <span className="text-[9px] text-kumo-subtle">持续 {lifecycleMeta.duration}</span>
+                          )}
+                          {lifecycleMeta.changedFields.length > 0 && (
+                            <span className="text-[9px] text-kumo-subtle" title={lifecycleMeta.changedFields.join(', ')}>
+                              变化 {lifecycleMeta.changedFields.length} 项
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
                     {/* Message block */}
-                    <div className="text-xs text-kumo-subtle font-mono p-3 app-subcard bg-kumo-recessed rounded-md mt-2.5 whitespace-pre-wrap select-all">
+                    <AppCard padding="none" className="mt-2.5 whitespace-pre-wrap bg-kumo-recessed p-3 font-mono text-xs text-kumo-subtle">
                       {log.message}
-                    </div>
+                    </AppCard>
 
                     {/* Metadata indicators */}
                     {(log.error_message || log.retry_count > 0) && (
@@ -1148,7 +1265,7 @@ function NotificationPage() {
                       </div>
                     )}
                   </div>
-                </div>
+                </AppCard>
               ))}
             </div>
           )}
@@ -1157,11 +1274,13 @@ function NotificationPage() {
 
       {/* ==================== 4. 全局配置 Tab ==================== */}
       {notificationCurrentTab === 'settings' && (
-        <div className="app-card p-6 space-y-6">
-          <h3 className="text-sm font-semibold text-kumo-strong border-b border-kumo-line pb-3 select-none">
-            全局配置选项
-          </h3>
-
+        <SectionCard
+          title="全局配置选项"
+          description="配置通知聚合、限频与看板链接。"
+          icon={<Settings className="w-4 h-4 text-kumo-brand" />}
+          bodyClassName="space-y-6"
+          bodyPadding="xl"
+        >
           <div className="space-y-4">
             {/* Base URL */}
             <div className="space-y-1.5">
@@ -1223,12 +1342,12 @@ function NotificationPage() {
               保存全局配置
             </Button>
           </div>
-        </div>
+        </SectionCard>
       )}
 
       {/* ==================== 6. 弹窗 1: 添加/编辑通道 ==================== */}
       <Dialog.Root open={showChannelModal} onOpenChange={setShowChannelModal}>
-        <Dialog className="p-6 sm:max-w-lg">
+        <Dialog className="!w-[min(40rem,calc(100vw-2rem))] !max-w-[min(40rem,calc(100vw-2rem))] p-6">
           <Dialog.Title className="text-base font-bold text-kumo-strong mb-1 select-none">
             {channelForm.id ? '编辑通知渠道' : '新建通知渠道'}
           </Dialog.Title>
@@ -1337,9 +1456,15 @@ function NotificationPage() {
                   <label className="text-xs font-semibold text-kumo-subtle">SMTP 授权口令 / 应用密码 *</label>
                   <Input size="sm"
                     aria-label="SMTP 授权口令"
-                    type="password"
+                    type="text"
                     placeholder="your_smtp_app_password"
                     value={channelForm.config.auth.pass}
+                    autoComplete="off"
+                    data-1p-ignore
+                    data-lpignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    spellCheck={false}
                     onChange={(e) => setChannelForm(prev => ({
                       ...prev,
                       config: {
@@ -1415,6 +1540,21 @@ function NotificationPage() {
                     className="w-full font-mono"
                   />
                 </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-kumo-subtle">代理地址（可选）</label>
+                  <Input size="sm"
+                    aria-label="Telegram 代理地址"
+                    type="text"
+                    placeholder="例如：http://127.0.0.1:7890"
+                    value={channelForm.config.proxy_url || ''}
+                    onChange={(e) => setChannelForm(prev => ({
+                      ...prev,
+                      config: { ...prev.config, proxy_url: e.target.value }
+                    }))}
+                    className="w-full font-mono"
+                  />
+                </div>
               </>
             )}
 
@@ -1446,7 +1586,7 @@ function NotificationPage() {
 
       {/* ==================== 7. 弹窗 2: 添加/编辑规则 ==================== */}
       <Dialog.Root open={showRuleModal} onOpenChange={setShowRuleModal}>
-        <Dialog className="p-6 sm:max-w-xl">
+        <Dialog className="!w-[min(48rem,calc(100vw-2rem))] !max-w-[min(48rem,calc(100vw-2rem))] p-6">
           <Dialog.Title className="text-base font-bold text-kumo-strong mb-1 select-none">
             {ruleForm.id ? '编辑告警规则' : '添加告警规则'}
           </Dialog.Title>
@@ -1512,7 +1652,7 @@ function NotificationPage() {
             {/* Target Delivery Channels Checkboxes */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-kumo-subtle">发送通知的渠道 *</label>
-              <div className="flex flex-wrap gap-2.5 p-3.5 app-subcard bg-kumo-recessed/50">
+              <AppCard padding="none" className="flex flex-wrap gap-2.5 bg-kumo-recessed/50 p-3.5">
                 {notificationChannels.filter(c => c.enabled).map((channel) => (
                   <Checkbox
                     key={channel.id}
@@ -1529,7 +1669,7 @@ function NotificationPage() {
                     label={channel.name}
                   />
                 ))}
-              </div>
+              </AppCard>
             </div>
 
             {/* Repeats & Cooldown Suppression */}
@@ -1568,7 +1708,7 @@ function NotificationPage() {
             {/* Backup Notification Channels Checkboxes */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-kumo-subtle">首选失败时的备用通知渠道</label>
-              <div className="flex flex-wrap gap-2.5 p-3.5 app-subcard bg-kumo-recessed/50">
+              <AppCard padding="none" className="flex flex-wrap gap-2.5 bg-kumo-recessed/50 p-3.5">
                 {notificationChannels.filter(c => c.enabled).map((channel) => (
                   <Checkbox
                     key={`backup_${channel.id}`}
@@ -1585,7 +1725,7 @@ function NotificationPage() {
                     label={channel.name}
                   />
                 ))}
-              </div>
+              </AppCard>
             </div>
 
             {/* Custom Template Titles */}
@@ -1617,7 +1757,7 @@ function NotificationPage() {
               <label className="text-xs font-semibold text-kumo-subtle">自定义内容模板 (可选)</label>
               <Textarea
                 aria-label="自定义内容模板"
-                placeholder="例: 服务 {{monitorName}} 无法连通，出错原因: {{error}}"
+                placeholder={'状态: 故障\n监控项: {{monitorName}}\n地址: {{url}}\n错误原因: {{error}}\n时间: {{time}}'}
                 value={ruleForm.message_template}
                 onChange={(e) => setRuleForm(prev => ({ ...prev, message_template: e.target.value }))}
                 className="w-full min-h-16"
@@ -1625,15 +1765,26 @@ function NotificationPage() {
             </div>
 
             {templatePreview && (
-              <div className="rounded-lg border border-kumo-line bg-kumo-recessed/50 p-3">
-                <div className="text-[11px] font-bold text-kumo-strong">模板预览</div>
-                <div className="mt-2 rounded border border-kumo-line bg-kumo-base p-2 text-xs font-semibold text-kumo-strong">
-                  {templatePreview.title}
+              <div className="overflow-hidden rounded-lg border border-kumo-line bg-kumo-base">
+                <div className="h-1 bg-kumo-brand" />
+                <div className="p-3.5">
+                  <div className="text-[9px] font-bold uppercase text-kumo-brand">API Monitor</div>
+                  <div className="mt-1 text-xs font-bold text-kumo-strong">{templatePreview.title}</div>
+                  <div className="mt-3 max-h-36 space-y-1 overflow-y-auto border-l-2 border-kumo-brand bg-kumo-recessed/60 px-3 py-2">
+                    {(templatePreview.message || '').split('\n').map((line, index) => {
+                      const item = parseNotificationPreviewLine(line);
+                      if (item.empty) return <div key={`empty-${index}`} className="h-1.5" />;
+                      if (!item.label) return <div key={`line-${index}`} className="text-[11px] leading-relaxed text-kumo-subtle">{item.value}</div>;
+                      return (
+                        <div key={`${item.label}-${index}`} className="grid grid-cols-[88px_minmax(0,1fr)] gap-2 text-[11px] leading-relaxed">
+                          <span className="text-kumo-subtle">{item.label}</span>
+                          <span className={`min-w-0 break-words font-semibold text-kumo-strong ${item.code ? 'font-mono text-[10px]' : ''}`}>{item.value}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-                <div className="mt-2 max-h-28 overflow-y-auto whitespace-pre-wrap rounded border border-kumo-line bg-kumo-base p-2 font-mono text-[11px] leading-relaxed text-kumo-subtle">
-                  {templatePreview.message}
-                </div>
-                <div className="mt-2 flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-1.5 px-3.5 pb-3.5">
                   {(templatePreview.variables || []).map((variable) => (
                     <span key={variable} className="rounded border border-kumo-line bg-kumo-base px-1.5 py-0.5 font-mono text-[9px] text-kumo-subtle">
                       {`{{${variable}}}`}

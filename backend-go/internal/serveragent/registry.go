@@ -34,7 +34,7 @@ type ConnectionRegistry struct {
 func NewConnectionRegistry() *ConnectionRegistry {
 	registry := &ConnectionRegistry{
 		connections:      make(map[string]*AgentConnection),
-		heartbeatTimeout: 30 * time.Second,
+		heartbeatTimeout: envDurationMs("API_MONITOR_AGENT_REGISTRY_STALE_AFTER_MS", 120*time.Second),
 		cleanupInterval:  60 * time.Second,
 		stopCh:           make(chan struct{}),
 	}

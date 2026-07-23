@@ -1,12 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Input } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Switch } from '@cloudflare/kumo/components/switch';
-import { LayerCard } from '@cloudflare/kumo';
 import { toast } from '../modules/toast.js';
 import { Download, FileText, RefreshCw, Search } from '../components/Icons.jsx';
+import { SectionCard } from '../components/ui/AppPrimitives.jsx';
 
 const LEVELS = [
   { value: 'all', label: '全部' },
@@ -20,11 +20,98 @@ function authHeaders() {
   return { 'x-admin-password': localStorage.getItem('admin_password') || '' };
 }
 
-function variant(level) {
-  if (level === 'ERROR') return 'error';
-  if (level === 'WARN') return 'warning';
-  if (level === 'INFO') return 'info';
-  return 'secondary';
+function levelClass(level) {
+  if (level === 'ERROR' || level === 'FATAL') return 'app-log-danger';
+  if (level === 'WARN') return 'app-log-warning';
+  if (level === 'DEBUG') return 'app-log-info';
+  if (level === 'INFO') return 'app-log-success';
+  return 'app-log-muted';
+}
+
+function formatLogTime(value) {
+  if (!value) return '--:--:--';
+  const date = new Date(value);
+  if (!Number.isNaN(date.getTime())) {
+    return date.toLocaleTimeString('zh-CN', { hour12: false });
+  }
+  const match = String(value).match(/T?(\d{2}:\d{2}:\d{2})/);
+  return match ? match[1] : String(value).slice(0, 8);
+}
+
+function parseRawLog(line) {
+  const raw = line.raw || '';
+  const match = raw.match(/^(\[[^\]]+\])\s+(\S+)\s+\[([A-Z]+)\]\s+\[([^\]]+)\]\s*(.*)$/);
+  const message = line.message || raw;
+  if (!match) {
+    return {
+      source: raw.match(/^(\[[^\]]+\])/)?.[1] || '[backend]',
+      time: formatLogTime(line.time),
+      level: line.level || 'RAW',
+      module: line.module || '-',
+      message: formatDisplayMessage(message),
+    };
+  }
+  return {
+    source: match[1],
+    time: match[2],
+    level: match[3],
+    module: match[4],
+    message: formatDisplayMessage(match[5]),
+  };
+}
+
+function formatDisplayMessage(message) {
+  return String(message || '')
+    .replace(/\s+status=(\d{3})\s+duration=(\d+ms)\b/g, ' - $1 ($2)')
+    .replace(/\s+duration=(\d+ms)\b/g, ' ($1)')
+    .replace(/\s+status=(\d{3})\b/g, ' - $1');
+}
+
+function durationTone(value) {
+  const duration = Number(String(value).match(/\d+/)?.[0]);
+  if (!Number.isFinite(duration)) return 'app-log-muted';
+  if (duration >= 3000) return 'app-log-danger';
+  if (duration >= 1000) return 'app-log-warning';
+  return 'app-log-success';
+}
+
+function statusTone(value) {
+  const status = Number(String(value).match(/\d{3}/)?.[0]);
+  if (!Number.isFinite(status)) return 'app-log-muted';
+  if (status >= 500) return 'app-log-danger';
+  if (status >= 400) return 'app-log-warning';
+  if (status >= 300) return 'app-log-info';
+  return 'app-log-success';
+}
+
+function renderMessageParts(message) {
+  const text = String(message || '');
+  const tokenPattern = /\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b|status=\d{3}|\b\d{3}\b|duration=\d+ms|\(\d+ms\)|\bsession_id=[^\s]+|\bserver_id=[^\s]+/g;
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = tokenPattern.exec(text)) !== null) {
+    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
+    const token = match[0];
+    let className = 'app-log-text';
+    if (/^(GET|HEAD|OPTIONS)$/.test(token)) className = 'app-log-info font-semibold';
+    else if (/^(POST|PUT|PATCH)$/.test(token)) className = 'app-log-success font-semibold';
+    else if (/^DELETE$/.test(token)) className = 'app-log-danger font-semibold';
+    else if (/^(status=)?\d{3}$/.test(token)) className = `${statusTone(token)} font-semibold`;
+    else if (/^(duration=|\()\d+ms\)?$/.test(token)) className = `${durationTone(token)} font-semibold`;
+    else if (/^(session_id|server_id)=/.test(token)) className = 'app-log-muted';
+
+    parts.push(
+      <span key={`${token}-${match.index}`} className={className}>
+        {token}
+      </span>
+    );
+    lastIndex = match.index + token.length;
+  }
+
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+  return parts;
 }
 
 export default function SystemLogsPage() {
@@ -34,6 +121,8 @@ export default function SystemLogsPage() {
   const [logPath, setLogPath] = useState('');
   const [loading, setLoading] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const logViewportRef = useRef(null);
 
   const load = async () => {
     setLoading(true);
@@ -78,58 +167,77 @@ export default function SystemLogsPage() {
     return () => window.clearInterval(timer);
   }, [autoRefresh, level, query]);
 
+  const renderedLines = useMemo(() => lines.map(parseRawLog), [lines]);
+
+  useEffect(() => {
+    if (!autoScroll || !logViewportRef.current) return;
+    logViewportRef.current.scrollTop = logViewportRef.current.scrollHeight;
+  }, [autoScroll, renderedLines]);
+
   return (
-    <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4">
-      <LayerCard className="p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-kumo-line pb-3">
-          <div className="min-w-0">
-            <h1 className="text-lg font-semibold text-kumo-strong">系统日志</h1>
-            <p className="mt-1 truncate text-xs text-kumo-subtle">{logPath || '查看、筛选并下载 Go 后端应用日志。'}</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col gap-3 overflow-hidden px-px py-px sm:gap-4">
+      <SectionCard
+        className="shrink-0"
+        title="系统日志"
+        description={logPath || '查看、筛选并下载 Go 后端应用日志。'}
+        icon={<FileText className="h-4 w-4 text-kumo-brand" />}
+        actions={(
+          <>
             <Badge variant="secondary">{lines.length} 条</Badge>
             <label className="flex h-8 items-center gap-2 rounded-md border border-kumo-line bg-kumo-recessed px-2 text-xs text-kumo-subtle">
               <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />
               自动刷新
             </label>
+            <label className="flex h-8 items-center gap-2 rounded-md border border-kumo-line bg-kumo-recessed px-2 text-xs text-kumo-subtle">
+              <Switch checked={autoScroll} onCheckedChange={setAutoScroll} />
+              跟随底部
+            </label>
             <Button size="sm" variant="secondary" onClick={download} icon={<Download className="h-3.5 w-3.5" />}>下载</Button>
             <Button size="sm" variant="primary" onClick={load} loading={loading} icon={<RefreshCw className="h-3.5 w-3.5" />}>刷新</Button>
-          </div>
-        </div>
-
-        <div className="mt-3 grid gap-3 md:grid-cols-[11rem_minmax(0,1fr)_auto] md:items-end">
+          </>
+        )}
+      >
+        <div className="grid gap-3 md:grid-cols-[11rem_minmax(0,1fr)_auto] md:items-end">
           <Select size="sm" label="级别" className="w-full" value={level} onValueChange={setLevel} items={LEVELS} />
           <Input size="sm" label="关键字 / 正则" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && load()} placeholder="输入关键字或正则后回车" />
           <Button size="sm" variant="secondary" onClick={load} icon={<Search className="h-3.5 w-3.5" />}>检索</Button>
         </div>
-      </LayerCard>
+      </SectionCard>
 
-      <section className="overflow-hidden rounded-md border border-kumo-line bg-zinc-950 text-zinc-100 shadow-none">
-        <div className="grid border-b border-white/10 bg-white/5 px-3 py-2 font-mono text-[11px] uppercase tracking-normal text-zinc-500 md:grid-cols-[4.5rem_10rem_7rem_minmax(0,1fr)]">
-          <span>级别</span>
-          <span>时间</span>
-          <span>模块</span>
-          <span>消息</span>
-        </div>
+      <SectionCard
+        className="flex min-h-0 flex-1"
+        title={logPath || 'app.log'}
+        icon={<FileText className="h-4 w-4 text-kumo-brand" />}
+        meta={<span className="text-[10px] font-mono text-kumo-subtle">{lines.length} lines</span>}
+        bodyPadding="none"
+        bodyClassName="app-terminal-surface app-log-surface flex min-h-0 flex-1 flex-col"
+      >
         {lines.length === 0 ? (
-          <div className="flex min-h-80 flex-col items-center justify-center gap-2 px-6 py-12 text-center text-zinc-500">
+          <div className="app-log-muted flex flex-1 min-h-0 flex-col items-center justify-center gap-2 px-6 py-12 text-center">
             <FileText className="h-8 w-8" />
-            <div className="text-sm font-semibold text-zinc-300">暂无日志</div>
+            <div className="app-log-text text-sm font-semibold">暂无日志</div>
             <div className="text-xs">调整筛选条件或刷新后再查看。</div>
           </div>
         ) : (
-          <div className="max-h-[calc(100vh-19rem)] min-h-[26rem] overflow-auto px-3 font-mono text-xs">
-            {lines.map((line, index) => (
-              <div key={`${line.time}-${index}`} className="grid gap-2 border-b border-white/5 py-1.5 md:grid-cols-[4.5rem_10rem_7rem_minmax(0,1fr)]">
-                <Badge variant={variant(line.level)}>{line.level || 'RAW'}</Badge>
-                <span className="truncate text-zinc-400">{line.time || '-'}</span>
-                <span className="truncate text-zinc-400">{line.module || '-'}</span>
-                <span className={`min-w-0 whitespace-pre-wrap break-words ${line.matched ? 'bg-yellow-500/20 text-yellow-100' : 'text-zinc-100'}`} title={line.raw}>{line.message || line.raw}</span>
+          <div ref={logViewportRef} className="app-log-viewport min-h-0 flex-1 overflow-auto px-3 py-2 font-mono text-xs leading-5">
+            {renderedLines.map((line, index) => (
+              <div
+                key={`${line.time}-${index}`}
+                className="app-log-row min-w-max whitespace-pre py-0.5"
+                title={lines[index]?.raw}
+              >
+                <span className="app-log-source mr-2 font-semibold">{line.source}</span>
+                <span className="app-log-muted mr-2">{line.time}</span>
+                <span className={`mr-2 font-semibold ${levelClass(line.level)}`}>[{line.level}]</span>
+                <span className="app-log-module mr-2 font-semibold">[{line.module}]</span>
+                <span className={lines[index]?.matched ? 'app-log-match' : 'app-log-text'}>
+                  {renderMessageParts(line.message)}
+                </span>
               </div>
             ))}
           </div>
         )}
-      </section>
+      </SectionCard>
     </div>
   );
 }

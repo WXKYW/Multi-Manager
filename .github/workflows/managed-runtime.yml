@@ -1,0 +1,84 @@
+name: Build managed sing-box runtime
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - dev
+    paths:
+      - .github/workflows/managed-runtime.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: managed-runtime-v1.13.14
+  cancel-in-progress: false
+
+env:
+  SING_BOX_VERSION: 1.13.14
+  SING_BOX_REVISION: 25a600db24f7680ad9806ce5427bd0ab8afe1114
+  GO_VERSION: 1.26.4
+  BUILD_TAGS: with_v2ray_api,with_quic,with_utls,with_acme,with_clash_api
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout control plane
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.2.2
+
+      - name: Set up pinned Go toolchain
+        uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v5.2.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Checkout audited sing-box revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout https://github.com/SagerNet/sing-box.git upstream-sing-box
+          git -C upstream-sing-box checkout --detach "$SING_BOX_REVISION"
+          test "$(git -C upstream-sing-box rev-parse HEAD)" = "$SING_BOX_REVISION"
+
+      - name: Build reproducible Linux runtimes
+        shell: bash
+        working-directory: upstream-sing-box
+        run: |
+          set -euo pipefail
+          mkdir -p ../managed-runtime-dist
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build \
+              -trimpath -buildvcs=false -tags "$BUILD_TAGS" \
+              -o "../managed-runtime-dist/sing-box-${SING_BOX_VERSION}-linux-${arch}" \
+              ./cmd/sing-box
+          done
+
+      - name: Verify pinned digests and required build tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd managed-runtime-dist
+          sha256sum sing-box-*
+          echo '094568655c7324de08bbeb108df886950f76b4dc164e1e5bc08e64219f1af727  sing-box-1.13.14-linux-amd64' | sha256sum --check --strict
+          echo 'fd19a07696593307c14133ae0ebed2e089523424b3f2ab2ea74aa206661f7131  sing-box-1.13.14-linux-arm64' | sha256sum --check --strict
+          chmod 0755 sing-box-*
+          ./sing-box-1.13.14-linux-amd64 version | grep -F with_v2ray_api
+          sha256sum sing-box-* > SHA256SUMS
+
+      - name: Publish immutable managed runtime release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.2.1
+        with:
+          tag_name: managed-runtime-v1.13.14
+          name: Managed sing-box runtime v1.13.14
+          body: |
+            Reproducible sing-box v1.13.14 builds pinned to revision 25a600db24f7680ad9806ce5427bd0ab8afe1114.
+            Build tags add the loopback-only V2Ray statistics interface required for per-subscriber accounting.
+          files: |
+            managed-runtime-dist/sing-box-1.13.14-linux-amd64
+            managed-runtime-dist/sing-box-1.13.14-linux-arm64
+            managed-runtime-dist/SHA256SUMS
+          fail_on_unmatched_files: true
+          prerelease: false
+          make_latest: false

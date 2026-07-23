@@ -259,12 +259,12 @@ func (s *Service) buildNetworkQualityPayload(ctx context.Context, db *sql.DB, se
 			"data": data,
 		})
 		summary = append(summary, map[string]interface{}{
-			"name":       name,
+			"name":        name,
 			"sampleCount": len(targetSamples),
-			"avgLatency": avgLatency,
-			"lossRate":   lossRate,
-			"jitterMs":   jitterMs,
-			"latest":     latest,
+			"avgLatency":  avgLatency,
+			"lossRate":    lossRate,
+			"jitterMs":    jitterMs,
+			"latest":      latest,
 		})
 	}
 
@@ -423,6 +423,18 @@ func (s *Service) PushNetworkTargetsToAllAgents(ctx context.Context) {
 }
 
 func (s *Service) processAgentNetworkQuality(ctx context.Context, db *sql.DB, serverID string, nqData interface{}) {
+	s.processAgentNetworkQualityWithOptions(ctx, db, serverID, nqData, false)
+}
+
+func (s *Service) processAgentNetworkQualityForced(ctx context.Context, db *sql.DB, serverID string, nqData interface{}) {
+	s.processAgentNetworkQualityWithOptions(ctx, db, serverID, nqData, true)
+}
+
+func (s *Service) processAgentNetworkQualityWithOptions(ctx context.Context, db *sql.DB, serverID string, nqData interface{}, force bool) {
+	if !force && !s.shouldPersistNetworkQuality(serverID, time.Now()) {
+		return
+	}
+
 	m, ok := nqData.(map[string]interface{})
 	if !ok || m == nil {
 		return
@@ -450,7 +462,7 @@ func (s *Service) processAgentNetworkQuality(ctx context.Context, db *sql.DB, se
 		portFloat, _ := res["port"].(float64)
 		port := int(portFloat)
 		success, _ := res["success"].(bool)
-		
+
 		var latencyMS float64
 		if latVal, exists := res["latency_ms"]; exists && latVal != nil {
 			latencyMS, _ = latVal.(float64)

@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
-import { Input, Textarea } from '@cloudflare/kumo/components/input';
+import { Input } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
-import { LayerCard, Tabs } from '@cloudflare/kumo';
+import { Tabs } from '@cloudflare/kumo';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
 import useStore, {
@@ -13,9 +13,12 @@ import useStore, {
   MODULE_CONFIG,
   MODULE_GROUPS,
   applyCustomCss,
+  getGroupModuleIds,
   normalizeUserSettings,
 } from '../store.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
+import { AppCard, SectionCard, cx } from '../components/ui/AppPrimitives.jsx';
+import CodeEditor from '../components/ui/CodeEditor.jsx';
 import { BackupPanel } from './BackupPage.jsx';
 import {
   Activity,
@@ -23,8 +26,6 @@ import {
   Check,
   Database,
   Download,
-  Eye,
-  EyeOff,
   FileText,
   Globe,
   HardDrive,
@@ -32,6 +33,7 @@ import {
   Lock,
   RefreshCw,
   Save,
+  Search,
   Settings,
   Shield,
   Sun,
@@ -63,31 +65,19 @@ const PAGE_WIDTH_OPTIONS = [
   { value: 'full', label: '全宽' },
 ];
 
-const LOAD_BALANCING_OPTIONS = [
-  { value: 'random', label: '随机' },
-  { value: 'round_robin', label: '轮询' },
-];
-
-const SERVER_IP_DISPLAY_OPTIONS = [
-  { value: 'normal', label: '明文' },
-  { value: 'masked', label: '打码' },
-  { value: 'hidden', label: '隐藏' },
-];
-
-const TOTP_INPUT_MODE_OPTIONS = [
-  { value: 'scan', label: '扫码导入' },
-  { value: 'upload', label: '上传二维码' },
-  { value: 'manual', label: '手动录入' },
+const TIMEZONE_OPTIONS = [
+  { value: 'system', label: '跟随服务器' },
+  { value: 'UTC', label: 'UTC' },
+  { value: 'Asia/Shanghai', label: '中国标准时间 (Asia/Shanghai)' },
+  { value: 'Asia/Tokyo', label: '日本时间 (Asia/Tokyo)' },
+  { value: 'Asia/Singapore', label: '新加坡时间 (Asia/Singapore)' },
+  { value: 'Europe/London', label: '伦敦时间 (Europe/London)' },
+  { value: 'Europe/Berlin', label: '柏林时间 (Europe/Berlin)' },
+  { value: 'America/New_York', label: '纽约时间 (America/New_York)' },
+  { value: 'America/Los_Angeles', label: '洛杉矶时间 (America/Los_Angeles)' },
 ];
 
 
-
-const GROUP_LABELS = {
-  overview: '总览',
-  'api-gateway': 'API 网关',
-  infrastructure: '云服务',
-  toolbox: '工具箱',
-};
 
 const getAuthHeaders = () => ({
   'Content-Type': 'application/json',
@@ -111,38 +101,19 @@ const toInt = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const moveItem = (items, fromIndex, toIndex) => {
-  const next = [...items];
-  const [item] = next.splice(fromIndex, 1);
-  next.splice(toIndex, 0, item);
-  return next;
-};
-
 const moduleRows = DEFAULT_MODULE_ORDER.map((moduleId) => {
-  const group = MODULE_GROUPS.find((item) => item.modules.includes(moduleId));
+  const group = MODULE_GROUPS.find((item) => getGroupModuleIds(item).includes(moduleId));
   return {
     id: moduleId,
     groupId: group?.id || 'other',
-    groupName: GROUP_LABELS[group?.id] || group?.name || '其他',
+    groupName: group?.name || '其他模块',
     config: MODULE_CONFIG[moduleId] || { name: moduleId },
   };
 });
 
-function SectionHeader({ title, description, actions }) {
-  return (
-    <div className="flex flex-col gap-3 border-b border-kumo-line p-5 sm:flex-row sm:items-start sm:justify-between">
-      <div className="min-w-0">
-        <h2 className="text-base font-bold text-kumo-strong">{title}</h2>
-        {description && <p className="mt-1 text-xs leading-relaxed text-kumo-subtle">{description}</p>}
-      </div>
-      {actions && <div className="flex shrink-0 flex-wrap gap-2">{actions}</div>}
-    </div>
-  );
-}
-
 function FieldRow({ title, description, children }) {
   return (
-    <div className="grid gap-3 border-b border-kumo-line px-5 py-4 last:border-b-0 md:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)] md:items-center">
+    <div className="grid gap-3 border-b border-kumo-line px-4 py-3 last:border-b-0 md:grid-cols-[minmax(0,1fr)_minmax(14rem,20rem)] md:items-center">
       <div className="min-w-0">
         <div className="text-sm font-semibold text-kumo-strong">{title}</div>
         {description && <div className="mt-1 text-xs leading-relaxed text-kumo-subtle">{description}</div>}
@@ -154,7 +125,7 @@ function FieldRow({ title, description, children }) {
 
 function StatCard({ label, value, hint, icon: Icon }) {
   return (
-    <LayerCard className="p-5">
+    <AppCard padding="lg">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="text-[11px] font-semibold uppercase tracking-normal text-kumo-subtle">{label}</div>
@@ -167,19 +138,78 @@ function StatCard({ label, value, hint, icon: Icon }) {
           </div>
         )}
       </div>
-    </LayerCard>
+    </AppCard>
   );
 }
 
-function ToggleLine({ title, description, checked, onCheckedChange, disabled = false }) {
+function SummaryMetricCard({ label, value, hint, tone = 'default', compact = false }) {
+  const valueToneClass = {
+    default: 'text-kumo-strong',
+    brand: 'text-kumo-brand',
+    warning: 'text-kumo-warning',
+    info: 'text-kumo-info',
+    success: 'text-kumo-success',
+    danger: 'text-kumo-danger',
+  };
+
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-kumo-line py-4 last:border-b-0">
-      <div className="min-w-0">
-        <div className="text-sm font-semibold text-kumo-strong">{title}</div>
-        {description && <div className="mt-1 text-xs leading-relaxed text-kumo-subtle">{description}</div>}
+    <AppCard
+      padding={compact ? 'sm' : 'md'}
+      className={cx(
+        'flex min-w-0',
+        compact ? 'min-h-[4.5rem] flex-col items-start justify-center gap-1.5' : 'flex-col gap-1',
+      )}
+    >
+      <span className={cx('font-bold uppercase tracking-wider text-kumo-subtle', compact ? 'text-[11px] leading-none' : 'text-[10px]')}>
+        {label}
+      </span>
+      <span className={cx('font-mono font-bold leading-none', compact ? 'text-lg sm:text-base' : 'text-xl', valueToneClass[tone] || valueToneClass.default)}>
+        {value}
+      </span>
+      {!compact && hint ? <span className="truncate text-[11px] text-kumo-subtle">{hint}</span> : null}
+    </AppCard>
+  );
+}
+
+function MaintenanceActionCard({
+  title,
+  description,
+  icon,
+  tone = 'default',
+  meta,
+  children,
+}) {
+  const toneClassName = {
+    default: 'border-kumo-line/80 bg-kumo-recessed/15',
+    brand: 'border-kumo-brand/15 bg-kumo-brand/5',
+    danger: 'border-kumo-danger/20 bg-kumo-danger/5',
+    warning: 'border-kumo-warning/20 bg-kumo-warning/5',
+  };
+  const compact = !description;
+
+  return (
+    <AppCard
+      padding="md"
+      className={cx(
+        'flex min-h-[102px] min-w-0 flex-col gap-2 border',
+        compact ? 'justify-center' : '',
+        toneClassName[tone] || toneClassName.default,
+      )}
+    >
+      <div className={cx('flex justify-between gap-3', compact ? 'items-center' : 'items-start')}>
+        <div className={cx('flex min-w-0 gap-3', compact ? 'items-center' : 'items-start')}>
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-kumo-line/70 bg-kumo-base text-kumo-brand">
+            {icon}
+          </div>
+          <div className={cx('min-w-0', compact ? 'flex min-h-7 items-center' : '')}>
+            <div className={cx('truncate text-sm font-semibold text-kumo-strong', compact ? 'leading-none' : '')}>{title}</div>
+            {description ? <div className="mt-1 text-xs leading-relaxed text-kumo-subtle">{description}</div> : null}
+          </div>
+        </div>
+        {meta ? <div className={cx('shrink-0', compact ? 'flex min-h-7 items-center' : '')}>{meta}</div> : null}
       </div>
-      <Switch checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} />
-    </div>
+      <div className={cx(compact ? 'pt-0.5' : 'mt-auto')}>{children}</div>
+    </AppCard>
   );
 }
 
@@ -190,6 +220,9 @@ function SettingsPage() {
     setThemeMode,
     pageWidthMode,
     setPageWidthMode,
+    setDashboardFooterVisible,
+    setDashboardFooterRecordNumber,
+    setVibrationEnabled,
     applyUserSettings,
     loadUserSettings,
     logout,
@@ -199,8 +232,10 @@ function SettingsPage() {
   const fileInputRef = useRef(null);
   const [activeTab, setActiveTab] = useState('general');
   const [settings, setSettings] = useState(() => normalizeUserSettings());
+  const [settingsPatch, setSettingsPatch] = useState({});
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsSaving, setSettingsSaving] = useState(false);
+  const [moduleSearch, setModuleSearch] = useState('');
 
 
 
@@ -227,6 +262,7 @@ function SettingsPage() {
   const [dbAnalysis, setDbAnalysis] = useState(null);
   const [deprecatedTables, setDeprecatedTables] = useState(null);
   const [databaseBusy, setDatabaseBusy] = useState(false);
+  const [databaseLoaded, setDatabaseLoaded] = useState(false);
   const [dbImportPreview, setDbImportPreview] = useState(null);
 
   const [logSettings, setLogSettings] = useState({
@@ -238,6 +274,8 @@ function SettingsPage() {
   const [logFileInfo, setLogFileInfo] = useState(null);
   const [operationLogs, setOperationLogs] = useState([]);
   const [logsBusy, setLogsBusy] = useState(false);
+  const [logsLoaded, setLogsLoaded] = useState(false);
+  const [twoFALoaded, setTwoFALoaded] = useState(false);
 
   const currentOrigin = useMemo(() => {
     if (typeof window === 'undefined') return 'http://localhost';
@@ -248,19 +286,18 @@ function SettingsPage() {
     if (dbAnalysis?.tables?.length) return dbAnalysis.tables;
     return Object.entries(dbStats?.tables || {}).map(([table, rows]) => ({ table, rows }));
   }, [dbAnalysis, dbStats]);
+  const formatTableRows = useCallback((rows) => {
+    const value = Number(rows);
+    return Number.isFinite(value) && value >= 0 ? value : '-';
+  }, []);
+  const formatTableMetricSize = useCallback((value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? formatFileSize(parsed) : '-';
+  }, []);
 
   const patchSettings = useCallback((patch) => {
     setSettings((prev) => normalizeUserSettings({ ...prev, ...patch }));
-  }, []);
-
-  const updateTotpSetting = useCallback((key, value) => {
-    setSettings((prev) => normalizeUserSettings({
-      ...prev,
-      totpSettings: {
-        ...prev.totpSettings,
-        [key]: value,
-      },
-    }));
+    setSettingsPatch((prev) => ({ ...prev, ...patch }));
   }, []);
 
   const handleThemeModeChange = useCallback((value) => {
@@ -275,48 +312,77 @@ function SettingsPage() {
     patchSettings({ pageWidthMode: nextMode });
   }, [patchSettings, setPageWidthMode]);
 
+  const handleVibrationEnabledChange = useCallback((checked) => {
+    setVibrationEnabled(checked);
+    patchSettings({ vibrationEnabled: Boolean(checked) });
+  }, [patchSettings, setVibrationEnabled]);
+
+  const handleDashboardFooterVisibleChange = useCallback((checked) => {
+    setDashboardFooterVisible(checked);
+    patchSettings({ dashboardFooterVisible: Boolean(checked) });
+  }, [patchSettings, setDashboardFooterVisible]);
+
+  const handleDashboardFooterRecordNumberChange = useCallback((event) => {
+    const recordNumber = event.target.value;
+    setDashboardFooterRecordNumber(recordNumber);
+    patchSettings({ dashboardFooterRecordNumber: recordNumber });
+  }, [patchSettings, setDashboardFooterRecordNumber]);
+
   const fetchSettings = useCallback(async () => {
     const response = await fetch('/api/settings', { headers: getAuthHeaders() });
     const result = await response.json();
     if (!response.ok || !result.success) throw new Error(result.error || '加载用户设置失败');
     const normalized = normalizeUserSettings(result.data || {});
     setSettings(normalized);
+    setSettingsPatch({});
     applyUserSettings(normalized);
     return normalized;
   }, [applyUserSettings]);
 
   const fetchDbState = useCallback(async () => {
-    const [statsResponse, analysisResponse, deprecatedResponse] = await Promise.all([
-      fetch('/api/settings/database-stats', { headers: getAuthHeaders() }),
-      fetch('/api/settings/database-analysis', { headers: getAuthHeaders() }),
-      fetch('/api/settings/deprecated-tables', { headers: getAuthHeaders() }),
-    ]);
+    setDatabaseBusy(true);
+    try {
+      const [statsResponse, analysisResponse, deprecatedResponse] = await Promise.all([
+        fetch('/api/settings/database-stats', { headers: getAuthHeaders() }),
+        fetch('/api/settings/database-analysis?deep=1', { headers: getAuthHeaders() }),
+        fetch('/api/settings/deprecated-tables', { headers: getAuthHeaders() }),
+      ]);
 
-    const statsResult = await statsResponse.json();
-    if (statsResult.success) setDbStats(statsResult.data);
+      const statsResult = await statsResponse.json();
+      if (statsResult.success) setDbStats(statsResult.data);
 
-    const analysisResult = await analysisResponse.json();
-    if (analysisResult.success) setDbAnalysis(analysisResult.data);
+      const analysisResult = await analysisResponse.json();
+      if (analysisResult.success) setDbAnalysis(analysisResult.data);
 
-    const deprecatedResult = await deprecatedResponse.json();
-    if (deprecatedResult.success) setDeprecatedTables(deprecatedResult.data);
+      const deprecatedResult = await deprecatedResponse.json();
+      if (deprecatedResult.success) setDeprecatedTables(deprecatedResult.data);
+      setDatabaseLoaded(true);
+    } finally {
+      setDatabaseBusy(false);
+    }
   }, []);
 
   const fetchLogState = useCallback(async () => {
-    const [logSettingsResponse, operationLogsResponse] = await Promise.all([
-      fetch('/api/settings/log-settings', { headers: getAuthHeaders() }),
-      fetch('/api/settings/operation-logs', { headers: getAuthHeaders() }),
-    ]);
+    setLogsBusy(true);
+    try {
+      const [logSettingsResponse, operationLogsResponse] = await Promise.all([
+        fetch('/api/settings/log-settings', { headers: getAuthHeaders() }),
+        fetch('/api/settings/operation-logs', { headers: getAuthHeaders() }),
+      ]);
 
-    const logSettingsResult = await logSettingsResponse.json();
-    if (logSettingsResult.success) {
-      setLogSettings(logSettingsResult.data);
-      setLogFileInfo(logSettingsResult.fileInfo || null);
-    }
+      const logSettingsResult = await logSettingsResponse.json();
+      if (logSettingsResult.success) {
+        setLogSettings(logSettingsResult.data);
+        setLogFileInfo(logSettingsResult.fileInfo || null);
+      }
 
-    const operationLogsResult = await operationLogsResponse.json();
-    if (operationLogsResult.success) {
-      setOperationLogs(operationLogsResult.data || []);
+      const operationLogsResult = await operationLogsResponse.json();
+      if (operationLogsResult.success) {
+        setOperationLogs(operationLogsResult.data || []);
+      }
+      setLogsLoaded(true);
+    } finally {
+      setLogsBusy(false);
     }
   }, []);
 
@@ -325,44 +391,78 @@ function SettingsPage() {
     const result = await response.json();
     if (result.success) {
       setTwoFA((prev) => ({ ...prev, enabled: !!result.enabled }));
+      setTwoFALoaded(true);
     }
   }, []);
 
 
 
-  const refreshAll = useCallback(async (showFeedback = false) => {
+  const refreshCurrent = useCallback(async (showFeedback = false) => {
     setSettingsLoading(true);
     try {
-      await Promise.all([
-        fetchSettings(),
-        fetchDbState(),
-        fetchLogState(),
-        fetchTwoFAStatus(),
-      ]);
+      await fetchSettings();
+      if (activeTab === 'database') await fetchDbState();
+      if (activeTab === 'logs') await fetchLogState();
+      if (activeTab === 'security') await fetchTwoFAStatus();
       if (showFeedback) toast.success('设置已刷新');
     } catch (error) {
       toast.error(error.message || '加载设置失败');
     } finally {
       setSettingsLoading(false);
     }
-  }, [fetchDbState, fetchLogState, fetchSettings, fetchTwoFAStatus]);
+  }, [activeTab, fetchDbState, fetchLogState, fetchSettings, fetchTwoFAStatus]);
 
   useEffect(() => {
-    refreshAll(false);
-  }, [refreshAll]);
+    let cancelled = false;
+    setSettingsLoading(true);
+    fetchSettings()
+      .catch((error) => {
+        if (!cancelled) toast.error(error.message || '加载设置失败');
+      })
+      .finally(() => {
+        if (!cancelled) setSettingsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchSettings]);
 
-  const persistSettings = async (nextSettings = settings, successMessage = '设置已保存') => {
-    const normalized = normalizeUserSettings(nextSettings);
+  useEffect(() => {
+    if (activeTab === 'database' && !databaseLoaded && !databaseBusy) {
+      fetchDbState().catch((error) => toast.error(error.message || '加载数据库统计失败'));
+    }
+  }, [activeTab, databaseBusy, databaseLoaded, fetchDbState]);
+
+  useEffect(() => {
+    if (activeTab === 'logs' && !logsLoaded && !logsBusy) {
+      fetchLogState().catch((error) => toast.error(error.message || '加载审计日志失败'));
+    }
+  }, [activeTab, fetchLogState, logsBusy, logsLoaded]);
+
+  useEffect(() => {
+    if (activeTab === 'security' && !twoFALoaded) {
+      fetchTwoFAStatus().catch((error) => toast.error(error.message || '加载 2FA 状态失败'));
+    }
+  }, [activeTab, fetchTwoFAStatus, twoFALoaded]);
+
+  const persistSettings = async (successMessage = '设置已保存') => {
+    const patch = settingsPatch;
+    if (Object.keys(patch).length === 0) {
+      toast.info('没有需要保存的设置');
+      return true;
+    }
     setSettingsSaving(true);
     try {
       const response = await fetch('/api/settings', {
-        method: 'POST',
+        method: 'PATCH',
         headers: getAuthHeaders(),
-        body: JSON.stringify(normalized),
+        body: JSON.stringify(patch),
       });
       const result = await response.json();
       if (!response.ok || !result.success) throw new Error(result.error || '保存设置失败');
 
+      const normalized = normalizeUserSettings(result.data || { ...settings, ...patch });
+      setSettingsPatch({});
       setSettings(normalized);
       applyUserSettings(normalized);
       applyCustomCss(normalized.customCss);
@@ -628,14 +728,6 @@ function SettingsPage() {
     );
   };
 
-  const setAllModulesVisibility = (visible) => {
-    const moduleVisibility = DEFAULT_MODULE_ORDER.reduce((acc, moduleId) => {
-      acc[moduleId] = moduleId === 'dashboard' ? true : visible;
-      return acc;
-    }, {});
-    patchSettings({ moduleVisibility });
-  };
-
   const toggleModule = (moduleId, checked) => {
     patchSettings({
       moduleVisibility: {
@@ -645,12 +737,34 @@ function SettingsPage() {
     });
   };
 
-  const reorderModule = (moduleId, direction) => {
-    const index = settings.moduleOrder.indexOf(moduleId);
-    const nextIndex = index + direction;
-    if (index < 0 || nextIndex < 0 || nextIndex >= settings.moduleOrder.length) return;
-    patchSettings({ moduleOrder: moveItem(settings.moduleOrder, index, nextIndex) });
-  };
+  const orderedModuleRows = useMemo(() => {
+    const rowById = new Map(moduleRows.map((row) => [row.id, row]));
+    const orderedIds = MODULE_GROUPS.flatMap((group) => [
+      ...settings.moduleOrder.filter((moduleId) => (group.modules || []).includes(moduleId)),
+      ...(group.subgroups || []).flatMap((subgroup) => (
+        settings.moduleOrder.filter((moduleId) => (subgroup.modules || []).includes(moduleId))
+      )),
+      ...settings.moduleOrder.filter((moduleId) => (group.trailingModules || []).includes(moduleId)),
+    ]);
+
+    return orderedIds.map((moduleId) => rowById.get(moduleId)).filter(Boolean);
+  }, [settings.moduleOrder]);
+  const moduleGroups = useMemo(() => (
+    MODULE_GROUPS
+      .map((group) => ({
+        id: group.id,
+        name: group.name,
+        count: orderedModuleRows.filter((item) => item.groupId === group.id).length,
+      }))
+      .filter((group) => group.count > 0)
+  ), [orderedModuleRows]);
+  const normalizedModuleSearch = moduleSearch.trim().toLocaleLowerCase();
+  const filteredModuleRows = orderedModuleRows.filter((item) => {
+    const matchesSearch = !normalizedModuleSearch || [item.config.name, item.config.description, item.groupName]
+      .filter(Boolean)
+      .some((value) => value.toLocaleLowerCase().includes(normalizedModuleSearch));
+    return matchesSearch;
+  });
 
   const databaseStorage = dbStats?.storage || dbAnalysis?.storage || null;
   const databaseSizeBytes = dbStats?.totalSize ?? dbStats?.dbSize;
@@ -658,10 +772,11 @@ function SettingsPage() {
     ? `主库 ${formatFileSize(databaseStorage.mainSizeBytes)} · WAL ${formatFileSize(databaseStorage.walSizeBytes)} · 空闲 ${formatFileSize(databaseStorage.freePageBytes)}`
     : (dbStats?.dbPath || '等待统计');
   const deprecatedTableItems = deprecatedTables?.tables || [];
+  const contentViewportClassName = 'min-h-0 md:flex-1 md:overflow-auto';
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4">
-      <div className="flex flex-col gap-3 border-b border-kumo-line pb-3 lg:flex-row lg:items-center lg:justify-between">
+    <div className="flex min-h-full w-full min-w-0 flex-col gap-3 px-px py-px sm:gap-4 md:h-full md:min-h-0 md:flex-1 md:overflow-hidden">
+      <div className="flex shrink-0 flex-col gap-3 border-b border-kumo-line pb-3 lg:flex-row lg:items-center lg:justify-between">
         <Tabs
           {...MODULE_TABS_PROPS}
           value={activeTab}
@@ -669,34 +784,44 @@ function SettingsPage() {
           tabs={SETTINGS_TABS}
         />
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center lg:justify-end">
+        <div className="flex flex-row flex-wrap items-center gap-2 lg:justify-end">
           <Button size="sm"
-            onClick={() => refreshAll(true)}
-            loading={settingsLoading}
+            onClick={() => refreshCurrent(true)}
+            loading={settingsLoading || (activeTab === 'database' && databaseBusy) || (activeTab === 'logs' && logsBusy)}
             icon={<RefreshCw className="h-4 w-4" />}
           >
             刷新
           </Button>
-          <Button size="sm"
-            variant="primary"
-            onClick={() => persistSettings()}
-            loading={settingsSaving}
-            icon={<Save className="h-4 w-4" />}
-          >
-            保存用户设置
-          </Button>
+          {['general', 'modules', 'appearance'].includes(activeTab) && (
+            <Button size="sm"
+              variant="primary"
+              onClick={() => persistSettings()}
+              loading={settingsSaving}
+              icon={<Save className="h-4 w-4" />}
+            >
+              保存当前页设置
+            </Button>
+          )}
         </div>
       </div>
 
+      <div className={contentViewportClassName}>
       {activeTab === 'general' && (
-        <div className="grid gap-4 lg:grid-cols-4">
-          <StatCard label="运行状态" value="正常" hint={settingsLoading ? '同步中' : '已连接后端'} icon={Check} />
-          <StatCard label="公网入口" value={settings.publicApiUrl || currentOrigin} hint="/api 自动拼接" icon={Globe} />
-          <StatCard label="数据库大小" value={formatFileSize(databaseSizeBytes)} hint={databaseSizeHint} icon={Database} />
-          <StatCard label="日志文件" value={logFileInfo?.sizeFormatted || `${logSettings.logFileSizeMB || 10} MB 上限`} hint="app.log" icon={FileText} />
+        <div className="grid min-h-0 items-start gap-4 px-px py-px pr-px md:h-full md:overflow-auto xl:grid-cols-[minmax(16rem,1fr)_minmax(0,3fr)]">
+          <div className="grid min-h-0 gap-4">
+            <StatCard label="运行状态" value="正常" hint={settingsLoading ? '同步中' : '已连接后端'} icon={Check} />
+            <StatCard label="公网入口" value={settings.publicApiUrl || currentOrigin} hint="/api 自动拼接" icon={Globe} />
+            <StatCard label="数据库大小" value={formatFileSize(databaseSizeBytes)} hint={databaseSizeHint} icon={Database} />
+            <StatCard label="日志文件" value={logFileInfo?.sizeFormatted || `${logSettings.logFileSizeMB || 10} MB 上限`} hint="app.log" icon={FileText} />
+          </div>
 
-          <LayerCard className="lg:col-span-2">
-            <SectionHeader title="公网访问与 Agent" description="这些值会被后端用于生成 Agent 安装命令、下载地址和对外 API 连接配置。" />
+          <SectionCard
+            title="部署访问地址"
+            description="用于生成公开状态页、回调地址和对外 API 连接配置。"
+            icon={<Globe className="h-4 w-4 text-kumo-brand" />}
+            className="min-h-0 self-start"
+            bodyPadding="none"
+          >
             <FieldRow title="公网 API 地址" description="主控端可从公网访问时填写，留空则使用当前访问来源。">
               <Input size="sm"
                 label="公网 API 地址"
@@ -705,150 +830,151 @@ function SettingsPage() {
                 placeholder="https://monitor.example.com"
               />
             </FieldRow>
-            <FieldRow title="Agent 下载目录" description="留空使用主控端内置 /agent 目录；自定义时填写目录 URL，不填写文件名。">
-              <Input size="sm"
-                label="Agent 下载目录"
-                value={settings.agentDownloadUrl}
-                onChange={(e) => patchSettings({ agentDownloadUrl: e.target.value })}
-                placeholder="https://cdn.example.com/agent"
+            <FieldRow title="系统时区" description="用于后续展示本地化时间；跟随服务器时使用后端运行环境默认时区。">
+              <Select
+                size="sm"
+                label="系统时区"
+                value={settings.timezone}
+                onValueChange={(value) => patchSettings({ timezone: value })}
+                items={TIMEZONE_OPTIONS}
               />
             </FieldRow>
-          </LayerCard>
-
-          <LayerCard className="lg:col-span-2">
-            <SectionHeader title="运行偏好" description="这些设置会同步给对应业务页面和后端用户设置表。" />
-            <FieldRow title="主机地址显示" description="控制主机实例页和安装命令中的地址脱敏策略。">
-              <Select size="sm"
-                label="主机地址显示"
-                value={settings.serverIpDisplayMode}
-                onValueChange={(value) => patchSettings({ serverIpDisplayMode: String(value) })}
-                items={SERVER_IP_DISPLAY_OPTIONS}
-              />
-            </FieldRow>
-            <FieldRow title="PaaS 自动刷新" description="Koyeb 和 Fly.io 状态拉取间隔，单位秒。">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Input size="sm"
-                  label="Koyeb 秒数"
-                  type="number"
-                  min="5"
-                  value={Math.round(settings.koyebRefreshInterval / 1000)}
-                  onChange={(e) => patchSettings({ koyebRefreshInterval: Math.max(5, toInt(e.target.value, 30)) * 1000 })}
-                />
-                <Input size="sm"
-                  label="Fly.io 秒数"
-                  type="number"
-                  min="5"
-                  value={Math.round(settings.flyRefreshInterval / 1000)}
-                  onChange={(e) => patchSettings({ flyRefreshInterval: Math.max(5, toInt(e.target.value, 30)) * 1000 })}
-                />
-              </div>
-            </FieldRow>
-          </LayerCard>
+          </SectionCard>
         </div>
       )}
 
 
 
       {activeTab === 'modules' && (
-        <LayerCard className="overflow-x-auto p-0">
-          <SectionHeader
-            title="功能模块"
-            description="模块顺序和显隐会立即影响左侧导航；系统设置入口固定显示。"
-            actions={
+        <div className="min-h-0 overflow-auto px-px py-px md:h-full">
+        <SectionCard
+          className="flex min-h-0 md:h-full"
+          headerClassName="max-sm:min-h-12 max-sm:flex-row max-sm:items-center max-sm:px-3 max-sm:py-2"
+          title="功能模块"
+          description="集中管理现有侧栏入口；修改后即时生效，保存后长期保留。"
+          icon={<Activity className="h-4 w-4 text-kumo-brand" />}
+          actionsClassName="max-sm:ml-auto max-sm:w-auto max-sm:gap-1.5"
+          actions={
               <>
-                <Button size="sm" onClick={() => setAllModulesVisibility(true)} icon={<Eye className="h-4 w-4" />}>显示全部</Button>
-                <Button size="sm" onClick={() => setAllModulesVisibility(false)} icon={<EyeOff className="h-4 w-4" />}>隐藏可选模块</Button>
+                <Input
+                  size="sm"
+                  aria-label="搜索模块"
+                  value={moduleSearch}
+                  onChange={(event) => setModuleSearch(event.target.value)}
+                  placeholder="搜索模块"
+                  className="hidden w-52 sm:block"
+                  prefix={<Search className="h-4 w-4" />}
+                />
               </>
-            }
-          />
-          <Table layout="fixed">
-            <colgroup>
-              <col className="w-[82px]" />
-              <col />
-              <col className="w-[150px]" />
-              <col className="w-[120px]" />
-              <col className="w-[150px]" />
-            </colgroup>
-            <Table.Header>
-              <Table.Row>
-                <Table.Head>顺序</Table.Head>
-                <Table.Head>模块</Table.Head>
-                <Table.Head>分组</Table.Head>
-                <Table.Head>可见</Table.Head>
-                <Table.Head>排序</Table.Head>
-              </Table.Row>
-            </Table.Header>
-            <Table.Body>
-              {settings.moduleOrder.map((moduleId, index) => {
-                const row = moduleRows.find((item) => item.id === moduleId);
-                if (!row) return null;
-                const ModuleIcon = getModuleIconComponent(moduleId);
+          }
+          bodyClassName="flex min-h-0 flex-1 flex-col gap-3 overflow-auto"
+        >
+          <div className="sm:hidden">
+            <Input
+              size="sm"
+              aria-label="搜索模块"
+              value={moduleSearch}
+              onChange={(event) => setModuleSearch(event.target.value)}
+              placeholder="搜索模块名称或用途"
+              className="w-full"
+              prefix={<Search className="h-4 w-4" />}
+            />
+          </div>
 
-                return (
-                  <Table.Row key={moduleId}>
-                    <Table.Cell className="font-mono text-xs text-kumo-subtle">{index + 1}</Table.Cell>
-                    <Table.Cell>
-                      <div className="flex min-w-0 items-center gap-3">
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-kumo-line bg-kumo-recessed text-kumo-brand">
-                          <ModuleIcon className="h-4 w-4" />
+          <div className="flex flex-col gap-3 sm:gap-4">
+            {moduleGroups.map((group) => {
+              const groupRows = filteredModuleRows.filter((row) => row.groupId === group.id);
+              if (groupRows.length === 0) return null;
+
+              return (
+                <section key={group.id} className="min-w-0">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-kumo-subtle">
+                    <span>{group.name}</span>
+                    <span className="h-px min-w-4 flex-1 bg-kumo-line" />
+                    <span className="font-normal">{groupRows.length} 项</span>
+                  </div>
+                  <div className="grid gap-1.5 lg:grid-cols-2 xl:grid-cols-3">
+                    {groupRows.map((row) => {
+                      const ModuleIcon = getModuleIconComponent(row.id);
+                      const isVisible = settings.moduleVisibility[row.id] !== false;
+
+                      return (
+                        <div key={row.id} className={cx('flex min-h-15 items-center gap-2.5 rounded-md border px-2.5 py-2 transition-colors sm:min-h-16 sm:gap-3 sm:px-3', isVisible ? 'border-kumo-line bg-kumo-base' : 'border-kumo-line/70 bg-kumo-recessed/35 opacity-75')}>
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-kumo-line bg-kumo-recessed text-kumo-brand">
+                            <ModuleIcon className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-semibold text-kumo-strong">{row.config.name}</div>
+                            <div className="hidden truncate text-xs text-kumo-subtle sm:block">{row.config.description}</div>
+                          </div>
+                          <Switch
+                            checked={isVisible}
+                            onCheckedChange={(checked) => toggleModule(row.id, checked)}
+                            disabled={row.id === 'dashboard'}
+                            aria-label={`切换 ${row.config.name}`}
+                          />
                         </div>
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold text-kumo-strong">{row.config.name}</div>
-                          <div className="truncate text-xs text-kumo-subtle">{row.config.description}</div>
-                        </div>
-                      </div>
-                    </Table.Cell>
-                    <Table.Cell><Badge variant="outline">{row.groupName}</Badge></Table.Cell>
-                    <Table.Cell>
-                      <Switch
-                        checked={settings.moduleVisibility[moduleId] !== false}
-                        onCheckedChange={(checked) => toggleModule(moduleId, checked)}
-                        disabled={moduleId === 'dashboard'}
-                        aria-label={`切换 ${row.config.name}`}
-                      />
-                    </Table.Cell>
-                    <Table.Cell>
-                      <div className="flex gap-2">
-                        <Button size="sm" onClick={() => reorderModule(moduleId, -1)} disabled={index === 0}>上移</Button>
-                        <Button size="sm" onClick={() => reorderModule(moduleId, 1)} disabled={index === settings.moduleOrder.length - 1}>下移</Button>
-                      </div>
-                    </Table.Cell>
-                  </Table.Row>
-                );
-              })}
-            </Table.Body>
-          </Table>
-        </LayerCard>
+                      );
+                    })}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+          {filteredModuleRows.length === 0 && (
+            <div className="rounded-lg border border-dashed border-kumo-line p-8 text-center text-sm text-kumo-subtle">没有找到匹配的模块，请调整搜索或分组筛选。</div>
+          )}
+        </SectionCard>
+        </div>
       )}
 
       {activeTab === 'security' && (
-        <div className="grid gap-4 xl:grid-cols-2">
-          <LayerCard>
-            <SectionHeader title="管理员密码" description="后端接口为 /api/auth/change-password，修改成功后会退出当前会话。" />
+        <div className="grid h-full min-h-0 items-start gap-4 overflow-auto px-px py-px pr-px xl:grid-cols-2">
+          <SectionCard
+            title="管理员密码"
+            description="后端接口为 /api/auth/change-password，修改成功后会退出当前会话。"
+            icon={<Lock className="h-4 w-4 text-kumo-brand" />}
+            bodyPadding="none"
+          >
             <div className="grid max-w-xl gap-4 p-5">
               <Input size="sm"
                 label="当前密码"
-                type="password"
+                type="text"
                 value={passwordForm.oldPassword}
                 onChange={(e) => setPasswordForm((prev) => ({ ...prev, oldPassword: e.target.value }))}
                 disabled={isDemoMode}
-                autoComplete="current-password"
+                autoComplete="off"
+                data-1p-ignore
+                data-lpignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                spellCheck={false}
               />
               <Input size="sm"
                 label="新密码"
-                type="password"
+                type="text"
                 value={passwordForm.newPassword}
                 onChange={(e) => setPasswordForm((prev) => ({ ...prev, newPassword: e.target.value }))}
                 disabled={isDemoMode}
-                autoComplete="new-password"
+                autoComplete="off"
+                data-1p-ignore
+                data-lpignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                spellCheck={false}
               />
               <Input size="sm"
                 label="确认新密码"
-                type="password"
+                type="text"
                 value={passwordForm.confirmPassword}
                 onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))}
                 disabled={isDemoMode}
-                autoComplete="new-password"
+                autoComplete="off"
+                data-1p-ignore
+                data-lpignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                spellCheck={false}
               />
               <div>
                 <Button size="sm" variant="primary" onClick={changePassword} loading={passwordSaving} disabled={isDemoMode}>
@@ -856,27 +982,28 @@ function SettingsPage() {
                 </Button>
               </div>
             </div>
-          </LayerCard>
+          </SectionCard>
 
-          <LayerCard className="p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-base font-bold text-kumo-strong">双因子认证</h2>
-                <p className="mt-1 text-xs text-kumo-subtle">当前登录保护状态</p>
-              </div>
+          <SectionCard
+            title="双因子认证"
+            description="当前登录保护状态"
+            icon={<Shield className="h-4 w-4 text-kumo-brand" />}
+            meta={(
               <Badge variant={twoFA.enabled ? 'success' : 'warning'}>
                 {twoFA.enabled ? '已启用' : '未启用'}
               </Badge>
-            </div>
+            )}
+            bodyPadding="lg"
+          >
 
             {twoFA.error && (
-              <div className="mt-4 rounded-md border border-kumo-danger/20 bg-kumo-danger/10 px-3 py-2 text-xs text-kumo-danger">
+              <div className="rounded-md border border-kumo-danger/20 bg-kumo-danger/10 px-3 py-2 text-xs text-kumo-danger">
                 {twoFA.error}
               </div>
             )}
 
             {!twoFA.enabled && !twoFA.setupMode && (
-              <Button size="sm" className="mt-5 w-full" variant="primary" onClick={start2FASetup} loading={twoFA.loading} disabled={isDemoMode}>
+              <Button size="sm" className={`${twoFA.error ? 'mt-5' : ''} w-full`} variant="primary" onClick={start2FASetup} loading={twoFA.loading} disabled={isDemoMode}>
                 启用 2FA
               </Button>
             )}
@@ -884,9 +1011,9 @@ function SettingsPage() {
             {twoFA.setupMode && (
               <div className="mt-5 grid gap-4">
                 {twoFA.qrCode && (
-                  <div className="flex justify-center app-card p-4">
+                  <AppCard padding="none" className="flex justify-center p-4">
                     <img src={twoFA.qrCode} alt="2FA QR Code" className="h-44 w-44" />
-                  </div>
+                  </AppCard>
                 )}
                 <Input size="sm" label="手动密钥" value={twoFA.secret} readOnly className="font-mono" />
                 <Input size="sm"
@@ -913,10 +1040,15 @@ function SettingsPage() {
               <div className="mt-5 grid gap-4">
                 <Input size="sm"
                   label="当前密码"
-                  type="password"
+                  type="text"
                   value={twoFA.disablePassword}
                   onChange={(e) => setTwoFA((prev) => ({ ...prev, disablePassword: e.target.value }))}
-                  autoComplete="current-password"
+                  autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  spellCheck={false}
                 />
                 <div className="flex gap-2">
                   <Button size="sm" onClick={() => setTwoFA((prev) => ({ ...prev, disableMode: false, disablePassword: '', error: '' }))}>取消</Button>
@@ -924,78 +1056,100 @@ function SettingsPage() {
                 </div>
               </div>
             )}
-          </LayerCard>
+          </SectionCard>
         </div>
       )}
 
       {activeTab === 'database' && (
-        <div className="grid items-start gap-4 xl:grid-cols-2">
-          <LayerCard className="overflow-x-auto p-0">
-            <SectionHeader
-              title="数据库统计"
-              description={dbStats?.dbPath || 'SQLite 数据文件'}
-              actions={
-                <Button size="sm" onClick={fetchDbState} loading={databaseBusy} icon={<RefreshCw className="h-4 w-4" />}>刷新统计</Button>
-              }
-            />
+        <div className="grid items-start gap-3 px-px py-px pr-px xl:grid-cols-[minmax(0,1.1fr)_minmax(24rem,0.9fr)]">
+          <SectionCard
+            className="flex h-full min-h-0 flex-1"
+            title="数据库统计"
+            description={dbStats?.dbPath || 'SQLite 数据文件'}
+            icon={<Database className="h-4 w-4 text-kumo-brand" />}
+            actions={
+                <Button size="sm" onClick={() => fetchDbState().catch((error) => toast.error(error.message || '加载数据库统计失败'))} loading={databaseBusy} icon={<RefreshCw className="h-4 w-4" />}>刷新统计</Button>
+            }
+            bodyPadding="none"
+            bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
+          >
             {databaseStorage && (
-              <div className="grid gap-3 border-b border-kumo-line px-5 py-3 text-xs text-kumo-subtle md:grid-cols-4">
-                <div>
-                  <div className="font-semibold text-kumo-strong">{formatFileSize(databaseStorage.totalSizeBytes)}</div>
-                  <div>总占用</div>
-                </div>
-                <div>
-                  <div className="font-semibold text-kumo-strong">{formatFileSize(databaseStorage.mainSizeBytes)}</div>
-                  <div>主库文件</div>
-                </div>
-                <div>
-                  <div className="font-semibold text-kumo-strong">{formatFileSize((databaseStorage.walSizeBytes || 0) + (databaseStorage.shmSizeBytes || 0))}</div>
-                  <div>WAL / SHM</div>
-                </div>
-                <div>
-                  <div className="font-semibold text-kumo-strong">{formatFileSize(databaseStorage.freePageBytes)}</div>
-                  <div>空闲页</div>
+              <div className="shrink-0 border-b border-kumo-line px-3 py-3">
+                <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+                  <SummaryMetricCard
+                    label="总占用"
+                    value={formatFileSize(databaseStorage.totalSizeBytes)}
+                    tone="brand"
+                    compact
+                  />
+                  <SummaryMetricCard
+                    label="主库文件"
+                    value={formatFileSize(databaseStorage.mainSizeBytes)}
+                    tone="default"
+                    compact
+                  />
+                  <SummaryMetricCard
+                    label="WAL / SHM"
+                    value={formatFileSize((databaseStorage.walSizeBytes || 0) + (databaseStorage.shmSizeBytes || 0))}
+                    tone="warning"
+                    compact
+                  />
+                  <SummaryMetricCard
+                    label="空闲页"
+                    value={formatFileSize(databaseStorage.freePageBytes)}
+                    tone="info"
+                    compact
+                  />
                 </div>
               </div>
             )}
-            <Table layout="fixed">
-              <colgroup>
-                <col />
-                <col className="w-[120px]" />
-                <col className="w-[140px]" />
-                <col className="w-[120px]" />
-                <col className="w-[140px]" />
-              </colgroup>
-              <Table.Header>
-                <Table.Row>
-                  <Table.Head>表名</Table.Head>
-                  <Table.Head>记录数</Table.Head>
-                  <Table.Head>实际占用</Table.Head>
-                  <Table.Head>索引</Table.Head>
-                  <Table.Head>平均行大小</Table.Head>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {tableRows.length === 0 ? (
+            <div className="min-h-0 flex-1 overflow-auto pr-px">
+              <Table layout="fixed">
+                <colgroup>
+                  <col className="w-[28%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[19%]" />
+                  <col className="w-[18%]" />
+                  <col className="w-[21%]" />
+                </colgroup>
+                <Table.Header>
                   <Table.Row>
-                    <Table.Cell colSpan={5} className="p-8 text-center text-kumo-subtle">暂无统计数据</Table.Cell>
+                    <Table.Head>表名</Table.Head>
+                    <Table.Head>记录数</Table.Head>
+                    <Table.Head>占用</Table.Head>
+                    <Table.Head>索引</Table.Head>
+                    <Table.Head>行大小</Table.Head>
                   </Table.Row>
-                ) : tableRows.map((row) => (
-                  <Table.Row key={row.table}>
-                    <Table.Cell className="font-mono text-xs text-kumo-strong">{row.table}</Table.Cell>
-                    <Table.Cell className="font-mono text-xs">{row.rows ?? '-'}</Table.Cell>
-                    <Table.Cell className="font-mono text-xs">{row.estimatedSizeBytes ? formatFileSize(row.estimatedSizeBytes) : '-'}</Table.Cell>
-                    <Table.Cell className="font-mono text-xs">{row.indexSizeBytes ? formatFileSize(row.indexSizeBytes) : '-'}</Table.Cell>
-                    <Table.Cell className="font-mono text-xs">{row.avgRowSizeBytes ? formatFileSize(row.avgRowSizeBytes) : '-'}</Table.Cell>
-                  </Table.Row>
-                ))}
-              </Table.Body>
-            </Table>
-          </LayerCard>
+                </Table.Header>
+                <Table.Body>
+                  {tableRows.length === 0 ? (
+                    <Table.Row>
+                      <Table.Cell colSpan={5} className="p-8 text-center text-kumo-subtle">
+                        {databaseBusy ? '正在加载统计...' : '暂无统计数据'}
+                      </Table.Cell>
+                    </Table.Row>
+                  ) : tableRows.map((row) => (
+                    <Table.Row key={row.table}>
+                      <Table.Cell className="truncate font-mono text-xs text-kumo-strong" title={row.table}>{row.table}</Table.Cell>
+                      <Table.Cell className="font-mono text-xs">{formatTableRows(row.rows)}</Table.Cell>
+                      <Table.Cell className="font-mono text-xs">{formatTableMetricSize(row.estimatedSizeBytes)}</Table.Cell>
+                      <Table.Cell className="font-mono text-xs">{formatTableMetricSize(row.indexSizeBytes)}</Table.Cell>
+                      <Table.Cell className="font-mono text-xs">{formatTableMetricSize(row.avgRowSizeBytes)}</Table.Cell>
+                    </Table.Row>
+                  ))}
+                </Table.Body>
+              </Table>
+            </div>
+          </SectionCard>
 
-          <div className="grid content-start gap-3">
-            <LayerCard className="p-4">
-              <h2 className="text-base font-bold text-kumo-strong">备份与恢复</h2>
+          <div className="grid content-start gap-3 px-px py-px">
+            <SectionCard
+              title="数据库导入导出"
+              description="导出当前数据库，或预检后替换。"
+              icon={<Download className="h-4 w-4 text-kumo-brand" />}
+              bodyPadding="sm"
+              bodyClassName="space-y-3"
+            >
               <Input
                 ref={fileInputRef}
                 type="file"
@@ -1004,21 +1158,43 @@ function SettingsPage() {
                 className="hidden"
                 onChange={previewDatabaseImport}
               />
-              <div className="mt-3 grid gap-2">
-                <Button size="sm" className="justify-start" onClick={exportDatabase} icon={<Download className="h-4 w-4" />}>导出数据库</Button>
-                <Button size="sm" className="justify-start" onClick={importDatabase} loading={databaseBusy} icon={<Upload className="h-4 w-4" />}>上传并预检数据库</Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  shape="square"
+                  onClick={exportDatabase}
+                  aria-label="导出数据库"
+                  title="导出数据库"
+                  icon={<Upload className="h-4 w-4" />}
+                />
+                <Button
+                  size="sm"
+                  variant="primary"
+                  shape="square"
+                  onClick={importDatabase}
+                  loading={databaseBusy}
+                  aria-label="导入数据库"
+                  title="导入数据库"
+                  icon={<Download className="h-4 w-4" />}
+                />
               </div>
               {dbImportPreview && (
-                <div className="mt-4 app-subcard p-3 text-xs">
+                <AppCard padding="none" className="bg-kumo-recessed/40 p-3 text-xs">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-semibold text-kumo-strong truncate">{dbImportPreview.originalName}</span>
                     <Badge variant={dbImportPreview.analysis?.integrity === 'ok' ? 'success' : 'warning'}>
                       {dbImportPreview.analysis?.integrity || 'unknown'}
                     </Badge>
                   </div>
-                  <div className="mt-2 grid grid-cols-2 gap-2 font-mono text-[11px] text-kumo-subtle">
-                    <span>大小 {formatFileSize(dbImportPreview.analysis?.sizeBytes)}</span>
-                    <span>表 {dbImportPreview.analysis?.tableCount || 0} 个</span>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <div className="rounded-md border border-kumo-line/70 bg-kumo-base px-3 py-2">
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-kumo-subtle">大小</div>
+                      <div className="mt-1 font-mono text-kumo-strong">{formatFileSize(dbImportPreview.analysis?.sizeBytes)}</div>
+                    </div>
+                    <div className="rounded-md border border-kumo-line/70 bg-kumo-base px-3 py-2">
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-kumo-subtle">表数量</div>
+                      <div className="mt-1 font-mono text-kumo-strong">{dbImportPreview.analysis?.tableCount || 0}</div>
+                    </div>
                   </div>
                   {dbImportPreview.warnings?.length > 0 && (
                     <div className="mt-2 space-y-1 rounded border border-kumo-warning/30 bg-kumo-warning/10 p-2 text-[11px] text-kumo-warning">
@@ -1046,97 +1222,148 @@ function SettingsPage() {
                     </Table>
                   </div>
                   <div className="mt-3 flex gap-2">
-                    <Button size="sm" variant="primary" onClick={commitDatabaseImport} loading={databaseBusy}>
+                    <Button size="sm" variant="primary" className="flex-1 justify-center" onClick={commitDatabaseImport} loading={databaseBusy}>
                       确认导入
                     </Button>
-                    <Button size="sm" variant="secondary" onClick={() => setDbImportPreview(null)}>
+                    <Button size="sm" variant="secondary" className="flex-1 justify-center" onClick={() => setDbImportPreview(null)}>
                       取消
                     </Button>
                   </div>
-                </div>
+                </AppCard>
               )}
-              <div className="mt-4 border-t border-kumo-line pt-4">
-                <BackupPanel embedded />
-              </div>
-            </LayerCard>
+            </SectionCard>
 
-            <LayerCard className="p-4">
-              <h2 className="text-base font-bold text-kumo-strong">维护操作</h2>
-              <div className="mt-3 grid gap-2">
-                <Button size="sm" className="justify-start" onClick={() => postSettingsAction('/api/settings/vacuum-database', '数据库已压缩', fetchDbState)} loading={databaseBusy}>
-                  压缩数据库
-                </Button>
-                <Button size="sm"
-                  className="justify-start"
-                  variant="secondary-destructive"
-                  onClick={() => postSettingsAction('/api/settings/clear-logs', '数据库日志已清理', fetchDbState)}
-                  loading={databaseBusy}
-                  icon={<Trash className="h-4 w-4" />}
+            <BackupPanel embedded />
+
+            <SectionCard
+              title="维护操作"
+              icon={<HardDrive className="h-4 w-4 text-kumo-brand" />}
+              bodyPadding="sm"
+              bodyClassName="space-y-3"
+            >
+              <div className="grid gap-3 xl:grid-cols-3">
+                <MaintenanceActionCard
+                  title="压缩数据库"
+                  icon={<Database className="h-4 w-4" />}
+                  tone="brand"
                 >
-                  清理数据库日志
-                </Button>
-                <Button size="sm"
-                  className="justify-start"
-                  variant="secondary-destructive"
-                  onClick={cleanupDeprecatedTables}
-                  loading={databaseBusy}
-                  disabled={deprecatedTableItems.length === 0}
-                  icon={<Trash className="h-4 w-4" />}
+                  <Button
+                    size="sm"
+                    className="w-full justify-center"
+                    onClick={() => postSettingsAction('/api/settings/vacuum-database', '数据库已压缩', fetchDbState)}
+                    loading={databaseBusy}
+                  >
+                    立即压缩
+                  </Button>
+                </MaintenanceActionCard>
+
+                <MaintenanceActionCard
+                  title="清理运行日志"
+                  icon={<FileText className="h-4 w-4" />}
+                  tone="danger"
                 >
-                  清理废弃表
-                </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary-destructive"
+                    className="w-full justify-center"
+                    onClick={() => postSettingsAction('/api/settings/clear-logs', '数据库日志已清理', fetchDbState)}
+                    loading={databaseBusy}
+                    icon={<Trash className="h-4 w-4" />}
+                  >
+                    清理日志
+                  </Button>
+                </MaintenanceActionCard>
+
+                <MaintenanceActionCard
+                  title="清理废弃表"
+                  icon={<Trash className="h-4 w-4" />}
+                  tone="warning"
+                  meta={<Badge variant={deprecatedTableItems.length > 0 ? 'warning' : 'secondary'}>{deprecatedTableItems.length} 张</Badge>}
+                >
+                  <Button
+                    size="sm"
+                    variant="secondary-destructive"
+                    className="w-full justify-center"
+                    onClick={cleanupDeprecatedTables}
+                    loading={databaseBusy}
+                    disabled={deprecatedTableItems.length === 0}
+                    icon={<Trash className="h-4 w-4" />}
+                  >
+                    清理废弃表
+                  </Button>
+                </MaintenanceActionCard>
               </div>
-              <div className="mt-3 border-t border-kumo-line pt-3">
-                <div className="flex items-center justify-between gap-2 text-xs">
-                  <span className="font-semibold text-kumo-strong">废弃表候选</span>
+
+              <div className="rounded-lg border border-kumo-line/80 bg-kumo-base px-3 pt-3 pb-2">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold text-kumo-strong">废弃表候选</div>
+                    <div className="mt-1 text-xs text-kumo-subtle">这里会列出可清理的旧表及预计释放空间。</div>
+                  </div>
                   <Badge variant={deprecatedTableItems.length > 0 ? 'warning' : 'secondary'}>
                     {deprecatedTableItems.length} 张
                   </Badge>
                 </div>
-                <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-kumo-subtle">
-                  <span>记录 {deprecatedTables?.totalRows || 0}</span>
-                  <span>占用 {formatFileSize(deprecatedTables?.totalSize)}</span>
+
+                <div className="mt-2 rounded-md border border-kumo-line/70 bg-kumo-recessed/20 px-3 py-2.5">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                    <span className="text-kumo-subtle">候选表 <span className="font-semibold text-kumo-strong">{deprecatedTableItems.length}</span></span>
+                    <span className="text-kumo-subtle">记录数 <span className="font-semibold text-kumo-strong">{deprecatedTables?.totalRows || 0}</span></span>
+                    <span className="text-kumo-subtle">占用 <span className="font-semibold text-kumo-strong">{formatFileSize(deprecatedTables?.totalSize)}</span></span>
+                  </div>
                 </div>
+
                 {deprecatedTableItems.length > 0 && (
-                  <div className="mt-2 max-h-40 overflow-y-auto divide-y divide-kumo-line text-[11px]">
+                  <div className="mt-3 max-h-40 overflow-y-auto divide-y divide-kumo-line rounded-md border border-kumo-line/70 bg-kumo-recessed/10 text-[11px]">
                     {deprecatedTableItems.slice(0, 8).map((item) => (
-                      <div key={item.table} className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 py-1.5">
-                        <span className="truncate font-mono text-kumo-strong" title={item.reason}>{item.table}</span>
+                      <div key={item.table} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-3 py-2">
+                        <div className="min-w-0">
+                          <div className="truncate font-mono text-kumo-strong" title={item.table}>{item.table}</div>
+                          <div className="mt-0.5 truncate text-kumo-subtle" title={item.reason}>{item.reason}</div>
+                        </div>
                         <span className="font-mono text-kumo-subtle">{formatFileSize(item.sizeBytes)}</span>
                       </div>
                     ))}
                   </div>
                 )}
               </div>
-            </LayerCard>
+            </SectionCard>
           </div>
         </div>
       )}
 
       {activeTab === 'logs' && (
-        <div className="grid gap-4">
-          <LayerCard>
-            <SectionHeader
-              title="审计与保留"
-              description="这里只管理数据库审计记录与日志保留策略；应用运行日志请到左侧「系统日志」查看。"
-              actions={
+        <div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden px-px py-px pr-px">
+          <SectionCard
+            className="shrink-0"
+            title="审计与保留"
+            description="这里只管理数据库审计记录与日志保留策略；应用运行日志请到左侧「系统日志」查看。"
+            icon={<FileText className="h-4 w-4 text-kumo-brand" />}
+            actions={
                 <>
                   <Button size="sm" onClick={saveLogSettings} loading={logsBusy} icon={<Save className="h-4 w-4" />}>保存保留策略</Button>
                   <Button size="sm" onClick={() => postSettingsAction('/api/settings/enforce-log-limits', '日志限制已执行', fetchLogState)} loading={logsBusy}>立即执行限制</Button>
                 </>
-              }
-            />
+            }
+            bodyPadding="none"
+          >
             <div className="grid gap-4 p-5 md:grid-cols-4">
               <Input size="sm" label="保留天数" type="number" min="0" value={logSettings.days} onChange={(e) => setLogSettings((prev) => ({ ...prev, days: Math.max(0, toInt(e.target.value, 0)) }))} />
               <Input size="sm" label="单表最大条数" type="number" min="0" value={logSettings.count} onChange={(e) => setLogSettings((prev) => ({ ...prev, count: Math.max(0, toInt(e.target.value, 0)) }))} />
               <Input size="sm" label="数据库最大 MB" type="number" min="0" value={logSettings.dbSizeMB} onChange={(e) => setLogSettings((prev) => ({ ...prev, dbSizeMB: Math.max(0, toInt(e.target.value, 0)) }))} />
               <Input size="sm" label="app.log 最大 MB" type="number" min="1" value={logSettings.logFileSizeMB} onChange={(e) => setLogSettings((prev) => ({ ...prev, logFileSizeMB: Math.max(1, toInt(e.target.value, 10)) }))} />
             </div>
-          </LayerCard>
+          </SectionCard>
 
-          <div className="grid gap-4">
-            <LayerCard className="overflow-x-auto p-0">
-              <SectionHeader title="审计记录" description="最近 100 条数据库操作记录" />
+          <div className="flex min-h-0 flex-1">
+            <SectionCard
+              className="min-h-0 flex-1"
+              title="审计记录"
+              description="最近 100 条数据库操作记录"
+              icon={<Database className="h-4 w-4 text-kumo-brand" />}
+              bodyPadding="none"
+              bodyClassName="min-h-0 flex-1 overflow-auto"
+            >
               <Table layout="fixed">
                 <colgroup>
                   <col className="w-[170px]" />
@@ -1147,7 +1374,7 @@ function SettingsPage() {
                 <Table.Header>
                   <Table.Row>
                     <Table.Head>时间</Table.Head>
-                    <Table.Head>操作</Table.Head>
+                    <Table.Head className="app-table-action">操作</Table.Head>
                     <Table.Head>对象</Table.Head>
                     <Table.Head>Trace</Table.Head>
                   </Table.Row>
@@ -1168,54 +1395,49 @@ function SettingsPage() {
                   )}
                 </Table.Body>
               </Table>
-            </LayerCard>
+            </SectionCard>
           </div>
         </div>
       )}
 
       {activeTab === 'appearance' && (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
-          <LayerCard>
-            <SectionHeader title="界面外观" description={`当前生效主题: ${theme === 'dark' ? '深色' : '浅色'}`} />
+        <div className="grid h-full min-h-0 items-start gap-3 overflow-auto px-px py-px pr-px xl:grid-cols-[minmax(20rem,0.82fr)_minmax(0,1.18fr)]">
+          <SectionCard
+            title="界面外观"
+            description={`当前生效主题: ${theme === 'dark' ? '深色' : '浅色'}`}
+            icon={<Sun className="h-4 w-4 text-kumo-brand" />}
+            bodyPadding="none"
+          >
             <FieldRow title="主题模式" description="云端偏好，切换后立即生效并自动同步。">
               <Select size="sm" label="主题模式" value={themeMode} onValueChange={handleThemeModeChange} items={THEME_OPTIONS} />
             </FieldRow>
             <FieldRow title="页面宽度" description="云端偏好，顶部宽度切换器也会同步。">
               <Select size="sm" label="页面宽度" value={pageWidthMode} onValueChange={handlePageWidthModeChange} items={PAGE_WIDTH_OPTIONS} />
             </FieldRow>
-            <FieldRow title="触感反馈" description="移动端交互振动开关。">
-              <Switch checked={settings.vibrationEnabled} onCheckedChange={(checked) => patchSettings({ vibrationEnabled: checked })} />
+            <FieldRow title="显示首页页脚" description="控制仪表盘底部页脚栏及其内容，切换后立即生效。">
+              <Switch aria-label="显示首页页脚" checked={settings.dashboardFooterVisible} onCheckedChange={handleDashboardFooterVisibleChange} />
             </FieldRow>
-          </LayerCard>
-
-          <LayerCard className="p-5">
-            <h2 className="text-base font-bold text-kumo-strong">TOTP 显示偏好</h2>
-            <div className="mt-2 text-xs leading-relaxed text-kumo-subtle">这些选项会被 2FA 工具页读取。</div>
-            <div className="mt-4">
-              <ToggleLine title="账号名称打码" checked={!!settings.totpSettings.maskAccount} onCheckedChange={(checked) => updateTotpSetting('maskAccount', checked)} />
-              <ToggleLine title="遮挡验证码" checked={!!settings.totpSettings.hideCode} onCheckedChange={(checked) => updateTotpSetting('hideCode', checked)} />
-              <ToggleLine title="允许悬浮显示验证码" checked={!!settings.totpSettings.allowRevealCode} onCheckedChange={(checked) => updateTotpSetting('allowRevealCode', checked)} />
-              <ToggleLine title="按站点分组" checked={!!settings.totpSettings.groupByPlatform} onCheckedChange={(checked) => updateTotpSetting('groupByPlatform', checked)} />
-              <ToggleLine title="显示站点标题" checked={!!settings.totpSettings.showPlatformHeaders} onCheckedChange={(checked) => updateTotpSetting('showPlatformHeaders', checked)} />
-              <ToggleLine title="隐藏站点文字" checked={!!settings.totpSettings.hidePlatformText} onCheckedChange={(checked) => updateTotpSetting('hidePlatformText', checked)} />
-              <ToggleLine title="扫码后自动导入" checked={!!settings.totpSettings.autoSave} onCheckedChange={(checked) => updateTotpSetting('autoSave', checked)} />
-              <ToggleLine title="锁定默认录入方式" checked={!!settings.totpSettings.lockInputMode} onCheckedChange={(checked) => updateTotpSetting('lockInputMode', checked)} />
-            </div>
-            <div className="mt-4">
-              <Select size="sm"
-                label="默认录入方式"
-                value={settings.totpSettings.defaultInputMode}
-                onValueChange={(value) => updateTotpSetting('defaultInputMode', String(value))}
-                items={TOTP_INPUT_MODE_OPTIONS}
+            <FieldRow title="备案号" description="显示在首页页脚右侧；留空时不显示。">
+              <Input
+                size="sm"
+                aria-label="首页页脚备案号"
+                value={settings.dashboardFooterRecordNumber}
+                onChange={handleDashboardFooterRecordNumberChange}
+                placeholder="例如：京ICP备12345678号"
+                className="w-full min-w-52"
               />
-            </div>
-          </LayerCard>
+            </FieldRow>
+            <FieldRow title="触感反馈" description="移动端交互振动开关。">
+              <Switch checked={settings.vibrationEnabled} onCheckedChange={handleVibrationEnabledChange} />
+            </FieldRow>
+          </SectionCard>
 
-          <LayerCard className="xl:col-span-2">
-            <SectionHeader
-              title="自定义 CSS"
-              description="应用会立即注入当前页面，保存后写入后端用户设置。"
-              actions={
+          <SectionCard
+            title="自定义 CSS"
+            description="应用会立即注入当前页面，保存后写入后端用户设置。"
+            icon={<Terminal className="h-4 w-4 text-kumo-brand" />}
+            className="xl:min-h-[28rem]"
+            actions={
                 <>
                   <Button size="sm" onClick={() => applyCustomCss(settings.customCss)}>预览</Button>
                   <Button size="sm" variant="secondary-destructive" onClick={() => {
@@ -1223,41 +1445,41 @@ function SettingsPage() {
                     applyCustomCss('');
                   }}>清空</Button>
                 </>
-              }
-            />
-            <div className="p-5">
-              <Textarea
+            }
+            bodyPadding="none"
+          >
+            <div className="p-4">
+              <CodeEditor
                 label="CSS"
+                language="css"
                 value={settings.customCss}
-                onChange={(e) => patchSettings({ customCss: e.target.value })}
+                onChange={(customCss) => patchSettings({ customCss })}
                 placeholder="/* 在此输入自定义 CSS */"
-                className="min-h-64 font-mono text-sm"
+                minHeight="22rem"
               />
             </div>
-          </LayerCard>
+          </SectionCard>
         </div>
       )}
 
       {activeTab === 'about' && (
-        <div className="grid gap-4 lg:grid-cols-1">
-          <LayerCard className="p-6 lg:col-span-2">
-            <div className="flex items-center gap-4">
-              <img src="/logo.svg" alt="" className="h-12 w-12 object-contain" />
-              <div>
-                <h2 className="text-xl font-bold text-kumo-strong">API Monitor</h2>
-                <p className="mt-1 text-xs text-kumo-subtle">React 前端 + Go 后端</p>
-              </div>
-            </div>
-            <div className="mt-6 grid gap-3 sm:grid-cols-3">
-              <div className="rounded-lg border border-kumo-line bg-kumo-recessed p-4">
+        <div className="grid items-start gap-4 overflow-auto px-px py-px pr-px lg:grid-cols-1">
+          <SectionCard
+            title="API Monitor"
+            description="React 前端 + Go 后端"
+            icon={<img src="/logo.svg" alt="" className="h-6 w-6 object-contain" />}
+            bodyPadding="lg"
+          >
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-lg border border-kumo-line bg-kumo-recessed p-3">
                 <div className="text-xs text-kumo-subtle">当前源</div>
                 <div className="mt-1 truncate font-mono text-sm text-kumo-strong">{currentOrigin}</div>
               </div>
-              <div className="rounded-lg border border-kumo-line bg-kumo-recessed p-4">
+              <div className="rounded-lg border border-kumo-line bg-kumo-recessed p-3">
                 <div className="text-xs text-kumo-subtle">API 地址</div>
                 <div className="mt-1 truncate font-mono text-sm text-kumo-strong">{`${currentOrigin}/api`}</div>
               </div>
-              <div className="rounded-lg border border-kumo-line bg-kumo-recessed p-4">
+              <div className="rounded-lg border border-kumo-line bg-kumo-recessed p-3">
                 <div className="text-xs text-kumo-subtle">仓库地址</div>
                 <div className="mt-1 truncate font-mono text-sm text-kumo-strong">
                   <a
@@ -1271,7 +1493,7 @@ function SettingsPage() {
                 </div>
               </div>
             </div>
-          </LayerCard>
+          </SectionCard>
 
           {/* <LayerCard className="p-6">
             <h2 className="text-base font-bold text-kumo-strong">已对接接口</h2>
@@ -1293,6 +1515,7 @@ function SettingsPage() {
           </LayerCard> */}
         </div>
       )}
+      </div>
     </div>
   );
 }

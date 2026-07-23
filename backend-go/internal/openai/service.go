@@ -30,8 +30,9 @@ import (
 
 const (
 	defaultTimeout       = 60 * time.Second
-	degradedThreshold    = 20 * time.Second
-	healthTimeoutDefault = 60 * time.Second
+	degradedThreshold    = 3 * time.Second
+	healthTimeoutDefault = 30 * time.Second
+	healthConcurrencyMax = 12
 )
 
 type Endpoint struct {
@@ -155,6 +156,8 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS openai_gateway_analytics (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			endpoint_id TEXT,
+			gateway_key_id TEXT,
+			route TEXT NOT NULL DEFAULT 'chat.completions',
 			model TEXT NOT NULL,
 			status_code INTEGER NOT NULL,
 			latency_ms INTEGER NOT NULL,
@@ -163,7 +166,21 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			total_tokens INTEGER DEFAULT 0,
 			timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
+		`CREATE TABLE IF NOT EXISTS openai_gateway_keys (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			key_hash TEXT NOT NULL UNIQUE,
+			key_cipher TEXT,
+			key_prefix TEXT NOT NULL,
+			key_suffix TEXT NOT NULL,
+			enabled INTEGER DEFAULT 1,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			last_used DATETIME,
+			expires_at DATETIME,
+			request_count INTEGER DEFAULT 0
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_openai_analytics_timestamp ON openai_gateway_analytics(timestamp)`,
+		`CREATE INDEX IF NOT EXISTS idx_openai_gateway_keys_hash ON openai_gateway_keys(key_hash)`,
 		`INSERT OR IGNORE INTO openai_chat_personas (id, name, icon, system_prompt, is_default)
 		 VALUES ('1', '默认助手', 'fa-robot', '你是一个有用的 AI 助手。', 1)`,
 	}
@@ -172,7 +189,41 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("openai ensure schema: %w", err)
 		}
 	}
+	if err := ensureSQLiteColumn(ctx, db, "openai_gateway_analytics", "gateway_key_id", "TEXT"); err != nil {
+		return err
+	}
+	if err := ensureSQLiteColumn(ctx, db, "openai_gateway_analytics", "route", "TEXT NOT NULL DEFAULT 'chat.completions'"); err != nil {
+		return err
+	}
+	if err := ensureSQLiteColumn(ctx, db, "openai_gateway_keys", "key_cipher", "TEXT"); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_openai_analytics_gateway_key ON openai_gateway_analytics(gateway_key_id, timestamp)`); err != nil {
+		return fmt.Errorf("openai ensure schema: %w", err)
+	}
 	return nil
+}
+
+func ensureSQLiteColumn(ctx context.Context, db *sql.DB, table, column, definition string) error {
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+table+")")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, primaryKey int
+		var defaultValue interface{}
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	_, err = db.ExecContext(ctx, "ALTER TABLE "+table+" ADD COLUMN "+column+" "+definition)
+	return err
 }
 
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -226,6 +277,18 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.refreshAllEndpointsRoute(w, r)
 	case len(parts) == 1 && parts[0] == "health-check-all" && method == http.MethodPost:
 		s.healthCheckAllRoute(w, r)
+	case len(parts) == 1 && parts[0] == "keys" && method == http.MethodGet:
+		s.listGatewayKeys(w, r)
+	case len(parts) == 1 && parts[0] == "keys" && method == http.MethodPost:
+		s.createGatewayKey(w, r)
+	case len(parts) == 2 && parts[0] == "keys" && method == http.MethodPut:
+		s.updateGatewayKey(w, r, parts[1])
+	case len(parts) == 2 && parts[0] == "keys" && method == http.MethodDelete:
+		s.deleteGatewayKey(w, r, parts[1])
+	case len(parts) == 3 && parts[0] == "keys" && parts[2] == "toggle" && method == http.MethodPost:
+		s.toggleGatewayKey(w, r, parts[1])
+	case len(parts) == 3 && parts[0] == "keys" && parts[2] == "rotate" && method == http.MethodPost:
+		s.rotateGatewayKey(w, r, parts[1])
 	case len(parts) == 1 && parts[0] == "export" && method == http.MethodGet:
 		s.exportEndpointsRoute(w, r)
 	case len(parts) == 1 && parts[0] == "import" && method == http.MethodPost:
@@ -848,6 +911,7 @@ func (s *Service) healthCheckAllModelsRoute(w http.ResponseWriter, r *http.Reque
 	if req.Concurrency > 0 {
 		concurrency = req.Concurrency
 	}
+	concurrency = min(max(concurrency, 1), healthConcurrencyMax)
 
 	summary := s.runBatchHealthCheck(ctx, id, baseURL, apiKey, models, timeoutDuration, concurrency)
 
@@ -1060,27 +1124,60 @@ func (s *Service) healthCheckAllRoute(w http.ResponseWriter, r *http.Request) {
 	if req.Concurrency > 0 {
 		concurrency = req.Concurrency
 	}
+	concurrency = min(max(concurrency, 1), healthConcurrencyMax)
 
-	results := []map[string]interface{}{}
-
+	type endpointTarget struct {
+		item
+		models []string
+	}
+	targets := make([]endpointTarget, 0, len(items))
 	for _, it := range items {
 		var models []string
 		if it.modelsRaw != "" {
 			_ = json.Unmarshal([]byte(it.modelsRaw), &models)
 		}
-		if len(models) == 0 {
+		targets = append(targets, endpointTarget{item: it, models: models})
+	}
+
+	resultsByEndpoint := make(map[string][]HealthRecord, len(targets))
+	var resultsMu sync.Mutex
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+
+	for _, target := range targets {
+		for _, model := range target.models {
+			wg.Add(1)
+			go func(target endpointTarget, model string) {
+				defer wg.Done()
+				select {
+				case sem <- struct{}{}:
+				case <-ctx.Done():
+					return
+				}
+				defer func() { <-sem }()
+
+				result := s.healthCheckSingleModel(ctx, target.id, target.url, target.key, model, timeoutDuration)
+				resultsMu.Lock()
+				resultsByEndpoint[target.id] = append(resultsByEndpoint[target.id], result)
+				resultsMu.Unlock()
+			}(target, model)
+		}
+	}
+	wg.Wait()
+
+	results := make([]map[string]interface{}, 0, len(targets))
+	for _, target := range targets {
+		if len(target.models) == 0 {
 			results = append(results, map[string]interface{}{
-				"endpointId":  it.id,
-				"name":        it.name,
+				"endpointId":  target.id,
+				"name":        target.name,
 				"totalModels": 0,
 				"skipped":     true,
 			})
 			continue
 		}
 
-		summary := s.runBatchHealthCheck(ctx, it.id, it.url, it.key, models, timeoutDuration, concurrency)
-
-		// Save history
+		summary := summarizeHealthResults(target.models, resultsByEndpoint[target.id])
 		for _, result := range summary.Results {
 			var errMsg sql.NullString
 			if result.Error != "" {
@@ -1090,19 +1187,17 @@ func (s *Service) healthCheckAllRoute(w http.ResponseWriter, r *http.Request) {
 			_, _ = db.ExecContext(ctx, `
 				INSERT INTO openai_health_history (endpoint_id, status, response_time, error_message, checked_at)
 				VALUES (?, ?, ?, ?, ?)`,
-				it.id, result.Status, result.Latency, errMsg, result.CheckedAt)
+				target.id, result.Status, result.Latency, errMsg, result.CheckedAt)
 		}
-
-		// Update status
 		_, _ = db.ExecContext(ctx, `
 			UPDATE openai_endpoints
 			SET status = ?, last_checked = ?
 			WHERE id = ?`,
-			summary.OverallStatus, summary.CheckedAt, it.id)
+			summary.OverallStatus, summary.CheckedAt, target.id)
 
 		results = append(results, map[string]interface{}{
-			"endpointId":  it.id,
-			"name":        it.name,
+			"endpointId":  target.id,
+			"name":        target.name,
 			"totalModels": summary.TotalModels,
 			"operational": summary.Operational,
 			"degraded":    summary.Degraded,
@@ -1279,14 +1374,17 @@ func (s *Service) importEndpointsRoute(w http.ResponseWriter, r *http.Request) {
 
 func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	requestStarted := time.Now()
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
+		s.RecordAnalytics(ctx, "chat.completions", "", "", http.StatusBadRequest, time.Since(requestStarted).Milliseconds(), 0, 0, 0)
 		response.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
 	var parsedBody map[string]interface{}
 	if err := json.Unmarshal(bodyBytes, &parsedBody); err != nil {
+		s.RecordAnalytics(ctx, "chat.completions", "", "", http.StatusBadRequest, time.Since(requestStarted).Milliseconds(), 0, 0, 0)
 		response.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
@@ -1297,6 +1395,7 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	db, err := s.open(ctx)
 	if err != nil {
+		s.RecordAnalytics(ctx, "chat.completions", "", model, http.StatusInternalServerError, time.Since(requestStarted).Milliseconds(), 0, 0, 0)
 		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -1311,7 +1410,7 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 		var enabledInt int
 		err := db.QueryRowContext(ctx, `
 			SELECT id, name, base_url, api_key, status, enabled, models
-			FROM openai_endpoints WHERE id = ?`, targetEndpointID).
+			FROM openai_endpoints WHERE id = ? AND enabled = 1`, targetEndpointID).
 			Scan(&ep.ID, &ep.Name, &ep.BaseURL, &ep.APIKey, &ep.Status, &enabledInt, &modelsRaw)
 
 		if err == nil {
@@ -1326,10 +1425,10 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !found {
-		// Get all valid enabled endpoints
+		// Enabled is the administrator's routing decision; status is the latest verification result.
 		rows, err := db.QueryContext(ctx, `
 			SELECT id, name, base_url, api_key, status, enabled, models
-			FROM openai_endpoints WHERE status = 'valid' AND enabled = 1`)
+			FROM openai_endpoints WHERE enabled = 1`)
 		if err == nil {
 			defer rows.Close()
 			endpoints := []Endpoint{}
@@ -1371,6 +1470,7 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !found {
+		s.RecordAnalytics(ctx, "chat.completions", "", model, http.StatusServiceUnavailable, time.Since(requestStarted).Milliseconds(), 0, 0, 0)
 		response.JSON(w, http.StatusServiceUnavailable, map[string]interface{}{
 			"error": map[string]string{
 				"message": "No valid OpenAI endpoints available",
@@ -1432,6 +1532,7 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", fullURL, bytes.NewReader(upstreamBodyBytes))
 	if err != nil {
+		s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, http.StatusInternalServerError, time.Since(requestStarted).Milliseconds(), 0, 0, 0)
 		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -1447,7 +1548,8 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 	resp, err := s.client.Do(httpReq)
 	if err != nil {
-		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"error": map[string]string{"message": err.Error(), "type": "proxy_error"}})
+		s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, http.StatusBadGateway, time.Since(startTime).Milliseconds(), 0, 0, 0)
+		response.JSON(w, http.StatusBadGateway, map[string]interface{}{"error": map[string]string{"message": err.Error(), "type": "proxy_error"}})
 		return
 	}
 	defer resp.Body.Close()
@@ -1501,7 +1603,7 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 			totalTokens = promptTokens + completionTokens
 		}
 
-		s.RecordAnalytics(selected.ID, model, resp.StatusCode, latencyMs, promptTokens, completionTokens, totalTokens)
+		s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, resp.StatusCode, latencyMs, promptTokens, completionTokens, totalTokens)
 	} else {
 		respBodyBytes, _ := io.ReadAll(resp.Body)
 		latencyMs := time.Since(startTime).Milliseconds()
@@ -1515,7 +1617,7 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.Unmarshal(respBodyBytes, &usageInfo)
 
-		s.RecordAnalytics(selected.ID, model, resp.StatusCode, latencyMs, usageInfo.Usage.PromptTokens, usageInfo.Usage.CompletionTokens, usageInfo.Usage.TotalTokens)
+		s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, resp.StatusCode, latencyMs, usageInfo.Usage.PromptTokens, usageInfo.Usage.CompletionTokens, usageInfo.Usage.TotalTokens)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(resp.StatusCode)
@@ -1530,7 +1632,7 @@ func (s *Service) GetModelsList(ctx context.Context) ([]map[string]interface{}, 
 	}
 	defer db.Close()
 
-	rows, err := db.QueryContext(ctx, "SELECT name, enabled, status, models FROM openai_endpoints WHERE enabled = 1 AND status = 'valid'")
+	rows, err := db.QueryContext(ctx, "SELECT name, enabled, status, models FROM openai_endpoints WHERE enabled = 1")
 	if err != nil {
 		return nil, err
 	}
@@ -1729,9 +1831,10 @@ func (s *Service) healthCheckSingleModel(ctx context.Context, endpointID, baseUR
 
 	reqURL := fmt.Sprintf("%s/chat/completions", strings.TrimSuffix(baseURL, "/"))
 	payload := map[string]interface{}{
-		"model":    model,
-		"messages": []map[string]string{{"role": "user", "content": "hi"}},
-		"stream":   true,
+		"model":      model,
+		"messages":   []map[string]string{{"role": "user", "content": "hi"}},
+		"stream":     true,
+		"max_tokens": 1,
 	}
 	bodyBytes, _ := json.Marshal(payload)
 
@@ -1802,6 +1905,14 @@ func (s *Service) runBatchHealthCheck(ctx context.Context, endpointID, baseURL, 
 	}
 
 	wg.Wait()
+
+	return summarizeHealthResults(models, results)
+}
+
+func summarizeHealthResults(models []string, results []HealthRecord) HealthSummary {
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Model < results[j].Model
+	})
 
 	operationalCount := 0
 	degradedCount := 0

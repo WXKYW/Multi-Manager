@@ -1,10 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChartPalette, ClipboardText, LayerCard, Popover, Tabs, TimeseriesChart } from '@cloudflare/kumo';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
 import { Checkbox } from '@cloudflare/kumo/components/checkbox';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
-import { Input, Textarea } from '@cloudflare/kumo/components/input';
+import { Input } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Table } from '@cloudflare/kumo/components/table';
 import { Switch } from '@cloudflare/kumo/components/switch';
@@ -24,12 +24,17 @@ import useStore from '../store.js';
 import useTableResize from '../composables/useTableResize.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
+import { AppCard, PageStack, PageToolbar, SectionCard } from '../components/ui/AppPrimitives.jsx';
+import CodeEditor from '../components/ui/CodeEditor.jsx';
+import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
 import {
   ArrowLeft,
   Box,
   Check,
+  ChevronDown,
+  ChevronUp,
   Cloud,
   Copy,
   Database,
@@ -115,6 +120,7 @@ const CLOUDFLARE_TABS = [
 const EMPTY_ACCOUNT_FORM = {
   name: '',
   email: '',
+  cfAccountId: '',
   apiToken: '',
   skipVerify: false,
 };
@@ -180,6 +186,24 @@ function formatBytes(bytes) {
   if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(2)} MB`;
   if (value >= 1024) return `${(value / 1024).toFixed(2)} KB`;
   return `${value} B`;
+}
+
+function r2PreviewKind(key = '') {
+  const extension = String(key).split('?')[0].split('#')[0].split('.').pop()?.toLowerCase() || '';
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'svg'].includes(extension)) return 'image';
+  if (['mp4', 'webm', 'mov', 'm4v', 'ogg'].includes(extension)) return 'video';
+  if (['mp3', 'wav', 'm4a', 'aac', 'flac', 'oga'].includes(extension)) return 'audio';
+  if (extension === 'pdf') return 'frame';
+  if ([
+    'txt', 'log', 'json', 'xml', 'csv', 'md', 'yaml', 'yml', 'html', 'css', 'js', 'jsx', 'ts', 'tsx',
+    'go', 'py', 'sh', 'sql', 'ini', 'env', 'toml',
+  ].includes(extension)) return 'frame';
+  return 'unknown';
+}
+
+function objectFileName(value = '') {
+  const parts = String(value).split('/').filter(Boolean);
+  return parts[parts.length - 1] || 'object';
 }
 
 function formatNumber(value) {
@@ -322,10 +346,14 @@ function DnsPage() {
   const [r2Objects, setR2Objects] = useState([]);
   const [r2Prefixes, setR2Prefixes] = useState([]);
   const [r2CurrentPrefix, setR2CurrentPrefix] = useState('');
+  const [r2BucketSearch, setR2BucketSearch] = useState('');
+  const [r2ObjectSearch, setR2ObjectSearch] = useState('');
+  const r2UploadInputRef = useRef(null);
   const [tunnels, setTunnels] = useState([]);
   const [sslInfo, setSslInfo] = useState(null);
   const [analytics, setAnalytics] = useState(null);
   const [analyticsRange, setAnalyticsRange] = useState('24h');
+  const [showAnalyticsCharts, setShowAnalyticsCharts] = useState(false);
   const [selectedRecordIds, setSelectedRecordIds] = useState([]);
   const [selectedR2Objects, setSelectedR2Objects] = useState([]);
   const [accountTokens, setAccountTokens] = useState({});
@@ -343,20 +371,21 @@ function DnsPage() {
   const [pagesDeployState, setPagesDeployState] = useState({ project: null, deployments: [] });
   const [pagesDomainState, setPagesDomainState] = useState({ project: null, domains: [], domain: '' });
   const [r2BucketForm, setR2BucketForm] = useState({ name: '', location: 'auto' });
+  const [r2FolderForm, setR2FolderForm] = useState({ name: '' });
   const [importState, setImportState] = useState({ kind: '', text: '', overwrite: false });
   const [tunnelForm, setTunnelForm] = useState({ name: '' });
   const [tunnelTokenState, setTunnelTokenState] = useState({ tunnel: null, token: '' });
   const [tunnelConfigState, setTunnelConfigState] = useState({ tunnel: null, text: EMPTY_TUNNEL_CONFIG });
   const [tunnelConnectionState, setTunnelConnectionState] = useState({ tunnel: null, connections: [] });
 
-  const [zoneColWidths, startZoneResize] = useTableResize([166, 76, 58, 54, 68]);
+  const zoneColWidths = ['31%', '20%', '13%', '11%', '25%'];
   const [recordColWidths, startRecordResize] = useTableResize([34, 54, 82, 140, 48, 50, 106, 70]);
   const [workerColWidths, startWorkerResize] = useTableResize([260, 160, 180, 280]);
   const [pageColWidths, startPageResize] = useTableResize([240, 220, 150, 150, 220]);
-  const [r2ColWidths, startR2Resize] = useTableResize([48, 360, 120, 180, 150]);
+  const [r2ColWidths, startR2Resize] = useTableResize([44, 420, 128, 180, 128]);
   const [tunnelColWidths, startTunnelResize] = useTableResize([260, 120, 100, 180, 240]);
   const [templateColWidths, startTemplateResize] = useTableResize([220, 90, 260, 120, 180]);
-  const [accountColWidths, startAccountResize] = useTableResize([220, 260, 240, 170, 190]);
+  const [accountColWidths, startAccountResize] = useTableResize([220, 220, 260, 240, 170, 190]);
 
   const selectedAccount = useMemo(
     () => accounts.find((account) => String(account.id) === String(selectedAccountId)) || null,
@@ -433,6 +462,11 @@ function DnsPage() {
       },
     ];
   }, [analyticsPoints, analyticsSummary.bandwidth, analyticsSummary.cacheHitRate, analyticsSummary.requests, isDarkMode]);
+  const showAnalyticsPanel = showAnalyticsCharts && (analyticsPoints.length > 0 || loading.analytics);
+
+  useEffect(() => {
+    setShowAnalyticsCharts(false);
+  }, [selectedZoneId]);
 
   const setLoadingKey = useCallback((key, value) => {
     setLoading((prev) => ({ ...prev, [key]: value }));
@@ -674,6 +708,7 @@ function DnsPage() {
       );
       setR2Objects(data.objects || []);
       setR2Prefixes(data.delimited_prefixes || []);
+      if ((prefix || '') !== r2CurrentPrefix) setR2ObjectSearch('');
       setR2CurrentPrefix(prefix || '');
       setSelectedR2Objects([]);
     } catch (error) {
@@ -751,7 +786,7 @@ function DnsPage() {
   const openAccountModal = (account = null) => {
     setModal({ type: 'account', data: account });
     setAccountForm(account
-      ? { name: account.name || '', email: account.email || '', apiToken: '', skipVerify: false }
+      ? { name: account.name || '', email: account.email || '', cfAccountId: account.cfAccountId || '', apiToken: '', skipVerify: false }
       : EMPTY_ACCOUNT_FORM);
   };
 
@@ -1463,6 +1498,67 @@ function DnsPage() {
     await loadR2Objects(bucket.name, '');
   };
 
+  const r2ObjectApiPath = (objectKey, suffix = '') => (
+    `/accounts/${selectedAccountId}/r2/buckets/${encodeURIComponent(r2SelectedBucket.name)}/objects/${encodeURIComponent(objectKey)}${suffix}`
+  );
+
+  const uploadR2Object = async (objectKey, body, contentType = 'application/octet-stream') => {
+    if (!selectedAccountId || !r2SelectedBucket?.name) throw new Error('请先选择 R2 存储桶');
+    const response = await fetch(`/api/cloudflare${r2ObjectApiPath(objectKey)}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': contentType || 'application/octet-stream',
+      },
+      body,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.error) {
+      throw new Error(payload.error || `上传失败：HTTP ${response.status}`);
+    }
+    return payload;
+  };
+
+  const handleR2UploadFiles = async (event) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (files.length === 0) return;
+    setLoadingKey('uploadR2', true);
+    try {
+      await Promise.all(files.map((file) => {
+        const relativePath = file.webkitRelativePath || file.name;
+        const key = `${r2CurrentPrefix}${relativePath}`.replace(/^\/+/, '');
+        return uploadR2Object(key, file, file.type || 'application/octet-stream');
+      }));
+      toast.success(`已上传 ${files.length} 个文件`);
+      await loadR2Objects(r2SelectedBucket.name, r2CurrentPrefix);
+    } catch (error) {
+      toast.error(`上传 R2 对象失败：${error.message}`);
+    } finally {
+      setLoadingKey('uploadR2', false);
+    }
+  };
+
+  const createR2Folder = async () => {
+    const folderName = r2FolderForm.name.trim().replace(/^\/+|\/+$/g, '');
+    if (!folderName) {
+      toast.warning('请输入文件夹名称');
+      return;
+    }
+    setLoadingKey('createR2Folder', true);
+    try {
+      const key = `${r2CurrentPrefix}${folderName}/.keep`;
+      await uploadR2Object(key, new Blob([''], { type: 'application/octet-stream' }));
+      toast.success('文件夹已创建');
+      setR2FolderForm({ name: '' });
+      setModal({ type: null, data: null });
+      await loadR2Objects(r2SelectedBucket.name, r2CurrentPrefix);
+    } catch (error) {
+      toast.error(`创建文件夹失败：${error.message}`);
+    } finally {
+      setLoadingKey('createR2Folder', false);
+    }
+  };
+
   const deleteR2Object = async (objectKey) => {
     if (!(await dialog.confirm(`确定要删除对象“${objectKey}”吗？`))) return;
     try {
@@ -1496,18 +1592,23 @@ function DnsPage() {
   };
 
   const downloadR2Object = async (objectKey) => {
-    try {
-      const data = await cfApi(
-        `/accounts/${selectedAccountId}/r2/buckets/${encodeURIComponent(r2SelectedBucket.name)}/objects/${encodeURIComponent(objectKey)}/download-info`
-      );
-      if (data.publicUrl) {
-        window.open(data.publicUrl, '_blank', 'noopener,noreferrer');
-      } else {
-        toast.warning('该对象没有公开访问地址，可在 R2 绑定公开域名后再下载');
-      }
-    } catch (error) {
-      toast.error(`获取下载信息失败：${error.message}`);
-    }
+    window.open(`/api/cloudflare${r2ObjectApiPath(objectKey, '/download')}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const r2ObjectPreviewUrl = (objectKey) => (
+    `/api/cloudflare/accounts/${encodeURIComponent(selectedAccountId)}/r2/buckets/${encodeURIComponent(r2SelectedBucket.name)}/objects/${encodeURIComponent(objectKey)}/preview`
+  );
+
+  const previewR2Object = (objectKey) => {
+    setModal({
+      type: 'r2Preview',
+      data: {
+        key: objectKey,
+        name: objectFileName(objectKey),
+        kind: r2PreviewKind(objectKey),
+        url: r2ObjectPreviewUrl(objectKey),
+      },
+    });
   };
 
   const createTunnel = async () => {
@@ -1647,19 +1748,53 @@ function DnsPage() {
     });
   };
 
-  const r2Rows = [
-    ...r2Prefixes.map((prefix) => ({ key: prefix, name: prefix.slice(r2CurrentPrefix.length).replace(/\/$/, ''), isFolder: true })),
-    ...r2Objects.map((object) => ({
-      ...object,
-      key: object.key || object.name,
-      name: (object.key || object.name || '').slice(r2CurrentPrefix.length) || object.key || object.name,
-      isFolder: false,
+  const filteredR2Buckets = useMemo(() => {
+    const keyword = r2BucketSearch.trim().toLowerCase();
+    if (!keyword) return r2Buckets;
+    return r2Buckets.filter((bucket) => String(bucket.name || '').toLowerCase().includes(keyword));
+  }, [r2BucketSearch, r2Buckets]);
+
+  const r2Rows = useMemo(() => [
+    ...r2Prefixes.map((prefix) => ({
+      key: prefix,
+      name: prefix.slice(r2CurrentPrefix.length).replace(/\/$/, '') || prefix.replace(/\/$/, ''),
+      isFolder: true,
     })),
-  ];
-  const isDnsWorkspace = activeTab === 'dns' && selectedAccountId;
-  const pageShellClassName = isDnsWorkspace
-    ? 'dns-workspace flex w-full max-w-full flex-col gap-3 overflow-visible pb-4 md:h-[calc(100dvh-88px)] md:min-h-0 md:overflow-hidden md:pb-1 lg:h-[calc(100dvh-92px)]'
-    : 'flex w-full min-w-0 flex-col gap-3 sm:gap-4';
+    ...r2Objects
+      .filter((object) => !String(object.key || object.name || '').endsWith('/.keep'))
+      .map((object) => ({
+        ...object,
+        key: object.key || object.name,
+        name: (object.key || object.name || '').slice(r2CurrentPrefix.length) || object.key || object.name,
+        isFolder: false,
+      })),
+  ], [r2CurrentPrefix, r2Objects, r2Prefixes]);
+
+  const filteredR2Rows = useMemo(() => {
+    const keyword = r2ObjectSearch.trim().toLowerCase();
+    if (!keyword) return r2Rows;
+    return r2Rows.filter((row) => String(row.name || row.key || '').toLowerCase().includes(keyword));
+  }, [r2ObjectSearch, r2Rows]);
+
+  const r2VisibleObjectKeys = useMemo(
+    () => filteredR2Rows.filter((row) => !row.isFolder).map((row) => row.key),
+    [filteredR2Rows]
+  );
+
+  const r2ObjectTotalBytes = useMemo(
+    () => r2Objects.reduce((total, object) => total + Number(object.size || 0), 0),
+    [r2Objects]
+  );
+
+  const r2PathSegments = useMemo(
+    () => r2CurrentPrefix.split('/').filter(Boolean),
+    [r2CurrentPrefix]
+  );
+  const isViewportWorkspaceTab = ['dns', 'r2'].includes(activeTab);
+  const pageShellClassName = 'dns-workspace min-h-full max-w-full md:h-full md:min-h-0 md:flex-1';
+  const contentAreaClassName = isViewportWorkspaceTab
+    ? 'flex min-w-0 flex-col md:min-h-0 md:flex-1'
+    : 'min-w-0';
   const renderResizeHead = (label, index, startResize, align = 'left') => {
     const alignClassName = {
       left: 'justify-start text-left',
@@ -1678,25 +1813,23 @@ function DnsPage() {
   };
 
   return (
-    <div className={pageShellClassName}>
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-kumo-line pb-3">
-        <div className="min-w-0 max-w-full overflow-x-auto scrollbar-thin">
-          <Tabs
-            {...MODULE_TABS_PROPS}
-            value={activeTab}
-            onValueChange={setActiveTab}
-            tabs={CLOUDFLARE_TABS}
-          />
-        </div>
+    <PageStack className={pageShellClassName}>
+      <PageToolbar>
+        <Tabs
+          {...MODULE_TABS_PROPS}
+          value={activeTab}
+          onValueChange={setActiveTab}
+          tabs={CLOUDFLARE_TABS}
+        />
 
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto">
           {!['accounts', 'templates'].includes(activeTab) && (
             <Select size="sm"
               aria-label="选择 Cloudflare 账号"
               value={selectedAccountId || null}
               onValueChange={(value) => setSelectedAccountId(value ? String(value) : '')}
               placeholder="选择账号"
-              className="w-32 sm:w-48"
+              className="min-w-0 flex-1 sm:w-48 sm:flex-none"
               items={accounts.map((account) => ({
                 value: String(account.id),
                 label: account.name,
@@ -1712,26 +1845,32 @@ function DnsPage() {
             icon={<RefreshCw className={`h-4 w-4 ${Object.values(loading).some(Boolean) ? 'animate-spin' : ''}`} />}
           />
         </div>
-      </div>
+      </PageToolbar>
 
-      {!selectedAccountId && !['accounts', 'templates'].includes(activeTab) ? (
-        <LayerCard className="p-8">
-          <div className="flex flex-col items-center gap-3 text-center text-sm text-kumo-subtle">
-            <Cloud className="h-10 w-10 text-kumo-subtle" />
-            <div>尚未配置 Cloudflare 账号，请先在“账号”中添加 API 令牌。</div>
-            <Button size="sm" onClick={() => setActiveTab('accounts')}>
-              去添加账号
-            </Button>
-          </div>
-        </LayerCard>
-      ) : (
-        <>
+      <div className={contentAreaClassName}>
+        {!selectedAccountId && !['accounts', 'templates'].includes(activeTab) ? (
+          <SectionCard
+            title="Cloudflare 账号"
+            description="添加 API 令牌后即可管理 DNS、Workers、Pages、R2 和 Tunnel。"
+            icon={<Cloud className="h-4 w-4 text-kumo-brand" />}
+            bodyPadding="xl"
+          >
+            <div className="flex flex-col items-center gap-3 text-center text-sm text-kumo-subtle">
+              <Cloud className="h-10 w-10 text-kumo-subtle" />
+              <div>尚未配置 Cloudflare 账号，请先在“账号”中添加 API 令牌。</div>
+              <Button size="sm" onClick={() => setActiveTab('accounts')}>
+                去添加账号
+              </Button>
+            </div>
+          </SectionCard>
+        ) : (
+          <>
           {activeTab === 'dns' && (
-            <div className="dns-split grid max-w-full gap-3 overflow-visible px-px md:min-h-0 md:flex-1 md:overflow-hidden">
-              <section className="flex min-h-0 min-w-0 max-w-full flex-col gap-2">
-              <div className="flex min-h-8 shrink-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="dns-split grid min-w-0 gap-3 md:min-h-0 md:flex-1">
+              <section className="flex min-w-0 flex-col gap-2 md:min-h-0">
+              <div className="flex min-h-8 shrink-0 flex-col gap-2 pl-px sm:flex-row sm:items-center sm:justify-between">
                 <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:items-center">
-                  <Button size="sm" onClick={openZoneModal} icon={<Plus className="h-4 w-4" />} className="w-full justify-center sm:w-auto">
+                  <Button size="sm" variant="secondary" onClick={openZoneModal} icon={<Plus className="h-4 w-4" />} className="w-full justify-center sm:w-auto">
                     添加域名
                   </Button>
                   {selectedZone && (
@@ -1774,19 +1913,19 @@ function DnsPage() {
                 ))}
               </div>
 
-              <div className="dns-table-frame hidden min-h-0 max-w-full flex-1 md:block">
+              <div className="dns-table-frame hidden min-h-0 max-w-full flex-1 md:flex">
                 <div className="dns-table-scroll scrollbar-thin">
-                <Table layout="fixed" className="w-full text-xs" style={{ minWidth: zoneColWidths.reduce((sum, width) => sum + width, 0) }}>
+                <Table layout="fixed" className="w-full text-xs">
                   <colgroup>
                     {zoneColWidths.map((width, index) => <col key={index} style={{ width }} />)}
                   </colgroup>
                   <Table.Header sticky variant="compact">
                     <Table.Row className="h-8">
-                      {renderResizeHead('域名', 0, startZoneResize)}
-                      {renderResizeHead('状态', 1, startZoneResize, 'center')}
-                      {renderResizeHead('类型', 2, startZoneResize, 'center')}
-                      {renderResizeHead('NS', 3, startZoneResize, 'center')}
-                      <Table.Head className="!px-2 !py-1.5 text-center">操作</Table.Head>
+                      <Table.Head className="!px-2.5 !py-1.5 text-left">域名</Table.Head>
+                      <Table.Head className="!px-2.5 !py-1.5 text-center">状态</Table.Head>
+                      <Table.Head className="!px-2.5 !py-1.5 text-center">类型</Table.Head>
+                      <Table.Head className="!px-2.5 !py-1.5 text-center">NS</Table.Head>
+                      <Table.Head className="app-table-action !px-2 !py-1.5">操作</Table.Head>
                     </Table.Row>
                   </Table.Header>
                   <Table.Body>
@@ -1906,7 +2045,7 @@ function DnsPage() {
 
               </section>
 
-              <section className="flex min-w-0 max-w-full flex-col gap-2 overflow-visible md:min-h-0 md:overflow-hidden">
+              <section className="flex min-w-0 flex-col gap-2 md:min-h-0">
               <div className="flex min-h-8 shrink-0 items-center justify-between gap-2 px-1">
                 <div className="flex min-w-0 items-center gap-2 text-xs text-kumo-subtle">
                   <Globe className="h-3.5 w-3.5 shrink-0" />
@@ -1915,15 +2054,38 @@ function DnsPage() {
                   </span>
                 </div>
                 {selectedZone && (
-                  <div className="shrink-0 text-xs text-kumo-subtle">
-                    {records.length} 条记录
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Select size="sm"
+                      value={analyticsRange}
+                      onValueChange={(value) => loadAnalytics(String(value))}
+                      className="w-20 shrink-0"
+                      items={[
+                        { value: '24h', label: '24 小时' },
+                        { value: '7d', label: '7 天' },
+                        { value: '30d', label: '30 天' },
+                      ]}
+                    />
+                    {(analyticsPoints.length > 0 || loading.analytics) && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => setShowAnalyticsCharts((value) => !value)}
+                        icon={showAnalyticsCharts ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                        className="shrink-0 px-2"
+                      >
+                        {showAnalyticsCharts ? '收起趋势' : '展开趋势'}
+                      </Button>
+                    )}
+                    <div className="shrink-0 text-xs text-kumo-subtle">
+                      {records.length} 条记录
+                    </div>
                   </div>
                 )}
               </div>
               {selectedZone ? (
                 <>
                   <div className="dns-summary-grid order-3 grid shrink-0 gap-2 md:order-none">
-                    <DnsPanelCard className="flex min-h-11 items-center justify-between gap-3 p-2.5">
+                    <DnsPanelCard className="flex min-h-9 items-center justify-between gap-2 p-2">
                       <div className="shrink-0 whitespace-nowrap text-xs text-kumo-subtle">SSL 模式</div>
                       <Select size="sm"
                         value={sslInfo?.mode || null}
@@ -1935,70 +2097,63 @@ function DnsPage() {
                         items={SSL_MODES}
                       />
                     </DnsPanelCard>
-                    <DnsPanelCard className="flex min-h-11 items-center justify-between gap-3 p-2.5">
+                    <DnsPanelCard className="flex min-h-9 items-center justify-between gap-2 p-2">
                       <div className="shrink-0 whitespace-nowrap text-xs text-kumo-subtle">唯一访问者</div>
-                      <div className="shrink-0 whitespace-nowrap text-base font-semibold leading-6 text-kumo-strong">{loading.analytics ? '加载中' : formatNumber(analyticsSummary.uniques)}</div>
+                      <div className="shrink-0 whitespace-nowrap text-base font-semibold leading-5 text-kumo-strong">{loading.analytics ? '加载中' : formatNumber(analyticsSummary.uniques)}</div>
                     </DnsPanelCard>
-                    <DnsPanelCard className="flex min-h-11 items-center justify-between gap-3 p-2.5">
+                    <DnsPanelCard className="flex min-h-9 items-center justify-between gap-2 p-2">
                       <div className="shrink-0 whitespace-nowrap text-xs text-kumo-subtle">请求量</div>
-                      <div className="shrink-0 whitespace-nowrap text-base font-semibold leading-6 text-kumo-strong">{loading.analytics ? '加载中' : formatNumber(analyticsSummary.requests)}</div>
+                      <div className="shrink-0 whitespace-nowrap text-base font-semibold leading-5 text-kumo-strong">{loading.analytics ? '加载中' : formatNumber(analyticsSummary.requests)}</div>
                     </DnsPanelCard>
-                    <DnsPanelCard className="flex min-h-11 items-center justify-between gap-3 p-2.5">
+                    <DnsPanelCard className="flex min-h-9 items-center justify-between gap-2 p-2">
                       <div className="shrink-0 whitespace-nowrap text-xs text-kumo-subtle">带宽</div>
-                      <div className="shrink-0 whitespace-nowrap text-base font-semibold leading-6 text-kumo-strong">{loading.analytics ? '加载中' : formatBytes(analyticsSummary.bandwidth)}</div>
+                      <div className="shrink-0 whitespace-nowrap text-base font-semibold leading-5 text-kumo-strong">{loading.analytics ? '加载中' : formatBytes(analyticsSummary.bandwidth)}</div>
                     </DnsPanelCard>
-                    <DnsPanelCard className="flex min-h-11 items-center justify-between gap-3 p-2.5">
+                    <DnsPanelCard className="flex min-h-9 items-center justify-between gap-2 p-2">
                       <div className="flex min-w-0 items-center gap-2">
                           <div className="shrink-0 whitespace-nowrap text-xs text-kumo-subtle">缓存命中率</div>
-                          <div className="shrink-0 whitespace-nowrap text-base font-semibold leading-6 text-kumo-strong">
+                          <div className="shrink-0 whitespace-nowrap text-base font-semibold leading-5 text-kumo-strong">
                             {loading.analytics ? '加载中' : formatPercent(analyticsSummary.cacheHitRate)}
                           </div>
                         </div>
-                        <Select size="sm"
-                          value={analyticsRange}
-                          onValueChange={(value) => loadAnalytics(String(value))}
-                          className="w-20 shrink-0"
-                          items={[
-                            { value: '24h', label: '24 小时' },
-                            { value: '7d', label: '7 天' },
-                            { value: '30d', label: '30 天' },
-                          ]}
-                        />
                     </DnsPanelCard>
                   </div>
 
-                  {(analyticsPoints.length > 0 || loading.analytics) && (
-                    <div className="dns-chart-grid order-4 grid shrink-0 gap-2 md:order-none">
-                      {analyticsChartCards.map((card) => (
-                        <DnsPanelCard key={card.key} className="min-w-0 overflow-hidden p-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="truncate text-xs font-medium text-kumo-strong">{card.label}</div>
-                            <div className="shrink-0 text-xs font-semibold text-kumo-subtle">{loading.analytics ? '加载中' : card.value}</div>
-                          </div>
-                          <div className="mt-2 min-w-0 overflow-hidden" style={{ height: 108 }}>
-                            <TimeseriesChart
-                              echarts={echarts}
-                              data={card.data}
-                              height={108}
-                              isDarkMode={isDarkMode}
-                              gradient
-                              loading={loading.analytics && analyticsPoints.length === 0}
-                              xAxisTickCount={3}
-                              yAxisTickCount={2}
-                              xAxisTickFormat={(timestamp) => formatAnalyticsAxisTime(timestamp, analyticsRange)}
-                              yAxisTickFormat={card.yAxisTickFormat}
-                              tooltipValueFormat={card.tooltipValueFormat}
-                              tooltipFollowCursor="x"
-                              ariaDescription={`Cloudflare ${card.label}`}
-                            />
-                          </div>
-                        </DnsPanelCard>
-                      ))}
+                  <AnimatedCollapse
+                    open={showAnalyticsPanel}
+                    className={showAnalyticsPanel ? 'order-5 shrink-0 md:order-none' : 'contents'}
+                  >
+                    <div className="dns-chart-grid grid gap-2 pt-0.5">
+                    {analyticsChartCards.map((card) => (
+                      <DnsPanelCard key={card.key} className="min-w-0 overflow-hidden p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="truncate text-xs font-medium text-kumo-strong">{card.label}</div>
+                          <div className="shrink-0 text-xs font-semibold text-kumo-subtle">{loading.analytics ? '加载中' : card.value}</div>
+                        </div>
+                        <div className="mt-2 min-w-0 overflow-hidden" style={{ height: 108 }}>
+                          <TimeseriesChart
+                            echarts={echarts}
+                            data={card.data}
+                            height={108}
+                            isDarkMode={isDarkMode}
+                            gradient
+                            loading={loading.analytics && analyticsPoints.length === 0}
+                            xAxisTickCount={3}
+                            yAxisTickCount={2}
+                            xAxisTickFormat={(timestamp) => formatAnalyticsAxisTime(timestamp, analyticsRange)}
+                            yAxisTickFormat={card.yAxisTickFormat}
+                            tooltipValueFormat={card.tooltipValueFormat}
+                            tooltipFollowCursor="x"
+                            ariaDescription={`Cloudflare ${card.label}`}
+                          />
+                        </div>
+                      </DnsPanelCard>
+                    ))}
                     </div>
-                  )}
+                  </AnimatedCollapse>
 
                   <div className="dns-toolbar-frame order-1 flex shrink-0 flex-wrap items-center justify-between gap-2 p-2 md:order-none">
-                    <div className="grid w-full grid-cols-[minmax(0,1fr)_8rem_auto] gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
+                    <div className="grid w-full grid-cols-[minmax(0,1fr)_minmax(7rem,0.7fr)_auto] gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
                       <Input size="sm"
                         aria-label="按名称筛选 DNS 记录"
                         value={recordFilter.name}
@@ -2077,7 +2232,7 @@ function DnsPage() {
                     ))}
                   </div>
 
-                  <div className="dns-table-frame order-2 hidden min-h-0 max-w-full flex-1 md:block md:order-none">
+                  <div className="dns-table-frame order-2 hidden min-h-0 max-w-full flex-1 md:flex md:order-none">
                     <div className="dns-table-scroll scrollbar-thin">
                     <Table layout="fixed" className="w-full text-xs" style={{ minWidth: recordColWidths.reduce((sum, width) => sum + width, 0) }}>
                       <colgroup>
@@ -2098,7 +2253,7 @@ function DnsPage() {
                           {renderResizeHead('TTL', 4, startRecordResize, 'center')}
                           {renderResizeHead('代理', 5, startRecordResize, 'center')}
                           {renderResizeHead('更新时间', 6, startRecordResize, 'center')}
-                          <Table.Head className="!px-2 !py-1.5 text-center">操作</Table.Head>
+                          <Table.Head className="app-table-action !px-2 !py-1.5">操作</Table.Head>
                         </Table.Row>
                       </Table.Header>
                       <Table.Body>
@@ -2170,61 +2325,67 @@ function DnsPage() {
           )}
 
           {activeTab === 'workers' && (
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="text-sm text-kumo-subtle">
-                  {workerSubdomain ? <>默认子域名：<span className="font-mono text-kumo-strong">{workerSubdomain}.workers.dev</span></> : 'Workers 默认子域名未返回'}
-                </div>
+            <SectionCard
+              title="Workers"
+              description={workerSubdomain ? <>默认子域名：<span className="font-mono text-kumo-strong">{workerSubdomain}.workers.dev</span></> : 'Workers 默认子域名未返回'}
+              icon={<Terminal className="h-4 w-4 text-kumo-brand" />}
+              action={(
                 <Button size="sm" onClick={() => openWorkerModal()} icon={<Plus className="h-4 w-4" />}>
                   新建 Worker
                 </Button>
-              </div>
-              <LayerCard className="overflow-x-auto p-0">
-                <Table layout="fixed">
-                  <colgroup>{workerColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
-                  <Table.Header variant="compact">
-                    <Table.Row>
-                      <Table.Head className="relative pr-6">名称<Table.ResizeHandle onMouseDown={(e) => startWorkerResize(0, e)} onTouchStart={(e) => startWorkerResize(0, e)} /></Table.Head>
-                      <Table.Head className="relative pr-6">创建时间<Table.ResizeHandle onMouseDown={(e) => startWorkerResize(1, e)} onTouchStart={(e) => startWorkerResize(1, e)} /></Table.Head>
-                      <Table.Head className="relative pr-6">更新时间<Table.ResizeHandle onMouseDown={(e) => startWorkerResize(2, e)} onTouchStart={(e) => startWorkerResize(2, e)} /></Table.Head>
-                      <Table.Head className="text-right">操作</Table.Head>
+              )}
+              bodyPadding="none"
+              bodyClassName="overflow-x-auto"
+            >
+              <Table layout="fixed">
+                <colgroup>{workerColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
+                <Table.Header variant="compact">
+                  <Table.Row>
+                    <Table.Head className="relative pr-6">名称<Table.ResizeHandle onMouseDown={(e) => startWorkerResize(0, e)} onTouchStart={(e) => startWorkerResize(0, e)} /></Table.Head>
+                    <Table.Head className="relative pr-6">创建时间<Table.ResizeHandle onMouseDown={(e) => startWorkerResize(1, e)} onTouchStart={(e) => startWorkerResize(1, e)} /></Table.Head>
+                    <Table.Head className="relative pr-6">更新时间<Table.ResizeHandle onMouseDown={(e) => startWorkerResize(2, e)} onTouchStart={(e) => startWorkerResize(2, e)} /></Table.Head>
+                    <Table.Head className="app-table-action">操作</Table.Head>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {loading.workers ? (
+                    Array.from({ length: 4 }).map((_, index) => <Table.Row key={index}><Table.Cell colSpan={4}><SkeletonLine className="h-4 w-full" /></Table.Cell></Table.Row>)
+                  ) : workers.length === 0 ? (
+                    <Table.Row><Table.Cell colSpan={4} className="py-10 text-center text-kumo-subtle">没有 Workers。</Table.Cell></Table.Row>
+                  ) : workers.map((worker) => (
+                    <Table.Row
+                      key={worker.id || worker.name}
+                      className="cursor-pointer"
+                      title="双击编辑 Worker 代码"
+                      onDoubleClick={(event) => handleEditableRowDoubleClick(event, () => openWorkerModal(worker))}
+                    >
+                      <Table.Cell className="font-medium text-kumo-strong">{worker.name}</Table.Cell>
+                      <Table.Cell>{formatDate(worker.createdOn)}</Table.Cell>
+                      <Table.Cell>{formatDate(worker.modifiedOn)}</Table.Cell>
+                      <Table.Cell className="text-right">
+                        <div className="inline-flex flex-wrap justify-end gap-2">
+                          <Button size="sm" variant="secondary" onClick={() => openWorkerModal(worker)}>代码</Button>
+                          <Button size="sm" variant="secondary" onClick={() => openWorkerRoutesModal(worker)}>路由</Button>
+                          <Button size="sm" variant="secondary" onClick={() => openWorkerDomainsModal(worker)}>域名</Button>
+                          <Button size="sm" variant="secondary" onClick={() => openWorkerAnalyticsModal(worker)}>统计</Button>
+                          <Button size="sm" variant="secondary" onClick={() => toggleWorkerSubdomain(worker, true)}>启用</Button>
+                          <Button size="sm" variant="secondary-destructive" onClick={() => deleteWorker(worker)} aria-label={`删除 ${worker.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                        </div>
+                      </Table.Cell>
                     </Table.Row>
-                  </Table.Header>
-                  <Table.Body>
-                    {loading.workers ? (
-                      Array.from({ length: 4 }).map((_, index) => <Table.Row key={index}><Table.Cell colSpan={4}><SkeletonLine className="h-4 w-full" /></Table.Cell></Table.Row>)
-                    ) : workers.length === 0 ? (
-                      <Table.Row><Table.Cell colSpan={4} className="py-10 text-center text-kumo-subtle">没有 Workers。</Table.Cell></Table.Row>
-                    ) : workers.map((worker) => (
-                      <Table.Row
-                        key={worker.id || worker.name}
-                        className="cursor-pointer"
-                        title="双击编辑 Worker 代码"
-                        onDoubleClick={(event) => handleEditableRowDoubleClick(event, () => openWorkerModal(worker))}
-                      >
-                        <Table.Cell className="font-medium text-kumo-strong">{worker.name}</Table.Cell>
-                        <Table.Cell>{formatDate(worker.createdOn)}</Table.Cell>
-                        <Table.Cell>{formatDate(worker.modifiedOn)}</Table.Cell>
-                        <Table.Cell className="text-right">
-                          <div className="inline-flex flex-wrap justify-end gap-2">
-                            <Button size="sm" variant="secondary" onClick={() => openWorkerModal(worker)}>代码</Button>
-                            <Button size="sm" variant="secondary" onClick={() => openWorkerRoutesModal(worker)}>路由</Button>
-                            <Button size="sm" variant="secondary" onClick={() => openWorkerDomainsModal(worker)}>域名</Button>
-                            <Button size="sm" variant="secondary" onClick={() => openWorkerAnalyticsModal(worker)}>统计</Button>
-                            <Button size="sm" variant="secondary" onClick={() => toggleWorkerSubdomain(worker, true)}>启用</Button>
-                            <Button size="sm" variant="secondary-destructive" onClick={() => deleteWorker(worker)} aria-label={`删除 ${worker.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
-                          </div>
-                        </Table.Cell>
-                      </Table.Row>
-                    ))}
-                  </Table.Body>
-                </Table>
-              </LayerCard>
-            </div>
+                  ))}
+                </Table.Body>
+              </Table>
+            </SectionCard>
           )}
 
           {activeTab === 'pages' && (
-            <LayerCard className="overflow-x-auto p-0">
+            <SectionCard
+              title="Pages 项目"
+              icon={<Layers className="h-4 w-4 text-kumo-brand" />}
+              bodyPadding="none"
+              bodyClassName="overflow-x-auto"
+            >
               <Table layout="fixed">
                 <colgroup>{pageColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
                 <Table.Header variant="compact">
@@ -2233,7 +2394,7 @@ function DnsPage() {
                     <Table.Head className="relative pr-6">访问地址<Table.ResizeHandle onMouseDown={(e) => startPageResize(1, e)} onTouchStart={(e) => startPageResize(1, e)} /></Table.Head>
                     <Table.Head className="relative pr-6">生产分支<Table.ResizeHandle onMouseDown={(e) => startPageResize(2, e)} onTouchStart={(e) => startPageResize(2, e)} /></Table.Head>
                     <Table.Head className="relative pr-6">最新部署<Table.ResizeHandle onMouseDown={(e) => startPageResize(3, e)} onTouchStart={(e) => startPageResize(3, e)} /></Table.Head>
-                    <Table.Head className="text-right">操作</Table.Head>
+                    <Table.Head className="app-table-action">操作</Table.Head>
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
@@ -2268,254 +2429,413 @@ function DnsPage() {
                   ))}
                 </Table.Body>
               </Table>
-            </LayerCard>
+            </SectionCard>
           )}
 
           {activeTab === 'r2' && (
-            <div className="flex flex-col gap-4">
-              {!r2SelectedBucket ? (
-                <>
-                  <div className="flex justify-end">
-                    <Button size="sm" onClick={() => { setR2BucketForm({ name: '', location: 'auto' }); setModal({ type: 'r2Bucket', data: null }); }} icon={<Plus className="h-4 w-4" />}>
+            <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[18rem_minmax(0,1fr)]">
+              <AppCard padding="sm" className="flex min-h-0 flex-col gap-3 lg:h-full">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-kumo-strong">存储桶</div>
+                    <div className="text-xs text-kumo-subtle">{r2Buckets.length} 个 Bucket</div>
+                  </div>
+                  <Button
+                    size="sm"
+                    shape="square"
+                    onClick={() => { setR2BucketForm({ name: '', location: 'auto' }); setModal({ type: 'r2Bucket', data: null }); }}
+                    disabled={!selectedAccountId}
+                    aria-label="创建存储桶"
+                    title="创建存储桶"
+                    icon={<Plus className="h-4 w-4" />}
+                  />
+                </div>
+
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-kumo-subtle" />
+                  <Input
+                    size="sm"
+                    aria-label="搜索 R2 存储桶"
+                    value={r2BucketSearch}
+                    onChange={(event) => setR2BucketSearch(event.target.value)}
+                    placeholder="搜索存储桶"
+                    className="pl-8"
+                  />
+                </div>
+
+                <div className="flex min-h-0 flex-col gap-2 overflow-y-auto pr-1">
+                  {loading.r2 ? Array.from({ length: 5 }).map((_, index) => (
+                    <div key={index} className="rounded-md border border-kumo-line p-3">
+                      <SkeletonLine className="h-4 w-36" />
+                    </div>
+                  )) : !selectedAccountId ? (
+                    <div className="rounded-md border border-dashed border-kumo-line p-4 text-sm text-kumo-subtle">先选择 Cloudflare 账号。</div>
+                  ) : r2Buckets.length === 0 ? (
+                    <div className="rounded-md border border-dashed border-kumo-line p-4 text-sm text-kumo-subtle">还没有 R2 存储桶。</div>
+                  ) : filteredR2Buckets.length === 0 ? (
+                    <div className="rounded-md border border-dashed border-kumo-line p-4 text-sm text-kumo-subtle">没有匹配的存储桶。</div>
+                  ) : filteredR2Buckets.map((bucket) => {
+                    const isSelected = r2SelectedBucket?.name === bucket.name;
+                    return (
+                      <div
+                        key={bucket.name}
+                        className={`rounded-md border p-2.5 transition ${isSelected ? 'border-kumo-brand/70 bg-kumo-brand/10' : 'border-kumo-line bg-kumo-base hover:border-kumo-brand/60'}`}
+                      >
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-auto w-full min-w-0 items-start justify-start gap-2 px-0 py-0 text-left"
+                          onClick={() => selectR2Bucket(bucket)}
+                        >
+                          <Box className={`mt-0.5 h-4 w-4 shrink-0 ${isSelected ? 'text-kumo-brand' : 'text-kumo-subtle'}`} />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium text-kumo-strong">{bucket.name}</span>
+                            <span className="mt-1 block truncate text-xs text-kumo-subtle">{formatDate(bucket.creation_date || bucket.created_at)}</span>
+                          </span>
+                        </Button>
+                        <div className="mt-2 flex items-center justify-between gap-2">
+                          <Badge variant={bucket.public_url_base ? 'success' : 'outline'} className="text-[10px] leading-4">
+                            {bucket.public_url_base ? '公开访问' : '私有'}
+                          </Badge>
+                          <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteR2Bucket(bucket)} aria-label={`删除 ${bucket.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </AppCard>
+
+              <AppCard padding="none" className="flex min-h-0 min-w-0 flex-col overflow-hidden lg:h-full">
+                {!r2SelectedBucket ? (
+                  <div className="flex min-h-72 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+                    <Database className="h-8 w-8 text-kumo-subtle" />
+                    <div>
+                      <div className="font-medium text-kumo-strong">选择一个存储桶开始管理</div>
+                      <div className="mt-1 text-sm text-kumo-subtle">左侧可以创建、搜索并进入 Bucket。</div>
+                    </div>
+                    <Button size="sm" disabled={!selectedAccountId} onClick={() => { setR2BucketForm({ name: '', location: 'auto' }); setModal({ type: 'r2Bucket', data: null }); }} icon={<Plus className="h-4 w-4" />}>
                       创建存储桶
                     </Button>
                   </div>
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-                    {loading.r2 ? Array.from({ length: 6 }).map((_, index) => (
-                      <LayerCard key={index} className="p-4"><SkeletonLine className="h-5 w-40" /></LayerCard>
-                    )) : r2Buckets.length === 0 ? (
-                      <LayerCard className="p-8 text-center text-kumo-subtle md:col-span-2 xl:col-span-3">没有 R2 存储桶。</LayerCard>
-                    ) : r2Buckets.map((bucket) => (
-                      <LayerCard key={bucket.name} className="p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 font-medium text-kumo-strong">
-                              <Box className="h-4 w-4" />
-                              <span className="truncate">{bucket.name}</span>
-                            </div>
-                            <div className="mt-2 text-xs text-kumo-subtle">创建时间：{formatDate(bucket.creation_date || bucket.created_at)}</div>
-                          </div>
-                          <div className="flex gap-2">
-                            <Button size="sm" variant="secondary" onClick={() => selectR2Bucket(bucket)}>浏览</Button>
-                            <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteR2Bucket(bucket)} aria-label={`删除 ${bucket.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                ) : (
+                  <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                    <input
+                      ref={r2UploadInputRef}
+                      type="file"
+                      multiple
+                      className="hidden"
+                      onChange={handleR2UploadFiles}
+                    />
+                    <div className="flex shrink-0 flex-col gap-3 border-b border-kumo-line p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex min-w-0 flex-wrap items-center gap-1 rounded-md border border-kumo-line bg-kumo-recessed/25 px-2 py-1.5 text-sm">
+                            <Database className="h-4 w-4 shrink-0 text-kumo-brand" />
+                            <Button type="button" size="xs" variant="ghost" className="h-auto max-w-48 truncate px-1.5 py-0.5 font-semibold text-kumo-strong" onClick={() => loadR2Objects(r2SelectedBucket.name, '')}>
+                              {r2SelectedBucket.name}
+                            </Button>
+                            <span className="text-kumo-subtle">/</span>
+                            <Button type="button" size="xs" variant="ghost" className="h-auto px-1.5 py-0.5 text-kumo-subtle hover:text-kumo-strong" onClick={() => loadR2Objects(r2SelectedBucket.name, '')}>
+                              根目录
+                            </Button>
+                            {r2PathSegments.map((segment, index) => {
+                              const prefix = `${r2PathSegments.slice(0, index + 1).join('/')}/`;
+                              return (
+                                <React.Fragment key={prefix}>
+                                  <span className="text-kumo-subtle">/</span>
+                                  <Button type="button" size="xs" variant="ghost" className="h-auto max-w-40 truncate px-1.5 py-0.5 text-kumo-subtle hover:text-kumo-strong" onClick={() => loadR2Objects(r2SelectedBucket.name, prefix)}>
+                                    {segment}
+                                  </Button>
+                                </React.Fragment>
+                              );
+                            })}
                           </div>
                         </div>
-                      </LayerCard>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button size="sm" variant="secondary" onClick={() => { setR2SelectedBucket(null); setR2Objects([]); setR2Prefixes([]); }} icon={<ArrowLeft className="h-4 w-4" />}>
-                        返回存储桶
-                      </Button>
-                      <span className="text-sm font-medium text-kumo-strong">{r2SelectedBucket.name}</span>
-                      <Button size="sm" variant="secondary" onClick={() => loadR2Objects(r2SelectedBucket.name, '')}>
-                        根目录
-                      </Button>
-                      {r2CurrentPrefix && (
-                        <Button size="sm"
-                          variant="secondary"
-                          onClick={() => {
-                            const parent = r2CurrentPrefix.split('/').filter(Boolean).slice(0, -1).join('/');
-                            loadR2Objects(r2SelectedBucket.name, parent ? `${parent}/` : '');
-                          }}
-                        >
-                          上一级
-                        </Button>
-                      )}
-                    </div>
-                    {selectedR2Objects.length > 0 && (
-                      <Button size="sm" variant="secondary-destructive" onClick={batchDeleteR2Objects} icon={<Trash className="h-4 w-4" />}>
-                        删除 {selectedR2Objects.length}
-                      </Button>
-                    )}
-                  </div>
-                  <LayerCard className="overflow-x-auto p-0">
-                    <Table layout="fixed">
-                      <colgroup>{r2ColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
-                      <Table.Header variant="compact">
-                        <Table.Row>
-                          <Table.CheckHead
-                            checked={r2Objects.length > 0 && selectedR2Objects.length === r2Objects.length}
-                            indeterminate={selectedR2Objects.length > 0 && selectedR2Objects.length < r2Objects.length}
-                            onCheckedChange={(checked) => setSelectedR2Objects(checked ? r2Objects.map((object) => object.key || object.name) : [])}
-                            aria-label="全选 R2 对象"
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            onClick={() => r2UploadInputRef.current?.click()}
+                            disabled={loading.uploadR2}
+                            icon={<Upload className="h-4 w-4" />}
+                          >
+                            上传
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => {
+                              setR2FolderForm({ name: '' });
+                              setModal({ type: 'r2Folder', data: null });
+                            }}
+                            icon={<Folder className="h-4 w-4" />}
+                          >
+                            新建文件夹
+                          </Button>
+                          {r2CurrentPrefix && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => {
+                                const parent = r2CurrentPrefix.split('/').filter(Boolean).slice(0, -1).join('/');
+                                loadR2Objects(r2SelectedBucket.name, parent ? `${parent}/` : '');
+                              }}
+                              icon={<ArrowLeft className="h-4 w-4" />}
+                            >
+                              上一级
+                            </Button>
+                          )}
+                          <Button size="sm" shape="square" variant="secondary" onClick={() => loadR2Objects(r2SelectedBucket.name, r2CurrentPrefix)} aria-label="刷新对象" title="刷新" icon={<RefreshCw className="h-4 w-4" />} />
+                          {selectedR2Objects.length > 0 && (
+                            <Button size="sm" variant="secondary-destructive" onClick={batchDeleteR2Objects} disabled={loading.batchDeleteR2} icon={<Trash className="h-4 w-4" />}>
+                              删除 {selectedR2Objects.length}
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-kumo-subtle">
+                          <Badge variant="outline">{r2Prefixes.length} 个文件夹</Badge>
+                          <Badge variant="outline">{r2Objects.filter((object) => !String(object.key || object.name || '').endsWith('/.keep')).length} 个对象</Badge>
+                          <Badge variant="outline">{formatBytes(r2ObjectTotalBytes)}</Badge>
+                          {selectedR2Objects.length > 0 && <Badge variant="info">已选择 {selectedR2Objects.length}</Badge>}
+                        </div>
+                        <div className="relative w-full max-w-md">
+                          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-kumo-subtle" />
+                          <Input
+                            size="sm"
+                            aria-label="搜索当前 R2 目录"
+                            value={r2ObjectSearch}
+                            onChange={(event) => setR2ObjectSearch(event.target.value)}
+                            placeholder="搜索当前目录"
+                            className="pl-8"
                           />
-                          <Table.Head className="relative pr-6">名称<Table.ResizeHandle onMouseDown={(e) => startR2Resize(1, e)} onTouchStart={(e) => startR2Resize(1, e)} /></Table.Head>
-                          <Table.Head className="relative pr-6">大小<Table.ResizeHandle onMouseDown={(e) => startR2Resize(2, e)} onTouchStart={(e) => startR2Resize(2, e)} /></Table.Head>
-                          <Table.Head className="relative pr-6">修改时间<Table.ResizeHandle onMouseDown={(e) => startR2Resize(3, e)} onTouchStart={(e) => startR2Resize(3, e)} /></Table.Head>
-                          <Table.Head className="text-right">操作</Table.Head>
-                        </Table.Row>
-                      </Table.Header>
-                      <Table.Body>
-                        {loading.r2Objects ? (
-                          Array.from({ length: 5 }).map((_, index) => <Table.Row key={index}><Table.Cell colSpan={5}><SkeletonLine className="h-4 w-full" /></Table.Cell></Table.Row>)
-                        ) : r2Rows.length === 0 ? (
-                          <Table.Row><Table.Cell colSpan={5} className="py-10 text-center text-kumo-subtle">当前目录为空。</Table.Cell></Table.Row>
-                        ) : r2Rows.map((row) => (
-                          <Table.Row key={row.key}>
-                            {row.isFolder ? (
-                              <Table.Cell />
-                            ) : (
-                              <Table.CheckCell
-                                checked={selectedR2Objects.includes(row.key)}
-                                onCheckedChange={(checked) => toggleR2Selection(row.key, Boolean(checked))}
-                                aria-label={`选择 ${row.key}`}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="min-h-0 flex-1 overflow-auto">
+                        <Table layout="fixed">
+                          <colgroup>{r2ColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
+                          <Table.Header variant="compact">
+                            <Table.Row>
+                              <Table.CheckHead
+                                checked={r2VisibleObjectKeys.length > 0 && r2VisibleObjectKeys.every((key) => selectedR2Objects.includes(key))}
+                                indeterminate={selectedR2Objects.length > 0 && !r2VisibleObjectKeys.every((key) => selectedR2Objects.includes(key))}
+                                onCheckedChange={(checked) => setSelectedR2Objects(checked ? r2VisibleObjectKeys : [])}
+                                aria-label="全选当前可见 R2 对象"
                               />
-                            )}
-                            <Table.Cell>
-                              <div className="flex items-center gap-2 font-medium text-kumo-strong">
-                                {row.isFolder ? <Folder className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
-                                <span className="truncate">{row.name || row.key}</span>
-                              </div>
-                            </Table.Cell>
-                            <Table.Cell>{row.isFolder ? '-' : formatBytes(row.size)}</Table.Cell>
-                            <Table.Cell>{row.isFolder ? '-' : formatDate(row.uploaded || row.last_modified)}</Table.Cell>
-                            <Table.Cell className="text-right">
-                              {row.isFolder ? (
-                                <Button size="sm" variant="secondary" onClick={() => loadR2Objects(r2SelectedBucket.name, row.key)}>进入</Button>
-                              ) : (
-                                <div className="inline-flex gap-2">
-                                  <Button size="sm" shape="square" variant="secondary" onClick={() => downloadR2Object(row.key)} aria-label={`下载 ${row.key}`} title="下载" icon={<Download className="h-4 w-4" />} />
-                                  <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteR2Object(row.key)} aria-label={`删除 ${row.key}`} title="删除" icon={<Trash className="h-4 w-4" />} />
-                                </div>
-                              )}
-                            </Table.Cell>
-                          </Table.Row>
-                        ))}
-                      </Table.Body>
-                    </Table>
-                  </LayerCard>
-                </>
-              )}
+                              <Table.Head className="relative pr-6">名称<Table.ResizeHandle onMouseDown={(e) => startR2Resize(1, e)} onTouchStart={(e) => startR2Resize(1, e)} /></Table.Head>
+                              <Table.Head className="relative pr-6">大小<Table.ResizeHandle onMouseDown={(e) => startR2Resize(2, e)} onTouchStart={(e) => startR2Resize(2, e)} /></Table.Head>
+                              <Table.Head className="relative pr-6">修改时间<Table.ResizeHandle onMouseDown={(e) => startR2Resize(3, e)} onTouchStart={(e) => startR2Resize(3, e)} /></Table.Head>
+                              <Table.Head className="app-table-action">操作</Table.Head>
+                            </Table.Row>
+                          </Table.Header>
+                          <Table.Body>
+                            {loading.r2Objects ? (
+                              Array.from({ length: 7 }).map((_, index) => <Table.Row key={index}><Table.Cell colSpan={5}><SkeletonLine className="h-4 w-full" /></Table.Cell></Table.Row>)
+                            ) : r2Rows.length === 0 ? (
+                              <Table.Row><Table.Cell colSpan={5} className="py-12 text-center text-kumo-subtle">当前目录为空。可以上传文件或新建文件夹。</Table.Cell></Table.Row>
+                            ) : filteredR2Rows.length === 0 ? (
+                              <Table.Row><Table.Cell colSpan={5} className="py-12 text-center text-kumo-subtle">没有匹配的对象。</Table.Cell></Table.Row>
+                            ) : filteredR2Rows.map((row) => (
+                              <Table.Row
+                                key={row.key}
+                                className="cursor-pointer hover:bg-kumo-recessed/35"
+                                onClick={() => (row.isFolder ? loadR2Objects(r2SelectedBucket.name, row.key) : previewR2Object(row.key))}
+                                title={row.isFolder ? '打开目录' : '预览文件'}
+                              >
+                                {row.isFolder ? (
+                                  <Table.Cell />
+                                ) : (
+                                  <Table.CheckCell
+                                    checked={selectedR2Objects.includes(row.key)}
+                                    onClick={(event) => event.stopPropagation()}
+                                    onCheckedChange={(checked) => toggleR2Selection(row.key, Boolean(checked))}
+                                    aria-label={`选择 ${row.key}`}
+                                  />
+                                )}
+                                <Table.Cell>
+                                  <Button
+                                    type="button"
+                                    size="xs"
+                                    variant="ghost"
+                                    className={`h-auto min-w-0 justify-start gap-2 px-0 py-0 text-left ${row.isFolder ? 'font-medium text-kumo-strong hover:text-kumo-brand' : 'text-kumo-strong'}`}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      if (row.isFolder) loadR2Objects(r2SelectedBucket.name, row.key);
+                                      else previewR2Object(row.key);
+                                    }}
+                                    title={row.key}
+                                  >
+                                    {row.isFolder ? <Folder className="h-4 w-4 shrink-0 text-kumo-brand" /> : <FileText className="h-4 w-4 shrink-0 text-kumo-subtle" />}
+                                    <span className="truncate">{row.name || row.key}</span>
+                                  </Button>
+                                </Table.Cell>
+                                <Table.Cell>{row.isFolder ? '-' : formatBytes(row.size)}</Table.Cell>
+                                <Table.Cell>{row.isFolder ? '-' : formatDate(row.uploaded || row.last_modified)}</Table.Cell>
+                                <Table.Cell className="text-right">
+                                  {row.isFolder ? (
+                                    <Button size="sm" variant="secondary" onClick={(event) => { event.stopPropagation(); loadR2Objects(r2SelectedBucket.name, row.key); }}>进入</Button>
+                                  ) : (
+                                    <div className="inline-flex gap-2" onClick={(event) => event.stopPropagation()}>
+                                      <Button size="sm" shape="square" variant="secondary" onClick={() => previewR2Object(row.key)} aria-label={`预览 ${row.key}`} title="预览" icon={<Eye className="h-4 w-4" />} />
+                                      <Button size="sm" shape="square" variant="secondary" onClick={() => downloadR2Object(row.key)} aria-label={`下载 ${row.key}`} title="下载" icon={<Download className="h-4 w-4" />} />
+                                      <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteR2Object(row.key)} aria-label={`删除 ${row.key}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                                    </div>
+                                  )}
+                                </Table.Cell>
+                              </Table.Row>
+                            ))}
+                          </Table.Body>
+                        </Table>
+                    </div>
+                  </div>
+                )}
+              </AppCard>
             </div>
           )}
 
           {activeTab === 'tunnels' && (
-            <div className="flex flex-col gap-4">
-              <div className="flex justify-end">
+            <SectionCard
+              title="Tunnel"
+              icon={<Lock className="h-4 w-4 text-kumo-brand" />}
+              action={(
                 <Button size="sm" onClick={() => { setTunnelForm({ name: '' }); setModal({ type: 'tunnelCreate', data: null }); }} icon={<Plus className="h-4 w-4" />}>
                   创建 Tunnel
                 </Button>
-              </div>
-              <LayerCard className="overflow-x-auto p-0">
-                <Table layout="fixed">
-                  <colgroup>{tunnelColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
-                  <Table.Header variant="compact">
-                    <Table.Row>
-                      <Table.Head className="relative pr-6">名称<Table.ResizeHandle onMouseDown={(e) => startTunnelResize(0, e)} onTouchStart={(e) => startTunnelResize(0, e)} /></Table.Head>
-                      <Table.Head className="relative pr-6">状态<Table.ResizeHandle onMouseDown={(e) => startTunnelResize(1, e)} onTouchStart={(e) => startTunnelResize(1, e)} /></Table.Head>
-                      <Table.Head className="relative pr-6">连接<Table.ResizeHandle onMouseDown={(e) => startTunnelResize(2, e)} onTouchStart={(e) => startTunnelResize(2, e)} /></Table.Head>
-                      <Table.Head className="relative pr-6">创建时间<Table.ResizeHandle onMouseDown={(e) => startTunnelResize(3, e)} onTouchStart={(e) => startTunnelResize(3, e)} /></Table.Head>
-                      <Table.Head className="text-right">操作</Table.Head>
+              )}
+              bodyPadding="none"
+              bodyClassName="overflow-x-auto"
+            >
+              <Table layout="fixed">
+                <colgroup>{tunnelColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
+                <Table.Header variant="compact">
+                  <Table.Row>
+                    <Table.Head className="relative pr-6">名称<Table.ResizeHandle onMouseDown={(e) => startTunnelResize(0, e)} onTouchStart={(e) => startTunnelResize(0, e)} /></Table.Head>
+                    <Table.Head className="relative pr-6">状态<Table.ResizeHandle onMouseDown={(e) => startTunnelResize(1, e)} onTouchStart={(e) => startTunnelResize(1, e)} /></Table.Head>
+                    <Table.Head className="relative pr-6">连接<Table.ResizeHandle onMouseDown={(e) => startTunnelResize(2, e)} onTouchStart={(e) => startTunnelResize(2, e)} /></Table.Head>
+                    <Table.Head className="relative pr-6">创建时间<Table.ResizeHandle onMouseDown={(e) => startTunnelResize(3, e)} onTouchStart={(e) => startTunnelResize(3, e)} /></Table.Head>
+                    <Table.Head className="app-table-action">操作</Table.Head>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {loading.tunnels ? (
+                    Array.from({ length: 4 }).map((_, index) => <Table.Row key={index}><Table.Cell colSpan={5}><SkeletonLine className="h-4 w-full" /></Table.Cell></Table.Row>)
+                  ) : tunnels.length === 0 ? (
+                    <Table.Row><Table.Cell colSpan={5} className="py-10 text-center text-kumo-subtle">没有 Tunnel。</Table.Cell></Table.Row>
+                  ) : tunnels.map((tunnel) => (
+                    <Table.Row key={tunnel.id}>
+                      <Table.Cell>
+                        <div className="flex flex-col">
+                          <span className="font-medium text-kumo-strong">{tunnel.name}</span>
+                          <span className="text-xs text-kumo-subtle">{tunnel.id}</span>
+                        </div>
+                      </Table.Cell>
+                      <Table.Cell><Badge variant={statusVariant(tunnel.status)}>{tunnelStatusLabel(tunnel.status, tunnel.connections || [])}</Badge></Table.Cell>
+                      <Table.Cell>{tunnel.connections?.length || 0}</Table.Cell>
+                      <Table.Cell>{formatDate(tunnel.createdAt)}</Table.Cell>
+                      <Table.Cell className="text-right">
+                        <div className="inline-flex flex-wrap justify-end gap-2">
+                          <Button size="sm" variant="secondary" onClick={() => openTunnelTokenModal(tunnel)}>令牌</Button>
+                          <Button size="sm" variant="secondary" onClick={() => openTunnelConfigModal(tunnel)}>配置</Button>
+                          <Button size="sm" variant="secondary" onClick={() => openTunnelConnectionsModal(tunnel)}>连接</Button>
+                          <Button size="sm" shape="square" variant="secondary" onClick={() => renameTunnel(tunnel)} aria-label={`重命名 ${tunnel.name}`} title="重命名" icon={<Edit className="h-4 w-4" />} />
+                          <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteTunnel(tunnel)} aria-label={`删除 ${tunnel.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                        </div>
+                      </Table.Cell>
                     </Table.Row>
-                  </Table.Header>
-                  <Table.Body>
-                    {loading.tunnels ? (
-                      Array.from({ length: 4 }).map((_, index) => <Table.Row key={index}><Table.Cell colSpan={5}><SkeletonLine className="h-4 w-full" /></Table.Cell></Table.Row>)
-                    ) : tunnels.length === 0 ? (
-                      <Table.Row><Table.Cell colSpan={5} className="py-10 text-center text-kumo-subtle">没有 Tunnel。</Table.Cell></Table.Row>
-                    ) : tunnels.map((tunnel) => (
-                      <Table.Row key={tunnel.id}>
-                        <Table.Cell>
-                          <div className="flex flex-col">
-                            <span className="font-medium text-kumo-strong">{tunnel.name}</span>
-                            <span className="text-xs text-kumo-subtle">{tunnel.id}</span>
-                          </div>
-                        </Table.Cell>
-                        <Table.Cell><Badge variant={statusVariant(tunnel.status)}>{tunnelStatusLabel(tunnel.status, tunnel.connections || [])}</Badge></Table.Cell>
-                        <Table.Cell>{tunnel.connections?.length || 0}</Table.Cell>
-                        <Table.Cell>{formatDate(tunnel.createdAt)}</Table.Cell>
-                        <Table.Cell className="text-right">
-                          <div className="inline-flex flex-wrap justify-end gap-2">
-                            <Button size="sm" variant="secondary" onClick={() => openTunnelTokenModal(tunnel)}>令牌</Button>
-                            <Button size="sm" variant="secondary" onClick={() => openTunnelConfigModal(tunnel)}>配置</Button>
-                            <Button size="sm" variant="secondary" onClick={() => openTunnelConnectionsModal(tunnel)}>连接</Button>
-                            <Button size="sm" shape="square" variant="secondary" onClick={() => renameTunnel(tunnel)} aria-label={`重命名 ${tunnel.name}`} title="重命名" icon={<Edit className="h-4 w-4" />} />
-                            <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteTunnel(tunnel)} aria-label={`删除 ${tunnel.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
-                          </div>
-                        </Table.Cell>
-                      </Table.Row>
-                    ))}
-                  </Table.Body>
-                </Table>
-              </LayerCard>
-            </div>
+                  ))}
+                </Table.Body>
+              </Table>
+            </SectionCard>
           )}
 
           {activeTab === 'templates' && (
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-wrap justify-end gap-2">
-                <Button size="sm" variant="secondary" onClick={() => openImportModal('templates')} icon={<Upload className="h-4 w-4" />}>导入模板</Button>
-                <Button size="sm" variant="secondary" onClick={() => downloadJson(`cloudflare-dns-templates-${Date.now()}.json`, { version: '1.0', templates })} icon={<Download className="h-4 w-4" />}>导出模板</Button>
+            <SectionCard
+              title="DNS 模板"
+              icon={<FileText className="h-4 w-4 text-kumo-brand" />}
+              actions={(
+                <>
+                <Button size="sm" shape="square" variant="secondary" onClick={() => openImportModal('templates')} aria-label="导入模板" title="导入模板" icon={<Download className="h-4 w-4" />} />
+                <Button size="sm" shape="square" variant="secondary" onClick={() => downloadJson(`cloudflare-dns-templates-${Date.now()}.json`, { version: '1.0', templates })} aria-label="导出模板" title="导出模板" icon={<Upload className="h-4 w-4" />} />
                 <Button size="sm" onClick={() => openTemplateModal()} icon={<Plus className="h-4 w-4" />}>添加模板</Button>
-              </div>
-              <LayerCard className="overflow-x-auto p-0">
-                <Table layout="fixed">
-                  <colgroup>{templateColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
-                  <Table.Header variant="compact">
-                    <Table.Row>
-                      <Table.Head className="relative pr-6">名称<Table.ResizeHandle onMouseDown={(e) => startTemplateResize(0, e)} onTouchStart={(e) => startTemplateResize(0, e)} /></Table.Head>
-                      <Table.Head className="relative pr-6">记录数<Table.ResizeHandle onMouseDown={(e) => startTemplateResize(1, e)} onTouchStart={(e) => startTemplateResize(1, e)} /></Table.Head>
-                      <Table.Head className="relative pr-6">描述<Table.ResizeHandle onMouseDown={(e) => startTemplateResize(2, e)} onTouchStart={(e) => startTemplateResize(2, e)} /></Table.Head>
-                      <Table.Head className="relative pr-6">更新时间<Table.ResizeHandle onMouseDown={(e) => startTemplateResize(3, e)} onTouchStart={(e) => startTemplateResize(3, e)} /></Table.Head>
-                      <Table.Head className="text-right">操作</Table.Head>
+                </>
+              )}
+              bodyPadding="none"
+              bodyClassName="overflow-x-auto"
+            >
+              <Table layout="fixed">
+                <colgroup>{templateColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
+                <Table.Header variant="compact">
+                  <Table.Row>
+                    <Table.Head className="relative pr-6">名称<Table.ResizeHandle onMouseDown={(e) => startTemplateResize(0, e)} onTouchStart={(e) => startTemplateResize(0, e)} /></Table.Head>
+                    <Table.Head className="relative pr-6">记录数<Table.ResizeHandle onMouseDown={(e) => startTemplateResize(1, e)} onTouchStart={(e) => startTemplateResize(1, e)} /></Table.Head>
+                    <Table.Head className="relative pr-6">描述<Table.ResizeHandle onMouseDown={(e) => startTemplateResize(2, e)} onTouchStart={(e) => startTemplateResize(2, e)} /></Table.Head>
+                    <Table.Head className="relative pr-6">更新时间<Table.ResizeHandle onMouseDown={(e) => startTemplateResize(3, e)} onTouchStart={(e) => startTemplateResize(3, e)} /></Table.Head>
+                    <Table.Head className="app-table-action">操作</Table.Head>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {templates.length === 0 ? (
+                    <Table.Row><Table.Cell colSpan={5} className="py-10 text-center text-kumo-subtle">没有 DNS 模板。</Table.Cell></Table.Row>
+                  ) : templates.map((template) => (
+                    <Table.Row
+                      key={template.id}
+                      className="cursor-pointer"
+                      title="双击编辑模板"
+                      onDoubleClick={(event) => handleEditableRowDoubleClick(event, () => openTemplateModal(template))}
+                    >
+                      <Table.Cell className="font-medium text-kumo-strong">{template.name}</Table.Cell>
+                      <Table.Cell>{template.records?.length || 0}</Table.Cell>
+                      <Table.Cell><div className="truncate">{template.description || '-'}</div></Table.Cell>
+                      <Table.Cell>{formatDate(template.updatedAt || template.createdAt)}</Table.Cell>
+                      <Table.Cell className="text-right">
+                        <div className="inline-flex gap-2">
+                          <Button size="sm" variant="secondary" onClick={() => applyTemplate(template)}>应用</Button>
+                          <Button size="sm" shape="square" variant="secondary" onClick={() => openTemplateModal(template)} aria-label={`编辑 ${template.name}`} title="编辑" icon={<Edit className="h-4 w-4" />} />
+                          <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteTemplate(template)} aria-label={`删除 ${template.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                        </div>
+                      </Table.Cell>
                     </Table.Row>
-                  </Table.Header>
-                  <Table.Body>
-                    {templates.length === 0 ? (
-                      <Table.Row><Table.Cell colSpan={5} className="py-10 text-center text-kumo-subtle">没有 DNS 模板。</Table.Cell></Table.Row>
-                    ) : templates.map((template) => (
-                      <Table.Row
-                        key={template.id}
-                        className="cursor-pointer"
-                        title="双击编辑模板"
-                        onDoubleClick={(event) => handleEditableRowDoubleClick(event, () => openTemplateModal(template))}
-                      >
-                        <Table.Cell className="font-medium text-kumo-strong">{template.name}</Table.Cell>
-                        <Table.Cell>{template.records?.length || 0}</Table.Cell>
-                        <Table.Cell><div className="truncate">{template.description || '-'}</div></Table.Cell>
-                        <Table.Cell>{formatDate(template.updatedAt || template.createdAt)}</Table.Cell>
-                        <Table.Cell className="text-right">
-                          <div className="inline-flex gap-2">
-                            <Button size="sm" variant="secondary" onClick={() => applyTemplate(template)}>应用</Button>
-                            <Button size="sm" shape="square" variant="secondary" onClick={() => openTemplateModal(template)} aria-label={`编辑 ${template.name}`} title="编辑" icon={<Edit className="h-4 w-4" />} />
-                            <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteTemplate(template)} aria-label={`删除 ${template.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
-                          </div>
-                        </Table.Cell>
-                      </Table.Row>
-                    ))}
-                  </Table.Body>
-                </Table>
-              </LayerCard>
-            </div>
+                  ))}
+                </Table.Body>
+              </Table>
+            </SectionCard>
           )}
 
           {activeTab === 'accounts' && (
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-wrap justify-end gap-2">
-                <Button size="sm" variant="secondary" onClick={exportAccounts} icon={<Download className="h-4 w-4" />}>导出账号</Button>
-                <Button size="sm" variant="secondary" onClick={() => openImportModal('accounts')} icon={<Upload className="h-4 w-4" />}>导入账号</Button>
-                <Button size="sm" onClick={() => openAccountModal()} icon={<Plus className="h-4 w-4" />}>添加账号</Button>
-              </div>
-              <LayerCard className="overflow-x-auto p-0">
+            <SectionCard
+              title="Cloudflare 账号"
+              icon={<Settings className="h-4 w-4 text-kumo-brand" />}
+              actions={(
+                <>
+                <Button size="sm" shape="square" variant="secondary" onClick={exportAccounts} aria-label="导出账号" title="导出账号" icon={<Upload className="h-4 w-4" />} />
+                <Button size="sm" shape="square" variant="secondary" onClick={() => openImportModal('accounts')} aria-label="导入账号" title="导入账号" icon={<Download className="h-4 w-4" />} />
+                <Button size="sm" variant="primary" onClick={() => openAccountModal()} icon={<Plus className="h-4 w-4" />}>添加账号</Button>
+                </>
+              )}
+              bodyPadding="none"
+              bodyClassName="overflow-x-auto"
+            >
                 <Table layout="fixed">
                   <colgroup>{accountColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
                   <Table.Header variant="compact">
                     <Table.Row>
                       <Table.Head className="relative pr-6">备注名称<Table.ResizeHandle onMouseDown={(e) => startAccountResize(0, e)} onTouchStart={(e) => startAccountResize(0, e)} /></Table.Head>
                       <Table.Head className="relative pr-6">邮箱<Table.ResizeHandle onMouseDown={(e) => startAccountResize(1, e)} onTouchStart={(e) => startAccountResize(1, e)} /></Table.Head>
-                      <Table.Head className="relative pr-6">令牌<Table.ResizeHandle onMouseDown={(e) => startAccountResize(2, e)} onTouchStart={(e) => startAccountResize(2, e)} /></Table.Head>
-                      <Table.Head className="relative pr-6">最后使用<Table.ResizeHandle onMouseDown={(e) => startAccountResize(3, e)} onTouchStart={(e) => startAccountResize(3, e)} /></Table.Head>
-                      <Table.Head className="text-right">操作</Table.Head>
+                      <Table.Head className="relative pr-6">Account ID<Table.ResizeHandle onMouseDown={(e) => startAccountResize(2, e)} onTouchStart={(e) => startAccountResize(2, e)} /></Table.Head>
+                      <Table.Head className="relative pr-6">令牌<Table.ResizeHandle onMouseDown={(e) => startAccountResize(3, e)} onTouchStart={(e) => startAccountResize(3, e)} /></Table.Head>
+                      <Table.Head className="relative pr-6">最后使用<Table.ResizeHandle onMouseDown={(e) => startAccountResize(4, e)} onTouchStart={(e) => startAccountResize(4, e)} /></Table.Head>
+                      <Table.Head className="app-table-action">操作</Table.Head>
                     </Table.Row>
                   </Table.Header>
                   <Table.Body>
                     {accounts.length === 0 ? (
-                      <Table.Row><Table.Cell colSpan={5} className="py-10 text-center text-kumo-subtle">尚未配置 Cloudflare 账号。</Table.Cell></Table.Row>
+                      <Table.Row><Table.Cell colSpan={6} className="py-10 text-center text-kumo-subtle">尚未配置 Cloudflare 账号。</Table.Cell></Table.Row>
                     ) : accounts.map((account) => (
                       <Table.Row
                         key={account.id}
@@ -2524,7 +2844,8 @@ function DnsPage() {
                         onDoubleClick={(event) => handleEditableRowDoubleClick(event, () => openAccountModal(account))}
                       >
                         <Table.Cell className="font-medium text-kumo-strong">{account.name}</Table.Cell>
-                        <Table.Cell>{account.email || '-'}</Table.Cell>
+                        <Table.Cell>{account.userEmail || account.email || '-'}</Table.Cell>
+                        <Table.Cell><code className="block truncate text-xs">{account.cfAccountId || '-'}</code></Table.Cell>
                         <Table.Cell>
                           <div className="flex items-center gap-2">
                             <code className="truncate text-xs">{accountTokens[account.id] || (account.hasToken ? '••••••••••••••••' : '-')}</code>
@@ -2547,33 +2868,48 @@ function DnsPage() {
                     ))}
                   </Table.Body>
                 </Table>
-              </LayerCard>
-            </div>
+            </SectionCard>
           )}
-        </>
-      )}
+          </>
+        )}
+      </div>
 
       <Dialog.Root open={Boolean(modal.type)} onOpenChange={(open) => { if (!open) closeModal(); }}>
         {modal.type && (
-        <Dialog className="max-h-[85vh] w-[min(920px,calc(100vw-2rem))] overflow-y-auto p-6">
+        <Dialog className="flex max-h-[min(calc(100dvh-2rem),48rem)] !w-[min(760px,calc(100vw-2rem))] !max-w-[min(760px,calc(100vw-2rem))] flex-col overflow-hidden p-0">
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 scrollbar-thin">
           {modal.type === 'account' && (
             <div className="flex flex-col gap-4">
               <Dialog.Title className="text-base font-semibold text-kumo-strong">
                 {modal.data ? '编辑 Cloudflare 账号' : '添加 Cloudflare 账号'}
               </Dialog.Title>
               <Dialog.Description className="text-sm text-kumo-subtle">
-                API 令牌可使用受限令牌；全局 API 密钥需要填写邮箱。
+                推荐使用 Cloudflare API Token，邮箱留空；账户 API Token（cfat_）需要额外填写 Account ID。Origin CA Key（v1.0-）已弃用且不可用于这里。
               </Dialog.Description>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <Input size="sm" label="备注名称" value={accountForm.name} onChange={(event) => setAccountForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="生产账号" />
                 <Input size="sm" label="邮箱" type="email" value={accountForm.email} onChange={(event) => setAccountForm((prev) => ({ ...prev, email: event.target.value }))} placeholder="name@example.com" />
               </div>
               <Input size="sm"
-                label="API 令牌 / 全局 API 密钥"
-                type="password"
+                label="Cloudflare Account ID"
+                value={accountForm.cfAccountId}
+                onChange={(event) => setAccountForm((prev) => ({ ...prev, cfAccountId: event.target.value }))}
+                placeholder="请输入 Cloudflare Account ID"
+                className="font-mono"
+              />
+              <Input size="sm"
+                label="API Token / 账户 API Token / 旧版全局 API 密钥"
+                type="text"
+                name="cf_credential_value"
                 value={accountForm.apiToken}
                 onChange={(event) => setAccountForm((prev) => ({ ...prev, apiToken: event.target.value }))}
-                placeholder={modal.data ? '不修改请留空' : '请输入令牌或密钥'}
+                placeholder={modal.data ? '不修改请留空' : 'cfat_... 或普通 API Token'}
+                autoComplete="off"
+                data-1p-ignore
+                data-lpignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                spellCheck={false}
                 className="font-mono"
               />
               <Checkbox
@@ -2583,8 +2919,8 @@ function DnsPage() {
               />
               <div className="flex justify-end gap-2">
                 <Button size="sm" variant="secondary" onClick={closeModal}>取消</Button>
-                <Button size="sm" onClick={saveAccount} disabled={loading.saveAccount} icon={<Save className="h-4 w-4" />}>
-                  保存账号
+                <Button size="sm" variant="primary" onClick={saveAccount} disabled={loading.saveAccount} icon={<Save className="h-4 w-4" />}>
+                  保存
                 </Button>
               </div>
             </div>
@@ -2692,11 +3028,12 @@ function DnsPage() {
               {loading.workerScript ? (
                 <SkeletonLine className="h-64 w-full" />
               ) : (
-                <Textarea
+                <CodeEditor
                   label="脚本内容"
+                  language="javascript"
                   value={workerForm.script}
-                  onChange={(event) => setWorkerForm((prev) => ({ ...prev, script: event.target.value }))}
-                  className="min-h-96 font-mono text-xs"
+                  onChange={(script) => setWorkerForm((prev) => ({ ...prev, script }))}
+                  minHeight="24rem"
                 />
               )}
               <div className="flex justify-end gap-2">
@@ -2735,7 +3072,7 @@ function DnsPage() {
                     <Table.Row>
                       <Table.Head>规则</Table.Head>
                       <Table.Head>Worker</Table.Head>
-                      <Table.Head className="text-right">操作</Table.Head>
+                      <Table.Head className="app-table-action">操作</Table.Head>
                     </Table.Row>
                   </Table.Header>
                   <Table.Body>
@@ -2770,7 +3107,7 @@ function DnsPage() {
               <LayerCard className="overflow-x-auto p-0">
                 <Table>
                   <Table.Header variant="compact">
-                    <Table.Row><Table.Head>域名</Table.Head><Table.Head>环境</Table.Head><Table.Head>Zone</Table.Head><Table.Head className="text-right">操作</Table.Head></Table.Row>
+                    <Table.Row><Table.Head>域名</Table.Head><Table.Head>环境</Table.Head><Table.Head>Zone</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row>
                   </Table.Header>
                   <Table.Body>
                     {workerDomainState.domains.length === 0 ? (
@@ -2795,7 +3132,7 @@ function DnsPage() {
               {loading.workerAnalytics ? (
                 <SkeletonLine className="h-64 w-full" />
               ) : (
-                <Textarea label="统计数据" value={JSON.stringify(workerAnalyticsState.analytics || {}, null, 2)} readOnly className="min-h-80 font-mono text-xs" />
+                <CodeEditor label="统计数据" language="json" value={JSON.stringify(workerAnalyticsState.analytics || {}, null, 2)} readOnly minHeight="20rem" />
               )}
               <div className="flex justify-end"><Button size="sm" variant="secondary" onClick={closeModal}>关闭</Button></div>
             </div>
@@ -2807,7 +3144,7 @@ function DnsPage() {
               <LayerCard className="overflow-x-auto p-0">
                 <Table>
                   <Table.Header variant="compact">
-                    <Table.Row><Table.Head>地址</Table.Head><Table.Head>环境</Table.Head><Table.Head>状态</Table.Head><Table.Head>创建时间</Table.Head><Table.Head className="text-right">操作</Table.Head></Table.Row>
+                    <Table.Row><Table.Head>地址</Table.Head><Table.Head>环境</Table.Head><Table.Head>状态</Table.Head><Table.Head>创建时间</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row>
                   </Table.Header>
                   <Table.Body>
                     {pagesDeployState.deployments.length === 0 ? (
@@ -2842,7 +3179,7 @@ function DnsPage() {
               <LayerCard className="overflow-x-auto p-0">
                 <Table>
                   <Table.Header variant="compact">
-                    <Table.Row><Table.Head>域名</Table.Head><Table.Head>状态</Table.Head><Table.Head>验证状态</Table.Head><Table.Head>创建时间</Table.Head><Table.Head className="text-right">操作</Table.Head></Table.Row>
+                    <Table.Row><Table.Head>域名</Table.Head><Table.Head>状态</Table.Head><Table.Head>验证状态</Table.Head><Table.Head>创建时间</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row>
                   </Table.Header>
                   <Table.Body>
                     {pagesDomainState.domains.length === 0 ? (
@@ -2876,16 +3213,90 @@ function DnsPage() {
             </div>
           )}
 
+          {modal.type === 'r2Folder' && (
+            <div className="flex flex-col gap-4">
+              <div>
+                <Dialog.Title className="text-base font-semibold text-kumo-strong">新建文件夹</Dialog.Title>
+                <Dialog.Description className="mt-1 text-xs text-kumo-subtle">
+                  将在当前路径 {r2CurrentPrefix || '/'} 下创建文件夹。
+                </Dialog.Description>
+              </div>
+              <Input
+                size="sm"
+                label="文件夹名称"
+                value={r2FolderForm.name}
+                onChange={(event) => setR2FolderForm({ name: event.target.value })}
+                placeholder="assets"
+                autoFocus
+              />
+              <div className="flex justify-end gap-2">
+                <Button size="sm" variant="secondary" onClick={closeModal}>取消</Button>
+                <Button size="sm" onClick={createR2Folder} disabled={loading.createR2Folder}>创建</Button>
+              </div>
+            </div>
+          )}
+
+          {modal.type === 'r2Preview' && (
+            <div className="flex min-h-0 flex-col gap-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <Dialog.Title className="truncate text-base font-semibold text-kumo-strong">预览：{modal.data?.name}</Dialog.Title>
+                  <Dialog.Description className="mt-1 truncate text-xs text-kumo-subtle">{modal.data?.key}</Dialog.Description>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => window.open(modal.data?.url, '_blank', 'noopener,noreferrer')} icon={<ExternalLink className="h-4 w-4" />}>
+                    新窗口打开
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={closeModal}>关闭</Button>
+                </div>
+              </div>
+
+              <div className="min-h-[28rem] overflow-hidden rounded-md border border-kumo-line bg-kumo-recessed/25">
+                {modal.data?.kind === 'image' ? (
+                  <div className="flex h-[68vh] max-h-[42rem] min-h-[28rem] items-center justify-center overflow-auto p-3">
+                    <img src={modal.data.url} alt={modal.data.name} className="max-h-full max-w-full object-contain" />
+                  </div>
+                ) : modal.data?.kind === 'video' ? (
+                  <div className="flex h-[68vh] max-h-[42rem] min-h-[28rem] items-center justify-center p-3">
+                    <video src={modal.data.url} controls className="max-h-full max-w-full rounded-md bg-black" />
+                  </div>
+                ) : modal.data?.kind === 'audio' ? (
+                  <div className="flex h-44 items-center justify-center p-6">
+                    <audio src={modal.data.url} controls className="w-full max-w-xl" />
+                  </div>
+                ) : modal.data?.kind === 'frame' ? (
+                  <iframe
+                    title={`预览 ${modal.data.name}`}
+                    src={modal.data.url}
+                    className="h-[68vh] max-h-[42rem] min-h-[28rem] w-full bg-kumo-base"
+                  />
+                ) : (
+                  <div className="flex min-h-[28rem] flex-col items-center justify-center gap-3 p-8 text-center">
+                    <FileText className="h-8 w-8 text-kumo-subtle" />
+                    <div>
+                      <div className="font-medium text-kumo-strong">该类型暂不支持内嵌预览</div>
+                      <div className="mt-1 text-sm text-kumo-subtle">可以在新窗口打开，浏览器会按文件类型处理。</div>
+                    </div>
+                    <Button size="sm" onClick={() => window.open(modal.data?.url, '_blank', 'noopener,noreferrer')} icon={<ExternalLink className="h-4 w-4" />}>
+                      打开对象
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {modal.type === 'import' && (
             <div className="flex flex-col gap-4">
               <Dialog.Title className="text-base font-semibold text-kumo-strong">
                 导入{importState.kind === 'accounts' ? '账号' : importState.kind === 'templates' ? '模板' : 'DNS 记录'}
               </Dialog.Title>
-              <Textarea
+              <CodeEditor
                 label="JSON 内容"
+                language="json"
                 value={importState.text}
-                onChange={(event) => setImportState((prev) => ({ ...prev, text: event.target.value }))}
-                className="min-h-80 font-mono text-xs"
+                onChange={(text) => setImportState((prev) => ({ ...prev, text }))}
+                minHeight="20rem"
                 placeholder='{"records":[{"type":"A","name":"@","content":"1.1.1.1","ttl":1,"proxied":false}]}'
               />
               {importState.kind !== 'records' && (
@@ -2947,11 +3358,12 @@ function DnsPage() {
               {loading.tunnelConfig ? (
                 <SkeletonLine className="h-80 w-full" />
               ) : (
-                <Textarea
+                <CodeEditor
                   label="配置 JSON"
+                  language="json"
                   value={tunnelConfigState.text}
-                  onChange={(event) => setTunnelConfigState((prev) => ({ ...prev, text: event.target.value }))}
-                  className="min-h-96 font-mono text-xs"
+                  onChange={(text) => setTunnelConfigState((prev) => ({ ...prev, text }))}
+                  minHeight="24rem"
                 />
               )}
               <div className="flex justify-end gap-2">
@@ -2972,7 +3384,7 @@ function DnsPage() {
               <LayerCard className="overflow-x-auto p-0">
                 <Table>
                   <Table.Header variant="compact">
-                    <Table.Row><Table.Head>客户端</Table.Head><Table.Head>版本</Table.Head><Table.Head>架构</Table.Head><Table.Head>边缘节点</Table.Head><Table.Head>连接时间</Table.Head><Table.Head className="text-right">操作</Table.Head></Table.Row>
+                    <Table.Row><Table.Head>客户端</Table.Head><Table.Head>版本</Table.Head><Table.Head>架构</Table.Head><Table.Head>边缘节点</Table.Head><Table.Head>连接时间</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row>
                   </Table.Header>
                   <Table.Body>
                     {tunnelConnectionState.connections.length === 0 ? (
@@ -2996,11 +3408,13 @@ function DnsPage() {
               </LayerCard>
             </div>
           )}
+          </div>
         </Dialog>
         )}
       </Dialog.Root>
-    </div>
+    </PageStack>
   );
 }
 
 export default DnsPage;
+

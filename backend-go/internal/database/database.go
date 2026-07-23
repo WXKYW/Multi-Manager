@@ -39,6 +39,10 @@ func (s *Store) Open(ctx context.Context) (*sql.DB, error) {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
 	db.SetMaxOpenConns(1)
+	if _, err := db.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("configure sqlite foreign_keys: %w", err)
+	}
 	if _, err := db.ExecContext(ctx, "PRAGMA busy_timeout = 5000"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("configure sqlite busy_timeout: %w", err)
@@ -47,8 +51,18 @@ func (s *Store) Open(ctx context.Context) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("configure sqlite journal_mode: %w", err)
 	}
+	if _, err := db.ExecContext(ctx, "PRAGMA wal_autocheckpoint = 256"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("configure sqlite wal_autocheckpoint: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, "PRAGMA journal_size_limit = 8388608"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("configure sqlite journal_size_limit: %w", err)
+	}
 	s.schemaOnce.Do(func() {
-		s.schemaErr = EnsureCoreSchema(ctx, db)
+		s.schemaErr = WithSchemaLock(ctx, func() error {
+			return EnsureCoreSchema(ctx, db)
+		})
 	})
 	if s.schemaErr != nil {
 		db.Close()
@@ -113,6 +127,7 @@ func EnsureCoreSchema(ctx context.Context, db *sql.DB) error {
 			koyeb_refresh_interval INTEGER DEFAULT 30000,
 			fly_refresh_interval INTEGER DEFAULT 30000,
 			public_api_url TEXT,
+			time_zone TEXT DEFAULT 'system',
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE TABLE IF NOT EXISTS system_api_stats (
@@ -176,6 +191,7 @@ func ensureUserSettingsColumns(ctx context.Context, db *sql.DB) error {
 		{"koyeb_refresh_interval", "ALTER TABLE user_settings ADD COLUMN koyeb_refresh_interval INTEGER DEFAULT 30000"},
 		{"fly_refresh_interval", "ALTER TABLE user_settings ADD COLUMN fly_refresh_interval INTEGER DEFAULT 30000"},
 		{"public_api_url", "ALTER TABLE user_settings ADD COLUMN public_api_url TEXT"},
+		{"time_zone", "ALTER TABLE user_settings ADD COLUMN time_zone TEXT DEFAULT 'system'"},
 	}
 	for _, column := range columns {
 		exists, err := hasColumn(ctx, db, "user_settings", column.name)
@@ -199,7 +215,8 @@ func ensureUserSettingsColumns(ctx context.Context, db *sql.DB) error {
 			main_tabs_layout = COALESCE(main_tabs_layout, 'top'),
 			vibration_enabled = COALESCE(vibration_enabled, 1),
 			koyeb_refresh_interval = COALESCE(koyeb_refresh_interval, 30000),
-			fly_refresh_interval = COALESCE(fly_refresh_interval, 30000)
+			fly_refresh_interval = COALESCE(fly_refresh_interval, 30000),
+			time_zone = COALESCE(time_zone, 'system')
 		WHERE id = 1
 	`)
 	if err != nil {

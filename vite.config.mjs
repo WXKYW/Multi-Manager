@@ -35,6 +35,7 @@ export default defineConfig(({ mode }) => {
   return {
     root: 'src',
     base: '/',
+    publicDir: path.resolve(__dirname, './src/pwa-public'),
     customLogger: createDevLogger(),
     plugins: [
       react(),
@@ -124,6 +125,10 @@ export default defineConfig(({ mode }) => {
       },
       proxy: {
         '^/api(?:/|$)': {
+          target: `http://127.0.0.1:${env.PORT || 3000}`,
+          changeOrigin: true,
+        },
+        '^/sub(?:/|$)': {
           target: `http://127.0.0.1:${env.PORT || 3000}`,
           changeOrigin: true,
         },

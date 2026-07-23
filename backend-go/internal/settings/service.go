@@ -51,6 +51,7 @@ type userSettingsRow struct {
 	TOTPSettings          sql.NullString
 	AgentDownloadURL      sql.NullString
 	PublicAPIURL          sql.NullString
+	TimeZone              sql.NullString
 }
 
 type tableAnalysis struct {
@@ -292,14 +293,18 @@ func (s *Service) getDatabaseStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	deep := r.URL.Query().Get("deep") == "1"
 	stats := make(map[string]int64, len(tables))
 	for _, table := range tables {
-		count, err := countTableRows(r.Context(), db, table)
-		if err != nil {
-			response.Error(w, http.StatusInternalServerError, err.Error())
-			return
+		stats[table] = -1
+		if deep {
+			count, err := countTableRows(r.Context(), db, table)
+			if err != nil {
+				response.Error(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			stats[table] = count
 		}
-		stats[table] = count
 	}
 
 	storage := databaseStorageStats(r.Context(), db, s.store.DatabasePath())
@@ -319,6 +324,7 @@ func (s *Service) getDatabaseStats(w http.ResponseWriter, r *http.Request) {
 		"freePageBytes": storage.FreePageBytes,
 		"storage":       storage,
 		"tables":        stats,
+		"countsExact":   deep,
 	})
 }
 
@@ -386,15 +392,23 @@ func (s *Service) getDatabaseAnalysis(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	deep := r.URL.Query().Get("deep") == "1"
 	pageSizes, sizeSource := tablePageSizes(r.Context(), db)
 	analysis := make([]tableAnalysis, 0, len(tables))
 	for _, table := range tables {
-		item, err := analyzeTable(r.Context(), db, table)
-		if err != nil {
-			item = tableAnalysis{
-				Table: table,
-				Rows:  0,
-				Error: err.Error(),
+		item := tableAnalysis{
+			Table: table,
+			Rows:  -1,
+		}
+		if deep {
+			var err error
+			item, err = analyzeTable(r.Context(), db, table)
+			if err != nil {
+				item = tableAnalysis{
+					Table: table,
+					Rows:  -1,
+					Error: err.Error(),
+				}
 			}
 		}
 		if pageSize, ok := pageSizes[table]; ok {
@@ -425,6 +439,7 @@ func (s *Service) getDatabaseAnalysis(w http.ResponseWriter, r *http.Request) {
 		"dbFileSizeMB": sizeMBString(storage.MainSizeBytes),
 		"storage":      storage,
 		"tables":       analysis,
+		"countsExact":  deep,
 	})
 }
 
@@ -822,6 +837,13 @@ func (s *Service) clearLogs(w http.ResponseWriter, r *http.Request) {
 		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": "log cleanup failed: " + err.Error()})
 		return
 	}
+	if deleted > 0 {
+		if _, err := db.ExecContext(r.Context(), `VACUUM`); err != nil {
+			response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": "database vacuum failed: " + err.Error()})
+			return
+		}
+	}
+	_, _ = db.ExecContext(r.Context(), `PRAGMA wal_checkpoint(TRUNCATE)`)
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
@@ -861,6 +883,7 @@ func (s *Service) enforceLogLimits(w http.ResponseWriter, r *http.Request) {
 		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": err.Error()})
 		return
 	}
+	_, _ = db.ExecContext(r.Context(), `PRAGMA wal_checkpoint(TRUNCATE)`)
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
@@ -956,7 +979,8 @@ func loadUserSettings(ctx context.Context, db *sql.DB) (map[string]interface{}, 
 			main_tabs_layout,
 			totp_settings,
 			agent_download_url,
-			public_api_url
+			public_api_url,
+			time_zone
 		FROM user_settings
 		WHERE id = 1
 	`).Scan(
@@ -977,6 +1001,7 @@ func loadUserSettings(ctx context.Context, db *sql.DB) (map[string]interface{}, 
 		&row.TOTPSettings,
 		&row.AgentDownloadURL,
 		&row.PublicAPIURL,
+		&row.TimeZone,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		if _, insertErr := db.ExecContext(ctx, `
@@ -1045,6 +1070,7 @@ func loadUserSettings(ctx context.Context, db *sql.DB) (map[string]interface{}, 
 		"totpSettings":            parseObject(row.TOTPSettings, map[string]interface{}{}),
 		"agentDownloadUrl":        nullString(row.AgentDownloadURL, ""),
 		"publicApiUrl":            nullString(row.PublicAPIURL, ""),
+		"timezone":                nullString(row.TimeZone, "system"),
 	}
 	if value := nullString(row.ThemeMode, ""); value != "" {
 		settings["themeMode"] = value
@@ -1074,6 +1100,7 @@ func saveUserSettings(ctx context.Context, db *sql.DB, settings map[string]inter
 	assignJSON(updates, "totp_settings", settings, "totpSettings", "totp_settings")
 	assignString(updates, "agent_download_url", settings, "agentDownloadUrl", "agent_download_url")
 	assignString(updates, "public_api_url", settings, "publicApiUrl", "public_api_url")
+	assignString(updates, "time_zone", settings, "timezone", "timeZone", "time_zone")
 
 	if len(updates) == 0 {
 		return nil
@@ -1097,6 +1124,7 @@ func saveUserSettings(ctx context.Context, db *sql.DB, settings map[string]inter
 		"totp_settings",
 		"agent_download_url",
 		"public_api_url",
+		"time_zone",
 	}
 
 	setParts := make([]string, 0, len(updates)+1)
@@ -1367,7 +1395,6 @@ func uniqueStrings(values []string) []string {
 	return result
 }
 
-
 func listUserTables(ctx context.Context, db *sql.DB) ([]string, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT name
@@ -1451,7 +1478,7 @@ func estimateTableSize(ctx context.Context, db *sql.DB, table string) (int64, er
 
 func migrationRequiredTables() map[string][]string {
 	return map[string][]string{
-		"user_settings":         {"id", "theme_mode", "page_width_mode", "sidebar_collapsed", "module_visibility", "module_order"},
+		"user_settings":         {"id", "theme_mode", "page_width_mode", "sidebar_collapsed", "module_visibility", "module_order", "time_zone"},
 		"operation_logs":        {"id", "operation_type", "table_name", "trace_id"},
 		"totp_accounts":         {"id", "secret", "secret_encrypted_at", "last_revealed_at"},
 		"filebox_entries":       {"code", "type", "expiry", "downloads"},
@@ -1731,7 +1758,11 @@ func listLogTables(ctx context.Context, db *sql.DB) ([]string, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT name
 		FROM sqlite_master
-		WHERE type = 'table' AND (name LIKE '%_logs' OR name LIKE '%_history')
+		WHERE type = 'table' AND (
+			name LIKE '%_logs'
+			OR name LIKE '%_history'
+			OR name IN ('server_network_quality_samples', 'uptime_heartbeats')
+		)
 		ORDER BY name
 	`)
 	if err != nil {
