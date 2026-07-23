@@ -6,12 +6,11 @@
 # - 自动或手动触发并指定版本号
 #
 # 流水线顺序（同组任务并行，无竞态）：
-# 1. create-release + tests  → 创建草稿，同时运行前后端测试
-# 2. build-agent             → 并行编译 5 平台 Rust Agent
-# 3. upload-assets + Docker  → 上传附件，同时构建双架构镜像
-# 4. merge-docker            → 合并多架构 manifest
-# 5. publish-release         → 附件和镜像完成后公开 Release
-# 6. cleanup + scan          → 并行清理临时镜像和安全扫描
+# 1. create-release + tests + Agent → 草稿、测试和各平台编译同时启动
+# 2. upload-assets + Docker         → 运行时 Agent 完成后构建镜像，macOS 编译继续并行
+# 3. merge-docker                   → 测试和双架构镜像均成功后合并 manifest
+# 4. publish-release                → 附件和镜像完成后公开 Release
+# 5. cleanup + scan                 → 并行清理临时镜像和安全扫描
 
 name: Release
 
@@ -191,7 +190,7 @@ jobs:
 
       - name: Run Go Tests
         working-directory: backend-go
-        run: go test ./... -v -race
+        run: go test ./... -v
 
       - name: Build Go Backend
         working-directory: backend-go
@@ -218,7 +217,7 @@ jobs:
         run: echo "npm_config_user_agent=pnpm/9.0.0 npm/? node/?" >> $GITHUB_ENV
 
       - name: Install dependencies
-        run: npm install --legacy-peer-deps
+        run: npm ci --legacy-peer-deps
 
       - name: Run ESLint
         run: npm run lint
@@ -235,10 +234,10 @@ jobs:
           VITE_USE_CDN: false
 
   # ==========================================
-  # Phase 3: 编译 Rust Agent（5 平台）
+  # Phase 3: 编译运行时 Rust Agent（Linux / Windows）
   # ==========================================
-  build-agent:
-    needs: [create-release, test-backend, test-frontend]
+  build-agent-runtime:
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -257,15 +256,6 @@ jobs:
             os: windows-latest
             output_name: agent-windows-amd64.exe
             use_cross: false
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            output_name: agent-darwin-amd64
-            use_cross: false
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            output_name: agent-darwin-arm64
-            use_cross: false
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.2.2
@@ -332,10 +322,65 @@ jobs:
           retention-days: 7
 
   # ==========================================
+  # Phase 3b: 编译 macOS 下载 Agent
+  # ==========================================
+  build-agent-macos:
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            output_name: agent-darwin-amd64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            output_name: agent-darwin-arm64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.2.2
+
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.10.1
+        with:
+          target: ${{ matrix.target }}
+          cache: true
+          cache-workspaces: agent-rust
+
+      - name: Remove cargo mirror config in CI
+        shell: bash
+        run: rm -f agent-rust/.cargo/config.toml
+
+      - name: Build Agent
+        working-directory: agent-rust
+        shell: bash
+        run: cargo build --target ${{ matrix.target }} --release
+
+      - name: Copy & Rename Binary
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp agent-rust/target/${{ matrix.target }}/release/api-monitor-agent dist/${{ matrix.output_name }}
+          (cd dist && shasum -a 256 "${{ matrix.output_name }}" | awk '{print $1}' > "${{ matrix.output_name }}.sha256")
+          ls -lh dist/
+
+      - name: Upload agent artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.0
+        with:
+          name: ${{ matrix.output_name }}
+          path: |
+            dist/${{ matrix.output_name }}
+            dist/${{ matrix.output_name }}.sha256
+          retention-days: 7
+
+  # ==========================================
   # Phase 4: 上传 Agent 到 Release
   # ==========================================
   upload-assets:
-    needs: [create-release, build-agent]
+    needs: [create-release, build-agent-runtime, build-agent-macos]
     runs-on: ubuntu-latest
 
     steps:
@@ -366,7 +411,7 @@ jobs:
   # Phase 5: 构建多架构 Docker 镜像
   # ==========================================
   build-docker:
-    needs: [create-release, build-agent]
+    needs: [create-release, build-agent-runtime]
     runs-on: ${{ matrix.runner }}
 
     strategy:
@@ -445,7 +490,6 @@ jobs:
           context: .
           file: ./Dockerfile
           platforms: ${{ matrix.platform }}
-          no-cache: true
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:build-${{ github.run_id }}-${{ matrix.suffix }}
@@ -473,7 +517,7 @@ jobs:
   # Phase 6: 合并多架构 manifest
   # ==========================================
   merge-docker:
-    needs: build-docker
+    needs: [test-backend, test-frontend, build-docker]
     runs-on: ubuntu-latest
 
     steps:

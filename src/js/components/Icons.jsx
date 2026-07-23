@@ -55,6 +55,7 @@ import {
   ListBullets,
   Lock as PhLock,
   MagnifyingGlass,
+  Minus as PhMinus,
   Moon as PhMoon,
   Palette as PhPalette,
   PaperPlaneTilt,
@@ -201,6 +202,7 @@ export const AlertTriangle = createIcon(Warning);
 export const LogIn = createIcon(SignIn);
 export const LayoutSidebar = createIcon(PhSidebar);
 export const Plus = createIcon(PhPlus);
+export const Minus = createIcon(PhMinus);
 export const Trash = createIcon(PhTrash);
 export const Play = createIcon(PhPlay);
 export const PlayCircle = createIcon(PhPlayCircle);

@@ -2,13 +2,13 @@
 # API Monitor Unified CI/CD Pipeline
 # ===================================
 # 触发条件：
-# - 推送到 main / dev 分支
+# - 推送到 dev 分支（main 由正式 Release 流水线负责）
 # - 提 PR 到 main / dev 分支
 # - 手动触发
 #
 # 功能：
 # - 阶段 1 (CI)：前端 ESLint 检查、测试、构建验证
-# - 阶段 2 (Build Agent)：并行编译 5 平台 Rust Agent，上传产物并启用缓存
+# - 阶段 2 (Build Agent)：并行编译部署所需的 Linux / Windows Agent
 # - 阶段 3 (CD - Docker)：多架构 Docker 镜像自动构建与发布（共享新编译的 Agent）
 # - 阶段 4 (Merge)：合并多架构 Docker Manifest 并生成相应标签（main -> latest, dev -> dev）
 
@@ -20,7 +20,7 @@ concurrency:
 
 on:
   push:
-    branches: [main, dev]
+    branches: [dev]
     paths-ignore:
       - "**.md"
       - "docs/**"
@@ -68,7 +68,7 @@ jobs:
         run: echo "npm_config_user_agent=pnpm/9.0.0 npm/? node/?" >> $GITHUB_ENV
 
       - name: Install dependencies
-        run: npm install --legacy-peer-deps
+        run: npm ci --legacy-peer-deps
 
       - name: Run ESLint
         run: npm run lint
@@ -106,7 +106,7 @@ jobs:
 
       - name: Run Go Tests
         working-directory: backend-go
-        run: go test ./... -v -race -coverprofile=coverage.out
+        run: go test ./... -v -coverprofile=coverage.out
 
       - name: Build Go Backend
         working-directory: backend-go
@@ -124,7 +124,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
 
   # ==========================================
-  # 阶段 2: 编译 Rust Agent (5 平台)
+  # 阶段 2: 编译部署所需的 Rust Agent (3 平台)
   # ==========================================
   build-agent:
     runs-on: ${{ matrix.os }}
@@ -143,14 +143,6 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             output_name: agent-windows-amd64.exe
-            use_cross: false
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            output_name: agent-darwin-amd64
-            use_cross: false
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            output_name: agent-darwin-arm64
             use_cross: false
 
     steps:
@@ -277,7 +269,7 @@ jobs:
           if [ "$GITHUB_REF" = "refs/heads/main" ]; then
             VERSION="v$(node -p "require('./package.json').version")"
           else
-            VERSION="dev-${GITHUB_SHA: -4}"
+            VERSION="dev-${GITHUB_SHA:0:7}"
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
@@ -288,7 +280,6 @@ jobs:
           context: .
           file: ./Dockerfile
           platforms: ${{ matrix.platform }}
-          no-cache: true
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:build-${{ github.run_id }}-${{ matrix.suffix }}

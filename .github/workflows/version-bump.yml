@@ -1,7 +1,6 @@
 # Keep the application version in package.json aligned with main merges.
-# The merge commit is bumped in a follow-up commit, then CI and the release
-# pipeline are dispatched explicitly because GITHUB_TOKEN pushes do not
-# trigger other workflows.
+# The merge commit is bumped in a follow-up commit, then the release pipeline
+# is dispatched explicitly because GITHUB_TOKEN pushes do not trigger it.
 name: Bump Main Version
 
 on:
@@ -30,23 +29,34 @@ jobs:
       - name: Checkout full history
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.2.2
         with:
-          fetch-depth: 2
-          ref: main
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || github.sha }}
 
       - name: Detect merge commit
         id: merge
         env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_NAME: ${{ github.event_name }}
+          MERGE_COMMIT_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         shell: bash
         run: |
           if [ "$EVENT_NAME" = "pull_request" ]; then
-            echo "parent_count=pr" >> "$GITHUB_OUTPUT"
-            echo "is_merge=true" >> "$GITHUB_OUTPUT"
+            PARENT_COUNT=$(git rev-list --parents -n 1 "$MERGE_COMMIT_SHA" | awk '{print NF - 1}')
+            echo "parent_count=${PARENT_COUNT}" >> "$GITHUB_OUTPUT"
+            echo "base_revision=${BASE_SHA}" >> "$GITHUB_OUTPUT"
+            if [ "$PARENT_COUNT" -ge 2 ]; then
+              # The push event handles regular merge commits. PR events handle
+              # squash and rebase merges, whose resulting commits have one parent.
+              echo "is_merge=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "is_merge=true" >> "$GITHUB_OUTPUT"
+            fi
             exit 0
           fi
 
           PARENT_COUNT=$(git rev-list --parents -n 1 HEAD | awk '{print NF - 1}')
           echo "parent_count=${PARENT_COUNT}" >> "$GITHUB_OUTPUT"
+          echo "base_revision=HEAD^1" >> "$GITHUB_OUTPUT"
           if [ "$PARENT_COUNT" -ge 2 ]; then
             echo "is_merge=true" >> "$GITHUB_OUTPUT"
           else
@@ -56,10 +66,12 @@ jobs:
       - name: Resolve next version
         if: steps.merge.outputs.is_merge == 'true'
         id: version
+        env:
+          BASE_REVISION: ${{ steps.merge.outputs.base_revision }}
         shell: bash
         run: |
           CURRENT_VERSION=$(node -p "require('./package.json').version")
-          BASE_VERSION=$(git show HEAD^1:package.json | node -e "let input=''; process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => console.log(JSON.parse(input).version));")
+          BASE_VERSION=$(git show "${BASE_REVISION}:package.json" | node -e "let input=''; process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => console.log(JSON.parse(input).version));")
 
           if node -e "const a='$CURRENT_VERSION'.split('.').map(Number); const b='$BASE_VERSION'.split('.').map(Number); process.exit(a[0] > b[0] || (a[0] === b[0] && (a[1] > b[1] || (a[1] === b[1] && a[2] > b[2]))) ? 0 : 1)"; then
             VERSION="$CURRENT_VERSION"
@@ -87,14 +99,8 @@ jobs:
           git commit -m "chore(release): bump version to v${VERSION} [skip ci]"
           git push origin HEAD:main
 
-      - name: Dispatch CI for bumped main
-        if: steps.merge.outputs.is_merge == 'true' && steps.version.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run ci-cd.yml --ref main
-
-      - name: Dispatch release for bumped main
-        if: steps.merge.outputs.is_merge == 'true' && steps.version.outputs.changed == 'true'
+      - name: Dispatch release for main version
+        if: steps.merge.outputs.is_merge == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
