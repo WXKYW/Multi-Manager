@@ -17,8 +17,22 @@ API Monitor 使用语义化版本（Semantic Versioning），格式为 `MAJOR.MI
 3. `Bump Main Version` 工作流比较合并前后的版本：
    - 版本未变化时，自动执行 patch 递增，例如 `2.0.0` 到 `2.0.1`。
    - 版本已人工提升到更高的 minor 或 major 时，保留人工版本。
-4. 工作流提交 `package.json` 和 `package-lock.json`，随后重新触发主分支 CI/CD。
-5. 创建 Release 时，输入版本必须与 `package.json` 一致；不一致时工作流会停止。
+4. 工作流提交 `package.json` 和 `package-lock.json`，随后触发主分支 CI/CD 和正式发布流水线。
+5. 正式发布流水线从 `main` 检出源码，验证输入版本与 `package.json` 一致，并创建对应的 `vX.Y.Z` 标签。
+6. 前后端测试通过后，流水线编译各平台 Agent、上传 Release 附件并发布带版本号和 `latest` 标签的多架构 Docker 镜像。
+7. 所有必需构建成功后，GitHub Release 自动从草稿转为公开发布。失败的流水线会保留草稿，避免发布不完整版本。
+
+由 `GITHUB_TOKEN` 创建的提交和标签不会再次触发其他工作流，因此版本递增工作流会显式调度 CI/CD 和 Release。这可以避免递归触发，同时保证自动发布链路完整。
+
+## 发布失败后重试
+
+修复外部服务或临时构建问题后，可以在 GitHub Actions 页面手动重新运行失败任务。也可以在 `main` 上重新调度相同版本；工作流会复用已经指向当前提交的标签和 Release 草稿：
+
+```bash
+gh workflow run release.yml --ref main --field version=2.0.1 --field prerelease=false
+```
+
+如果同名标签已经指向其他提交，工作流会停止，不会移动或覆盖正式版本标签。
 
 ## 主版本和次版本
 

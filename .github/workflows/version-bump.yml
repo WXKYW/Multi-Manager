@@ -1,6 +1,7 @@
 # Keep the application version in package.json aligned with main merges.
-# The merge commit is bumped in a follow-up commit, then CI is dispatched
-# explicitly because pushes made with GITHUB_TOKEN do not trigger workflows.
+# The merge commit is bumped in a follow-up commit, then CI and the release
+# pipeline are dispatched explicitly because GITHUB_TOKEN pushes do not
+# trigger other workflows.
 name: Bump Main Version
 
 on:
@@ -91,3 +92,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run ci-cd.yml --ref main
+
+      - name: Dispatch release for bumped main
+        if: steps.merge.outputs.is_merge == 'true' && steps.version.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: >-
+          gh workflow run release.yml --ref main
+          --field version="$VERSION"
+          --field prerelease=false
