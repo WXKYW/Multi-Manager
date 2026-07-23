@@ -17,6 +17,7 @@ import useStore, {
   normalizeUserSettings,
 } from '../store.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
+import { APP_VERSION } from '../modules/appVersion.js';
 import { AppCard, SectionCard, cx } from '../components/ui/AppPrimitives.jsx';
 import CodeEditor from '../components/ui/CodeEditor.jsx';
 import { BackupPanel } from './BackupPage.jsx';
@@ -1466,7 +1467,7 @@ function SettingsPage() {
         <div className="grid items-start gap-4 overflow-auto px-px py-px pr-px lg:grid-cols-1">
           <SectionCard
             title="API Monitor"
-            description="React 前端 + Go 后端"
+            description={APP_VERSION}
             icon={<img src="/logo.svg" alt="" className="h-6 w-6 object-contain" />}
             bodyPadding="lg"
           >

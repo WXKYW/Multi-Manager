@@ -8,6 +8,7 @@ import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Tabs } from '@cloudflare/kumo';
 import { TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
+import { APP_VERSION } from '../modules/appVersion.js';
 import AppPageHeader, { AppBreadcrumbs } from './AppPageHeader.jsx';
 import { AppCard } from './ui/AppPrimitives.jsx';
 import {
@@ -754,7 +755,7 @@ function MainLayout() {
                   · 已运行 {appProcessUptimeMeasuredAt > 0 ? formatAppProcessUptime(displayedAppProcessUptime) : '加载中'}
                 </span>
               </div>
-              <div className="flex min-w-0 items-center justify-end gap-4">
+              <div className="flex min-w-0 items-center justify-end gap-3">
                 {dashboardFooterRecordNumber ? (
                   <a
                     href="https://beian.miit.gov.cn/"
@@ -773,6 +774,13 @@ function MainLayout() {
                 >
                   GitHub
                 </a>
+                <span
+                  className="shrink-0 font-mono text-[10px] tabular-nums text-kumo-subtle"
+                  aria-label={`版本 ${APP_VERSION}`}
+                  title={`API Monitor ${APP_VERSION}`}
+                >
+                  {APP_VERSION}
+                </span>
               </div>
             </footer>
           )}

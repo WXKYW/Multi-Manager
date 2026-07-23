@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { visualizer } from 'rollup-plugin-visualizer';
+import { resolveAppVersionFromEnvironment } from './tools/app-version.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,12 +32,19 @@ function createDevLogger() {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const isProduction = mode === 'production';
+  const appVersion = resolveAppVersionFromEnvironment({
+    cwd: __dirname,
+    env: { ...process.env, ...env },
+  });
 
   return {
     root: 'src',
     base: '/',
     publicDir: path.resolve(__dirname, './src/pwa-public'),
     customLogger: createDevLogger(),
+    define: {
+      'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
+    },
     plugins: [
       react(),
       tailwindcss(),
