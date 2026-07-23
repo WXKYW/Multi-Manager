@@ -1,7 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BubbleMap } from '@cloudflare/kumo';
+import { Button } from '@cloudflare/kumo/components/button';
 import { feature } from 'topojson-client';
 import worldCountries from 'world-atlas/countries-110m.json';
+import { Minus, Plus, RotateCw } from '../Icons.jsx';
 
 const rawWorldGeoJson = feature(worldCountries, worldCountries.objects.countries);
 const WORLD_GEO_JSON = {
@@ -167,9 +169,12 @@ function ServerLocationMap({
   echarts,
   servers,
   resolveStatus,
-  height = 190,
+  height,
+  aspectRatio,
 }) {
   const isDarkMode = useDocumentDarkMode();
+  const chartRef = useRef(null);
+  const chartHeight = height ?? (aspectRatio ? undefined : 190);
   const points = useMemo(() => {
     const rawPoints = (Array.isArray(servers) ? servers : [])
       .map((server) => {
@@ -216,10 +221,60 @@ function ServerLocationMap({
     });
   }, [servers, resolveStatus]);
 
+  const changeZoom = useCallback((factor) => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    chart.dispatchAction({
+      type: 'geoRoam',
+      componentType: 'geo',
+      geoIndex: 0,
+      zoom: factor,
+      originX: chart.getWidth() / 2,
+      originY: chart.getHeight() / 2,
+    });
+  }, []);
+
+  const resetView = useCallback(() => {
+    chartRef.current?.setOption({ geo: { center: null, zoom: 1.15 } });
+  }, []);
+
   return (
-    <section className="overflow-hidden rounded-md border border-kumo-line bg-kumo-base">
+    <section className="relative overflow-hidden rounded-md border border-kumo-line bg-kumo-base">
+      <div className="absolute right-3 top-3 z-10 flex items-center gap-1 rounded-md border border-kumo-line bg-kumo-base/90 p-1 shadow-sm backdrop-blur-sm">
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          shape="square"
+          icon={<Plus className="size-3.5" />}
+          aria-label="放大地图"
+          title="放大地图"
+          onClick={() => changeZoom(1.35)}
+        />
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          shape="square"
+          icon={<Minus className="size-3.5" />}
+          aria-label="缩小地图"
+          title="缩小地图"
+          onClick={() => changeZoom(1 / 1.35)}
+        />
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          shape="square"
+          icon={<RotateCw className="size-3.5" />}
+          aria-label="重置地图"
+          title="重置地图"
+          onClick={resetView}
+        />
+      </div>
       <div className="bg-kumo-recessed/20 px-2 py-1.5">
         <BubbleMap
+          ref={chartRef}
           echarts={echarts}
           geoJson={WORLD_GEO_JSON}
           mapName="api-monitor-world-hosts"
@@ -233,8 +288,10 @@ function ServerLocationMap({
           bubbleColor={(row) => STATUS_COLORS[row.status] || '#4290F0'}
           bubbleBorderColor={isDarkMode ? 'rgba(255,255,255,0.76)' : '#ffffff'}
           bubbleBorderWidth={1}
-          height={height}
+          height={chartHeight}
+          aspectRatio={chartHeight === undefined ? aspectRatio : undefined}
           zoom={1.15}
+          roam
           isDarkMode={isDarkMode}
           tooltipFormatter={formatServerListTooltip}
         />

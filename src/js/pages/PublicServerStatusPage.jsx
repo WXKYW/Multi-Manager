@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import io from 'socket.io-client';
-import { Banner, Meter, Tabs } from '@cloudflare/kumo';
+import { Meter, Tabs } from '@cloudflare/kumo';
 import { Button } from '@cloudflare/kumo/components/button';
 import { AlertTriangle, Globe, RefreshCw, Server, Shield } from '../components/Icons.jsx';
 import CountryFlag from '../components/CountryFlag.jsx';
-import PublicOverviewStats from '../components/public/PublicOverviewStats.jsx';
 import ServerLocationMap from '../components/server/ServerLocationMap.jsx';
 import { useCloudflareSpotlight } from '../hooks/useCloudflareSpotlight.js';
 import { FLOW_UNIT_BADGE_CLASS, getFlowUnitClassName } from '../modules/flowUnits.js';
+import { normalizeTrafficLimitMode, resolveTrafficUsedBytes } from '../modules/trafficMetrics.js';
 import { TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import * as echarts from 'echarts/core';
 import { MapChart, ScatterChart } from 'echarts/charts';
@@ -102,12 +102,18 @@ const mergeRealtimeMetrics = (server, metrics, timestamp) => {
   const uptimeLabel = uptimeSeconds !== null
     ? ''
     : (typeof rawUptime === 'string' && rawUptime.trim() ? rawUptime.trim() : server.uptimeLabel);
-  const trafficUsedBytes = firstNumber(metrics, ['traffic_used_bytes'], null);
-  const transferBytes = firstNumber(metrics, ['net_in_transfer', 'net_rx_total'], 0)
-    + firstNumber(metrics, ['net_out_transfer', 'net_tx_total'], 0);
-  const networkTrafficBytes = firstNumber(network, ['traffic_used_bytes'], null);
   const trafficRxBytes = firstNumber(metrics, ['net_in_transfer', 'net_rx_total', 'rx_total_bytes'], firstNumber(network, ['rx_total_bytes'], server.trafficRxBytes));
   const trafficTxBytes = firstNumber(metrics, ['net_out_transfer', 'net_tx_total', 'tx_total_bytes'], firstNumber(network, ['tx_total_bytes'], server.trafficTxBytes));
+  const networkTrafficBytes = firstNumber(network, ['traffic_used_bytes'], null);
+  const metricsTrafficBytes = firstNumber(metrics, ['traffic_used_bytes'], null);
+  const trafficLimitMode = normalizeTrafficLimitMode(firstText(
+    metrics,
+    ['traffic_limit_mode'],
+    firstText(network, ['traffic_limit_mode'], server.trafficLimitMode || 'total'),
+  ));
+  const trafficUsedBytes = networkTrafficBytes
+    ?? metricsTrafficBytes
+    ?? resolveTrafficUsedBytes(trafficRxBytes, trafficTxBytes, trafficLimitMode);
 
   return {
     ...server,
@@ -145,9 +151,10 @@ const mergeRealtimeMetrics = (server, metrics, timestamp) => {
     gpuPower: firstNumber(metrics, ['gpu_power', 'gpuPower'], firstNumber(gpu, ['Power'], server.gpuPower)),
     gpuMemory: firstNumber(metrics, ['gpu_mem_percent'], firstNumber(gpu, ['Percent'], server.gpuMemory)),
     gpuModel: firstText(metrics, ['gpu_model', 'gpu_name'], firstText(gpu, ['Model', 'Name'], server.gpuModel)),
-    trafficUsedBytes: networkTrafficBytes ?? trafficUsedBytes ?? (transferBytes > 0 ? transferBytes : server.trafficUsedBytes),
+    trafficUsedBytes,
     trafficRxBytes,
     trafficTxBytes,
+    trafficLimitMode,
     updatedAt: timestamp ? new Date(timestamp).toISOString() : new Date().toISOString(),
   };
 };
@@ -494,14 +501,11 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [fetchedAt, setFetchedAt] = useState('');
-  const [wsConnected, setWsConnected] = useState(false);
   const [wideColumns, setWideColumns] = useState(() => {
     const stored = window.localStorage?.getItem('publicServerStatusColumns');
     return stored === '4' ? 4 : 3;
   });
   const [mapOpen, setMapOpen] = useState(false);
-  const [serverFilter, setServerFilter] = useState('all');
-
   const load = useCallback(async ({ silent = false } = {}) => {
     if (silent) {
       setRefreshing(true);
@@ -562,10 +566,6 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
       transports: ['websocket', 'polling'],
     });
 
-    socket.on('connect', () => setWsConnected(true));
-    socket.on('disconnect', () => setWsConnected(false));
-    socket.on('connect_error', () => setWsConnected(false));
-
     socket.on('metrics:update', data => {
       if (!data?.serverId || !data.metrics || !visibleServerIds.has(String(data.serverId))) return;
       const updatedAt = new Date().toISOString();
@@ -608,7 +608,6 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
 
     return () => {
       socket.disconnect();
-      setWsConnected(false);
     };
   }, [serverIdKey]);
 
@@ -622,18 +621,7 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
   const serverGridClass = wideColumns === 4
     ? 'grid gap-3 md:grid-cols-2 2xl:grid-cols-4'
     : 'grid gap-3 md:grid-cols-2 xl:grid-cols-3';
-  const onlineCount = servers.filter(server => server?.online).length;
-  const offlineCount = Math.max(0, servers.length - onlineCount);
-  const visibleServers = serverFilter === 'online'
-    ? servers.filter((server) => server?.online)
-    : serverFilter === 'offline'
-      ? servers.filter((server) => !server?.online)
-      : servers;
-  const overviewText = servers.length === 0
-    ? '暂无公开主机'
-    : offlineCount > 0
-      ? `${offlineCount} 台主机离线`
-      : '全部主机在线';
+  const visibleServers = servers;
 
   return (
     <div ref={surfaceRef} className="cf-ai-background-surface public-server-status-page relative isolate min-h-screen text-kumo-default">
@@ -690,30 +678,12 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
 
         {!initialLoading && page && (
           <div className="flex flex-col gap-4">
-            <Banner
-              variant={servers.length === 0 ? 'secondary' : offlineCount > 0 ? 'error' : 'default'}
-              icon={<Server className="size-4" />}
-              title={overviewText}
-              className="items-center !bg-kumo-base"
-              action={(
-                <PublicOverviewStats
-                  activeKey={serverFilter}
-                  onChange={setServerFilter}
-                  items={[
-                    { key: 'all', label: '主机', value: servers.length },
-                    { key: 'online', label: '在线', value: onlineCount },
-                    { key: 'offline', label: '离线', value: offlineCount },
-                    { label: '连接', value: wsConnected ? '实时' : '重连' },
-                  ]}
-                />
-              )}
-            />
             {mapOpen ? (
               <ServerLocationMap
                 echarts={echarts}
                 servers={visibleServers}
                 resolveStatus={(server) => (server?.online ? 'online' : 'offline')}
-                height="calc(100vh - 160px)"
+                aspectRatio="16 / 9"
               />
             ) : (
               <section>
