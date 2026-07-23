@@ -3,11 +3,11 @@
 # ===================================
 # 触发条件：
 # - 推送版本标签 (v*)
-# - 手动触发并指定版本号
+# - 自动或手动触发并指定版本号
 #
 # 流水线顺序（严格依赖链，无竞态）：
 # 1. create-release  → 创建 GitHub Release
-# 2. test-backend    → Go 后端测试
+# 2. tests           → 前端与 Go 后端测试
 # 3. build-agent     → 编译 5 平台 Rust Agent
 # 4. upload-assets   → 上传 Agent 到 Release
 # 5. build-docker    → 构建多架构 Docker 镜像
@@ -49,6 +49,7 @@ jobs:
   # Phase 1: 创建 GitHub Release
   # ==========================================
   create-release:
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.version.outputs.tag }}
@@ -59,6 +60,9 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.2.2
         with:
           fetch-depth: 0
+          # A dispatch always releases the current main commit, even if a user
+          # selects another branch in the workflow UI.
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.ref }}
 
       - name: Determine version
         id: version
@@ -88,15 +92,27 @@ jobs:
             exit 1
           fi
 
-      - name: Create tag (manual trigger only)
+      - name: Create or verify tag (dispatch only)
         if: github.event_name == 'workflow_dispatch'
         env:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "Release $TAG"
-          git push origin "$TAG"
+          git fetch origin --tags --force
+
+          if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
+            TAG_COMMIT=$(git rev-list -n 1 "$TAG")
+            HEAD_COMMIT=$(git rev-parse HEAD)
+            if [ "$TAG_COMMIT" != "$HEAD_COMMIT" ]; then
+              echo "Tag $TAG already points to $TAG_COMMIT, not $HEAD_COMMIT." >&2
+              exit 1
+            fi
+            echo "Tag $TAG already points to the current main commit; reusing it."
+          else
+            git tag -a "$TAG" -m "Release $TAG"
+            git push origin "$TAG"
+          fi
 
       - name: Generate changelog
         id: changelog
@@ -184,10 +200,47 @@ jobs:
         run: go build -v -o api-monitor ./cmd/api-monitor
 
   # ==========================================
+  # Phase 2: 前端测试
+  # ==========================================
+  test-frontend:
+    needs: create-release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.2.2
+
+      - name: Setup Node.js 20.x
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.2.0
+        with:
+          node-version: 20.x
+          cache: "npm"
+
+      - name: Disable pnpm enforcement
+        run: echo "npm_config_user_agent=pnpm/9.0.0 npm/? node/?" >> $GITHUB_ENV
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run Tests
+        run: npm run test
+
+      - name: Three-side governance check
+        run: npm run governance:check
+
+      - name: Build Frontend Validation
+        run: npm run build
+        env:
+          VITE_USE_CDN: false
+
+  # ==========================================
   # Phase 3: 编译 Rust Agent（5 平台）
   # ==========================================
   build-agent:
-    needs: test-backend
+    needs: [test-backend, test-frontend]
     runs-on: ${{ matrix.os }}
 
     strategy:
