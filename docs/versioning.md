@@ -13,7 +13,7 @@ API Monitor 使用语义化版本（Semantic Versioning），格式为 `MAJOR.MI
 ## 日常发布流程
 
 1. 在 `dev` 完成功能开发和验证。
-2. 使用 merge commit 将 `dev` 合并到 `main`，不要使用 squash merge。
+2. 将 `dev` 合并到 `main`，普通 merge、squash merge 和 rebase merge 都可以。
 3. `Bump Main Version` 工作流比较合并前后的版本：
    - 版本未变化时，自动执行 patch 递增，例如 `2.0.0` 到 `2.0.1`。
    - 版本已人工提升到更高的 minor 或 major 时，保留人工版本。

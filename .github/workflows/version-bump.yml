@@ -6,6 +6,9 @@ name: Bump Main Version
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
+    types: [closed]
 
 permissions:
   contents: write
@@ -18,19 +21,29 @@ concurrency:
 jobs:
   bump:
     if: >-
-      github.actor != 'github-actions[bot]' &&
-      !contains(github.event.head_commit.message, 'chore(release): bump version')
+      (github.event_name == 'push' && github.actor != 'github-actions[bot]' &&
+      !contains(github.event.head_commit.message, 'chore(release): bump version')) ||
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout full history
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.2.2
         with:
           fetch-depth: 2
+          ref: main
 
       - name: Detect merge commit
         id: merge
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         shell: bash
         run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            echo "parent_count=pr" >> "$GITHUB_OUTPUT"
+            echo "is_merge=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           PARENT_COUNT=$(git rev-list --parents -n 1 HEAD | awk '{print NF - 1}')
           echo "parent_count=${PARENT_COUNT}" >> "$GITHUB_OUTPUT"
           if [ "$PARENT_COUNT" -ge 2 ]; then
