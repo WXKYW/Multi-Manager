@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Button, RefreshButton } from '@cloudflare/kumo/components/button';
 import { Checkbox } from '@cloudflare/kumo/components/checkbox';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
@@ -8,7 +8,7 @@ import { Select } from '@cloudflare/kumo/components/select';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
-import { Badge, ClipboardText, Code, LayerCard, Meter, Tabs } from '@cloudflare/kumo';
+import { Badge, ClipboardText, Code, DropdownMenu, LayerCard, Meter, Tabs } from '@cloudflare/kumo';
 import { AppTable, DataTableFrame, PageStack, PageToolbar, SectionCard } from '../components/ui/AppPrimitives.jsx';
 import CodeEditor from '../components/ui/CodeEditor.jsx';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
@@ -742,6 +742,56 @@ function TrafficSizeInput({ label, value, onChange }) {
   );
 }
 
+function MasonryGrid({ children, className = '' }) {
+  const containerRef = useRef(null);
+  const childArray = React.Children.toArray(children);
+  const childKeys = childArray.map((child, index) => child.key || index).join('|');
+  const [rowSpans, setRowSpans] = useState([]);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return undefined;
+
+    let frameId = null;
+    const items = Array.from(container.children);
+    const updateSpans = () => {
+      frameId = null;
+      const styles = getComputedStyle(container);
+      const rowHeight = Number.parseFloat(styles.gridAutoRows) || 1;
+      const rowGap = Number.parseFloat(styles.rowGap) || 0;
+      const nextSpans = items.map((item) => {
+        const content = item.firstElementChild || item;
+        const height = content.getBoundingClientRect().height || item.scrollHeight;
+        return Math.max(1, Math.ceil((height + rowGap) / (rowHeight + rowGap)));
+      });
+      setRowSpans((previous) => previous.length === nextSpans.length && previous.every((value, index) => value === nextSpans[index]) ? previous : nextSpans);
+    };
+    const scheduleUpdate = () => {
+      if (frameId === null) frameId = requestAnimationFrame(updateSpans);
+    };
+
+    updateSpans();
+    const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(scheduleUpdate) : null;
+    items.forEach((item) => resizeObserver?.observe(item.firstElementChild || item));
+    resizeObserver?.observe(container);
+
+    return () => {
+      if (frameId !== null) cancelAnimationFrame(frameId);
+      resizeObserver?.disconnect();
+    };
+  }, [childKeys]);
+
+  return (
+    <div ref={containerRef} className={`grid grid-flow-row-dense grid-cols-1 items-start gap-3 lg:grid-cols-2 ${className}`} style={{ gridAutoRows: '1px' }}>
+      {childArray.map((child, index) => (
+        <div key={child.key || index} className="min-w-0 self-start" style={rowSpans[index] ? { gridRowEnd: `span ${rowSpans[index]}` } : undefined}>
+          {child}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function SubscriptionPage() {
   const publicApiUrl = useStore((state) => state.publicApiUrl);
   const [activeTab, setActiveTab] = useState('instances');
@@ -1367,6 +1417,13 @@ function SubscriptionPage() {
       setTemplateSubscriptionId(exportSubscriptions[0].id);
     }
   }, [exportSubscriptions, templateSubscriptionId]);
+  useEffect(() => {
+    setTemplateBindingId(
+      selectedTemplateSubscription?.template_id
+      || settings?.default_template_id
+      || 'builtin_mihomo_default'
+    );
+  }, [selectedTemplateSubscription, settings?.default_template_id]);
   const visibleNodes = useMemo(
     () => nodes,
     [nodes]
@@ -1705,6 +1762,17 @@ function SubscriptionPage() {
     setTemplateModalOpen(true);
   };
 
+  const openCloneTemplate = (tpl) => {
+    setEditingTemplateId(null);
+    setTemplateForm({
+      name: `${tpl.name}（自定义）`,
+      format: tpl.format,
+      content: tpl.content,
+      description: `基于 ${tpl.name} 的自定义模板`,
+    });
+    setTemplateModalOpen(true);
+  };
+
   const saveTemplate = async () => {
     setSaving(true);
     try {
@@ -1878,7 +1946,22 @@ function SubscriptionPage() {
                     </Table.Cell>
                     <Table.Cell className="text-center">
                       <div className="inline-flex items-center justify-center gap-2">
-                        <Button size="sm" shape="square" variant="secondary" aria-label="复制订阅链接" title="复制订阅链接" onClick={() => copyText(link, '订阅链接已复制')} icon={<Copy className="h-3.5 w-3.5" />} />
+                        <DropdownMenu>
+                          <DropdownMenu.Trigger
+                            render={<Button size="sm" shape="square" variant="secondary" aria-label="复制订阅链接" title="复制订阅链接" icon={<Copy className="h-3.5 w-3.5" />} />}
+                          />
+                          <DropdownMenu.Content side="bottom" align="end" sideOffset={6} className="min-w-44">
+                            <DropdownMenu.Item icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copyText(link, '默认订阅链接已复制')}>
+                              Mihomo / Clash（YAML）
+                            </DropdownMenu.Item>
+                            <DropdownMenu.Item icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copyText(subscriptionURL(publicBase, sub, 'raw'), 'Raw 订阅链接已复制')}>
+                              通用节点链接（Raw）
+                            </DropdownMenu.Item>
+                            <DropdownMenu.Item icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copyText(subscriptionURL(publicBase, sub, 'base64'), 'Base64 订阅链接已复制')}>
+                              v2rayN / NekoBox（Base64）
+                            </DropdownMenu.Item>
+                          </DropdownMenu.Content>
+                        </DropdownMenu>
                         <Button size="sm" shape="square" variant="secondary" aria-label="编辑订阅链接" title="编辑订阅链接" onClick={() => openEditSubscription(sub)} icon={<Edit className="h-3.5 w-3.5" />} />
                         <Button size="sm" shape="square" variant="secondary" aria-label="重置连接凭据" title="重置连接凭据" onClick={() => resetToken(sub)} icon={<RefreshCw className="h-3.5 w-3.5" />} />
                         <Button size="sm" shape="square" variant="secondary-destructive" aria-label="删除订阅链接" title="删除订阅链接" onClick={() => deleteSubscription(sub)} icon={<Trash className="h-3.5 w-3.5" />} />
@@ -2221,14 +2304,19 @@ function SubscriptionPage() {
   );
 
   const renderTemplates = () => (
-    <div className="grid gap-3">
+    <MasonryGrid>
       <SectionCard
         title="模板转换"
-        actions={<Button size="sm" variant="primary" onClick={saveTemplateBinding} loading={saving} disabled={!selectedTemplateSubscription}><Save className="h-3.5 w-3.5" />保存转换</Button>}
+        actions={(
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button size="sm" variant="secondary" onClick={openCreateTemplate}><Plus className="h-3.5 w-3.5" />新建模板</Button>
+            <Button size="sm" variant="primary" onClick={saveTemplateBinding} loading={saving} disabled={!selectedTemplateSubscription}><Save className="h-3.5 w-3.5" />保存转换</Button>
+          </div>
+        )}
       >
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Select size="sm" label="对外订阅" value={templateSubscriptionId} onValueChange={(value) => setTemplateSubscriptionId(String(value))} items={subscriptionItems} />
-          <Select size="sm" label="输出模板" value={templateBindingId} onValueChange={(value) => setTemplateBindingId(String(value))} items={templateItems} disabled={!selectedTemplateSubscription} />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Select size="sm" label="对外订阅" value={templateSubscriptionId} onValueChange={(value) => setTemplateSubscriptionId(String(value))} items={subscriptionItems} className="w-full" />
+          <Select size="sm" label="输出模板" value={templateBindingId} onValueChange={(value) => setTemplateBindingId(String(value))} items={templateItems} disabled={!selectedTemplateSubscription} className="w-full" />
         </div>
         {selectedTemplateSubscription && (
           <div className="mt-4 grid gap-2 border-t border-kumo-line pt-4 sm:grid-cols-3">
@@ -2239,8 +2327,7 @@ function SubscriptionPage() {
         )}
       </SectionCard>
 
-      <div className="grid items-start gap-3 lg:grid-cols-2">
-        {templates.map((tpl) => (
+      {templates.map((tpl) => (
           <LayerCard key={tpl.id} className="overflow-hidden">
             <LayerCard.Secondary className="flex items-center justify-between gap-3">
               <div className="min-w-0">
@@ -2253,6 +2340,7 @@ function SubscriptionPage() {
               </div>
               <div className="flex shrink-0 gap-1">
                 <Button size="sm" variant="secondary" onClick={() => setDefaultTemplate(tpl)} disabled={tpl.valid === false}>默认</Button>
+                <Button size="sm" shape="square" variant="secondary" onClick={() => openCloneTemplate(tpl)} aria-label="复制模板" title="复制模板" icon={<Copy className="h-3.5 w-3.5" />} />
                 <Button size="sm" shape="square" variant="secondary" onClick={() => openEditTemplate(tpl)} aria-label="编辑模板" title="编辑模板" icon={<Edit className="h-3.5 w-3.5" />} />
                 <Button size="sm" variant="secondary-destructive" onClick={() => deleteTemplate(tpl)} disabled={tpl.builtin}><Trash className="h-3.5 w-3.5" /></Button>
               </div>
@@ -2264,9 +2352,8 @@ function SubscriptionPage() {
               </div>
             </LayerCard.Primary>
           </LayerCard>
-        ))}
-      </div>
-    </div>
+      ))}
+    </MasonryGrid>
   );
 
   const renderLogs = () => (
@@ -2337,6 +2424,7 @@ function SubscriptionPage() {
             { value: 'nodes', label: '节点管理' },
             { value: 'plans', label: '套餐管理' },
             { value: 'subscriptions', label: '订阅管理' },
+            { value: 'templates', label: '模板管理' },
           ]}
         />
       </PageToolbar>
@@ -2348,6 +2436,7 @@ function SubscriptionPage() {
             {activeTab === 'instances' && <>{renderTunnelControls()}{renderInstanceManagement()}</>}
             {activeTab === 'plans' && renderPlans()}
             {activeTab === 'subscriptions' && renderSubscriptions()}
+            {activeTab === 'templates' && renderTemplates()}
           </div>
         )}
       </div>

@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iwvw/api-monitor/backend-go/internal/applog"
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
 	"github.com/iwvw/api-monitor/backend-go/internal/database"
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
@@ -881,9 +882,9 @@ func (s *Service) resetLoginAttempts(ctx context.Context, db *sql.DB, ip string)
 func (s *Service) logOperation(ctx context.Context, db *sql.DB, operationType, tableName string, details map[string]interface{}, ipAddress, userAgent string) error {
 	detailsJSON, _ := json.Marshal(details)
 	_, err := db.ExecContext(ctx, `
-		INSERT INTO operation_logs (operation_type, table_name, details, ip_address, user_agent)
-		VALUES (?, ?, ?, ?, ?)
-	`, operationType, tableName, string(detailsJSON), ipAddress, userAgent)
+		INSERT INTO operation_logs (operation_type, table_name, details, ip_address, user_agent, trace_id)
+		VALUES (?, ?, ?, ?, ?, NULLIF(?, ''))
+	`, operationType, tableName, string(detailsJSON), ipAddress, userAgent, applog.RequestID(ctx))
 	return err
 }
 

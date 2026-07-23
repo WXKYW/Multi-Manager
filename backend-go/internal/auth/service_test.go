@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"database/sql"
 	"encoding/base32"
 	"encoding/json"
 	"net/http"
@@ -10,8 +11,56 @@ import (
 	"testing"
 	"time"
 
+	"github.com/iwvw/api-monitor/backend-go/internal/applog"
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
 )
+
+func TestLoginAuditIncludesRequestID(t *testing.T) {
+	t.Setenv("ADMIN_PASSWORD", "")
+	t.Setenv("DEMO_MODE", "")
+	t.Setenv("ENCRYPTION_KEY", "")
+
+	service := New(config.Config{
+		Version: "test",
+		Host:    "127.0.0.1",
+		Port:    0,
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	res := performAuthRequest(service, http.MethodPost, "/api/auth/set-password", `{"password":"secret123"}`, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("set-password status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	const requestID = "req_login_audit_test"
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"password":"secret123"}`))
+	req.RemoteAddr = "203.0.113.20:4567"
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Request-ID", requestID)
+	res = httptest.NewRecorder()
+	applog.Middleware(service).ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("login status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	db, err := service.openDB(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var traceID sql.NullString
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT trace_id FROM operation_logs
+		WHERE operation_type = 'LOGIN_SUCCESS'
+		ORDER BY id DESC LIMIT 1
+	`).Scan(&traceID); err != nil {
+		t.Fatal(err)
+	}
+	if !traceID.Valid || traceID.String != requestID {
+		t.Fatalf("login audit trace_id = %#v, want %q", traceID, requestID)
+	}
+}
 
 func Test2FAManagementFlow(t *testing.T) {
 	t.Setenv("ADMIN_PASSWORD", "")
