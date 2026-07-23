@@ -5,15 +5,13 @@
 # - 推送版本标签 (v*)
 # - 自动或手动触发并指定版本号
 #
-# 流水线顺序（严格依赖链，无竞态）：
-# 1. create-release  → 创建 GitHub Release
-# 2. tests           → 前端与 Go 后端测试
-# 3. build-agent     → 编译 5 平台 Rust Agent
-# 4. upload-assets   → 上传 Agent 到 Release
-# 5. build-docker    → 构建多架构 Docker 镜像
-# 6. merge-docker    → 合并多架构 manifest
-# 7. cleanup-docker  → 清理临时镜像
-# 8. security-scan   → 安全扫描
+# 流水线顺序（同组任务并行，无竞态）：
+# 1. create-release + tests  → 创建草稿，同时运行前后端测试
+# 2. build-agent             → 并行编译 5 平台 Rust Agent
+# 3. upload-assets + Docker  → 上传附件，同时构建双架构镜像
+# 4. merge-docker            → 合并多架构 manifest
+# 5. publish-release         → 附件和镜像完成后公开 Release
+# 6. cleanup + scan          → 并行清理临时镜像和安全扫描
 
 name: Release
 
@@ -178,7 +176,7 @@ jobs:
   # Phase 2: Go 后端测试
   # ==========================================
   test-backend:
-    needs: create-release
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     steps:
@@ -203,7 +201,7 @@ jobs:
   # Phase 2: 前端测试
   # ==========================================
   test-frontend:
-    needs: create-release
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     steps:
@@ -240,7 +238,7 @@ jobs:
   # Phase 3: 编译 Rust Agent（5 平台）
   # ==========================================
   build-agent:
-    needs: [test-backend, test-frontend]
+    needs: [create-release, test-backend, test-frontend]
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -368,7 +366,7 @@ jobs:
   # Phase 5: 构建多架构 Docker 镜像
   # ==========================================
   build-docker:
-    needs: upload-assets
+    needs: [create-release, build-agent]
     runs-on: ${{ matrix.runner }}
 
     strategy:
