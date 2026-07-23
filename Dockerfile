@@ -5,6 +5,7 @@
 
 # 阶段 1: 构建前端 (Frontend Builder) - 始终在构建主机平台运行
 FROM --platform=$BUILDPLATFORM node:20-slim AS frontend-builder
+ARG APP_VERSION=dev-local
 # 安装构建工具
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
@@ -32,7 +33,8 @@ COPY . .
 # 显式设置 PATH (虽然 npm run 通常不需要，但以防万一)
 # 禁用 CDN 模式，所有依赖打包到本地
 ENV PATH=/app/node_modules/.bin:$PATH \
-    VITE_USE_CDN=false
+    VITE_USE_CDN=false \
+    VITE_APP_VERSION=${APP_VERSION}
 RUN npm run build
 
 # 阶段 2: 构建 Go 后端 (Go Backend Builder)

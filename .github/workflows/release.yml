@@ -77,6 +77,17 @@ jobs:
           echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
           echo "📦 Version: ${VERSION}, Tag: v${VERSION}"
 
+      - name: Verify source version
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          if [ "$RELEASE_VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "Release version ${RELEASE_VERSION} does not match package.json ${PACKAGE_VERSION}." >&2
+            exit 1
+          fi
+
       - name: Create tag (manual trigger only)
         if: github.event_name == 'workflow_dispatch'
         env:
@@ -349,6 +360,15 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Resolve application version
+        id: app-version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          VERSION="${INPUT_VERSION:-${GITHUB_REF_NAME#v}}"
+          echo "version=v${VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.6.1
@@ -384,6 +404,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
           build-args: |
             NODE_ENV=production
+            APP_VERSION=${{ steps.app-version.outputs.version }}
 
       - name: Export digest
         run: |
