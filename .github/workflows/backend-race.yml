@@ -1,0 +1,26 @@
+name: Backend Race Checks
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 2 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  race:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.2.2
+
+      - name: Setup Go from backend-go/go.mod
+        uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v5.2.0
+        with:
+          go-version-file: backend-go/go.mod
+          cache-dependency-path: backend-go/go.sum
+
+      - name: Run race tests
+        working-directory: backend-go
+        run: go test ./... -race

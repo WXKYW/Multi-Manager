@@ -19,12 +19,12 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 
 # 设置镜像源
-RUN npm config set registry https://registry.npmmirror.com
+RUN npm config set registry https://registry.npmjs.org
 
 # 2. 直接安装所有依赖 (确保 vite 可用)
 # 注意：不使用 --only=production，确保安装 devDependencies
 # 添加 --ignore-scripts 以绕过部分依赖包内置的 pnpm 强制检查 (如 only-allow)
-RUN npm install --legacy-peer-deps --ignore-scripts
+RUN npm ci --legacy-peer-deps --ignore-scripts
 
 # 3. 复制源码
 COPY . .

@@ -32,6 +32,7 @@ function createDevLogger() {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const isProduction = mode === 'production';
+  const shouldAnalyze = env.ANALYZE === 'true';
   const appVersion = resolveAppVersionFromEnvironment({
     cwd: __dirname,
     env: { ...process.env, ...env },
@@ -48,20 +49,19 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
       tailwindcss(),
-      // 构建分析插件 (输出到 dist/stats.html)
-      visualizer({
+      shouldAnalyze && visualizer({
         filename: 'dist/stats.html',
         open: false,
         gzipSize: true,
         brotliSize: true,
       }),
-    ],
+    ].filter(Boolean),
     build: {
       outDir: '../dist',
       assetsDir: 'assets',
       emptyOutDir: true,
       sourcemap: !isProduction,
-      minify: isProduction ? 'terser' : false,
+      minify: isProduction,
       rollupOptions: {
         output: {
           // 代码分割策略

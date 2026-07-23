@@ -6,8 +6,8 @@ import {
 } from '../../../tools/app-version.mjs';
 
 describe('application version resolver', () => {
-  it('formats development versions from the final four commit characters', () => {
-    expect(formatDevelopmentVersion('0123456789ABCDEF')).toBe('dev-cdef');
+  it('formats development versions from the first seven commit characters', () => {
+    expect(formatDevelopmentVersion('0123456789ABCDEF')).toBe('dev-0123456');
     expect(formatDevelopmentVersion('')).toBe('dev-local');
   });
 
@@ -39,11 +39,11 @@ describe('application version resolver', () => {
         commitSha: '0123456789abcdef',
         packageVersion: '2.0.1',
       })
-    ).toBe('dev-cdef');
+    ).toBe('dev-0123456');
   });
 
   it('allows CI and Docker builds to provide an explicit version', () => {
     expect(resolveAppVersion({ explicitVersion: '2.0.2' })).toBe('v2.0.2');
-    expect(resolveAppVersion({ explicitVersion: 'dev-9abc' })).toBe('dev-9abc');
+    expect(resolveAppVersion({ explicitVersion: 'dev-0123456' })).toBe('dev-0123456');
   });
 });

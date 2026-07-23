@@ -7,7 +7,7 @@ API Monitor 使用语义化版本（Semantic Versioning），格式为 `MAJOR.MI
 - `package.json` 中的 `version` 是正式版本的单一来源。
 - GitHub Release 和 Git tag 使用相同版本，并增加 `v` 前缀，例如 `v2.0.1`。
 - `main` 构建显示正式版本，例如 `v2.0.1`。
-- `dev` 和其他开发分支显示 `dev-xxxx`，其中 `xxxx` 是完整提交哈希的末四位。
+- `dev` 和其他开发分支显示 `dev-xxxxxxx`，其中 `xxxxxxx` 是完整提交哈希的前七位。
 - Docker 构建通过 `APP_VERSION` 构建参数把版本写入前端，不在运行时请求 GitHub。
 
 ## 日常发布流程
@@ -17,12 +17,12 @@ API Monitor 使用语义化版本（Semantic Versioning），格式为 `MAJOR.MI
 3. `Bump Main Version` 工作流比较合并前后的版本：
    - 版本未变化时，自动执行 patch 递增，例如 `2.0.0` 到 `2.0.1`。
    - 版本已人工提升到更高的 minor 或 major 时，保留人工版本。
-4. 工作流提交 `package.json` 和 `package-lock.json`，随后触发主分支 CI/CD 和正式发布流水线。
+4. 工作流提交 `package.json` 和 `package-lock.json`，随后触发正式发布流水线。`main` 不再重复运行通用 CI/CD；Release 自身包含同等级的前后端验证。
 5. 正式发布流水线从 `main` 检出源码，验证输入版本与 `package.json` 一致，并创建对应的 `vX.Y.Z` 标签。
-6. 前后端测试通过后，流水线编译各平台 Agent、上传 Release 附件并发布带版本号和 `latest` 标签的多架构 Docker 镜像。
+6. 前后端测试和各平台 Agent 编译并行执行；Linux / Windows 运行时 Agent 完成后立即开始多架构 Docker 构建，macOS Agent 继续并行编译。测试、镜像和全部附件均成功后才发布版本标签和 `latest` 镜像。
 7. 所有必需构建成功后，GitHub Release 自动从草稿转为公开发布。失败的流水线会保留草稿，避免发布不完整版本。
 
-由 `GITHUB_TOKEN` 创建的提交和标签不会再次触发其他工作流，因此版本递增工作流会显式调度 CI/CD 和 Release。这可以避免递归触发，同时保证自动发布链路完整。
+由 `GITHUB_TOKEN` 创建的提交和标签不会再次触发其他工作流，因此版本递增工作流会显式调度 Release。这可以避免递归触发，同时保证自动发布链路完整。
 
 ## 发布失败后重试
 

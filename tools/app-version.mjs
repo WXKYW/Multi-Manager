@@ -20,7 +20,7 @@ export function formatDevelopmentVersion(commitSha) {
   const normalizedSha = String(commitSha || '')
     .trim()
     .toLowerCase();
-  return `dev-${normalizedSha ? normalizedSha.slice(-4) : 'local'}`;
+  return `dev-${normalizedSha ? normalizedSha.slice(0, 7) : 'local'}`;
 }
 
 export function resolveAppVersion({
