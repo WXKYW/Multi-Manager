@@ -896,8 +896,42 @@ function TotpPage() {
       return;
     }
 
-    setIsScanning(true);
     setQrError('');
+
+    // 在用户显式点击手势（User Gesture）中，率先触发原生的 getUserMedia 授权请求
+    if (navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+        });
+        if (stream && stream.getTracks) {
+          stream.getTracks().forEach((track) => track.stop());
+        }
+      } catch (permErr) {
+        console.warn('Initial getUserMedia with environment facingMode failed, retrying with simple video constraint', permErr);
+        try {
+          const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true });
+          if (fallbackStream && fallbackStream.getTracks) {
+            fallbackStream.getTracks().forEach((track) => track.stop());
+          }
+        } catch (permErr2) {
+          console.error('Camera permission request denied', permErr2);
+          let friendlyMsg = '未获得摄像头访问权限';
+          if (permErr2.name === 'NotAllowedError' || permErr2.name === 'PermissionDeniedError') {
+            friendlyMsg = '未获得摄像头访问权限，请在手机系统或浏览器地址栏安全图标中开启摄像头权限';
+          } else if (permErr2.name === 'NotFoundError') {
+            friendlyMsg = '未发现可用的摄像头';
+          } else if (permErr2.name === 'NotReadableError') {
+            friendlyMsg = '摄像头已被其他应用占用';
+          }
+          setQrError(`${friendlyMsg} (${permErr2.message || permErr2.name || 'Permission denied'})`);
+          toast.error(friendlyMsg);
+          return;
+        }
+      }
+    }
+
+    setIsScanning(true);
 
     setTimeout(async () => {
       try {
@@ -946,7 +980,7 @@ function TotpPage() {
         setQrError(`${friendlyMsg}: ${err.message || '未知错误'}`);
         setIsScanning(false);
       }
-    }, 100);
+    }, 50);
   };
 
   const stopQrScan = async () => {
@@ -1825,7 +1859,7 @@ function TotpPage() {
           </Dialog.Description>
 
           {accountModalMode === 'add' && (
-            <div className="mb-4">
+            <div className="mb-4 pt-1.5 px-0.5">
               <Tabs
                 {...TOOL_TABS_PROPS}
                 value={accountAddTab}
