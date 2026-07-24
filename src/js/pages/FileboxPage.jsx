@@ -789,12 +789,12 @@ function FileboxPage() {
             bodyClassName="grid gap-4"
           >
             <div className="grid gap-3 rounded-md border border-kumo-line bg-kumo-recessed/30 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-3 min-w-0">
+                <div className="flex shrink-0 items-center gap-2">
                   <div className="text-sm font-semibold text-kumo-strong">新建房间</div>
                   <Badge variant={voidMode === 'persistent' ? 'success' : 'secondary'}>{voidMode === 'persistent' ? '持久' : '临时'}</Badge>
                 </div>
-                <div className="mt-2 max-w-md">
+                <div className="w-fit min-w-0 max-w-full">
                   <Tabs {...TOOL_TABS_PROPS} value={voidMode} onValueChange={setVoidMode} tabs={VOID_ROOM_TABS} />
                 </div>
               </div>
