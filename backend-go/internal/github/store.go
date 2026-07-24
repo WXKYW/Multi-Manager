@@ -476,6 +476,86 @@ func latestActionRunForRepository(ctx context.Context, db *sql.DB, repositoryID 
 	}, true, nil
 }
 
+func recentActionRunsForRepository(ctx context.Context, db *sql.DB, repositoryID int64, limit int) ([]map[string]interface{}, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := db.QueryContext(ctx, `SELECT run_id, workflow_name, display_title, status, conclusion, event, branch, commit_sha, commit_message, actor, html_url,
+		run_started_at, created_at, updated_at, collected_at
+		FROM github_action_runs
+		WHERE repository_id = ?
+		ORDER BY COALESCE(run_started_at, created_at, collected_at) DESC
+		LIMIT ?`, repositoryID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []map[string]interface{}
+	for rows.Next() {
+		var runID int64
+		var workflowName, displayTitle, status, conclusion, event, branch, commitSHA, commitMessage, actor, htmlURL string
+		var startedAt, createdAt, updatedAt, collectedAt sql.NullString
+		if err := rows.Scan(&runID, &workflowName, &displayTitle, &status, &conclusion, &event, &branch, &commitSHA, &commitMessage, &actor, &htmlURL, &startedAt, &createdAt, &updatedAt, &collectedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, map[string]interface{}{
+			"run_id":         runID,
+			"workflow_name":  workflowName,
+			"display_title":  displayTitle,
+			"status":         status,
+			"conclusion":     conclusion,
+			"event":          event,
+			"branch":         branch,
+			"commit_sha":     commitSHA,
+			"commit_message": commitMessage,
+			"actor":          actor,
+			"html_url":       htmlURL,
+			"run_started_at": nullString(startedAt),
+			"created_at":     nullString(createdAt),
+			"updated_at":     nullString(updatedAt),
+			"collected_at":   nullString(collectedAt),
+		})
+	}
+	return result, rows.Err()
+}
+
+func getActionRunByRunID(ctx context.Context, db *sql.DB, repositoryID int64, runID int64) (map[string]interface{}, bool, error) {
+	row := db.QueryRowContext(ctx, `SELECT run_id, workflow_name, display_title, status, conclusion, event, branch, commit_sha, commit_message, actor, html_url,
+		run_started_at, created_at, updated_at, collected_at
+		FROM github_action_runs
+		WHERE repository_id = ? AND run_id = ?
+		LIMIT 1`, repositoryID, runID)
+
+	var rID int64
+	var workflowName, displayTitle, status, conclusion, event, branch, commitSHA, commitMessage, actor, htmlURL string
+	var startedAt, createdAt, updatedAt, collectedAt sql.NullString
+	if err := row.Scan(&rID, &workflowName, &displayTitle, &status, &conclusion, &event, &branch, &commitSHA, &commitMessage, &actor, &htmlURL, &startedAt, &createdAt, &updatedAt, &collectedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+
+	return map[string]interface{}{
+		"run_id":         rID,
+		"workflow_name":  workflowName,
+		"display_title":  displayTitle,
+		"status":         status,
+		"conclusion":     conclusion,
+		"event":          event,
+		"branch":         branch,
+		"commit_sha":     commitSHA,
+		"commit_message": commitMessage,
+		"actor":          actor,
+		"html_url":       htmlURL,
+		"run_started_at": nullString(startedAt),
+		"created_at":     nullString(createdAt),
+		"updated_at":     nullString(updatedAt),
+		"collected_at":   nullString(collectedAt),
+	}, true, nil
+}
+
 func getRepositoryByFullName(ctx context.Context, db *sql.DB, fullName string) (Repository, bool, error) {
 	repo, err := scanRepository(db.QueryRowContext(ctx, repoSelect+` WHERE lower(full_name) = lower(?)`, fullName))
 	if err == sql.ErrNoRows {

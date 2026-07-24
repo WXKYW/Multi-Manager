@@ -390,6 +390,14 @@ func (s *Service) publicPageRepositoryBySlug(w http.ResponseWriter, r *http.Requ
 		response.Error(w, http.StatusNotFound, "仓库不存在")
 		return
 	}
+	if runIDParam := r.URL.Query().Get("run_id"); runIDParam != "" {
+		if rid, parseErr := strconv.ParseInt(runIDParam, 10, 64); parseErr == nil && rid > 0 {
+			if specificRun, ok, _ := getActionRunByRunID(r.Context(), db, repoID, rid); ok {
+				latestRun = specificRun
+				item["latest_run"] = specificRun
+			}
+		}
+	}
 	s.attachPublicRepositoryWorkflowDetail(r.Context(), db, item, latestRun)
 	setPublicPageCacheControl(w, page, true)
 	response.OK(w, item)
@@ -519,6 +527,7 @@ func (s *Service) publicRepositorySummaryItem(ctx context.Context, db *sql.DB, r
 	if err != nil {
 		return nil, Repository{}, nil, false, err
 	}
+	recentRuns, _ := recentActionRunsForRepository(ctx, db, repo.ID, 15)
 
 	item := map[string]interface{}{
 		"id":                       repo.ID,
@@ -543,6 +552,7 @@ func (s *Service) publicRepositorySummaryItem(ctx context.Context, db *sql.DB, r
 		"latest_action_created_at": repo.LatestActionCreatedAt,
 		"latest_action_updated_at": repo.LatestActionUpdatedAt,
 		"latest_run":               latestRun,
+		"recent_runs":              recentRuns,
 		"updated_at":               repo.UpdatedAt,
 	}
 	return item, repo, latestRun, true, nil

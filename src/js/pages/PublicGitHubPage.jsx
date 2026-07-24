@@ -1536,21 +1536,45 @@ function RepositoryStat({ label, value }) {
   );
 }
 
-function RepositoryCard({ item, now, config, detailLoading = false }) {
+function RepositoryCard({ item, now, config, detailLoading = false, onSelectRun }) {
   const projectPanelRef = useRef(null);
   const actionContentRef = useRef(null);
   const [panelHeights, setPanelHeights] = useState({ project: 0, action: 0 });
-  const latestRun = item?.latest_run || null;
-  const workflowName = latestRun?.workflow_name || latestRun?.display_title || '最新 Workflow';
-  const actionStatus = latestRun?.conclusion || latestRun?.status || item?.latest_action_conclusion || item?.latest_action_status || 'unknown';
+
+  // 1. 获取同一次提交 (Latest Commit SHA) 的所有 Workflow Runs 列表
+  const recentRuns = Array.isArray(item?.recent_runs) && item.recent_runs.length > 0
+    ? item.recent_runs
+    : (item?.latest_run ? [item.latest_run] : []);
+
+  const latestCommitSha = item?.latest_run?.commit_sha || recentRuns[0]?.commit_sha;
+  const sameCommitRuns = useMemo(() => {
+    if (!latestCommitSha) return recentRuns;
+    const matching = recentRuns.filter(r => r.commit_sha === latestCommitSha);
+    return matching.length > 0 ? matching : recentRuns;
+  }, [recentRuns, latestCommitSha]);
+
+  const [activeRunId, setActiveRunId] = useState(() => item?.latest_run?.run_id || sameCommitRuns[0]?.run_id || null);
+
+  useEffect(() => {
+    if (sameCommitRuns.length > 0 && !sameCommitRuns.some(r => String(r.run_id) === String(activeRunId))) {
+      setActiveRunId(sameCommitRuns[0]?.run_id);
+    }
+  }, [sameCommitRuns, activeRunId]);
+
+  const activeRun = useMemo(() => {
+    return sameCommitRuns.find(r => String(r.run_id) === String(activeRunId)) || sameCommitRuns[0] || item?.latest_run || null;
+  }, [sameCommitRuns, activeRunId, item?.latest_run]);
+
+  const workflowName = activeRun?.workflow_name || activeRun?.display_title || '最新 Workflow';
+  const actionStatus = activeRun?.conclusion || activeRun?.status || item?.latest_action_conclusion || item?.latest_action_status || 'unknown';
   const actionTone = statusTone(actionStatus);
   const jobs = Array.isArray(item?.jobs) ? item.jobs : [];
   const canLinkRepo = config?.showRepoLinks !== false && item?.html_url;
-  const canLinkRun = latestRun?.html_url;
+  const canLinkRun = activeRun?.html_url || item?.latest_run?.html_url;
   const hasStats = config?.showRepositoryStats !== false;
   const showDescriptions = config?.showDescriptions !== false;
-  const runStartedAt = latestRun?.run_started_at || latestRun?.created_at || item?.latest_action_started_at || item?.latest_action_created_at;
-  const runUpdatedAt = latestRun?.updated_at || item?.latest_action_updated_at;
+  const runStartedAt = activeRun?.run_started_at || activeRun?.created_at || item?.latest_action_started_at || item?.latest_action_created_at;
+  const runUpdatedAt = activeRun?.updated_at || item?.latest_action_updated_at;
   const runDuration = runStartedAt ? formatActionDuration(runStartedAt, runUpdatedAt, now) : '-';
   const hasDetailPayload = Array.isArray(item?.jobs) || Boolean(item?.workflow) || Boolean(item?.workflow_error);
   const showDetailLoading = detailLoading && !hasDetailPayload;
@@ -1632,7 +1656,7 @@ function RepositoryCard({ item, now, config, detailLoading = false }) {
                     variant="secondary"
                     shape="square"
                     icon={<ExternalLink className="h-3.5 w-3.5" />}
-                    onClick={() => window.open(latestRun.html_url, '_blank', 'noopener,noreferrer')}
+                    onClick={() => window.open(activeRun?.html_url || item?.latest_run?.html_url, '_blank', 'noopener,noreferrer')}
                     aria-label="打开运行详情"
                   />
                 )}
@@ -1647,10 +1671,10 @@ function RepositoryCard({ item, now, config, detailLoading = false }) {
             <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-kumo-subtle">
               <span className="inline-flex items-center gap-1">
                 <GitBranch className="h-3.5 w-3.5" />
-                {latestRun?.branch || item.default_branch || '默认分支'}
+                {activeRun?.branch || item.default_branch || '默认分支'}
               </span>
-              {latestRun?.actor && <span>{latestRun.actor}</span>}
-              {latestRun?.commit_sha && <span className="font-mono">{String(latestRun.commit_sha).slice(0, 8)}</span>}
+              {activeRun?.actor && <span>{activeRun.actor}</span>}
+              {activeRun?.commit_sha && <span className="font-mono">{String(activeRun.commit_sha).slice(0, 8)}</span>}
             </div>
           </div>
         </div>
@@ -1666,13 +1690,60 @@ function RepositoryCard({ item, now, config, detailLoading = false }) {
           )}
 
           <div className="grid content-start gap-1.5 rounded-lg border border-kumo-interact/70 bg-kumo-recessed/25 px-3 py-2 text-[11px]">
-            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
-              <div className="min-w-0 truncate font-semibold text-kumo-strong" title={workflowName}>{workflowName}</div>
-              <div className="shrink-0 whitespace-nowrap text-kumo-subtle">{runStartedAt ? formatDateTime(runStartedAt) : '暂无运行记录'}</div>
+            <div className="flex items-center justify-between gap-2 border-b border-kumo-interact/40 pb-1">
+              <span className="font-bold text-kumo-strong text-[11px] flex items-center gap-1">
+                <span>⚡ CI/CD Pipeline</span>
+                {sameCommitRuns.length > 1 && (
+                  <span className="rounded bg-kumo-brand/10 text-kumo-brand px-1 py-0.2 text-[9px] font-mono font-semibold">
+                    {sameCommitRuns.length}项工作流
+                  </span>
+                )}
+              </span>
+              <span className="shrink-0 text-[10px] text-kumo-subtle font-mono">
+                {runStartedAt ? formatDateTime(runStartedAt) : '暂无记录'}
+              </span>
             </div>
-            <div className="min-w-0 truncate text-kumo-subtle" title={latestRun?.commit_message || latestRun?.display_title || ''}>
-              {latestRun?.commit_message || latestRun?.display_title || '这个仓库还没有可展示的 workflow 运行记录。'}
-            </div>
+
+            {sameCommitRuns.length > 1 ? (
+              <div className="max-h-[64px] overflow-y-auto scrollbar-thin space-y-1 pr-0.5">
+                {sameCommitRuns.map((run) => {
+                  const isSelected = String(run.run_id) === String(activeRun?.run_id);
+                  const tone = statusTone(run.conclusion || run.status);
+                  return (
+                    <button
+                      key={run.run_id}
+                      type="button"
+                      onClick={() => {
+                        setActiveRunId(run.run_id);
+                        onSelectRun?.(run.run_id);
+                      }}
+                      className={`w-full flex items-center justify-between gap-1.5 rounded px-2 py-0.5 text-left text-[10.5px] transition-colors ${
+                        isSelected
+                          ? 'bg-kumo-brand/15 text-kumo-brand font-semibold border border-kumo-brand/30'
+                          : 'bg-kumo-base/60 text-kumo-subtle hover:bg-kumo-base hover:text-kumo-strong border border-transparent'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                          tone === 'success' ? 'bg-emerald-500' : tone === 'error' ? 'bg-rose-500' : 'bg-amber-500'
+                        }`} />
+                        <span className="truncate">{run.workflow_name || run.display_title}</span>
+                      </div>
+                      <span className="text-[9px] font-mono opacity-80 shrink-0">
+                        {statusLabel(run.conclusion || run.status)}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="min-w-0 space-y-1">
+                <div className="min-w-0 truncate font-semibold text-kumo-strong" title={workflowName}>{workflowName}</div>
+                <div className="min-w-0 truncate text-kumo-subtle" title={activeRun?.commit_message || activeRun?.display_title || ''}>
+                  {activeRun?.commit_message || activeRun?.display_title || '这个仓库还没有可展示的 workflow 运行记录。'}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -2045,6 +2116,7 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
                     now={currentTime}
                     config={config}
                     detailLoading={detailStatusByRepo[String(item.id || '')] === 'loading'}
+                    onSelectRun={(runId) => refreshRepositoryDetail(slug, item.id, { markLoading: true, runId })}
                   />
                 ))}
                 {visibleRepositories.length === 0 && (
