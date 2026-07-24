@@ -10387,7 +10387,7 @@ function ServerPage() {
                                   <Button
                                     shape="square"
                                     size="sm"
-                                    variant="ghost"
+                                    variant="secondary"
                                     aria-label="设为默认凭据"
                                     onClick={() => setDefaultCredential(cred.id)}
                                     icon={<Star className="h-3.5 w-3.5" />}
@@ -10397,12 +10397,11 @@ function ServerPage() {
                                 <Button
                                   shape="square"
                                   size="sm"
-                                  variant="ghost"
+                                  variant="secondary-destructive"
                                   aria-label="删除凭据"
                                   onClick={() => deleteCredential(cred.id)}
                                   icon={<Trash className="h-3.5 w-3.5" />}
                                   title="删除"
-                                  className="text-kumo-danger"
                                 />
                               </div>
                             </Table.Cell>
@@ -10486,7 +10485,7 @@ function ServerPage() {
                                 <Button
                                   shape="square"
                                   size="sm"
-                                  variant="ghost"
+                                  variant="secondary"
                                   aria-label="编辑目标"
                                   onClick={() => {
                                     setNetworkTargetModalMode('edit');
@@ -10507,12 +10506,11 @@ function ServerPage() {
                                 <Button
                                   shape="square"
                                   size="sm"
-                                  variant="ghost"
+                                  variant="secondary-destructive"
                                   aria-label="删除目标"
                                   onClick={() => deleteNetworkTarget(target.id)}
                                   icon={<Trash className="h-3.5 w-3.5" />}
                                   title="删除"
-                                  className="text-kumo-danger"
                                 />
                               </div>
                             </Table.Cell>

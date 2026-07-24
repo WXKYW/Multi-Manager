@@ -819,7 +819,7 @@ function NotificationPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {[...Array(4)].map((_, i) => (
                 <AppCard key={i} padding="none" className="space-y-4 p-4">
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start justify-between gap-3">
                     <SkeletonLine className="w-8 h-8 rounded-lg" />
                     <div className="flex-1 space-y-1.5">
                       <SkeletonLine className="w-1/2 h-3.5" />
@@ -847,7 +847,7 @@ function NotificationPage() {
                   interactive
                   className="flex min-h-[128px] flex-col justify-between p-4 transition-all hover:border-kumo-brand"
                 >
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start justify-between gap-3">
                     {/* Icon */}
                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-kumo-inverse text-base flex-shrink-0 ${
                       channel.type === 'email' ? 'bg-kumo-info' : 'bg-kumo-brand'
@@ -869,34 +869,28 @@ function NotificationPage() {
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       <Button
                         onClick={() => handleTestChannel(channel.id)}
-                        variant="ghost" size="sm"
+                        variant="secondary" size="sm"
                         shape="square"
                         aria-label="测试投递"
-                        className="text-kumo-subtle hover:text-kumo-brand"
                         title="测试投递"
-                      >
-                        <Send className="w-3 h-3" />
-                      </Button>
+                        icon={<Send className="w-3 h-3" />}
+                      />
                       <Button
                         onClick={() => handleOpenEditChannel(channel)}
-                        variant="ghost" size="sm"
+                        variant="secondary" size="sm"
                         shape="square"
                         aria-label="编辑通知渠道"
-                        className="text-kumo-subtle hover:text-kumo-strong"
                         title="编辑"
-                      >
-                        <Edit className="w-3.5 h-3.5" />
-                      </Button>
+                        icon={<Edit className="w-3.5 h-3.5" />}
+                      />
                       <Button
                         onClick={() => handleDeleteChannel(channel.id)}
-                        variant="ghost" size="sm"
+                        variant="secondary-destructive" size="sm"
                         shape="square"
                         aria-label="删除通知渠道"
-                        className="text-kumo-subtle hover:text-kumo-danger"
                         title="删除"
-                      >
-                        <Trash className="w-3.5 h-3.5" />
-                      </Button>
+                        icon={<Trash className="w-3.5 h-3.5" />}
+                      />
                     </div>
                   </div>
 
@@ -1013,35 +1007,29 @@ function NotificationPage() {
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       <Button
                         onClick={() => handleDryRunRule(rule)}
-                        variant="ghost" size="sm"
+                        variant="secondary" size="sm"
                         shape="square"
                         aria-label="预演告警规则"
-                        className="text-kumo-subtle hover:text-kumo-brand"
                         title="Dry-run"
                         loading={dryRunLoadingId === rule.id}
-                      >
-                        <CheckDouble className="w-3.5 h-3.5" />
-                      </Button>
+                        icon={<CheckDouble className="w-3.5 h-3.5" />}
+                      />
                       <Button
                         onClick={() => handleOpenEditRule(rule)}
-                        variant="ghost" size="sm"
+                        variant="secondary" size="sm"
                         shape="square"
                         aria-label="编辑告警规则"
-                        className="text-kumo-subtle hover:text-kumo-strong"
                         title="编辑"
-                      >
-                        <Edit className="w-3.5 h-3.5" />
-                      </Button>
+                        icon={<Edit className="w-3.5 h-3.5" />}
+                      />
                       <Button
                         onClick={() => handleDeleteRule(rule.id)}
-                        variant="ghost" size="sm"
+                        variant="secondary-destructive" size="sm"
                         shape="square"
                         aria-label="删除告警规则"
-                        className="text-kumo-subtle hover:text-kumo-danger"
                         title="删除"
-                      >
-                        <Trash className="w-3.5 h-3.5" />
-                      </Button>
+                        icon={<Trash className="w-3.5 h-3.5" />}
+                      />
                     </div>
                   </div>
 
@@ -1063,8 +1051,8 @@ function NotificationPage() {
                       </span>
                       <Button
                         onClick={() => handleToggleRuleEnabled(rule)}
-                        variant="ghost" size="sm"
-                        className="h-6 text-[10px] text-kumo-brand hover:underline font-semibold"
+                        variant="secondary" size="sm"
+                        className="h-6 text-[10px] font-semibold"
                       >
                         {rule.enabled ? '一键禁用' : '一键启用'}
                       </Button>

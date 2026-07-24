@@ -6,7 +6,7 @@ import { Table } from '@cloudflare/kumo/components/table';
 import { LayerCard } from '@cloudflare/kumo';
 import { Info } from '../Icons.jsx';
 
-export const pageStackClass = 'flex w-full min-w-0 flex-col gap-3 sm:gap-4';
+export const pageStackClass = 'flex w-full min-w-0 flex-col gap-3 sm:gap-4 pb-6 sm:pb-8';
 export const pageToolbarClass =
   'flex min-w-0 flex-col items-stretch gap-3 border-b border-kumo-line pb-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between [&>*]:min-w-0';
 export const sectionCardHeaderClass =
@@ -61,14 +61,18 @@ function withCompactCardActions(node) {
       ? String(node.props.children)
       : undefined;
 
-    return React.cloneElement(node, {
-      size: 'sm',
-      ...(hasIconAndLabel ? {
-        className: cx(node.props.className, 'max-sm:!size-8 max-sm:!p-0'),
+    if (hasIconAndLabel) {
+      const isSmall = (node.props.size || 'sm') === 'sm';
+      const compactClass = isSmall ? 'max-sm:!px-0 max-sm:!w-6.5 max-sm:!justify-center' : 'max-sm:!px-0 max-sm:!w-9 max-sm:!justify-center';
+      return React.cloneElement(node, {
+        size: node.props.size || 'sm',
+        className: cx(node.props.className, compactClass),
         children: <span className="hidden sm:inline">{node.props.children}</span>,
         'aria-label': node.props['aria-label'] || textLabel || node.props.title,
-      } : {}),
-    });
+      });
+    }
+
+    return node;
   }
 
   if (!node.props?.children) return node;

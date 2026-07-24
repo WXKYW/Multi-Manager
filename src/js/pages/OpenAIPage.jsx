@@ -2381,7 +2381,7 @@ function OpenAIPage() {
                         <Table layout="fixed" className="w-full text-xs">
                           <colgroup>
                             <col />
-                            <col style={{ width: 64 }} />
+                            <col style={{ width: 92 }} />
                             <col style={{ width: 58 }} />
                           </colgroup>
                           <Table.Header sticky variant="compact">
@@ -2416,21 +2416,24 @@ function OpenAIPage() {
                                   </div>
                                 </Table.Cell>
                                 <Table.Cell className="!px-2 !py-1.5 text-center">
-                                  <InlineStatusPill
-                                    tone={
-                                      item.enabled && item.status === 'valid'
-                                        ? 'success'
-                                        : item.status === 'invalid'
-                                          ? 'danger'
-                                          : 'neutral'
-                                    }
+                                  <div
+                                    className="flex justify-center"
+                                    onClick={event => event.stopPropagation()}
                                   >
-                                    {item.enabled
-                                      ? item.status === 'valid'
-                                        ? '可用'
-                                        : '待检'
-                                      : '停用'}
-                                  </InlineStatusPill>
+                                    <Switch
+                                      size="sm"
+                                      label={
+                                        item.enabled
+                                          ? item.status === 'valid'
+                                            ? '可用'
+                                            : '待检'
+                                          : '停用'
+                                      }
+                                      checked={item.enabled}
+                                      onCheckedChange={() => toggleEndpointEnabled(item)}
+                                      disabled={!!endpointToggleLoading[item.id]}
+                                    />
+                                  </div>
                                 </Table.Cell>
                                 <Table.Cell className="!px-2 !py-1.5 text-right font-mono text-kumo-strong">
                                   {item.models?.length || 0}
@@ -2462,13 +2465,6 @@ function OpenAIPage() {
                         </span>
                       </div>
                       <div className="flex shrink-0 items-center gap-1.5">
-                        <Switch
-                          size="sm"
-                          label={endpoint.enabled ? '已启用' : '已停用'}
-                          checked={endpoint.enabled}
-                          onCheckedChange={() => toggleEndpointEnabled(endpoint)}
-                          disabled={!!endpointToggleLoading[endpoint.id]}
-                        />
                         <Button
                           shape="square"
                           size="sm"
@@ -2712,7 +2708,7 @@ function OpenAIPage() {
                 <col style={{ width: 140 }} />
                 <col style={{ width: 140 }} />
                 <col style={{ width: 96 }} />
-                <col style={{ width: 156 }} />
+                <col style={{ width: 172 }} />
               </colgroup>
               <Table.Header variant="compact">
                 <Table.Row>

@@ -2277,9 +2277,9 @@ function GitHubPage() {
                         </div>
 
                         <div className="flex items-center justify-end gap-1 border-t border-kumo-line pt-2">
-                          {repo.html_url && <Button size="sm" variant="ghost" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); window.open(repo.html_url, '_blank'); }} aria-label="打开 GitHub" />}
-                          <Button size="sm" variant="ghost" icon={<RefreshCw className={`h-3.5 w-3.5 ${refreshingRepositoryId === String(repo.id) ? 'animate-spin' : ''}`} />} onClick={(event) => { event.stopPropagation(); refreshRepository(repo.id); }} disabled={refreshingRepositoryId === String(repo.id)} aria-label="刷新仓库" />
-                          <Button size="sm" variant="ghost" icon={<Trash className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); deleteRepository(repo.id); }} aria-label="删除仓库" />
+                          {repo.html_url && <Button size="sm" shape="square" variant="secondary" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); window.open(repo.html_url, '_blank'); }} aria-label="打开 GitHub" title="打开 GitHub" />}
+                          <Button size="sm" shape="square" variant="secondary" icon={<RefreshCw className={`h-3.5 w-3.5 ${refreshingRepositoryId === String(repo.id) ? 'animate-spin' : ''}`} />} onClick={(event) => { event.stopPropagation(); refreshRepository(repo.id); }} disabled={refreshingRepositoryId === String(repo.id)} aria-label="刷新仓库" title="刷新仓库" />
+                          <Button size="sm" shape="square" variant="secondary-destructive" icon={<Trash className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); deleteRepository(repo.id); }} aria-label="删除仓库" title="删除仓库" />
                         </div>
                       </LayerCard.Primary>
                     </LayerCard>
@@ -2376,12 +2376,12 @@ function GitHubPage() {
                           <Table.Cell className="align-middle text-center"><div className="min-w-0 truncate text-sm leading-6 text-kumo-strong" title={formatDateTime(run.run_started_at || run.created_at)}>{formatDateTime(run.run_started_at || run.created_at)}</div></Table.Cell>
                           <Table.Cell className="align-middle text-center">
                             <div className="flex justify-center gap-1">
-                              {run.html_url && <Button size="sm" variant="ghost" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); window.open(run.html_url, '_blank'); }} aria-label="打开 Actions" />}
+                              {run.html_url && <Button size="sm" shape="square" variant="secondary" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); window.open(run.html_url, '_blank'); }} aria-label="打开 Actions" title="打开 Actions" />}
                               {canAttemptActionOperations && (
                                 <>
-                                  <Button size="sm" variant="ghost" icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); actionOperation(run.run_id, 'rerun'); }} aria-label="重新运行" />
-                                  <Button size="sm" variant="ghost" icon={<Check className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); actionOperation(run.run_id, 'rerun-failed-jobs'); }} aria-label="重跑失败任务" />
-                                  <Button size="sm" variant="ghost" icon={<X className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); actionOperation(run.run_id, 'cancel'); }} aria-label="取消" />
+                                  <Button size="sm" shape="square" variant="secondary" icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); actionOperation(run.run_id, 'rerun'); }} aria-label="重新运行" title="重新运行" />
+                                  <Button size="sm" shape="square" variant="secondary" icon={<Check className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); actionOperation(run.run_id, 'rerun-failed-jobs'); }} aria-label="重跑失败任务" title="重跑失败任务" />
+                                  <Button size="sm" shape="square" variant="secondary-destructive" icon={<X className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); actionOperation(run.run_id, 'cancel'); }} aria-label="取消" title="取消" />
                                 </>
                               )}
                             </div>
@@ -2582,7 +2582,7 @@ function GitHubPage() {
                           <Button size="sm" variant="secondary" onClick={() => testToken(token.id)} loading={testingTokenId === String(token.id)}>
                             {selectedRepo ? '检测并用于当前仓库' : '检测权限'}
                           </Button>
-                          <Button size="sm" variant="ghost" icon={<Trash className="h-3.5 w-3.5" />} onClick={() => deleteToken(token)} aria-label="删除 Token" />
+                          <Button size="sm" shape="square" variant="secondary-destructive" icon={<Trash className="h-3.5 w-3.5" />} onClick={() => deleteToken(token)} aria-label="删除 Token" title="删除 Token" />
                         </div>
                       </LayerCard.Primary>
                     </LayerCard>

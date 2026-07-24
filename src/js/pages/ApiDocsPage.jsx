@@ -2,11 +2,13 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { CalendarDotsIcon } from '@phosphor-icons/react';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Checkbox } from '@cloudflare/kumo/components/checkbox';
+import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { ClipboardText, DatePicker, Label, Popover, Tabs } from '@cloudflare/kumo';
 import { toast } from '../modules/toast.js';
+import { dialog } from '../modules/dialog.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import {
   AppCard,
@@ -1076,10 +1078,10 @@ function AIAccessConsole({
                     <InlineStatusPill tone={item.enabled ? 'success' : 'neutral'}>
                       {item.enabled ? '启用' : '停用'}
                     </InlineStatusPill>
-                    <Button size="sm" variant="ghost" onClick={() => onEditMCP(item)}>
+                    <Button size="sm" shape="square" variant="secondary" onClick={() => onEditMCP(item)} title="编辑" aria-label="编辑">
                       <Edit className="h-3.5 w-3.5" />
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => onDeleteMCP(item.id)}>
+                    <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => onDeleteMCP(item.id)} title="删除" aria-label="删除">
                       <Trash className="h-3.5 w-3.5" />
                     </Button>
                   </div>
@@ -1251,10 +1253,10 @@ function AIAccessConsole({
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <Button size="sm" variant="ghost" onClick={() => onEditSkill(item)}>
+                    <Button size="sm" shape="square" variant="secondary" onClick={() => onEditSkill(item)} title="编辑" aria-label="编辑">
                       <Edit className="h-3.5 w-3.5" />
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => onDeleteSkill(item.id)}>
+                    <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => onDeleteSkill(item.id)} title="删除" aria-label="删除">
                       <Trash className="h-3.5 w-3.5" />
                     </Button>
                   </div>
@@ -1680,24 +1682,26 @@ function APIKeyConsole({
                       </div>
                     </div>
                     <div className="flex shrink-0 flex-wrap items-center gap-1">
-                      <Button size="sm" variant="ghost" onClick={() => onEdit(key)} aria-label="编辑密钥">
+                      <Button size="sm" shape="square" variant="secondary" onClick={() => onEdit(key)} aria-label="编辑密钥" title="编辑">
                         <Edit className="h-3.5 w-3.5" />
                       </Button>
                       {!key.revokedAt && (
                         <Button
                           size="sm"
-                          variant="ghost"
+                          shape="square"
+                          variant="secondary"
                           onClick={() => onToggle(key)}
                           aria-label={key.enabled ? '停用密钥' : '启用密钥'}
+                          title={key.enabled ? '停用' : '启用'}
                         >
                           {key.enabled ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                         </Button>
                       )}
-                      <Button size="sm" variant="ghost" onClick={() => onRotate(key)} aria-label="轮换密钥">
+                      <Button size="sm" shape="square" variant="secondary" onClick={() => onRotate(key)} aria-label="轮换密钥" title="轮换">
                         <RefreshCw className="h-3.5 w-3.5" />
                       </Button>
                       {!key.revokedAt && (
-                        <Button size="sm" variant="ghost" onClick={() => onRevoke(key)} aria-label="撤销密钥">
+                        <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => onRevoke(key)} aria-label="撤销密钥" title="撤销">
                           <Trash className="h-3.5 w-3.5" />
                         </Button>
                       )}
@@ -2087,7 +2091,13 @@ function ApiDocsPage() {
     updateAPIKey(key, { enabled: !key.enabled }, key.enabled ? '密钥已停用' : '密钥已启用');
 
   const rotateAPIKey = async key => {
-    if (!window.confirm(`轮换“${key.name}”后，旧密钥会立即失效。继续吗？`)) return;
+    const confirmed = await dialog.confirm({
+      title: '确认轮换密钥',
+      message: `轮换“${key.name}”后，旧密钥会立即失效。确定要继续吗？`,
+      confirmText: '确认轮换',
+      confirmClass: '!bg-kumo-danger !text-white',
+    });
+    if (!confirmed) return;
     try {
       const payload = await apiRequest(`${API_KEYS_BASE}/${key.id}/rotate`, { method: 'POST' });
       setIssuedAPIKey(payload.apiKey || '');
@@ -2099,7 +2109,13 @@ function ApiDocsPage() {
   };
 
   const revokeAPIKey = async key => {
-    if (!window.confirm(`撤销“${key.name}”后，只有轮换才能重新启用。继续吗？`)) return;
+    const confirmed = await dialog.confirm({
+      title: '确认撤销密钥',
+      message: `撤销“${key.name}”后，只有轮换才能重新启用。确定要继续吗？`,
+      confirmText: '确认撤销',
+      confirmClass: '!bg-kumo-danger !text-white',
+    });
+    if (!confirmed) return;
     try {
       await apiRequest(`${API_KEYS_BASE}/${key.id}/revoke`, { method: 'POST' });
       if (apiKeyEditingId === key.id) resetAPIKeyForm();
@@ -2300,6 +2316,7 @@ function ApiDocsPage() {
           />
         </div>
       )}
+
     </PageStack>
   );
 }

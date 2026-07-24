@@ -571,7 +571,13 @@ function SettingsPage() {
   };
 
   const forceAllSessionsOffline = async () => {
-    if (!window.confirm('这会立即终止全部主程序会话，并使浏览器插件停止取码。继续吗？')) return;
+    const confirmed = await dialog.confirm({
+      title: '确认强制全部设备下线',
+      message: '这会立即终止全部主程序会话，并使浏览器插件停止取码。确定要继续吗？',
+      confirmText: '确认全部下线',
+      confirmClass: '!bg-kumo-danger !text-white',
+    });
+    if (!confirmed) return;
     try {
       const response = await fetch('/api/auth/sessions/revoke-all', { method: 'POST', headers: getAuthHeaders() });
       const result = await response.json();
@@ -1162,46 +1168,53 @@ function SettingsPage() {
             icon={<Lock className="h-4 w-4 text-kumo-brand" />}
             bodyPadding="none"
           >
-            <div className="grid max-w-xl gap-4 p-5">
-              <Input size="sm"
-                label="当前密码"
-                type="text"
-                value={passwordForm.oldPassword}
-                onChange={(e) => setPasswordForm((prev) => ({ ...prev, oldPassword: e.target.value }))}
-                disabled={isDemoMode}
-                autoComplete="off"
-                data-1p-ignore
-                data-lpignore="true"
-                data-bwignore="true"
-                data-form-type="other"
-                spellCheck={false}
-              />
-              <Input size="sm"
-                label="新密码"
-                type="text"
-                value={passwordForm.newPassword}
-                onChange={(e) => setPasswordForm((prev) => ({ ...prev, newPassword: e.target.value }))}
-                disabled={isDemoMode}
-                autoComplete="off"
-                data-1p-ignore
-                data-lpignore="true"
-                data-bwignore="true"
-                data-form-type="other"
-                spellCheck={false}
-              />
-              <Input size="sm"
-                label="确认新密码"
-                type="text"
-                value={passwordForm.confirmPassword}
-                onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))}
-                disabled={isDemoMode}
-                autoComplete="off"
-                data-1p-ignore
-                data-lpignore="true"
-                data-bwignore="true"
-                data-form-type="other"
-                spellCheck={false}
-              />
+            <div className="flex w-full flex-col gap-4 p-5">
+              <div>
+                <Input size="sm"
+                  label="当前密码"
+                  type="text"
+                  value={passwordForm.oldPassword}
+                  onChange={(e) => setPasswordForm((prev) => ({ ...prev, oldPassword: e.target.value }))}
+                  disabled={isDemoMode}
+                  autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  spellCheck={false}
+                  className="w-full"
+                />
+              </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <Input size="sm"
+                  label="新密码"
+                  type="text"
+                  value={passwordForm.newPassword}
+                  onChange={(e) => setPasswordForm((prev) => ({ ...prev, newPassword: e.target.value }))}
+                  disabled={isDemoMode}
+                  autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  spellCheck={false}
+                  className="w-full"
+                />
+                <Input size="sm"
+                  label="确认新密码"
+                  type="text"
+                  value={passwordForm.confirmPassword}
+                  onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))}
+                  disabled={isDemoMode}
+                  autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  spellCheck={false}
+                  className="w-full"
+                />
+              </div>
               <div>
                 <Button size="sm" variant="primary" onClick={changePassword} loading={passwordSaving} disabled={isDemoMode}>
                   更新密码
@@ -1850,14 +1863,14 @@ function SettingsPage() {
               <Table layout="fixed">
                 <colgroup>
                   <col className="w-[170px]" />
-                  <col className="w-[150px]" />
+                  <col className="w-[220px]" />
                   <col className="w-[130px]" />
                   <col />
                 </colgroup>
                 <Table.Header>
                   <Table.Row>
                     <Table.Head>时间</Table.Head>
-                    <Table.Head className="app-table-action">操作</Table.Head>
+                    <Table.Head>操作</Table.Head>
                     <Table.Head>对象</Table.Head>
                     <Table.Head>Trace</Table.Head>
                   </Table.Row>
@@ -1948,7 +1961,7 @@ function SettingsPage() {
       {activeTab === 'about' && (
         <div className="grid items-start gap-4 overflow-auto px-px py-px pr-px lg:grid-cols-1">
           <SectionCard
-            title="API Monitor"
+            title={<span className="app-brand-wordmark">API Monitor</span>}
             description={APP_VERSION}
             icon={<img src="/logo.svg" alt="" className="h-6 w-6 object-contain" />}
             bodyPadding="lg"

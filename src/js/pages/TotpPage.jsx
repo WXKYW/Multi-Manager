@@ -1396,9 +1396,9 @@ function TotpPage() {
                       onMouseEnter={() => handleCardMouseEnter(account.id)}
                       onMouseLeave={() => handleCardMouseLeave(account.id)}
                       onClick={() => copyCodeToClipboard(account)}
-                      className="group/card relative grid min-h-[96px] cursor-pointer grid-rows-[auto_1fr_auto] overflow-hidden p-0 transition-colors hover:border-kumo-brand sm:min-h-[112px]"
+                      className="group/card relative grid min-h-[96px] min-w-0 cursor-pointer grid-rows-[auto_1fr_auto] overflow-hidden p-0 transition-colors hover:border-kumo-brand sm:min-h-[112px]"
                     >
-                      <div className="flex items-center gap-1.5 border-b border-kumo-line bg-kumo-recessed/35 px-2 py-1.5 sm:gap-2 sm:px-3 sm:py-2">
+                      <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5 border-b border-kumo-line bg-kumo-recessed/35 px-2 py-1.5 sm:gap-2 sm:px-3 sm:py-2">
                         <TotpBrandMark issuer={account.issuer} icon={account.icon} color={issuerColor} />
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-[10px] font-semibold leading-tight text-kumo-strong sm:text-[11px]">{account.issuer || '未知平台'}</div>
@@ -1415,7 +1415,7 @@ function TotpPage() {
                               e.stopPropagation();
                               handleOpenEditAccount(account);
                             }}
-                            className="flex h-5 w-5 items-center justify-center sm:h-6 sm:w-6"
+                            className="!size-5 !p-0 sm:!size-6"
                             title="编辑"
                           >
                             <Edit className="h-3 w-3" />
@@ -1428,7 +1428,7 @@ function TotpPage() {
                               e.stopPropagation();
                               handleDeleteAccount(account);
                             }}
-                            className="flex h-5 w-5 items-center justify-center sm:h-6 sm:w-6"
+                            className="!size-5 !p-0 sm:!size-6"
                             title="删除"
                           >
                             <Trash className="h-3 w-3" />
@@ -1522,7 +1522,7 @@ function TotpPage() {
                     <Table.Head className="text-center">
                       账号数
                     </Table.Head>
-                    <Table.Head className="text-center">
+                    <Table.Head className="app-table-action">
                       操作
                     </Table.Head>
                   </Table.Row>
@@ -1551,14 +1551,12 @@ function TotpPage() {
                         <div className="flex items-center justify-center gap-2">
                           <Button
                             shape="square" size="sm"
-                            variant="ghost"
+                            variant="secondary"
                             aria-label="编辑分组"
                             onClick={() => handleOpenEditGroup(group)}
-                            className="text-kumo-subtle hover:text-kumo-strong"
                             title="编辑"
                             icon={<Edit className="w-3.5 h-3.5" />}
-                          >
-                          </Button>
+                          />
                           <Button
                             shape="square" size="sm"
                             variant="secondary-destructive"
@@ -1566,8 +1564,7 @@ function TotpPage() {
                             onClick={() => handleDeleteGroup(group)}
                             title="删除"
                             icon={<Trash className="w-3.5 h-3.5" />}
-                          >
-                          </Button>
+                          />
                         </div>
                       </Table.Cell>
                     </Table.Row>
@@ -1786,8 +1783,8 @@ function TotpPage() {
               </Button>
 
               <Button size="sm"
-                variant="ghost"
-                className="w-full text-xs text-kumo-subtle hover:text-kumo-strong"
+                variant="secondary"
+                className="w-full text-xs"
                 onClick={() => setShowExtensionGuide(!showExtensionGuide)}
               >
                 {showExtensionGuide ? '关闭教程' : '查看安装教程'}
@@ -1978,9 +1975,9 @@ function TotpPage() {
                   <div className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto_minmax(0,8rem)] items-center gap-2">
                     <Button
                       type="button"
-                      variant="ghost"
+                      variant="secondary"
                       shape="square"
-                      className="!h-auto p-0 transition-transform hover:scale-[1.03]"
+                      className="!size-8 !p-0 transition-transform hover:scale-[1.03]"
                       onClick={() => openBrandStylePicker()}
                       title="点击选择或上传品牌图标"
                     >
@@ -1998,7 +1995,7 @@ function TotpPage() {
                     <Button size="sm" variant="secondary" onClick={detectAccountBrandIcon} loading={brandDetecting}>
                       检测
                     </Button>
-                    <Button size="sm" variant="ghost" className="px-2 text-[11px]" onClick={() => setAccountForm((prev) => ({ ...prev, icon: '', color: '' }))}>
+                    <Button size="sm" variant="secondary" className="px-2 text-[11px]" onClick={() => setAccountForm((prev) => ({ ...prev, icon: '', color: '' }))}>
                       重置
                     </Button>
                     <span
@@ -2039,10 +2036,10 @@ function TotpPage() {
                     />
                     <Button
                       type="button" size="sm"
-                      variant="ghost"
+                      variant="secondary"
                       aria-label={totpShowSecret ? '隐藏密钥' : '显示密钥'}
                       onClick={toggleSecretVisibility}
-                      className="absolute right-1 top-1/2 -translate-y-1/2 text-kumo-subtle hover:text-kumo-strong"
+                      className="absolute right-1 top-1/2 h-7 -translate-y-1/2 px-2 text-[11px]"
                     >
                       {totpShowSecret ? '隐藏' : '显示'}
                     </Button>

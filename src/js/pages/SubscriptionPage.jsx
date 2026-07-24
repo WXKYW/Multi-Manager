@@ -1930,7 +1930,7 @@ function SubscriptionPage() {
                     </Table.Cell>
                     <Table.Cell>
                       <Meter
-                        label="托管流量"
+                        label="已用流量"
                         value={meteringAvailable ? Math.min(100, sub.traffic?.percent || 0) : 0}
 						customValue={meteringAvailable ? `${formatBytes(used)} / ${sub.traffic?.total ? formatBytes(sub.traffic.total) : '无限制'}` : meteringLabel(meteringStatus)}
                       />
@@ -2041,7 +2041,7 @@ function SubscriptionPage() {
                 <Table.Cell className="text-center"><Switch size="sm" aria-label={node.enabled ? '停用内部节点' : '启用内部节点'} checked={!!node.enabled} onCheckedChange={(checked) => toggleInternalNodeEnabled(node, checked)} /></Table.Cell>
                 <Table.Cell><div className="flex min-w-0 items-center gap-1.5 truncate text-sm font-bold text-kumo-strong">{node.stable && <Star className="h-3.5 w-3.5 shrink-0 text-kumo-warning" />}{node.name}{node.stable && <Badge variant="success">稳定</Badge>}</div>{!node.publishable && (() => { const [stateLabel, stateVariant] = managedNodeState(node); return <div className="mt-1"><Badge variant={stateVariant}>{stateLabel}</Badge></div>; })()}</Table.Cell>
                 <Table.Cell className="text-center"><Badge variant={nodeTypeBadgeVariant(protocol)} className="uppercase">{node.protocol === 'vless-reality' ? 'VLESS' : 'HYSTERIA2'}</Badge></Table.Cell>
-                <Table.Cell><div className="truncate font-mono text-xs text-kumo-strong">{displayHost}:{displayPort}</div><div className="mt-1 flex min-w-0 flex-wrap gap-1">{connectionTags.map((tag) => <span key={tag} className={`${tag === node.runtime ? 'hidden sm:inline-flex' : 'inline-flex'} rounded-[3px] border px-1.5 py-0.5 font-mono text-[10px] leading-4 ${nodeNetworkTagClass({ key: tag === 'tls' ? 'tls' : 'network', tone: tag })}`}>{tag}</span>)}</div></Table.Cell>
+                <Table.Cell><div className="truncate font-mono text-xs text-kumo-strong">{displayHost}:{displayPort}</div><div className="mt-1 flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto scrollbar-none">{connectionTags.map((tag) => <span key={tag} className={`${tag === node.runtime ? 'hidden sm:inline-flex' : 'inline-flex'} shrink-0 rounded-[3px] border px-1.5 py-0.5 font-mono text-[10px] leading-4 ${nodeNetworkTagClass({ key: tag === 'tls' ? 'tls' : 'network', tone: tag })}`}>{tag}</span>)}</div></Table.Cell>
                 <Table.Cell>{server?.status === 'online' ? <NodeHostQuality node={{ ...node, traffic_server_id: node.server_id }} serverNameById={serverNameById} /> : <div className="flex min-w-0 flex-col items-start gap-1"><span className="inline-flex max-w-full rounded-[3px] border border-kumo-info/25 bg-kumo-info/10 px-1.5 py-0.5 text-[10px] font-semibold leading-4 text-kumo-info"><span className="truncate">{server?.name || node.server_name || node.server_id}</span></span><span className={`inline-flex rounded-[3px] border px-1.5 py-0.5 text-[10px] font-semibold leading-4 ${latencyChipClass(0)}`}>主机离线</span></div>}</Table.Cell>
                 <Table.Cell className="text-center"><div className="inline-flex items-center justify-center gap-2"><Button size="sm" shape="square" variant="secondary" aria-label={`编辑 ${node.name}`} title={`编辑 ${node.name}`} disabled={reconciling || deleting} onClick={(event) => { event.stopPropagation(); openEditInternalNode(node); }} icon={<Edit className="h-3.5 w-3.5" />} /><RefreshButton size="sm" variant="secondary" loading={reconciling} aria-label={`重新部署 ${node.name}`} title={`重新部署 ${node.name}`} disabled={reconciling || deleting} onClick={(event) => { event.stopPropagation(); reconcileInternalNode(node); }} /><Button size="sm" shape="square" variant={confirmingDelete ? 'destructive' : 'secondary-destructive'} aria-label={confirmingDelete ? `再次确认卸载 ${node.name}` : `卸载 ${node.name}`} title={confirmingDelete ? '再次点击确认卸载' : `卸载 ${node.name}`} disabled={reconciling || deleting} onClick={(event) => { event.stopPropagation(); deleteInternalNode(node); }} icon={deleting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />} /></div></Table.Cell>
               </Table.Row>;
@@ -2107,25 +2107,23 @@ function SubscriptionPage() {
                     />
                   </Table.Cell>
                   <Table.Cell>
-                    <div className="flex min-w-0 items-center gap-2">
+                    <div className="flex min-w-0 items-center gap-1.5 truncate text-sm font-bold text-kumo-strong">
                       <NodeFlag node={node} />
-                      {node.stable && <Star className="h-3.5 w-3.5 text-kumo-warning" />}
-                      <span className="truncate text-sm font-bold text-kumo-strong">{node.name}</span>
-                    </div>
-                  </Table.Cell>
-                  <Table.Cell className="text-center">
-                    <div className="flex flex-wrap items-center justify-center gap-1">
-                      <Badge variant={nodeTypeBadgeVariant(node.type)} className="uppercase">{node.type || '-'}</Badge>
+                      {node.stable && <Star className="h-3.5 w-3.5 shrink-0 text-kumo-warning" />}
+                      <span className="truncate">{node.name}</span>
                       {node.stable && <Badge variant="success">稳定</Badge>}
                     </div>
                   </Table.Cell>
+                  <Table.Cell className="text-center">
+                    <Badge variant={nodeTypeBadgeVariant(node.type)} className="uppercase">{node.type || '-'}</Badge>
+                  </Table.Cell>
                   <Table.Cell>
                     <div className="truncate font-mono text-xs text-kumo-strong">{nodeEndpoint(node)}</div>
-                    <div className="mt-1 flex min-w-0 flex-wrap gap-1">
+                    <div className="mt-1 flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto scrollbar-none">
                       {networkTags.map((tag) => (
                         <span
                           key={tag.key}
-                          className={`${['fingerprint', 'path', 'alpn'].includes(tag.key) ? 'hidden sm:inline-flex' : 'inline-flex'} min-w-0 max-w-full truncate rounded-[3px] border px-1.5 py-0.5 font-mono text-[10px] leading-4 ${nodeNetworkTagClass(tag)}`}
+                          className={`${['fingerprint', 'path', 'alpn'].includes(tag.key) ? 'hidden sm:inline-flex' : 'inline-flex'} shrink-0 min-w-0 max-w-full truncate rounded-[3px] border px-1.5 py-0.5 font-mono text-[10px] leading-4 ${nodeNetworkTagClass(tag)}`}
                           title={tag.label}
                         >
                           {tag.label}
@@ -2416,7 +2414,7 @@ function SubscriptionPage() {
           {...MODULE_TABS_PROPS}
           value={activeTab}
           onValueChange={(value) => setActiveTab(String(value))}
-          className="w-full min-w-0"
+          className="w-fit max-w-full min-w-0"
           listClassName="max-w-full overflow-x-auto whitespace-nowrap scrollbar-thin"
           tabs={[
             { value: 'instances', label: '实例管理' },

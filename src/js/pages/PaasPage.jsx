@@ -1750,15 +1750,15 @@ function PaasPage() {
                           variant="ghost"
                           size="sm"
                           tabIndex={-1}
-                          className="min-w-0 justify-start px-0"
-                          icon={<ChevronDown className={`h-4 w-4 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />}
+                          className="w-full min-w-0 justify-start px-0 text-left sm:w-auto"
+                          icon={<ChevronDown className={`h-4 w-4 shrink-0 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />}
                         >
-                          <span className="flex min-w-0 items-center gap-2">
+                          <span className="flex min-w-0 items-center gap-2 text-left">
                             <KoyebBrand className="h-4 w-4 shrink-0 text-kumo-info" />
                             <Text as="span" bold truncate>{account.name}</Text>
                           </span>
                         </Button>
-                        <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
                           {account.data?.email ? (
                             <Badge variant="outline" className="max-w-full">
                               <Mail className="h-3 w-3 shrink-0" />
@@ -2030,15 +2030,15 @@ function PaasPage() {
                           variant="ghost"
                           size="sm"
                           tabIndex={-1}
-                          className="min-w-0 justify-start px-0"
-                          icon={<ChevronDown className={`h-4 w-4 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />}
+                          className="w-full min-w-0 justify-start px-0 text-left sm:w-auto"
+                          icon={<ChevronDown className={`h-4 w-4 shrink-0 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`} />}
                         >
-                          <span className="flex min-w-0 items-center gap-2">
+                          <span className="flex min-w-0 items-center gap-2 text-left">
                             <FlyIoBrand className="h-4 w-4 shrink-0 text-kumo-brand" />
                             <Text as="span" bold truncate>{account.name}</Text>
                           </span>
                         </Button>
-                        <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
                           <Badge variant="neutral">{appCount} 应用</Badge>
                           <Badge variant="neutral">{machineCount} 机器</Badge>
                           <Button size="sm" variant="secondary" onClick={(e) => { e.stopPropagation(); updateAllFlyAppsImage(account); }} icon={<Rocket className="h-3.5 w-3.5" />}>
