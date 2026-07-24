@@ -226,7 +226,7 @@ function AuthBrandCanvas() {
   );
 }
 
-function AuthShell({ title, children }) {
+function AuthShell({ title, notice, children }) {
   const surfaceRef = useCloudflareSpotlight();
 
   return (
@@ -248,11 +248,14 @@ function AuthShell({ title, children }) {
           </span>
         </div>
 
-        <div className="auth-login-panel">
-          <div className="auth-login-head">
-            <h1>{title}</h1>
+        <div className="w-full max-w-sm flex flex-col gap-3">
+          <div className="auth-login-panel">
+            <div className="auth-login-head">
+              <h1>{title}</h1>
+            </div>
+            {children}
           </div>
-          {children}
+          {notice}
         </div>
       </section>
     </main>
@@ -664,7 +667,6 @@ function AuthPage() {
           >
             {setupLoading ? '处理中...' : '保存并进入'}
           </Button>
-          <AuthStatusNotice statusKey={busyState} message={setupError} />
         </form>
       </AuthShell>
     );
@@ -673,7 +675,10 @@ function AuthPage() {
   const title = isDemoMode ? '演示模式' : requiresSecondStep ? '双因素验证' : '登录';
 
   return (
-    <AuthShell title={title}>
+    <AuthShell
+      title={title}
+      notice={<AuthStatusNotice statusKey={busyState} message={loginError} />}
+    >
       <form onSubmit={handleLogin} className="auth-login-form space-y-3">
         {isDemoMode && (
           <Banner
@@ -828,7 +833,6 @@ function AuthPage() {
               </div>
             </div>
           )}
-        <AuthStatusNotice statusKey={busyState} message={loginError} />
       </form>
     </AuthShell>
   );
