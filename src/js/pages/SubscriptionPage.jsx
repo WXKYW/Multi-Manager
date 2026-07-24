@@ -2174,7 +2174,7 @@ function SubscriptionPage() {
       actions={<Button size="sm" variant="primary" loading={saving} disabled={selectedRuntimeHosts.size === 0} onClick={() => deployProxyRuntime([...selectedRuntimeHosts])}><Plus className="h-3.5 w-3.5" />批量部署程序 ({selectedRuntimeHosts.size})</Button>}
     >
       <DataTableFrame variant="embedded" className="max-h-[calc(100dvh-15rem)] min-h-0 overflow-auto">
-        <AppTable percentageWidths layout="fixed" widths={[48, 104, 220, 120, 90, 140, 180, 150, 260]} style={{ minWidth: 1080 }} className="text-xs [&_td]:border-kumo-interact/45 [&_th]:border-kumo-interact/50">
+        <AppTable percentageWidths layout="fixed" widths={[44, 80, 150, 90, 75, 95, 300, 95, 255]} style={{ minWidth: 1184 }} className="text-xs [&_td]:border-kumo-interact/45 [&_th]:border-kumo-interact/50">
           <Table.Header sticky variant="compact">
             <Table.Row>
               <Table.CheckHead checked={runtimeLifecycleServers.length > 0 && selectedRuntimeHosts.size === runtimeLifecycleServers.length} indeterminate={selectedRuntimeHosts.size > 0 && selectedRuntimeHosts.size < runtimeLifecycleServers.length} onCheckedChange={(checked) => setSelectedRuntimeHosts(checked ? new Set(runtimeLifecycleServers.map((server) => server.id)) : new Set())} />
