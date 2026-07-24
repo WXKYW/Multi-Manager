@@ -281,16 +281,20 @@ function AuthErrorBanner({ message }) {
 
   return (
     <div
-      className={`auth-feedback-banner ${isWarning ? 'auth-feedback-banner--warning' : 'auth-feedback-banner--danger'}`}
+      className={`w-full rounded-lg border p-3 text-left transition-all ${
+        isWarning
+          ? 'border-kumo-warning/35 bg-kumo-warning/10 text-kumo-warning'
+          : 'border-kumo-danger/35 bg-kumo-danger/10 text-kumo-danger'
+      }`}
     >
-      <div className="flex items-start gap-2.5">
-        <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-current/10">
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-current/15">
           <AlertTriangle className="size-3.5" />
         </span>
-        <div className="min-w-0">
-          <div className="text-xs font-semibold leading-5">{title}</div>
-          <div className="text-xs leading-5 opacity-90">{normalized}</div>
-        </div>
+        <div className="text-xs font-bold leading-none">{title}</div>
+      </div>
+      <div className="text-[11.5px] leading-relaxed opacity-90 break-all pl-7 font-mono">
+        {normalized}
       </div>
     </div>
   );
@@ -309,15 +313,13 @@ function AuthStatusNotice({ statusKey, message }) {
   const status = statusMap[statusKey];
 
   return (
-    <div className="auth-status-slot" aria-live="polite">
+    <div className="w-full text-left" aria-live="polite">
       {message ? (
         <AuthErrorBanner message={message} />
       ) : status ? (
-        <div className="auth-status-strip">
-          <RefreshCw className="size-3.5 shrink-0 animate-spin" />
-          <div className="min-w-0">
-            <div className="text-xs font-semibold leading-5 text-kumo-strong">{status}</div>
-          </div>
+        <div className="flex w-full items-center gap-2.5 rounded-lg border border-kumo-brand/35 bg-kumo-brand/10 p-3 text-kumo-brand">
+          <RefreshCw className="size-4 shrink-0 animate-spin" />
+          <div className="text-xs font-bold leading-tight">{status}</div>
         </div>
       ) : null}
     </div>
@@ -672,7 +674,7 @@ function AuthPage() {
 
   return (
     <AuthShell title={title}>
-      <form onSubmit={handleLogin} className="auth-login-form space-y-4">
+      <form onSubmit={handleLogin} className="auth-login-form space-y-3">
         {isDemoMode && (
           <Banner
             variant="secondary"
@@ -684,7 +686,7 @@ function AuthPage() {
 
         {!isDemoMode && !requiresSecondStep && (
           <Input
-            size="base"
+            size="sm"
             type="password"
             aria-label="管理员密码"
             placeholder="请输入管理员密码"
@@ -702,7 +704,7 @@ function AuthPage() {
 
         {requiresSecondStep && (
           <Input
-            size="base"
+            size="sm"
             type="text"
             inputMode="numeric"
             label="双因素验证码"
@@ -723,7 +725,7 @@ function AuthPage() {
           <Button
             type="submit"
             variant="primary"
-            size="base"
+            size="sm"
             loading={loginLoading}
             disabled={Boolean(activeAction)}
             icon={!loginLoading ? <LogIn className="size-3.5" /> : undefined}
@@ -741,7 +743,7 @@ function AuthPage() {
               type="button"
               onClick={githubFlowId ? cancelGitHubFlow : cancelLogin2FA}
               variant="secondary"
-              size="base"
+              size="sm"
               shape="square"
               disabled={buttonsLocked}
               icon={<ChevronLeft className="size-3.5" />}
@@ -752,7 +754,7 @@ function AuthPage() {
             <Button
               type="submit"
               variant="primary"
-              size="base"
+              size="sm"
               loading={loginLoading || activeAction === 'github-2fa'}
               disabled={Boolean(activeAction && activeAction !== 'github-2fa')}
               icon={
@@ -774,8 +776,8 @@ function AuthPage() {
         {!isDemoMode &&
           !requiresSecondStep &&
           (loginOptions.githubEnabled || (loginOptions.webauthnEnabled && supportsPasskey)) && (
-            <div className="auth-login-alternatives">
-              <div className="auth-login-divider">
+            <div className="auth-login-alternatives pt-0.5">
+              <div className="auth-login-divider mb-2.5">
                 <span>其他方式</span>
               </div>
               <div
@@ -791,7 +793,7 @@ function AuthPage() {
                   <Button
                     type="button"
                     variant="secondary"
-                    size="base"
+                    size="sm"
                     onClick={handleGitHubLogin}
                     loading={activeAction === 'github'}
                     disabled={loginLoading || Boolean(activeAction && activeAction !== 'github')}
@@ -809,7 +811,7 @@ function AuthPage() {
                   <Button
                     type="button"
                     variant="secondary"
-                    size="base"
+                    size="sm"
                     onClick={handlePasskeyLogin}
                     loading={activeAction === 'passkey'}
                     disabled={loginLoading || Boolean(activeAction && activeAction !== 'passkey')}
