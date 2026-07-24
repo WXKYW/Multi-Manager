@@ -20,6 +20,7 @@ use bollard::volume::{
 use bollard::Docker;
 use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -1021,7 +1022,16 @@ impl DockerBridge {
             })
             .map_err(|e| format!("获取 Compose 项目失败: {}", e))?;
 
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(if stderr.is_empty() {
+                "获取 Compose 项目失败".to_string()
+            } else {
+                format!("获取 Compose 项目失败: {}", stderr)
+            });
+        }
+
+        normalize_compose_projects_json(&String::from_utf8_lossy(&output.stdout))
     }
 
     pub fn handle_docker_compose_action(&self, data: &str) -> Result<String, String> {
@@ -1117,6 +1127,15 @@ impl DockerBridge {
             return Ok("[]".to_string());
         }
 
+        let local_image_digests = docker_client
+            .list_images(Some(ListImagesOptions::<String> {
+                all: true,
+                ..Default::default()
+            }))
+            .await
+            .map(|images| build_local_image_digest_lookup(&images))
+            .unwrap_or_default();
+
         let mut results = Vec::new();
         let mut missing_remote = HashSet::new();
 
@@ -1132,18 +1151,21 @@ impl DockerBridge {
                 error: None,
             };
 
-            match docker_client.inspect_image(&image).await {
+            let inspect_error = match docker_client.inspect_image(&image).await {
                 Ok(img_inspect) => {
-                    if let Some(repo_digests) = img_inspect.repo_digests {
-                        if let Some(digest_str) = repo_digests.first() {
-                            if let Some(idx) = digest_str.find('@') {
-                                status.current_digest = digest_str[idx + 1..].to_string();
-                            }
-                        }
-                    }
+                    status.current_digest =
+                        select_local_digest(img_inspect.repo_digests.as_deref(), &image)
+                            .unwrap_or_default();
+                    None
                 }
-                Err(e) => {
-                    status.error = Some(format!("获取本地镜像信息失败: {}", e));
+                Err(e) => Some(e.to_string()),
+            };
+
+            if status.current_digest.is_empty() {
+                if let Some(digest) = lookup_local_image_digest(&local_image_digests, &image) {
+                    status.current_digest = digest;
+                } else if let Some(err) = inspect_error {
+                    status.error = Some(format!("获取本地镜像信息失败: {}", err));
                 }
             }
 
@@ -1493,6 +1515,118 @@ fn docker_compose_args(
     Ok(args)
 }
 
+fn normalize_compose_projects_json(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok("[]".to_string());
+    }
+
+    let mut projects = parse_compose_projects_output(trimmed)?;
+    for project in &mut projects {
+        normalize_compose_project(project);
+    }
+
+    serde_json::to_string(&projects).map_err(|e| format!("序列化 Compose 项目失败: {}", e))
+}
+
+fn parse_compose_projects_output(raw: &str) -> Result<Vec<Value>, String> {
+    if let Ok(projects) = serde_json::from_str::<Vec<Value>>(raw) {
+        return Ok(projects);
+    }
+
+    let mut projects = Vec::new();
+    for line in raw.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        projects.push(
+            serde_json::from_str::<Value>(line)
+                .map_err(|e| format!("解析 Compose 项目失败: {}", e))?,
+        );
+    }
+
+    if projects.is_empty() {
+        return Err("解析 Compose 项目失败: 空响应".to_string());
+    }
+
+    Ok(projects)
+}
+
+fn normalize_compose_project(project: &mut Value) {
+    let Some(obj) = project.as_object_mut() else {
+        return;
+    };
+
+    if compose_project_working_dir(obj).is_some() {
+        return;
+    }
+
+    if let Some(working_dir) = derive_compose_working_dir(obj) {
+        obj.insert("WorkingDir".to_string(), Value::String(working_dir));
+    }
+}
+
+fn compose_project_working_dir(project: &serde_json::Map<String, Value>) -> Option<String> {
+    for key in [
+        "WorkingDir",
+        "workingDir",
+        "working_dir",
+        "ProjectDir",
+        "projectDir",
+    ] {
+        if let Some(value) = project
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
+fn derive_compose_working_dir(project: &serde_json::Map<String, Value>) -> Option<String> {
+    let config_file = compose_project_config_files(project).into_iter().next()?;
+    std::path::Path::new(&config_file)
+        .parent()
+        .and_then(|path| path.to_str())
+        .map(|path| path.to_string())
+}
+
+fn compose_project_config_files(project: &serde_json::Map<String, Value>) -> Vec<String> {
+    for key in [
+        "ConfigFiles",
+        "configFiles",
+        "config_files",
+        "config_file",
+        "configFile",
+        "Files",
+        "files",
+    ] {
+        if let Some(value) = project.get(key) {
+            return normalize_json_string_list(value);
+        }
+    }
+    Vec::new()
+}
+
+fn normalize_json_string_list(value: &Value) -> Vec<String> {
+    match value {
+        Value::Array(items) => items
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_string())
+            .collect(),
+        Value::String(text) => text
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_string())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 fn count_pruned_images(items: Vec<ImageDeleteResponseItem>) -> usize {
     items
         .into_iter()
@@ -1546,6 +1680,98 @@ fn split_image_tag(full_tag: &str) -> (String, String) {
     } else {
         (full_tag.to_string(), "latest".to_string())
     }
+}
+
+fn build_local_image_digest_lookup(
+    images: &[bollard::models::ImageSummary],
+) -> HashMap<String, String> {
+    let mut lookup = HashMap::new();
+
+    for image in images {
+        let Some(digest) = select_local_digest(Some(image.repo_digests.as_slice()), "") else {
+            continue;
+        };
+
+        lookup.insert(image.id.clone(), digest.clone());
+
+        for tag in image
+            .repo_tags
+            .iter()
+            .map(String::as_str)
+            .filter(|tag| !tag.is_empty() && *tag != "<none>:<none>")
+        {
+            lookup.insert(tag.to_string(), digest.clone());
+            if let Some(key) = canonical_image_lookup_key(tag) {
+                lookup.insert(key, digest.clone());
+            }
+        }
+    }
+
+    lookup
+}
+
+fn lookup_local_image_digest(lookup: &HashMap<String, String>, image_ref: &str) -> Option<String> {
+    let image_ref = image_ref.trim();
+    if image_ref.is_empty() {
+        return None;
+    }
+
+    if let Some(digest) = lookup.get(image_ref) {
+        return Some(digest.clone());
+    }
+
+    canonical_image_lookup_key(image_ref).and_then(|key| lookup.get(&key).cloned())
+}
+
+fn select_local_digest(repo_digests: Option<&[String]>, image_ref: &str) -> Option<String> {
+    let repo_digests = repo_digests?;
+    let target_repo = canonical_repository_key(image_ref);
+
+    if let Some(target_repo) = target_repo.as_deref() {
+        for repo_digest in repo_digests {
+            if let Some((repo, digest)) = split_repo_digest(repo_digest) {
+                if canonical_repository_key(repo).as_deref() == Some(target_repo) {
+                    return Some(digest.to_string());
+                }
+            }
+        }
+    }
+
+    repo_digests.iter().find_map(|repo_digest| {
+        split_repo_digest(repo_digest).map(|(_, digest)| digest.to_string())
+    })
+}
+
+fn split_repo_digest(repo_digest: &str) -> Option<(&str, &str)> {
+    let (repo, digest) = repo_digest.split_once('@')?;
+    Some((repo.trim(), digest.trim()))
+}
+
+fn canonical_repository_key(image_ref: &str) -> Option<String> {
+    let image_ref = image_ref.trim();
+    if image_ref.is_empty() || image_ref.starts_with("sha256:") {
+        return None;
+    }
+
+    let (registry, repo, _) = parse_image_name(image_ref);
+    Some(format!(
+        "{}/{}",
+        registry_hosts(&registry)
+            .first()
+            .cloned()
+            .unwrap_or(registry),
+        repo
+    ))
+}
+
+fn canonical_image_lookup_key(image_ref: &str) -> Option<String> {
+    let image_ref = image_ref.trim();
+    if image_ref.is_empty() || image_ref.starts_with("sha256:") {
+        return None;
+    }
+
+    let (registry, repo, tag) = parse_image_name(image_ref);
+    Some(remote_digest_cache_key(&registry, &repo, &tag))
 }
 
 fn split_pull_image_ref(image: &str) -> (String, String) {
@@ -2194,6 +2420,64 @@ mod tests {
         let args = docker_compose_args("", Some("edge"), "restart").unwrap();
         assert_eq!(args, vec!["--project-name", "edge", "restart"]);
         assert!(docker_compose_args("", Some("edge"), "delete").is_err());
+    }
+
+    #[test]
+    fn compose_list_derives_working_dir_from_config_files() {
+        let normalized = normalize_compose_projects_json(
+            r#"[{"Name":"edge","Status":"running(2)","ConfigFiles":"/srv/edge/docker-compose.yml"}]"#,
+        )
+        .unwrap();
+        let projects: Vec<Value> = serde_json::from_str(&normalized).unwrap();
+
+        assert_eq!(projects[0]["WorkingDir"], "/srv/edge");
+    }
+
+    #[test]
+    fn compose_list_supports_json_lines_output() {
+        let normalized = normalize_compose_projects_json(
+            "{\"Name\":\"edge\",\"ConfigFiles\":\"/srv/edge/docker-compose.yml\"}\n{\"Name\":\"api\",\"WorkingDir\":\"/opt/api\",\"ConfigFiles\":\"/opt/api/compose.yml\"}",
+        )
+        .unwrap();
+        let projects: Vec<Value> = serde_json::from_str(&normalized).unwrap();
+
+        assert_eq!(projects.len(), 2);
+        assert_eq!(projects[0]["WorkingDir"], "/srv/edge");
+        assert_eq!(projects[1]["WorkingDir"], "/opt/api");
+    }
+
+    #[test]
+    fn local_image_digest_lookup_matches_canonical_image_names() {
+        let images = vec![bollard::models::ImageSummary {
+            id: "sha256:abc".to_string(),
+            parent_id: String::new(),
+            repo_tags: vec!["library/nginx:latest".to_string()],
+            repo_digests: vec!["docker.io/library/nginx@sha256:def".to_string()],
+            created: 0,
+            size: 0,
+            shared_size: 0,
+            virtual_size: Some(0),
+            labels: HashMap::new(),
+            containers: 0,
+        }];
+        let lookup = build_local_image_digest_lookup(&images);
+
+        assert_eq!(
+            lookup_local_image_digest(&lookup, "nginx"),
+            Some("sha256:def".to_string())
+        );
+        assert_eq!(
+            lookup_local_image_digest(&lookup, "library/nginx:latest"),
+            Some("sha256:def".to_string())
+        );
+        assert_eq!(
+            lookup_local_image_digest(&lookup, "sha256:abc"),
+            Some("sha256:def".to_string())
+        );
+        assert_eq!(
+            select_local_digest(Some(images[0].repo_digests.as_slice()), "nginx"),
+            Some("sha256:def".to_string())
+        );
     }
 
     #[test]
