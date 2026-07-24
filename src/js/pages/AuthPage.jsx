@@ -264,7 +264,9 @@ function AuthShell({ title, onBack, notice, children }) {
                   className="shrink-0 -ml-1"
                 />
               )}
-              <h1>{title}</h1>
+              <h1 className="auth-login-title" aria-live="polite">
+                <span key={title} className="auth-login-title-text">{title}</span>
+              </h1>
             </div>
             {children}
           </div>
@@ -323,11 +325,9 @@ function AuthErrorBanner({ message }) {
 function AuthStatusNotice({ statusKey, message }) {
   const statusMap = {
     setup: '正在初始化',
-    password: '正在验证',
     github: '正在验证 GitHub',
     passkey: '通行密钥验证中',
     'github-2fa': '正在验证 GitHub',
-    'password-2fa': '正在验证',
   };
 
   const status = statusMap[statusKey];
@@ -635,6 +635,18 @@ function AuthPage() {
     useStore.setState({ loginError: '' });
   };
 
+  const handleReturnToPassword = event => {
+    event.preventDefault();
+    event.stopPropagation();
+    setPendingButton('');
+    setActiveAction('');
+    if (githubFlowId) {
+      cancelGitHubFlow();
+      return;
+    }
+    cancelLogin2FA();
+  };
+
   if (showSetPasswordModal) {
     return (
       <AuthShell title="设置管理员密码">
@@ -694,7 +706,6 @@ function AuthPage() {
   return (
     <AuthShell
       title={title}
-      onBack={requiresSecondStep && !buttonsLocked ? (githubFlowId ? cancelGitHubFlow : cancelLogin2FA) : undefined}
       notice={<AuthStatusNotice statusKey={busyState} message={loginError} />}
     >
       <form onSubmit={handleLogin} className="auth-login-form space-y-3">
@@ -707,9 +718,8 @@ function AuthPage() {
           />
         )}
 
-        {/* 原位无缝转换输入框（In-Place Morphing Input） */}
+        {/* 保持同一个输入控件实例，让密码框在原位切换成验证码框并保留焦点。 */}
         <Input
-          key={requiresSecondStep ? '2fa-input' : 'password-input'}
           size="base"
           type={requiresSecondStep ? 'text' : 'password'}
           inputMode={requiresSecondStep ? 'numeric' : undefined}
@@ -735,40 +745,43 @@ function AuthPage() {
           autoFocus
         />
 
-        {/* 原位无缝转换操作按钮（In-Place Morphing Button） */}
-        {!requiresSecondStep ? (
-          <Button
-            type="submit"
-            variant="primary"
-            size="sm"
-            loading={loginLoading}
-            disabled={Boolean(activeAction)}
-            icon={!loginLoading ? <LogIn className="size-3.5" /> : undefined}
-            className={getButtonClassName(
-              'password',
-              loginLoading,
-              'auth-login-button--primary w-full justify-center transition-all duration-200'
-            )}
-          >
-            {loginLoading ? '处理中...' : isDemoMode ? '进入演示环境' : '登录'}
-          </Button>
-        ) : (
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            disabled={buttonsLocked}
-            onClick={githubFlowId ? cancelGitHubFlow : cancelLogin2FA}
-            icon={<ChevronLeft className="size-3.5" />}
-            className="auth-login-button--secondary w-full justify-center transition-all duration-200"
-            aria-label="返回密码"
-          >
-            返回密码
-          </Button>
-        )}
+        {/* 保持同一个按钮实例，让登录按钮在原位切换成返回按钮。 */}
+        <Button
+          type={requiresSecondStep ? 'button' : 'submit'}
+          variant={requiresSecondStep ? 'secondary' : 'primary'}
+          size="sm"
+          loading={!requiresSecondStep && loginLoading}
+          disabled={!requiresSecondStep && Boolean(activeAction)}
+          onClick={requiresSecondStep ? handleReturnToPassword : undefined}
+          icon={
+            requiresSecondStep
+              ? <ChevronLeft className="size-3.5" />
+              : !loginLoading
+                ? <LogIn className="size-3.5" />
+                : undefined
+          }
+          className={getButtonClassName(
+            requiresSecondStep ? '2fa-back' : 'password',
+            !requiresSecondStep && loginLoading,
+            cx(
+              requiresSecondStep
+                ? 'auth-login-button--secondary'
+                : 'auth-login-button--primary',
+              'w-full justify-center transition-all duration-200'
+            )
+          )}
+          aria-label={requiresSecondStep ? '返回密码' : undefined}
+        >
+          {requiresSecondStep
+            ? '返回密码'
+            : loginLoading
+              ? '处理中...'
+              : isDemoMode
+                ? '进入演示环境'
+                : '登录'}
+        </Button>
 
         {!isDemoMode &&
-          !requiresSecondStep &&
           (loginOptions.githubEnabled || (loginOptions.webauthnEnabled && supportsPasskey)) && (
             <div className="auth-login-alternatives pt-0.5">
               <div className="auth-login-divider mb-2.5">

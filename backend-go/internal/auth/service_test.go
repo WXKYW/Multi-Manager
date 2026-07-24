@@ -62,6 +62,97 @@ func TestLoginAuditIncludesRequestID(t *testing.T) {
 	}
 }
 
+func TestSuccessfulLoginResetsFailedAttempts(t *testing.T) {
+	t.Setenv("ADMIN_PASSWORD", "")
+	t.Setenv("DEMO_MODE", "")
+	t.Setenv("ENCRYPTION_KEY", "")
+
+	service := New(config.Config{
+		Version: "test",
+		Host:    "127.0.0.1",
+		Port:    0,
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	res := performAuthRequest(service, http.MethodPost, "/api/auth/set-password", `{"password":"secret123"}`, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("set-password status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	const clientIP = "203.0.113.21"
+	for range 2 {
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"password":"wrong"}`))
+		req.RemoteAddr = clientIP + ":4567"
+		req.Header.Set("Content-Type", "application/json")
+		res = httptest.NewRecorder()
+		service.ServeHTTP(res, req)
+		if res.Code != http.StatusUnauthorized {
+			t.Fatalf("failed login status = %d body=%s", res.Code, res.Body.String())
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"password":"secret123"}`))
+	req.RemoteAddr = clientIP + ":4567"
+	req.Header.Set("Content-Type", "application/json")
+	res = httptest.NewRecorder()
+	service.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("successful login status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	db, err := service.openDB(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var remaining int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM login_attempts WHERE ip_address = ?`, clientIP).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 0 {
+		t.Fatalf("login attempt rows after success = %d, want 0", remaining)
+	}
+}
+
+func TestExternalLoginResetsFailedAttempts(t *testing.T) {
+	t.Setenv("ADMIN_PASSWORD", "")
+	t.Setenv("DEMO_MODE", "")
+	t.Setenv("ENCRYPTION_KEY", "")
+
+	service := New(config.Config{
+		Version: "test",
+		Host:    "127.0.0.1",
+		Port:    0,
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+	db, err := service.openDB(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	const clientIP = "203.0.113.22"
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO login_attempts (ip_address, failed_count, last_attempt) VALUES (?, 2, ?)`, clientIP, formatTime(time.Now().UTC())); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/webauthn/login/finish", nil)
+	req.RemoteAddr = clientIP + ":4567"
+	res := httptest.NewRecorder()
+	if err := service.issueAuthenticatedSession(res, req, db, "webauthn", map[string]interface{}{}); err != nil {
+		t.Fatal(err)
+	}
+
+	var remaining int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM login_attempts WHERE ip_address = ?`, clientIP).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 0 {
+		t.Fatalf("login attempt rows after external auth = %d, want 0", remaining)
+	}
+}
+
 func Test2FAManagementFlow(t *testing.T) {
 	t.Setenv("ADMIN_PASSWORD", "")
 	t.Setenv("DEMO_MODE", "")

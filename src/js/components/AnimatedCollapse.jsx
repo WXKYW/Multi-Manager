@@ -5,7 +5,6 @@ const cx = (...classes) => classes.filter(Boolean).join(' ');
 const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
 
 const panelMotionClassName = [
-  'overflow-hidden',
   'transition-[height,opacity]',
   'duration-160',
   'ease-out',
@@ -53,6 +52,7 @@ export function AnimatedCollapse({
   const [displayChildren, setDisplayChildren] = useState(children);
   const [height, setHeight] = useState(open ? 'auto' : '0px');
   const [opacity, setOpacity] = useState(open ? 1 : 0);
+  const isFullyOpen = open && height === 'auto';
 
   latestChildrenRef.current = children;
 
@@ -135,7 +135,12 @@ export function AnimatedCollapse({
           ref={panelRef}
           keepMounted
           aria-hidden={!open}
-          className={cx(panelMotionClassName, panelClassName, prefersReducedMotion() ? 'opacity-100' : '')}
+          className={cx(
+            panelMotionClassName,
+            isFullyOpen ? 'overflow-visible' : 'overflow-hidden',
+            panelClassName,
+            prefersReducedMotion() ? 'opacity-100' : ''
+          )}
           style={{ height, opacity }}
           onTransitionEnd={handleTransitionEnd}
         >

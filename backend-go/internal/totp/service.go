@@ -379,6 +379,12 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.importCustomBrandIconFromURL(w, r)
+	case len(parts) == 3 && parts[0] == "icons" && parts[1] == "library":
+		if r.Method != http.MethodDelete {
+			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		s.deleteCustomBrandIcon(w, r, parts[2])
 	case len(parts) == 2 && parts[0] == "icons":
 		if r.Method != http.MethodGet {
 			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")

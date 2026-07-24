@@ -3,20 +3,21 @@ import jsQR from 'jsqr';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
+import { Banner } from '@cloudflare/kumo/components/banner';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
-import { LayerCard, Tabs } from '@cloudflare/kumo';
+import { DeleteResource, LayerCard, SensitiveInput, Tabs } from '@cloudflare/kumo';
 import useStore, { DEFAULT_TOTP_SETTINGS } from '../store.js';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
 import { buildTotpAccountPayload } from '../modules/totpPayload.js';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
 import BrandIcon, { BRAND_COLOR_FALLBACK, getIssuerColor } from '../components/ui/BrandIcon.jsx';
-import { AppCard, SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { AppCard, SectionCard, cx } from '../components/ui/AppPrimitives.jsx';
 import CodeEditor from '../components/ui/CodeEditor.jsx';
 import {
   Key,
@@ -31,14 +32,15 @@ import {
   Edit,
   X,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   RefreshCw,
   History,
   Shield,
-  Bot
+  Bot,
 } from '../components/Icons.jsx';
 
-const maskEmail = (email) => {
+const maskEmail = email => {
   if (!email) return '';
   if (!email.includes('@')) return email;
   const [local, domain] = email.split('@');
@@ -48,24 +50,25 @@ const maskEmail = (email) => {
 
 const GROUP_FILTER_ALL = '__all__';
 
-const isSVGRepoIcon = (icon) => typeof icon === 'string' && icon.startsWith('svgrepo:');
-const isCustomUploadedIcon = (icon) => typeof icon === 'string' && icon.startsWith('custom:');
-const SVG_REPO_ICON_REF_PATTERN = /(?:svgrepo:)?(?:https?:\/\/(?:www\.)?svgrepo\.com\/(?:show|download|svg)\/)?([0-9]{3,9})[-/:]([a-z0-9][a-z0-9-]{0,80})(?:\.svg)?/i;
+const isSVGRepoIcon = icon => typeof icon === 'string' && icon.startsWith('svgrepo:');
+const isCustomUploadedIcon = icon => typeof icon === 'string' && icon.startsWith('custom:');
+const SVG_REPO_ICON_REF_PATTERN =
+  /(?:svgrepo:)?(?:https?:\/\/(?:www\.)?svgrepo\.com\/(?:show|download|svg)\/)?([0-9]{3,9})[-/:]([a-z0-9][a-z0-9-]{0,80})(?:\.svg)?/i;
 const HEX_COLOR_PATTERN = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 
-const normalizeHexColor = (value) => {
+const normalizeHexColor = value => {
   const text = String(value || '').trim();
   if (!text) return '';
   const withHash = text.startsWith('#') ? text : `#${text}`;
   return HEX_COLOR_PATTERN.test(withHash) ? withHash.toLowerCase() : text;
 };
 
-const resolveFormColor = (form) => {
+const resolveFormColor = form => {
   const color = normalizeHexColor(form.color);
   return HEX_COLOR_PATTERN.test(color) ? color : getIssuerColor(form.issuer);
 };
 
-const normalizeSVGRepoIconRef = (value) => {
+const normalizeSVGRepoIconRef = value => {
   const text = String(value || '').trim();
   if (!text) return '';
   const match = text.match(SVG_REPO_ICON_REF_PATTERN);
@@ -73,7 +76,7 @@ const normalizeSVGRepoIconRef = (value) => {
   return `svgrepo:${match[1]}-${match[2].replace(/^-+|-+$/g, '').toLowerCase()}`;
 };
 
-const normalizeRemoteBrandIconURL = (value) => {
+const normalizeRemoteBrandIconURL = value => {
   const text = String(value || '').trim();
   if (!text) return '';
   try {
@@ -86,11 +89,12 @@ const normalizeRemoteBrandIconURL = (value) => {
 
 const TotpBrandMark = ({ issuer, icon, color, size = 'card' }) => {
   const isHeader = size === 'header';
+  const isPicker = size === 'picker';
   const markColor = color || getIssuerColor(issuer);
   const remoteIcon = isSVGRepoIcon(icon) || isCustomUploadedIcon(icon);
   return (
     <span
-      className={`app-totp-brand-mark ${remoteIcon ? 'app-totp-brand-mark--remote' : 'border border-kumo-line'} ${isHeader ? 'size-7 rounded-md text-[17px]' : 'size-7 rounded-md text-[18px]'} flex shrink-0 items-center justify-center`}
+      className={`app-totp-brand-mark ${remoteIcon ? 'app-totp-brand-mark--remote' : 'border border-kumo-line'} ${isPicker ? 'size-9 rounded-lg text-[22px]' : isHeader ? 'size-7 rounded-md text-[17px]' : 'size-7 rounded-md text-[18px]'} flex shrink-0 items-center justify-center`}
       style={{ background: remoteIcon ? 'transparent' : markColor, color: '#fff' }}
     >
       <BrandIcon issuer={issuer} icon={icon} color="inherit" />
@@ -98,14 +102,27 @@ const TotpBrandMark = ({ issuer, icon, color, size = 'card' }) => {
   );
 };
 
-const buildBrandStyleOptions = ({ issuer, icon, color, name, options: detectedOptions = [] } = {}) => {
+const buildBrandStyleOptions = ({
+  issuer,
+  icon,
+  color,
+  name,
+  options: detectedOptions = [],
+} = {}) => {
   const displayName = name || issuer || '品牌';
   const baseColor = color || getIssuerColor(issuer);
-  const firstLetter = String(displayName || issuer || '?').trim().slice(0, 1).toUpperCase() || '?';
+  const firstLetter =
+    String(displayName || issuer || '?')
+      .trim()
+      .slice(0, 1)
+      .toUpperCase() || '?';
   const options = [];
-  const repoOptions = Array.isArray(detectedOptions) && detectedOptions.length > 0
-    ? detectedOptions
-    : (icon ? [{ icon, color, name }] : []);
+  const repoOptions =
+    Array.isArray(detectedOptions) && detectedOptions.length > 0
+      ? detectedOptions
+      : icon
+        ? [{ icon, color, name }]
+        : [];
   repoOptions.forEach((item, index) => {
     options.push({
       id: `svgrepo-${index}-${item.icon || icon}`,
@@ -129,21 +146,32 @@ const buildBrandStyleOptions = ({ issuer, icon, color, name, options: detectedOp
       caption: firstLetter,
       icon: `letter:${firstLetter}`,
       color: baseColor,
-    },
+    }
   );
   return options;
 };
 
 const buildCustomBrandStyleOptions = ({ issuer, entries = [], fallbackColor = '' } = {}) => {
-  const issuerKey = String(issuer || '').trim().toLowerCase();
+  const issuerKey = String(issuer || '')
+    .trim()
+    .toLowerCase();
   const sorted = [...entries].sort((a, b) => {
-    const aMatched = issuerKey && String(a.issuer || '').trim().toLowerCase() === issuerKey;
-    const bMatched = issuerKey && String(b.issuer || '').trim().toLowerCase() === issuerKey;
+    const aMatched =
+      issuerKey &&
+      String(a.issuer || '')
+        .trim()
+        .toLowerCase() === issuerKey;
+    const bMatched =
+      issuerKey &&
+      String(b.issuer || '')
+        .trim()
+        .toLowerCase() === issuerKey;
     if (aMatched !== bMatched) return aMatched ? -1 : 1;
     return String(a.name || '').localeCompare(String(b.name || ''), 'zh-CN');
   });
-  return sorted.map((entry) => ({
+  return sorted.map(entry => ({
     id: `custom-${entry.id}`,
+    customId: entry.id,
     label: entry.name || entry.issuer || '自定义图标',
     caption: entry.issuer ? `图标库 / ${entry.issuer}` : '图标库',
     icon: entry.icon || (entry.id ? `custom:${entry.id}` : ''),
@@ -155,7 +183,7 @@ const buildCustomBrandStyleOptions = ({ issuer, entries = [], fallbackColor = ''
 const mergeBrandStyleOptions = (...groups) => {
   const seen = new Set();
   const merged = [];
-  groups.flat().forEach((option) => {
+  groups.flat().forEach(option => {
     if (!option) return;
     const key = option.icon || option.id;
     if (seen.has(key)) return;
@@ -167,7 +195,7 @@ const mergeBrandStyleOptions = (...groups) => {
 
 // ==================== TotpPage 组件 ====================
 function TotpPage() {
-  const triggerHaptic = useStore((state) => state.triggerHaptic);
+  const triggerHaptic = useStore(state => state.triggerHaptic);
   const [totpCurrentTab, setTotpCurrentTab] = useState('accounts');
   const [totpAccounts, setTotpAccounts] = useState([]);
   const [totpGroups, setTotpGroups] = useState([]);
@@ -200,7 +228,7 @@ function TotpPage() {
     color: '',
   });
   const [accountModalError, setAccountModalError] = useState('');
-  const [totpShowSecret, setTotpShowSecret] = useState(false);
+  const [showAdvancedAccountSettings, setShowAdvancedAccountSettings] = useState(false);
   const [importUris, setImportUris] = useState('');
   const [accountModalSaving, setAccountModalSaving] = useState(false);
   const [brandDetecting, setBrandDetecting] = useState(false);
@@ -209,6 +237,9 @@ function TotpPage() {
   const [customBrandIcons, setCustomBrandIcons] = useState([]);
   const [customBrandIconsLoading, setCustomBrandIconsLoading] = useState(false);
   const [customBrandIconUploading, setCustomBrandIconUploading] = useState(false);
+  const [deletingCustomBrandIconId, setDeletingCustomBrandIconId] = useState('');
+  const [pendingDeleteBrandIcon, setPendingDeleteBrandIcon] = useState(null);
+  const [deleteCustomBrandIconError, setDeleteCustomBrandIconError] = useState('');
   const [accountAddTab, setAccountAddTab] = useState('scan');
 
   // QR 扫码状态
@@ -218,6 +249,7 @@ function TotpPage() {
   const scannerRef = useRef(null);
   const fileInputRef = useRef(null);
   const brandUploadInputRef = useRef(null);
+  const editingAccountIdRef = useRef(null);
 
   // Group Modal 状态
   const [showGroupModal, setShowGroupModal] = useState(false);
@@ -244,7 +276,7 @@ function TotpPage() {
     return {};
   };
 
-  const cacheDetectedBrandIcon = async (item) => {
+  const cacheDetectedBrandIcon = async item => {
     const sourceUrl = item?.sourceUrl;
     const icon = item?.icon;
     if (!sourceUrl || !isSVGRepoIcon(icon)) return;
@@ -285,9 +317,9 @@ function TotpPage() {
         setTotpGroups(groupsData.data);
       }
       if (settingsData.success && settingsData.data?.totpSettings) {
-        setTotpSettings((prev) => ({ ...prev, ...settingsData.data.totpSettings }));
+        setTotpSettings(prev => ({ ...prev, ...settingsData.data.totpSettings }));
       }
-      
+
       // 首次加载验证码
       await refreshCodes();
     } catch (e) {
@@ -317,7 +349,7 @@ function TotpPage() {
   };
 
   // 持久化保存设置
-  const saveSettingsToServer = async (newSettings) => {
+  const saveSettingsToServer = async newSettings => {
     try {
       const headers = getAuthHeaders();
       await fetch('/api/settings', {
@@ -343,8 +375,16 @@ function TotpPage() {
   }, []);
 
   useEffect(() => {
+    if (!totpFilterGroup) return;
+    const exists = totpGroups.some(group => String(group.id) === String(totpFilterGroup));
+    if (!exists) {
+      setTotpFilterGroup('');
+    }
+  }, [totpFilterGroup, totpGroups]);
+
+  useEffect(() => {
     const timer = setInterval(() => {
-      setTotpCodes((prevCodes) => {
+      setTotpCodes(prevCodes => {
         const updated = {};
         let needRefresh = false;
         let changed = false;
@@ -361,7 +401,7 @@ function TotpPage() {
             updated[id] = item;
           }
         }
-        
+
         if (needRefresh) {
           Promise.resolve().then(() => {
             refreshCodes();
@@ -378,14 +418,13 @@ function TotpPage() {
   const filteredAccounts = useMemo(() => {
     let list = [...totpAccounts];
     if (totpFilterGroup) {
-      list = list.filter((a) => String(a.group_id) === String(totpFilterGroup));
+      list = list.filter(a => String(a.group_id) === String(totpFilterGroup));
     }
     if (totpSearchQuery.trim()) {
       const q = totpSearchQuery.toLowerCase();
       list = list.filter(
-        (a) =>
-          (a.issuer || '').toLowerCase().includes(q) ||
-          (a.account || '').toLowerCase().includes(q)
+        a =>
+          (a.issuer || '').toLowerCase().includes(q) || (a.account || '').toLowerCase().includes(q)
       );
     }
 
@@ -397,7 +436,7 @@ function TotpPage() {
 
   const platformCounts = useMemo(() => {
     const counts = {};
-    totpAccounts.forEach((a) => {
+    totpAccounts.forEach(a => {
       const key = (a.issuer || '').toLowerCase();
       counts[key] = (counts[key] || 0) + 1;
     });
@@ -406,7 +445,7 @@ function TotpPage() {
 
   const groupAccountCounts = useMemo(() => {
     const counts = {};
-    totpAccounts.forEach((a) => {
+    totpAccounts.forEach(a => {
       if (a.group_id) {
         counts[a.group_id] = (counts[a.group_id] || 0) + 1;
       }
@@ -414,19 +453,21 @@ function TotpPage() {
     return counts;
   }, [totpAccounts]);
 
-  const groupFilterTabs = useMemo(() => [
-    { value: GROUP_FILTER_ALL, label: '总' },
-    ...totpGroups.map((group) => ({
-      value: String(group.id),
-      label: group.name,
-    })),
-  ], [totpGroups]);
+  const groupFilterTabs = useMemo(
+    () => [
+      { value: GROUP_FILTER_ALL, label: '总' },
+      ...totpGroups.map(group => ({
+        value: String(group.id),
+        label: group.name,
+      })),
+    ],
+    [totpGroups]
+  );
+  const hasGroupTabs = totpGroups.length > 0;
 
   // ==================== 账号编辑与删除 ====================
   const handleOpenAddAccount = () => {
-    const defaultMode = totpSettings.lockInputMode
-      ? totpSettings.defaultInputMode
-      : 'scan';
+    const defaultMode = totpSettings.lockInputMode ? totpSettings.defaultInputMode : 'scan';
 
     setAccountAddTab(defaultMode === 'manual' ? 'manual' : 'scan');
     setAccountForm({
@@ -443,8 +484,9 @@ function TotpPage() {
       color: '',
     });
     setAccountModalMode('add');
+    editingAccountIdRef.current = null;
     setAccountModalError('');
-    setTotpShowSecret(false);
+    setShowAdvancedAccountSettings(false);
     setImportUris('');
     setQrError('');
     setBrandStyleOptions([]);
@@ -452,10 +494,29 @@ function TotpPage() {
     setShowAccountModal(true);
   };
 
-  const handleOpenEditAccount = async (account) => {
+  const loadAccountSecret = useCallback(async accountId => {
+    try {
+      const res = await fetch(`/api/totp/accounts/${accountId}?showSecret=true`, {
+        headers: getAuthHeaders(),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.data?.secret) {
+        throw new Error(data.error || '获取密钥失败');
+      }
+      setAccountForm(prev =>
+        editingAccountIdRef.current === accountId ? { ...prev, secret: data.data.secret } : prev
+      );
+    } catch (error) {
+      console.error(error);
+      toast.error(error.message || '获取密钥失败');
+    }
+  }, []);
+
+  const handleOpenEditAccount = async account => {
     setAccountModalMode('edit');
     setAccountAddTab('manual');
     setEditingAccountId(account.id);
+    editingAccountIdRef.current = account.id;
     setAccountForm({
       otp_type: account.otp_type || 'totp',
       issuer: account.issuer || '',
@@ -470,10 +531,11 @@ function TotpPage() {
       color: account.color || '',
     });
     setAccountModalError('');
-    setTotpShowSecret(false);
+    setShowAdvancedAccountSettings(false);
     setBrandStyleOptions([]);
     setCustomBrandIcons([]);
     setShowAccountModal(true);
+    void loadAccountSecret(account.id);
   };
 
   const loadCustomBrandIcons = useCallback(async () => {
@@ -495,92 +557,115 @@ function TotpPage() {
     }
   }, []);
 
-  const uploadCustomBrandIconAsset = useCallback(async (file, fallbackName = '') => {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('name', String(accountForm.issuer || fallbackName || file.name || '自定义图标').trim());
-    formData.append('issuer', String(accountForm.issuer || '').trim());
-    formData.append('color', normalizeHexColor(accountForm.color) || resolveFormColor(accountForm));
-    const res = await fetch('/api/totp/icons/library', {
-      method: 'POST',
-      headers: getAuthOnlyHeaders(),
-      body: formData,
-    });
-    const data = await res.json();
-    if (!res.ok || !data.success) {
-      throw new Error(data.error || '上传图标失败');
-    }
-    const uploaded = data.data || {};
-    const nextIcon = uploaded.icon || (uploaded.id ? `custom:${uploaded.id}` : '');
-    setAccountForm((prev) => ({
-      ...prev,
-      icon: nextIcon,
-      color: uploaded.color || prev.color,
-    }));
-    const nextLibrary = await loadCustomBrandIcons();
-    const customOptions = buildCustomBrandStyleOptions({
-      issuer: accountForm.issuer,
-      entries: nextLibrary,
-      fallbackColor: resolveFormColor(accountForm),
-    });
-    setBrandStyleOptions((prev) => mergeBrandStyleOptions(customOptions, prev));
-    setShowBrandStyleModal(true);
-    return uploaded;
-  }, [accountForm.color, accountForm.issuer, loadCustomBrandIcons]);
+  const uploadCustomBrandIconAsset = useCallback(
+    async (file, fallbackName = '') => {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append(
+        'name',
+        String(accountForm.issuer || fallbackName || file.name || '自定义图标').trim()
+      );
+      formData.append('issuer', String(accountForm.issuer || '').trim());
+      formData.append(
+        'color',
+        normalizeHexColor(accountForm.color) || resolveFormColor(accountForm)
+      );
+      const res = await fetch('/api/totp/icons/library', {
+        method: 'POST',
+        headers: getAuthOnlyHeaders(),
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || '上传图标失败');
+      }
+      const uploaded = data.data || {};
+      const nextIcon = uploaded.icon || (uploaded.id ? `custom:${uploaded.id}` : '');
+      setAccountForm(prev => ({
+        ...prev,
+        icon: nextIcon,
+        color: uploaded.color || prev.color,
+      }));
+      const nextLibrary = await loadCustomBrandIcons();
+      const customOptions = buildCustomBrandStyleOptions({
+        issuer: accountForm.issuer,
+        entries: nextLibrary,
+        fallbackColor: resolveFormColor(accountForm),
+      });
+      setBrandStyleOptions(prev => mergeBrandStyleOptions(customOptions, prev));
+      setShowBrandStyleModal(true);
+      return uploaded;
+    },
+    [accountForm.color, accountForm.issuer, loadCustomBrandIcons]
+  );
 
-  const importCustomBrandIconFromURL = useCallback(async (sourceURL) => {
-    const normalizedURL = normalizeRemoteBrandIconURL(sourceURL);
-    if (!normalizedURL) {
-      throw new Error('请粘贴有效的 http/https 图片链接');
-    }
-    const res = await fetch('/api/totp/icons/library/import-url', {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({
-        url: normalizedURL,
-        name: String(accountForm.issuer || '').trim(),
-        issuer: String(accountForm.issuer || '').trim(),
-        color: normalizeHexColor(accountForm.color) || resolveFormColor(accountForm),
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok || !data.success) {
-      throw new Error(data.error || '下载图标失败');
-    }
-    const uploaded = data.data || {};
-    const nextIcon = uploaded.icon || (uploaded.id ? `custom:${uploaded.id}` : '');
-    setAccountForm((prev) => ({
-      ...prev,
-      icon: nextIcon,
-      color: uploaded.color || prev.color,
-    }));
-    const nextLibrary = await loadCustomBrandIcons();
-    const customOptions = buildCustomBrandStyleOptions({
-      issuer: accountForm.issuer,
-      entries: nextLibrary,
-      fallbackColor: resolveFormColor(accountForm),
-    });
-    setBrandStyleOptions((prev) => mergeBrandStyleOptions(customOptions, prev));
-    setShowBrandStyleModal(true);
-    return uploaded;
-  }, [accountForm.color, accountForm.issuer, loadCustomBrandIcons]);
+  const importCustomBrandIconFromURL = useCallback(
+    async sourceURL => {
+      const normalizedURL = normalizeRemoteBrandIconURL(sourceURL);
+      if (!normalizedURL) {
+        throw new Error('请粘贴有效的 http/https 图片链接');
+      }
+      const res = await fetch('/api/totp/icons/library/import-url', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          url: normalizedURL,
+          name: String(accountForm.issuer || '').trim(),
+          issuer: String(accountForm.issuer || '').trim(),
+          color: normalizeHexColor(accountForm.color) || resolveFormColor(accountForm),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || '下载图标失败');
+      }
+      const uploaded = data.data || {};
+      const nextIcon = uploaded.icon || (uploaded.id ? `custom:${uploaded.id}` : '');
+      setAccountForm(prev => ({
+        ...prev,
+        icon: nextIcon,
+        color: uploaded.color || prev.color,
+      }));
+      const nextLibrary = await loadCustomBrandIcons();
+      const customOptions = buildCustomBrandStyleOptions({
+        issuer: accountForm.issuer,
+        entries: nextLibrary,
+        fallbackColor: resolveFormColor(accountForm),
+      });
+      setBrandStyleOptions(prev => mergeBrandStyleOptions(customOptions, prev));
+      setShowBrandStyleModal(true);
+      return uploaded;
+    },
+    [accountForm.color, accountForm.issuer, loadCustomBrandIcons]
+  );
 
-  const openBrandStylePicker = useCallback(async (baseOptions = null) => {
-    const fallbackOptions = baseOptions || buildBrandStyleOptions({
-      issuer: accountForm.issuer,
-      icon: accountForm.icon,
-      color: resolveFormColor(accountForm),
-      name: accountForm.issuer || accountForm.account || '品牌',
-    });
-    const library = await loadCustomBrandIcons();
-    const customOptions = buildCustomBrandStyleOptions({
-      issuer: accountForm.issuer,
-      entries: library,
-      fallbackColor: resolveFormColor(accountForm),
-    });
-    setBrandStyleOptions(mergeBrandStyleOptions(customOptions, fallbackOptions));
-    setShowBrandStyleModal(true);
-  }, [accountForm.account, accountForm.icon, accountForm.issuer, accountForm.color, loadCustomBrandIcons]);
+  const openBrandStylePicker = useCallback(
+    async (baseOptions = null) => {
+      const fallbackOptions =
+        baseOptions ||
+        buildBrandStyleOptions({
+          issuer: accountForm.issuer,
+          icon: accountForm.icon,
+          color: resolveFormColor(accountForm),
+          name: accountForm.issuer || accountForm.account || '品牌',
+        });
+      const library = await loadCustomBrandIcons();
+      const customOptions = buildCustomBrandStyleOptions({
+        issuer: accountForm.issuer,
+        entries: library,
+        fallbackColor: resolveFormColor(accountForm),
+      });
+      setBrandStyleOptions(mergeBrandStyleOptions(customOptions, fallbackOptions));
+      setShowBrandStyleModal(true);
+    },
+    [
+      accountForm.account,
+      accountForm.icon,
+      accountForm.issuer,
+      accountForm.color,
+      loadCustomBrandIcons,
+    ]
+  );
 
   const detectAccountBrandIcon = async () => {
     setBrandDetecting(true);
@@ -599,12 +684,14 @@ function TotpPage() {
         throw new Error(data.error || '检测失败');
       }
       if (!data.data?.matched) {
-        await openBrandStylePicker(buildBrandStyleOptions({
-          issuer: accountForm.issuer,
-          icon: accountForm.icon,
-          color: resolveFormColor(accountForm),
-          name: accountForm.issuer || accountForm.account || '品牌',
-        }));
+        await openBrandStylePicker(
+          buildBrandStyleOptions({
+            issuer: accountForm.issuer,
+            icon: accountForm.icon,
+            color: resolveFormColor(accountForm),
+            name: accountForm.issuer || accountForm.account || '品牌',
+          })
+        );
         toast.info(data.data?.message || '未检测到远程图标，已提供系统图标样式');
         return;
       }
@@ -615,8 +702,11 @@ function TotpPage() {
         name: data.data.name,
         options: data.data.options,
       });
-      const detectedItems = [data.data, ...(Array.isArray(data.data.options) ? data.data.options : [])];
-      detectedItems.forEach((item) => {
+      const detectedItems = [
+        data.data,
+        ...(Array.isArray(data.data.options) ? data.data.options : []),
+      ];
+      detectedItems.forEach(item => {
         cacheDetectedBrandIcon(item);
       });
       await openBrandStylePicker(baseOptions);
@@ -627,7 +717,7 @@ function TotpPage() {
     }
   };
 
-  const handleCustomBrandIconUpload = async (event) => {
+  const handleCustomBrandIconUpload = async event => {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
@@ -648,27 +738,33 @@ function TotpPage() {
       if (item.kind === 'file') {
         const file = item.getAsFile?.();
         if (file) {
-          const ext = file.type === 'image/svg+xml'
-            ? 'svg'
-            : file.type === 'image/png'
-              ? 'png'
-              : file.type === 'image/jpeg'
-                ? 'jpg'
-                : file.type === 'image/webp'
-                  ? 'webp'
-                  : file.type === 'image/gif'
-                    ? 'gif'
-                    : 'png';
+          const ext =
+            file.type === 'image/svg+xml'
+              ? 'svg'
+              : file.type === 'image/png'
+                ? 'png'
+                : file.type === 'image/jpeg'
+                  ? 'jpg'
+                  : file.type === 'image/webp'
+                    ? 'webp'
+                    : file.type === 'image/gif'
+                      ? 'gif'
+                      : 'png';
           return {
             type: 'file',
-            value: new File([file], file.name || `clipboard-icon.${ext}`, { type: file.type || 'image/png' }),
+            value: new File([file], file.name || `clipboard-icon.${ext}`, {
+              type: file.type || 'image/png',
+            }),
           };
         }
       }
       if (item.kind === 'string' && item.type === 'text/plain') {
-        const text = await new Promise((resolve) => item.getAsString(resolve));
+        const text = await new Promise(resolve => item.getAsString(resolve));
         if (typeof text === 'string' && text.toLowerCase().includes('<svg')) {
-          return { type: 'file', value: new File([text], 'clipboard-icon.svg', { type: 'image/svg+xml' }) };
+          return {
+            type: 'file',
+            value: new File([text], 'clipboard-icon.svg', { type: 'image/svg+xml' }),
+          };
         }
         const sourceURL = normalizeRemoteBrandIconURL(text);
         if (sourceURL) {
@@ -679,29 +775,36 @@ function TotpPage() {
     return null;
   }, []);
 
-  const handleBrandLibraryPaste = useCallback(async (event) => {
-    const items = Array.from(event.clipboardData?.items || []);
-    if (items.length === 0) return;
-    event.preventDefault();
-    setCustomBrandIconUploading(true);
-    try {
-      const asset = await uploadCustomBrandIconFromClipboardItems(items);
-      if (!asset) {
-        throw new Error('剪贴板里没有可用的图片、SVG 图标或图片链接');
+  const handleBrandLibraryPaste = useCallback(
+    async event => {
+      const items = Array.from(event.clipboardData?.items || []);
+      if (items.length === 0) return;
+      event.preventDefault();
+      setCustomBrandIconUploading(true);
+      try {
+        const asset = await uploadCustomBrandIconFromClipboardItems(items);
+        if (!asset) {
+          throw new Error('剪贴板里没有可用的图片、SVG 图标或图片链接');
+        }
+        if (asset.type === 'url') {
+          await importCustomBrandIconFromURL(asset.value);
+          toast.success('已从链接下载并应用图标');
+        } else {
+          await uploadCustomBrandIconAsset(asset.value, 'clipboard-icon');
+          toast.success('已从剪贴板粘贴并应用图标');
+        }
+      } catch (error) {
+        toast.error(error.message || '粘贴图标失败');
+      } finally {
+        setCustomBrandIconUploading(false);
       }
-      if (asset.type === 'url') {
-        await importCustomBrandIconFromURL(asset.value);
-        toast.success('已从链接下载并应用图标');
-      } else {
-        await uploadCustomBrandIconAsset(asset.value, 'clipboard-icon');
-        toast.success('已从剪贴板粘贴并应用图标');
-      }
-    } catch (error) {
-      toast.error(error.message || '粘贴图标失败');
-    } finally {
-      setCustomBrandIconUploading(false);
-    }
-  }, [importCustomBrandIconFromURL, uploadCustomBrandIconAsset, uploadCustomBrandIconFromClipboardItems]);
+    },
+    [
+      importCustomBrandIconFromURL,
+      uploadCustomBrandIconAsset,
+      uploadCustomBrandIconFromClipboardItems,
+    ]
+  );
 
   const handlePasteBrandIconFromClipboard = useCallback(async () => {
     if (!navigator.clipboard?.read) {
@@ -715,18 +818,21 @@ function TotpPage() {
       let clipboardText = '';
       for (const clipboardItem of clipboardItems) {
         const types = clipboardItem.types || [];
-        const imageType = types.find((type) => ['image/svg+xml', 'image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(type));
+        const imageType = types.find(type =>
+          ['image/svg+xml', 'image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(type)
+        );
         if (imageType) {
           const blob = await clipboardItem.getType(imageType);
-          const ext = imageType === 'image/svg+xml'
-            ? 'svg'
-            : imageType === 'image/png'
-              ? 'png'
-              : imageType === 'image/jpeg'
-                ? 'jpg'
-                : imageType === 'image/webp'
-                  ? 'webp'
-                  : 'gif';
+          const ext =
+            imageType === 'image/svg+xml'
+              ? 'svg'
+              : imageType === 'image/png'
+                ? 'png'
+                : imageType === 'image/jpeg'
+                  ? 'jpg'
+                  : imageType === 'image/webp'
+                    ? 'webp'
+                    : 'gif';
           const file = new File([blob], `clipboard-icon.${ext}`, { type: imageType });
           await uploadCustomBrandIconAsset(file, 'clipboard-icon');
           uploaded = true;
@@ -762,8 +868,8 @@ function TotpPage() {
     }
   }, [importCustomBrandIconFromURL, uploadCustomBrandIconAsset]);
 
-  const applyBrandStyleOption = (option) => {
-    setAccountForm((prev) => ({
+  const applyBrandStyleOption = option => {
+    setAccountForm(prev => ({
       ...prev,
       icon: option.icon || '',
       color: option.color || prev.color,
@@ -772,24 +878,41 @@ function TotpPage() {
     toast.success(`已选择${option.label}`);
   };
 
-  const toggleSecretVisibility = async () => {
-    if (!totpShowSecret && accountModalMode === 'edit' && accountForm.secret.includes('•••')) {
-      try {
-        const res = await fetch(`/api/totp/accounts/${editingAccountId}?showSecret=true`, {
-          headers: getAuthHeaders(),
-        });
-        const data = await res.json();
-        if (data.success && data.data.secret) {
-          setAccountForm((prev) => ({ ...prev, secret: data.data.secret }));
-        } else {
-          toast.error('获取密钥失败');
-        }
-      } catch (e) {
-        console.error(e);
-        toast.error('获取密钥失败');
+  const requestDeleteCustomBrandIcon = option => {
+    if (!option?.customId) return;
+    setDeleteCustomBrandIconError('');
+    setPendingDeleteBrandIcon(option);
+  };
+
+  const deleteCustomBrandIcon = async () => {
+    const option = pendingDeleteBrandIcon;
+    if (!option?.customId) return;
+    setDeletingCustomBrandIconId(option.customId);
+    setDeleteCustomBrandIconError('');
+    try {
+      const res = await fetch(`/api/totp/icons/library/${encodeURIComponent(option.customId)}`, {
+        method: 'DELETE',
+        headers: getAuthOnlyHeaders(),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || '删除图标失败');
       }
+      setCustomBrandIcons(prev => prev.filter(item => item.id !== option.customId));
+      setBrandStyleOptions(prev => prev.filter(item => item.customId !== option.customId));
+      setTotpAccounts(prev =>
+        prev.map(account => (account.icon === option.icon ? { ...account, icon: '' } : account))
+      );
+      setAccountForm(prev => (prev.icon === option.icon ? { ...prev, icon: '' } : prev));
+      setPendingDeleteBrandIcon(null);
+      toast.success('自定义图标已删除');
+    } catch (error) {
+      const message = error.message || '删除图标失败';
+      setDeleteCustomBrandIconError(message);
+      throw error;
+    } finally {
+      setDeletingCustomBrandIconId('');
     }
-    setTotpShowSecret(!totpShowSecret);
   };
 
   const handleSaveAccount = async () => {
@@ -837,7 +960,7 @@ function TotpPage() {
     }
   };
 
-  const handleDeleteAccount = async (account) => {
+  const handleDeleteAccount = async account => {
     if (!(await dialog.confirm(`确定要删除 "${account.issuer}" 的账号吗？`))) {
       return;
     }
@@ -860,7 +983,7 @@ function TotpPage() {
     }
   };
 
-  const incrementHotp = async (account) => {
+  const incrementHotp = async account => {
     try {
       const res = await fetch(`/api/totp/accounts/${account.id}/increment`, {
         method: 'POST',
@@ -868,7 +991,7 @@ function TotpPage() {
       });
       const data = await res.json();
       if (data.success) {
-        setTotpCodes((prev) => ({
+        setTotpCodes(prev => ({
           ...prev,
           [account.id]: {
             ...prev[account.id],
@@ -890,7 +1013,11 @@ function TotpPage() {
       toast.error('扫码库加载失败');
       return;
     }
-    if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+    if (
+      !window.isSecureContext &&
+      location.hostname !== 'localhost' &&
+      location.hostname !== '127.0.0.1'
+    ) {
       setQrError('摄像头功能仅支持 HTTPS 环境。如果是移动端访问，请确认服务器域名已开启 SSL。');
       toast.warning('环境不受支持');
       return;
@@ -905,26 +1032,32 @@ function TotpPage() {
           video: { facingMode: { ideal: 'environment' } },
         });
         if (stream && stream.getTracks) {
-          stream.getTracks().forEach((track) => track.stop());
+          stream.getTracks().forEach(track => track.stop());
         }
       } catch (permErr) {
-        console.warn('Initial getUserMedia with environment facingMode failed, retrying with simple video constraint', permErr);
+        console.warn(
+          'Initial getUserMedia with environment facingMode failed, retrying with simple video constraint',
+          permErr
+        );
         try {
           const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true });
           if (fallbackStream && fallbackStream.getTracks) {
-            fallbackStream.getTracks().forEach((track) => track.stop());
+            fallbackStream.getTracks().forEach(track => track.stop());
           }
         } catch (permErr2) {
           console.error('Camera permission request denied', permErr2);
           let friendlyMsg = '未获得摄像头访问权限';
           if (permErr2.name === 'NotAllowedError' || permErr2.name === 'PermissionDeniedError') {
-            friendlyMsg = '未获得摄像头访问权限，请在手机系统或浏览器地址栏安全图标中开启摄像头权限';
+            friendlyMsg =
+              '未获得摄像头访问权限，请在手机系统或浏览器地址栏安全图标中开启摄像头权限';
           } else if (permErr2.name === 'NotFoundError') {
             friendlyMsg = '未发现可用的摄像头';
           } else if (permErr2.name === 'NotReadableError') {
             friendlyMsg = '摄像头已被其他应用占用';
           }
-          setQrError(`${friendlyMsg} (${permErr2.message || permErr2.name || 'Permission denied'})`);
+          setQrError(
+            `${friendlyMsg} (${permErr2.message || permErr2.name || 'Permission denied'})`
+          );
           toast.error(friendlyMsg);
           return;
         }
@@ -940,10 +1073,11 @@ function TotpPage() {
 
         const config = {
           fps: 15,
+          aspectRatio: 1,
           qrbox: { width: 250, height: 250 },
         };
 
-        const successCallback = async (decodedText) => {
+        const successCallback = async decodedText => {
           if (decodedText.startsWith('otpauth://')) {
             triggerHaptic('success');
             await stopQrScan();
@@ -951,7 +1085,7 @@ function TotpPage() {
             if (totpSettings.autoSave) {
               await importUrisDirectly(decodedText);
             } else {
-              setImportUris((prev) => (prev ? prev + '\n' + decodedText : decodedText));
+              setImportUris(prev => (prev ? prev + '\n' + decodedText : decodedText));
               toast.success('扫码成功');
             }
           }
@@ -995,7 +1129,7 @@ function TotpPage() {
     setIsScanning(false);
   };
 
-  const parseQrImage = async (blob) => {
+  const parseQrImage = async blob => {
     try {
       setQrParsing(true);
       setQrError('');
@@ -1022,7 +1156,7 @@ function TotpPage() {
         if (totpSettings.autoSave) {
           await importUrisDirectly(uri);
         } else {
-          setImportUris((prev) => (prev ? prev + '\n' + uri : uri));
+          setImportUris(prev => (prev ? prev + '\n' + uri : uri));
           toast.success('二维码解析成功');
         }
       } else {
@@ -1037,7 +1171,7 @@ function TotpPage() {
     }
   };
 
-  const handleQrPaste = async (e) => {
+  const handleQrPaste = async e => {
     const items = e.clipboardData?.items;
     if (!items) return;
 
@@ -1051,18 +1185,18 @@ function TotpPage() {
     }
   };
 
-  const handleQrUpload = async (e) => {
+  const handleQrUpload = async e => {
     const file = e.target.files?.[0];
     if (!file) return;
     await parseQrImage(file);
     e.target.value = ''; // Reset input
   };
 
-  const importUrisDirectly = async (urisText) => {
+  const importUrisDirectly = async urisText => {
     const uris = urisText
       .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.startsWith('otpauth://'));
+      .map(line => line.trim())
+      .filter(line => line.startsWith('otpauth://'));
     const backupPayload = uris.length === 0 ? urisText.trim() : '';
 
     if (uris.length === 0 && !backupPayload) {
@@ -1115,7 +1249,7 @@ function TotpPage() {
     setShowGroupModal(true);
   };
 
-  const handleOpenEditGroup = (group) => {
+  const handleOpenEditGroup = group => {
     setGroupModalMode('edit');
     setEditingGroupId(group.id);
     setGroupForm({ name: group.name, color: group.color || BRAND_COLOR_FALLBACK });
@@ -1130,9 +1264,7 @@ function TotpPage() {
 
     try {
       const url =
-        groupModalMode === 'add'
-          ? '/api/totp/groups'
-          : `/api/totp/groups/${editingGroupId}`;
+        groupModalMode === 'add' ? '/api/totp/groups' : `/api/totp/groups/${editingGroupId}`;
 
       const res = await fetch(url, {
         method: groupModalMode === 'add' ? 'POST' : 'PUT',
@@ -1154,7 +1286,7 @@ function TotpPage() {
     }
   };
 
-  const handleDeleteGroup = async (group) => {
+  const handleDeleteGroup = async group => {
     if (!(await dialog.confirm(`确定要删除分组 "${group.name}" 吗？分组内的账号不会被删除。`))) {
       return;
     }
@@ -1215,7 +1347,7 @@ function TotpPage() {
     }
   };
 
-  const copyCodeToClipboard = async (account) => {
+  const copyCodeToClipboard = async account => {
     const code = totpCodes[account.id]?.code;
     if (!code) return;
 
@@ -1252,7 +1384,7 @@ function TotpPage() {
   const formatTotpCode = (account, code) => {
     const digits = account.digits || 6;
     const isRevealed = revealedCodes[account.id] || false;
-    
+
     if (totpSettings.hideCode && !isRevealed) {
       if (digits === 8) return '•••• ••••';
       return '••• •••';
@@ -1262,7 +1394,7 @@ function TotpPage() {
       if (digits === 8) return '0000 0000';
       return '000 000';
     }
-    
+
     const cleanCode = code.replace(/\s/g, '');
     if (cleanCode.length === 6) {
       return cleanCode.slice(0, 3) + ' ' + cleanCode.slice(3);
@@ -1279,15 +1411,15 @@ function TotpPage() {
     return parts.length > 1 ? parts : [formatted];
   };
 
-  const handleCardMouseEnter = (accountId) => {
+  const handleCardMouseEnter = accountId => {
     if (totpSettings.allowRevealCode) {
-      setRevealedCodes((prev) => ({ ...prev, [accountId]: true }));
+      setRevealedCodes(prev => ({ ...prev, [accountId]: true }));
     }
   };
 
-  const handleCardMouseLeave = (accountId) => {
+  const handleCardMouseLeave = accountId => {
     if (totpSettings.allowRevealCode) {
-      setRevealedCodes((prev) => ({ ...prev, [accountId]: false }));
+      setRevealedCodes(prev => ({ ...prev, [accountId]: false }));
     }
   };
 
@@ -1300,48 +1432,84 @@ function TotpPage() {
           value={totpCurrentTab}
           onValueChange={setTotpCurrentTab}
           tabs={[
-            { value: 'accounts', label: <span className="inline-flex items-center gap-1.5"><Key className="w-3.5 h-3.5" />验证码</span> },
-            { value: 'groups', label: <span className="inline-flex items-center gap-1.5"><FolderOpen className="w-3.5 h-3.5" />分组</span> },
-            { value: 'settings', label: <span className="inline-flex items-center gap-1.5"><Settings className="w-3.5 h-3.5" />设置</span> },
+            {
+              value: 'accounts',
+              label: (
+                <span className="inline-flex items-center gap-1.5">
+                  <Key className="w-3.5 h-3.5" />
+                  验证码
+                </span>
+              ),
+            },
+            {
+              value: 'groups',
+              label: (
+                <span className="inline-flex items-center gap-1.5">
+                  <FolderOpen className="w-3.5 h-3.5" />
+                  分组
+                </span>
+              ),
+            },
+            {
+              value: 'settings',
+              label: (
+                <span className="inline-flex items-center gap-1.5">
+                  <Settings className="w-3.5 h-3.5" />
+                  设置
+                </span>
+              ),
+            },
           ]}
         />
 
         {totpCurrentTab === 'accounts' && (
           <div className="flex w-full min-w-0 flex-wrap items-center gap-2 md:w-auto md:flex-1 md:justify-end">
-            <Tabs
-              {...TOOL_TABS_PROPS}
-              value={totpFilterGroup || GROUP_FILTER_ALL}
-              onValueChange={(value) => {
-                const nextValue = String(value);
-                setTotpFilterGroup(nextValue === GROUP_FILTER_ALL ? '' : nextValue);
-              }}
-              tabs={groupFilterTabs}
-              className="min-w-0 max-w-full flex-1 md:flex-none"
-              listClassName="max-w-full overflow-x-auto"
-            />
+            {hasGroupTabs && (
+              <Tabs
+                {...TOOL_TABS_PROPS}
+                value={totpFilterGroup || GROUP_FILTER_ALL}
+                onValueChange={value => {
+                  const nextValue = String(value);
+                  setTotpFilterGroup(nextValue === GROUP_FILTER_ALL ? '' : nextValue);
+                }}
+                tabs={groupFilterTabs}
+                className="min-w-0 max-w-full flex-1 md:flex-none"
+              />
+            )}
 
             <div className="relative min-w-40 flex-1 md:max-w-48">
               <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-kumo-subtle">
                 <Search className="w-3.5 h-3.5" />
               </span>
-              <Input size="sm"
+              <Input
+                size="sm"
                 aria-label="搜索 TOTP 账号"
                 type="text"
                 placeholder="搜索账号..."
                 value={totpSearchQuery}
-                onChange={(e) => setTotpSearchQuery(e.target.value)}
+                onChange={e => setTotpSearchQuery(e.target.value)}
                 className="w-full text-kumo-strong text-xs pl-8 pr-3 py-1.5"
               />
             </div>
 
-            <Button size="sm" variant="primary" icon={<Plus className="w-4 h-4" />} onClick={handleOpenAddAccount}>
+            <Button
+              size="sm"
+              variant="primary"
+              icon={<Plus className="w-4 h-4" />}
+              onClick={handleOpenAddAccount}
+            >
               添加账号
             </Button>
           </div>
         )}
 
         {totpCurrentTab === 'groups' && (
-          <Button size="sm" variant="primary" icon={<Plus className="w-4 h-4" />} onClick={handleOpenAddGroup}>
+          <Button
+            size="sm"
+            variant="primary"
+            icon={<Plus className="w-4 h-4" />}
+            onClick={handleOpenAddGroup}
+          >
             新建分组
           </Button>
         )}
@@ -1394,7 +1562,7 @@ function TotpPage() {
                 const period = account.period || 30;
                 const ratio = Math.max(0, Math.min(100, (remaining / period) * 100));
                 const codeParts = getTotpCodeParts(account, codeDetail.code);
-                
+
                 // Show platform header if settings enable it
                 const showHeader =
                   totpSettings.groupByPlatform &&
@@ -1407,7 +1575,11 @@ function TotpPage() {
                       <div className="col-span-full mt-2 flex items-center justify-between border-b border-kumo-line pb-1.5">
                         {!totpSettings.hidePlatformText ? (
                           <div className="flex items-center gap-2">
-                            <TotpBrandMark issuer={account.issuer} icon={account.icon} size="header" />
+                            <TotpBrandMark
+                              issuer={account.issuer}
+                              icon={account.icon}
+                              size="header"
+                            />
                             <span className="text-xs font-semibold text-kumo-strong">
                               {account.issuer || '未知平台'}
                             </span>
@@ -1417,7 +1589,10 @@ function TotpPage() {
                           </div>
                         ) : (
                           <div className="flex items-center gap-1.5">
-                            <span className="size-2.5 rounded-full" style={{ background: getIssuerColor(account.issuer) }} />
+                            <span
+                              className="size-2.5 rounded-full"
+                              style={{ background: getIssuerColor(account.issuer) }}
+                            />
                             <span className="text-[10px] text-kumo-subtle font-medium">
                               {platformCounts[(account.issuer || '').toLowerCase()]} 个账号
                             </span>
@@ -1433,19 +1608,28 @@ function TotpPage() {
                       className="group/card relative grid min-h-[96px] min-w-0 cursor-pointer grid-rows-[auto_1fr_auto] overflow-hidden p-0 transition-colors hover:border-kumo-brand sm:min-h-[112px]"
                     >
                       <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5 border-b border-kumo-line bg-kumo-recessed/35 px-2 py-1.5 sm:gap-2 sm:px-3 sm:py-2">
-                        <TotpBrandMark issuer={account.issuer} icon={account.icon} color={issuerColor} />
+                        <TotpBrandMark
+                          issuer={account.issuer}
+                          icon={account.icon}
+                          color={issuerColor}
+                        />
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-[10px] font-semibold leading-tight text-kumo-strong sm:text-[11px]">{account.issuer || '未知平台'}</div>
+                          <div className="truncate text-[10px] font-semibold leading-tight text-kumo-strong sm:text-[11px]">
+                            {account.issuer || '未知平台'}
+                          </div>
                           <div className="mt-0.5 truncate pb-px text-[9px] leading-tight text-kumo-subtle sm:mt-0.5 sm:text-[10px]">
-                            {totpSettings.maskAccount ? maskEmail(account.account) : account.account}
+                            {totpSettings.maskAccount
+                              ? maskEmail(account.account)
+                              : account.account}
                           </div>
                         </div>
                         <div className="flex shrink-0 items-center gap-1 opacity-65 transition-opacity group-hover/card:opacity-100">
                           <Button
-                            shape="square" size="sm"
+                            shape="square"
+                            size="sm"
                             variant="secondary"
                             aria-label="编辑账号"
-                            onClick={(e) => {
+                            onClick={e => {
                               e.stopPropagation();
                               handleOpenEditAccount(account);
                             }}
@@ -1455,10 +1639,11 @@ function TotpPage() {
                             <Edit className="h-3 w-3" />
                           </Button>
                           <Button
-                            shape="square" size="sm"
+                            shape="square"
+                            size="sm"
                             variant="secondary-destructive"
                             aria-label="删除账号"
-                            onClick={(e) => {
+                            onClick={e => {
                               e.stopPropagation();
                               handleDeleteAccount(account);
                             }}
@@ -1489,9 +1674,10 @@ function TotpPage() {
                         {account.otp_type === 'hotp' ? (
                           <div className="flex items-center justify-between gap-2">
                             <span>counter #{codeDetail.counter || 0}</span>
-                            <Button size="sm"
+                            <Button
+                              size="sm"
                               variant="secondary"
-                              onClick={(e) => {
+                              onClick={e => {
                                 e.stopPropagation();
                                 incrementHotp(account);
                               }}
@@ -1547,27 +1733,21 @@ function TotpPage() {
                 </colgroup>
                 <Table.Header variant="compact">
                   <Table.Row>
-                    <Table.Head>
-                      颜色
-                    </Table.Head>
-                    <Table.Head>
-                      分组名称
-                    </Table.Head>
-                    <Table.Head className="text-center">
-                      账号数
-                    </Table.Head>
-                    <Table.Head className="app-table-action">
-                      操作
-                    </Table.Head>
+                    <Table.Head>颜色</Table.Head>
+                    <Table.Head>分组名称</Table.Head>
+                    <Table.Head className="text-center">账号数</Table.Head>
+                    <Table.Head className="app-table-action">操作</Table.Head>
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
-                  {totpGroups.map((group) => (
+                  {totpGroups.map(group => (
                     <Table.Row
                       key={group.id}
                       className="cursor-pointer"
                       title="双击编辑分组"
-                      onDoubleClick={(event) => handleEditableRowDoubleClick(event, () => handleOpenEditGroup(group))}
+                      onDoubleClick={event =>
+                        handleEditableRowDoubleClick(event, () => handleOpenEditGroup(group))
+                      }
                     >
                       <Table.Cell>
                         <div
@@ -1584,7 +1764,8 @@ function TotpPage() {
                       <Table.Cell className="text-center">
                         <div className="flex items-center justify-center gap-2">
                           <Button
-                            shape="square" size="sm"
+                            shape="square"
+                            size="sm"
                             variant="secondary"
                             aria-label="编辑分组"
                             onClick={() => handleOpenEditGroup(group)}
@@ -1592,7 +1773,8 @@ function TotpPage() {
                             icon={<Edit className="w-3.5 h-3.5" />}
                           />
                           <Button
-                            shape="square" size="sm"
+                            shape="square"
+                            size="sm"
                             variant="secondary-destructive"
                             aria-label="删除分组"
                             onClick={() => handleDeleteGroup(group)}
@@ -1621,7 +1803,6 @@ function TotpPage() {
             bodyPadding="md"
             bodyClassName="divide-y divide-kumo-line/80"
           >
-
             {/* Toggle 1: maskAccount */}
             <div className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0">
               <div className="min-w-0 pr-4">
@@ -1632,7 +1813,7 @@ function TotpPage() {
               </div>
               <Switch
                 checked={!!totpSettings.maskAccount}
-                onCheckedChange={(checked) => updateSetting('maskAccount', checked)}
+                onCheckedChange={checked => updateSetting('maskAccount', checked)}
                 size="sm"
               />
             </div>
@@ -1647,21 +1828,23 @@ function TotpPage() {
               </div>
               <Switch
                 checked={!!totpSettings.hideCode}
-                onCheckedChange={(checked) => updateSetting('hideCode', checked)}
+                onCheckedChange={checked => updateSetting('hideCode', checked)}
                 size="sm"
               />
             </div>
 
             <div className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0">
               <div className="min-w-0 pr-4">
-                <h4 className="text-xs font-semibold leading-5 text-kumo-strong">允许悬浮显示验证码</h4>
+                <h4 className="text-xs font-semibold leading-5 text-kumo-strong">
+                  允许悬浮显示验证码
+                </h4>
                 <p className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
                   开启后鼠标悬浮在验证码卡片上时临时显示被遮挡的验证码。
                 </p>
               </div>
               <Switch
                 checked={!!totpSettings.allowRevealCode}
-                onCheckedChange={(checked) => updateSetting('allowRevealCode', checked)}
+                onCheckedChange={checked => updateSetting('allowRevealCode', checked)}
                 size="sm"
               />
             </div>
@@ -1676,7 +1859,7 @@ function TotpPage() {
               </div>
               <Switch
                 checked={!!totpSettings.groupByPlatform}
-                onCheckedChange={(checked) => updateSetting('groupByPlatform', checked)}
+                onCheckedChange={checked => updateSetting('groupByPlatform', checked)}
                 size="sm"
               />
             </div>
@@ -1690,7 +1873,7 @@ function TotpPage() {
               </div>
               <Switch
                 checked={!!totpSettings.showPlatformHeaders}
-                onCheckedChange={(checked) => updateSetting('showPlatformHeaders', checked)}
+                onCheckedChange={checked => updateSetting('showPlatformHeaders', checked)}
                 disabled={!totpSettings.groupByPlatform}
                 size="sm"
               />
@@ -1705,7 +1888,7 @@ function TotpPage() {
               </div>
               <Switch
                 checked={!!totpSettings.hidePlatformText}
-                onCheckedChange={(checked) => updateSetting('hidePlatformText', checked)}
+                onCheckedChange={checked => updateSetting('hidePlatformText', checked)}
                 disabled={!totpSettings.groupByPlatform || !totpSettings.showPlatformHeaders}
                 size="sm"
               />
@@ -1714,14 +1897,16 @@ function TotpPage() {
             {/* Toggle 4: autoSave */}
             <div className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0">
               <div className="min-w-0 pr-4">
-                <h4 className="text-xs font-semibold leading-5 text-kumo-strong">解析二维码后自动导入</h4>
+                <h4 className="text-xs font-semibold leading-5 text-kumo-strong">
+                  解析二维码后自动导入
+                </h4>
                 <p className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
                   扫码或选取二维码图片后自动读取数据入库，不需要手动核对表单保存。
                 </p>
               </div>
               <Switch
                 checked={!!totpSettings.autoSave}
-                onCheckedChange={(checked) => updateSetting('autoSave', checked)}
+                onCheckedChange={checked => updateSetting('autoSave', checked)}
                 size="sm"
               />
             </div>
@@ -1729,14 +1914,16 @@ function TotpPage() {
             {/* Toggle 5: lockInputMode */}
             <div className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0">
               <div className="min-w-0 pr-4">
-                <h4 className="text-xs font-semibold leading-5 text-kumo-strong">锁定默认录入类型</h4>
+                <h4 className="text-xs font-semibold leading-5 text-kumo-strong">
+                  锁定默认录入类型
+                </h4>
                 <p className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
                   开启后添加账号弹窗默认直接使用锁定的选项，不用每次手动选。
                 </p>
               </div>
               <Switch
                 checked={!!totpSettings.lockInputMode}
-                onCheckedChange={(checked) => updateSetting('lockInputMode', checked)}
+                onCheckedChange={checked => updateSetting('lockInputMode', checked)}
                 size="sm"
               />
             </div>
@@ -1745,9 +1932,10 @@ function TotpPage() {
               <div className="flex flex-wrap items-center justify-between gap-3 py-3 pl-3 first:pt-0 last:pb-0">
                 <label className="text-xs font-medium text-kumo-subtle">默认录入模式</label>
                 <Select
-                  aria-label="默认录入模式" size="sm"
+                  aria-label="默认录入模式"
+                  size="sm"
                   value={totpSettings.defaultInputMode}
-                  onValueChange={(value) => updateSetting('defaultInputMode', String(value))}
+                  onValueChange={value => updateSetting('defaultInputMode', String(value))}
                   items={[
                     { value: 'scan', label: '扫描二维码' },
                     { value: 'upload', label: '上传二维码' },
@@ -1758,7 +1946,8 @@ function TotpPage() {
             )}
 
             <div className="flex flex-wrap items-center gap-2 pt-3 first:pt-0 last:pb-0">
-              <Button size="sm"
+              <Button
+                size="sm"
                 shape="square"
                 onClick={async () => {
                   const uris = await dialog.prompt({
@@ -1770,7 +1959,14 @@ function TotpPage() {
                 title="批量导入 URI"
                 icon={<Download className="w-3.5 h-3.5" />}
               />
-              <Button size="sm" shape="square" onClick={handleExportAccounts} aria-label="批量导出备份" title="批量导出备份" icon={<Upload className="w-3.5 h-3.5" />} />
+              <Button
+                size="sm"
+                shape="square"
+                onClick={handleExportAccounts}
+                aria-label="批量导出备份"
+                title="批量导出备份"
+                icon={<Upload className="w-3.5 h-3.5" />}
+              />
               <Button size="sm" onClick={refreshCodes} icon={<RotateCw className="w-3.5 h-3.5" />}>
                 手动刷新验证码
               </Button>
@@ -1792,11 +1988,17 @@ function TotpPage() {
 
               <div className="p-3 bg-kumo-recessed/60 border border-kumo-line rounded-lg flex items-start gap-3 mt-3">
                 <div className="w-9 h-9 rounded-md bg-kumo-base flex items-center justify-center flex-shrink-0">
-                  <img src="https://cdn.simpleicons.org/blueprint" className="w-6 h-6" alt="Extension" />
+                  <img
+                    src="https://cdn.simpleicons.org/blueprint"
+                    className="w-6 h-6"
+                    alt="Extension"
+                  />
                 </div>
                 <div className="min-w-0">
                   <h4 className="text-xs font-bold text-kumo-strong">API Monitor 2FA 助手</h4>
-                  <p className="text-[10px] text-kumo-subtle mt-0.5">一次性配对，使用受限、可撤销的 API Key</p>
+                  <p className="text-[10px] text-kumo-subtle mt-0.5">
+                    一次性配对，使用受限、可撤销的 API Key
+                  </p>
                 </div>
               </div>
             </div>
@@ -1812,11 +2014,17 @@ function TotpPage() {
                 下载插件 ZIP 包
               </LinkButton>
 
-              <Button size="sm" variant="primary" className="w-full" onClick={syncConfigToExtension}>
+              <Button
+                size="sm"
+                variant="primary"
+                className="w-full"
+                onClick={syncConfigToExtension}
+              >
                 生成安全配对码
               </Button>
 
-              <Button size="sm"
+              <Button
+                size="sm"
                 variant="secondary"
                 className="w-full text-xs"
                 onClick={() => setShowExtensionGuide(!showExtensionGuide)}
@@ -1840,7 +2048,10 @@ function TotpPage() {
                   <div className="bg-kumo-brand/10 text-kumo-brand p-2 rounded border border-kumo-brand/20 mt-1 font-medium select-all">
                     配置插件地址: {window.location.origin}
                   </div>
-                  <p>在插件设置页填写上方地址，并粘贴刚生成的一次性配对码；配对码 10 分钟后失效且只能使用一次。</p>
+                  <p>
+                    在插件设置页填写上方地址，并粘贴刚生成的一次性配对码；配对码 10
+                    分钟后失效且只能使用一次。
+                  </p>
                 </div>
               </AnimatedCollapse>
             </div>
@@ -1849,346 +2060,404 @@ function TotpPage() {
       )}
 
       {/* ==================== 模态框 1: 账号添加/修改 ==================== */}
-      <Dialog.Root open={showAccountModal} onOpenChange={setShowAccountModal}>
-        <Dialog className="!w-[min(40rem,calc(100vw-2rem))] !max-w-[min(40rem,calc(100vw-2rem))] p-6">
-          <Dialog.Title className="text-base font-bold text-kumo-strong mb-1">
-            {accountModalMode === 'add' ? '添加 / 导入 2FA 账号' : '编辑 2FA 账号'}
-          </Dialog.Title>
-          <Dialog.Description className="text-xs text-kumo-subtle mb-4">
-            {accountModalMode === 'add' ? '扫码或手动填表记录新的动态验证码' : '修改现有 2FA 令牌的标签或分组配置'}
-          </Dialog.Description>
-
-          {accountModalMode === 'add' && (
-            <div className="mb-4">
-              <Tabs
-                {...TOOL_TABS_PROPS}
-                value={accountAddTab}
-                onValueChange={(value) => {
-                  stopQrScan();
-                  setAccountAddTab(value);
-                }}
-                tabs={[
-                  { value: 'scan', label: '扫码导入' },
-                  { value: 'manual', label: '手动录入' },
-                ]}
-              />
+      <Dialog.Root
+        open={showAccountModal}
+        onOpenChange={open => {
+          setShowAccountModal(open);
+          if (!open) void stopQrScan();
+        }}
+      >
+        <Dialog size="xl" className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden p-0">
+          <div className="flex items-start justify-between gap-4 border-b border-kumo-line px-5 py-4">
+            <div className="min-w-0">
+              <Dialog.Title className="text-base font-semibold text-kumo-strong">
+                {accountModalMode === 'add' ? '添加或导入 2FA 账号' : '编辑 2FA 账号'}
+              </Dialog.Title>
+              <Dialog.Description className="mt-1 text-xs leading-5 text-kumo-subtle">
+                {accountModalMode === 'add'
+                  ? '扫码、上传二维码或手动填写动态验证码信息。'
+                  : '修改令牌标签、品牌标识、分组和验证码参数。'}
+              </Dialog.Description>
             </div>
-          )}
+            <Dialog.Close
+              render={props => (
+                <Button
+                  {...props}
+                  type="button"
+                  size="sm"
+                  shape="square"
+                  variant="ghost"
+                  icon={<X className="size-4" />}
+                  aria-label="关闭"
+                />
+              )}
+            />
+          </div>
 
-          {/* Form Content */}
-          <div className="space-y-4 max-h-[60vh] overflow-y-auto pt-2 px-1 pb-1 scrollbar-thin">
-            {accountModalMode === 'add' && accountAddTab === 'scan' ? (
-              <div className="space-y-4">
-                <div className="flex gap-2 items-center">
-                  <Button size="sm"
-                    onClick={isScanning ? stopQrScan : startQrScan}
-                    variant={isScanning ? 'destructive' : 'secondary'}
-                  >
-                    {isScanning ? '停止摄像头' : '开启摄像头扫码'}
-                  </Button>
-                  <Button size="sm" onClick={() => fileInputRef.current?.click()} icon={<Upload className="w-3.5 h-3.5" />}>
-                    上传二维码图片
-                  </Button>
-                  <Input size="sm"
-                    aria-label="上传二维码图片"
-                    type="file"
-                    ref={fileInputRef}
-                    accept="image/*"
-                    onChange={handleQrUpload}
-                    className="hidden"
-                  />
-                </div>
-
-                {isScanning && (
-                  <div
-                    id="qr-reader"
-                    className="w-full aspect-square max-w-[280px] mx-auto rounded-xl overflow-hidden border border-kumo-line bg-black"
-                  />
-                )}
-
-                {!isScanning && (
-                  <div
-                    onPaste={handleQrPaste}
-                    tabIndex={0}
-                    className="w-full py-10 app-empty-panel rounded-lg flex flex-col items-center justify-center text-kumo-subtle cursor-pointer focus:border-kumo-brand focus:outline-none group"
-                  >
-                    {qrParsing ? (
-                      <span className="flex items-center gap-2">
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>解析中...</span>
-                      </span>
-                    ) : (
-                      <>
-                        <Upload className="w-6 h-6 mb-2 opacity-50 group-hover:scale-105 transition-transform" />
-                        <span className="text-xs">Ctrl+V 粘贴二维码图片 或 拖拽图片至此</span>
-                      </>
-                    )}
-                  </div>
-                )}
-
-                {qrError && (
-                  <div className="p-3 bg-kumo-danger/10 border border-kumo-danger/20 text-kumo-danger text-xs rounded-md">
-                    {qrError}
-                  </div>
-                )}
-
-                <div className="space-y-1.5 pt-2">
-                  <label className="text-xs font-semibold text-kumo-subtle">
-                    批量导入 OTP Auth URI
-                  </label>
-                  <CodeEditor
-                    label="批量 OTP Auth URIs"
-                    language="text"
-                    placeholder="otpauth://totp/GitHub:user@example.com?secret=..."
-                    value={importUris}
-                    onChange={setImportUris}
-                    minHeight="8rem"
-                    showHeader={false}
-                  />
-                </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-5 scrollbar-thin">
+            {accountModalMode === 'add' && (
+              <div className="mb-5">
+                <Tabs
+                  {...TOOL_TABS_PROPS}
+                  value={accountAddTab}
+                  onValueChange={value => {
+                    stopQrScan();
+                    setAccountAddTab(value);
+                  }}
+                  tabs={[
+                    { value: 'scan', label: '扫码导入' },
+                    { value: 'manual', label: '手动录入' },
+                  ]}
+                />
               </div>
-            ) : (
-              <div className="space-y-4">
-                {/* OTP Type 选择器 */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-kumo-subtle">验证码类型</label>
-                  <Tabs
-                    {...TOOL_TABS_PROPS}
-                    value={accountForm.otp_type}
-                    onValueChange={(val) => setAccountForm((prev) => ({ ...prev, otp_type: val }))}
-                    tabs={[
-                      { value: 'totp', label: 'TOTP (基于时间)' },
-                      { value: 'hotp', label: 'HOTP (基于计数)' },
-                    ]}
-                  />
-                </div>
+            )}
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-kumo-subtle">发行商</label>
-                  <Input size="sm"
-                    aria-label="发行商"
-                    type="text"
-                    placeholder="如：GitHub、Microsoft"
-                    value={accountForm.issuer}
-                    onChange={(e) => setAccountForm((prev) => ({ ...prev, issuer: e.target.value }))}
-                    className="w-full"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-kumo-subtle">账户名</label>
-                  <Input size="sm"
-                    aria-label="账户名"
-                    type="text"
-                    placeholder="如：user@example.com"
-                    value={accountForm.account}
-                    onChange={(e) => setAccountForm((prev) => ({ ...prev, account: e.target.value }))}
-                    className="w-full"
-                  />
-                </div>
-
-                {/* 品牌标识配置区 */}
-                <div className="space-y-2 rounded-lg border border-kumo-line bg-kumo-recessed/30 p-3">
-                  <div className="text-xs font-bold text-kumo-strong">品牌标识与主题色</div>
-                  
-                  <div className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-2">
+            {/* Form Content */}
+            <div className="space-y-4">
+              {accountModalMode === 'add' && accountAddTab === 'scan' ? (
+                <div className="space-y-4">
+                  <div className="flex gap-2 items-center">
                     <Button
-                      type="button"
-                      variant="secondary"
-                      shape="square"
-                      className="!size-8.5 !p-0 transition-transform hover:scale-[1.03]"
-                      onClick={() => openBrandStylePicker()}
-                      title="点击选择或上传品牌图标"
+                      size="sm"
+                      onClick={isScanning ? stopQrScan : startQrScan}
+                      variant={isScanning ? 'destructive' : 'secondary'}
                     >
-                      <TotpBrandMark issuer={accountForm.issuer} icon={accountForm.icon} color={resolveFormColor(accountForm)} />
+                      {isScanning ? '停止摄像头' : '开启摄像头扫码'}
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => fileInputRef.current?.click()}
+                      icon={<Upload className="w-3.5 h-3.5" />}
+                    >
+                      上传二维码图片
                     </Button>
                     <Input
                       size="sm"
-                      aria-label="图标关键字"
+                      aria-label="上传二维码图片"
+                      type="file"
+                      ref={fileInputRef}
+                      accept="image/*"
+                      onChange={handleQrUpload}
+                      className="hidden"
+                    />
+                  </div>
+
+                  {isScanning && (
+                    <div
+                      id="qr-reader"
+                      className="app-qr-reader w-full aspect-square max-w-[280px] mx-auto rounded-xl overflow-hidden border border-kumo-line bg-black"
+                    />
+                  )}
+
+                  {!isScanning && (
+                    <div
+                      onPaste={handleQrPaste}
+                      tabIndex={0}
+                      className="w-full py-10 app-empty-panel rounded-lg flex flex-col items-center justify-center text-kumo-subtle cursor-pointer focus:border-kumo-brand focus:outline-none group"
+                    >
+                      {qrParsing ? (
+                        <span className="flex items-center gap-2">
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>解析中...</span>
+                        </span>
+                      ) : (
+                        <>
+                          <Upload className="w-6 h-6 mb-2 opacity-50 group-hover:scale-105 transition-transform" />
+                          <span className="text-xs">Ctrl+V 粘贴二维码图片 或 拖拽图片至此</span>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {qrError && (
+                    <div className="p-3 bg-kumo-danger/10 border border-kumo-danger/20 text-kumo-danger text-xs rounded-md">
+                      {qrError}
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5 pt-2">
+                    <label className="text-xs font-semibold text-kumo-subtle">
+                      批量导入 OTP Auth URI
+                    </label>
+                    <CodeEditor
+                      label="批量 OTP Auth URIs"
+                      language="text"
+                      placeholder="otpauth://totp/GitHub:user@example.com?secret=..."
+                      value={importUris}
+                      onChange={setImportUris}
+                      minHeight="8rem"
+                      showHeader={false}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* OTP Type 选择器 */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-kumo-subtle">验证码类型</label>
+                    <Tabs
+                      {...TOOL_TABS_PROPS}
+                      value={accountForm.otp_type}
+                      onValueChange={val => setAccountForm(prev => ({ ...prev, otp_type: val }))}
+                      tabs={[
+                        { value: 'totp', label: 'TOTP (基于时间)' },
+                        { value: 'hotp', label: 'HOTP (基于计数)' },
+                      ]}
+                    />
+                  </div>
+
+                  <div className="grid items-start gap-4 sm:grid-cols-2">
+                    <Input
+                      size="sm"
+                      label="发行商"
                       type="text"
-                      placeholder="品牌名或 svgrepo:448239-microsoft"
-                      value={accountForm.icon}
-                      onChange={(e) => setAccountForm((prev) => ({ ...prev, icon: normalizeSVGRepoIconRef(e.target.value) }))}
-                      onBlur={(e) => setAccountForm((prev) => ({ ...prev, icon: normalizeSVGRepoIconRef(e.target.value) }))}
+                      placeholder="如：GitHub、Microsoft"
+                      value={accountForm.issuer}
+                      onChange={e => setAccountForm(prev => ({ ...prev, issuer: e.target.value }))}
                       className="w-full"
                     />
-                    <Button size="sm" variant="secondary" onClick={detectAccountBrandIcon} loading={brandDetecting}>
-                      检测
-                    </Button>
-                    <Button size="sm" variant="secondary" onClick={() => setAccountForm((prev) => ({ ...prev, icon: '', color: '' }))}>
-                      重置
-                    </Button>
-                  </div>
-
-                  <div className="flex items-center gap-2 pt-1">
-                    <span className="text-xs font-medium text-kumo-subtle shrink-0">品牌色:</span>
-                    <span
-                      className="h-6 w-6 shrink-0 rounded-md border border-kumo-line shadow-xs"
-                      style={{ background: resolveFormColor(accountForm) }}
-                      aria-hidden="true"
-                    />
                     <Input
                       size="sm"
-                      aria-label="品牌色值"
+                      label="账户名"
                       type="text"
-                      inputMode="text"
-                      placeholder="#f50049"
-                      value={accountForm.color}
-                      onChange={(e) => setAccountForm((prev) => ({ ...prev, color: e.target.value }))}
-                      onBlur={(e) => setAccountForm((prev) => ({ ...prev, color: normalizeHexColor(e.target.value) }))}
-                      className="w-36 font-mono text-xs"
+                      placeholder="如：user@example.com"
+                      value={accountForm.account}
+                      onChange={e => setAccountForm(prev => ({ ...prev, account: e.target.value }))}
+                      className="w-full"
                     />
                   </div>
-                </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-kumo-subtle">密钥 (Base32)</label>
-                  <div className="relative">
-                    <Input size="sm"
-                      aria-label="TOTP 密钥"
-                      type="text"
+                  <LayerCard>
+                    <LayerCard.Secondary className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                      <div className="text-sm font-semibold leading-none text-kumo-strong">
+                        品牌标识与主题色
+                      </div>
+                      <div className="flex items-center gap-2.5">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={detectAccountBrandIcon}
+                          loading={brandDetecting}
+                        >
+                          检测图标
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setAccountForm(prev => ({ ...prev, icon: '', color: '' }))}
+                        >
+                          重置
+                        </Button>
+                      </div>
+                    </LayerCard.Secondary>
+                    <LayerCard.Primary className="grid items-end gap-3 p-3 sm:grid-cols-[auto_minmax(0,1fr)_11rem]">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        shape="square"
+                        onClick={() => openBrandStylePicker()}
+                        title="选择或上传品牌图标"
+                        aria-label="选择或上传品牌图标"
+                        className="mb-px h-12 w-12 p-0"
+                      >
+                        <TotpBrandMark
+                          issuer={accountForm.issuer}
+                          icon={accountForm.icon}
+                          color={resolveFormColor(accountForm)}
+                          size="picker"
+                        />
+                      </Button>
+                      <Input
+                        size="sm"
+                        label="图标标识"
+                        type="text"
+                        placeholder="品牌名或 svgrepo:448239-microsoft"
+                        value={accountForm.icon}
+                        onChange={e =>
+                          setAccountForm(prev => ({
+                            ...prev,
+                            icon: normalizeSVGRepoIconRef(e.target.value),
+                          }))
+                        }
+                        onBlur={e =>
+                          setAccountForm(prev => ({
+                            ...prev,
+                            icon: normalizeSVGRepoIconRef(e.target.value),
+                          }))
+                        }
+                        className="w-full"
+                      />
+                      <div className="grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2">
+                        <span
+                          className="mb-px size-8 rounded-md border border-kumo-line"
+                          style={{ background: resolveFormColor(accountForm) }}
+                          aria-hidden="true"
+                        />
+                        <Input
+                          size="sm"
+                          label="品牌色"
+                          type="text"
+                          inputMode="text"
+                          placeholder="#f50049"
+                          value={accountForm.color}
+                          onChange={e =>
+                            setAccountForm(prev => ({ ...prev, color: e.target.value }))
+                          }
+                          onBlur={e =>
+                            setAccountForm(prev => ({
+                              ...prev,
+                              color: normalizeHexColor(e.target.value),
+                            }))
+                          }
+                          className="w-full font-mono text-xs"
+                        />
+                      </div>
+                    </LayerCard.Primary>
+                  </LayerCard>
+
+                  <div className="grid items-end gap-2">
+                    <SensitiveInput
+                      size="sm"
+                      label="密钥 (Base32)"
                       placeholder="JBSWY3DPEHPK3PXP"
-                      disabled={accountModalMode === 'edit'}
+                      readOnly={accountModalMode === 'edit'}
                       value={accountForm.secret}
-                      onChange={(e) => setAccountForm((prev) => ({ ...prev, secret: e.target.value }))}
+                      onValueChange={value =>
+                        setAccountForm(prev => ({ ...prev, secret: value }))
+                      }
                       autoComplete="off"
+                      spellCheck={false}
+                      className="w-full font-mono"
                       data-1p-ignore
                       data-lpignore="true"
                       data-bwignore="true"
                       data-form-type="other"
-                      spellCheck={false}
-                      className="w-full pr-16 disabled:opacity-60"
                     />
-                    <Button
-                      type="button" size="sm"
-                      variant="secondary"
-                      aria-label={totpShowSecret ? '隐藏密钥' : '显示密钥'}
-                      onClick={toggleSecretVisibility}
-                      className="absolute right-1 top-1/2 h-7 -translate-y-1/2 px-2 text-[11px]"
-                    >
-                      {totpShowSecret ? '隐藏' : '显示'}
-                    </Button>
                   </div>
-                </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-kumo-subtle">关联分组</label>
-                  <Select size="sm"
-                    aria-label="关联分组"
+                  <Select
+                    size="sm"
+                    label="关联分组"
                     value={accountForm.group_id}
-                    onValueChange={(value) => setAccountForm((prev) => ({ ...prev, group_id: String(value) }))}
+                    onValueChange={value =>
+                      setAccountForm(prev => ({ ...prev, group_id: String(value) }))
+                    }
                     placeholder="无分组"
                     className="w-full"
                     items={[
                       { value: '', label: '无分组' },
-                      ...totpGroups.map((g) => ({ value: String(g.id), label: g.name })),
+                      ...totpGroups.map(g => ({ value: String(g.id), label: g.name })),
                     ]}
                   />
-                </div>
 
-                {/* 高级参数配置折叠区 */}
-                <div className="pt-1">
-                  <button
-                    type="button"
-                    className="flex items-center gap-1.5 text-xs font-bold text-kumo-subtle hover:text-kumo-strong transition-colors py-1 select-none"
-                    onClick={() => setShowAdvancedAccountSettings((prev) => !prev)}
-                  >
-                    <ChevronRight className={cx('size-3.5 transition-transform duration-200', showAdvancedAccountSettings && 'rotate-90')} />
-                    <span>高级参数配置 (算法 / 码位长度 / 周期)</span>
-                  </button>
-                  
-                  <AnimatedCollapse open={showAdvancedAccountSettings}>
-                    <div className="pt-2.5 grid grid-cols-3 gap-3">
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-semibold text-kumo-subtle">加密算法</label>
-                        <Select
-                          aria-label="加密算法"
-                          size="sm"
-                          value={accountForm.algorithm}
-                          onValueChange={(value) => setAccountForm((prev) => ({ ...prev, algorithm: String(value) }))}
-                          className="w-full"
-                          items={[
-                            { value: 'SHA1', label: 'SHA1' },
-                            { value: 'SHA256', label: 'SHA256' },
-                            { value: 'SHA512', label: 'SHA512' },
-                          ]}
+                  {/* 高级参数配置折叠区 */}
+                  <div className="pt-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      icon={
+                        <ChevronRight
+                          className={cx(
+                            'size-3.5 transition-transform duration-200',
+                            showAdvancedAccountSettings && 'rotate-90'
+                          )}
                         />
-                      </div>
+                      }
+                      onClick={() => setShowAdvancedAccountSettings(prev => !prev)}
+                    >
+                      高级参数配置
+                    </Button>
 
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-semibold text-kumo-subtle">码位长度</label>
-                        <Select
-                          aria-label="码位长度"
-                          size="sm"
-                          value={accountForm.digits}
-                          onValueChange={(value) => setAccountForm((prev) => ({ ...prev, digits: String(value) }))}
-                          className="w-full"
-                          items={[
-                            { value: '6', label: '6 位' },
-                            { value: '8', label: '8 位' },
-                          ]}
-                        />
-                      </div>
-
-                      {accountForm.otp_type === 'totp' ? (
-                        <div className="space-y-1">
-                          <label className="text-[11px] font-semibold text-kumo-subtle">周期数 (s)</label>
+                    <AnimatedCollapse open={showAdvancedAccountSettings}>
+                      <LayerCard className="mt-2 p-3">
+                        <div className="grid items-start gap-3 sm:grid-cols-3">
                           <Select
-                            aria-label="周期数"
+                            label="加密算法"
                             size="sm"
-                            value={accountForm.period}
-                            onValueChange={(value) => setAccountForm((prev) => ({ ...prev, period: String(value) }))}
+                            value={accountForm.algorithm}
+                            onValueChange={value =>
+                              setAccountForm(prev => ({ ...prev, algorithm: String(value) }))
+                            }
                             className="w-full"
                             items={[
-                              { value: '30', label: '30 秒' },
-                              { value: '60', label: '60 秒' },
+                              { value: 'SHA1', label: 'SHA1' },
+                              { value: 'SHA256', label: 'SHA256' },
+                              { value: 'SHA512', label: 'SHA512' },
                             ]}
                           />
-                        </div>
-                      ) : (
-                        <div className="space-y-1">
-                          <label className="text-[11px] font-semibold text-kumo-subtle">计数起始</label>
-                          <Input
+
+                          <Select
+                            label="码位长度"
                             size="sm"
-                            aria-label="计数起始"
-                            type="number"
-                            value={accountForm.counter}
-                            onChange={(e) => setAccountForm((prev) => ({ ...prev, counter: e.target.value }))}
-                            className="w-full font-mono"
+                            value={accountForm.digits}
+                            onValueChange={value =>
+                              setAccountForm(prev => ({ ...prev, digits: String(value) }))
+                            }
+                            className="w-full"
+                            items={[
+                              { value: '6', label: '6 位' },
+                              { value: '8', label: '8 位' },
+                            ]}
                           />
+
+                          {accountForm.otp_type === 'totp' ? (
+                            <Select
+                              label="周期数 (s)"
+                              size="sm"
+                              value={accountForm.period}
+                              onValueChange={value =>
+                                setAccountForm(prev => ({ ...prev, period: String(value) }))
+                              }
+                              className="w-full"
+                              items={[
+                                { value: '30', label: '30 秒' },
+                                { value: '60', label: '60 秒' },
+                              ]}
+                            />
+                          ) : (
+                            <Input
+                              size="sm"
+                              label="计数起始"
+                              type="number"
+                              value={accountForm.counter}
+                              onChange={e =>
+                                setAccountForm(prev => ({ ...prev, counter: e.target.value }))
+                              }
+                              className="w-full font-mono"
+                            />
+                          )}
                         </div>
-                      )}
-                    </div>
-                  </AnimatedCollapse>
+                      </LayerCard>
+                    </AnimatedCollapse>
+                  </div>
                 </div>
-              </div>
+              )}
+            </div>
+
+            {accountModalError && (
+              <Banner
+                variant="error"
+                title="无法保存账号"
+                description={accountModalError}
+                className="mt-4"
+              />
             )}
           </div>
 
-          {accountModalError && (
-            <div className="mt-4 p-3 bg-kumo-danger/10 border border-kumo-danger/20 text-kumo-danger text-xs rounded-md">
-              {accountModalError}
-            </div>
-          )}
-
-          <div className="flex justify-end gap-3 mt-6">
+          <div className="flex shrink-0 justify-end gap-2 border-t border-kumo-line px-5 py-4">
             <Dialog.Close
-              render={(props) => (
-                <Button size="sm"
-                  {...props}
-                  variant="secondary"
-                  onClick={(event) => {
-                    props.onClick?.(event);
-                    stopQrScan();
-                  }}
-                >
+              render={props => (
+                <Button size="sm" {...props} variant="secondary">
                   取消
                 </Button>
               )}
             />
 
             {accountModalMode === 'add' && accountAddTab === 'scan' ? (
-              <Button size="sm"
+              <Button
+                size="sm"
                 variant="primary"
                 onClick={() => importUrisDirectly(importUris)}
                 disabled={!importUris.trim()}
@@ -2196,7 +2465,12 @@ function TotpPage() {
                 执行导入
               </Button>
             ) : (
-              <Button size="sm" variant="primary" onClick={handleSaveAccount} loading={accountModalSaving}>
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={handleSaveAccount}
+                loading={accountModalSaving}
+              >
                 保存账号
               </Button>
             )}
@@ -2206,95 +2480,146 @@ function TotpPage() {
 
       {/* ==================== 模态框: 品牌图标样式选择 ==================== */}
       <Dialog.Root open={showBrandStyleModal} onOpenChange={setShowBrandStyleModal}>
-        <Dialog className="!w-[min(42rem,calc(100vw-2rem))] !max-w-[min(42rem,calc(100vw-2rem))] p-5">
-          <Dialog.Title className="text-base font-bold text-kumo-strong mb-1">
-            选择品牌标识样式
-          </Dialog.Title>
-          <Dialog.Description className="text-xs text-kumo-subtle mb-3">
-            可直接选择系统样式，也可以上传自定义图标。保存账号后会同步到同发行商账号。
-          </Dialog.Description>
-
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div className="text-[11px] text-kumo-subtle">
-              支持 `SVG / PNG / JPG / WebP / GIF`，也可直接粘贴图片、SVG 源码或 http(s) 图片链接。
+        <Dialog size="xl" className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden p-0">
+          <div className="flex items-start justify-between gap-4 border-b border-kumo-line px-5 py-4">
+            <div className="min-w-0">
+              <Dialog.Title className="text-base font-semibold text-kumo-strong">
+                选择品牌标识样式
+              </Dialog.Title>
+              <Dialog.Description className="mt-1 text-xs leading-5 text-kumo-subtle">
+                选择系统样式或管理自定义图标；保存账号后会同步到同发行商账号。
+              </Dialog.Description>
             </div>
-            <div className="flex items-center gap-2">
-              <input
-                ref={brandUploadInputRef}
-                type="file"
-                accept=".svg,image/svg+xml,image/png,image/jpeg,image/webp,image/gif"
-                className="hidden"
-                onChange={handleCustomBrandIconUpload}
-              />
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => brandUploadInputRef.current?.click()}
-                loading={customBrandIconUploading}
-              >
-                <Upload className="w-3.5 h-3.5" />
-                上传自定义图标
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={handlePasteBrandIconFromClipboard}
-                loading={customBrandIconUploading}
-              >
-                粘贴图标
-              </Button>
-              <LinkButton
-                size="sm"
-                variant="secondary"
-                href="https://www.svgrepo.com/"
-                target="_blank"
-                rel="noreferrer"
-              >
-                打开 SVG Repo
-              </LinkButton>
-            </div>
-          </div>
-
-          <div
-            tabIndex={0}
-            onPaste={handleBrandLibraryPaste}
-            className="mb-3 rounded-md border border-dashed border-kumo-line bg-kumo-recessed/15 px-3 py-2.5 text-[11px] text-kumo-subtle outline-none transition-colors focus:border-kumo-brand focus:ring-2 focus:ring-kumo-brand/20"
-          >
-            选中这里后按 `Ctrl+V`，可以直接粘贴截图、图标文件、SVG 源码或图片链接，并自动下载应用。
-          </div>
-
-          <div className="grid grid-cols-1 items-start gap-2 sm:grid-cols-2 md:grid-cols-3">
-            {!customBrandIconsLoading && brandStyleOptions.length === 0 && (
-              <div className="col-span-full rounded-md border border-kumo-line bg-kumo-recessed/20 px-3 py-6 text-center text-xs text-kumo-subtle">
-                当前还没有可选图标。
-              </div>
-            )}
-            {brandStyleOptions.map((option) => (
-              <Button
-                key={option.id}
-                type="button"
-                variant="secondary"
-                onClick={() => applyBrandStyleOption(option)}
-                className="!h-auto min-w-0 w-full self-start px-3 py-2 text-left"
-              >
-                <span className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2">
-                  <TotpBrandMark
-                    issuer={accountForm.issuer}
-                    icon={option.icon}
-                    color={option.color || resolveFormColor(accountForm)}
-                  />
-                  <span className="min-w-0">
-                    <span className="block truncate text-xs font-semibold text-kumo-strong">{option.label}</span>
-                    <span className="block truncate text-[11px] text-kumo-subtle">{option.caption}</span>
-                  </span>
-                </span>
-              </Button>
-            ))}
-          </div>
-
-          <div className="flex justify-end gap-3 mt-4">
             <Dialog.Close
-              render={(props) => (
+              render={props => (
+                <Button
+                  {...props}
+                  size="sm"
+                  shape="square"
+                  variant="ghost"
+                  icon={<X className="size-4" />}
+                  aria-label="关闭"
+                />
+              )}
+            />
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto p-5 scrollbar-thin">
+            <LayerCard className="mb-4 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-[11px] leading-5 text-kumo-subtle">
+                  支持 SVG、PNG、JPG、WebP 和 GIF，也可粘贴图片、SVG 源码或图片链接。
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={brandUploadInputRef}
+                    type="file"
+                    accept=".svg,image/svg+xml,image/png,image/jpeg,image/webp,image/gif"
+                    className="hidden"
+                    onChange={handleCustomBrandIconUpload}
+                  />
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => brandUploadInputRef.current?.click()}
+                    loading={customBrandIconUploading}
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    上传自定义图标
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={handlePasteBrandIconFromClipboard}
+                    loading={customBrandIconUploading}
+                  >
+                    粘贴图标
+                  </Button>
+                  <LinkButton
+                    size="sm"
+                    variant="secondary"
+                    href="https://www.svgrepo.com/"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    打开 SVG Repo
+                  </LinkButton>
+                </div>
+              </div>
+            </LayerCard>
+
+            <div
+              tabIndex={0}
+              onPaste={handleBrandLibraryPaste}
+              className="mb-3 rounded-md border border-dashed border-kumo-line bg-kumo-recessed/15 px-3 py-2.5 text-[11px] text-kumo-subtle outline-none transition-colors focus:border-kumo-brand focus:ring-2 focus:ring-kumo-brand/20"
+            >
+              选中这里后按 `Ctrl+V`，可以直接粘贴截图、图标文件、SVG
+              源码或图片链接，并自动下载应用。
+            </div>
+
+            <div className="grid grid-cols-1 items-start gap-2 sm:grid-cols-2">
+              {!customBrandIconsLoading && brandStyleOptions.length === 0 && (
+                <div className="col-span-full rounded-md border border-kumo-line bg-kumo-recessed/20 px-3 py-6 text-center text-xs text-kumo-subtle">
+                  当前还没有可选图标。
+                </div>
+              )}
+              {brandStyleOptions.map(option => {
+                const canDelete = option.source === 'custom' && option.customId;
+                return (
+                  <LayerCard
+                    key={option.id}
+                    className={cx(
+                      'grid min-w-0 items-center gap-2 self-start p-1.5',
+                      canDelete ? 'grid-cols-[minmax(0,1fr)_auto]' : 'grid-cols-1'
+                    )}
+                  >
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => applyBrandStyleOption(option)}
+                      className="!h-auto min-w-0 w-full justify-start px-2 py-1.5 text-left"
+                    >
+                      <span className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2">
+                        <TotpBrandMark
+                          issuer={accountForm.issuer}
+                          icon={option.icon}
+                          color={option.color || resolveFormColor(accountForm)}
+                          size="picker"
+                        />
+                        <span className="min-w-0">
+                          <span className="block truncate text-xs font-semibold text-kumo-strong">
+                            {option.label}
+                          </span>
+                          <span className="block truncate text-[11px] text-kumo-subtle">
+                            {option.caption}
+                          </span>
+                        </span>
+                      </span>
+                    </Button>
+                    {canDelete && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        shape="square"
+                        variant="secondary-destructive"
+                        icon={<Trash className="size-4" />}
+                        aria-label={`删除 ${option.label}`}
+                        title={`删除 ${option.label}`}
+                        loading={deletingCustomBrandIconId === option.customId}
+                        disabled={Boolean(deletingCustomBrandIconId)}
+                        onClick={() => requestDeleteCustomBrandIcon(option)}
+                      />
+                    )}
+                  </LayerCard>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="flex shrink-0 justify-end gap-2 border-t border-kumo-line px-5 py-4">
+            <Dialog.Close
+              render={props => (
                 <Button size="sm" {...props} variant="secondary">
                   取消
                 </Button>
@@ -2303,6 +2628,23 @@ function TotpPage() {
           </div>
         </Dialog>
       </Dialog.Root>
+
+      <DeleteResource
+        open={Boolean(pendingDeleteBrandIcon)}
+        onOpenChange={open => {
+          if (!open && !deletingCustomBrandIconId) {
+            setPendingDeleteBrandIcon(null);
+            setDeleteCustomBrandIconError('');
+          }
+        }}
+        resourceType="自定义图标"
+        resourceName={pendingDeleteBrandIcon?.label || ''}
+        onDelete={deleteCustomBrandIcon}
+        isDeleting={Boolean(deletingCustomBrandIconId)}
+        deleteButtonText="删除图标"
+        size="sm"
+        errorMessage={deleteCustomBrandIconError}
+      />
 
       {/* ==================== 模态框 2: 新建/编辑分组 ==================== */}
       <Dialog.Root open={showGroupModal} onOpenChange={setShowGroupModal}>
@@ -2317,12 +2659,13 @@ function TotpPage() {
           <div className="space-y-4">
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-kumo-subtle">分组名称</label>
-              <Input size="sm"
+              <Input
+                size="sm"
                 aria-label="分组名称"
                 type="text"
                 placeholder="如: 财务, 工作, 个人"
                 value={groupForm.name}
-                onChange={(e) => setGroupForm((prev) => ({ ...prev, name: e.target.value }))}
+                onChange={e => setGroupForm(prev => ({ ...prev, name: e.target.value }))}
                 className="w-full"
               />
             </div>
@@ -2332,17 +2675,27 @@ function TotpPage() {
               <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2">
                 <span
                   className="h-7 w-7 rounded-md border border-kumo-line"
-                  style={{ background: HEX_COLOR_PATTERN.test(normalizeHexColor(groupForm.color)) ? normalizeHexColor(groupForm.color) : BRAND_COLOR_FALLBACK }}
+                  style={{
+                    background: HEX_COLOR_PATTERN.test(normalizeHexColor(groupForm.color))
+                      ? normalizeHexColor(groupForm.color)
+                      : BRAND_COLOR_FALLBACK,
+                  }}
                   aria-hidden="true"
                 />
-                <Input size="sm"
+                <Input
+                  size="sm"
                   aria-label="卡片标识色值"
                   type="text"
                   inputMode="text"
                   placeholder="#4285f4"
                   value={groupForm.color}
-                  onChange={(e) => setGroupForm((prev) => ({ ...prev, color: e.target.value }))}
-                  onBlur={(e) => setGroupForm((prev) => ({ ...prev, color: normalizeHexColor(e.target.value) || BRAND_COLOR_FALLBACK }))}
+                  onChange={e => setGroupForm(prev => ({ ...prev, color: e.target.value }))}
+                  onBlur={e =>
+                    setGroupForm(prev => ({
+                      ...prev,
+                      color: normalizeHexColor(e.target.value) || BRAND_COLOR_FALLBACK,
+                    }))
+                  }
                   className="w-full font-mono text-xs"
                 />
               </div>
@@ -2351,7 +2704,7 @@ function TotpPage() {
 
           <div className="flex justify-end gap-3 mt-6">
             <Dialog.Close
-              render={(props) => (
+              render={props => (
                 <Button size="sm" {...props} variant="secondary">
                   取消
                 </Button>
@@ -2391,7 +2744,7 @@ function TotpPage() {
 
           <div className="flex justify-end gap-3 mt-6">
             <Dialog.Close
-              render={(props) => (
+              render={props => (
                 <Button size="sm" {...props} variant="secondary">
                   关闭
                 </Button>

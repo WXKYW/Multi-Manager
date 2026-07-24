@@ -788,6 +788,9 @@ func (s *Service) deleteWebAuthnCredential(w http.ResponseWriter, r *http.Reques
 
 func (s *Service) issueAuthenticatedSession(w http.ResponseWriter, r *http.Request, db *sql.DB, method string, details map[string]interface{}) error {
 	clientIP := s.requestClientIP(r)
+	if err := s.resetLoginAttempts(r.Context(), db, clientIP); err != nil {
+		return err
+	}
 	sessionPassword := "authenticated"
 	if s.isDemoMode() {
 		sessionPassword = "demo"

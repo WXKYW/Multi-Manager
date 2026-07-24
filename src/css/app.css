@@ -881,6 +881,32 @@ body {
   letter-spacing: 0;
 }
 
+.auth-login-title {
+  min-height: 1.15em;
+  overflow: visible;
+}
+
+.auth-login-title-text {
+  display: inline-block;
+  transform-origin: left center;
+  animation: auth-title-swap 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: opacity, transform, filter;
+}
+
+@keyframes auth-title-swap {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+    transform: translateY(0.18em) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0) scale(1);
+  }
+}
+
 .auth-login-head p {
   max-width: 24rem;
   margin: 0.75rem 0 0;
@@ -1004,8 +1030,9 @@ body {
   .auth-auth-pane {
     min-height: 100vh;
     min-height: 100dvh;
-    align-items: flex-start;
-    padding: clamp(1.5rem, 8vw, 3rem);
+    align-items: center;
+    padding: max(clamp(1.5rem, 8vw, 3rem), env(safe-area-inset-top)) clamp(1.5rem, 8vw, 3rem)
+      max(clamp(1.5rem, 8vw, 3rem), env(safe-area-inset-bottom));
   }
 
   .auth-mobile-brand {
@@ -1035,8 +1062,8 @@ body {
   }
 
   .auth-login-panel {
-    margin: auto 0;
-    padding: 5rem 0 2rem;
+    margin: 0;
+    padding: 0;
   }
 }
 
@@ -1135,6 +1162,10 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .auth-login-title-text {
+    animation: none;
+  }
+
   .auth-login-button {
     transition: none;
   }
@@ -1203,6 +1234,13 @@ body {
 
 .app-totp-brand-mark {
   overflow: hidden;
+}
+
+.app-qr-reader video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  object-position: center !important;
 }
 
 .app-totp-brand-mark--remote {
@@ -1972,5 +2010,3 @@ input[type='number'] {
   -moz-appearance: textfield;
   appearance: textfield;
 }
-
-

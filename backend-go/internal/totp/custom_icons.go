@@ -221,6 +221,67 @@ func (s *Service) saveCustomBrandIcon(data []byte, baseName, issuer, color, ext,
 	}, nil
 }
 
+func (s *Service) deleteCustomBrandIcon(w http.ResponseWriter, r *http.Request, id string) {
+	id = strings.TrimSpace(id)
+	if !safeBrandIconKeyPattern.MatchString(id) {
+		response.Error(w, http.StatusBadRequest, "invalid custom icon key")
+		return
+	}
+	records, err := s.loadCustomBrandIconRecords()
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	index := -1
+	for i := range records {
+		if records[i].ID == id {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		response.Error(w, http.StatusNotFound, "icon not found")
+		return
+	}
+
+	db, err := s.open(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer db.Close()
+	tx, err := db.BeginTx(r.Context(), nil)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(r.Context(), `
+		UPDATE totp_accounts SET icon = NULL, updated_at = ? WHERE icon = ?
+	`, nowISO(), "custom:"+id); err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	record := records[index]
+	remaining := append([]customBrandIconRecord{}, records[:index]...)
+	remaining = append(remaining, records[index+1:]...)
+	if err := s.saveCustomBrandIconRecords(remaining); err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		_ = s.saveCustomBrandIconRecords(records)
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	path := recordPathForCustomBrandIcon(s.customBrandIconDir(), record)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		// Metadata is authoritative; a failed cleanup only leaves an unserved orphan file.
+	}
+	response.OK(w, map[string]interface{}{"id": id, "deleted": true})
+}
+
 func downloadRemoteBrandIcon(ctx context.Context, rawURL string) (remoteBrandIconAsset, error) {
 	if err := validateRemoteBrandIconURL(rawURL); err != nil {
 		return remoteBrandIconAsset{}, err

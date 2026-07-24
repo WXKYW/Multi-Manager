@@ -55,6 +55,29 @@ func TestImportCustomBrandIconFromURLStoresDownloadedAsset(t *testing.T) {
 	if serveRes.Code != http.StatusOK || !strings.Contains(serveRes.Body.String(), "<path") {
 		t.Fatalf("stored icon status = %d body=%s", serveRes.Code, serveRes.Body.String())
 	}
+
+	createRes := performTOTPRequest(service, http.MethodPost, "/api/totp/accounts", `{
+		"issuer":"Example",
+		"account":"user@example.com",
+		"secret":"JBSWY3DPEHPK3PXP",
+		"icon":"custom:`+payload.Data.ID+`"
+	}`)
+	if createRes.Code != http.StatusOK {
+		t.Fatalf("create account status = %d body=%s", createRes.Code, createRes.Body.String())
+	}
+
+	deleteRes := performTOTPRequest(service, http.MethodDelete, "/api/totp/icons/library/"+payload.Data.ID, "")
+	if deleteRes.Code != http.StatusOK {
+		t.Fatalf("delete icon status = %d body=%s", deleteRes.Code, deleteRes.Body.String())
+	}
+	serveRes = performTOTPRequest(service, http.MethodGet, "/api/totp/icons/custom-"+payload.Data.ID, "")
+	if serveRes.Code != http.StatusNotFound {
+		t.Fatalf("deleted icon status = %d body=%s", serveRes.Code, serveRes.Body.String())
+	}
+	accounts := listTOTPAccountsForTest(t, service)
+	if len(accounts) != 1 || (accounts[0].Icon != nil && *accounts[0].Icon != "") {
+		t.Fatalf("account icon after delete = %#v", accounts)
+	}
 }
 
 func TestValidateRemoteBrandIconURLRejectsUnsafeTargets(t *testing.T) {
