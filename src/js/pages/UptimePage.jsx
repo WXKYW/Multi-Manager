@@ -82,7 +82,7 @@ const createEmptyStatusPageForm = () => ({
   public: true,
   hideTargets: false,
   linkMonitorNames: false,
-  showOnDashboard: false,
+  showOnDashboard: true,
   cacheSeconds: 300,
   monitorIds: [],
 });

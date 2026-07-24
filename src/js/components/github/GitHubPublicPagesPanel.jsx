@@ -32,7 +32,7 @@ const createEmptyGitHubPublicPageForm = () => ({
   showRepoLinks: true,
   showDescriptions: true,
   showRepositoryStats: true,
-  showOnDashboard: false,
+  showOnDashboard: true,
   repositoryIds: [],
 });
 

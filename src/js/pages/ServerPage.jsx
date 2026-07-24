@@ -288,7 +288,7 @@ const createEmptyServerStatusPageForm = () => ({
   hideHosts: true,
   showTraffic: true,
   showCharts: true,
-  showOnDashboard: false,
+  showOnDashboard: true,
   cacheSeconds: 300,
   serverIds: [],
 });
