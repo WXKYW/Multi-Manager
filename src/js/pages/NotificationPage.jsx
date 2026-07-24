@@ -1190,15 +1190,19 @@ function NotificationPage() {
                   resolve: '告警恢复',
                 }[lifecycleMeta.mutation] || lifecycleMeta.mutation) : null;
 
+                // 获取匹配的通知渠道名称
+                const matchedChannel = notificationChannels.find(c => String(c.id) === String(log.channel_id));
+                const channelDisplayName = log.channel_name || matchedChannel?.name || (log.channel_type ? getChannelTypeName(log.channel_type) : null);
+
                 return (
                   <AppCard
                     key={log.id}
                     padding="none"
-                    className="grid grid-cols-1 gap-3 p-3.5 transition-all duration-200 hover:border-kumo-brand/40 hover:shadow-sm md:grid-cols-[minmax(14rem,1fr)_minmax(0,1.8fr)] md:items-start"
+                    className="grid grid-cols-1 gap-3 p-3.5 transition-all duration-200 hover:border-kumo-brand/40 hover:shadow-sm md:grid-cols-[280px_1fr] md:items-start"
                   >
-                    {/* 左栏：状态与元数据快照 */}
+                    {/* 左栏：状态与元数据快照 (固定 280px 宽度，饱满工整) */}
                     <div className="flex flex-col gap-2 min-w-0 pr-0 md:pr-3.5 md:border-r md:border-kumo-line/50">
-                      {/* 状态 Header 标签与点号 */}
+                      {/* 1. 状态指示 + 标题 + 投递状态 */}
                       <div className="flex items-center justify-between gap-2 min-w-0">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className={`h-2 w-2 rounded-full shrink-0 ${
@@ -1208,11 +1212,11 @@ function NotificationPage() {
                                 ? 'bg-kumo-danger'
                                 : 'bg-kumo-warning'
                           }`} />
-                          <span className="text-xs font-bold text-kumo-strong truncate" title={log.title}>
+                          <span className="text-[13px] font-bold text-kumo-strong truncate leading-snug" title={log.title}>
                             {log.title}
                           </span>
                         </div>
-                        <Badge className={`text-[9px] px-1.5 py-0.5 border ${
+                        <Badge className={`text-[10px] font-semibold px-2 py-0.5 border shrink-0 ${
                           log.status === 'sent'
                             ? 'bg-kumo-success/10 text-kumo-success border-kumo-success/20'
                             : log.status === 'failed'
@@ -1223,32 +1227,42 @@ function NotificationPage() {
                         </Badge>
                       </div>
 
-                      {/* 动态生命周期 Badges & 细节 */}
+                      {/* 2. 投递渠道标识 (Notification Channel) */}
+                      {channelDisplayName && (
+                        <div className="flex items-center gap-1.5 text-[11px] text-kumo-subtle select-none">
+                          <span className="font-medium">📢 渠道:</span>
+                          <span className="rounded border border-kumo-line/60 bg-kumo-recessed/60 px-1.5 py-0.5 text-[10px] font-medium text-kumo-strong">
+                            {channelDisplayName}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* 3. 动态生命周期 Badges & 细节 */}
                       {lifecycleMeta && (
                         <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
-                          <Badge className="border border-kumo-brand/25 bg-kumo-brand/10 text-[9px] font-semibold text-kumo-brand py-0 px-1.5">
+                          <Badge className="border border-kumo-brand/25 bg-kumo-brand/10 text-[10px] font-semibold text-kumo-brand py-0.5 px-2">
                             ↻ {mutationLabel}
                           </Badge>
                           {lifecycleMeta.kind && (
-                            <span className="rounded bg-kumo-recessed px-1.5 py-0.5 font-mono text-[9px] text-kumo-subtle border border-kumo-line/40">
+                            <span className="rounded bg-kumo-recessed px-1.5 py-0.5 font-mono text-[10px] text-kumo-subtle border border-kumo-line/40">
                               {lifecycleMeta.kind}
                             </span>
                           )}
                           {lifecycleMeta.duration && (
-                            <span className="text-[10px] text-kumo-subtle">
+                            <span className="text-[11px] text-kumo-subtle">
                               持续 {lifecycleMeta.duration}
                             </span>
                           )}
                           {lifecycleMeta.changedFields.length > 0 && (
-                            <span className="text-[10px] text-kumo-subtle" title={lifecycleMeta.changedFields.join(', ')}>
+                            <span className="text-[11px] text-kumo-subtle" title={lifecycleMeta.changedFields.join(', ')}>
                               变化 {lifecycleMeta.changedFields.length} 项
                             </span>
                           )}
                         </div>
                       )}
 
-                      {/* 时间记录 */}
-                      <div className="font-mono text-[10px] text-kumo-subtle select-none pt-0.5 flex items-center gap-1">
+                      {/* 4. 时间记录 */}
+                      <div className="font-mono text-[11px] text-kumo-subtle select-none pt-0.5 flex items-center gap-1">
                         <span className="opacity-60">🕒</span>
                         {new Date(log.created_at).toLocaleString()}
                       </div>
@@ -1257,7 +1271,7 @@ function NotificationPage() {
                     {/* 右栏：详细消息内容与异常/重试提示 */}
                     <div className="min-w-0 flex-1 space-y-1.5">
                       {log.message && (
-                        <div className="rounded-md border border-kumo-line/60 bg-kumo-recessed/30 px-3 py-2 font-mono text-[11px] leading-relaxed text-kumo-subtle whitespace-pre-wrap break-all">
+                        <div className="rounded-md border border-kumo-line/60 bg-kumo-recessed/30 px-3.5 py-2.5 font-mono text-[11px] leading-relaxed text-kumo-subtle whitespace-pre-wrap break-all">
                           {log.message}
                         </div>
                       )}
@@ -1265,12 +1279,12 @@ function NotificationPage() {
                       {(log.error_message || log.retry_count > 0) && (
                         <div className="flex flex-wrap items-center gap-2 pt-0.5 select-none">
                           {log.error_message && (
-                            <span className="rounded border border-kumo-danger/20 bg-kumo-danger/10 px-2 py-0.5 text-[10px] font-semibold text-kumo-danger">
+                            <span className="rounded border border-kumo-danger/20 bg-kumo-danger/10 px-2 py-0.5 text-[11px] font-semibold text-kumo-danger">
                               报错: {log.error_message}
                             </span>
                           )}
                           {log.retry_count > 0 && (
-                            <span className="rounded border border-kumo-warning/20 bg-kumo-warning/10 px-2 py-0.5 font-mono text-[10px] font-semibold text-kumo-warning">
+                            <span className="rounded border border-kumo-warning/20 bg-kumo-warning/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-kumo-warning">
                               重试: {log.retry_count} 次
                             </span>
                           )}
