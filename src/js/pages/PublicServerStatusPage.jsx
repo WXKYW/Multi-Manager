@@ -438,7 +438,7 @@ function ServerCard({ server }) {
     <article className={`public-server-status-card flex h-full flex-col rounded-lg border p-2.5 ${server.online ? 'border-kumo-line bg-kumo-base' : 'border-kumo-danger/25 bg-kumo-danger/5'}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2.5">
+          <div className="flex min-w-0 items-center gap-2">
             <Button
               type="button"
               size="xs"
@@ -453,18 +453,18 @@ function ServerCard({ server }) {
             </Button>
             {country && <CountryFlag preferSvg countryCode={country} className="h-3.5 w-5 shrink-0 !rounded-[2px] text-sm" />}
             <h3 className="min-w-0 truncate text-sm font-bold leading-tight text-kumo-strong" title={server.name}>{server.name}</h3>
-            <span className={`shrink-0 rounded-md border px-2 py-0.5 text-xs font-semibold ${server.online ? 'border-kumo-success/30 bg-kumo-success/10 text-kumo-success' : 'border-kumo-danger/30 bg-kumo-danger/10 text-kumo-danger'}`}>
-              {server.online ? '在线' : '离线'}
-            </span>
           </div>
           {showPlatform && platformText && (
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-kumo-subtle">
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-kumo-subtle">
               <span className="min-w-0 truncate" title={platformText}>{platformText}</span>
             </div>
           )}
         </div>
-        <div className="shrink-0 whitespace-nowrap text-right text-xs text-kumo-subtle">
+        <div className="flex shrink-0 items-center gap-2 text-xs">
           <div className="font-bold tabular-nums text-kumo-strong">{server.online ? formatUptime(server) : '离线'}</div>
+          <span className={`shrink-0 rounded-md border px-2 py-0.5 text-xs font-semibold ${server.online ? 'border-kumo-success/30 bg-kumo-success/10 text-kumo-success' : 'border-kumo-danger/30 bg-kumo-danger/10 text-kumo-danger'}`}>
+            {server.online ? '在线' : '离线'}
+          </span>
         </div>
       </div>
 
