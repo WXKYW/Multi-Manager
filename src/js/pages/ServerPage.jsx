@@ -2594,7 +2594,7 @@ function ServerPage() {
   const [dockerSelectedServer, setDockerSelectedServer] = useState('');
   const [expandedDockerOverviewServers, setExpandedDockerOverviewServers] = useState([]);
   const [showDockerTaskDetails, setShowDockerTaskDetails] = useState(false);
-  const [showDockerLogPanel, setShowDockerLogPanel] = useState(true);
+  const [showDockerLogPanel, setShowDockerLogPanel] = useState(false);
   const [dockerTasks, setDockerTasks] = useState([]);
   const [dockerTaskStreamConnected, setDockerTaskStreamConnected] = useState(false);
   const [dockerTaskStreamError, setDockerTaskStreamError] = useState('');
@@ -4789,7 +4789,15 @@ function ServerPage() {
     const payload = task.payload || {};
     const targetName = task.targetName || getDockerTaskTargetLabel(payload);
     const actionLabel = getDockerTaskActionLabel(task.action || task.command || task.type);
-    return targetName ? `${actionLabel} ${targetName}` : actionLabel;
+
+    const sId = task.serverId || payload.serverId || payload.server_id;
+    const serverMatch = (dockerOverviewServers || []).find(s => String(s.id) === String(sId))
+      || (servers || []).find(s => String(s.id) === String(sId));
+    const hostName = task.serverName || payload.serverName || serverMatch?.name;
+
+    const hostPrefix = hostName ? `[${hostName}] ` : '';
+    const mainTitle = targetName ? `${actionLabel} ${targetName}` : actionLabel;
+    return `${hostPrefix}${mainTitle}`;
   };
 
   const getDockerTaskStateVariant = (state = '') => {
@@ -4805,12 +4813,18 @@ function ServerPage() {
   const decorateDockerTask = (task = {}) => {
     const meta = dockerTaskMetaRef.current[task.taskId] || {};
     const payload = task.payload || meta.payload || {};
+    const sId = task.serverId || meta.serverId || payload.serverId || payload.server_id;
+    const serverMatch = (dockerOverviewServers || []).find(s => String(s.id) === String(sId))
+      || (servers || []).find(s => String(s.id) === String(sId));
+    const serverName = task.serverName || meta.serverName || payload.serverName || serverMatch?.name;
+
     return normalizeDockerTaskResult({
       ...meta,
       ...task,
       payload,
       action: task.action || meta.action,
-      serverId: task.serverId || meta.serverId,
+      serverId: sId,
+      serverName,
       targetName: task.targetName || meta.targetName || getDockerTaskTargetLabel(payload),
       silent: task.silent ?? meta.silent,
     });
@@ -6354,13 +6368,14 @@ function ServerPage() {
       const failedResults = results.filter(result => getDockerUpdateResultError(result));
       if (!options.silent) {
         const updateCount = results.filter(item => item?.has_update || item?.hasUpdate).length;
+        const hostTag = server?.name ? `[${server.name}] ` : '';
         if (failedResults.length > 0) {
           const target = failedResults[0]?.container_name || failedResults[0]?.containerName || fallback.containerName || '容器';
-          toast.error(`${target} 检测失败：${getDockerUpdateResultError(failedResults[0])}`);
+          toast.error(`${hostTag}${target} 检测失败：${getDockerUpdateResultError(failedResults[0])}`);
         } else if (updateCount > 0) {
-          toast.warning(`检测完成，发现 ${updateCount} 个可更新镜像`);
+          toast.warning(`${hostTag}检测完成，发现 ${updateCount} 个可更新镜像`);
         } else {
-          toast.success('检测完成，暂无可更新镜像');
+          toast.success(`${hostTag}检测完成，暂无可更新镜像`);
         }
       }
 
@@ -6414,12 +6429,13 @@ function ServerPage() {
       );
       const failedCount = finished.filter(item => !item.ok).length;
 
+      const targetTag = targets.length === 1 && targets[0]?.name ? `[${targets[0].name}] ` : '';
       if (failedCount > 0) {
-        toast.warning(`检测完成，${updateCount} 个可更新，${failedCount} 台主机检测失败`);
+        toast.warning(`${targetTag}检测完成，${updateCount} 个可更新，${failedCount} 台主机检测失败`);
       } else if (updateCount > 0) {
-        toast.warning(`检测完成，发现 ${updateCount} 个可更新镜像`);
+        toast.warning(`${targetTag}检测完成，发现 ${updateCount} 个可更新镜像`);
       } else {
-        toast.success('检测完成，暂无可更新镜像');
+        toast.success(`${targetTag}检测完成，暂无可更新镜像`);
       }
     } finally {
       setDockerBulkUpdateChecking(false);
