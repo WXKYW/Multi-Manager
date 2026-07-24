@@ -707,44 +707,36 @@ function AuthPage() {
           />
         )}
 
-        {!isDemoMode && !requiresSecondStep && (
-          <Input
-            size="base"
-            type="password"
-            aria-label="管理员密码"
-            placeholder="请输入管理员密码"
-            value={loginPassword}
-            onChange={event => {
+        {/* 原位无缝转换输入框（In-Place Morphing Input） */}
+        <Input
+          key={requiresSecondStep ? '2fa-input' : 'password-input'}
+          size="base"
+          type={requiresSecondStep ? 'text' : 'password'}
+          inputMode={requiresSecondStep ? 'numeric' : undefined}
+          aria-label={requiresSecondStep ? '双因素验证码' : '管理员密码'}
+          placeholder={requiresSecondStep ? '000000' : '请输入管理员密码'}
+          maxLength={requiresSecondStep ? 6 : undefined}
+          value={requiresSecondStep ? loginTotpToken : loginPassword}
+          onChange={event => {
+            if (requiresSecondStep) {
+              handle2FAInput(event);
+            } else {
               clearLoginError();
               setLoginPassword(event.target.value);
-            }}
-            autoComplete="current-password"
-            spellCheck={false}
-            className={cx('auth-login-input w-full', loginError && 'auth-login-input--error')}
-            autoFocus
-          />
-        )}
+            }
+          }}
+          autoComplete={requiresSecondStep ? 'one-time-code' : 'current-password'}
+          spellCheck={false}
+          className={cx(
+            'auth-login-input w-full transition-all duration-200',
+            requiresSecondStep && 'text-center font-mono tracking-widest text-lg',
+            loginError && 'auth-login-input--error'
+          )}
+          autoFocus
+        />
 
-        {requiresSecondStep && (
-          <Input
-            size="base"
-            type="text"
-            inputMode="numeric"
-            aria-label="双因素验证码"
-            maxLength={6}
-            placeholder="000000"
-            value={loginTotpToken}
-            onChange={handle2FAInput}
-            autoComplete="one-time-code"
-            className={cx(
-              'auth-login-input w-full text-center font-mono tracking-widest text-lg',
-              loginError && 'auth-login-input--error'
-            )}
-            autoFocus
-          />
-        )}
-
-        {!requiresSecondStep && (
+        {/* 原位无缝转换操作按钮（In-Place Morphing Button） */}
+        {!requiresSecondStep ? (
           <Button
             type="submit"
             variant="primary"
@@ -759,6 +751,19 @@ function AuthPage() {
             )}
           >
             {loginLoading ? '处理中...' : isDemoMode ? '进入演示环境' : '登录'}
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={buttonsLocked}
+            onClick={githubFlowId ? cancelGitHubFlow : cancelLogin2FA}
+            icon={<ChevronLeft className="size-3.5" />}
+            className="auth-login-button--secondary w-full justify-center"
+            aria-label="返回密码"
+          >
+            返回密码
           </Button>
         )}
 
