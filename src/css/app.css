@@ -856,7 +856,9 @@ body {
 }
 
 .auth-login-head {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
   margin-bottom: 2rem;
 }
 

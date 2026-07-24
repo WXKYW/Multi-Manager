@@ -747,7 +747,7 @@ function AuthPage() {
             className={getButtonClassName(
               'password',
               loginLoading,
-              'auth-login-button--primary w-full justify-center'
+              'auth-login-button--primary w-full justify-center transition-all duration-200'
             )}
           >
             {loginLoading ? '处理中...' : isDemoMode ? '进入演示环境' : '登录'}
@@ -760,7 +760,7 @@ function AuthPage() {
             disabled={buttonsLocked}
             onClick={githubFlowId ? cancelGitHubFlow : cancelLogin2FA}
             icon={<ChevronLeft className="size-3.5" />}
-            className="auth-login-button--secondary w-full justify-center"
+            className="auth-login-button--secondary w-full justify-center transition-all duration-200"
             aria-label="返回密码"
           >
             返回密码
