@@ -1657,22 +1657,25 @@ function SettingsPage() {
               <div className="flex flex-wrap gap-2">
                 <Button
                   size="sm"
-                  shape="square"
+                  variant="secondary"
                   onClick={exportDatabase}
                   aria-label="导出数据库"
                   title="导出数据库"
-                  icon={<Upload className="h-4 w-4" />}
-                />
+                  icon={<Upload className="h-3.5 w-3.5" />}
+                >
+                  导出数据库
+                </Button>
                 <Button
                   size="sm"
                   variant="primary"
-                  shape="square"
                   onClick={importDatabase}
                   loading={databaseBusy}
                   aria-label="导入数据库"
                   title="导入数据库"
-                  icon={<Download className="h-4 w-4" />}
-                />
+                  icon={<Download className="h-3.5 w-3.5" />}
+                >
+                  导入数据库
+                </Button>
               </div>
               {dbImportPreview && (
                 <AppCard padding="none" className="bg-kumo-recessed/40 p-3 text-xs">
