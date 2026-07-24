@@ -845,11 +845,11 @@ function NotificationPage() {
                   key={channel.id}
                   padding="none"
                   interactive
-                  className="flex min-h-[128px] flex-col justify-between p-4 transition-all hover:border-kumo-brand"
+                  className="flex min-h-[128px] flex-col justify-between p-4 transition-all duration-200 hover:border-kumo-brand/50 hover:shadow-sm"
                 >
                   <div className="flex min-w-0 items-start justify-between gap-3">
                     {/* Icon */}
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-kumo-inverse text-base flex-shrink-0 ${
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-kumo-inverse text-base flex-shrink-0 shadow-xs ${
                       channel.type === 'email' ? 'bg-kumo-info' : 'bg-kumo-brand'
                     }`}>
                       {channel.type === 'email' ? <Mail className="w-4 h-4" /> : <Send className="w-4 h-4" />}
@@ -857,10 +857,13 @@ function NotificationPage() {
 
                     {/* Information */}
                     <div className="min-w-0 flex-1">
-                      <h4 className="text-xs font-bold text-kumo-strong truncate leading-tight">
-                        {channel.name}
-                      </h4>
-                      <p className="text-[10px] text-kumo-subtle mt-1 select-none">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <h4 className="text-xs font-bold text-kumo-strong truncate leading-tight" title={channel.name}>
+                          {channel.name}
+                        </h4>
+                        <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${channel.enabled ? 'bg-kumo-success' : 'bg-kumo-subtle/50'}`} />
+                      </div>
+                      <p className="text-[10px] text-kumo-subtle mt-1 select-none font-medium">
                         {getChannelTypeName(channel.type)}
                       </p>
                     </div>
@@ -894,12 +897,12 @@ function NotificationPage() {
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between border-t border-kumo-line pt-3 mt-4">
-                    <span className={`text-[10px] font-semibold flex items-center gap-1 ${
+                  <div className="flex items-center justify-between border-t border-kumo-line/60 pt-2.5 mt-3 select-none">
+                    <span className={`text-[10px] font-semibold flex items-center gap-1.5 ${
                       channel.enabled ? 'text-kumo-success' : 'text-kumo-subtle'
                     }`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${channel.enabled ? 'bg-kumo-success' : 'bg-kumo-subtle'}`} />
-                      {channel.enabled ? '启用中' : '已禁用'}
+                      <span className={`w-1.5 h-1.5 rounded-full ${channel.enabled ? 'bg-kumo-success animate-pulse' : 'bg-kumo-subtle'}`} />
+                      {channel.enabled ? '已启用投递' : '已暂停投递'}
                     </span>
                   </div>
                 </AppCard>
@@ -964,11 +967,11 @@ function NotificationPage() {
                   key={rule.id}
                   padding="none"
                   interactive
-                  className="flex min-h-[148px] flex-col justify-between p-4 transition-all hover:border-kumo-brand"
+                  className="flex min-h-[148px] flex-col justify-between p-4 transition-all duration-200 hover:border-kumo-brand/50 hover:shadow-sm"
                 >
                   <div className="flex items-start justify-between gap-3">
                     {/* Severity Indicator */}
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-kumo-inverse text-base flex-shrink-0 ${
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-kumo-inverse text-base flex-shrink-0 shadow-xs ${
                       rule.severity === 'critical'
                         ? 'bg-kumo-danger'
                         : rule.severity === 'warning'
@@ -980,24 +983,24 @@ function NotificationPage() {
 
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-xs font-bold text-kumo-strong truncate leading-tight">
+                        <span className="text-xs font-bold text-kumo-strong truncate leading-tight" title={rule.name}>
                           {rule.name}
                         </span>
-                        <span className={`text-[8.5px] px-1 py-px rounded font-bold uppercase select-none ${
+                        <span className={`text-[8.5px] px-1.5 py-0.5 rounded font-bold uppercase select-none ${
                           rule.severity === 'critical'
-                            ? 'bg-kumo-danger/10 text-kumo-danger'
+                            ? 'bg-kumo-danger/10 text-kumo-danger border border-kumo-danger/20'
                             : rule.severity === 'warning'
-                            ? 'bg-kumo-warning/10 text-kumo-warning'
-                            : 'bg-kumo-info/10 text-kumo-info'
+                            ? 'bg-kumo-warning/10 text-kumo-warning border border-kumo-warning/20'
+                            : 'bg-kumo-info/10 text-kumo-info border border-kumo-info/20'
                         }`}>
                           {rule.severity}
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5 mt-2 flex-wrap select-none">
-                        <Badge className="bg-kumo-recessed text-[9px] font-medium text-kumo-subtle">
+                        <Badge className="bg-kumo-recessed text-[9px] font-medium text-kumo-subtle border border-kumo-line/40">
                           {getSourceModuleName(rule.source_module)}
                         </Badge>
-                        <Badge className="bg-kumo-recessed text-[9px] font-medium text-kumo-subtle">
+                        <Badge className="bg-kumo-recessed text-[9px] font-medium text-kumo-subtle border border-kumo-line/40">
                           {getEventTypeName(rule.event_type)}
                         </Badge>
                       </div>
@@ -1034,7 +1037,7 @@ function NotificationPage() {
                   </div>
 
                   {/* Settings status summary */}
-                  <div className="border-t border-kumo-line pt-3 mt-4 space-y-1.5">
+                  <div className="border-t border-kumo-line/60 pt-3 mt-3.5 space-y-2">
                     {rule.suppression && (
                       <div className="flex items-center gap-1.5 text-[10px] text-kumo-subtle font-mono select-none">
                         <span>• 重复抑制: {rule.suppression.repeat_count || 1} 次</span>
@@ -1043,29 +1046,29 @@ function NotificationPage() {
                       </div>
                     )}
                     <div className="flex items-center justify-between">
-                      <span className={`text-[10px] font-semibold flex items-center gap-1 ${
+                      <span className={`text-[10px] font-semibold flex items-center gap-1.5 ${
                         rule.enabled ? 'text-kumo-success' : 'text-kumo-subtle'
                       }`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${rule.enabled ? 'bg-kumo-success' : 'bg-kumo-subtle'}`} />
-                        {rule.enabled ? '开启中' : '已禁用'}
+                        <span className={`w-1.5 h-1.5 rounded-full ${rule.enabled ? 'bg-kumo-success animate-pulse' : 'bg-kumo-subtle'}`} />
+                        {rule.enabled ? '已开启规则' : '已禁用规则'}
                       </span>
                       <Button
                         onClick={() => handleToggleRuleEnabled(rule)}
                         variant="secondary" size="sm"
-                        className="h-6 text-[10px] font-semibold"
+                        className="h-6 text-[10px] font-semibold px-2"
                       >
                         {rule.enabled ? '一键禁用' : '一键启用'}
                       </Button>
                     </div>
                     {dryRunResults[rule.id] && (
-                      <div className="rounded-md border border-kumo-line bg-kumo-recessed/50 p-2 text-[10px] leading-relaxed text-kumo-subtle">
+                      <div className="rounded-md border border-kumo-line/60 bg-kumo-recessed/40 p-2.5 text-[10px] leading-relaxed text-kumo-subtle space-y-1">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="font-semibold text-kumo-strong">
-                            {dryRunResults[rule.id].wouldNotify ? '预演结果：会发送' : '预演结果：不会发送'}
+                          <span className="font-bold text-kumo-strong">
+                            {dryRunResults[rule.id].wouldNotify ? '✅ 预演结果：触发发送' : 'ℹ️ 预演结果：未触发'}
                           </span>
-                          <span className="font-mono">{dryRunResults[rule.id].fingerprint}</span>
+                          <span className="font-mono text-[9px] text-kumo-subtle">{dryRunResults[rule.id].fingerprint}</span>
                         </div>
-                        <div className="mt-1 truncate font-mono">{dryRunResults[rule.id].title}</div>
+                        <div className="truncate font-mono text-[10px] text-kumo-subtle">{dryRunResults[rule.id].title}</div>
                       </div>
                     )}
                   </div>
@@ -1191,38 +1194,53 @@ function NotificationPage() {
                   <AppCard
                     key={log.id}
                     padding="none"
-                    className="grid grid-cols-1 gap-3 p-3 transition-colors duration-150 hover:bg-kumo-recessed/20 md:grid-cols-[minmax(13rem,1fr)_minmax(0,1.8fr)] md:items-start sm:p-3.5"
+                    className="grid grid-cols-1 gap-3 p-3.5 transition-all duration-200 hover:border-kumo-brand/40 hover:shadow-sm md:grid-cols-[minmax(14rem,1fr)_minmax(0,1.8fr)] md:items-start"
                   >
                     {/* 左栏：状态与元数据快照 */}
-                    <div className="flex flex-col gap-1.5 min-w-0 pr-0 md:pr-3 md:border-r md:border-kumo-line/40">
-                      {/* 头部：状态 Icon + 标题 */}
-                      <div className="flex items-center gap-2 min-w-0">
-                        <div
-                          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold select-none ${
+                    <div className="flex flex-col gap-2 min-w-0 pr-0 md:pr-3.5 md:border-r md:border-kumo-line/50">
+                      {/* 状态 Header 标签与点号 */}
+                      <div className="flex items-center justify-between gap-2 min-w-0">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className={`h-2 w-2 rounded-full shrink-0 ${
                             log.status === 'sent'
-                              ? 'bg-kumo-success/15 text-kumo-success'
+                              ? 'bg-kumo-success animate-pulse'
                               : log.status === 'failed'
-                                ? 'bg-kumo-danger/15 text-kumo-danger'
-                                : 'bg-kumo-warning/15 text-kumo-warning'
-                          }`}
-                        >
-                          {log.status === 'sent' ? '✓' : log.status === 'failed' ? '✗' : '...'}
+                                ? 'bg-kumo-danger'
+                                : 'bg-kumo-warning'
+                          }`} />
+                          <span className="text-xs font-bold text-kumo-strong truncate" title={log.title}>
+                            {log.title}
+                          </span>
                         </div>
-                        <span className="text-xs font-bold text-kumo-strong truncate" title={log.title}>
-                          {log.title}
-                        </span>
+                        <Badge className={`text-[9px] px-1.5 py-0.5 border ${
+                          log.status === 'sent'
+                            ? 'bg-kumo-success/10 text-kumo-success border-kumo-success/20'
+                            : log.status === 'failed'
+                              ? 'bg-kumo-danger/10 text-kumo-danger border-kumo-danger/20'
+                              : 'bg-kumo-warning/10 text-kumo-warning border-kumo-warning/20'
+                        }`}>
+                          {log.status === 'sent' ? '发送成功' : log.status === 'failed' ? '发送失败' : '队列处理中'}
+                        </Badge>
                       </div>
 
                       {/* 动态生命周期 Badges & 细节 */}
                       {lifecycleMeta && (
                         <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
-                          <Badge className="border border-kumo-brand/25 bg-kumo-brand/10 text-[9px] text-kumo-brand py-0 px-1.5">
+                          <Badge className="border border-kumo-brand/25 bg-kumo-brand/10 text-[9px] font-semibold text-kumo-brand py-0 px-1.5">
                             ↻ {mutationLabel}
                           </Badge>
-                          {lifecycleMeta.kind && <span className="font-mono text-kumo-subtle">{lifecycleMeta.kind}</span>}
-                          {lifecycleMeta.duration && <span className="text-kumo-subtle">持续 {lifecycleMeta.duration}</span>}
+                          {lifecycleMeta.kind && (
+                            <span className="rounded bg-kumo-recessed px-1.5 py-0.5 font-mono text-[9px] text-kumo-subtle border border-kumo-line/40">
+                              {lifecycleMeta.kind}
+                            </span>
+                          )}
+                          {lifecycleMeta.duration && (
+                            <span className="text-[10px] text-kumo-subtle">
+                              持续 {lifecycleMeta.duration}
+                            </span>
+                          )}
                           {lifecycleMeta.changedFields.length > 0 && (
-                            <span className="text-kumo-subtle" title={lifecycleMeta.changedFields.join(', ')}>
+                            <span className="text-[10px] text-kumo-subtle" title={lifecycleMeta.changedFields.join(', ')}>
                               变化 {lifecycleMeta.changedFields.length} 项
                             </span>
                           )}
@@ -1230,7 +1248,8 @@ function NotificationPage() {
                       )}
 
                       {/* 时间记录 */}
-                      <div className="font-mono text-[10px] text-kumo-subtle select-none pt-0.5">
+                      <div className="font-mono text-[10px] text-kumo-subtle select-none pt-0.5 flex items-center gap-1">
+                        <span className="opacity-60">🕒</span>
                         {new Date(log.created_at).toLocaleString()}
                       </div>
                     </div>
