@@ -6,17 +6,20 @@
 // 默认配置
 const DEFAULT_CONFIG = {
   serverUrl: '',
-  password: '',
+  token: '',
   showFillButton: true,
   masterEnabled: true
 };
 
+// Remove credentials persisted by releases that used browser sync storage.
+chrome.storage.sync.remove(['password', 'serverUrl']);
+
 // 获取配置
 async function getConfig() {
-  const result = await chrome.storage.sync.get(['serverUrl', 'password', 'showFillButton', 'masterEnabled']);
+  const result = await chrome.storage.local.get(['serverUrl', 'token', 'showFillButton', 'masterEnabled']);
   return {
     serverUrl: result.serverUrl || DEFAULT_CONFIG.serverUrl,
-    password: result.password || DEFAULT_CONFIG.password,
+    token: result.token || '',
     showFillButton: result.showFillButton !== undefined ? result.showFillButton : DEFAULT_CONFIG.showFillButton,
     masterEnabled: result.masterEnabled !== undefined ? result.masterEnabled : DEFAULT_CONFIG.masterEnabled
   };
@@ -28,12 +31,15 @@ async function fetchTotpAccounts() {
   if (!config.serverUrl) {
     return { success: false, error: '请先配置服务器地址' };
   }
+  if (!config.token) {
+    return { success: false, error: '请先完成插件安全配对' };
+  }
 
   try {
     const response = await fetch(`${config.serverUrl}/api/totp/accounts?withCodes=true`, {
       headers: {
         'Content-Type': 'application/json',
-        'x-admin-password': config.password
+        Authorization: `Bearer ${config.token}`
       }
     });
 

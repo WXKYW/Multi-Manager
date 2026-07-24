@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/iwvw/api-monitor/backend-go/internal/apikeys"
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
 	"github.com/iwvw/api-monitor/backend-go/internal/secure"
 )
@@ -61,6 +62,15 @@ func (s *Service) AuthorizeGatewayRequest(r *http.Request) (*http.Request, error
 	}
 	if rawKey == "" {
 		return r, errGatewayKeyMissing
+	}
+
+	if key, err := s.apiKeys.Authorize(r.Context(), r, apikeys.ScopeOpenAIGateway); err == nil {
+		identity := gatewayKeyIdentity{ID: key.ID, Name: key.Name}
+		return r.WithContext(context.WithValue(r.Context(), gatewayKeyContextKey{}, identity)), nil
+	} else if errors.Is(err, apikeys.ErrExpired) {
+		return r, errGatewayKeyExpired
+	} else if errors.Is(err, apikeys.ErrDisabled) {
+		return r, errGatewayKeyInvalid
 	}
 
 	ctx := r.Context()

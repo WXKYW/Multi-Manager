@@ -244,10 +244,8 @@ function NotificationPage() {
 
   // 获取请求 Headers
   const getAuthHeaders = () => {
-    const password = localStorage.getItem('admin_password') || '';
     return {
       'Content-Type': 'application/json',
-      'x-admin-password': password,
     };
   };
 
@@ -1276,7 +1274,7 @@ function NotificationPage() {
       {notificationCurrentTab === 'settings' && (
         <SectionCard
           title="全局配置选项"
-          description="配置通知聚合、限频与看板链接。"
+          description="聚合、限频与看板链接"
           icon={<Settings className="w-4 h-4 text-kumo-brand" />}
           bodyClassName="space-y-6"
           bodyPadding="xl"
@@ -1284,7 +1282,7 @@ function NotificationPage() {
           <div className="space-y-4">
             {/* Base URL */}
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-kumo-subtle">看板基准 URL (用于生成通知卡片链接)</label>
+              <label className="text-xs font-semibold text-kumo-subtle">看板基准 URL</label>
               <Input size="sm"
                 aria-label="看板基准 URL"
                 type="text"
@@ -1293,13 +1291,13 @@ function NotificationPage() {
                 onChange={(e) => setNotificationGlobalConfig(prev => ({ ...prev, base_url: e.target.value }))}
                 className="w-full text-kumo-strong text-xs px-3 py-2"
               />
-              <p className="text-[10px] text-kumo-subtle leading-tight select-none">设置后，Telegram/Email 发送出的故障消息将附带“查看看板详情”按钮与直达链接。</p>
+              <p className="text-[10px] text-kumo-subtle leading-tight select-none">设置后，通知会附带看板链接。</p>
             </div>
 
             {/* Rate cap & aggregation timer */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-kumo-line pt-4">
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-kumo-subtle">全局限频阀值 (条 / 小时)</label>
+                <label className="text-xs font-semibold text-kumo-subtle">全局限频（条/小时）</label>
                 <Input size="sm"
                   aria-label="全局限频阀值"
                   type="number"
@@ -1307,11 +1305,11 @@ function NotificationPage() {
                   onChange={(e) => setNotificationGlobalConfig(prev => ({ ...prev, global_rate_limit_per_hour: parseInt(e.target.value) || 0 }))}
                   className="w-full text-kumo-strong text-xs px-3 py-2 font-mono"
                 />
-                <p className="text-[10px] text-kumo-subtle leading-tight select-none">设置每小时发出通知的上限限制，达到阈值后将仅保留 Critical 极高等级事件推送。</p>
+                <p className="text-[10px] text-kumo-subtle leading-tight select-none">每小时通知上限；超限后仅推 Critical。</p>
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-kumo-subtle">消息聚合归并时间 (秒)</label>
+                <label className="text-xs font-semibold text-kumo-subtle">聚合窗口（秒）</label>
                 <Input size="sm"
                   aria-label="消息聚合归并时间"
                   type="number"
@@ -1319,15 +1317,15 @@ function NotificationPage() {
                   onChange={(e) => setNotificationGlobalConfig(prev => ({ ...prev, batch_interval_seconds: parseInt(e.target.value) || 0 }))}
                   className="w-full text-kumo-strong text-xs px-3 py-2 font-mono"
                 />
-                <p className="text-[10px] text-kumo-subtle leading-tight select-none">聚合聚合时间窗。在此窗口中下发的同渠道通知将合并作为单条推送，避免信息轰炸。</p>
+                <p className="text-[10px] text-kumo-subtle leading-tight select-none">窗口内同渠道通知合并发送。</p>
               </div>
             </div>
 
             {/* Enable aggregate batch toggle */}
             <div className="flex items-start justify-between border-t border-kumo-line pt-4">
               <div className="space-y-0.5">
-                <h4 className="text-xs font-semibold text-kumo-strong">启用通知聚合机制</h4>
-                <p className="text-[10px] text-kumo-subtle leading-tight select-none">勾选此项后，系统将自动汇总相同设备或接口的告警，聚合后统一发送。</p>
+                <h4 className="text-xs font-semibold text-kumo-strong">启用通知聚合</h4>
+                <p className="text-[10px] text-kumo-subtle leading-tight select-none">相同告警合并发送。</p>
               </div>
               <Switch
                 checked={!!notificationGlobalConfig.enable_batch}
@@ -1352,7 +1350,7 @@ function NotificationPage() {
             {channelForm.id ? '编辑通知渠道' : '新建通知渠道'}
           </Dialog.Title>
           <Dialog.Description className="text-xs text-kumo-subtle mb-4 select-none">
-            配置系统警报发送的目标分发端口
+            配置告警投递渠道
           </Dialog.Description>
 
           <div className="-mx-1 space-y-4 max-h-[60vh] overflow-y-auto px-1 pr-2 scrollbar-thin">
@@ -1378,7 +1376,7 @@ function NotificationPage() {
               <Input size="sm"
                 aria-label="显示名称"
                 type="text"
-                placeholder="例如：运维值班邮箱"
+                placeholder="如：运维值班邮箱"
                 value={channelForm.name}
                 onChange={(e) => setChannelForm(prev => ({ ...prev, name: e.target.value }))}
                 className="w-full"
@@ -1389,11 +1387,11 @@ function NotificationPage() {
             {channelForm.type === 'email' && (
               <>
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-kumo-subtle">SMTP 主机服务器地址 *</label>
+                  <label className="text-xs font-semibold text-kumo-subtle">SMTP 主机 *</label>
                   <Input size="sm"
                     aria-label="SMTP 主机服务器地址"
                     type="text"
-                    placeholder="smtp.gmail.com or smtp.exmail.qq.com"
+                    placeholder="smtp.gmail.com / smtp.exmail.qq.com"
                     value={channelForm.config.host}
                     onChange={(e) => setChannelForm(prev => ({
                       ...prev,
@@ -1417,7 +1415,7 @@ function NotificationPage() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-kumo-subtle">加密安全协议</label>
+                    <label className="text-xs font-semibold text-kumo-subtle">加密方式</label>
                     <Select size="sm"
                       aria-label="加密安全协议"
                       value={channelForm.config.secure ? 'ssl' : 'tls'}
@@ -1435,7 +1433,7 @@ function NotificationPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-kumo-subtle">发件账户邮箱账号 *</label>
+                  <label className="text-xs font-semibold text-kumo-subtle">发件邮箱 *</label>
                   <Input size="sm"
                     aria-label="发件账户邮箱账号"
                     type="email"
@@ -1453,7 +1451,7 @@ function NotificationPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-kumo-subtle">SMTP 授权口令 / 应用密码 *</label>
+                  <label className="text-xs font-semibold text-kumo-subtle">SMTP 授权码 *</label>
                   <Input size="sm"
                     aria-label="SMTP 授权口令"
                     type="text"
@@ -1477,11 +1475,11 @@ function NotificationPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-kumo-subtle">发件人昵称（可选）</label>
+                  <label className="text-xs font-semibold text-kumo-subtle">发件人名（可选）</label>
                   <Input size="sm"
                     aria-label="发件人昵称"
                     type="text"
-                    placeholder="API Monitor Alerter"
+                    placeholder="告警机器人"
                     value={channelForm.config.sender_name}
                     onChange={(e) => setChannelForm(prev => ({
                       ...prev,
@@ -1492,7 +1490,7 @@ function NotificationPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-kumo-subtle">收件目的邮箱 *</label>
+                  <label className="text-xs font-semibold text-kumo-subtle">收件邮箱 *</label>
                   <Input size="sm"
                     aria-label="收件目的邮箱"
                     type="email"
@@ -1527,11 +1525,11 @@ function NotificationPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-kumo-subtle">接收目标 Chat ID *</label>
+                  <label className="text-xs font-semibold text-kumo-subtle">Chat ID *</label>
                   <Input size="sm"
                     aria-label="接收目标 Chat ID"
                     type="text"
-                    placeholder="例如：123456789 或 -100987654321"
+                    placeholder="如：123456789 或 -100987654321"
                     value={channelForm.config.chat_id}
                     onChange={(e) => setChannelForm(prev => ({
                       ...prev,
@@ -1542,11 +1540,11 @@ function NotificationPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-kumo-subtle">代理地址（可选）</label>
+                  <label className="text-xs font-semibold text-kumo-subtle">代理（可选）</label>
                   <Input size="sm"
                     aria-label="Telegram 代理地址"
                     type="text"
-                    placeholder="例如：http://127.0.0.1:7890"
+                    placeholder="如：http://127.0.0.1:7890"
                     value={channelForm.config.proxy_url || ''}
                     onChange={(e) => setChannelForm(prev => ({
                       ...prev,
@@ -1560,7 +1558,7 @@ function NotificationPage() {
 
             {/* Status enable toggle */}
             <div className="flex items-center justify-between border-t border-kumo-line pt-4 select-none">
-              <span className="text-xs font-semibold text-kumo-strong">启用此通知渠道</span>
+              <span className="text-xs font-semibold text-kumo-strong">启用渠道</span>
               <Switch
                 checked={!!channelForm.enabled}
                 onCheckedChange={(checked) => setChannelForm(prev => ({ ...prev, enabled: checked }))}
@@ -1591,7 +1589,7 @@ function NotificationPage() {
             {ruleForm.id ? '编辑告警规则' : '添加告警规则'}
           </Dialog.Title>
           <Dialog.Description className="text-xs text-kumo-subtle mb-4 select-none">
-            配置匹配的触发条件与投递渠道
+            配置触发条件和投递渠道
           </Dialog.Description>
 
           <div className="-mx-1 space-y-4 max-h-[60vh] overflow-y-auto px-1 pr-2 scrollbar-thin">
@@ -1601,7 +1599,7 @@ function NotificationPage() {
               <Input size="sm"
                 aria-label="规则名称"
                 type="text"
-                placeholder="例如：数据库故障告警"
+                placeholder="如：数据库故障告警"
                 value={ruleForm.name}
                 onChange={(e) => setRuleForm(prev => ({ ...prev, name: e.target.value }))}
                 className="w-full"
@@ -1611,7 +1609,7 @@ function NotificationPage() {
             {/* Source & Event Type */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-kumo-subtle">来源监控模块</label>
+                <label className="text-xs font-semibold text-kumo-subtle">来源模块</label>
                 <Select size="sm"
                   aria-label="来源监控模块"
                   value={ruleForm.source_module}
@@ -1622,7 +1620,7 @@ function NotificationPage() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-kumo-subtle">触发事件类型</label>
+                <label className="text-xs font-semibold text-kumo-subtle">事件类型</label>
                 <Select size="sm"
                   aria-label="触发事件类型"
                   value={ruleForm.event_type}
@@ -1635,23 +1633,23 @@ function NotificationPage() {
 
             {/* Severity Level */}
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-kumo-subtle">告警紧急级别</label>
+              <label className="text-xs font-semibold text-kumo-subtle">告警级别</label>
               <Select size="sm"
                 aria-label="告警紧急级别"
                 value={ruleForm.severity}
                 onValueChange={(value) => setRuleForm(prev => ({ ...prev, severity: String(value) }))}
                 className="w-full"
                 items={[
-                  { value: 'info', label: '常规通知 (Info)' },
-                  { value: 'warning', label: '重要警告 (Warning)' },
-                  { value: 'critical', label: '紧急呼叫 (Critical)' },
+                  { value: 'info', label: '常规（Info）' },
+                  { value: 'warning', label: '警告（Warning）' },
+                  { value: 'critical', label: '紧急（Critical）' },
                 ]}
               />
             </div>
 
             {/* Target Delivery Channels Checkboxes */}
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-kumo-subtle">发送通知的渠道 *</label>
+              <label className="text-xs font-semibold text-kumo-subtle">通知渠道 *</label>
               <AppCard padding="none" className="flex flex-wrap gap-2.5 bg-kumo-recessed/50 p-3.5">
                 {notificationChannels.filter(c => c.enabled).map((channel) => (
                   <Checkbox
@@ -1675,7 +1673,7 @@ function NotificationPage() {
             {/* Repeats & Cooldown Suppression */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-kumo-subtle">累计触发次数再告警</label>
+                <label className="text-xs font-semibold text-kumo-subtle">累计触发后告警</label>
                 <Input size="sm"
                   aria-label="累计触发次数再告警"
                   type="number"
@@ -1690,7 +1688,7 @@ function NotificationPage() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-kumo-subtle">冷却静默期 (分钟)</label>
+                <label className="text-xs font-semibold text-kumo-subtle">静默期（分钟）</label>
                 <Input size="sm"
                   aria-label="冷却静默期"
                   type="number"
@@ -1707,7 +1705,7 @@ function NotificationPage() {
 
             {/* Backup Notification Channels Checkboxes */}
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-kumo-subtle">首选失败时的备用通知渠道</label>
+              <label className="text-xs font-semibold text-kumo-subtle">失败时备用渠道</label>
               <AppCard padding="none" className="flex flex-wrap gap-2.5 bg-kumo-recessed/50 p-3.5">
                 {notificationChannels.filter(c => c.enabled).map((channel) => (
                   <Checkbox
@@ -1731,7 +1729,7 @@ function NotificationPage() {
             {/* Custom Template Titles */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between gap-2">
-                <label className="text-xs font-semibold text-kumo-subtle">自定义标题模板 (可选，支持 {'{{变量}}'})</label>
+                <label className="text-xs font-semibold text-kumo-subtle">标题模板（可选，支持 {'{{变量}}'}）</label>
                 <Button
                   size="sm"
                   variant="secondary"
@@ -1745,7 +1743,7 @@ function NotificationPage() {
               <Input size="sm"
                 aria-label="自定义标题模板"
                 type="text"
-                placeholder="例: 🚨 [{{severity}}] 主机 {{serverName}} 离线!"
+                placeholder="如：[{{severity}}] {{serverName}} 离线"
                 value={ruleForm.title_template}
                 onChange={(e) => setRuleForm(prev => ({ ...prev, title_template: e.target.value }))}
                 className="w-full"
@@ -1754,10 +1752,10 @@ function NotificationPage() {
 
             {/* Custom Template Content */}
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-kumo-subtle">自定义内容模板 (可选)</label>
+              <label className="text-xs font-semibold text-kumo-subtle">内容模板（可选）</label>
               <Textarea
                 aria-label="自定义内容模板"
-                placeholder={'状态: 故障\n监控项: {{monitorName}}\n地址: {{url}}\n错误原因: {{error}}\n时间: {{time}}'}
+                placeholder={'状态: 故障\n监控项: {{monitorName}}\n地址: {{url}}\n原因: {{error}}\n时间: {{time}}'}
                 value={ruleForm.message_template}
                 onChange={(e) => setRuleForm(prev => ({ ...prev, message_template: e.target.value }))}
                 className="w-full min-h-16"
@@ -1796,7 +1794,7 @@ function NotificationPage() {
 
             {/* Quiet until */}
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-kumo-subtle">手动全局静默直至 (在此时间前屏蔽此规则)</label>
+              <label className="text-xs font-semibold text-kumo-subtle">静默至（此前不发送）</label>
               <Input size="sm"
                 aria-label="手动全局静默直至"
                 type="datetime-local"
@@ -1808,7 +1806,7 @@ function NotificationPage() {
 
             {/* Rule Status Switch */}
             <div className="flex items-center justify-between border-t border-kumo-line pt-4 select-none">
-              <span className="text-xs font-semibold text-kumo-strong">启用此告警规则</span>
+              <span className="text-xs font-semibold text-kumo-strong">启用规则</span>
               <Switch
                 checked={!!ruleForm.enabled}
                 onCheckedChange={(checked) => setRuleForm(prev => ({ ...prev, enabled: checked }))}

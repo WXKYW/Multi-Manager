@@ -88,6 +88,37 @@ func TestHealth(t *testing.T) {
 	}
 }
 
+func TestAuthSubroutesAreForwarded(t *testing.T) {
+	handler := testServer(t)
+
+	cases := []struct {
+		name       string
+		method     string
+		path       string
+		wantStatus int
+	}{
+		{name: "login options", method: http.MethodGet, path: "/api/auth/login-options", wantStatus: http.StatusOK},
+		{name: "github config", method: http.MethodGet, path: "/api/auth/github/config", wantStatus: http.StatusUnauthorized},
+		{name: "webauthn credentials", method: http.MethodGet, path: "/api/auth/webauthn/credentials", wantStatus: http.StatusUnauthorized},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			res := httptest.NewRecorder()
+
+			handler.ServeHTTP(res, req)
+
+			if res.Code != tc.wantStatus {
+				t.Fatalf("%s status = %d, want %d; body=%s", tc.path, res.Code, tc.wantStatus, res.Body.String())
+			}
+			if res.Code == http.StatusNotFound {
+				t.Fatalf("%s unexpectedly fell through router; body=%s", tc.path, res.Body.String())
+			}
+		})
+	}
+}
+
 func TestAIMCPCallAPIUsesInternalRoutes(t *testing.T) {
 	handler := testServer(t)
 	cookie := loginServerForTest(t, handler)
@@ -710,6 +741,110 @@ func TestAuthPasswordSessionLogoutFlow(t *testing.T) {
 	}
 	if sessionPayload.Authenticated {
 		t.Fatal("expected logout to invalidate session")
+	}
+}
+
+func TestPluginTokenIsRestrictedToTOTPAccountReads(t *testing.T) {
+	handler := testServer(t)
+	cookie := loginServerForTest(t, handler)
+
+	issueReq := httptest.NewRequest(http.MethodPost, "/api/auth/plugin-token", nil)
+	issueReq.AddCookie(cookie)
+	issueRes := httptest.NewRecorder()
+	handler.ServeHTTP(issueRes, issueReq)
+	if issueRes.Code != http.StatusOK {
+		t.Fatalf("issue token status = %d body=%s", issueRes.Code, issueRes.Body.String())
+	}
+	var issued struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(issueRes.Body.Bytes(), &issued); err != nil || !strings.HasPrefix(issued.Token, "akp_") {
+		t.Fatalf("unexpected token response: %s", issueRes.Body.String())
+	}
+
+	accountsReq := httptest.NewRequest(http.MethodGet, "/api/totp/accounts?withCodes=true", nil)
+	accountsReq.Header.Set("Authorization", "Bearer "+issued.Token)
+	accountsRes := httptest.NewRecorder()
+	handler.ServeHTTP(accountsRes, accountsReq)
+	if accountsRes.Code != http.StatusOK {
+		t.Fatalf("plugin account read status = %d body=%s", accountsRes.Code, accountsRes.Body.String())
+	}
+
+	settingsReq := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
+	settingsReq.Header.Set("Authorization", "Bearer "+issued.Token)
+	settingsRes := httptest.NewRecorder()
+	handler.ServeHTTP(settingsRes, settingsReq)
+	if settingsRes.Code != http.StatusUnauthorized {
+		t.Fatalf("plugin token accessed settings: %d body=%s", settingsRes.Code, settingsRes.Body.String())
+	}
+
+	writeReq := httptest.NewRequest(http.MethodPost, "/api/totp/accounts", strings.NewReader(`{}`))
+	writeReq.Header.Set("Authorization", "Bearer "+issued.Token)
+	writeRes := httptest.NewRecorder()
+	handler.ServeHTTP(writeRes, writeReq)
+	if writeRes.Code != http.StatusUnauthorized {
+		t.Fatalf("plugin token wrote TOTP data: %d body=%s", writeRes.Code, writeRes.Body.String())
+	}
+}
+
+func TestCrossOriginCookieRequestIsRejected(t *testing.T) {
+	handler := testServer(t)
+	cookie := loginServerForTest(t, handler)
+	req := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
+	req.AddCookie(cookie)
+	req.Header.Set("Origin", "https://attacker.example")
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin session status = %d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestDevProxyCookieRequestUsesForwardedHostForSameOrigin(t *testing.T) {
+	handler := testServer(t)
+	cookie := loginServerForTest(t, handler)
+	req := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
+	req.AddCookie(cookie)
+	req.RemoteAddr = "127.0.0.1:5173"
+	req.Host = "127.0.0.1:3000"
+	req.Header.Set("Origin", "http://localhost:5173")
+	req.Header.Set("X-Forwarded-Host", "localhost:5173")
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("dev proxy same-origin status = %d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestDevProxyCookieRequestAllowsPrivateOriginWithoutForwardedHost(t *testing.T) {
+	handler := testServer(t)
+	cookie := loginServerForTest(t, handler)
+	req := httptest.NewRequest(http.MethodPatch, "/api/settings", strings.NewReader(`{"theme":"dark"}`))
+	req.AddCookie(cookie)
+	req.RemoteAddr = "127.0.0.1:5173"
+	req.Host = "127.0.0.1:3000"
+	req.Header.Set("Origin", "http://192.168.10.3:5173")
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("dev proxy private-origin status = %d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestDevProxyCookieRequestStillRejectsPublicOrigin(t *testing.T) {
+	handler := testServer(t)
+	cookie := loginServerForTest(t, handler)
+	req := httptest.NewRequest(http.MethodPatch, "/api/settings", strings.NewReader(`{"theme":"dark"}`))
+	req.AddCookie(cookie)
+	req.RemoteAddr = "127.0.0.1:5173"
+	req.Host = "127.0.0.1:3000"
+	req.Header.Set("Origin", "https://attacker.example")
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("dev proxy public-origin status = %d body=%s", res.Code, res.Body.String())
 	}
 }
 

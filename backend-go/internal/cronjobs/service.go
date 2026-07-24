@@ -525,8 +525,13 @@ func (s *Service) executeSchedulerTaskAttempt(ctx context.Context, task Schedule
 		return s.executeInternalTask(ctx, task.Command, timeout)
 	case "agent":
 		return s.executeAgentTask(ctx, task, timeout)
-	default:
+	case "shell":
+		if !s.cfg.LocalShellTasksAllowed() {
+			return "", fmt.Errorf("本地 Shell 任务已在当前环境禁用，请显式设置 ALLOW_LOCAL_SHELL_TASKS=true")
+		}
 		return executeShellTask(ctx, task.Command, timeout)
+	default:
+		return "", fmt.Errorf("不支持的任务类型: %s", task.Type)
 	}
 }
 

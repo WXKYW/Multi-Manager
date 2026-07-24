@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { CalendarDotsIcon } from '@phosphor-icons/react';
 import { Button } from '@cloudflare/kumo/components/button';
+import { Checkbox } from '@cloudflare/kumo/components/checkbox';
 import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
-import { ClipboardText, Tabs } from '@cloudflare/kumo';
+import { ClipboardText, DatePicker, Label, Popover, Tabs } from '@cloudflare/kumo';
 import { toast } from '../modules/toast.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import {
@@ -71,10 +73,10 @@ const RESPONSE_LABEL = {
 
 const getAuthHeaders = () => ({
   'Content-Type': 'application/json',
-  'x-admin-password': localStorage.getItem('admin_password') || '',
 });
 
 const AI_ACCESS_BASE = '/api/ai-access';
+const API_KEYS_BASE = '/api/api-keys';
 const OPENAPI_ROUTE = '/api/openapi.json';
 const API_SEGMENT = 'api';
 const routePrefixLiteral = (...segments) => `/${segments.join('/')}`;
@@ -100,6 +102,100 @@ const defaultSkillForm = {
   version: '1.0.0',
   enabled: true,
   permissionsText: 'read',
+};
+
+const createDefaultAPIKeyForm = () => {
+  const expires = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+  expires.setMinutes(expires.getMinutes() - expires.getTimezoneOffset());
+  return {
+    name: '',
+    kind: 'plugin',
+    scopes: [],
+    expiresAt: expires.toISOString().slice(0, 16),
+    enabled: true,
+  };
+};
+
+const API_KEY_KINDS = [
+  { value: 'plugin', label: '浏览器插件', prefix: 'akp_', scope: '读取 TOTP 验证码' },
+  { value: 'ai', label: 'AI Agent', prefix: 'aka_', scope: '调用 AI / MCP 工具' },
+  { value: 'openai', label: 'OpenAI 网关', prefix: 'ako_', scope: '调用 OpenAI 兼容网关' },
+  { value: 'api', label: '通用 API', prefix: 'ak_', scope: '按所选权限访问后台 API' },
+];
+
+const API_SCOPE_LABELS = {
+  'totp:read': 'TOTP 只读',
+  'ai:mcp': 'AI / MCP',
+  'openai:gateway': 'OpenAI 网关',
+  'api:read': 'API 读取',
+  'api:write': 'API 修改',
+};
+
+const API_KEY_EXPIRY_PRESETS = [
+  { value: '7d', label: '7 天', days: 7 },
+  { value: '30d', label: '30 天', days: 30 },
+  { value: '90d', label: '90 天', days: 90 },
+  { value: '180d', label: '180 天', days: 180 },
+  { value: '365d', label: '1 年', days: 365 },
+  { value: 'never', label: '长期有效', days: 0 },
+];
+
+const API_KEY_EXPIRY_HOURS = Array.from({ length: 24 }, (_, hour) => ({
+  value: String(hour).padStart(2, '0'),
+  label: String(hour).padStart(2, '0'),
+}));
+
+const API_KEY_EXPIRY_MINUTES = Array.from({ length: 60 }, (_, minute) => ({
+  value: String(minute).padStart(2, '0'),
+  label: String(minute).padStart(2, '0'),
+}));
+
+const formatKeyTime = value => {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString('zh-CN', { hour12: false });
+};
+
+const toLocalDateTimeInput = value => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 16);
+};
+
+const parseLocalDateTime = value => {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const isSameLocalDate = (left, right) =>
+  left.getFullYear() === right.getFullYear() &&
+  left.getMonth() === right.getMonth() &&
+  left.getDate() === right.getDate();
+
+const matchExpiryPreset = expiresAt => {
+  if (!expiresAt) return 'never';
+  const expiry = parseLocalDateTime(expiresAt);
+  if (!expiry) return '';
+  const matchedPreset = API_KEY_EXPIRY_PRESETS.find(preset => {
+    if (preset.days === 0) return false;
+    const target = new Date();
+    target.setDate(target.getDate() + preset.days);
+    return isSameLocalDate(expiry, target);
+  });
+  return matchedPreset?.value || '';
+};
+
+const apiKeyStatus = key => {
+  if (key.revokedAt) return { label: '已撤销', tone: 'danger' };
+  if (!key.enabled) return { label: '已停用', tone: 'neutral' };
+  if (key.expiresAt && new Date(key.expiresAt).getTime() <= Date.now()) {
+    return { label: '已过期', tone: 'warning' };
+  }
+  return { label: '使用中', tone: 'success' };
 };
 
 const normalizeSummary = (summary = {}) => ({
@@ -340,27 +436,27 @@ const normalizeDocsPayload = (payload = {}) => {
         {
           id: 'providers',
           name: '模型端点',
-          description: '统一管理 OpenAI 兼容端点、模型发现、健康检测与负载均衡',
+          description: 'OpenAI 兼容端点与模型',
         },
         {
           id: 'mcp',
           name: 'MCP 服务',
-          description: '管理 MCP 服务、工具发现、资源、提示词与调用权限',
+          description: 'MCP 服务与工具',
         },
         {
           id: 'skills',
           name: 'Skill 管理',
-          description: '管理本地 Skill、版本、入口、依赖与启用状态',
+          description: 'Skill 与版本',
         },
         {
           id: 'permissions',
           name: '工具权限',
-          description: '统一约束模型、MCP、Skill 和内部系统动作的调用边界',
+          description: '调用权限',
         },
         {
           id: 'audit',
           name: '调用审计',
-          description: '记录模型请求、工具调用、Skill 执行、耗时和失败原因',
+          description: '调用记录',
         },
       ],
     },
@@ -458,7 +554,7 @@ function RouteList({ routes, selectedRoute, onSelect }) {
   return (
     <SectionCard
       title={`接口列表 (${routes.length})`}
-      description="按路径、认证和状态筛选后，在这里选择具体接口。"
+      description="按路径、认证、状态筛选"
       icon={<Search className="h-4 w-4 text-kumo-brand" />}
       className={cx(fixedPanelClass, 'min-h-0')}
       bodyPadding="none"
@@ -469,7 +565,7 @@ function RouteList({ routes, selectedRoute, onSelect }) {
           <EmptyState
             icon={Search}
             title="没有匹配的接口"
-            description="调整搜索词或筛选条件后再查看。"
+            description="换个筛选条件试试"
             card={false}
             className="min-h-0 flex-1"
           />
@@ -557,7 +653,6 @@ const buildCurlExample = route => {
   const lines = [`curl -X ${method} "${window.location.origin}${route.prefix}"`];
 
   if (route.auth === 'session') {
-    lines.push('  -H "x-admin-password: <ADMIN_PASSWORD>"');
   } else if (route.auth === 'api_key') {
     lines.push('  -H "Authorization: Bearer sk-xxx"');
   } else if (route.auth === 'agent_key') {
@@ -593,7 +688,7 @@ function RouteDetail({ route, openapiRoute }) {
           <EmptyState
             icon={FileText}
             title="选择一个接口"
-            description="左侧接口列表会自动跟随后端路由清单更新。"
+            description="从左侧选择接口"
             card={false}
             className="min-h-0 flex-1"
           />
@@ -1008,17 +1103,17 @@ function AIAccessConsole({
               {
                 step: '1',
                 title: '复制配置',
-                text: '复制 Codex MCP 或 Claude Desktop 配置，配置内已包含 Agent Key。',
+                text: '复制 Codex MCP 或 Claude Desktop 配置。',
               },
               {
                 step: '2',
                 title: '粘贴启用',
-                text: '粘贴到 AI 客户端的 MCP 配置区，保存后重启或刷新客户端连接。',
+                text: '粘贴后保存并刷新客户端连接。',
               },
               {
                 step: '3',
                 title: '调用接口',
-                text: '连接后可使用 list_apis、get_openapi、call_api 等工具访问系统接口。',
+                text: '连接后可直接调用系统接口。',
               },
             ].map(item => (
               <div
@@ -1237,6 +1332,398 @@ function AIAccessConsole({
   );
 }
 
+function APIKeyConsole({
+  overview,
+  loading,
+  error,
+  form,
+  setForm,
+  editingId,
+  submitting,
+  issuedSecret,
+  onDismissSecret,
+  onSave,
+  onEdit,
+  onCancelEdit,
+  onToggle,
+  onRotate,
+  onRevoke,
+  onRefresh,
+  onCopy,
+}) {
+  if (loading && !overview) {
+    return (
+      <AppCard padding="lg">
+        <SkeletonLine className="h-5 w-36" />
+        <SkeletonLine className="mt-4 h-80 w-full" />
+      </AppCard>
+    );
+  }
+
+  if (error && !overview) {
+    return (
+      <EmptyState
+        icon={Key}
+        title="密钥管理暂不可用"
+        description={error}
+        action={
+          <Button size="sm" variant="secondary" onClick={onRefresh}>
+            重试
+          </Button>
+        }
+      />
+    );
+  }
+
+  const keys = overview?.keys || [];
+  const summary = overview?.summary || {};
+  const selectedKind = API_KEY_KINDS.find(item => item.value === form.kind) || API_KEY_KINDS[0];
+  const selectedExpiryPreset = matchExpiryPreset(form.expiresAt);
+
+  const toggleScope = scope => {
+    setForm(current => ({
+      ...current,
+      scopes: current.scopes.includes(scope)
+        ? current.scopes.filter(item => item !== scope)
+        : [...current.scopes, scope],
+    }));
+  };
+
+  const updateExpiryDate = date => {
+    if (!date) return;
+    setForm(current => {
+      const existing = parseLocalDateTime(current.expiresAt);
+      const next = new Date(date);
+      next.setHours(existing?.getHours() ?? 23, existing?.getMinutes() ?? 59, 0, 0);
+      return { ...current, expiresAt: toLocalDateTimeInput(next) };
+    });
+  };
+
+  const updateExpiryTime = (part, value) => {
+    setForm(current => {
+      const next = parseLocalDateTime(current.expiresAt);
+      if (!next) return current;
+      if (part === 'hour') next.setHours(Number(value));
+      if (part === 'minute') next.setMinutes(Number(value));
+      return { ...current, expiresAt: toLocalDateTimeInput(next) };
+    });
+  };
+
+  const applyExpiryPreset = preset => {
+    setForm(current => {
+      if (preset.days === 0) {
+        return { ...current, expiresAt: '' };
+      }
+      const base = parseLocalDateTime(current.expiresAt);
+      const next = new Date();
+      next.setDate(next.getDate() + preset.days);
+      next.setSeconds(0, 0);
+      next.setHours(base?.getHours() ?? 23, base?.getMinutes() ?? 59, 0, 0);
+      return { ...current, expiresAt: toLocalDateTimeInput(next) };
+    });
+  };
+
+  return (
+    <div className="grid h-full min-h-0 min-w-0 gap-4 xl:grid-cols-[minmax(320px,0.72fr)_minmax(0,1.28fr)]">
+      <div className="min-h-0 space-y-4 overflow-y-auto px-px pb-2 pr-1 pt-px">
+        <div className="grid grid-cols-2 gap-3">
+          <StatCard icon={Key} label="密钥总数" value={summary.total || 0} />
+          <StatCard icon={Shield} label="使用中" value={summary.active || 0} tone="success" />
+          <StatCard icon={Activity} label="已过期" value={summary.expired || 0} tone="warning" />
+          <StatCard
+            icon={X}
+            label="停用 / 撤销"
+            value={summary.revoked || 0}
+            tone="info"
+          />
+        </div>
+
+        {issuedSecret && (
+          <SectionCard
+            title="新密钥仅显示一次"
+            icon={<Key className="h-4 w-4 text-kumo-warning" />}
+            action={
+              <Button size="sm" variant="ghost" onClick={onDismissSecret} aria-label="关闭">
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            }
+          >
+            <div className="space-y-2">
+              <div className="break-all rounded-md border border-kumo-warning/30 bg-kumo-warning/8 px-3 py-2 font-mono text-xs font-bold text-kumo-strong">
+                {issuedSecret}
+              </div>
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => onCopy(issuedSecret, 'API Key 已复制')}
+                className="gap-1.5"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                <span>复制密钥</span>
+              </Button>
+            </div>
+          </SectionCard>
+        )}
+
+        <SectionCard
+          title={editingId ? '编辑密钥' : '生成密钥'}
+          icon={<Plus className="h-4 w-4 text-kumo-brand" />}
+          bodyClassName="space-y-3"
+        >
+          <Input
+            size="sm"
+            value={form.name}
+            onChange={event => setForm(current => ({ ...current, name: event.target.value }))}
+            placeholder="密钥名称，例如 Chrome 插件"
+            aria-label="密钥名称"
+            className="text-xs"
+          />
+          <Select
+            size="sm"
+            aria-label="密钥类型"
+            value={form.kind}
+            disabled={Boolean(editingId)}
+            onValueChange={kind => setForm(current => ({ ...current, kind, scopes: [] }))}
+            items={API_KEY_KINDS.map(({ value, label }) => ({ value, label }))}
+            className="text-xs"
+          />
+          <div className="rounded-md border border-kumo-line/80 bg-kumo-recessed/25 px-3 py-2 text-xs text-kumo-subtle">
+            <div className="flex items-center justify-between gap-2">
+              <span>{selectedKind.scope}</span>
+              <span className="font-mono text-kumo-strong">{selectedKind.prefix}</span>
+            </div>
+          </div>
+          {form.kind === 'api' && (
+            <div className="grid gap-2 sm:grid-cols-2">
+              {[
+                { value: 'api:read', label: '读取后台 API' },
+                { value: 'api:write', label: '修改后台 API' },
+              ].map(scope => (
+                <label
+                  key={scope.value}
+                  className="flex cursor-pointer items-center gap-2 rounded-md border border-kumo-line/80 bg-kumo-recessed/25 px-3 py-2 text-xs text-kumo-strong"
+                >
+                  <Checkbox
+                    checked={form.scopes.includes(scope.value)}
+                    onCheckedChange={() => toggleScope(scope.value)}
+                    aria-label={scope.label}
+                  />
+                  <span>{scope.label}</span>
+                </label>
+              ))}
+            </div>
+          )}
+          <div className="space-y-2">
+            <Label showOptional>过期时间</Label>
+            <div className="flex flex-wrap gap-2">
+              {API_KEY_EXPIRY_PRESETS.map(preset => {
+                const active = selectedExpiryPreset === preset.value;
+                return (
+                  <Button
+                    key={preset.value}
+                    size="sm"
+                    variant={active ? 'primary' : 'secondary'}
+                    onClick={() => applyExpiryPreset(preset)}
+                    className={cx(
+                      'min-w-[4.5rem] transition-colors',
+                      active && 'shadow-[0_0_0_1px_rgba(255,255,255,0.12)]'
+                    )}
+                  >
+                    {preset.label}
+                  </Button>
+                );
+              })}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Popover>
+                <Popover.Trigger
+                  render={
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      icon={CalendarDotsIcon}
+                      className="min-w-[12.5rem] justify-start font-normal sm:min-w-[13.5rem]"
+                    />
+                  }
+                >
+                  <span className="truncate">
+                    {form.expiresAt ? formatKeyTime(form.expiresAt) : '长期有效'}
+                  </span>
+                </Popover.Trigger>
+                <Popover.Content className="p-3">
+                  <DatePicker
+                    size="sm"
+                    mode="single"
+                    selected={parseLocalDateTime(form.expiresAt)}
+                    onChange={updateExpiryDate}
+                  />
+                  {form.expiresAt && (
+                    <div className="mt-2 flex justify-end border-t border-kumo-line pt-2">
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        onClick={() => setForm(current => ({ ...current, expiresAt: '' }))}
+                      >
+                        清除
+                      </Button>
+                    </div>
+                  )}
+                </Popover.Content>
+              </Popover>
+              <div className="flex items-center gap-1.5">
+                <Select
+                  size="sm"
+                  aria-label="过期小时"
+                  disabled={!form.expiresAt}
+                  value={form.expiresAt.slice(11, 13)}
+                  onValueChange={value => updateExpiryTime('hour', value)}
+                  items={API_KEY_EXPIRY_HOURS}
+                />
+                <span className="text-center text-sm text-kumo-subtle">:</span>
+                <Select
+                  size="sm"
+                  aria-label="过期分钟"
+                  disabled={!form.expiresAt}
+                  value={form.expiresAt.slice(14, 16)}
+                  onValueChange={value => updateExpiryTime('minute', value)}
+                  items={API_KEY_EXPIRY_MINUTES}
+                />
+              </div>
+            </div>
+            <p className="text-[11px] text-kumo-subtle">留空表示长期有效，建议使用 90 天并定期轮换。</p>
+          </div>
+          {editingId && (
+            <Select
+              size="sm"
+              aria-label="启用状态"
+              value={form.enabled ? 'true' : 'false'}
+              onValueChange={value =>
+                setForm(current => ({ ...current, enabled: value === 'true' }))
+              }
+              items={[
+                { value: 'true', label: '启用' },
+                { value: 'false', label: '停用' },
+              ]}
+              className="text-xs"
+            />
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={submitting}
+              onClick={onSave}
+              className="gap-1.5"
+            >
+              {editingId ? <Edit className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+              <span>{editingId ? '保存修改' : '生成密钥'}</span>
+            </Button>
+            {editingId && (
+              <Button size="sm" variant="secondary" onClick={onCancelEdit} className="gap-1.5">
+                <X className="h-3.5 w-3.5" />
+                <span>取消</span>
+              </Button>
+            )}
+          </div>
+        </SectionCard>
+      </div>
+
+      <SectionCard
+        title="密钥与使用监控"
+        icon={<Activity className="h-4 w-4 text-kumo-brand" />}
+        action={
+          <Button size="sm" variant="secondary" onClick={onRefresh} disabled={loading}>
+            <RefreshCw className={cx('h-3.5 w-3.5', loading && 'animate-spin')} />
+          </Button>
+        }
+        className="min-h-0"
+        bodyClassName="h-full min-h-0 overflow-y-auto"
+      >
+        {keys.length === 0 ? (
+          <div className="flex h-full min-h-48 items-center justify-center text-xs text-kumo-subtle">
+            尚未生成密钥
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {keys.map(key => {
+              const status = apiKeyStatus(key);
+              const kind = API_KEY_KINDS.find(item => item.value === key.kind);
+              return (
+                <div
+                  key={key.id}
+                  className={cx(
+                    'rounded-md border bg-kumo-recessed/20 p-3',
+                    editingId === key.id ? 'border-kumo-brand/70' : 'border-kumo-line/80'
+                  )}
+                >
+                  <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span className="truncate text-xs font-bold text-kumo-strong">{key.name}</span>
+                        <InlineStatusPill tone={status.tone}>{status.label}</InlineStatusPill>
+                        <span className="rounded border border-kumo-line px-1.5 py-0.5 text-[10px] text-kumo-subtle">
+                          {kind?.label || key.kind}
+                        </span>
+                      </div>
+                      <div className="mt-2 break-all font-mono text-[11px] font-semibold text-kumo-strong">
+                        {key.maskedKey}
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {(key.scopes || []).map(scope => (
+                          <span
+                            key={scope}
+                            className="rounded border border-kumo-brand/20 bg-kumo-brand/7 px-1.5 py-0.5 text-[10px] text-kumo-brand"
+                          >
+                            {API_SCOPE_LABELS[scope] || scope}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 flex-wrap items-center gap-1">
+                      <Button size="sm" variant="ghost" onClick={() => onEdit(key)} aria-label="编辑密钥">
+                        <Edit className="h-3.5 w-3.5" />
+                      </Button>
+                      {!key.revokedAt && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => onToggle(key)}
+                          aria-label={key.enabled ? '停用密钥' : '启用密钥'}
+                        >
+                          {key.enabled ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                        </Button>
+                      )}
+                      <Button size="sm" variant="ghost" onClick={() => onRotate(key)} aria-label="轮换密钥">
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      </Button>
+                      {!key.revokedAt && (
+                        <Button size="sm" variant="ghost" onClick={() => onRevoke(key)} aria-label="撤销密钥">
+                          <Trash className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="mt-3 grid gap-2 border-t border-kumo-line/70 pt-3 text-[11px] text-kumo-subtle sm:grid-cols-2 2xl:grid-cols-4">
+                    <div><span className="block">请求次数</span><strong className="font-mono text-kumo-strong">{Number(key.requestCount || 0).toLocaleString()}</strong></div>
+                    <div><span className="block">过期时间</span><strong className="font-normal text-kumo-strong">{formatKeyTime(key.expiresAt)}</strong></div>
+                    <div><span className="block">最后使用</span><strong className="font-normal text-kumo-strong">{formatKeyTime(key.lastUsedAt)}</strong></div>
+                    <div className="min-w-0"><span className="block">最后 IP</span><strong className="block truncate font-mono font-normal text-kumo-strong" title={key.lastIpAddress || ''}>{key.lastIpAddress || '-'}</strong></div>
+                  </div>
+                  {key.lastUserAgent && (
+                    <div className="mt-2 truncate text-[10px] text-kumo-subtle" title={key.lastUserAgent}>
+                      {key.lastUserAgent}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </SectionCard>
+    </div>
+  );
+}
+
 function ApiDocsPage() {
   const [docs, setDocs] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1255,6 +1742,13 @@ function ApiDocsPage() {
   const [mcpEditingId, setMcpEditingId] = useState('');
   const [skillForm, setSkillForm] = useState(defaultSkillForm);
   const [skillEditingId, setSkillEditingId] = useState('');
+  const [apiKeyOverview, setApiKeyOverview] = useState(null);
+  const [apiKeysLoading, setApiKeysLoading] = useState(false);
+  const [apiKeysError, setApiKeysError] = useState('');
+  const [apiKeyForm, setApiKeyForm] = useState(createDefaultAPIKeyForm);
+  const [apiKeyEditingId, setApiKeyEditingId] = useState('');
+  const [apiKeySubmitting, setApiKeySubmitting] = useState(false);
+  const [issuedAPIKey, setIssuedAPIKey] = useState('');
 
   const loadDocs = useCallback(async (silent = false) => {
     if (silent) {
@@ -1317,6 +1811,25 @@ function ApiDocsPage() {
       loadAIAccess();
     }
   }, [activeView, aiAccess, aiError, aiLoading, loadAIAccess]);
+
+  const loadAPIKeys = useCallback(async (silent = false) => {
+    if (!silent) setApiKeysLoading(true);
+    setApiKeysError('');
+    try {
+      setApiKeyOverview(await fetchJsonEnvelope(API_KEYS_BASE));
+    } catch (error) {
+      console.error('load api keys failed:', error);
+      setApiKeysError(error.message || '密钥数据加载失败');
+    } finally {
+      setApiKeysLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeView === 'keys' && !apiKeyOverview && !apiKeysLoading && !apiKeysError) {
+      loadAPIKeys();
+    }
+  }, [activeView, apiKeyOverview, apiKeysError, apiKeysLoading, loadAPIKeys]);
 
   const routes = docs?.routes || [];
   const summary = normalizeSummary(docs?.summary);
@@ -1496,6 +2009,107 @@ function ApiDocsPage() {
     }
   };
 
+  const resetAPIKeyForm = () => {
+    setApiKeyEditingId('');
+    setApiKeyForm(createDefaultAPIKeyForm());
+  };
+
+  const saveAPIKey = async () => {
+    if (!apiKeyForm.name.trim()) {
+      toast.error('请输入密钥名称');
+      return;
+    }
+    if (apiKeyForm.kind === 'api' && apiKeyForm.scopes.length === 0) {
+      toast.error('通用 API Key 至少需要一个权限');
+      return;
+    }
+    let expiresAt = '';
+    if (apiKeyForm.expiresAt) {
+      const expiry = new Date(apiKeyForm.expiresAt);
+      if (Number.isNaN(expiry.getTime())) {
+        toast.error('过期时间无效');
+        return;
+      }
+      expiresAt = expiry.toISOString();
+    }
+    setApiKeySubmitting(true);
+    try {
+      const payload = await apiRequest(
+        apiKeyEditingId ? `${API_KEYS_BASE}/${apiKeyEditingId}` : API_KEYS_BASE,
+        {
+          method: apiKeyEditingId ? 'PUT' : 'POST',
+          body: JSON.stringify({ ...apiKeyForm, name: apiKeyForm.name.trim(), expiresAt }),
+        }
+      );
+      if (payload.apiKey) setIssuedAPIKey(payload.apiKey);
+      toast.success(apiKeyEditingId ? '密钥设置已更新' : 'API Key 已生成');
+      resetAPIKeyForm();
+      await loadAPIKeys(true);
+    } catch (error) {
+      toast.error(error.message || '密钥保存失败');
+    } finally {
+      setApiKeySubmitting(false);
+    }
+  };
+
+  const editAPIKey = key => {
+    setApiKeyEditingId(key.id);
+    setApiKeyForm({
+      name: key.name || '',
+      kind: key.kind || 'api',
+      scopes: key.scopes || [],
+      expiresAt: toLocalDateTimeInput(key.expiresAt),
+      enabled: key.enabled !== false,
+    });
+  };
+
+  const updateAPIKey = async (key, changes, successMessage) => {
+    try {
+      await apiRequest(`${API_KEYS_BASE}/${key.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          name: key.name,
+          kind: key.kind,
+          scopes: key.scopes || [],
+          expiresAt: key.expiresAt || '',
+          enabled: key.enabled !== false,
+          ...changes,
+        }),
+      });
+      toast.success(successMessage);
+      await loadAPIKeys(true);
+    } catch (error) {
+      toast.error(error.message || '密钥更新失败');
+    }
+  };
+
+  const toggleAPIKey = key =>
+    updateAPIKey(key, { enabled: !key.enabled }, key.enabled ? '密钥已停用' : '密钥已启用');
+
+  const rotateAPIKey = async key => {
+    if (!window.confirm(`轮换“${key.name}”后，旧密钥会立即失效。继续吗？`)) return;
+    try {
+      const payload = await apiRequest(`${API_KEYS_BASE}/${key.id}/rotate`, { method: 'POST' });
+      setIssuedAPIKey(payload.apiKey || '');
+      toast.success('API Key 已轮换');
+      await loadAPIKeys(true);
+    } catch (error) {
+      toast.error(error.message || '密钥轮换失败');
+    }
+  };
+
+  const revokeAPIKey = async key => {
+    if (!window.confirm(`撤销“${key.name}”后，只有轮换才能重新启用。继续吗？`)) return;
+    try {
+      await apiRequest(`${API_KEYS_BASE}/${key.id}/revoke`, { method: 'POST' });
+      if (apiKeyEditingId === key.id) resetAPIKeyForm();
+      toast.success('API Key 已撤销');
+      await loadAPIKeys(true);
+    } catch (error) {
+      toast.error(error.message || '密钥撤销失败');
+    }
+  };
+
   if (loading) {
     return (
       <PageStack className={apiDocsShellClass}>
@@ -1525,8 +2139,10 @@ function ApiDocsPage() {
           tabs={[
             { value: 'routes', label: '接口' },
             { value: 'ai', label: 'AI 接入' },
+            { value: 'keys', label: '密钥管理' },
           ]}
         />
+        {activeView === 'routes' && (
         <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
@@ -1549,6 +2165,7 @@ function ApiDocsPage() {
             <span>OpenAPI</span>
           </Button>
         </div>
+        )}
       </PageToolbar>
 
       {activeView === 'routes' && (
@@ -1655,6 +2272,30 @@ function ApiDocsPage() {
             onCancelSkill={cancelSkill}
             onDeleteSkill={deleteSkill}
             onClearAudit={clearAIAudit}
+            onCopy={copyText}
+          />
+        </div>
+      )}
+
+      {activeView === 'keys' && (
+        <div className="min-h-0 flex-1">
+          <APIKeyConsole
+            overview={apiKeyOverview}
+            loading={apiKeysLoading}
+            error={apiKeysError}
+            form={apiKeyForm}
+            setForm={setApiKeyForm}
+            editingId={apiKeyEditingId}
+            submitting={apiKeySubmitting}
+            issuedSecret={issuedAPIKey}
+            onDismissSecret={() => setIssuedAPIKey('')}
+            onSave={saveAPIKey}
+            onEdit={editAPIKey}
+            onCancelEdit={resetAPIKeyForm}
+            onToggle={toggleAPIKey}
+            onRotate={rotateAPIKey}
+            onRevoke={revokeAPIKey}
+            onRefresh={() => loadAPIKeys(true)}
             onCopy={copyText}
           />
         </div>

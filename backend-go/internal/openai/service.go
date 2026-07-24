@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/iwvw/api-monitor/backend-go/internal/apikeys"
 	"github.com/iwvw/api-monitor/backend-go/internal/applog"
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
 	"github.com/iwvw/api-monitor/backend-go/internal/database"
@@ -70,16 +71,18 @@ type HealthSummary struct {
 }
 
 type Service struct {
-	cfg    config.Config
-	store  *database.Store
-	client *http.Client
+	cfg     config.Config
+	store   *database.Store
+	client  *http.Client
+	apiKeys *apikeys.Manager
 }
 
 func New(cfg config.Config) *Service {
 	s := &Service{
-		cfg:    cfg,
-		store:  database.New(cfg),
-		client: &http.Client{Timeout: defaultTimeout},
+		cfg:     cfg,
+		store:   database.New(cfg),
+		client:  &http.Client{Timeout: defaultTimeout},
+		apiKeys: apikeys.New(cfg),
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

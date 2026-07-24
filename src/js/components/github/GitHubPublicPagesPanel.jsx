@@ -81,7 +81,6 @@ function GitHubPublicPagesPanel({ repositories = [] }) {
       ...options,
       headers: {
         'Content-Type': 'application/json',
-        'x-admin-password': localStorage.getItem('admin_password') || '',
         ...(options.headers || {}),
       },
     });
@@ -206,7 +205,7 @@ function GitHubPublicPagesPanel({ repositories = [] }) {
     <div className="grid items-start gap-4 xl:grid-cols-[minmax(24rem,0.92fr)_minmax(0,1.08fr)]">
       <SectionCard
         title={form.id ? '编辑 GitHub 公开页' : '新建 GitHub 公开页'}
-        description="生成可公开访问的仓库与最新 Actions 看板，可绑定独立域名或使用 /github/slug。"
+        description="公开仓库与 Actions 页面"
         icon={<Globe className="h-4 w-4 text-kumo-brand" />}
         action={form.id ? (
           <Button size="sm" variant="secondary" shape="square" icon={<X className="h-3.5 w-3.5" />} onClick={resetForm} aria-label="取消编辑" />
@@ -254,7 +253,7 @@ function GitHubPublicPagesPanel({ repositories = [] }) {
               label="说明"
               value={form.description}
               onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
-              placeholder="这里展示公开仓库的最新 Actions 活动与流程。"
+              placeholder="可选说明"
               rows={3}
             />
           </div>
@@ -262,11 +261,11 @@ function GitHubPublicPagesPanel({ repositories = [] }) {
 
         <div className="grid gap-2 sm:grid-cols-2">
           {[
-            ['public', '公开访问', '关闭后公开 API 和单页都会返回不可用。'],
-            ['showRepoLinks', '仓库跳转', '公开页中的仓库名称可直接打开 GitHub 仓库。'],
-            ['showDescriptions', '显示描述', '展示仓库描述和 workflow 摘要说明。'],
-            ['showRepositoryStats', '显示统计', '展示 Stars、Forks 和 Issues 等仓库摘要。'],
-            ['showOnDashboard', '首页快捷卡片', '在仪表盘中显示跳转到此公开页的快捷入口。'],
+            ['public', '公开访问', '关闭后公开页不可访问。'],
+            ['showRepoLinks', '仓库跳转', '允许跳转到 GitHub 仓库。'],
+            ['showDescriptions', '显示描述', '显示仓库描述和 workflow 摘要。'],
+            ['showRepositoryStats', '显示统计', '显示 Stars、Forks、Issues。'],
+            ['showOnDashboard', '首页快捷卡片', '在仪表盘显示入口。'],
           ].map(([key, title, description]) => (
             <div key={key} className="flex items-center justify-between gap-3 rounded-lg border border-kumo-line bg-kumo-recessed/30 p-3">
               <div className="min-w-0">
@@ -332,7 +331,7 @@ function GitHubPublicPagesPanel({ repositories = [] }) {
 
       <SectionCard
         title="已发布公开页"
-        description="公开单页会显示选中仓库、最新 Actions 状态和 workflow flow。"
+        description="已创建的 GitHub 公开页"
         icon={<Globe className="h-4 w-4 text-kumo-brand" />}
         className="self-start"
         actions={(
@@ -350,7 +349,7 @@ function GitHubPublicPagesPanel({ repositories = [] }) {
         ) : pages.length === 0 ? (
           <div className="flex min-h-56 flex-col items-center justify-center rounded-lg border border-dashed border-kumo-line text-center text-sm text-kumo-subtle">
             <Globe className="mb-3 h-8 w-8 opacity-40" />
-            暂无 GitHub 公开页，创建一个公开单页后即可分享。
+            暂无 GitHub 公开页
           </div>
         ) : (
           <div className="grid gap-3">

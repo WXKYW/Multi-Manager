@@ -104,7 +104,7 @@ function formatSpeed(bytesPerSecond) {
 }
 
 function authHeaders() {
-  return { 'x-admin-password': localStorage.getItem('admin_password') || '' };
+  return {};
 }
 
 function formatExpiry(value) {
@@ -466,7 +466,7 @@ function FileboxPage() {
         <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(22rem,1fr)]">
           <SectionCard
             title="创建分享"
-            description="生成可直接访问的下载链接，文本支持 Markdown。"
+            description="生成下载链接"
             icon={<Send className="h-4 w-4 text-kumo-brand" />}
             action={
               <Tabs
@@ -548,7 +548,7 @@ function FileboxPage() {
           <SectionCard title="分享结果" icon={<FileText className="h-4 w-4 text-kumo-brand" />}>
             {!result ? (
               <div className="space-y-3">
-                <div className="rounded-md border border-dashed border-kumo-line p-8 text-center text-xs text-kumo-subtle">创建后会在这里显示链接、二维码和取用信息。</div>
+                <div className="rounded-md border border-dashed border-kumo-line p-8 text-center text-xs text-kumo-subtle">显示链接、二维码和取用信息。</div>
                 <div className="grid gap-2 rounded-md border border-kumo-line bg-kumo-recessed/30 p-3 text-xs">
                   <div className="flex justify-between gap-3">
                     <span className="text-kumo-subtle">类型</span>
@@ -601,7 +601,7 @@ function FileboxPage() {
         <div className="grid gap-4">
           <SectionCard
             title="分享记录"
-            description="本地最近记录和服务端有效分享。"
+            description="本地记录与有效分享"
             icon={<History className="h-4 w-4 text-kumo-brand" />}
             actions={
               <>
@@ -721,7 +721,7 @@ function FileboxPage() {
       {activeTab === 'settings' && (
         <SectionCard
           title="文件柜策略"
-          description="这些限制由后端执行，影响新创建的分享。"
+          description="影响新建分享"
           icon={<Settings className="h-4 w-4 text-kumo-brand" />}
           action={
             <Button size="sm" variant="secondary" onClick={loadSettings} loading={settingsLoading} icon={<RefreshCw className="h-4 w-4" />}>
@@ -757,7 +757,7 @@ function FileboxPage() {
               }
             />
             <div className="md:col-span-2">
-              <Textarea label="允许 MIME 类型" value={settingsMimeText} onChange={(event) => setSettingsMimeText(event.target.value)} className="min-h-28 font-mono text-xs" placeholder="留空表示不限制。例如 image/*, application/pdf, text/plain" />
+              <Textarea label="允许 MIME 类型" value={settingsMimeText} onChange={(event) => setSettingsMimeText(event.target.value)} className="min-h-28 font-mono text-xs" placeholder="留空不限。如 image/*, application/pdf, text/plain" />
             </div>
             <div className="md:col-span-2 flex items-center justify-between rounded-md border border-kumo-line bg-kumo-recessed/30 p-3">
               <div>
@@ -779,7 +779,7 @@ function FileboxPage() {
         <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(22rem,0.8fr)]">
           <SectionCard
             title="房间管理"
-            description="创建和打开虚空传输房间。"
+            description="创建和进入房间"
             icon={<Send className="h-4 w-4 text-kumo-brand" />}
             action={
               <Button size="sm" variant="secondary" onClick={loadVoidRooms} loading={voidRoomsLoading} icon={<RefreshCw className="h-4 w-4" />}>

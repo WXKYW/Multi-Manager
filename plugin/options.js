@@ -4,17 +4,17 @@
 
 const form = document.getElementById('settingsForm');
 const serverUrlInput = document.getElementById('serverUrl');
-const passwordInput = document.getElementById('password');
+const tokenInput = document.getElementById('token');
 const showFillButtonInput = document.getElementById('showFillButton');
 const messageEl = document.getElementById('message');
 
 // 加载已保存的设置
-chrome.storage.sync.get(['serverUrl', 'password', 'showFillButton', 'masterEnabled'], (result) => {
+chrome.storage.local.get(['serverUrl', 'token', 'showFillButton', 'masterEnabled'], (result) => {
   if (result.serverUrl) {
     serverUrlInput.value = result.serverUrl;
   }
-  if (result.password) {
-    passwordInput.value = result.password;
+  if (result.token) {
+    tokenInput.value = result.token;
   }
   showFillButtonInput.checked = result.showFillButton !== false;
   // masterEnabled 在设置页不可见，但我们需要保留它
@@ -37,7 +37,7 @@ form.addEventListener('submit', async (e) => {
   e.preventDefault();
 
   const serverUrl = serverUrlInput.value.trim().replace(/\/$/, ''); // 移除末尾斜杠
-  const password = passwordInput.value;
+  let token = tokenInput.value.trim();
   const showFillButton = showFillButtonInput.checked;
 
   if (!serverUrl) {
@@ -45,12 +45,42 @@ form.addEventListener('submit', async (e) => {
     return;
   }
 
+  let parsedServerUrl;
+  try {
+    parsedServerUrl = new URL(serverUrl);
+  } catch {
+    showMessage('服务器地址格式无效', 'error');
+    return;
+  }
+  const isLoopback = ['localhost', '127.0.0.1', '::1'].includes(parsedServerUrl.hostname);
+  if (parsedServerUrl.protocol !== 'https:' && !isLoopback) {
+    showMessage('非本机服务器必须使用 HTTPS', 'error');
+    return;
+  }
+  if (!token.startsWith('akp_') && !token.startsWith('pair_')) {
+    showMessage('请输入 pair_ 配对码或 akp_ 插件 API Key', 'error');
+    return;
+  }
+
   // 测试连接
   try {
+    if (token.startsWith('pair_')) {
+      const pairingResponse = await fetch(`${serverUrl}/api/auth/plugin-pairings/claim`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: token })
+      });
+      const pairingResult = await pairingResponse.json().catch(() => ({}));
+      token = pairingResult.data?.token || pairingResult.token || '';
+      if (!pairingResponse.ok || !token.startsWith('akp_')) {
+        showMessage(pairingResult.error || '配对码无效、已使用或已过期', 'error');
+        return;
+      }
+    }
     const response = await fetch(`${serverUrl}/api/totp/accounts`, {
       headers: {
         'Content-Type': 'application/json',
-        'x-admin-password': password
+        Authorization: `Bearer ${token}`
       }
     });
 
@@ -61,13 +91,13 @@ form.addEventListener('submit', async (e) => {
 
     const data = await response.json();
     if (!data.success) {
-      showMessage('认证失败，请检查密码', 'error');
+      showMessage('认证失败，请先登录主程序并检查 API Key', 'error');
       return;
     }
 
     // 保存配置
-    chrome.storage.sync.set({ serverUrl, password, showFillButton }, () => {
-      showMessage('设置已保存！即将自动关闭...', 'success');
+    chrome.storage.local.set({ serverUrl, token, showFillButton }, () => {
+      showMessage('设置已保存', 'success');
       setTimeout(() => {
         window.close();
       }, 1000);

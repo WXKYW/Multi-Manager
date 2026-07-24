@@ -154,10 +154,8 @@ function OpenAIPage() {
   const [analyticsTotal, setAnalyticsTotal] = useState(0);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const getAuthHeaders = useCallback(() => {
-    const password = localStorage.getItem('admin_password') || '';
     return {
       'Content-Type': 'application/json',
-      'x-admin-password': password,
     };
   }, []);
 
@@ -2360,7 +2358,7 @@ function OpenAIPage() {
             <EmptyState
               icon={Bot}
               title="暂无 API 端点"
-              description="点击新增端点，配置 OpenAI 兼容 API 地址与上游密钥"
+              description="新增 OpenAI 兼容端点"
             />
           ) : (
             (() => {
@@ -2677,7 +2675,7 @@ function OpenAIPage() {
       {activeTab === 'keys' && (
         <GatewaySection
           title="API 密钥"
-          description="管理调用模型网关的客户端凭据"
+          description="管理客户端密钥"
           icon={<Key className="h-4 w-4 text-kumo-brand" />}
           actions={
             <div className="flex flex-wrap gap-2">
@@ -2871,7 +2869,7 @@ function OpenAIPage() {
         <GatewaySection
           className="min-h-0 flex-1"
           title="网关分析"
-          description="可靠性、Token 用量与调用方归因"
+          description="可靠性、Token、调用方"
           icon={<Activity className="h-4 w-4 text-kumo-brand" />}
           actions={
             <div className="flex items-center gap-3">
@@ -3189,13 +3187,13 @@ function OpenAIPage() {
               type="text"
               value={endpointForm.name}
               onChange={e => setEndpointForm({ ...endpointForm, name: e.target.value })}
-              placeholder="例如：DeepSeek 官方"
+              placeholder="如：DeepSeek 官方"
               className="w-full text-kumo-strong text-sm font-sans"
             />
 
             <Input
               size="sm"
-              label="API 接口地址 (Base URL)"
+              label="Base URL"
               type="text"
               value={endpointForm.baseUrl}
               onChange={e => setEndpointForm({ ...endpointForm, baseUrl: e.target.value })}
@@ -3265,7 +3263,7 @@ function OpenAIPage() {
               label="名称"
               value={gatewayKeyForm.name}
               onChange={e => setGatewayKeyForm({ ...gatewayKeyForm, name: e.target.value })}
-              placeholder="例如：生产环境、Open WebUI、自动化任务"
+              placeholder="如：生产环境、Open WebUI"
               className="w-full text-sm text-kumo-strong"
             />
             <div className="space-y-1.5">

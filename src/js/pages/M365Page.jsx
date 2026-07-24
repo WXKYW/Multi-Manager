@@ -227,7 +227,7 @@ function GroupsTabSkeleton() {
         className="flex min-h-0 flex-col"
         bodyClassName={panelBodyClass}
         title="组成员"
-        description="输入成员对象 ID 即可添加；移除成员会实时调用 Graph。"
+        description="输入成员对象 ID 添加成员"
         icon={<Users className="h-4 w-4" />}
         bodyPadding="sm"
         action={
@@ -507,7 +507,6 @@ function LicenseListPopover({ licenses, copyText, label = '许可证列表' }) {
 
 const getAuthHeaders = () => ({
   'Content-Type': 'application/json',
-  'x-admin-password': localStorage.getItem('admin_password') || '',
 });
 
 async function parseResponse(response) {
@@ -1891,7 +1890,7 @@ function M365Page() {
       className="flex min-h-0 flex-1 flex-col"
       bodyClassName={panelBodyClass}
       title="租户管理"
-      description="管理多个 Microsoft 365 / Entra 租户的应用凭据与连通性。"
+      description="管理租户凭据与连通性"
       icon={<Cloud className="h-4 w-4" />}
       action={
         <div className="flex items-center gap-2">
@@ -2016,7 +2015,7 @@ function M365Page() {
                       active ? 'text-kumo-brand' : 'text-kumo-subtle'
                     )}
                   >
-                    {active ? '当前选中' : '点击选择'}
+                    {active ? '已选中' : '选择'}
                   </span>
                   <div className="flex gap-2" onClick={event => event.stopPropagation()}>
                     <Button
@@ -2078,7 +2077,7 @@ function M365Page() {
         className="flex min-h-0 flex-1 flex-col"
         bodyClassName={panelBodyClass}
         title="公开页"
-        description="按模板管理公开注册链接，再按批次生成邀请码并查看使用记录。"
+        description="管理公开页与邀请码"
         icon={<Globe className="h-4 w-4" />}
         action={
           <div className="flex items-center gap-2">
@@ -2145,7 +2144,7 @@ function M365Page() {
                 <EmptyState
                   icon={Globe}
                   title="还没有公开页"
-                  description="先创建模板，再去邀请码页生成带 code 的注册链接。"
+                  description="先创建公开页模板"
                   card={false}
                 />
               ) : (
@@ -2305,7 +2304,7 @@ function M365Page() {
                 <EmptyState
                   icon={Globe}
                   title="还没有邀请码"
-                  description="先创建公开页模板，再生成邀请码。"
+                  description="先创建公开页再生成邀请码"
                   card={false}
                 />
               ) : (
@@ -2464,7 +2463,7 @@ function M365Page() {
                 <EmptyState
                   icon={Users}
                   title="暂无注册记录"
-                  description="当公开注册发生后，这里会记录状态和错误信息。"
+                  description="显示注册结果"
                   card={false}
                 />
               ) : (
@@ -2616,7 +2615,7 @@ function M365Page() {
         className="shrink-0"
         bodyClassName={panelBodyClass}
         title="SKU 库存"
-        description="查看租户可分配的许可证 SKU 及其消耗情况。"
+        description="查看许可证库存"
         icon={<Database className="h-4 w-4" />}
         action={
           <Button
@@ -2630,14 +2629,14 @@ function M365Page() {
         }
       >
         {!selectedAccountId ? (
-          <EmptyState icon={Database} title="请先选择租户" description="许可证列表依赖租户范围。" />
+          <EmptyState icon={Database} title="请先选择租户" description="需先选择租户" />
         ) : skuLoading ? (
           <SkuGridSkeleton />
         ) : skus.length === 0 ? (
           <EmptyState
             icon={Database}
             title="暂无 SKU 数据"
-            description="当前租户还没有可展示的许可证库存。"
+            description="当前租户没有 SKU"
           />
         ) : (
           <div
@@ -2722,7 +2721,7 @@ function M365Page() {
         className="flex min-h-0 flex-1 flex-col"
         bodyClassName={panelBodyClass}
         title="用户与许可证"
-        description="查看、创建、编辑、删除用户，并在列表中直接管理许可证。"
+        description="管理用户和许可证"
         icon={<Users className="h-4 w-4" />}
         action={
           <div className="flex items-center gap-2">
@@ -2756,12 +2755,12 @@ function M365Page() {
           <EmptyState
             icon={Users}
             title="请先选择租户"
-            description="用户管理依赖租户凭据与 Graph 连接。"
+            description="需先选择租户"
           />
         ) : usersLoading ? (
           <CardTableSkeleton rows={7} />
         ) : users.length === 0 ? (
-          <EmptyState icon={User} title="暂无用户" description="当前筛选条件下没有可展示的用户。" />
+          <EmptyState icon={User} title="暂无用户" description="当前筛选无用户" />
         ) : (
           <div
             className={cx(
@@ -2907,7 +2906,7 @@ function M365Page() {
         className="flex min-h-0 flex-1 flex-col"
         bodyClassName={panelBodyClass}
         title="组管理"
-        description="创建组、查看成员，并为组分配许可证。"
+        description="管理组与许可证"
         icon={<Folder className="h-4 w-4" />}
         action={
           <div className="flex items-center gap-2">
@@ -2931,14 +2930,14 @@ function M365Page() {
         }
       >
         {!selectedAccountId ? (
-          <EmptyState icon={Folder} title="请先选择租户" description="组管理依赖租户上下文。" />
+          <EmptyState icon={Folder} title="请先选择租户" description="需先选择租户" />
         ) : groupsLoading ? (
           <GroupsTabSkeleton />
         ) : groups.length === 0 ? (
           <EmptyState
             icon={Folder}
             title="暂无组"
-            description="可以先创建安全组或 Microsoft 365 组。"
+            description="先创建一个组"
           />
         ) : (
           <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
@@ -2980,7 +2979,7 @@ function M365Page() {
               className="flex min-h-0 flex-col"
               bodyClassName={panelBodyClass}
               title={selectedGroup ? selectedGroup.displayName : '组成员'}
-              description="输入成员对象 ID 即可添加；移除成员会实时调用 Graph。"
+              description="输入成员对象 ID 添加成员"
               icon={<Users className="h-4 w-4" />}
               bodyPadding="sm"
               action={
@@ -3002,7 +3001,7 @@ function M365Page() {
                 <EmptyState
                   icon={Users}
                   title="请选择一个组"
-                  description="选中左侧组后即可查看并管理成员。"
+                  description="先选择左侧组"
                   card={false}
                 />
               ) : groupMembersLoading ? (
@@ -3229,7 +3228,7 @@ function M365Page() {
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-kumo-strong">上传文件或直接粘贴</div>
                   <div className="text-xs text-kumo-subtle">
-                    支持导入 `.json` 文件，也可以把导出的租户 JSON 直接粘贴到下方。
+                    可导入 `.json`，也可直接粘贴租户 JSON。
                   </div>
                 </div>
                 <Button
@@ -3523,12 +3522,12 @@ function M365Page() {
                   </div>
                   <div className="text-xs text-kumo-subtle">
                     {editingUser
-                      ? '直接在这里勾选或取消勾选，保存时会一并更新许可证。'
-                      : '新增用户后会自动分配这里勾选的许可证。'}
+                      ? '可直接勾选，保存时会一并更新许可证。'
+                      : '新增用户后会自动分配已勾选许可证。'}
                   </div>
                   {skus.length === 0 ? (
                     <div className="text-xs text-kumo-subtle">
-                      当前没有可选订阅，或还未加载完成。
+                      暂无可选订阅
                     </div>
                   ) : (
                     <div className="max-h-80 overflow-auto pr-1 scrollbar-thin">
@@ -3776,7 +3775,7 @@ function M365Page() {
                   </div>
                 </div>
                 <div className="text-xs text-kumo-subtle">
-                  通过这个公开页注册的新账号会自动分配这里勾选的许可证。
+                  新注册账号会分配下方许可证。
                 </div>
                 <div className="rounded-lg border border-kumo-line/70 bg-kumo-base/60 px-3 py-2 text-xs text-kumo-subtle">
                   保存后请到“邀请码”页面单独生成注册链接，每次最多生成 5 个一次性邀请码。
@@ -3786,7 +3785,7 @@ function M365Page() {
                     先勾选一个租户，再读取该租户的许可证模板。
                   </div>
                 ) : skus.length === 0 ? (
-                  <div className="text-xs text-kumo-subtle">当前没有可选订阅，或还未加载完成。</div>
+                  <div className="text-xs text-kumo-subtle">暂无可选订阅</div>
                 ) : (
                   <div className="max-h-80 overflow-auto pr-1 scrollbar-thin">
                     <div className="grid gap-1">
@@ -3869,7 +3868,7 @@ function M365Page() {
                 placeholder="1-5"
               />
               <div className="rounded-lg border border-kumo-line/70 bg-kumo-base/60 px-3 py-2 text-xs text-kumo-subtle">
-                生成后直接使用带 `code` 的注册链接即可。每个邀请码默认只能使用 1 次。
+                使用带 `code` 的注册链接，默认限 1 次。
               </div>
             </div>
             <div className="flex justify-end gap-2">

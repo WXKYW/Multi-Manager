@@ -302,7 +302,7 @@ export default function QuickCommandBar({
         <div className="flex items-center justify-between gap-3 border-b border-kumo-line px-3 py-3">
           <div className="min-w-0">
             <div className="text-sm font-semibold text-kumo-strong">命令片段</div>
-            <div className="text-[10px] text-kumo-subtle">发送到当前终端</div>
+            <div className="text-[10px] text-kumo-subtle">发送到终端</div>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             <Button size="sm" variant="secondary" shape="square" icon={<Plus className="h-3.5 w-3.5" />} aria-label="新增片段" title="新增片段" onClick={startCreate} />
@@ -319,7 +319,7 @@ export default function QuickCommandBar({
               value={customCommand}
               onChange={event => setCustomCommand(event.target.value)}
               onKeyDown={handleCustomCommandKeyDown}
-              placeholder="输入命令，支持 {host} {username} {cwd}"
+              placeholder="输入命令，可用 {host} {username} {cwd}"
               className="min-w-0 flex-1 font-mono"
             />
             <Button size="sm" variant="primary" className="shrink-0" icon={<Send className="h-3.5 w-3.5" />} disabled={targetSessionIds.length === 0 || !customCommand.trim()} onClick={sendCustomCommand}>

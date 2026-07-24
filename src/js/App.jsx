@@ -1,7 +1,8 @@
 import React, { lazy, Suspense, useEffect, useState } from 'react';
-import useStore, { applyThemeMode } from './store.js';
+import useStore, { applyThemeMode, getPendingAuthProvider } from './store.js';
 import AuthPage from './pages/AuthPage.jsx';
 import MainLayout from './components/MainLayout.jsx';
+import { GitHubBrand, Shield } from './components/Icons.jsx';
 
 const PublicSharePage = lazy(() => import('./pages/PublicSharePage.jsx'));
 const PublicM365RegisterPage = lazy(() => import('./pages/PublicM365RegisterPage.jsx'));
@@ -43,6 +44,38 @@ const isPublicM365RegisterRoute = () => {
   const path = window.location.pathname.replace(/\/+$/, '') || '/';
   return path === '/m365/register';
 };
+
+const getCheckingAuthProvider = () => {
+  if (typeof window === 'undefined') return '';
+  const fromStorage = getPendingAuthProvider();
+  if (fromStorage) return fromStorage;
+  return String(new URLSearchParams(window.location.search).get('provider') || '').trim();
+};
+
+function AuthTransitionScreen() {
+  const provider = getCheckingAuthProvider();
+  const isGitHub = provider === 'github';
+
+  return (
+    <main className="relative flex min-h-dvh w-screen items-center justify-center overflow-hidden bg-kumo-canvas px-4 py-8 text-kumo-default">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(64,123,255,0.12),transparent_42%),radial-gradient(circle_at_bottom_right,rgba(15,23,42,0.08),transparent_38%)]"
+      />
+      <div className="relative z-10 flex w-full max-w-sm flex-col items-center gap-5 rounded-2xl border border-kumo-line bg-kumo-base/95 px-8 py-10 text-center shadow-none">
+        <div className="flex size-14 items-center justify-center rounded-2xl border border-kumo-line bg-kumo-recessed text-kumo-brand">
+          {isGitHub ? <GitHubBrand className="size-7" /> : <Shield className="size-7" />}
+        </div>
+        <div className="space-y-1">
+          <div className="text-base font-semibold text-kumo-strong">
+            {isGitHub ? '正在验证 GitHub' : '正在登录'}
+          </div>
+        </div>
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-kumo-line border-t-kumo-brand" />
+      </div>
+    </main>
+  );
+}
 
 function App() {
   const { isAuthenticated, checkAuth, isCheckingAuth, themeMode } = useStore();
@@ -137,7 +170,7 @@ function App() {
   }
 
   if (isCheckingAuth) {
-    return null;
+    return getCheckingAuthProvider() ? <AuthTransitionScreen /> : null;
   }
 
   if (isAuthenticated || dockerMockPreview) {

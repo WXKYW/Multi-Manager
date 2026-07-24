@@ -2048,7 +2048,7 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
                   />
                 ))}
                 {visibleRepositories.length === 0 && (
-                  <div className="rounded-lg border border-kumo-interact/70 bg-kumo-base p-6 text-center text-sm text-kumo-subtle">当前筛选没有匹配的仓库。</div>
+                  <div className="rounded-lg border border-kumo-interact/70 bg-kumo-base p-6 text-center text-sm text-kumo-subtle">暂无匹配仓库。</div>
                 )}
               </section>
             )}

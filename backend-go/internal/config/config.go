@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -9,28 +10,70 @@ import (
 )
 
 type Config struct {
-	Version       string
-	Host          string
-	Port          int
-	LegacyBaseURL string
-	DistDir       string
-	PublicDir     string
-	DataDir       string
-	DBName        string
+	Version              string
+	Environment          string
+	Host                 string
+	Port                 int
+	LegacyBaseURL        string
+	DistDir              string
+	PublicDir            string
+	DataDir              string
+	DBName               string
+	SecureCookies        bool
+	AllowLocalShellTasks bool
+	CORSAllowedOrigins   []string
+	TrustedProxyCIDRs    []string
 }
 
 func Load(version string) Config {
 	root := repoRoot()
+	environment := strings.ToLower(envString("APP_ENV", envString("NODE_ENV", "development")))
 	return Config{
-		Version:       version,
-		Host:          envString("GO_HOST", "0.0.0.0"),
-		Port:          envInt("GO_PORT", envInt("PORT", 3000)),
-		LegacyBaseURL: strings.TrimRight(os.Getenv("NODE_LEGACY_URL"), "/"),
-		DistDir:       envPath(root, "DIST_DIR", filepath.Join(root, "dist")),
-		PublicDir:     envPath(root, "PUBLIC_DIR", filepath.Join(root, "public")),
-		DataDir:       envPath(root, "DATA_DIR", filepath.Join(root, "data")),
-		DBName:        envString("DB_NAME", "data.db"),
+		Version:              version,
+		Environment:          environment,
+		Host:                 envString("GO_HOST", "0.0.0.0"),
+		Port:                 envInt("GO_PORT", envInt("PORT", 3000)),
+		LegacyBaseURL:        strings.TrimRight(os.Getenv("NODE_LEGACY_URL"), "/"),
+		DistDir:              envPath(root, "DIST_DIR", filepath.Join(root, "dist")),
+		PublicDir:            envPath(root, "PUBLIC_DIR", filepath.Join(root, "public")),
+		DataDir:              envPath(root, "DATA_DIR", filepath.Join(root, "data")),
+		DBName:               envString("DB_NAME", "data.db"),
+		SecureCookies:        envBool("SECURE_COOKIES", environment == "production"),
+		AllowLocalShellTasks: envBool("ALLOW_LOCAL_SHELL_TASKS", environment != "production"),
+		CORSAllowedOrigins:   envList("CORS_ALLOWED_ORIGINS"),
+		TrustedProxyCIDRs:    envList("TRUSTED_PROXY_CIDRS"),
 	}
+}
+
+func (c Config) IsProduction() bool {
+	return strings.EqualFold(strings.TrimSpace(c.Environment), "production")
+}
+
+func (c Config) ValidateSecurity() error {
+	if !c.IsProduction() {
+		return nil
+	}
+	for _, item := range []struct {
+		name  string
+		value string
+	}{
+		{name: "ENCRYPTION_KEY", value: os.Getenv("ENCRYPTION_KEY")},
+		{name: "JWT_SECRET", value: os.Getenv("JWT_SECRET")},
+	} {
+		if len(strings.TrimSpace(item.value)) < 32 {
+			return fmt.Errorf("production requires %s with at least 32 characters", item.name)
+		}
+	}
+	return nil
+}
+
+func (c Config) LocalShellTasksAllowed() bool {
+	// Config literals used by tests and local embedders predate Environment.
+	// Preserve their development behavior while loaded production config is explicit.
+	if strings.TrimSpace(c.Environment) == "" {
+		return true
+	}
+	return c.AllowLocalShellTasks
 }
 
 func (c Config) ListenAddress() string {
@@ -90,6 +133,29 @@ func envInt(name string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func envBool(name string, fallback bool) bool {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func envList(name string) []string {
+	values := strings.Split(os.Getenv(name), ",")
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			result = append(result, strings.TrimRight(value, "/"))
+		}
+	}
+	return result
 }
 
 func exists(path string) bool {

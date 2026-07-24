@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha1"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base32"
 	"encoding/base64"
@@ -23,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iwvw/api-monitor/backend-go/internal/apikeys"
 	"github.com/iwvw/api-monitor/backend-go/internal/applog"
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
 	"github.com/iwvw/api-monitor/backend-go/internal/database"
@@ -47,6 +49,7 @@ var bcryptHashPattern = regexp.MustCompile(`^\$2[aby]?\$\d{1,2}\$[./A-Za-z0-9]{5
 type Service struct {
 	cfg   config.Config
 	store *database.Store
+	keys  *apikeys.Manager
 }
 
 type loginRequest struct {
@@ -60,6 +63,14 @@ type setPasswordRequest struct {
 
 type verifyPasswordRequest struct {
 	Password string `json:"password"`
+}
+
+type pluginPairingRequest struct {
+	Name string `json:"name"`
+}
+
+type pluginPairingClaimRequest struct {
+	Code string `json:"code"`
 }
 
 type changePasswordRequest struct {
@@ -90,10 +101,12 @@ type sessionRecord struct {
 	LastAccessedAt string
 	ExpiresAt      string
 	IsActive       int
+	IPAddress      string
+	UserAgent      string
 }
 
 func New(cfg config.Config) *Service {
-	return &Service{cfg: cfg, store: database.New(cfg)}
+	return &Service{cfg: cfg, store: database.New(cfg), keys: apikeys.New(cfg)}
 }
 
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -106,12 +119,28 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.login(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/api/auth/logout":
 		s.logout(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/api/auth/plugin-token":
+		s.issuePluginToken(w, r)
+	case r.Method == http.MethodDelete && r.URL.Path == "/api/auth/plugin-token":
+		s.revokePluginToken(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/api/auth/plugin-pairings":
+		s.createPluginPairing(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/api/auth/plugin-pairings/claim":
+		s.claimPluginPairing(w, r)
+	case r.Method == http.MethodGet && r.URL.Path == "/api/auth/sessions":
+		s.listSessions(w, r)
+	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/auth/sessions/"):
+		s.revokeSessionByID(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/api/auth/sessions/revoke-all":
+		s.revokeAllSessions(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/api/auth/set-password":
 		s.setPassword(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/api/auth/verify-password":
 		s.verifyPassword(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/api/auth/change-password":
 		s.changePassword(w, r)
+	case r.Method == http.MethodGet && r.URL.Path == "/api/auth/login-options":
+		s.loginOptions(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/api/auth/2fa/status":
 		s.status2FA(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/api/auth/2fa/setup":
@@ -120,6 +149,28 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.enable2FA(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/api/auth/2fa/disable":
 		s.disable2FA(w, r)
+	case r.Method == http.MethodGet && r.URL.Path == "/api/auth/github/config":
+		s.githubConfig(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/api/auth/github/config":
+		s.saveGitHubConfig(w, r)
+	case r.Method == http.MethodGet && r.URL.Path == "/api/auth/github/start":
+		s.startGitHubLogin(w, r)
+	case r.Method == http.MethodGet && r.URL.Path == "/api/auth/github/callback":
+		s.finishGitHubLogin(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/api/auth/github/2fa":
+		s.completeGitHub2FA(w, r)
+	case r.Method == http.MethodGet && r.URL.Path == "/api/auth/webauthn/credentials":
+		s.listWebAuthnCredentials(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/api/auth/webauthn/register/begin":
+		s.beginWebAuthnRegistration(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/api/auth/webauthn/register/finish":
+		s.finishWebAuthnRegistration(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/api/auth/webauthn/login/begin":
+		s.beginWebAuthnLogin(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/api/auth/webauthn/login/finish":
+		s.finishWebAuthnLogin(w, r)
+	case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/auth/webauthn/credentials/") && strings.HasSuffix(r.URL.Path, "/delete"):
+		s.deleteWebAuthnCredential(w, r)
 	default:
 		response.Error(w, http.StatusNotFound, "auth route not implemented")
 	}
@@ -185,7 +236,7 @@ func (s *Service) login(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
-	clientIP := requestClientIP(r)
+	clientIP := s.requestClientIP(r)
 	if lockStatus, err := s.loginLockStatus(r.Context(), db, clientIP); err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
@@ -294,23 +345,25 @@ func (s *Service) login(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	_, _ = db.ExecContext(r.Context(), `UPDATE sessions SET ip_address=?, user_agent=? WHERE session_id=?`, clientIP, r.UserAgent(), sid)
 
 	_ = s.logOperation(r.Context(), db, "LOGIN_SUCCESS", "auth", map[string]interface{}{
 		"ip":      clientIP,
 		"with2FA": enabled,
 	}, clientIP, r.UserAgent())
 
+	w.Header().Set("Cache-Control", "no-store")
 	http.SetCookie(w, &http.Cookie{
 		Name:     "sid",
 		Value:    sid,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   s.cfg.SecureCookies || r.TLS != nil,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(sessionDuration.Seconds()),
 	})
 	response.JSON(w, http.StatusOK, map[string]interface{}{
-		"success":   true,
-		"sessionId": sid,
+		"success": true,
 	})
 }
 
@@ -322,7 +375,7 @@ func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
-	clientIP := requestClientIP(r)
+	clientIP := s.requestClientIP(r)
 	_, _ = s.destroySession(r.Context(), db, r)
 	_ = s.logOperation(r.Context(), db, "LOGOUT", "auth", map[string]interface{}{
 		"ip": clientIP,
@@ -333,10 +386,220 @@ func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   s.cfg.SecureCookies || r.TLS != nil,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 	})
 	response.JSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+func (s *Service) listSessions(w http.ResponseWriter, r *http.Request) {
+	db, ok := s.openSessionDB(w, r)
+	if !ok {
+		return
+	}
+	defer db.Close()
+	if !s.requireSession(w, r.Context(), db, r) {
+		return
+	}
+	cookie, _ := r.Cookie("sid")
+	currentID := ""
+	if cookie != nil {
+		currentID = cookie.Value
+	}
+	rows, err := db.QueryContext(r.Context(), `SELECT session_id,password,created_at,last_accessed_at,expires_at,is_active,COALESCE(ip_address,''),COALESCE(user_agent,'') FROM sessions WHERE is_active=1 ORDER BY last_accessed_at DESC`)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer rows.Close()
+	items := make([]map[string]interface{}, 0)
+	now := time.Now().UTC()
+	for rows.Next() {
+		var item sessionRecord
+		if err := rows.Scan(&item.ID, &item.Password, &item.CreatedAt, &item.LastAccessedAt, &item.ExpiresAt, &item.IsActive, &item.IPAddress, &item.UserAgent); err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		expires, _ := parseDBTime(item.ExpiresAt)
+		if !expires.After(now) {
+			continue
+		}
+		items = append(items, map[string]interface{}{
+			"id": sessionFingerprint(item.ID), "createdAt": item.CreatedAt, "lastAccessedAt": item.LastAccessedAt,
+			"expiresAt": item.ExpiresAt, "ipAddress": item.IPAddress, "userAgent": item.UserAgent, "current": item.ID == currentID,
+		})
+	}
+	response.OK(w, map[string]interface{}{"sessions": items})
+}
+
+func (s *Service) revokeSessionByID(w http.ResponseWriter, r *http.Request) {
+	db, ok := s.openSessionDB(w, r)
+	if !ok {
+		return
+	}
+	defer db.Close()
+	if !s.requireSession(w, r.Context(), db, r) {
+		return
+	}
+	fingerprint := strings.TrimPrefix(r.URL.Path, "/api/auth/sessions/")
+	if fingerprint == "" || strings.Contains(fingerprint, "/") {
+		response.Error(w, http.StatusBadRequest, "会话标识无效")
+		return
+	}
+	rows, err := db.QueryContext(r.Context(), `SELECT session_id FROM sessions WHERE is_active=1`)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var id string
+	for rows.Next() {
+		var candidate string
+		if scanErr := rows.Scan(&candidate); scanErr == nil && sessionFingerprint(candidate) == fingerprint {
+			id = candidate
+			break
+		}
+	}
+	rows.Close()
+	if id == "" {
+		response.Error(w, http.StatusNotFound, "会话不存在")
+		return
+	}
+	result, err := db.ExecContext(r.Context(), `UPDATE sessions SET is_active=0 WHERE session_id=?`, id)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		response.Error(w, http.StatusNotFound, "会话不存在")
+		return
+	}
+	response.OK(w, map[string]bool{"success": true})
+}
+
+func (s *Service) revokeAllSessions(w http.ResponseWriter, r *http.Request) {
+	db, ok := s.openSessionDB(w, r)
+	if !ok {
+		return
+	}
+	defer db.Close()
+	if !s.requireSession(w, r.Context(), db, r) {
+		return
+	}
+	if _, err := db.ExecContext(r.Context(), `UPDATE sessions SET is_active=0`); err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.OK(w, map[string]bool{"success": true})
+}
+
+func (s *Service) issuePluginToken(w http.ResponseWriter, r *http.Request) {
+	db, err := s.openDB(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer db.Close()
+	if !s.requireSession(w, r.Context(), db, r) {
+		return
+	}
+	expiresAt := time.Now().UTC().AddDate(0, 3, 0).Format(time.RFC3339)
+	key, err := s.keys.Create(r.Context(), apikeys.Input{Name: "TOTP 浏览器插件", Kind: "plugin", ExpiresAt: expiresAt})
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "保存插件令牌失败")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "token": key.APIKey, "key": key})
+}
+
+func (s *Service) createPluginPairing(w http.ResponseWriter, r *http.Request) {
+	db, ok := s.openSessionDB(w, r)
+	if !ok {
+		return
+	}
+	defer db.Close()
+	if !s.requireSession(w, r.Context(), db, r) {
+		return
+	}
+	var body pluginPairingRequest
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		name = "浏览器插件"
+	}
+	pairing, err := s.keys.CreatePluginPairing(r.Context(), name)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "创建插件配对失败")
+		return
+	}
+	_ = s.logOperation(r.Context(), db, "PLUGIN_PAIRING_CREATED", "api_access_keys", map[string]interface{}{"name": name, "expiresAt": pairing.ExpiresAt}, s.requestClientIP(r), r.UserAgent())
+	w.Header().Set("Cache-Control", "no-store")
+	response.OK(w, pairing)
+}
+
+func (s *Service) claimPluginPairing(w http.ResponseWriter, r *http.Request) {
+	var body pluginPairingClaimRequest
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	apiKey, err := s.keys.ClaimPluginPairing(r.Context(), body.Code)
+	if errors.Is(err, apikeys.ErrInvalid) {
+		response.JSON(w, http.StatusUnauthorized, map[string]interface{}{"success": false, "error": "配对码无效、已使用或已过期"})
+		return
+	}
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "完成插件配对失败")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	response.OK(w, map[string]string{"token": apiKey})
+}
+
+func (s *Service) revokePluginToken(w http.ResponseWriter, r *http.Request) {
+	db, err := s.openDB(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer db.Close()
+	if !s.requireSession(w, r.Context(), db, r) {
+		return
+	}
+	keys, err := s.keys.List(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "读取插件令牌失败")
+		return
+	}
+	for _, key := range keys {
+		if key.Kind == "plugin" && key.Enabled {
+			_ = s.keys.Revoke(r.Context(), key.ID)
+		}
+	}
+	response.JSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+func (s *Service) IsPluginToken(ctx context.Context, r *http.Request) (bool, error) {
+	_, err := s.keys.Authorize(ctx, r, apikeys.ScopeTOTPRead)
+	if errors.Is(err, apikeys.ErrInvalid) || errors.Is(err, apikeys.ErrDenied) || errors.Is(err, apikeys.ErrDisabled) || errors.Is(err, apikeys.ErrExpired) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (s *Service) IsAPIKeyAuthorized(ctx context.Context, r *http.Request, write bool) (bool, error) {
+	scope := apikeys.ScopeAPIRead
+	if write {
+		scope = apikeys.ScopeAPIWrite
+	}
+	_, err := s.keys.Authorize(ctx, r, scope)
+	if errors.Is(err, apikeys.ErrInvalid) || errors.Is(err, apikeys.ErrDenied) || errors.Is(err, apikeys.ErrDisabled) || errors.Is(err, apikeys.ErrExpired) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func (s *Service) setPassword(w http.ResponseWriter, r *http.Request) {
@@ -416,7 +679,7 @@ func (s *Service) changePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clientIP := requestClientIP(r)
+	clientIP := s.requestClientIP(r)
 	if s.isDemoMode() {
 		response.JSON(w, http.StatusForbidden, map[string]interface{}{"success": false, "error": "演示模式禁止修改密码"})
 		return
@@ -517,7 +780,7 @@ func (s *Service) enable2FA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clientIP := requestClientIP(r)
+	clientIP := s.requestClientIP(r)
 	if s.isDemoMode() {
 		response.JSON(w, http.StatusForbidden, map[string]interface{}{"success": false, "error": "演示模式禁止设置 2FA"})
 		return
@@ -567,7 +830,7 @@ func (s *Service) disable2FA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clientIP := requestClientIP(r)
+	clientIP := s.requestClientIP(r)
 	if s.isDemoMode() {
 		response.JSON(w, http.StatusForbidden, map[string]interface{}{"success": false, "error": "演示模式禁止禁用 2FA"})
 		return
@@ -707,6 +970,11 @@ func (s *Service) createSession(ctx context.Context, db *sql.DB, password string
 	return sid, nil
 }
 
+func sessionFingerprint(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:8])
+}
+
 func (s *Service) validateRequestSession(ctx context.Context, db *sql.DB, r *http.Request) (sessionRecord, bool, error) {
 	cookie, err := r.Cookie("sid")
 	if err != nil || strings.TrimSpace(cookie.Value) == "" {
@@ -718,7 +986,7 @@ func (s *Service) validateRequestSession(ctx context.Context, db *sql.DB, r *htt
 func (s *Service) validateSession(ctx context.Context, db *sql.DB, sid string) (sessionRecord, bool, error) {
 	var session sessionRecord
 	err := db.QueryRowContext(ctx, `
-		SELECT session_id, password, created_at, last_accessed_at, expires_at, is_active
+		SELECT session_id, password, created_at, last_accessed_at, expires_at, is_active, COALESCE(ip_address,''), COALESCE(user_agent,'')
 		FROM sessions
 		WHERE session_id = ?
 	`, sid).Scan(
@@ -728,6 +996,8 @@ func (s *Service) validateSession(ctx context.Context, db *sql.DB, sid string) (
 		&session.LastAccessedAt,
 		&session.ExpiresAt,
 		&session.IsActive,
+		&session.IPAddress,
+		&session.UserAgent,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return sessionRecord{}, false, nil
@@ -1011,19 +1281,38 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, target interface{}) bool
 	return true
 }
 
-func requestClientIP(r *http.Request) string {
-	forwarded := r.Header.Get("X-Forwarded-For")
-	if forwarded != "" {
-		return strings.TrimSpace(strings.Split(forwarded, ",")[0])
-	}
+func (s *Service) requestClientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err == nil && host != "" {
+		if s.isTrustedProxy(net.ParseIP(host)) {
+			if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); forwarded != "" {
+				candidate := strings.TrimSpace(strings.Split(forwarded, ",")[0])
+				if ip := net.ParseIP(candidate); ip != nil {
+					return ip.String()
+				}
+			}
+		}
 		return host
 	}
 	if r.RemoteAddr != "" {
 		return r.RemoteAddr
 	}
 	return "unknown"
+}
+
+func (s *Service) isTrustedProxy(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	for _, entry := range s.cfg.TrustedProxyCIDRs {
+		if _, network, err := net.ParseCIDR(entry); err == nil && network.Contains(ip) {
+			return true
+		}
+		if candidate := net.ParseIP(entry); candidate != nil && candidate.Equal(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 func formatTime(t time.Time) string {

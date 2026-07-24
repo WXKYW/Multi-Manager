@@ -1,9 +1,11 @@
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import useStore, { MODULE_GROUPS, MODULE_CONFIG, getGroupModuleIds, getModuleName } from '../store.js';
-import {
-  Sidebar,
-  useSidebar
-} from '@cloudflare/kumo/components/sidebar';
+import useStore, {
+  MODULE_GROUPS,
+  MODULE_CONFIG,
+  getGroupModuleIds,
+  getModuleName,
+} from '../store.js';
+import { Sidebar, useSidebar } from '@cloudflare/kumo/components/sidebar';
 import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Tabs } from '@cloudflare/kumo';
@@ -37,7 +39,6 @@ const NotificationPage = lazy(() => import('../pages/NotificationPage.jsx'));
 const OpenAIPage = lazy(() => import('../pages/OpenAIPage.jsx'));
 const SubscriptionPage = lazy(() => import('../pages/SubscriptionPage.jsx'));
 const GitHubPage = lazy(() => import('../pages/GitHubPage.jsx'));
-
 
 const PaasPage = lazy(() => import('../pages/PaasPage.jsx'));
 const DnsPage = lazy(() => import('../pages/DnsPage.jsx'));
@@ -113,18 +114,24 @@ class ModuleErrorBoundary extends React.Component {
   }
 }
 
-const MODULE_PATHS = Object.keys(MODULE_CONFIG).reduce((paths, moduleId) => {
-  paths[moduleId] = `/${moduleId}`;
-  return paths;
-}, { dashboard: '/dashboard' });
+const MODULE_PATHS = Object.keys(MODULE_CONFIG).reduce(
+  (paths, moduleId) => {
+    paths[moduleId] = `/${moduleId}`;
+    return paths;
+  },
+  { dashboard: '/dashboard' }
+);
 
 const LEGACY_MODULE_PATHS = {
   'self-h': 'scheduler',
 };
 
-const getPathModule = (pathname) => {
+const getPathModule = pathname => {
   const normalized = pathname.replace(/\/+$/, '') || '/';
-  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('mockDocker')) {
+  if (
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).has('mockDocker')
+  ) {
     return 'server';
   }
   if (normalized === '/') return 'dashboard';
@@ -149,7 +156,7 @@ const renderSidebarStyleIcon = (IconComponent, label) => (
   </span>
 );
 
-const formatAppProcessUptime = (seconds) => {
+const formatAppProcessUptime = seconds => {
   const totalSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
   const days = Math.floor(totalSeconds / 86400);
   const hours = Math.floor((totalSeconds % 86400) / 3600);
@@ -162,23 +169,48 @@ const formatAppProcessUptime = (seconds) => {
 };
 
 const PAGE_WIDTH_OPTIONS = [
-  { value: 'standard', label: renderSidebarStyleIcon(Rectangle, '标准宽度'), className: 'w-full !justify-center !px-0' },
-  { value: 'wide', label: renderSidebarStyleIcon(Columns, '宽屏宽度'), className: 'w-full !justify-center !px-0' },
-  { value: 'full', label: renderSidebarStyleIcon(Maximize2, '全宽'), className: 'w-full !justify-center !px-0' },
+  {
+    value: 'standard',
+    label: renderSidebarStyleIcon(Rectangle, '标准宽度'),
+    className: 'w-full !justify-center !px-0',
+  },
+  {
+    value: 'wide',
+    label: renderSidebarStyleIcon(Columns, '宽屏宽度'),
+    className: 'w-full !justify-center !px-0',
+  },
+  {
+    value: 'full',
+    label: renderSidebarStyleIcon(Maximize2, '全宽'),
+    className: 'w-full !justify-center !px-0',
+  },
 ];
 
 const THEME_MODE_OPTIONS = [
-  { value: 'auto', label: renderSidebarStyleIcon(DesktopDisplay, '自动跟随系统'), className: 'w-full !justify-center !px-0' },
-  { value: 'light', label: renderSidebarStyleIcon(Sun, '浅色模式'), className: 'w-full !justify-center !px-0' },
-  { value: 'dark', label: renderSidebarStyleIcon(Moon, '深色模式'), className: 'w-full !justify-center !px-0' },
+  {
+    value: 'auto',
+    label: renderSidebarStyleIcon(DesktopDisplay, '自动跟随系统'),
+    className: 'w-full !justify-center !px-0',
+  },
+  {
+    value: 'light',
+    label: renderSidebarStyleIcon(Sun, '浅色模式'),
+    className: 'w-full !justify-center !px-0',
+  },
+  {
+    value: 'dark',
+    label: renderSidebarStyleIcon(Moon, '深色模式'),
+    className: 'w-full !justify-center !px-0',
+  },
 ];
 
-const HAPTIC_INTERACTIVE_SELECTOR = 'button, a, [role="button"], [role="tab"], [role="switch"], input, select, textarea';
+const HAPTIC_INTERACTIVE_SELECTOR =
+  'button, a, [role="button"], [role="tab"], [role="switch"], input, select, textarea';
 
-const useMobileClosingNavigation = (onNavigate) => {
+const useMobileClosingNavigation = onNavigate => {
   const { isMobile, setOpenMobile } = useSidebar();
 
-  return (module) => {
+  return module => {
     onNavigate(module);
     if (isMobile) setOpenMobile(false);
   };
@@ -199,12 +231,12 @@ const SidebarTooltipMenuButton = ({ label, children, ...props }) => {
         content={label}
         side="right"
         open={allowTooltip ? tooltipOpen : false}
-        onOpenChange={(open) => setTooltipOpen(allowTooltip && open)}
-        render={(
+        onOpenChange={open => setTooltipOpen(allowTooltip && open)}
+        render={
           <Sidebar.MenuButton {...props} aria-label={label}>
             {children}
           </Sidebar.MenuButton>
-        )}
+        }
       />
     </Sidebar.MenuItem>
   );
@@ -268,16 +300,16 @@ const SidebarModuleSubgroup = ({ subgroup, activeModule, onNavigate }) => {
     <Sidebar.MenuItem>
       <Sidebar.Collapsible defaultOpen={active}>
         <Sidebar.CollapsibleTrigger
-          render={(
+          render={
             <Sidebar.MenuButton icon={ParentIcon} className={quietTriggerClassName}>
               {subgroup.name}
               <Sidebar.MenuChevron />
             </Sidebar.MenuButton>
-          )}
+          }
         />
         <Sidebar.CollapsibleContent>
           <Sidebar.MenuSub>
-            {subgroupModules.map((module) => (
+            {subgroupModules.map(module => (
               <SidebarModuleSubButton
                 key={module}
                 module={module}
@@ -316,7 +348,7 @@ const SidebarBrand = ({ onHome }) => (
     <span className="flex size-10 shrink-0 items-center justify-center transition-transform duration-250 ease-[cubic-bezier(0.4,0,0.2,1)]">
       <img src="/logo.svg" className="size-7 shrink-0 object-contain" alt="" />
     </span>
-    <span className="min-w-0 max-w-32 overflow-hidden truncate whitespace-nowrap text-sm font-semibold text-kumo-strong opacity-100 transition-[max-width,opacity] duration-250 ease-[cubic-bezier(0.4,0,0.2,1)] group-data-[state=collapsed]/sidebar:max-w-0 group-data-[state=collapsed]/sidebar:opacity-0">
+    <span className="app-brand-wordmark min-w-0 max-w-32 overflow-hidden truncate whitespace-nowrap text-sm font-semibold text-kumo-strong opacity-100 transition-[max-width,opacity] duration-250 ease-[cubic-bezier(0.4,0,0.2,1)] group-data-[state=collapsed]/sidebar:max-w-0 group-data-[state=collapsed]/sidebar:opacity-0">
       API Monitor
     </span>
   </Button>
@@ -349,11 +381,7 @@ const SidebarStyleSwitches = ({
         <Sidebar.MenuItem>
           <div className={controlRowClassName} data-sidebar="menu-button">
             <div className={controlRowInnerClassName}>
-              <span
-                className="h-4 w-4 shrink-0 opacity-40"
-                title="页面宽度"
-                aria-label="页面宽度"
-              >
+              <span className="h-4 w-4 shrink-0 opacity-40" title="页面宽度" aria-label="页面宽度">
                 <AppWindow className="h-4 w-4" />
               </span>
               <div className="sidebar-style-tabs min-w-0 flex-1 group-data-[state=collapsed]/sidebar:hidden">
@@ -372,11 +400,7 @@ const SidebarStyleSwitches = ({
         <Sidebar.MenuItem>
           <div className={controlRowClassName} data-sidebar="menu-button">
             <div className={controlRowInnerClassName}>
-              <span
-                className="h-4 w-4 shrink-0 opacity-40"
-                title="主题模式"
-                aria-label="主题模式"
-              >
+              <span className="h-4 w-4 shrink-0 opacity-40" title="主题模式" aria-label="主题模式">
                 <Palette className="h-4 w-4" />
               </span>
               <div className="sidebar-style-tabs min-w-0 flex-1 group-data-[state=collapsed]/sidebar:hidden">
@@ -420,9 +444,10 @@ function MainLayout() {
   } = useStore();
   const [runtimeClock, setRuntimeClock] = useState(() => Date.now());
   const pageWidthClass = PAGE_WIDTH_CLASSES[pageWidthMode] || PAGE_WIDTH_CLASSES.standard;
-  const displayedAppProcessUptime = appProcessUptimeSeconds > 0
-    ? appProcessUptimeSeconds + Math.max(0, runtimeClock - appProcessUptimeMeasuredAt) / 1000
-    : 0;
+  const displayedAppProcessUptime =
+    appProcessUptimeSeconds > 0
+      ? appProcessUptimeSeconds + Math.max(0, runtimeClock - appProcessUptimeMeasuredAt) / 1000
+      : 0;
 
   useEffect(() => {
     if (mainActiveTab !== 'dashboard' || !dashboardFooterVisible) return undefined;
@@ -432,18 +457,22 @@ function MainLayout() {
   }, [dashboardFooterVisible, mainActiveTab]);
 
   const visibleModuleGroups = useMemo(() => {
-    return MODULE_GROUPS.map((group) => {
+    return MODULE_GROUPS.map(group => {
       const directModules = moduleOrder.filter(
-        (moduleId) => (group.modules || []).includes(moduleId) && moduleVisibility[moduleId] !== false
+        moduleId => (group.modules || []).includes(moduleId) && moduleVisibility[moduleId] !== false
       );
-      const subgroups = (group.subgroups || []).map((subgroup) => ({
-        ...subgroup,
-        modules: moduleOrder.filter(
-          (moduleId) => (subgroup.modules || []).includes(moduleId) && moduleVisibility[moduleId] !== false
-        ),
-      })).filter((subgroup) => subgroup.modules.length > 0);
+      const subgroups = (group.subgroups || [])
+        .map(subgroup => ({
+          ...subgroup,
+          modules: moduleOrder.filter(
+            moduleId =>
+              (subgroup.modules || []).includes(moduleId) && moduleVisibility[moduleId] !== false
+          ),
+        }))
+        .filter(subgroup => subgroup.modules.length > 0);
       const trailingModules = moduleOrder.filter(
-        (moduleId) => (group.trailingModules || []).includes(moduleId) && moduleVisibility[moduleId] !== false
+        moduleId =>
+          (group.trailingModules || []).includes(moduleId) && moduleVisibility[moduleId] !== false
       );
 
       return {
@@ -452,9 +481,9 @@ function MainLayout() {
         subgroups,
         trailingModules,
       };
-    }).filter((group) => {
+    }).filter(group => {
       if (group.id === 'system') return false;
-      return getGroupModuleIds(group).some((moduleId) => moduleVisibility[moduleId] !== false);
+      return getGroupModuleIds(group).some(moduleId => moduleVisibility[moduleId] !== false);
     });
   }, [moduleOrder, moduleVisibility]);
 
@@ -472,7 +501,11 @@ function MainLayout() {
       if (currentTab !== routeTab) {
         useStore.getState().setMainActiveTab(routeTab);
       }
-      if (routeTab === 'server' && new URLSearchParams(window.location.search).has('mockDocker') && window.location.pathname !== '/server') {
+      if (
+        routeTab === 'server' &&
+        new URLSearchParams(window.location.search).has('mockDocker') &&
+        window.location.pathname !== '/server'
+      ) {
         window.history.replaceState({ module: 'server' }, '', `/server${window.location.search}`);
       }
     };
@@ -490,7 +523,7 @@ function MainLayout() {
     window.history.replaceState({ module: currentModule }, '', nextPath);
   }, []);
 
-  const navigateToModule = (module) => {
+  const navigateToModule = module => {
     triggerHaptic();
     setMainActiveTab(module);
     const nextPath = MODULE_PATHS[module] || `/${module}`;
@@ -510,7 +543,8 @@ function MainLayout() {
     if (!userSettingsLoaded || mainActiveTab === 'settings') return;
     if (moduleVisibility[mainActiveTab] !== false) return;
 
-    const nextModule = moduleOrder.find((moduleId) => moduleVisibility[moduleId] !== false) || 'dashboard';
+    const nextModule =
+      moduleOrder.find(moduleId => moduleVisibility[moduleId] !== false) || 'dashboard';
     setMainActiveTab(nextModule);
     const nextPath = MODULE_PATHS[nextModule] || `/${nextModule}`;
     if (window.location.pathname !== nextPath) {
@@ -519,17 +553,16 @@ function MainLayout() {
   }, [mainActiveTab, moduleOrder, moduleVisibility, setMainActiveTab, userSettingsLoaded]);
 
   useEffect(() => {
-    const matchesInteractiveTarget = (target) => (
-      target instanceof Element && Boolean(target.closest(HAPTIC_INTERACTIVE_SELECTOR))
-    );
+    const matchesInteractiveTarget = target =>
+      target instanceof Element && Boolean(target.closest(HAPTIC_INTERACTIVE_SELECTOR));
 
-    const handlePointerUp = (event) => {
+    const handlePointerUp = event => {
       if (event.pointerType && event.pointerType !== 'touch') return;
       if (!matchesInteractiveTarget(event.target)) return;
       triggerHaptic();
     };
 
-    const handleClick = (event) => {
+    const handleClick = event => {
       const hasTouchCapability = typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0;
       if (!hasTouchCapability) return;
       if (!matchesInteractiveTarget(event.target)) return;
@@ -553,7 +586,11 @@ function MainLayout() {
       ? 'flex-1 overflow-hidden p-3 sm:p-4 lg:px-8 lg:pb-6 lg:pt-3'
       : 'flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 lg:px-8 lg:pb-6 lg:pt-3 scrollbar-thin';
   const mainCanvasInnerClassName = `mx-auto flex w-full min-w-0 flex-col ${
-    responsiveWorkspaceModule ? 'min-h-full md:h-full md:min-h-0' : viewportWorkspaceModule || mainActiveTab === 'server' ? 'h-full min-h-0' : 'min-h-full'
+    responsiveWorkspaceModule
+      ? 'min-h-full md:h-full md:min-h-0'
+      : viewportWorkspaceModule || mainActiveTab === 'server'
+        ? 'h-full min-h-0'
+        : 'min-h-full'
   } ${pageWidthClass}`;
 
   // 渲染当前模块页
@@ -565,7 +602,6 @@ function MainLayout() {
         return <OpenAIPage />;
       case 'subscription':
         return <SubscriptionPage />;
-
 
       case 'paas':
         return <PaasPage />;
@@ -602,7 +638,10 @@ function MainLayout() {
       default:
         const ActiveIcon = getModuleIconComponent(mainActiveTab, Server);
         return (
-          <AppCard padding="none" className="mx-auto flex h-[60vh] max-w-xl flex-col items-center justify-center p-6 text-center">
+          <AppCard
+            padding="none"
+            className="mx-auto flex h-[60vh] max-w-xl flex-col items-center justify-center p-6 text-center"
+          >
             <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full border border-kumo-line bg-kumo-recessed text-kumo-brand shadow-none">
               <ActiveIcon className="w-7 h-7" />
             </div>
@@ -610,7 +649,8 @@ function MainLayout() {
               {getModuleName(mainActiveTab)} 模块重构中
             </h2>
             <p className="text-xs text-kumo-subtle max-w-sm leading-relaxed">
-              我们正在使用 React + Kumo + Tailwind v4 像素级重构该页面，在此期间原有逻辑将暂时不可用。
+              我们正在使用 React + Kumo + Tailwind v4
+              像素级重构该页面，在此期间原有逻辑将暂时不可用。
             </p>
           </AppCard>
         );
@@ -621,7 +661,7 @@ function MainLayout() {
     <Sidebar.Provider
       defaultOpen={!sidebarCollapsed}
       open={!sidebarCollapsed}
-      onOpenChange={(open) => setSidebarCollapsed(!open)}
+      onOpenChange={open => setSidebarCollapsed(!open)}
       peekable
       style={{
         '--sidebar-width': '11.5rem',
@@ -639,14 +679,14 @@ function MainLayout() {
 
           {/* 导航栏项 */}
           <Sidebar.Content>
-            {visibleModuleGroups.map((group) => {
+            {visibleModuleGroups.map(group => {
               const groupLabel = group.id === 'overview' ? '总览' : group.name;
 
               return (
                 <Sidebar.Group key={group.id}>
                   <Sidebar.GroupLabel>{groupLabel}</Sidebar.GroupLabel>
                   <Sidebar.Menu>
-                    {group.modules.map((module) => (
+                    {group.modules.map(module => (
                       <SidebarModuleButton
                         key={module}
                         module={module}
@@ -655,7 +695,7 @@ function MainLayout() {
                         onNavigate={navigateToModule}
                       />
                     ))}
-                    {(group.subgroups || []).map((subgroup) => (
+                    {(group.subgroups || []).map(subgroup => (
                       <SidebarModuleSubgroup
                         key={subgroup.id}
                         subgroup={subgroup}
@@ -663,7 +703,7 @@ function MainLayout() {
                         onNavigate={navigateToModule}
                       />
                     ))}
-                    {(group.trailingModules || []).map((module) => (
+                    {(group.trailingModules || []).map(module => (
                       <SidebarModuleButton
                         key={module}
                         module={module}
@@ -685,7 +725,9 @@ function MainLayout() {
                     name: '配置',
                     icon: Settings,
                     modules: ['apidocs', 'systemlogs', 'settings'].filter(
-                      (module) => module === 'settings' || (moduleOrder.includes(module) && moduleVisibility[module] !== false)
+                      module =>
+                        module === 'settings' ||
+                        (moduleOrder.includes(module) && moduleVisibility[module] !== false)
                     ),
                   }}
                   activeModule={mainActiveTab}
@@ -719,13 +761,13 @@ function MainLayout() {
               <AppPageHeader
                 className="flex-row items-center justify-between"
                 spacing="compact"
-                breadcrumbs={(
+                breadcrumbs={
                   <AppBreadcrumbs size="sm" className="mr-0 min-w-0 overflow-hidden">
                     <AppBreadcrumbs.Link href="/">首页</AppBreadcrumbs.Link>
                     <AppBreadcrumbs.Separator />
                     <AppBreadcrumbs.Current>{getModuleName(mainActiveTab)}</AppBreadcrumbs.Current>
                   </AppBreadcrumbs>
-                )}
+                }
               >
                 {/* <div className="flex h-6.5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-kumo-success/20 bg-kumo-success/10 px-2 text-[11px] text-kumo-success">
                   <span className="w-1 h-1 rounded-full bg-current animate-pulse"></span>
@@ -740,9 +782,7 @@ function MainLayout() {
           <main className={mainCanvasClassName}>
             <div className={mainCanvasInnerClassName}>
               <ModuleErrorBoundary moduleId={mainActiveTab}>
-                <Suspense fallback={<PageLoadingFallback />}>
-                  {renderActivePage()}
-                </Suspense>
+                <Suspense fallback={<PageLoadingFallback />}>{renderActivePage()}</Suspense>
               </ModuleErrorBoundary>
             </div>
           </main>
@@ -752,7 +792,10 @@ function MainLayout() {
                 <img src="/logo.svg" alt="" className="h-5 w-5 shrink-0 object-contain" />
                 <span className="truncate font-semibold text-kumo-strong">API Monitor</span>
                 <span className="hidden shrink-0 text-kumo-subtle min-[520px]:inline">
-                  · 已运行 {appProcessUptimeMeasuredAt > 0 ? formatAppProcessUptime(displayedAppProcessUptime) : '加载中'}
+                  · 已运行{' '}
+                  {appProcessUptimeMeasuredAt > 0
+                    ? formatAppProcessUptime(displayedAppProcessUptime)
+                    : '加载中'}
                 </span>
               </div>
               <div className="flex min-w-0 items-center justify-end gap-3">

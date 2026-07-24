@@ -85,7 +85,9 @@ func EnsureCoreSchema(ctx context.Context, db *sql.DB) error {
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			last_accessed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			expires_at DATETIME,
-			is_active INTEGER DEFAULT 1
+			is_active INTEGER DEFAULT 1,
+			ip_address TEXT,
+			user_agent TEXT
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(is_active, expires_at)`,
 		`CREATE TABLE IF NOT EXISTS login_attempts (
@@ -108,6 +110,24 @@ func EnsureCoreSchema(ctx context.Context, db *sql.DB) error {
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_operation_logs_table ON operation_logs(table_name, created_at)`,
+		`CREATE TABLE IF NOT EXISTS auth_flows (
+			id TEXT PRIMARY KEY,
+			flow_type TEXT NOT NULL,
+			payload TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			expires_at DATETIME NOT NULL,
+			consumed_at DATETIME
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_auth_flows_lookup ON auth_flows(flow_type, expires_at, consumed_at)`,
+		`CREATE TABLE IF NOT EXISTS webauthn_credentials (
+			credential_id TEXT PRIMARY KEY,
+			label TEXT NOT NULL,
+			credential_json TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			last_used_at DATETIME,
+			last_used_ip TEXT,
+			last_used_user_agent TEXT
+		)`,
 		`CREATE TABLE IF NOT EXISTS user_settings (
 			id INTEGER PRIMARY KEY CHECK (id = 1),
 			custom_css TEXT,
@@ -142,10 +162,34 @@ func EnsureCoreSchema(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("ensure core schema: %w", err)
 		}
 	}
+	if err := ensureSessionColumns(ctx, db); err != nil {
+		return err
+	}
 	if err := ensureUserSettingsColumns(ctx, db); err != nil {
 		return err
 	}
 	return ensureDefaultUserSettings(ctx, db)
+}
+
+func ensureSessionColumns(ctx context.Context, db *sql.DB) error {
+	for _, column := range []struct {
+		name string
+		sql  string
+	}{
+		{"ip_address", "ALTER TABLE sessions ADD COLUMN ip_address TEXT"},
+		{"user_agent", "ALTER TABLE sessions ADD COLUMN user_agent TEXT"},
+	} {
+		exists, err := hasColumn(ctx, db, "sessions", column.name)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			if _, err := db.ExecContext(ctx, column.sql); err != nil {
+				return fmt.Errorf("add sessions.%s: %w", column.name, err)
+			}
+		}
+	}
+	return nil
 }
 
 func ensureDefaultUserSettings(ctx context.Context, db *sql.DB) error {

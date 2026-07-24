@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -82,6 +83,9 @@ func NewChecked(cfg config.Config) (*Server, error) {
 }
 
 func newServer(cfg config.Config) (*Server, error) {
+	if err := cfg.ValidateSecurity(); err != nil {
+		return nil, err
+	}
 	subscriptionService := subscription.New(cfg)
 	initCtx, initCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	err := subscriptionService.Initialize(initCtx)
@@ -163,7 +167,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.applySecurityHeaders(w)
+	s.applySecurityHeaders(w, r)
 
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusNoContent)
@@ -227,6 +231,8 @@ func (s *Server) serveSystemControlRoute(w http.ResponseWriter, r *http.Request)
 	isSessionSystemRoute := path == "/api/system/api-docs" ||
 		path == "/api/openapi.json" ||
 		path == "/api/system/openapi.json" ||
+		strings.HasPrefix(path, "/api/api-keys") ||
+		strings.HasPrefix(path, "/api/system/api-keys") ||
 		path == "/api/ai-access" ||
 		path == "/api/ai-access/key/rotate" ||
 		path == "/api/ai-access/audit/clear" ||
@@ -276,6 +282,31 @@ func (s *Server) authorizeGoRoute(w http.ResponseWriter, r *http.Request, route 
 	if route.Auth != manifest.AuthSession {
 		return true
 	}
+	if r.Method == http.MethodGet && r.URL.Path == "/api/totp/accounts" {
+		pluginAuthorized, err := s.auth.IsPluginToken(r.Context(), r)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return false
+		}
+		if pluginAuthorized {
+			return true
+		}
+	}
+	if hasAPIKeyCredential(r) && !apiKeyRequiresSession(r.URL.Path) {
+		write := r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions
+		keyAuthorized, err := s.auth.IsAPIKeyAuthorized(r.Context(), r, write)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
+			return false
+		}
+		if keyAuthorized {
+			return true
+		}
+	}
+	if _, err := r.Cookie("sid"); err == nil && !s.sameOriginRequest(r) {
+		response.JSON(w, http.StatusForbidden, map[string]interface{}{"success": false, "error": "跨来源会话请求已拒绝"})
+		return false
+	}
 	ok, err := s.auth.IsAuthenticated(r.Context(), r)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, err.Error())
@@ -288,7 +319,41 @@ func (s *Server) authorizeGoRoute(w http.ResponseWriter, r *http.Request, route 
 	return true
 }
 
+func apiKeyRequiresSession(path string) bool {
+	protectedPrefixes := []string{
+		"/api/api-keys",
+		"/api/system/api-keys",
+		"/api/ai-access",
+		"/api/system/ai-access",
+		"/api/backup",
+		"/api/totp",
+		"/api/cron",
+		"/api/scheduler",
+	}
+	for _, prefix := range protectedPrefixes {
+		if path == prefix || strings.HasPrefix(path, prefix+"/") {
+			return true
+		}
+	}
+	protectedSettings := map[string]bool{
+		"/api/settings/database/import":           true,
+		"/api/settings/import-database":           true,
+		"/api/settings/export-database":           true,
+		"/api/settings/cleanup-deprecated-tables": true,
+	}
+	return protectedSettings[path]
+}
+
+func hasAPIKeyCredential(r *http.Request) bool {
+	return strings.TrimSpace(r.Header.Get("Authorization")) != "" || strings.TrimSpace(r.Header.Get("X-API-Key")) != ""
+}
+
 func (s *Server) serveGoRoute(w http.ResponseWriter, r *http.Request, route manifest.Route) {
+	if strings.HasPrefix(route.Prefix, "/api/auth") {
+		s.auth.ServeHTTP(w, r)
+		return
+	}
+
 	switch route.Prefix {
 	case "/health":
 		response.JSON(w, http.StatusOK, map[string]interface{}{
@@ -306,11 +371,9 @@ func (s *Server) serveGoRoute(w http.ResponseWriter, r *http.Request, route mani
 			"routes":        manifest.Routes(),
 			"retired":       []string{},
 		})
-	case "/api/auth", "/api/auth/2fa", "/api/auth/2fa/status":
-		s.auth.ServeHTTP(w, r)
 	case "/api/settings", "/api/settings/database-stats", "/api/settings/migration-self-check", "/api/settings/database-analysis", "/api/settings/deprecated-tables", "/api/settings/cleanup-deprecated-tables", "/api/settings/export-database", "/api/settings/database/import", "/api/settings/import-database", "/api/settings/operation-logs", "/api/settings/sys-logs", "/api/settings/app-log-file", "/api/settings/log-settings", "/api/settings/clear-app-logs", "/api/settings/vacuum-database", "/api/settings/clear-logs", "/api/settings/enforce-log-limits", "/api/settings/clear-chat-messages":
 		s.settings.ServeHTTP(w, r)
-	case "/api/system/host-metrics", "/api/system/api-stats", "/api/system/api-docs", "/api/system/openapi.json", "/api/system/ai-access/key/rotate", "/api/system/ai-access/mcp-servers/{id}", "/api/system/ai-access/mcp-servers", "/api/system/ai-access/skills/{id}", "/api/system/ai-access/skills", "/api/system/ai-access/audit/clear", "/api/system/ai-access", "/api/ai-access/key/rotate", "/api/ai-access/mcp-servers/{id}", "/api/ai-access/mcp-servers", "/api/ai-access/skills/{id}", "/api/ai-access/skills", "/api/ai-access/audit/clear", "/api/ai-access", "/api/ai/manifest", "/api/ai/mcp":
+	case "/api/system/host-metrics", "/api/system/api-stats", "/api/system/api-docs", "/api/system/openapi.json", "/api/api-keys", "/api/system/api-keys", "/api/system/ai-access/key/rotate", "/api/system/ai-access/mcp-servers/{id}", "/api/system/ai-access/mcp-servers", "/api/system/ai-access/skills/{id}", "/api/system/ai-access/skills", "/api/system/ai-access/audit/clear", "/api/system/ai-access", "/api/ai-access/key/rotate", "/api/ai-access/mcp-servers/{id}", "/api/ai-access/mcp-servers", "/api/ai-access/skills/{id}", "/api/ai-access/skills", "/api/ai-access/audit/clear", "/api/ai-access", "/api/ai/manifest", "/api/ai/mcp":
 		s.system.ServeHTTP(w, r)
 	case "/api/system/logs/stream", "/api/system/logs/download":
 		s.logs.ServeHTTP(w, r)
@@ -515,13 +578,103 @@ func joinStaticPath(rootDir, relPath string) (string, bool) {
 	return candidate, true
 }
 
-func (s *Server) applySecurityHeaders(w http.ResponseWriter) {
+func (s *Server) applySecurityHeaders(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization,X-Admin-Password,X-API-Key,X-Agent-Key,X-Server-ID,X-Filebox-Password")
+	w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+	if s.cfg.IsProduction() {
+		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+	}
+	origin := strings.TrimRight(strings.TrimSpace(r.Header.Get("Origin")), "/")
+	for _, allowed := range s.cfg.CORSAllowedOrigins {
+		if origin != "" && origin == allowed {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization,X-API-Key,X-Agent-Key,X-Server-ID,X-Filebox-Password")
+			w.Header().Add("Vary", "Origin")
+			break
+		}
+	}
+}
+
+func (s *Server) sameOriginRequest(r *http.Request) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(parsed.Host, s.originCheckHost(r)) {
+		return true
+	}
+	if !s.cfg.IsProduction() && s.trustForwardedHost(r) && isDevelopmentOriginHost(parsed.Hostname()) {
+		return true
+	}
+	return false
+}
+
+func (s *Server) originCheckHost(r *http.Request) string {
+	if s.trustForwardedHost(r) {
+		if forwarded := firstForwardedValue(r.Header.Get("X-Forwarded-Host")); forwarded != "" {
+			return forwarded
+		}
+	}
+	return r.Host
+}
+
+func (s *Server) trustForwardedHost(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil || host == "" {
+		host = strings.TrimSpace(r.RemoteAddr)
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	if !s.cfg.IsProduction() && ip.IsLoopback() {
+		return true
+	}
+	return s.isTrustedProxy(ip)
+}
+
+func (s *Server) isTrustedProxy(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	for _, entry := range s.cfg.TrustedProxyCIDRs {
+		if _, network, err := net.ParseCIDR(entry); err == nil && network.Contains(ip) {
+			return true
+		}
+		if candidate := net.ParseIP(entry); candidate != nil && candidate.Equal(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func firstForwardedValue(value string) string {
+	if value == "" {
+		return ""
+	}
+	return strings.TrimSpace(strings.Split(value, ",")[0])
+}
+
+func isDevelopmentOriginHost(host string) bool {
+	host = strings.TrimSpace(strings.Trim(host, "[]"))
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") || strings.EqualFold(host, "host.docker.internal") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate()
 }
 
 func (s *Server) serveV1Route(w http.ResponseWriter, r *http.Request) {

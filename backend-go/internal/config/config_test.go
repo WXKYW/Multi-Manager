@@ -82,3 +82,39 @@ func TestLoadResolvesRelativeEnvPathsFromRepoRoot(t *testing.T) {
 		t.Fatalf("asset dirs should be repo-root-relative: dist=%q public=%q", cfg.DistDir, cfg.PublicDir)
 	}
 }
+
+func TestProductionSecurityDefaults(t *testing.T) {
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("NODE_ENV", "")
+	t.Setenv("SECURE_COOKIES", "")
+	t.Setenv("ALLOW_LOCAL_SHELL_TASKS", "")
+	t.Setenv("TRUSTED_PROXY_CIDRS", "10.0.0.0/8,192.0.2.10")
+	t.Setenv("CORS_ALLOWED_ORIGINS", "https://panel.example.com")
+
+	cfg := Load("test")
+	if !cfg.IsProduction() || !cfg.SecureCookies || cfg.LocalShellTasksAllowed() {
+		t.Fatalf("unexpected production defaults: %#v", cfg)
+	}
+	if len(cfg.TrustedProxyCIDRs) != 2 || len(cfg.CORSAllowedOrigins) != 1 {
+		t.Fatalf("environment lists not parsed: proxies=%v cors=%v", cfg.TrustedProxyCIDRs, cfg.CORSAllowedOrigins)
+	}
+}
+
+func TestProductionSecurityValidation(t *testing.T) {
+	cfg := Config{Environment: "production"}
+	t.Setenv("ENCRYPTION_KEY", "")
+	t.Setenv("JWT_SECRET", "")
+	if err := cfg.ValidateSecurity(); err == nil {
+		t.Fatal("expected missing production secrets to be rejected")
+	}
+
+	t.Setenv("ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef")
+	t.Setenv("JWT_SECRET", "abcdef0123456789abcdef0123456789")
+	if err := cfg.ValidateSecurity(); err != nil {
+		t.Fatalf("valid production secrets rejected: %v", err)
+	}
+
+	if err := (Config{Environment: "development"}).ValidateSecurity(); err != nil {
+		t.Fatalf("development should not require production secrets: %v", err)
+	}
+}

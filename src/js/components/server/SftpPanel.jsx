@@ -350,7 +350,7 @@ export default function SftpPanel({ serverId, serverName, initialPath = '.', onC
                     {files.length === 0 ? (
                       <Table.Row>
                         <Table.Cell colSpan={5}>
-                          <div className="py-10 text-center text-xs text-kumo-subtle">当前目录为空</div>
+                          <div className="py-10 text-center text-xs text-kumo-subtle">目录为空</div>
                         </Table.Cell>
                       </Table.Row>
                     ) : files.map(file => {

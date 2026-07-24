@@ -419,7 +419,6 @@ const syncNodeForm = (prev, changedField, value) => {
 
 const getAuthHeaders = () => ({
   'Content-Type': 'application/json',
-  'x-admin-password': localStorage.getItem('admin_password') || '',
 });
 
 const formatBytes = (bytes = 0) => {
@@ -1122,7 +1121,7 @@ function SubscriptionPage() {
       setDestructiveConfirm((current) => current.key === key ? { key: '', expiresAt: 0 } : current);
       destructiveConfirmTimerRef.current = null;
     }, DESTRUCTIVE_CONFIRM_MS);
-    toast.warning(`${label}，请再次点击红色按钮确认`);
+    toast.warning(`${label}，再点一次确认`);
     return false;
   };
 
@@ -1137,7 +1136,7 @@ function SubscriptionPage() {
 			if (task.status === 'failed' || task.status === 'cancelled') throw new Error(task.error || '任务执行失败');
 			await new Promise((resolve) => window.setTimeout(resolve, 750));
 		}
-		throw new Error('任务等待超时，请在任务状态中查看最终结果');
+		throw new Error('任务等待超时，请到任务状态查看结果');
 	};
 
   const createInternalNode = async () => {
@@ -1971,7 +1970,7 @@ function SubscriptionPage() {
                 );
               })}
               {currentSubscriptions.length === 0 && (
-                <Table.Row><Table.Cell colSpan={6} className="p-8 text-center text-kumo-subtle">暂无订阅。请先创建套餐，再生成订阅。</Table.Cell></Table.Row>
+                <Table.Row><Table.Cell colSpan={6} className="p-8 text-center text-kumo-subtle">暂无订阅</Table.Cell></Table.Row>
               )}
             </Table.Body>
           </AppTable>
@@ -1995,7 +1994,7 @@ function SubscriptionPage() {
               <Table.Cell className="text-center"><Badge variant={plan.enabled ? 'success' : 'neutral'} appearance="dot">{plan.enabled ? '启用' : '停用'}</Badge></Table.Cell>
 			  <Table.Cell><div>{plan.total_bytes > 0 ? formatBytes(plan.total_bytes) : '不限'}</div>{externalCount > 0 && plan.total_bytes > 0 && <div className="mt-1 text-[10px] text-kumo-warning">仅内部节点强制执行</div>}</Table.Cell>
               <Table.Cell className="text-center">{plan.cycle_type === 'monthly' ? `每月 ${plan.cycle_day} 日` : plan.cycle_type === 'custom' ? '自定义' : '不重置'}</Table.Cell>
-				<Table.Cell><div className="text-xs font-semibold text-kumo-strong">内部 {internalCount} · 外部 {externalCount}</div>{plan.selection_mode === 'all' && <div className="mt-1 text-[10px] text-kumo-subtle">自动包含新增节点</div>}</Table.Cell>
+				<Table.Cell><div className="text-xs font-semibold text-kumo-strong">内部 {internalCount} · 外部 {externalCount}</div>{plan.selection_mode === 'all' && <div className="mt-1 text-[10px] text-kumo-subtle">包含新增节点</div>}</Table.Cell>
               <Table.Cell className="text-center">{plan.subscription_count || 0}</Table.Cell>
               <Table.Cell className="text-center"><div className="inline-flex justify-center gap-2"><Button size="sm" shape="square" variant="secondary" onClick={() => openEditPlan(plan)} icon={<Edit className="h-3.5 w-3.5" />} aria-label="编辑套餐" /><Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deletePlan(plan)} icon={<Trash className="h-3.5 w-3.5" />} aria-label="删除套餐" /></div></Table.Cell>
 			</Table.Row>})}
@@ -2047,7 +2046,7 @@ function SubscriptionPage() {
                 <Table.Cell className="text-center"><div className="inline-flex items-center justify-center gap-2"><Button size="sm" shape="square" variant="secondary" aria-label={`编辑 ${node.name}`} title={`编辑 ${node.name}`} disabled={reconciling || deleting} onClick={(event) => { event.stopPropagation(); openEditInternalNode(node); }} icon={<Edit className="h-3.5 w-3.5" />} /><RefreshButton size="sm" variant="secondary" loading={reconciling} aria-label={`重新部署 ${node.name}`} title={`重新部署 ${node.name}`} disabled={reconciling || deleting} onClick={(event) => { event.stopPropagation(); reconcileInternalNode(node); }} /><Button size="sm" shape="square" variant={confirmingDelete ? 'destructive' : 'secondary-destructive'} aria-label={confirmingDelete ? `再次确认卸载 ${node.name}` : `卸载 ${node.name}`} title={confirmingDelete ? '再次点击确认卸载' : `卸载 ${node.name}`} disabled={reconciling || deleting} onClick={(event) => { event.stopPropagation(); deleteInternalNode(node); }} icon={deleting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />} /></div></Table.Cell>
               </Table.Row>;
             })}
-            {internalNodes.length === 0 && <Table.Row><Table.Cell colSpan={6} className="p-6 text-center text-kumo-subtle">暂无本机节点。请先在实例管理安装代理程序，再生成节点。</Table.Cell></Table.Row>}
+            {internalNodes.length === 0 && <Table.Row><Table.Cell colSpan={6} className="p-6 text-center text-kumo-subtle">暂无本机节点</Table.Cell></Table.Row>}
           </Table.Body>
         </AppTable>
       </DataTableFrame>
@@ -2209,11 +2208,11 @@ function SubscriptionPage() {
                   <Table.Cell className="text-center"><span className="font-mono text-xs">{server.agent_version && server.agent_version !== '<nil>' ? server.agent_version : '未报告'}</span></Table.Cell>
 					<Table.Cell className="text-center"><div className="inline-flex flex-col items-center gap-1">{runtime ? <Badge variant={runtime.apply_status === 'running' ? 'success' : ['failed', 'drifted'].includes(runtime.apply_status) ? 'error' : 'warning'}>{runtime.apply_status === 'running' ? `sing-box${runtime.version ? ` ${runtime.version}` : ''}` : runtime.apply_status === 'failed' ? '部署失败' : runtime.apply_status === 'drifted' ? '状态漂移' : '部署中'}</Badge> : <Badge variant="neutral">未安装</Badge>}{server.status === 'online' && !supportsRuntimeLifecycle && <Badge variant="warning">需升级 Agent</Badge>}{tunnel && <Badge variant={tunnel.apply_status === 'running' ? 'success' : tunnel.apply_status === 'failed' ? 'error' : 'warning'}>Tunnel {tunnel.apply_status === 'running' ? '已连接' : tunnel.apply_status}</Badge>}</div></Table.Cell>
 					<Table.Cell className="text-center"><div className="flex flex-wrap justify-center gap-1">{managed.map((node) => <Badge key={node.id} variant={nodeTypeBadgeVariant(node.protocol)}>{node.protocol === 'hysteria2' ? 'HY2' : 'VLESS'}</Badge>)}{managed.length === 0 && <span className="text-xs text-kumo-subtle">—</span>}</div></Table.Cell>
-                  <Table.Cell className="text-center"><div className="flex w-full flex-wrap items-center justify-center gap-1">{runtime?.apply_status === 'running' ? <><Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>升级 / 重装</Button><Button size="sm" variant={isDestructiveConfirmActive(`runtime-uninstall:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallProxyRuntime(server)} disabled={saving || managed.length > 0 || !supportsRuntimeLifecycle} title={managed.length > 0 ? '请先在节点管理中卸载该实例的全部节点' : !supportsRuntimeLifecycle ? '请先升级 Agent' : '卸载 sing-box'}>{isDestructiveConfirmActive(`runtime-uninstall:${server.id}`) ? '再次确认' : '卸载程序'}</Button></> : <Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>安装代理程序</Button>}{tunnel ? <Button size="sm" variant={isDestructiveConfirmActive(`managed-tunnel-delete:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallTunnel(server)}>{isDestructiveConfirmActive(`managed-tunnel-delete:${server.id}`) ? '再次确认' : '卸载 Tunnel'}</Button> : <Button size="sm" variant="secondary" onClick={() => openTunnelDeployment(server)} disabled={server.status !== 'online'}>部署 Tunnel</Button>}</div></Table.Cell>
+                  <Table.Cell className="text-center"><div className="flex w-full flex-wrap items-center justify-center gap-1">{runtime?.apply_status === 'running' ? <><Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>升级 / 重装</Button><Button size="sm" variant={isDestructiveConfirmActive(`runtime-uninstall:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallProxyRuntime(server)} disabled={saving || managed.length > 0 || !supportsRuntimeLifecycle} title={managed.length > 0 ? '请先在节点管理中卸载该实例的全部节点' : !supportsRuntimeLifecycle ? '请先升级 Agent' : '卸载 sing-box'}>{isDestructiveConfirmActive(`runtime-uninstall:${server.id}`) ? '再次确认' : '卸载程序'}</Button></> : <Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>安装代理</Button>}{tunnel ? <Button size="sm" variant={isDestructiveConfirmActive(`managed-tunnel-delete:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallTunnel(server)}>{isDestructiveConfirmActive(`managed-tunnel-delete:${server.id}`) ? '再次确认' : '卸载 Tunnel'}</Button> : <Button size="sm" variant="secondary" onClick={() => openTunnelDeployment(server)} disabled={server.status !== 'online'}>部署</Button>}</div></Table.Cell>
                 </Table.Row>
               );
             })}
-            {servers.length === 0 && <Table.Row><Table.Cell colSpan={9} className="p-6 text-center text-kumo-subtle">没有可管理的 Linux 主机。请先在主机实例中部署 Agent。</Table.Cell></Table.Row>}
+            {servers.length === 0 && <Table.Row><Table.Cell colSpan={9} className="p-6 text-center text-kumo-subtle">暂无 Linux 主机</Table.Cell></Table.Row>}
           </Table.Body>
         </AppTable>
       </DataTableFrame>
@@ -2231,7 +2230,7 @@ function SubscriptionPage() {
           {managedTunnels.map((item) => <span key={item.server_id} className="inline-flex shrink-0 items-center gap-1.5 text-xs text-kumo-strong"><span className={`h-2 w-2 rounded-full ${item.apply_status === 'running' ? 'bg-kumo-success' : item.apply_status === 'failed' ? 'bg-kumo-danger' : 'bg-kumo-warning'}`} />{item.server_name} · <span className="font-mono text-kumo-subtle">{item.hostname}</span></span>)}
           {preferredAddresses.map((item) => <span key={item.id} className="shrink-0 font-mono text-xs text-kumo-subtle">{item.name} · {item.address}:{item.port}</span>)}
         </div>}
-        <Button className="ml-auto hidden shrink-0 sm:inline-flex" size="sm" variant="secondary" onClick={() => setPreferredModalOpen(true)}><Plus className="h-3.5 w-3.5" />管理优选地址</Button>
+        <Button className="ml-auto hidden shrink-0 sm:inline-flex" size="sm" variant="secondary" onClick={() => setPreferredModalOpen(true)}><Plus className="h-3.5 w-3.5" />优选地址</Button>
       </LayerCard.Primary>
     </LayerCard>
   );
@@ -2446,8 +2445,8 @@ function SubscriptionPage() {
           <div className="border-b border-kumo-line px-3 py-3 sm:px-5 sm:py-4"><Dialog.Title>{editingPlanId ? '编辑套餐' : '新建套餐'}</Dialog.Title></div>
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3 scrollbar-thin sm:p-5">
             <div className="grid gap-3 sm:grid-cols-2"><Input size="sm" label="套餐名称" value={planForm.name} onChange={(e) => setPlanForm((prev) => ({ ...prev, name: e.target.value }))} /><Input size="sm" label="备注" value={planForm.remark} onChange={(e) => setPlanForm((prev) => ({ ...prev, remark: e.target.value }))} /></div>
-            <div className="grid items-end gap-3 md:grid-cols-[minmax(16rem,1.2fr)_minmax(12rem,.8fr)_minmax(10rem,.7fr)]"><TrafficSizeInput label="每个订阅额度（仅托管节点，0 为不限）" value={planForm.total_bytes} onChange={(value) => setPlanForm((prev) => ({ ...prev, total_bytes: value }))} /><Select size="sm" label="重置周期" value={planForm.cycle_type} onValueChange={(value) => setPlanForm((prev) => ({ ...prev, cycle_type: String(value) }))} items={[{ value: 'monthly', label: '每月重置' }, { value: 'none', label: '不重置' }]} /><Input size="sm" label="每月重置日" type="number" min="1" max="31" value={planForm.cycle_day} disabled={planForm.cycle_type !== 'monthly'} onChange={(e) => setPlanForm((prev) => ({ ...prev, cycle_day: Number(e.target.value) || 1 }))} /></div>
-			{planForm.total_bytes > 0 && ((planForm.selection_mode === 'all' && planForm.include_external_nodes) || (planForm.selection_mode === 'explicit' && planForm.node_ids.some((id) => nodes.some((node) => node.id === id)))) && <div className="rounded-md border border-kumo-warning/30 bg-kumo-warning/10 px-3 py-2 text-xs text-kumo-warning">外部节点不受 Agent 管理，无法统计或强制执行额度；套餐额度只约束内部节点。</div>}
+            <div className="grid items-end gap-3 md:grid-cols-[minmax(16rem,1.2fr)_minmax(12rem,.8fr)_minmax(10rem,.7fr)]"><TrafficSizeInput label="订阅额度（仅托管节点，0 不限）" value={planForm.total_bytes} onChange={(value) => setPlanForm((prev) => ({ ...prev, total_bytes: value }))} /><Select size="sm" label="重置周期" value={planForm.cycle_type} onValueChange={(value) => setPlanForm((prev) => ({ ...prev, cycle_type: String(value) }))} items={[{ value: 'monthly', label: '每月重置' }, { value: 'none', label: '不重置' }]} /><Input size="sm" label="每月重置日" type="number" min="1" max="31" value={planForm.cycle_day} disabled={planForm.cycle_type !== 'monthly'} onChange={(e) => setPlanForm((prev) => ({ ...prev, cycle_day: Number(e.target.value) || 1 }))} /></div>
+			{planForm.total_bytes > 0 && ((planForm.selection_mode === 'all' && planForm.include_external_nodes) || (planForm.selection_mode === 'explicit' && planForm.node_ids.some((id) => nodes.some((node) => node.id === id)))) && <div className="rounded-md border border-kumo-warning/30 bg-kumo-warning/10 px-3 py-2 text-xs text-kumo-warning">外部节点不受 Agent 管理，额度仅约束内部节点。</div>}
             <div className="grid items-end gap-3 md:grid-cols-[minmax(18rem,1fr)_auto]"><Input size="sm" label="订阅请求限制（次/分钟）" type="number" min="1" value={planForm.rate_limit_per_minute} onChange={(e) => setPlanForm((prev) => ({ ...prev, rate_limit_per_minute: Number(e.target.value) || 30 }))} /><div className="flex min-h-8 items-center"><Switch size="sm" label="启用请求限制" checked={planForm.rate_limit_enabled} onCheckedChange={(checked) => setPlanForm((prev) => ({ ...prev, rate_limit_enabled: checked }))} /></div></div>
             <div className="border-t border-kumo-line pt-4">
               <div className="mb-3 grid items-end gap-3 sm:grid-cols-[14rem_1fr]">
@@ -2481,9 +2480,9 @@ function SubscriptionPage() {
               </div>
             </div>}
             {!editingInternalNodeId && <Select size="sm" label="节点协议" value={internalNodeForm.protocol} onValueChange={(value) => setInternalNodeForm((prev) => ({ ...prev, protocol: String(value) }))} items={[{ value: 'vless-reality', label: 'VLESS REALITY' }, { value: 'hysteria2', label: 'Hysteria2' }]} />}
-            <Input size="sm" label={editingInternalNodeId ? '节点名称' : selectedInternalHosts.size > 1 ? '节点名称前缀（可选）' : '节点名称（可选）'} placeholder="留空则自动添加国家图标并按实例名称生成" value={internalNodeForm.name} onChange={(event) => setInternalNodeForm((prev) => ({ ...prev, name: event.target.value }))} />
-            {!editingInternalNodeId && internalNodeForm.protocol === 'vless-reality' && <Input size="sm" label="REALITY 握手站点（可选）" placeholder="默认 www.cloudflare.com" value={internalNodeForm.server_name} onChange={(event) => setInternalNodeForm((prev) => ({ ...prev, server_name: event.target.value }))} />}
-            {!editingInternalNodeId && internalNodeForm.protocol === 'hysteria2' && <div className="flex min-h-8 items-center rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 text-xs text-kumo-subtle">TLS 证书、私钥、SNI 和端口将自动生成并配置。</div>}
+            <Input size="sm" label={editingInternalNodeId ? '节点名称' : selectedInternalHosts.size > 1 ? '节点名称前缀（可选）' : '节点名称（可选）'} placeholder="留空按实例名生成" value={internalNodeForm.name} onChange={(event) => setInternalNodeForm((prev) => ({ ...prev, name: event.target.value }))} />
+            {!editingInternalNodeId && internalNodeForm.protocol === 'vless-reality' && <Input size="sm" label="REALITY 握手站点" placeholder="默认 www.cloudflare.com" value={internalNodeForm.server_name} onChange={(event) => setInternalNodeForm((prev) => ({ ...prev, server_name: event.target.value }))} />}
+            {!editingInternalNodeId && internalNodeForm.protocol === 'hysteria2' && <div className="flex min-h-8 items-center rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 text-xs text-kumo-subtle">TLS 信息自动生成。</div>}
             {!editingInternalNodeId && <Select size="sm" label="接入方式" value={internalNodeForm.access_mode || 'direct'} onValueChange={(value) => setInternalNodeForm((prev) => ({ ...prev, access_mode: String(value) }))} items={[{ value: 'direct', label: '直连节点' }, { value: 'cloudflare_tunnel', label: 'Cloudflare Tunnel（VLESS WS）' }]} />}
             {internalNodeForm.access_mode === 'cloudflare_tunnel' && <Select size="sm" label="优选地址" value={internalNodeForm.preferred_address_id || ''} onValueChange={(value) => setInternalNodeForm((prev) => ({ ...prev, preferred_address_id: String(value) }))} items={[{ value: '', label: '继承默认地址' }, ...preferredAddresses.map((item) => ({ value: item.id, label: `${item.name} · ${item.address}` }))]} />}
             <div className="flex min-h-8 items-center rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 py-2"><Switch size="sm" label="稳定节点" controlFirst={false} checked={!!internalNodeForm.stable} onCheckedChange={(checked) => setInternalNodeForm((prev) => ({ ...prev, stable: checked }))} /></div>
@@ -2653,8 +2652,8 @@ function SubscriptionPage() {
             <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-3 scrollbar-thin sm:px-5 sm:py-4">
               <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(18rem,0.65fr)]">
                 <div className="min-w-0 space-y-3">
-                  <Input size="sm" label="原始订阅 URL" placeholder="https://example.com/sub.yaml" value={importSourceURL} onChange={(e) => setImportSourceURL(e.target.value)} />
-                  <CodeEditor className="h-[18rem] min-w-0" label="节点链接 / YAML / Base64 内容" language="yaml" minHeight="18rem" placeholder="可粘贴 vmess/vless/trojan/ss/hysteria2 链接、Base64 订阅内容，或 Clash/Mihomo YAML 的 proxies 内容。" value={importText} onChange={setImportText} />
+                  <Input size="sm" label="订阅 URL" placeholder="https://example.com/sub.yaml" value={importSourceURL} onChange={(e) => setImportSourceURL(e.target.value)} />
+                  <CodeEditor className="h-[18rem] min-w-0" label="节点链接 / YAML / Base64 内容" language="yaml" minHeight="18rem" placeholder="可粘贴节点链接、Base64 订阅，或 Clash/Mihomo YAML 的 proxies。" value={importText} onChange={setImportText} />
                 </div>
                 <LayerCard className="flex h-[18rem] min-h-0 min-w-0 flex-col overflow-hidden border border-kumo-line bg-kumo-elevated p-0 shadow-none lg:mt-[3.5rem]">
                   <LayerCard.Secondary className="flex min-h-11 items-center justify-between gap-3 border-b border-kumo-line bg-kumo-recessed/20 px-4 py-2.5">

@@ -350,7 +350,7 @@ function CronEditor({ form, setForm, preview, previewError }) {
       <div className="flex items-center justify-between gap-3 rounded-md border border-kumo-line p-3">
         <div>
           <div className="text-sm font-medium text-kumo-strong">可视化 Cron 编辑器</div>
-          <div className="text-xs text-kumo-subtle">简易周期会自动生成表达式，高级模式可手写。</div>
+          <div className="text-xs text-kumo-subtle">简易周期自动生成表达式。</div>
         </div>
         <Switch
           checked={form.useCustom}
@@ -527,7 +527,6 @@ function SchedulerPage() {
 
   const authHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
-    'x-admin-password': localStorage.getItem('admin_password') || '',
   }), []);
 
   const loadAll = useCallback(async () => {
@@ -1071,14 +1070,14 @@ function SchedulerPage() {
         {activeTab === 'tasks' && (
           <SectionCard
             title="任务列表"
-            description="Shell、HTTP、内部接口或 Agent 任务都在这里统一调度。"
+            description="统一调度任务"
             icon={<Clock className="h-4 w-4 text-kumo-brand" />}
             bodyPadding="none"
           >
             {loading ? (
               <div className="p-4"><SkeletonLine className="h-28" /></div>
             ) : tasks.length === 0 ? (
-              <Empty size="sm" className="rounded-none border-0 bg-transparent" icon={<Clock className="h-8 w-8 text-kumo-inactive" />} title="暂无任务" description="创建 Shell、HTTP、内部接口或 Agent 任务后，可作为定时任务或工作流节点运行。" contents={<Button size="sm" variant="primary" onClick={openCreateTask}><Plus className="h-3.5 w-3.5" />新建任务</Button>} />
+              <Empty size="sm" className="rounded-none border-0 bg-transparent" icon={<Clock className="h-8 w-8 text-kumo-inactive" />} title="暂无任务" description="创建后可作为定时任务或工作流节点。" contents={<Button size="sm" variant="primary" onClick={openCreateTask}><Plus className="h-3.5 w-3.5" />新建任务</Button>} />
             ) : (
               <div className="overflow-x-auto">
                 <Table layout="fixed" className="min-w-[1080px]">
@@ -1113,13 +1112,13 @@ function SchedulerPage() {
         {activeTab === 'workflows' && (
           <SectionCard
             title="工作流编排"
-            description="将多个任务连接成 DAG，并按成功、失败或完成条件自动执行。"
+            description="按 DAG 编排任务"
             icon={<GitBranch className="h-4 w-4 text-kumo-brand" />}
             bodyClassName={workflows.length === 0 ? '' : 'space-y-3'}
             bodyPadding={workflows.length === 0 ? 'none' : 'md'}
           >
             {workflows.length === 0 ? (
-              <Empty size="sm" className="rounded-none border-0 bg-transparent" icon={<GitBranch className="h-8 w-8 text-kumo-inactive" />} title="暂无工作流" description="将多个任务连接成 DAG，按成功、失败或完成条件自动编排。" contents={<Button size="sm" variant="primary" onClick={openCreateWorkflow}><Plus className="h-3.5 w-3.5" />新建工作流</Button>} />
+              <Empty size="sm" className="rounded-none border-0 bg-transparent" icon={<GitBranch className="h-8 w-8 text-kumo-inactive" />} title="暂无工作流" description="创建后可按 DAG 编排任务。" contents={<Button size="sm" variant="primary" onClick={openCreateWorkflow}><Plus className="h-3.5 w-3.5" />新建工作流</Button>} />
             ) : (
               <div className="grid gap-3 lg:grid-cols-2">
                 {workflows.map((workflow) => (
@@ -1166,7 +1165,7 @@ function SchedulerPage() {
         {activeTab === 'runs' && (
           <SectionCard
             title="运行记录"
-            description="查看任务和工作流的状态、耗时与输出摘要。"
+            description="查看状态、耗时和输出摘要"
             icon={<Activity className="h-4 w-4 text-kumo-brand" />}
             actions={(
               <>
@@ -1177,7 +1176,7 @@ function SchedulerPage() {
             bodyPadding="none"
           >
             {runs.length === 0 ? (
-              <Empty size="sm" className="rounded-none border-0 bg-transparent" icon={<Activity className="h-8 w-8 text-kumo-inactive" />} title="暂无运行记录" description="手动运行任务或工作流后，会在这里看到状态、耗时和节点输出。" />
+              <Empty size="sm" className="rounded-none border-0 bg-transparent" icon={<Activity className="h-8 w-8 text-kumo-inactive" />} title="暂无运行记录" description="运行后显示结果" />
             ) : (
               <div className="overflow-x-auto">
                 <Table layout="fixed" className="min-w-[920px]">
@@ -1208,12 +1207,12 @@ function SchedulerPage() {
         {activeTab === 'nodes' && (
           <SectionCard
             title="执行节点"
-            description="本机与 Agent 节点的在线状态、并发和能力标签。"
+            description="查看节点状态与并发"
             icon={<Server className="h-4 w-4 text-kumo-brand" />}
             bodyPadding="none"
           >
             {nodes.length === 0 ? (
-              <Empty size="sm" className="rounded-none border-0 bg-transparent" icon={<Server className="h-8 w-8 text-kumo-inactive" />} title="暂无执行节点" description="本机会自动作为默认执行节点，Agent 连接后也会显示在这里。" />
+              <Empty size="sm" className="rounded-none border-0 bg-transparent" icon={<Server className="h-8 w-8 text-kumo-inactive" />} title="暂无执行节点" description="本机默认作为执行节点。" />
             ) : (
               <div className="overflow-x-auto">
                 <Table layout="fixed" className="w-full min-w-[760px]">

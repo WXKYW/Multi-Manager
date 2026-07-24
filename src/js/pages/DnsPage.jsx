@@ -474,7 +474,6 @@ function DnsPage() {
 
   const getAuthHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
-    'x-admin-password': localStorage.getItem('admin_password') || '',
   }), []);
 
   const cfApi = useCallback(async (path, options = {}) => {
@@ -1851,13 +1850,13 @@ function DnsPage() {
         {!selectedAccountId && !['accounts', 'templates'].includes(activeTab) ? (
           <SectionCard
             title="Cloudflare 账号"
-            description="添加 API 令牌后即可管理 DNS、Workers、Pages、R2 和 Tunnel。"
+            description="管理 DNS、Workers、Pages、R2、Tunnel"
             icon={<Cloud className="h-4 w-4 text-kumo-brand" />}
             bodyPadding="xl"
           >
             <div className="flex flex-col items-center gap-3 text-center text-sm text-kumo-subtle">
               <Cloud className="h-10 w-10 text-kumo-subtle" />
-              <div>尚未配置 Cloudflare 账号，请先在“账号”中添加 API 令牌。</div>
+              <div>尚未配置 Cloudflare 账号。</div>
               <Button size="sm" onClick={() => setActiveTab('accounts')}>
                 去添加账号
               </Button>
@@ -1895,7 +1894,7 @@ function DnsPage() {
                     </LayerCard>
                   ))
                 ) : zones.length === 0 ? (
-                  <LayerCard className="min-w-full p-8 text-center text-xs text-kumo-subtle">当前账号下没有域名。</LayerCard>
+                  <LayerCard className="min-w-full p-8 text-center text-xs text-kumo-subtle">暂无域名。</LayerCard>
                 ) : zones.map((zone) => (
                   <LayerCard
                     key={zone.id}
@@ -1942,7 +1941,7 @@ function DnsPage() {
                     ) : zones.length === 0 ? (
                       <Table.Row>
                         <Table.Cell colSpan={5} className="py-10 text-center text-kumo-subtle">
-                          当前账号下没有域名。
+                          暂无域名。
                         </Table.Cell>
                       </Table.Row>
                     ) : zones.map((zone) => (
@@ -2201,7 +2200,7 @@ function DnsPage() {
                         </LayerCard>
                       ))
                     ) : records.length === 0 ? (
-                      <LayerCard className="p-8 text-center text-xs text-kumo-subtle">当前域名没有匹配的 DNS 记录。</LayerCard>
+                      <LayerCard className="p-8 text-center text-xs text-kumo-subtle">暂无匹配记录。</LayerCard>
                     ) : records.map((record) => (
                       <LayerCard
                         key={record.id}
@@ -2266,7 +2265,7 @@ function DnsPage() {
                         ) : records.length === 0 ? (
                           <Table.Row>
                             <Table.Cell colSpan={8} className="py-10 text-center text-kumo-subtle">
-                              当前域名没有匹配的 DNS 记录。
+                              暂无匹配记录。
                             </Table.Cell>
                           </Table.Row>
                         ) : records.map((record) => (
@@ -2638,7 +2637,7 @@ function DnsPage() {
                             {loading.r2Objects ? (
                               Array.from({ length: 7 }).map((_, index) => <Table.Row key={index}><Table.Cell colSpan={5}><SkeletonLine className="h-4 w-full" /></Table.Cell></Table.Row>)
                             ) : r2Rows.length === 0 ? (
-                              <Table.Row><Table.Cell colSpan={5} className="py-12 text-center text-kumo-subtle">当前目录为空。可以上传文件或新建文件夹。</Table.Cell></Table.Row>
+                              <Table.Row><Table.Cell colSpan={5} className="py-12 text-center text-kumo-subtle">当前目录为空。</Table.Cell></Table.Row>
                             ) : filteredR2Rows.length === 0 ? (
                               <Table.Row><Table.Cell colSpan={5} className="py-12 text-center text-kumo-subtle">没有匹配的对象。</Table.Cell></Table.Row>
                             ) : filteredR2Rows.map((row) => (
@@ -2835,7 +2834,7 @@ function DnsPage() {
                   </Table.Header>
                   <Table.Body>
                     {accounts.length === 0 ? (
-                      <Table.Row><Table.Cell colSpan={6} className="py-10 text-center text-kumo-subtle">尚未配置 Cloudflare 账号。</Table.Cell></Table.Row>
+                      <Table.Row><Table.Cell colSpan={6} className="py-10 text-center text-kumo-subtle">暂无 Cloudflare 账号。</Table.Cell></Table.Row>
                     ) : accounts.map((account) => (
                       <Table.Row
                         key={account.id}
@@ -2891,14 +2890,14 @@ function DnsPage() {
                 <Input size="sm" label="邮箱" type="email" value={accountForm.email} onChange={(event) => setAccountForm((prev) => ({ ...prev, email: event.target.value }))} placeholder="name@example.com" />
               </div>
               <Input size="sm"
-                label="Cloudflare Account ID"
+                label="Account ID"
                 value={accountForm.cfAccountId}
                 onChange={(event) => setAccountForm((prev) => ({ ...prev, cfAccountId: event.target.value }))}
-                placeholder="请输入 Cloudflare Account ID"
+                placeholder="输入 Cloudflare Account ID"
                 className="font-mono"
               />
               <Input size="sm"
-                label="API Token / 账户 API Token / 旧版全局 API 密钥"
+                label="API Token / 全局 API Key"
                 type="text"
                 name="cf_credential_value"
                 value={accountForm.apiToken}
@@ -2932,7 +2931,7 @@ function DnsPage() {
               <Input size="sm" label="域名" value={zoneForm.name} onChange={(event) => setZoneForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="example.com" />
               <div className="flex items-center justify-between rounded-md border border-kumo-line p-3">
                 <div>
-                  <div className="text-sm font-medium text-kumo-strong">自动扫描现有 DNS 记录</div>
+                  <div className="text-sm font-medium text-kumo-strong">扫描现有 DNS 记录</div>
                   <div className="text-xs text-kumo-subtle">对应 Cloudflare jump_start 参数。</div>
                 </div>
                 <Switch checked={zoneForm.jumpStart} onCheckedChange={(checked) => setZoneForm((prev) => ({ ...prev, jumpStart: Boolean(checked) }))} />

@@ -8,10 +8,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/iwvw/api-monitor/backend-go/internal/apikeys"
 	"github.com/iwvw/api-monitor/backend-go/internal/manifest"
 )
 
@@ -226,7 +228,7 @@ func (s *Service) rotateAIAgentKey(r *http.Request) (map[string]interface{}, err
 		('ai_agent_key_created_at', ?, 'AI access bearer key creation time', ?)`, key, now, now, now); err != nil {
 		return nil, err
 	}
-	_ = s.insertAIAudit(r.Context(), db, "admin", "rotate_key", "ai_agent_key", "success", 0, "AI 接入密钥已轮换", clientIP(r), r.UserAgent())
+	_ = s.insertAIAudit(r.Context(), db, "admin", "rotate_key", "ai_agent_key", "success", 0, "AI 接入密钥已轮换", s.clientIP(r), r.UserAgent())
 	return s.aiAccessOverview(r)
 }
 
@@ -249,6 +251,9 @@ func (s *Service) getOrCreateAIAgentKey(ctx context.Context, db *sql.DB) (string
 }
 
 func (s *Service) validateAIAgent(r *http.Request, db *sql.DB) bool {
+	if _, err := s.apiKeys.Authorize(r.Context(), r, apikeys.ScopeAIMCP); err == nil {
+		return true
+	}
 	authHeader := r.Header.Get("Authorization")
 	if !strings.HasPrefix(authHeader, "Bearer ") {
 		return false
@@ -271,10 +276,10 @@ func (s *Service) aiManifest(r *http.Request) (map[string]interface{}, error) {
 	}
 	start := time.Now()
 	if !s.validateAIAgent(r, db) {
-		_ = s.insertAIAudit(r.Context(), db, "external", "manifest", "/api/ai/manifest", "denied", time.Since(start).Milliseconds(), "invalid key", clientIP(r), r.UserAgent())
+		_ = s.insertAIAudit(r.Context(), db, "external", "manifest", "/api/ai/manifest", "denied", time.Since(start).Milliseconds(), "invalid key", s.clientIP(r), r.UserAgent())
 		return nil, errUnauthorizedAI
 	}
-	_ = s.insertAIAudit(r.Context(), db, "external", "manifest", "/api/ai/manifest", "success", time.Since(start).Milliseconds(), "manifest read", clientIP(r), r.UserAgent())
+	_ = s.insertAIAudit(r.Context(), db, "external", "manifest", "/api/ai/manifest", "success", time.Since(start).Milliseconds(), "manifest read", s.clientIP(r), r.UserAgent())
 	return s.aiManifestPayload(r), nil
 }
 
@@ -305,11 +310,11 @@ func (s *Service) handleMCP(r *http.Request) (interface{}, int, error) {
 	}
 	start := time.Now()
 	if !s.validateAIAgent(r, db) {
-		_ = s.insertAIAudit(r.Context(), db, "external", "mcp", "/api/ai/mcp", "denied", time.Since(start).Milliseconds(), "invalid key", clientIP(r), r.UserAgent())
+		_ = s.insertAIAudit(r.Context(), db, "external", "mcp", "/api/ai/mcp", "denied", time.Since(start).Milliseconds(), "invalid key", s.clientIP(r), r.UserAgent())
 		return nil, http.StatusUnauthorized, errUnauthorizedAI
 	}
 	if r.Method == http.MethodGet {
-		_ = s.insertAIAudit(r.Context(), db, "external", "mcp.describe", "/api/ai/mcp", "success", time.Since(start).Milliseconds(), "mcp metadata read", clientIP(r), r.UserAgent())
+		_ = s.insertAIAudit(r.Context(), db, "external", "mcp.describe", "/api/ai/mcp", "success", time.Since(start).Milliseconds(), "mcp metadata read", s.clientIP(r), r.UserAgent())
 		return map[string]interface{}{
 			"server":    "api-monitor",
 			"protocol":  "mcp-json-rpc",
@@ -326,7 +331,7 @@ func (s *Service) handleMCP(r *http.Request) (interface{}, int, error) {
 	if callErr != nil {
 		status = "error"
 	}
-	_ = s.insertAIAudit(r.Context(), db, "external", req.Method, "/api/ai/mcp", status, time.Since(start).Milliseconds(), truncate(fmt.Sprint(req.Params), 500), clientIP(r), r.UserAgent())
+	_ = s.insertAIAudit(r.Context(), db, "external", req.Method, "/api/ai/mcp", status, time.Since(start).Milliseconds(), truncate(fmt.Sprint(req.Params), 500), s.clientIP(r), r.UserAgent())
 	if callErr != nil {
 		return mcpError(req.ID, -32000, callErr.Error()), http.StatusOK, nil
 	}
@@ -498,7 +503,7 @@ func (s *Service) saveMCPServer(r *http.Request, id string) (map[string]interfac
 	if err != nil {
 		return nil, err
 	}
-	_ = s.insertAIAudit(r.Context(), db, "admin", "save_mcp_server", id, "success", 0, req.Name, clientIP(r), r.UserAgent())
+	_ = s.insertAIAudit(r.Context(), db, "admin", "save_mcp_server", id, "success", 0, req.Name, s.clientIP(r), r.UserAgent())
 	return s.aiAccessOverview(r)
 }
 
@@ -515,7 +520,7 @@ func (s *Service) deleteMCPServer(r *http.Request, id string) (map[string]interf
 	if err != nil {
 		return nil, err
 	}
-	_ = s.insertAIAudit(r.Context(), db, "admin", "delete_mcp_server", id, "success", 0, id, clientIP(r), r.UserAgent())
+	_ = s.insertAIAudit(r.Context(), db, "admin", "delete_mcp_server", id, "success", 0, id, s.clientIP(r), r.UserAgent())
 	return s.aiAccessOverview(r)
 }
 
@@ -575,7 +580,7 @@ func (s *Service) saveSkill(r *http.Request, id string) (map[string]interface{},
 	if err != nil {
 		return nil, err
 	}
-	_ = s.insertAIAudit(r.Context(), db, "admin", "save_skill", id, "success", 0, req.Name, clientIP(r), r.UserAgent())
+	_ = s.insertAIAudit(r.Context(), db, "admin", "save_skill", id, "success", 0, req.Name, s.clientIP(r), r.UserAgent())
 	return s.aiAccessOverview(r)
 }
 
@@ -592,7 +597,7 @@ func (s *Service) deleteSkill(r *http.Request, id string) (map[string]interface{
 	if err != nil {
 		return nil, err
 	}
-	_ = s.insertAIAudit(r.Context(), db, "admin", "delete_skill", id, "success", 0, id, clientIP(r), r.UserAgent())
+	_ = s.insertAIAudit(r.Context(), db, "admin", "delete_skill", id, "success", 0, id, s.clientIP(r), r.UserAgent())
 	return s.aiAccessOverview(r)
 }
 
@@ -676,15 +681,35 @@ func boolInt(value bool) int {
 	return 0
 }
 
-func clientIP(r *http.Request) string {
-	if value := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); value != "" {
-		return strings.TrimSpace(strings.Split(value, ",")[0])
+func (s *Service) clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err != nil {
+		host = strings.Trim(strings.TrimSpace(r.RemoteAddr), "[]")
 	}
-	host := r.RemoteAddr
-	if idx := strings.LastIndex(host, ":"); idx > -1 {
-		return host[:idx]
+	if isTrustedProxy(net.ParseIP(host), s.cfg.TrustedProxyCIDRs) {
+		if value := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); value != "" {
+			candidate := strings.TrimSpace(strings.Split(value, ",")[0])
+			if ip := net.ParseIP(candidate); ip != nil {
+				return ip.String()
+			}
+		}
 	}
 	return host
+}
+
+func isTrustedProxy(ip net.IP, entries []string) bool {
+	if ip == nil {
+		return false
+	}
+	for _, entry := range entries {
+		if _, network, err := net.ParseCIDR(entry); err == nil && network.Contains(ip) {
+			return true
+		}
+		if candidate := net.ParseIP(entry); candidate != nil && candidate.Equal(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 func truncate(value string, limit int) string {

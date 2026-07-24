@@ -52,6 +52,7 @@ export default function CodeEditor({
   showLanguage = true,
   showHeader = true,
   lineWrapping = false,
+  variant = 'default',
 }) {
   const description = useMemo(() => findCodeLanguage({ fileName, language }), [fileName, language]);
   const [languageSupport, setLanguageSupport] = useState(description?.support || null);
@@ -91,9 +92,10 @@ export default function CodeEditor({
     [label, languageSupport, lineWrapping, readOnly]
   );
   const languageName = getCodeLanguageName({ fileName, language });
+  const isEmbedded = variant === 'embedded';
 
   return (
-    <div className={`app-code-editor ${className}`.trim()} style={{ minHeight }}>
+    <div className={`app-code-editor ${isEmbedded ? 'app-code-editor--embedded' : ''} ${className}`.trim()} style={{ minHeight }}>
       {showHeader ? (
         <div className="app-code-editor-header">
           <span className="truncate font-semibold">{label}</span>

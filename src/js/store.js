@@ -14,50 +14,50 @@ export const MODULE_CONFIG = {
     name: '仪表盘',
     shortName: '总览',
     icon: 'fa-tachometer-alt',
-    description: '系统状态与数据概览',
+    description: '系统概览',
   },
   settings: {
     name: '系统设置',
     shortName: '设置',
     icon: 'fa-cog',
-    description: '全局配置、安全认证与外观主题',
+    description: '全局配置',
   },
   openai: {
     name: '模型网关',
     shortName: '模型',
     icon: 'fa-robot',
-    description: '模型网关与 OpenAI 兼容 API 管理',
+    description: 'OpenAI 网关',
   },
   subscription: {
     name: '订阅分发',
     shortName: '订阅',
     icon: 'fa-link',
-    description: 'Clash / v2ray 订阅链接、节点、模板与流量分发',
+    description: '订阅与节点',
   },
 
   paas: {
     name: 'PaaS',
     shortName: 'PaaS',
     icon: 'fa-cloud',
-    description: 'Koyeb / Fly.io 平台监控',
+    description: 'Koyeb / Fly.io',
   },
   dns: {
     name: 'Cloudflare',
     shortName: 'CF',
     icon: 'fa-globe',
-    description: 'Cloudflare DNS / Workers / Pages 管理',
+    description: 'DNS / Workers / Pages',
   },
   aliyun: {
     name: '阿里云',
     shortName: '阿里',
     icon: 'fa-cloud',
-    description: '阿里云 DNS / ECS 管理',
+    description: 'DNS / ECS',
   },
   m365: {
     name: 'Microsoft 365',
     shortName: 'M365',
     icon: 'fa-cloud',
-    description: 'Microsoft 365 租户、用户、许可证与使用情况管理',
+    description: '租户与许可证',
   },
   scheduler: {
     name: '定时任务',
@@ -69,25 +69,25 @@ export const MODULE_CONFIG = {
     name: 'GitHub',
     shortName: 'GitHub',
     icon: 'fa-github',
-    description: '仓库观察、Actions 活动、趋势和 DevOps 通知',
+    description: '仓库与 Actions',
   },
   tencent: {
     name: '腾讯云',
     shortName: '腾讯',
     icon: 'fa-hdd',
-    description: '腾讯云 DNS / CVM 管理',
+    description: 'DNS / CVM',
   },
   oracle: {
     name: '甲骨文云',
     shortName: 'Oracle',
     icon: 'fa-cloud',
-    description: 'Oracle Cloud Infrastructure 实例管理',
+    description: 'OCI 实例',
   },
   server: {
     name: '主机实例',
     shortName: '主机',
     icon: 'fa-server',
-    description: '主机管理与终端监控',
+    description: '主机与终端',
   },
   totp: {
     name: '双因子认证',
@@ -99,25 +99,25 @@ export const MODULE_CONFIG = {
     name: '可用性监测',
     shortName: '监控',
     icon: 'fa-heartbeat',
-    description: '站点与服务可用性监测',
+    description: '站点监测',
   },
   filebox: {
     name: '文件柜',
     shortName: '文件',
     icon: 'fa-box-open',
-    description: '文件分享与暂存',
+    description: '文件分享',
   },
   notification: {
     name: '通知',
     shortName: '通知',
     icon: 'fa-bell',
-    description: '通知渠道与告警规则管理',
+    description: '通知渠道',
   },
   apidocs: {
-    name: 'API 文档',
-    shortName: '文档',
+    name: 'API 接口',
+    shortName: '接口',
     icon: 'fa-file-code',
-    description: '系统接口索引与 AI 接入蓝图',
+    description: '接口与密钥',
   },
   systemlogs: {
     name: '系统日志',
@@ -194,6 +194,60 @@ const SIDEBAR_COLLAPSED_STORAGE_KEY = 'app_sidebar_collapsed';
 const DASHBOARD_FOOTER_VISIBLE_STORAGE_KEY = 'app_dashboard_footer_visible';
 const DASHBOARD_FOOTER_RECORD_NUMBER_STORAGE_KEY = 'app_dashboard_footer_record_number';
 const AUTH_LOGGED_OUT_STORAGE_KEY = 'auth_explicitly_logged_out';
+const AUTH_PENDING_PROVIDER_STORAGE_KEY = 'auth_pending_provider';
+
+export function hasExplicitLogoutMarker() {
+  try {
+    return !!localStorage.getItem(AUTH_LOGGED_OUT_STORAGE_KEY);
+  } catch {
+    return false;
+  }
+}
+
+export function clearExplicitLogoutMarker() {
+  try {
+    localStorage.removeItem(AUTH_LOGGED_OUT_STORAGE_KEY);
+  } catch (error) {
+    console.error('Failed to clear explicit logout marker:', error);
+  }
+}
+
+export function markExplicitLogout() {
+  try {
+    localStorage.setItem(AUTH_LOGGED_OUT_STORAGE_KEY, Date.now().toString());
+  } catch (error) {
+    console.error('Failed to persist explicit logout marker:', error);
+  }
+}
+
+export function getPendingAuthProvider() {
+  try {
+    return String(sessionStorage.getItem(AUTH_PENDING_PROVIDER_STORAGE_KEY) || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+export function setPendingAuthProvider(provider) {
+  try {
+    const value = String(provider || '').trim();
+    if (!value) {
+      sessionStorage.removeItem(AUTH_PENDING_PROVIDER_STORAGE_KEY);
+      return;
+    }
+    sessionStorage.setItem(AUTH_PENDING_PROVIDER_STORAGE_KEY, value);
+  } catch (error) {
+    console.error('Failed to persist pending auth provider:', error);
+  }
+}
+
+export function clearPendingAuthProvider() {
+  try {
+    sessionStorage.removeItem(AUTH_PENDING_PROVIDER_STORAGE_KEY);
+  } catch (error) {
+    console.error('Failed to clear pending auth provider:', error);
+  }
+}
 
 export const THEME_MODE_OPTIONS = ['auto', 'light', 'dark'];
 export const PAGE_WIDTH_OPTIONS = ['standard', 'wide', 'full'];
@@ -255,8 +309,12 @@ const normalizeModuleId = (moduleId) => LEGACY_MODULE_ALIASES[moduleId] || modul
 
 const getAuthHeaders = () => ({
   'Content-Type': 'application/json',
-  'x-admin-password': localStorage.getItem('admin_password') || useStore.getState().loginPassword || '',
 });
+
+// Older releases persisted the administrator password in localStorage. Remove
+// those legacy values immediately; authentication now uses the HttpOnly session cookie.
+localStorage.removeItem('admin_password');
+localStorage.removeItem('password_time');
 
 let appearanceSettingsSaveTimer = null;
 let pendingAppearanceSettingsPatch = {};
@@ -722,13 +780,14 @@ const useStore = create((set, get) => ({
   checkAuth: async () => {
     set({ isCheckingAuth: true });
     try {
-      const explicitlyLoggedOut = !!localStorage.getItem(AUTH_LOGGED_OUT_STORAGE_KEY);
+      const explicitlyLoggedOut = hasExplicitLogoutMarker();
 
       // 1. 优先检查当前 Session 是否已认证；显式退出后不再信任残留 Cookie。
       if (!explicitlyLoggedOut) {
         const sessionRes = await fetch('/api/auth/session');
         const { authenticated } = await sessionRes.json();
         if (authenticated) {
+          clearPendingAuthProvider();
           set({ isAuthenticated: true, showLoginModal: false, isCheckingAuth: false });
           return true;
         }
@@ -745,37 +804,13 @@ const useStore = create((set, get) => ({
           return false;
         }
 
-        const savedTime = localStorage.getItem('password_time');
-        const now = Date.now();
-        const isValidSession = savedTime && now - parseInt(savedTime) < 4 * 24 * 60 * 60 * 1000;
-
-        if (!isValidSession) {
-          set({ loginPassword: '' });
-          return await get().verifyPassword();
-        } else {
-          set({ isAuthenticated: true, showLoginModal: false });
-          return true;
-        }
+        set({ loginPassword: '' });
+        return await get().verifyPassword();
       }
 
       if (!hasPassword) {
         set({ showSetPasswordModal: true, isAuthenticated: false });
         return false;
-      }
-
-      const savedPassword = localStorage.getItem('admin_password');
-      const savedTime = localStorage.getItem('password_time');
-
-      if (!explicitlyLoggedOut && savedPassword && savedTime) {
-        const now = Date.now();
-        if (now - parseInt(savedTime) < 4 * 24 * 60 * 60 * 1000) {
-          set({ loginPassword: savedPassword });
-          await get().verifyPassword(true); // 静默验证
-          if (!get().isAuthenticated) {
-            set({ showLoginModal: true });
-          }
-          return get().isAuthenticated;
-        }
       }
 
       set({ showLoginModal: true });
@@ -827,16 +862,16 @@ const useStore = create((set, get) => ({
         set({
           isAuthenticated: true,
           showLoginModal: false,
+          loginPassword: '',
           loginRequire2FA: false,
           loginTotpToken: '',
         });
 
-        localStorage.setItem('admin_password', loginPassword);
-        localStorage.setItem('password_time', Date.now().toString());
-        localStorage.removeItem(AUTH_LOGGED_OUT_STORAGE_KEY);
+        clearExplicitLogoutMarker();
+        clearPendingAuthProvider();
 
         if (!silent) {
-          toastManager.success('登录成功，欢迎回来！');
+          toastManager.success('登录成功');
         }
         return true;
       } else {
@@ -870,7 +905,8 @@ const useStore = create((set, get) => ({
   // 登出
   logout: async () => {
     try {
-      localStorage.setItem(AUTH_LOGGED_OUT_STORAGE_KEY, Date.now().toString());
+      markExplicitLogout();
+      clearPendingAuthProvider();
       localStorage.removeItem('admin_password');
       localStorage.removeItem('password_time');
     } catch (error) {
@@ -899,7 +935,7 @@ const useStore = create((set, get) => ({
       toastManager.success('已安全登出');
     } catch (error) {
       console.error('Logout request failed:', error);
-      toastManager.warning('已清除本地登录状态，但后端会话注销失败，请重试或重启服务后确认');
+      toastManager.warning('本地已登出，后端会话注销失败');
     }
   },
 }));

@@ -1,92 +1,258 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Banner } from '@cloudflare/kumo/components/banner';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Input } from '@cloudflare/kumo/components/input';
 import useStore from '../store.js';
-import { SectionCard } from '../components/ui/AppPrimitives.jsx';
+import {
+  clearExplicitLogoutMarker,
+  clearPendingAuthProvider,
+  setPendingAuthProvider,
+} from '../store.js';
+import { cx } from '../components/ui/AppPrimitives.jsx';
 import { useCloudflareSpotlight } from '../hooks/useCloudflareSpotlight.js';
+import { browserSupportsWebAuthn, getPasskeyAssertion } from '../modules/webauthn.js';
 import {
   AlertTriangle,
   ArrowRight,
   ChevronLeft,
+  GitHubBrand,
+  RefreshCw,
   Key,
   LogIn,
-  Rocket,
   Shield,
 } from '../components/Icons.jsx';
 
-const AUTH_FEATURES = [
-  '统一管理入口',
-  '自动校验',
-  '多目标支持',
-];
+const AUTH_WAVE_SAMPLE_RATE = 30;
+const AUTH_WAVE_TRAVEL_SECONDS = 15;
+const AUTH_WAVE_SAMPLES = AUTH_WAVE_SAMPLE_RATE * AUTH_WAVE_TRAVEL_SECONDS + 3;
+const AUTH_WAVE_SAMPLE_INTERVAL = 1 / AUTH_WAVE_SAMPLE_RATE;
 
-function AuthShell({ mode, title, description, children }) {
-  const modeLabel = mode === 'setup' ? '初始化' : mode === '2fa' ? '二次验证' : '安全登录';
+function gaussianPulse(phase, center, width, amplitude) {
+  const distance = (phase - center) / width;
+  return amplitude * Math.exp(-0.5 * distance * distance);
+}
+
+function getMonitorVoltage(phase, profile) {
+  return (
+    gaussianPulse(phase, profile.pPosition, profile.pWidth, 0.13 * profile.pScale) -
+    gaussianPulse(
+      phase,
+      profile.qrsPosition - 0.035,
+      profile.qrsWidth * 0.82,
+      0.16 * profile.qrsScale
+    ) +
+    gaussianPulse(phase, profile.qrsPosition, profile.qrsWidth, profile.qrsScale) -
+    gaussianPulse(
+      phase,
+      profile.qrsPosition + 0.045,
+      profile.qrsWidth * 1.28,
+      0.28 * profile.qrsScale
+    ) +
+    gaussianPulse(phase, profile.tPosition, profile.tWidth, 0.3 * profile.tScale) +
+    (phase - 0.5) * profile.baselineSlope
+  );
+}
+
+function getPlethVoltage(phase, profile) {
+  const upstroke =
+    phase < profile.plethUpstroke
+      ? phase / profile.plethUpstroke
+      : Math.exp(-(phase - profile.plethUpstroke) * profile.plethDecay);
+  const dicroticNotch = gaussianPulse(
+    phase,
+    profile.plethNotchPosition,
+    profile.plethNotchWidth,
+    profile.plethNotchDepth
+  );
+  return upstroke - dicroticNotch;
+}
+
+function getSecondaryLeadVoltage(phase, profile) {
+  const qrsWidth = Math.max(profile.qrsWidth, 0.015);
+  return (
+    gaussianPulse(phase, profile.pPosition, profile.pWidth * 1.15, 0.055 * profile.pScale) +
+    gaussianPulse(phase, profile.qrsPosition - 0.018, qrsWidth * 0.72, 0.28 * profile.qrsScale) -
+    gaussianPulse(phase, profile.qrsPosition + 0.012, qrsWidth * 1.08, profile.secondaryLeadScale) +
+    gaussianPulse(phase, profile.qrsPosition + 0.05, qrsWidth * 1.35, 0.16 * profile.qrsScale) +
+    gaussianPulse(phase, profile.tPosition, profile.tWidth * 1.12, profile.secondaryTScale) +
+    (phase - 0.5) * profile.baselineSlope * 0.65
+  );
+}
+
+function createBeatProfile() {
+  return {
+    rateOffset: (Math.random() - 0.5) * 9,
+    pPosition: 0.17 + (Math.random() - 0.5) * 0.025,
+    pWidth: 0.03 + Math.random() * 0.012,
+    pScale: 0.78 + Math.random() * 0.38,
+    qrsPosition: 0.395 + (Math.random() - 0.5) * 0.018,
+    qrsWidth: 0.011 + Math.random() * 0.006,
+    qrsScale: 0.82 + Math.random() * 0.34,
+    tPosition: 0.69 + (Math.random() - 0.5) * 0.045,
+    tWidth: 0.065 + Math.random() * 0.025,
+    tScale: 0.74 + Math.random() * 0.42,
+    baselineSlope: (Math.random() - 0.5) * 0.035,
+    secondaryLeadScale: 0.78 + Math.random() * 0.38,
+    secondaryTScale: -0.06 + Math.random() * 0.22,
+    plethScale: 0.8 + Math.random() * 0.36,
+    plethUpstroke: 0.095 + Math.random() * 0.045,
+    plethDecay: 3 + Math.random() * 0.9,
+    plethNotchPosition: 0.44 + Math.random() * 0.08,
+    plethNotchWidth: 0.028 + Math.random() * 0.018,
+    plethNotchDepth: 0.08 + Math.random() * 0.08,
+  };
+}
+
+function AuthMonitorWave() {
+  const ecgPathRef = useRef(null);
+  const secondaryLeadPathRef = useRef(null);
+  const plethPathRef = useRef(null);
+  const traceGroupRef = useRef(null);
+
+  useEffect(() => {
+    let phase = 0;
+    let elapsedSeconds = 0;
+    let smoothNoise = 0;
+    let beatProfile = createBeatProfile();
+    const nextSample = deltaSeconds => {
+      const heartRate = 62 + Math.sin(elapsedSeconds * 0.2) * 2 + beatProfile.rateOffset;
+      const nextPhase = phase + (heartRate / 60) * deltaSeconds;
+      if (nextPhase >= 1) beatProfile = createBeatProfile();
+      phase = nextPhase % 1;
+      elapsedSeconds += deltaSeconds;
+      smoothNoise = smoothNoise * 0.82 + (Math.random() - 0.5) * 0.035;
+      const fineNoise = (Math.random() - 0.5) * 0.009;
+      const baselineWander =
+        Math.sin(elapsedSeconds * 0.63) * 0.022 + Math.sin(elapsedSeconds * 0.17 + 1.8) * 0.012;
+      return {
+        ecg: getMonitorVoltage(phase, beatProfile) + baselineWander + smoothNoise * 0.3 + fineNoise,
+        secondaryLead:
+          getSecondaryLeadVoltage(phase, beatProfile) +
+          baselineWander * 0.7 +
+          smoothNoise * 0.36 +
+          fineNoise * 0.7,
+        pleth:
+          getPlethVoltage(phase, beatProfile) * beatProfile.plethScale +
+          baselineWander * 0.6 +
+          smoothNoise * 0.24,
+      };
+    };
+    const samples = Array.from({ length: AUTH_WAVE_SAMPLES }, () =>
+      nextSample(AUTH_WAVE_SAMPLE_INTERVAL)
+    );
+    let lastFrame = 0;
+    let frameId = 0;
+    let sampleAccumulator = 0;
+    const xStep = 720 / (AUTH_WAVE_SAMPLES - 3);
+
+    const draw = () => {
+      const traces = [
+        { ref: ecgPathRef, key: 'ecg', baseline: 45, amplitude: -34 },
+        { ref: plethPathRef, key: 'pleth', baseline: 125, amplitude: -31 },
+        { ref: secondaryLeadPathRef, key: 'secondaryLead', baseline: 190, amplitude: -28 },
+      ];
+
+      traces.forEach(trace => {
+        const path = trace.ref.current;
+        if (!path) return;
+        const points = samples.map((sample, index) => {
+          const x = (index - 1) * xStep;
+          const y = trace.baseline + sample[trace.key] * trace.amplitude;
+          return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`;
+        });
+        path.setAttribute('d', points.join(' '));
+      });
+    };
+
+    const tick = timestamp => {
+      const deltaSeconds = lastFrame ? Math.min((timestamp - lastFrame) / 1000, 0.05) : 1 / 60;
+      sampleAccumulator += deltaSeconds;
+      while (sampleAccumulator >= AUTH_WAVE_SAMPLE_INTERVAL) {
+        samples.shift();
+        samples.push(nextSample(AUTH_WAVE_SAMPLE_INTERVAL));
+        sampleAccumulator -= AUTH_WAVE_SAMPLE_INTERVAL;
+        draw();
+      }
+      const progress = sampleAccumulator / AUTH_WAVE_SAMPLE_INTERVAL;
+      traceGroupRef.current?.setAttribute(
+        'transform',
+        `translate(${(-progress * xStep).toFixed(2)} 0)`
+      );
+      lastFrame = timestamp;
+      frameId = window.requestAnimationFrame(tick);
+    };
+
+    draw();
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      frameId = window.requestAnimationFrame(tick);
+    }
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, []);
+
+  return (
+    <svg className="auth-monitor-wave" viewBox="0 0 720 250" preserveAspectRatio="none">
+      <g ref={traceGroupRef}>
+        <path ref={ecgPathRef} className="auth-monitor-wave-line auth-monitor-wave-line--ecg" />
+        <path
+          ref={secondaryLeadPathRef}
+          className="auth-monitor-wave-line auth-monitor-wave-line--secondary"
+        />
+        <path ref={plethPathRef} className="auth-monitor-wave-line auth-monitor-wave-line--pleth" />
+      </g>
+    </svg>
+  );
+}
+
+function AuthBrandCanvas() {
+  return (
+    <div className="auth-brand-pane-inner">
+      <div className="auth-brand-lockup">
+        <div className="auth-brand-hero-mark">
+          <img src="/logo.svg" alt="" className="auth-brand-logo" />
+        </div>
+        <div className="auth-brand-copy">
+          <div className="auth-brand-title">
+            <span className="auth-brand-title-api">API</span>
+            <span className="auth-brand-title-monitor">Monitor</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="auth-monitor-visual" aria-hidden="true">
+        <AuthMonitorWave />
+      </div>
+    </div>
+  );
+}
+
+function AuthShell({ title, children }) {
   const surfaceRef = useCloudflareSpotlight();
 
   return (
-    <main className="relative flex min-h-dvh w-screen overflow-hidden bg-kumo-canvas text-kumo-default">
-      <section className="hidden w-[380px] shrink-0 flex-col justify-between border-r border-kumo-line bg-kumo-base px-8 py-7 lg:flex">
-        <div className="flex items-center gap-3">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-kumo-line bg-kumo-recessed">
-            <img src="/logo.svg" alt="" className="size-5 object-contain" />
-          </span>
-          <div className="min-w-0">
-            <div className="text-lg font-semibold text-kumo-strong">API Monitor</div>
-            {/* <div className="text-[11px] text-kumo-subtle">监控控制台</div> */}
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          {/* <div className="inline-flex h-6.5 items-center rounded-md border border-kumo-line bg-kumo-recessed px-2 text-xs font-medium text-kumo-subtle">
-            {modeLabel}
-          </div> */}
-          <div className="space-y-2">
-            <h1 className="text-2xl font-semibold leading-snug text-kumo-strong">请登录</h1>
-            <p className="max-w-[280px] text-sm leading-relaxed text-kumo-subtle">
-              管理主机、DNS、PaaS......
-            </p>
-          </div>
-        </div>
-
-        <div className="space-y-2 border-t border-kumo-line pt-4">
-          {AUTH_FEATURES.map((item) => (
-            <div key={item} className="flex items-center gap-2 text-xs text-kumo-subtle">
-              <span className="size-1.5 rounded-full bg-kumo-brand" />
-              <span>{item}</span>
-            </div>
-          ))}
-        </div>
+    <main
+      ref={surfaceRef}
+      className="auth-shell cf-ai-background-surface min-h-dvh w-full text-kumo-default"
+    >
+      <div className="auth-shell-spotlight cf-ai-background pointer-events-none absolute inset-0" />
+      <section className="auth-brand-pane">
+        <AuthBrandCanvas />
       </section>
 
-      <section
-        ref={surfaceRef}
-        className="cf-ai-background-surface relative isolate flex min-w-0 flex-1 items-center justify-center overflow-hidden bg-kumo-recessed/30 px-4 py-8 sm:px-6"
-      >
-        <div aria-hidden="true" className="cf-ai-background pointer-events-none absolute inset-0" />
+      <section className="auth-auth-pane">
+        <div className="auth-mobile-brand" aria-hidden="true">
+          <img src="/logo.svg" alt="" />
+          <span className="auth-brand-title">
+            <span className="auth-brand-title-api">API</span>
+            <span className="auth-brand-title-monitor">Monitor</span>
+          </span>
+        </div>
 
-        <div className="relative z-10 w-full max-w-[400px]">
-          <div className="mb-5 flex items-center justify-start gap-3 lg:hidden">
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-kumo-line bg-kumo-base">
-              <img src="/logo.svg" alt="" className="size-6 object-contain" />
-            </span>
-            <div className="min-w-0">
-              <div className="text-base font-semibold leading-tight text-kumo-strong">API Monitor</div>
-              <div className="text-xs leading-tight text-kumo-subtle">{modeLabel}</div>
-            </div>
+        <div className="auth-login-panel">
+          <div className="auth-login-head">
+            <h1>{title}</h1>
           </div>
-
-          <SectionCard
-            title={title}
-            description={description}
-            icon={mode === 'setup' ? <Rocket className="size-4 text-kumo-brand" /> : <Shield className="size-4 text-kumo-brand" />}
-            meta={<span className="text-[11px] font-medium text-kumo-subtle">{modeLabel}</span>}
-            className="w-full"
-            bodyPadding="lg"
-          >
-            {children}
-          </SectionCard>
+          {children}
         </div>
       </section>
     </main>
@@ -96,14 +262,65 @@ function AuthShell({ mode, title, description, children }) {
 function AuthErrorBanner({ message }) {
   if (!message) return null;
 
+  const normalized = String(message || '').trim();
+  const isWarning =
+    normalized.includes('还剩') ||
+    normalized.includes('尝试过多') ||
+    normalized.includes('稍后再试');
+  const title = normalized.includes('GitHub')
+    ? 'GitHub 登录失败'
+    : normalized.includes('通行密钥')
+      ? '通行密钥登录失败'
+      : normalized.includes('双因素') || normalized.includes('验证码')
+        ? '验证码错误'
+        : normalized.includes('密码')
+          ? '密码错误'
+          : isWarning
+            ? '请稍后再试'
+            : '登录失败';
+
   return (
-    <Banner
-      variant="error"
-      icon={<AlertTriangle className="size-4" />}
-      title="验证失败"
-      description={message}
-      className="rounded-md px-3 py-2 text-xs"
-    />
+    <div
+      className={`auth-feedback-banner ${isWarning ? 'auth-feedback-banner--warning' : 'auth-feedback-banner--danger'}`}
+    >
+      <div className="flex items-start gap-2.5">
+        <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-current/10">
+          <AlertTriangle className="size-3.5" />
+        </span>
+        <div className="min-w-0">
+          <div className="text-xs font-semibold leading-5">{title}</div>
+          <div className="text-xs leading-5 opacity-90">{normalized}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AuthStatusNotice({ statusKey, message }) {
+  const statusMap = {
+    setup: '正在初始化',
+    password: '正在验证',
+    github: '正在验证 GitHub',
+    passkey: '通行密钥验证中',
+    'github-2fa': '正在验证 GitHub',
+    'password-2fa': '正在验证',
+  };
+
+  const status = statusMap[statusKey];
+
+  return (
+    <div className="auth-status-slot" aria-live="polite">
+      {message ? (
+        <AuthErrorBanner message={message} />
+      ) : status ? (
+        <div className="auth-status-strip">
+          <RefreshCw className="size-3.5 shrink-0 animate-spin" />
+          <div className="min-w-0">
+            <div className="text-xs font-semibold leading-5 text-kumo-strong">{status}</div>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -126,16 +343,111 @@ function AuthPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [setupError, setSetupError] = useState('');
   const [setupLoading, setSetupLoading] = useState(false);
+  const [loginOptions, setLoginOptions] = useState({
+    githubEnabled: false,
+    webauthnEnabled: false,
+  });
+  const [activeAction, setActiveAction] = useState('');
+  const [githubFlowId, setGitHubFlowId] = useState('');
+  const [pendingButton, setPendingButton] = useState('');
+  const supportsPasskey = browserSupportsWebAuthn();
 
-  const handle2FAInput = (event) => {
-    const value = event.target.value.replace(/\D/g, '').slice(0, 6);
-    setLoginTotpToken(value);
-    if (value.length === 6) {
-      verifyPassword(true);
+  const beginButtonMotion = async (buttonId, delayMs = 0) => {
+    setPendingButton(buttonId);
+    if (delayMs > 0) {
+      await new Promise(resolve => window.setTimeout(resolve, delayMs));
     }
   };
 
-  const handleSetupPassword = async (event) => {
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    const authError = query.get('authError');
+    const flowId = query.get('githubFlow');
+    if (flowId) {
+      setGitHubFlowId(flowId);
+      clearPendingAuthProvider();
+    } else {
+      setGitHubFlowId('');
+    }
+    if (authError) {
+      clearPendingAuthProvider();
+      useStore.setState({ loginError: authError });
+      query.delete('authError');
+      const next = query.toString();
+      window.history.replaceState(
+        {},
+        document.title,
+        `${window.location.pathname}${next ? `?${next}` : ''}`
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/auth/login-options', { cache: 'no-store' })
+      .then(response => response.json())
+      .then(result => {
+        if (cancelled) return;
+        const payload = result.data || result;
+        setLoginOptions({
+          githubEnabled: !!payload.github?.enabled,
+          webauthnEnabled: !!payload.webauthn?.enabled,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLoginOptions({ githubEnabled: false, webauthnEnabled: false });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!loginLoading && !activeAction && !setupLoading) {
+      setPendingButton('');
+    }
+  }, [activeAction, loginLoading, setupLoading]);
+
+  const requiresSecondStep = useMemo(
+    () => loginRequire2FA || Boolean(githubFlowId),
+    [githubFlowId, loginRequire2FA]
+  );
+  const busyState = useMemo(() => {
+    if (setupLoading) return 'setup';
+    if (activeAction) return activeAction;
+    if (loginLoading)
+      return requiresSecondStep ? (githubFlowId ? 'github-2fa' : 'password-2fa') : 'password';
+    return '';
+  }, [activeAction, githubFlowId, loginLoading, requiresSecondStep, setupLoading]);
+  const buttonsLocked = loginLoading || Boolean(activeAction) || setupLoading;
+  const getButtonClassName = (buttonId, loading = false, className = '') =>
+    cx(
+      'auth-login-button',
+      (pendingButton === buttonId || loading) && 'auth-login-button--pending',
+      className
+    );
+  const clearLoginError = () => {
+    if (loginError) {
+      useStore.setState({ loginError: '' });
+    }
+  };
+
+  const handle2FAInput = event => {
+    const value = event.target.value.replace(/\D/g, '').slice(0, 6);
+    clearLoginError();
+    setLoginTotpToken(value);
+    if (value.length === 6) {
+      if (githubFlowId) {
+        void completeGitHub2FA(value, true);
+      } else {
+        verifyPassword(true);
+      }
+    }
+  };
+
+  const handleSetupPassword = async event => {
     event.preventDefault();
     setSetupError('');
 
@@ -172,34 +484,152 @@ function AuthPage() {
     }
   };
 
-  const handleLogin = (event) => {
+  const handleLogin = async event => {
     event.preventDefault();
+    if (buttonsLocked) return;
+    if (githubFlowId) {
+      await beginButtonMotion('2fa');
+      completeGitHub2FA();
+      return;
+    }
+    await beginButtonMotion(requiresSecondStep ? '2fa' : 'password');
     verifyPassword();
+  };
+
+  const handleGitHubLogin = async () => {
+    if (buttonsLocked) return;
+    setActiveAction('github');
+    useStore.setState({ loginError: '' });
+    clearExplicitLogoutMarker();
+    setPendingAuthProvider('github');
+    await beginButtonMotion('github', 120);
+    window.location.href = '/api/auth/github/start';
+  };
+
+  const handlePasskeyLogin = async () => {
+    if (buttonsLocked) return;
+    await beginButtonMotion('passkey', 90);
+    setActiveAction('passkey');
+    useStore.setState({ loginError: '' });
+    try {
+      const beginResponse = await fetch('/api/auth/webauthn/login/begin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const beginResult = await beginResponse.json();
+      if (!beginResponse.ok || beginResult.success === false) {
+        throw new Error(beginResult.error || '创建通行密钥登录挑战失败');
+      }
+      const credential = await getPasskeyAssertion(beginResult.options);
+      const finishResponse = await fetch('/api/auth/webauthn/login/finish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          flowId: beginResult.flowId,
+          credential,
+        }),
+      });
+      const finishResult = await finishResponse.json();
+      if (!finishResponse.ok || finishResult.success === false) {
+        throw new Error(finishResult.error || '通行密钥登录失败');
+      }
+      clearExplicitLogoutMarker();
+      clearPendingAuthProvider();
+      useStore.setState({
+        isAuthenticated: true,
+        showLoginModal: false,
+        loginPassword: '',
+        loginRequire2FA: false,
+        loginTotpToken: '',
+        loginError: '',
+      });
+    } catch (error) {
+      const message =
+        error?.name === 'NotAllowedError'
+          ? '通行密钥操作已取消或未通过系统验证'
+          : error.message || '通行密钥登录失败';
+      useStore.setState({ loginError: message });
+    } finally {
+      setActiveAction('');
+    }
+  };
+
+  const completeGitHub2FA = async (overrideToken, silent = false) => {
+    setActiveAction('github-2fa');
+    try {
+      const response = await fetch('/api/auth/github/2fa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          flowId: githubFlowId,
+          totpToken: overrideToken || loginTotpToken,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok || result.success === false) {
+        throw new Error(result.error || 'GitHub 登录二次验证失败');
+      }
+      clearExplicitLogoutMarker();
+      clearPendingAuthProvider();
+      const query = new URLSearchParams(window.location.search);
+      query.delete('githubFlow');
+      query.delete('provider');
+      window.history.replaceState(
+        {},
+        document.title,
+        `${window.location.pathname}${query.toString() ? `?${query.toString()}` : ''}`
+      );
+      setGitHubFlowId('');
+      useStore.setState({
+        isAuthenticated: true,
+        showLoginModal: false,
+        loginPassword: '',
+        loginRequire2FA: false,
+        loginTotpToken: '',
+        loginError: '',
+      });
+    } catch (error) {
+      if (!silent) {
+        useStore.setState({ loginError: error.message || 'GitHub 登录二次验证失败' });
+      }
+    } finally {
+      setActiveAction('');
+    }
+  };
+
+  const cancelGitHubFlow = () => {
+    clearPendingAuthProvider();
+    const query = new URLSearchParams(window.location.search);
+    query.delete('githubFlow');
+    query.delete('provider');
+    window.history.replaceState(
+      {},
+      document.title,
+      `${window.location.pathname}${query.toString() ? `?${query.toString()}` : ''}`
+    );
+    setGitHubFlowId('');
+    setLoginTotpToken('');
+    useStore.setState({ loginError: '' });
   };
 
   if (showSetPasswordModal) {
     return (
-      <AuthShell
-        mode="setup"
-        title="设置管理员密码"
-        description="首次使用前，请为控制台创建一个管理员密码。"
-      >
-        <form onSubmit={handleSetupPassword} className="space-y-4">
+      <AuthShell title="设置管理员密码">
+        <form onSubmit={handleSetupPassword} className="auth-login-form space-y-4">
           <Input
             size="base"
             type="password"
             label="新密码"
-            description="至少 6 位，建议使用更长的短语。"
             placeholder="设置管理员密码"
             value={newPassword}
-            onChange={(event) => setNewPassword(event.target.value)}
-            autoComplete="off"
-            data-1p-ignore
-            data-lpignore="true"
-            data-bwignore="true"
-            data-form-type="other"
+            onChange={event => {
+              setSetupError('');
+              setNewPassword(event.target.value);
+            }}
+            autoComplete="new-password"
             spellCheck={false}
-            className="w-full"
+            className="auth-login-input w-full"
             autoFocus
           />
 
@@ -209,17 +639,14 @@ function AuthPage() {
             label="确认密码"
             placeholder="再次输入密码"
             value={confirmPassword}
-            onChange={(event) => setConfirmPassword(event.target.value)}
-            autoComplete="off"
-            data-1p-ignore
-            data-lpignore="true"
-            data-bwignore="true"
-            data-form-type="other"
+            onChange={event => {
+              setSetupError('');
+              setConfirmPassword(event.target.value);
+            }}
+            autoComplete="new-password"
             spellCheck={false}
-            className="w-full"
+            className="auth-login-input w-full"
           />
-
-          <AuthErrorBanner message={setupError} />
 
           <Button
             type="submit"
@@ -227,97 +654,98 @@ function AuthPage() {
             size="base"
             loading={setupLoading}
             icon={!setupLoading ? <ArrowRight className="size-3.5" /> : undefined}
-            className="w-full justify-center"
+            className={getButtonClassName(
+              'setup',
+              setupLoading,
+              'auth-login-button--primary w-full justify-center'
+            )}
           >
-            开始使用
+            {setupLoading ? '处理中...' : '保存并进入'}
           </Button>
+          <AuthStatusNotice statusKey={busyState} message={setupError} />
         </form>
       </AuthShell>
     );
   }
 
-  const title = isDemoMode ? '演示模式' : loginRequire2FA ? '输入二次验证码' : '欢迎回来';
-  const description = isDemoMode
-    ? '当前环境无需密码，确认后可直接进入控制台。'
-    : loginRequire2FA
-      ? '请输入 Authenticator App 中显示的 6 位动态验证码。'
-      : '输入管理员密码以访问面板';
+  const title = isDemoMode ? '演示模式' : requiresSecondStep ? '双因素验证' : '登录';
 
   return (
-    <AuthShell
-      mode={loginRequire2FA ? '2fa' : 'login'}
-      title={title}
-      description={description}
-    >
-      <form onSubmit={handleLogin} className="space-y-4">
+    <AuthShell title={title}>
+      <form onSubmit={handleLogin} className="auth-login-form space-y-4">
         {isDemoMode && (
           <Banner
             variant="secondary"
             icon={<Shield className="size-4" />}
             title="演示环境"
-            description="不会保存真实凭据，适合快速预览功能。"
             className="rounded-md px-3 py-2 text-xs"
           />
         )}
 
-        {!isDemoMode && !loginRequire2FA && (
+        {!isDemoMode && !requiresSecondStep && (
           <Input
             size="base"
             type="password"
             aria-label="管理员密码"
             placeholder="请输入管理员密码"
             value={loginPassword}
-            onChange={(event) => setLoginPassword(event.target.value)}
-            autoComplete="off"
-            data-1p-ignore
-            data-lpignore="true"
-            data-bwignore="true"
-            data-form-type="other"
+            onChange={event => {
+              clearLoginError();
+              setLoginPassword(event.target.value);
+            }}
+            autoComplete="current-password"
             spellCheck={false}
-            className="w-full"
+            className={cx('auth-login-input w-full', loginError && 'auth-login-input--error')}
             autoFocus
           />
         )}
 
-        {loginRequire2FA && (
+        {requiresSecondStep && (
           <Input
             size="base"
             type="text"
             inputMode="numeric"
             label="双因素验证码"
-            description="填满 6 位后会自动验证，也可以按 Enter 提交。"
             maxLength={6}
             placeholder="000000"
             value={loginTotpToken}
             onChange={handle2FAInput}
             autoComplete="one-time-code"
-            className="w-full text-center font-mono tracking-widest"
+            className={cx(
+              'auth-login-input w-full text-center font-mono tracking-widest',
+              loginError && 'auth-login-input--error'
+            )}
             autoFocus
           />
         )}
 
-        <AuthErrorBanner message={loginError} />
-
-        {!loginRequire2FA ? (
+        {!requiresSecondStep ? (
           <Button
             type="submit"
             variant="primary"
             size="base"
             loading={loginLoading}
+            disabled={Boolean(activeAction)}
             icon={!loginLoading ? <LogIn className="size-3.5" /> : undefined}
-            className="w-full justify-center"
+            className={getButtonClassName(
+              'password',
+              loginLoading,
+              'auth-login-button--primary w-full justify-center'
+            )}
           >
-            {isDemoMode ? '进入演示模式' : '立即进入'}
+            {loginLoading ? '处理中...' : isDemoMode ? '进入演示环境' : '登录'}
           </Button>
         ) : (
           <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-2">
             <Button
               type="button"
-              onClick={cancelLogin2FA}
+              onClick={githubFlowId ? cancelGitHubFlow : cancelLogin2FA}
               variant="secondary"
               size="base"
               shape="square"
+              disabled={buttonsLocked}
               icon={<ChevronLeft className="size-3.5" />}
+              className="auth-login-button--secondary"
               aria-label="返回修改密码"
               title="返回修改密码"
             />
@@ -325,19 +753,80 @@ function AuthPage() {
               type="submit"
               variant="primary"
               size="base"
-              loading={loginLoading}
-              icon={!loginLoading ? <Key className="size-3.5" /> : undefined}
-              className="justify-center"
+              loading={loginLoading || activeAction === 'github-2fa'}
+              disabled={Boolean(activeAction && activeAction !== 'github-2fa')}
+              icon={
+                !(loginLoading || activeAction === 'github-2fa') ? (
+                  <Key className="size-3.5" />
+                ) : undefined
+              }
+              className={getButtonClassName(
+                '2fa',
+                loginLoading || activeAction === 'github-2fa',
+                'auth-login-button--primary justify-center'
+              )}
             >
-              验证并进入
+              {loginLoading || activeAction === 'github-2fa' ? '处理中...' : '确认'}
             </Button>
           </div>
         )}
-{/* 
-        <div className="flex items-center justify-between border-t border-kumo-line pt-3 text-[11px] text-kumo-subtle">
-          <span>会话状态</span>
-          <span className="font-medium text-kumo-success">受保护</span>
-        </div> */}
+
+        {!isDemoMode &&
+          !requiresSecondStep &&
+          (loginOptions.githubEnabled || (loginOptions.webauthnEnabled && supportsPasskey)) && (
+            <div className="auth-login-alternatives">
+              <div className="auth-login-divider">
+                <span>其他方式</span>
+              </div>
+              <div
+                className={cx(
+                  'grid gap-2',
+                  loginOptions.githubEnabled &&
+                    loginOptions.webauthnEnabled &&
+                    supportsPasskey &&
+                    'sm:grid-cols-2'
+                )}
+              >
+                {loginOptions.githubEnabled && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="base"
+                    onClick={handleGitHubLogin}
+                    loading={activeAction === 'github'}
+                    disabled={loginLoading || Boolean(activeAction && activeAction !== 'github')}
+                    icon={<GitHubBrand className="size-3.5" />}
+                    className={getButtonClassName(
+                      'github',
+                      activeAction === 'github',
+                      'auth-login-button--secondary w-full justify-center'
+                    )}
+                  >
+                    {activeAction === 'github' ? '处理中...' : 'GitHub'}
+                  </Button>
+                )}
+                {loginOptions.webauthnEnabled && supportsPasskey && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="base"
+                    onClick={handlePasskeyLogin}
+                    loading={activeAction === 'passkey'}
+                    disabled={loginLoading || Boolean(activeAction && activeAction !== 'passkey')}
+                    icon={<Key className="size-3.5" />}
+                    className={getButtonClassName(
+                      'passkey',
+                      activeAction === 'passkey',
+                      'auth-login-button--secondary w-full justify-center'
+                    )}
+                  >
+                    {activeAction === 'passkey' ? '处理中...' : '通行密钥'}
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+        <AuthStatusNotice statusKey={busyState} message={loginError} />
       </form>
     </AuthShell>
   );

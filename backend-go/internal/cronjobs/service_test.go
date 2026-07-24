@@ -1,6 +1,7 @@
 package cronjobs
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -89,6 +90,24 @@ func TestTaskCRUDManualRunAndLogCleanup(t *testing.T) {
 	res = performCronRequest(service, http.MethodGet, "/api/cron/tasks", "")
 	if tasks := decodeCronData[[]Task](t, res); len(tasks) != 0 {
 		t.Fatalf("expected empty tasks after delete, got %#v", tasks)
+	}
+}
+
+func TestProductionDisablesLocalShellTasksByDefault(t *testing.T) {
+	service := New(config.Config{
+		Environment: "production",
+		Host:        "127.0.0.1",
+		Port:        0,
+		DataDir:     t.TempDir(),
+		DBName:      "data.db",
+	})
+	t.Cleanup(func() { <-service.Stop().Done() })
+	_, err := service.executeSchedulerTaskCommand(context.Background(), SchedulerTask{
+		Task:           Task{Type: "shell", Command: "echo blocked"},
+		TimeoutSeconds: 1,
+	})
+	if err == nil || !strings.Contains(err.Error(), "ALLOW_LOCAL_SHELL_TASKS") {
+		t.Fatalf("expected production shell task rejection, got %v", err)
 	}
 }
 

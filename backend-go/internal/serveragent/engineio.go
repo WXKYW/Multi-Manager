@@ -113,9 +113,7 @@ func (s *EngineIOServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true // 允许所有来源（生产环境应该限制）
-	},
+	CheckOrigin: sameWebSocketOrigin,
 }
 
 // HandleWebSocket 处理 WebSocket 升级
@@ -454,8 +452,6 @@ func (s *EngineIOServer) handleHandshake(w http.ResponseWriter, r *http.Request)
 	packet := fmt.Sprintf("0%s", openJSON)
 
 	w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Credentials", "true")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(packet))
 }
@@ -481,8 +477,6 @@ func (s *EngineIOServer) handlePoll(w http.ResponseWriter, r *http.Request, sess
 	payload := strings.Join(messages, "\x1e")
 
 	w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Credentials", "true")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(payload))
 }
@@ -546,8 +540,6 @@ func (s *EngineIOServer) handlePost(w http.ResponseWriter, r *http.Request, sess
 	session.mu.Unlock()
 
 	w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Credentials", "true")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("ok"))
 }

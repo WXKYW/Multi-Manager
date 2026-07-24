@@ -161,8 +161,8 @@ async function showCodePicker(input) {
   
   const listCont = picker.querySelector('#api-2fa-list');
   safeSendMessage({ type: 'GET_ACCOUNTS', frameHostname: window.location.hostname }, (response) => {
-    if (!response || !response.success) { 
-      listCont.innerHTML = `<div class="error"><p>${response?.error || '获取失败'}</p></div>`; return; 
+    if (!response || !response.success) {
+      listCont.replaceChildren(Object.assign(document.createElement('div'), { className: 'error', textContent: response?.error || '获取失败' })); return;
     }
     allAccounts = Array.isArray(response.matched) ? response.matched : [];
     if (allAccounts.length === 0) {
@@ -201,15 +201,18 @@ async function showCodePicker(input) {
 }
 
 function renderPickerList(container, accounts, input) {
+  const escapeHTML = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[char]));
   container.innerHTML = accounts.map(acc => `
-    <div class="account-item" data-code="${acc.currentCode || ''}">
+    <div class="account-item" data-code="${escapeHTML(acc.currentCode || '')}">
       <div class="api-monitor-2fa-info">
-        <div class="api-monitor-2fa-account">${acc.account || '未命名'}</div>
-        <div class="api-monitor-2fa-issuer">${acc.issuer || '其他'}</div>
+        <div class="api-monitor-2fa-account">${escapeHTML(acc.account || '未命名')}</div>
+        <div class="api-monitor-2fa-issuer">${escapeHTML(acc.issuer || '其他')}</div>
       </div>
       <div class="api-monitor-2fa-code-wrapper">
-        <div class="api-monitor-2fa-code">${formatCode(acc.currentCode)}</div>
-        <div class="api-monitor-2fa-progress-container"><div class="api-monitor-2fa-progress-bar" id="prog-${acc.id}"></div></div>
+        <div class="api-monitor-2fa-code">${escapeHTML(formatCode(acc.currentCode))}</div>
+        <div class="api-monitor-2fa-progress-container"><div class="api-monitor-2fa-progress-bar" id="prog-${escapeHTML(acc.id)}"></div></div>
       </div>
     </div>`).join('');
 
@@ -328,24 +331,3 @@ chrome.storage.onChanged.addListener((changes) => {
 const observer = new MutationObserver(() => isContextValid() && masterEnabled && scanInputs());
 if (isContextValid()) observer.observe(document.body, { childList: true, subtree: true });
 scanInputs();
-
-// --- 核心功能：主站一键同步配置 ---
-window.addEventListener('message', (event) => {
-  // 安全校验：只接受来自主站的消息（这里逻辑可以根据主站域名加固）
-  if (event.data && event.data.type === 'API_MONITOR_SYNC_CONFIG') {
-    const { serverUrl, password } = event.data;
-    if (serverUrl) {
-      const cleanUrl = serverUrl.endsWith('/') ? serverUrl.slice(0, -1) : serverUrl;
-      chrome.storage.sync.set({ 
-        serverUrl: cleanUrl, 
-        password: password || '' 
-      }, () => {
-        // 同步成功后通知主站显示成功状态
-        window.postMessage({ type: 'API_MONITOR_SYNC_SUCCESS' }, '*');
-        // 同时立即更新当前页面的变量
-        responseServerUrl = cleanUrl;
-        console.log('API Monitor: 配置已自动同步');
-      });
-    }
-  }
-});

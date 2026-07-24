@@ -347,7 +347,7 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
             <h1 className="text-lg font-bold text-kumo-strong">无法显示状态页</h1>
             <p className="mt-2 max-w-md text-sm leading-relaxed text-kumo-subtle">{error}</p>
             {!slug && isLocalHost(window.location.host) && (
-              <p className="mt-2 text-xs text-kumo-subtle">本地根路径不会自动匹配自定义域名，请使用 /status/slug 或 /u/slug 访问。</p>
+              <p className="mt-2 text-xs text-kumo-subtle">本地访问请使用 /status/slug 或 /u/slug。</p>
             )}
           </div>
         )}
@@ -466,7 +466,7 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
                       </div>
                     );
                   })}
-                  {visibleMonitors.length === 0 && <div className="p-8 text-center text-sm text-kumo-subtle">当前筛选没有匹配的监测项。</div>}
+                  {visibleMonitors.length === 0 && <div className="p-8 text-center text-sm text-kumo-subtle">暂无匹配监测项。</div>}
                 </div>
               )}
             </section>

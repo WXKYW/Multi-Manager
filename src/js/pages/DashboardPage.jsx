@@ -440,10 +440,8 @@ function DashboardPage({ onNavigate } = {}) {
       });
     };
 
-    const savedPassword = localStorage.getItem('admin_password') || '';
     const headers = {
       'Content-Type': 'application/json',
-      'x-admin-password': savedPassword,
     };
     const previousStats = dashboardStatsCache?.stats
       ? { ...DEFAULT_DASHBOARD_STATS, ...dashboardStatsCache.stats }
@@ -786,13 +784,10 @@ function DashboardPage({ onNavigate } = {}) {
       const timeout = window.setTimeout(() => controller.abort(), HOST_METRICS_FETCH_TIMEOUT_MS);
       activeController = controller;
 
-      const savedPassword = localStorage.getItem('admin_password') || '';
-
       try {
         const response = await fetch('/api/system/host-metrics', {
           headers: {
             'Content-Type': 'application/json',
-            'x-admin-password': savedPassword,
           },
           signal: controller.signal,
         });
@@ -954,7 +949,7 @@ function DashboardPage({ onNavigate } = {}) {
   const uptimeBadgeClassName = stats.uptime.down > 0
     ? 'text-kumo-danger bg-kumo-danger/10 border-kumo-danger/20'
     : 'text-kumo-success bg-kumo-success/10 border-kumo-success/20';
-  const uptimeDetailText = stats.uptime.down > 0 ? `${stats.uptime.down} 个监测发生故障` : '服务状态健康';
+  const uptimeDetailText = stats.uptime.down > 0 ? `${stats.uptime.down} 个监测故障` : '全部在线';
   const uptimeDetailClassName = stats.uptime.down > 0 ? 'text-kumo-danger font-semibold' : '';
   const dashboardStatusPages = Array.isArray(stats.statusPages) ? stats.statusPages : [];
 
@@ -969,7 +964,7 @@ function DashboardPage({ onNavigate } = {}) {
           iconClassName="bg-kumo-info-tint text-kumo-info"
           badge={`${stats.servers.online}/${stats.servers.total} 在线`}
           badgeClassName={serverBadgeClassName}
-          label="主机管理"
+          label="主机"
           value={stats.servers.total}
           unit="台主机"
           detail={serverDetailText}
@@ -993,7 +988,7 @@ function DashboardPage({ onNavigate } = {}) {
           label="云应用实例"
           value={stats.paas.koyeb.total + stats.paas.fly.total}
           unit="个应用"
-          detail="应用实例状态正常"
+          detail={`${stats.paas.koyeb.running + stats.paas.fly.running} 个运行中`}
         />
 
         <DashboardOverviewCard
@@ -1005,7 +1000,7 @@ function DashboardPage({ onNavigate } = {}) {
           label="域名解析"
           value={stats.dns.zones}
           unit="个域名"
-          detail="域名配置正常"
+          detail="Cloudflare 区域"
         />
 
         <DashboardOverviewCard
@@ -1039,7 +1034,7 @@ function DashboardPage({ onNavigate } = {}) {
       <div className="grid grid-cols-1 items-stretch gap-3 sm:gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(360px,1fr)]">
         
         <SectionCard
-          title="系统 API 调用趋势"
+          title="API 调用趋势"
           icon={<Activity className="h-4 w-4 text-kumo-brand" />}
           meta={<Badge variant="neutral">最近 7 天</Badge>}
           className="order-1 hidden min-w-0 sm:flex"
@@ -1070,7 +1065,7 @@ function DashboardPage({ onNavigate } = {}) {
 
         {/* Right Column: Services & Tools List */}
         <SectionCard
-          title="服务与工具"
+          title="模块入口"
           icon={<Box className="h-4 w-4 text-kumo-brand" />}
           className="order-2 h-full min-w-0 xl:col-start-2 xl:row-span-2 xl:row-start-1"
           bodyClassName="flex min-h-0 flex-1 flex-col p-2.5 sm:p-3"
@@ -1200,7 +1195,7 @@ function DashboardPage({ onNavigate } = {}) {
 
         {dashboardStatusPages.length > 0 && (
           <SectionCard
-            title="快捷入口"
+            title="状态页"
             icon={<Activity className="h-4 w-4 text-kumo-brand" />}
             className="order-3 min-w-0 xl:col-span-2 xl:row-start-3"
             bodyClassName="p-2.5 sm:p-3"

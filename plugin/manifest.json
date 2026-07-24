@@ -4,7 +4,6 @@
     "version": "1.0.1",
     "description": "自动检测并填充 2FA 验证码",
     "permissions": [
-        "activeTab",
         "storage"
     ],
     "host_permissions": [
@@ -39,7 +38,7 @@
                 "content.css"
             ],
             "run_at": "document_idle",
-            "all_frames": true
+            "all_frames": false
         }
     ],
     "options_page": "options.html"

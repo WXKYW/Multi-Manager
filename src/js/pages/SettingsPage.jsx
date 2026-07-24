@@ -5,7 +5,7 @@ import { Input } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
-import { Tabs } from '@cloudflare/kumo';
+import { ClipboardText, Tabs } from '@cloudflare/kumo';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
 import useStore, {
@@ -21,14 +21,17 @@ import { APP_VERSION } from '../modules/appVersion.js';
 import { AppCard, SectionCard, cx } from '../components/ui/AppPrimitives.jsx';
 import CodeEditor from '../components/ui/CodeEditor.jsx';
 import { BackupPanel } from './BackupPage.jsx';
+import { browserSupportsWebAuthn, createPasskeyCredential } from '../modules/webauthn.js';
 import {
   Activity,
   Bell,
   Check,
   Database,
   Download,
+  ExternalLink,
   FileText,
   Globe,
+  GitHubBrand,
   HardDrive,
   LayoutDashboard,
   Lock,
@@ -54,11 +57,15 @@ const SETTINGS_TABS = [
   { value: 'about', label: <span className="inline-flex items-center gap-1.5"><Settings className="h-4 w-4" />关于</span> },
 ];
 
+const SECURITY_MASONRY_CARD_CLASS = 'mb-4 inline-block w-full align-top [break-inside:avoid]';
+
 const THEME_OPTIONS = [
   { value: 'auto', label: '跟随系统' },
   { value: 'light', label: '浅色' },
   { value: 'dark', label: '深色' },
 ];
+
+const GITHUB_NEW_OAUTH_APP_URL = 'https://github.com/settings/applications/new';
 
 const PAGE_WIDTH_OPTIONS = [
   { value: 'standard', label: '标准' },
@@ -82,11 +89,9 @@ const TIMEZONE_OPTIONS = [
 
 const getAuthHeaders = () => ({
   'Content-Type': 'application/json',
-  'x-admin-password': localStorage.getItem('admin_password') || useStore.getState().loginPassword || '',
 });
 
 const getUploadHeaders = () => ({
-  'x-admin-password': localStorage.getItem('admin_password') || useStore.getState().loginPassword || '',
 });
 
 const formatFileSize = (bytes) => {
@@ -95,6 +100,20 @@ const formatFileSize = (bytes) => {
   if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(2)} MB`;
   if (size >= 1024) return `${(size / 1024).toFixed(2)} KB`;
   return `${size} B`;
+};
+
+const formatSessionTime = (value) => {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString('zh-CN', { hour12: false });
+};
+
+const describeUserAgent = (value) => {
+  const ua = String(value || '');
+  const browser = ua.includes('Edg/') ? 'Edge' : ua.includes('Chrome/') ? 'Chrome' : ua.includes('Firefox/') ? 'Firefox' : ua.includes('Safari/') ? 'Safari' : '浏览器';
+  const platform = ua.includes('Windows') ? 'Windows' : ua.includes('Mac OS') ? 'macOS' : ua.includes('Android') ? 'Android' : ua.includes('iPhone') || ua.includes('iPad') ? 'iOS' : ua.includes('Linux') ? 'Linux' : '未知系统';
+  return `${browser} · ${platform}`;
 };
 
 const toInt = (value, fallback = 0) => {
@@ -277,11 +296,33 @@ function SettingsPage() {
   const [logsBusy, setLogsBusy] = useState(false);
   const [logsLoaded, setLogsLoaded] = useState(false);
   const [twoFALoaded, setTwoFALoaded] = useState(false);
+  const [loginSessions, setLoginSessions] = useState([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
+  const [githubAuth, setGitHubAuth] = useState({
+    enabled: false,
+    clientId: '',
+    clientSecret: '',
+    hasClientSecret: false,
+    allowedLoginsText: '',
+    allowedEmailsText: '',
+  });
+  const [githubAuthLoading, setGitHubAuthLoading] = useState(false);
+  const [githubAuthSaving, setGitHubAuthSaving] = useState(false);
+  const [githubAuthLoaded, setGitHubAuthLoaded] = useState(false);
+  const [passkeys, setPasskeys] = useState([]);
+  const [passkeysLoading, setPasskeysLoading] = useState(false);
+  const [passkeysLoaded, setPasskeysLoaded] = useState(false);
+  const [passkeyForm, setPasskeyForm] = useState({
+    label: '',
+  });
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
 
   const currentOrigin = useMemo(() => {
     if (typeof window === 'undefined') return 'http://localhost';
     return window.location.origin;
   }, []);
+  const githubOAuthCallback = useMemo(() => `${settings.publicApiUrl || currentOrigin}/api/auth/github/callback`, [currentOrigin, settings.publicApiUrl]);
 
   const tableRows = useMemo(() => {
     if (dbAnalysis?.tables?.length) return dbAnalysis.tables;
@@ -396,6 +437,55 @@ function SettingsPage() {
     }
   }, []);
 
+  const fetchLoginSessions = useCallback(async () => {
+    setSessionsLoading(true);
+    try {
+      const response = await fetch('/api/auth/sessions', { headers: getAuthHeaders() });
+      const result = await response.json();
+      if (!response.ok || result.success === false) throw new Error(result.error || '加载登录设备失败');
+      const payload = result.data || result;
+      setLoginSessions(payload.sessions || []);
+      setSessionsLoaded(true);
+    } finally {
+      setSessionsLoading(false);
+    }
+  }, []);
+
+  const fetchGitHubAuthConfig = useCallback(async () => {
+    setGitHubAuthLoading(true);
+    try {
+      const response = await fetch('/api/auth/github/config', { headers: getAuthHeaders() });
+      const result = await response.json();
+      if (!response.ok || result.success === false) throw new Error(result.error || '加载 GitHub 登录配置失败');
+      const payload = result.data || result;
+      setGitHubAuth({
+        enabled: !!payload.enabled,
+        clientId: payload.clientId || '',
+        clientSecret: '',
+        hasClientSecret: !!payload.hasClientSecret,
+        allowedLoginsText: payload.allowedLoginsText || '',
+        allowedEmailsText: payload.allowedEmailsText || '',
+      });
+      setGitHubAuthLoaded(true);
+    } finally {
+      setGitHubAuthLoading(false);
+    }
+  }, []);
+
+  const fetchPasskeys = useCallback(async () => {
+    setPasskeysLoading(true);
+    try {
+      const response = await fetch('/api/auth/webauthn/credentials', { headers: getAuthHeaders() });
+      const result = await response.json();
+      if (!response.ok || result.success === false) throw new Error(result.error || '加载通行密钥失败');
+      const payload = result.data || result;
+      setPasskeys(payload.credentials || []);
+      setPasskeysLoaded(true);
+    } finally {
+      setPasskeysLoading(false);
+    }
+  }, []);
+
 
 
   const refreshCurrent = useCallback(async (showFeedback = false) => {
@@ -404,14 +494,14 @@ function SettingsPage() {
       await fetchSettings();
       if (activeTab === 'database') await fetchDbState();
       if (activeTab === 'logs') await fetchLogState();
-      if (activeTab === 'security') await fetchTwoFAStatus();
+      if (activeTab === 'security') await Promise.all([fetchTwoFAStatus(), fetchLoginSessions(), fetchGitHubAuthConfig(), fetchPasskeys()]);
       if (showFeedback) toast.success('设置已刷新');
     } catch (error) {
       toast.error(error.message || '加载设置失败');
     } finally {
       setSettingsLoading(false);
     }
-  }, [activeTab, fetchDbState, fetchLogState, fetchSettings, fetchTwoFAStatus]);
+  }, [activeTab, fetchDbState, fetchGitHubAuthConfig, fetchLogState, fetchLoginSessions, fetchPasskeys, fetchSettings, fetchTwoFAStatus]);
 
   useEffect(() => {
     let cancelled = false;
@@ -445,6 +535,53 @@ function SettingsPage() {
       fetchTwoFAStatus().catch((error) => toast.error(error.message || '加载 2FA 状态失败'));
     }
   }, [activeTab, fetchTwoFAStatus, twoFALoaded]);
+
+  useEffect(() => {
+    if (activeTab === 'security' && !sessionsLoaded && !sessionsLoading) {
+      fetchLoginSessions().catch((error) => toast.error(error.message || '加载登录设备失败'));
+    }
+  }, [activeTab, fetchLoginSessions, sessionsLoaded, sessionsLoading]);
+
+  useEffect(() => {
+    if (activeTab === 'security' && !githubAuthLoaded && !githubAuthLoading) {
+      fetchGitHubAuthConfig().catch((error) => toast.error(error.message || '加载 GitHub 登录配置失败'));
+    }
+  }, [activeTab, fetchGitHubAuthConfig, githubAuthLoaded, githubAuthLoading]);
+
+  useEffect(() => {
+    if (activeTab === 'security' && !passkeysLoaded && !passkeysLoading) {
+      fetchPasskeys().catch((error) => toast.error(error.message || '加载通行密钥失败'));
+    }
+  }, [activeTab, fetchPasskeys, passkeysLoaded, passkeysLoading]);
+
+  const forceSessionOffline = async (session) => {
+    try {
+      const response = await fetch(`/api/auth/sessions/${encodeURIComponent(session.id)}`, { method: 'DELETE', headers: getAuthHeaders() });
+      const result = await response.json();
+      if (!response.ok || result.success === false) throw new Error(result.error || '强制下线失败');
+      toast.success(session.current ? '当前设备已下线' : '设备已强制下线');
+      if (session.current) {
+        await logout();
+        return;
+      }
+      await fetchLoginSessions();
+    } catch (error) {
+      toast.error(error.message || '强制下线失败');
+    }
+  };
+
+  const forceAllSessionsOffline = async () => {
+    if (!window.confirm('这会立即终止全部主程序会话，并使浏览器插件停止取码。继续吗？')) return;
+    try {
+      const response = await fetch('/api/auth/sessions/revoke-all', { method: 'POST', headers: getAuthHeaders() });
+      const result = await response.json();
+      if (!response.ok || result.success === false) throw new Error(result.error || '全部下线失败');
+      toast.success('全部设备已下线');
+      await logout();
+    } catch (error) {
+      toast.error(error.message || '全部下线失败');
+    }
+  };
 
   const persistSettings = async (successMessage = '设置已保存') => {
     const patch = settingsPatch;
@@ -599,6 +736,94 @@ function SettingsPage() {
       setTwoFA((prev) => ({ ...prev, error: error.message || '禁用 2FA 失败' }));
     } finally {
       setTwoFA((prev) => ({ ...prev, loading: false }));
+    }
+  };
+
+  const saveGitHubLoginConfig = async () => {
+    setGitHubAuthSaving(true);
+    try {
+      const response = await fetch('/api/auth/github/config', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(githubAuth),
+      });
+      const result = await response.json();
+      if (!response.ok || result.success === false) throw new Error(result.error || '保存 GitHub 登录配置失败');
+      const payload = result.data || result;
+      setGitHubAuth({
+        enabled: !!payload.enabled,
+        clientId: payload.clientId || '',
+        clientSecret: '',
+        hasClientSecret: !!payload.hasClientSecret,
+        allowedLoginsText: payload.allowedLoginsText || '',
+        allowedEmailsText: payload.allowedEmailsText || '',
+      });
+      toast.success('GitHub 登录配置已保存');
+    } catch (error) {
+      toast.error(error.message || '保存 GitHub 登录配置失败');
+    } finally {
+      setGitHubAuthSaving(false);
+    }
+  };
+
+  const registerPasskey = async () => {
+    if (!browserSupportsWebAuthn()) {
+      toast.error('当前浏览器不支持通行密钥');
+      return;
+    }
+
+    setPasskeyBusy(true);
+    try {
+      const beginResponse = await fetch('/api/auth/webauthn/register/begin', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(passkeyForm),
+      });
+      const beginResult = await beginResponse.json();
+      if (!beginResponse.ok || beginResult.success === false) throw new Error(beginResult.error || '创建通行密钥挑战失败');
+
+      const credential = await createPasskeyCredential(beginResult.options);
+      const finishResponse = await fetch('/api/auth/webauthn/register/finish', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          flowId: beginResult.flowId,
+          credential,
+        }),
+      });
+      const finishResult = await finishResponse.json();
+      if (!finishResponse.ok || finishResult.success === false) throw new Error(finishResult.error || '保存通行密钥失败');
+
+      toast.success('通行密钥已添加');
+      setPasskeyForm({ label: '' });
+      await fetchPasskeys();
+    } catch (error) {
+      const message = error?.name === 'NotAllowedError'
+        ? '通行密钥操作已取消或被浏览器拦截'
+        : (error.message || '保存通行密钥失败');
+      toast.error(message);
+    } finally {
+      setPasskeyBusy(false);
+    }
+  };
+
+  const removePasskey = async (passkey) => {
+    if (!(await dialog.confirm(`确定删除“${passkey.label || '通行密钥'}”吗？`))) return;
+
+    setPasskeyBusy(true);
+    try {
+      const response = await fetch(`/api/auth/webauthn/credentials/${encodeURIComponent(passkey.id)}/delete`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+      const result = await response.json();
+      if (!response.ok || result.success === false) throw new Error(result.error || '删除通行密钥失败');
+      toast.success('通行密钥已删除');
+      await fetchPasskeys();
+    } catch (error) {
+      toast.error(error.message || '删除通行密钥失败');
+    } finally {
+      setPasskeyBusy(false);
     }
   };
 
@@ -818,12 +1043,12 @@ function SettingsPage() {
 
           <SectionCard
             title="部署访问地址"
-            description="用于生成公开状态页、回调地址和对外 API 连接配置。"
+            description="公开页与回调地址"
             icon={<Globe className="h-4 w-4 text-kumo-brand" />}
             className="min-h-0 self-start"
             bodyPadding="none"
           >
-            <FieldRow title="公网 API 地址" description="主控端可从公网访问时填写，留空则使用当前访问来源。">
+            <FieldRow title="公网 API 地址" description="公网可访问时填写，留空用当前来源。">
               <Input size="sm"
                 label="公网 API 地址"
                 value={settings.publicApiUrl}
@@ -831,7 +1056,7 @@ function SettingsPage() {
                 placeholder="https://monitor.example.com"
               />
             </FieldRow>
-            <FieldRow title="系统时区" description="用于后续展示本地化时间；跟随服务器时使用后端运行环境默认时区。">
+            <FieldRow title="系统时区" description="本地化时间；跟随服务器用默认时区。">
               <Select
                 size="sm"
                 label="系统时区"
@@ -852,7 +1077,7 @@ function SettingsPage() {
           className="flex min-h-0 md:h-full"
           headerClassName="max-sm:min-h-12 max-sm:flex-row max-sm:items-center max-sm:px-3 max-sm:py-2"
           title="功能模块"
-          description="集中管理现有侧栏入口；修改后即时生效，保存后长期保留。"
+          description="管理侧栏入口"
           icon={<Activity className="h-4 w-4 text-kumo-brand" />}
           actionsClassName="max-sm:ml-auto max-sm:w-auto max-sm:gap-1.5"
           actions={
@@ -876,7 +1101,7 @@ function SettingsPage() {
               aria-label="搜索模块"
               value={moduleSearch}
               onChange={(event) => setModuleSearch(event.target.value)}
-              placeholder="搜索模块名称或用途"
+              placeholder="搜索模块"
               className="w-full"
               prefix={<Search className="h-4 w-4" />}
             />
@@ -923,17 +1148,17 @@ function SettingsPage() {
             })}
           </div>
           {filteredModuleRows.length === 0 && (
-            <div className="rounded-lg border border-dashed border-kumo-line p-8 text-center text-sm text-kumo-subtle">没有找到匹配的模块，请调整搜索或分组筛选。</div>
+            <div className="rounded-lg border border-dashed border-kumo-line p-8 text-center text-sm text-kumo-subtle">没有匹配模块，请调整搜索。</div>
           )}
         </SectionCard>
         </div>
       )}
 
       {activeTab === 'security' && (
-        <div className="grid h-full min-h-0 items-start gap-4 overflow-auto px-px py-px pr-px xl:grid-cols-2">
+        <div className="min-w-0 overflow-auto px-px py-px [column-gap:1rem] xl:columns-2">
           <SectionCard
+            className={SECURITY_MASONRY_CARD_CLASS}
             title="管理员密码"
-            description="后端接口为 /api/auth/change-password，修改成功后会退出当前会话。"
             icon={<Lock className="h-4 w-4 text-kumo-brand" />}
             bodyPadding="none"
           >
@@ -986,64 +1211,228 @@ function SettingsPage() {
           </SectionCard>
 
           <SectionCard
-            title="双因子认证"
-            description="当前登录保护状态"
+            className={SECURITY_MASONRY_CARD_CLASS}
+            title="双因子认证与通行密钥"
             icon={<Shield className="h-4 w-4 text-kumo-brand" />}
             meta={(
-              <Badge variant={twoFA.enabled ? 'success' : 'warning'}>
-                {twoFA.enabled ? '已启用' : '未启用'}
+              <div className="flex items-center gap-2">
+                <Badge variant={twoFA.enabled ? 'success' : 'warning'}>
+                  {twoFA.enabled ? 'TOTP 已启用' : 'TOTP 未启用'}
+                </Badge>
+                <Badge variant={passkeys.length > 0 ? 'success' : 'secondary'}>
+                  {passkeys.length > 0 ? `${passkeys.length} 个通行密钥` : '无通行密钥'}
+                </Badge>
+              </div>
+            )}
+            bodyPadding="lg"
+          >
+            <div className="grid items-start gap-4 xl:grid-cols-2">
+              <AppCard padding="md" className="flex h-auto flex-col gap-4 self-start border border-kumo-line/80">
+                <div className="space-y-1">
+                  <div className="text-sm font-semibold text-kumo-strong">验证器</div>
+                  <div className="text-xs leading-relaxed text-kumo-subtle">为密码和 GitHub 登录增加 6 位验证码；通行密钥不依赖 TOTP。</div>
+                </div>
+
+                {twoFA.error && (
+                  <div className="rounded-md border border-kumo-danger/20 bg-kumo-danger/10 px-3 py-2 text-xs text-kumo-danger">
+                    {twoFA.error}
+                  </div>
+                )}
+
+                {!twoFA.enabled && !twoFA.setupMode && (
+                  <Button size="sm" variant="primary" onClick={start2FASetup} loading={twoFA.loading} disabled={isDemoMode}>
+                    启用 2FA
+                  </Button>
+                )}
+
+                {twoFA.setupMode && (
+                  <div className="grid gap-4">
+                    {twoFA.qrCode && (
+                      <AppCard padding="none" className="flex justify-center p-4">
+                        <img src={twoFA.qrCode} alt="2FA QR Code" className="h-44 w-44" />
+                      </AppCard>
+                    )}
+                    <Input size="sm" label="手动密钥" value={twoFA.secret} readOnly className="font-mono" />
+                    <Input size="sm"
+                      label="6 位验证码"
+                      value={twoFA.token}
+                      onChange={(e) => setTwoFA((prev) => ({ ...prev, token: e.target.value.replace(/\D/g, '').slice(0, 6) }))}
+                      placeholder="000000"
+                      className="font-mono"
+                    />
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={() => setTwoFA((prev) => ({ ...prev, setupMode: false, token: '', error: '' }))}>取消</Button>
+                      <Button size="sm" variant="primary" onClick={confirm2FASetup} loading={twoFA.loading}>确认启用</Button>
+                    </div>
+                  </div>
+                )}
+
+                {twoFA.enabled && !twoFA.disableMode && (
+                  <Button size="sm" variant="secondary-destructive" onClick={() => setTwoFA((prev) => ({ ...prev, disableMode: true, error: '' }))} disabled={isDemoMode}>
+                    禁用 2FA
+                  </Button>
+                )}
+
+                {twoFA.disableMode && (
+                  <div className="grid gap-4">
+                    <Input size="sm"
+                      label="当前密码"
+                      type="password"
+                      value={twoFA.disablePassword}
+                      onChange={(e) => setTwoFA((prev) => ({ ...prev, disablePassword: e.target.value }))}
+                      autoComplete="off"
+                      data-1p-ignore
+                      data-lpignore="true"
+                      data-bwignore="true"
+                      data-form-type="other"
+                      spellCheck={false}
+                    />
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={() => setTwoFA((prev) => ({ ...prev, disableMode: false, disablePassword: '', error: '' }))}>取消</Button>
+                      <Button size="sm" variant="destructive" onClick={disable2FA} loading={twoFA.loading}>确认禁用</Button>
+                    </div>
+                  </div>
+                )}
+              </AppCard>
+
+              <AppCard padding="md" className="flex h-auto flex-col gap-4 self-start border border-kumo-line/80">
+                <div className="space-y-1">
+                  <div className="text-sm font-semibold text-kumo-strong">通行密钥</div>
+                  <div className="text-xs leading-relaxed text-kumo-subtle">支持 Windows Hello、Touch ID、安全密钥等。</div>
+                </div>
+
+                <div className="grid gap-3">
+                  <Input
+                    size="sm"
+                    label="通行密钥名称"
+                    value={passkeyForm.label}
+                    onChange={(event) => setPasskeyForm((prev) => ({ ...prev, label: event.target.value }))}
+                    placeholder="如：Windows Hello"
+                  />
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    onClick={registerPasskey}
+                    loading={passkeyBusy}
+                    disabled={isDemoMode || !browserSupportsWebAuthn()}
+                  >
+                    添加通行密钥
+                  </Button>
+                  {!browserSupportsWebAuthn() && (
+                    <span className="text-xs text-kumo-warning">当前环境不支持 WebAuthn</span>
+                  )}
+                </div>
+
+                <div className="divide-y divide-kumo-line rounded-md border border-kumo-line/80">
+                  {passkeysLoading && (
+                    <div className="px-4 py-6 text-sm text-kumo-subtle">加载中...</div>
+                  )}
+                  {!passkeysLoading && passkeys.map((passkey) => (
+                    <div key={passkey.id} className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-semibold text-kumo-strong">{passkey.label || '通行密钥'}</span>
+                          {passkey.attachment && <Badge variant="secondary">{passkey.attachment}</Badge>}
+                          {passkey.backedUp ? <Badge variant="success">可同步</Badge> : null}
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-kumo-subtle">
+                          <span>添加时间: <span className="text-kumo-strong">{formatSessionTime(passkey.createdAt)}</span></span>
+                          <span>最近使用: <span className="text-kumo-strong">{formatSessionTime(passkey.lastUsedAt)}</span></span>
+                        </div>
+                        <div className="mt-1 truncate font-mono text-[10px] text-kumo-subtle">{passkey.id}</div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="secondary-destructive"
+                        onClick={() => removePasskey(passkey)}
+                        loading={passkeyBusy}
+                        disabled={isDemoMode}
+                      >
+                        删除
+                      </Button>
+                    </div>
+                  ))}
+                  {!passkeysLoading && passkeys.length === 0 && (
+                    <div className="px-4 py-8 text-center text-sm text-kumo-subtle">暂无通行密钥</div>
+                  )}
+                </div>
+              </AppCard>
+            </div>
+          </SectionCard>
+
+          <SectionCard
+            className={SECURITY_MASONRY_CARD_CLASS}
+            title="GitHub 一键登录"
+            icon={<GitHubBrand className="h-4 w-4 text-kumo-brand" />}
+            meta={(
+              <Badge variant={githubAuth.enabled ? 'success' : 'secondary'}>
+                {githubAuth.enabled ? '已启用' : '未启用'}
               </Badge>
             )}
             bodyPadding="lg"
           >
+            <div className="grid gap-4">
+              <div className="grid gap-4 border-b border-kumo-line/70 pb-4 xl:grid-cols-2 xl:gap-0">
+                  <div className="grid gap-2 xl:pr-5">
+                    <div className="inline-flex items-center gap-2 text-sm font-semibold text-kumo-strong">
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-kumo-brand/10 text-xs font-bold text-kumo-brand">1</span>
+                      <span>创建 OAuth App</span>
+                    </div>
+                    <div className="text-xs leading-relaxed text-kumo-subtle">
+                      <code className="app-inline-code">Homepage URL</code> 填当前站点地址即可。
+                    </div>
+                    <ClipboardText
+                      size="sm"
+                      text={settings.publicApiUrl || currentOrigin}
+                      className="min-w-0 w-full font-mono text-[11px]"
+                      tooltip={{ text: '复制主页地址', copiedText: '主页地址已复制' }}
+                      labels={{ copyAction: '复制主页地址' }}
+                    />
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <a href={GITHUB_NEW_OAUTH_APP_URL} target="_blank" rel="noreferrer">
+                        <Button size="sm" variant="secondary" icon={<ExternalLink className="h-4 w-4" />}>
+                          新建 OAuth App
+                        </Button>
+                      </a>
+                    </div>
+                  </div>
 
-            {twoFA.error && (
-              <div className="rounded-md border border-kumo-danger/20 bg-kumo-danger/10 px-3 py-2 text-xs text-kumo-danger">
-                {twoFA.error}
+                  <div className="grid gap-2 border-t border-kumo-line/70 pt-4 xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0">
+                    <div className="inline-flex items-center gap-2 text-sm font-semibold text-kumo-strong">
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-kumo-brand/10 text-xs font-bold text-kumo-brand">2</span>
+                      <span>填回调并保存到下方</span>
+                    </div>
+                    <div className="text-xs leading-relaxed text-kumo-subtle">
+                      <code className="app-inline-code">Authorization callback URL</code> 用下方地址；创建后把 <code className="app-inline-code">Client ID / Secret</code> 填到下面。
+                    </div>
+                    <ClipboardText
+                      size="sm"
+                      text={githubOAuthCallback}
+                      className="min-w-0 w-full font-mono text-[11px]"
+                      tooltip={{ text: '复制回调地址', copiedText: 'GitHub 回调地址已复制' }}
+                      labels={{ copyAction: '复制回调地址' }}
+                    />
+                  </div>
               </div>
-            )}
 
-            {!twoFA.enabled && !twoFA.setupMode && (
-              <Button size="sm" className={`${twoFA.error ? 'mt-5' : ''} w-full`} variant="primary" onClick={start2FASetup} loading={twoFA.loading} disabled={isDemoMode}>
-                启用 2FA
-              </Button>
-            )}
-
-            {twoFA.setupMode && (
-              <div className="mt-5 grid gap-4">
-                {twoFA.qrCode && (
-                  <AppCard padding="none" className="flex justify-center p-4">
-                    <img src={twoFA.qrCode} alt="2FA QR Code" className="h-44 w-44" />
-                  </AppCard>
-                )}
-                <Input size="sm" label="手动密钥" value={twoFA.secret} readOnly className="font-mono" />
-                <Input size="sm"
-                  label="6 位验证码"
-                  value={twoFA.token}
-                  onChange={(e) => setTwoFA((prev) => ({ ...prev, token: e.target.value.replace(/\D/g, '').slice(0, 6) }))}
-                  placeholder="000000"
-                  className="font-mono"
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input
+                  size="sm"
+                  label="Client ID"
+                  value={githubAuth.clientId}
+                  onChange={(event) => setGitHubAuth((prev) => ({ ...prev, clientId: event.target.value }))}
+                  placeholder="GitHub OAuth App Client ID"
                 />
-                <div className="flex gap-2">
-                  <Button size="sm" onClick={() => setTwoFA((prev) => ({ ...prev, setupMode: false, token: '', error: '' }))}>取消</Button>
-                  <Button size="sm" variant="primary" onClick={confirm2FASetup} loading={twoFA.loading}>确认启用</Button>
-                </div>
-              </div>
-            )}
-
-            {twoFA.enabled && !twoFA.disableMode && (
-              <Button size="sm" className="mt-5 w-full" variant="secondary-destructive" onClick={() => setTwoFA((prev) => ({ ...prev, disableMode: true, error: '' }))} disabled={isDemoMode}>
-                禁用 2FA
-              </Button>
-            )}
-
-            {twoFA.disableMode && (
-              <div className="mt-5 grid gap-4">
-                <Input size="sm"
-                  label="当前密码"
-                  type="text"
-                  value={twoFA.disablePassword}
-                  onChange={(e) => setTwoFA((prev) => ({ ...prev, disablePassword: e.target.value }))}
+                <Input
+                  size="sm"
+                  label={githubAuth.hasClientSecret ? 'Client Secret（留空表示保持不变）' : 'Client Secret'}
+                  type="password"
+                  value={githubAuth.clientSecret}
+                  onChange={(event) => setGitHubAuth((prev) => ({ ...prev, clientSecret: event.target.value }))}
+                  placeholder={githubAuth.hasClientSecret ? '如需替换再填写' : 'GitHub OAuth App Client Secret'}
                   autoComplete="off"
                   data-1p-ignore
                   data-lpignore="true"
@@ -1051,12 +1440,104 @@ function SettingsPage() {
                   data-form-type="other"
                   spellCheck={false}
                 />
-                <div className="flex gap-2">
-                  <Button size="sm" onClick={() => setTwoFA((prev) => ({ ...prev, disableMode: false, disablePassword: '', error: '' }))}>取消</Button>
-                  <Button size="sm" variant="destructive" onClick={disable2FA} loading={twoFA.loading}>确认禁用</Button>
-                </div>
+              </div>
+
+              <div className="grid gap-3 xl:grid-cols-2">
+                <label className="grid gap-1.5 text-xs text-kumo-subtle">
+                  <span className="font-semibold text-kumo-strong">允许登录的 GitHub 用户名</span>
+                  <textarea
+                    value={githubAuth.allowedLoginsText}
+                    onChange={(event) => setGitHubAuth((prev) => ({ ...prev, allowedLoginsText: event.target.value }))}
+                    placeholder={'一行一个或逗号分隔\n如：iwvw'}
+                    className="min-h-24 rounded-md border border-kumo-line bg-kumo-base px-3 py-2 text-sm text-kumo-strong outline-none transition-colors focus:border-kumo-brand"
+                  />
+                </label>
+                <label className="grid gap-1.5 text-xs text-kumo-subtle">
+                  <span className="font-semibold text-kumo-strong">允许登录的邮箱</span>
+                  <textarea
+                    value={githubAuth.allowedEmailsText}
+                    onChange={(event) => setGitHubAuth((prev) => ({ ...prev, allowedEmailsText: event.target.value }))}
+                    placeholder={'可选；支持私人邮箱校验\n如：admin@example.com'}
+                    className="min-h-24 rounded-md border border-kumo-line bg-kumo-base px-3 py-2 text-sm text-kumo-strong outline-none transition-colors focus:border-kumo-brand"
+                  />
+                </label>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <Switch
+                  checked={githubAuth.enabled}
+                  onCheckedChange={(checked) => setGitHubAuth((prev) => ({ ...prev, enabled: checked }))}
+                  aria-label="启用 GitHub 登录"
+                />
+                <span className="text-sm text-kumo-strong">启用 GitHub 登录入口</span>
+                <span className="text-xs text-kumo-subtle">保存后显示 GitHub 按钮。</span>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={saveGitHubLoginConfig}
+                  loading={githubAuthSaving || githubAuthLoading}
+                  disabled={isDemoMode}
+                >
+                  保存 GitHub 配置
+                </Button>
+              </div>
+            </div>
+          </SectionCard>
+
+          <SectionCard
+            className={SECURITY_MASONRY_CARD_CLASS}
+            title="登录设备"
+            icon={<Globe className="h-4 w-4 text-kumo-brand" />}
+            actions={(
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => fetchLoginSessions().catch((error) => toast.error(error.message || '加载登录设备失败'))}
+                  loading={sessionsLoading}
+                  icon={<RefreshCw className="h-4 w-4" />}
+                >
+                  刷新
+                </Button>
+                <Button size="sm" variant="secondary-destructive" onClick={forceAllSessionsOffline}>
+                  全部下线
+                </Button>
               </div>
             )}
+            bodyPadding="none"
+          >
+            <div className="divide-y divide-kumo-line">
+              {loginSessions.map((session) => (
+                <div key={session.id} className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-semibold text-kumo-strong">{describeUserAgent(session.userAgent)}</span>
+                      {session.current && <Badge variant="success">当前设备</Badge>}
+                      <span className="font-mono text-[10px] text-kumo-subtle">{session.id}</span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-kumo-subtle">
+                      <span>IP: <span className="font-mono text-kumo-strong">{session.ipAddress || '-'}</span></span>
+                      <span>最后活动: <span className="text-kumo-strong">{formatSessionTime(session.lastAccessedAt)}</span></span>
+                      <span>会话到期: <span className="text-kumo-strong">{formatSessionTime(session.expiresAt)}</span></span>
+                    </div>
+                    {session.userAgent && <div className="mt-1 truncate text-[10px] text-kumo-subtle" title={session.userAgent}>{session.userAgent}</div>}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="secondary-destructive"
+                    onClick={() => forceSessionOffline(session)}
+                  >
+                    强制下线
+                  </Button>
+                </div>
+              ))}
+              {!sessionsLoading && loginSessions.length === 0 && (
+                <div className="px-4 py-8 text-center text-sm text-kumo-subtle">暂无有效登录设备</div>
+              )}
+            </div>
           </SectionCard>
         </div>
       )}
@@ -1146,7 +1627,7 @@ function SettingsPage() {
           <div className="grid content-start gap-3 px-px py-px">
             <SectionCard
               title="数据库导入导出"
-              description="导出当前数据库，或预检后替换。"
+              description="导出数据库，或预检后替换。"
               icon={<Download className="h-4 w-4 text-kumo-brand" />}
               bodyPadding="sm"
               bodyClassName="space-y-3"
@@ -1299,7 +1780,7 @@ function SettingsPage() {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-semibold text-kumo-strong">废弃表候选</div>
-                    <div className="mt-1 text-xs text-kumo-subtle">这里会列出可清理的旧表及预计释放空间。</div>
+                    <div className="mt-1 text-xs text-kumo-subtle">显示可清理旧表与预计空间。</div>
                   </div>
                   <Badge variant={deprecatedTableItems.length > 0 ? 'warning' : 'secondary'}>
                     {deprecatedTableItems.length} 张
@@ -1338,7 +1819,7 @@ function SettingsPage() {
           <SectionCard
             className="shrink-0"
             title="审计与保留"
-            description="这里只管理数据库审计记录与日志保留策略；应用运行日志请到左侧「系统日志」查看。"
+            description="数据库审计与日志保留"
             icon={<FileText className="h-4 w-4 text-kumo-brand" />}
             actions={
                 <>
@@ -1360,7 +1841,7 @@ function SettingsPage() {
             <SectionCard
               className="min-h-0 flex-1"
               title="审计记录"
-              description="最近 100 条数据库操作记录"
+              description="最近 100 条记录"
               icon={<Database className="h-4 w-4 text-kumo-brand" />}
               bodyPadding="none"
               bodyClassName="min-h-0 flex-1 overflow-auto"
@@ -1402,23 +1883,23 @@ function SettingsPage() {
       )}
 
       {activeTab === 'appearance' && (
-        <div className="grid h-full min-h-0 items-start gap-3 overflow-auto px-px py-px pr-px xl:grid-cols-[minmax(20rem,0.82fr)_minmax(0,1.18fr)]">
+        <div className="grid min-h-0 items-start gap-3 overflow-auto px-px py-px pr-px xl:grid-cols-[minmax(20rem,0.82fr)_minmax(0,1.18fr)]">
           <SectionCard
             title="界面外观"
             description={`当前生效主题: ${theme === 'dark' ? '深色' : '浅色'}`}
             icon={<Sun className="h-4 w-4 text-kumo-brand" />}
             bodyPadding="none"
           >
-            <FieldRow title="主题模式" description="云端偏好，切换后立即生效并自动同步。">
+            <FieldRow title="主题模式" description="切换后立即生效">
               <Select size="sm" label="主题模式" value={themeMode} onValueChange={handleThemeModeChange} items={THEME_OPTIONS} />
             </FieldRow>
-            <FieldRow title="页面宽度" description="云端偏好，顶部宽度切换器也会同步。">
+            <FieldRow title="页面宽度" description="与顶部宽度切换同步">
               <Select size="sm" label="页面宽度" value={pageWidthMode} onValueChange={handlePageWidthModeChange} items={PAGE_WIDTH_OPTIONS} />
             </FieldRow>
-            <FieldRow title="显示首页页脚" description="控制仪表盘底部页脚栏及其内容，切换后立即生效。">
+            <FieldRow title="显示首页页脚" description="控制仪表盘底部页脚">
               <Switch aria-label="显示首页页脚" checked={settings.dashboardFooterVisible} onCheckedChange={handleDashboardFooterVisibleChange} />
             </FieldRow>
-            <FieldRow title="备案号" description="显示在首页页脚右侧；留空时不显示。">
+            <FieldRow title="备案号" description="显示在首页页脚右侧；留空不显示。">
               <Input
                 size="sm"
                 aria-label="首页页脚备案号"
@@ -1428,16 +1909,15 @@ function SettingsPage() {
                 className="w-full min-w-52"
               />
             </FieldRow>
-            <FieldRow title="触感反馈" description="移动端交互振动开关。">
+            <FieldRow title="触感反馈" description="移动端振动反馈。">
               <Switch checked={settings.vibrationEnabled} onCheckedChange={handleVibrationEnabledChange} />
             </FieldRow>
           </SectionCard>
 
           <SectionCard
             title="自定义 CSS"
-            description="应用会立即注入当前页面，保存后写入后端用户设置。"
+            description="保存后写入用户设置"
             icon={<Terminal className="h-4 w-4 text-kumo-brand" />}
-            className="xl:min-h-[28rem]"
             actions={
                 <>
                   <Button size="sm" onClick={() => applyCustomCss(settings.customCss)}>预览</Button>
@@ -1449,16 +1929,17 @@ function SettingsPage() {
             }
             bodyPadding="none"
           >
-            <div className="p-4">
-              <CodeEditor
-                label="CSS"
-                language="css"
-                value={settings.customCss}
-                onChange={(customCss) => patchSettings({ customCss })}
-                placeholder="/* 在此输入自定义 CSS */"
-                minHeight="22rem"
-              />
-            </div>
+            <CodeEditor
+              variant="embedded"
+              label="CSS"
+              language="css"
+              value={settings.customCss}
+              onChange={(customCss) => patchSettings({ customCss })}
+              placeholder="/* 在此输入自定义 CSS */"
+              minHeight="18rem"
+              showHeader={false}
+              showLanguage={false}
+            />
           </SectionCard>
         </div>
       )}

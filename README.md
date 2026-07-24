@@ -30,6 +30,8 @@ services:
     volumes:
       - ./data:/app/data
     environment:
+      - APP_ENV=production
+      - SECURE_COOKIES=true
       - ADMIN_PASSWORD=<CHANGE_ME>
       - JWT_SECRET=<CHANGE_ME_TO_A_LONG_RANDOM_STRING>
     restart: unless-stopped
@@ -41,11 +43,15 @@ services:
 docker run -d --name api-monitor \
   -p 3000:3000 \
   -v ./data:/app/data \
+  -e APP_ENV=production \
+  -e SECURE_COOKIES=true \
   -e ADMIN_PASSWORD=<CHANGE_ME> \
   -e JWT_SECRET=<CHANGE_ME_TO_A_LONG_RANDOM_STRING> \
   --restart unless-stopped \
   iwvw/api-monitor:latest
 ```
+
+生产模式必须通过 HTTPS 反向代理访问；`Secure` 会话 Cookie 不会在普通 HTTP 页面中生效。本地开发保持默认的 `APP_ENV=development`，可直接使用 `http://localhost:5173`。
 
 ## 本地开发
 
@@ -75,6 +81,11 @@ npm run backend-go:build
 | `ADMIN_PASSWORD` | 初始化管理员密码，仅首次初始化使用 |
 | `JWT_SECRET` | 会话密钥，建议使用长随机字符串 |
 | `LOG_LEVEL` | 日志级别：`DEBUG`、`INFO`、`WARN`、`ERROR` |
+| `APP_ENV` | `development` 或 `production`；生产模式启用更严格的安全默认值 |
+| `SECURE_COOKIES` | 是否仅通过 HTTPS 发送会话 Cookie；生产默认 `true` |
+| `ALLOW_LOCAL_SHELL_TASKS` | 是否允许后台直接执行本机 Shell；生产默认 `false` |
+| `TRUSTED_PROXY_CIDRS` | 允许提供真实客户端 IP 的反向代理 IP/CIDR 列表 |
+| `CORS_ALLOWED_ORIGINS` | 允许跨域访问 API 的 Origin 白名单，逗号分隔 |
 
 ## 技术栈
 
@@ -88,6 +99,7 @@ npm run backend-go:build
 - [文档索引](./docs/README.md)
 - [开发指南](./docs/开发指南.md)
 - [API 接口文档](./docs/API接口文档.md)
+- [安全加固与扫描计划](./docs/安全加固与扫描计划.md)
 - [Kumo UI 规则](./docs/Kumo%20UI%20规则.md)
 
 ## 许可证

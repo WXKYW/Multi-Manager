@@ -93,7 +93,6 @@ const ADVANCED_INSTANCE_ACTIONS = [
 
 const getAuthHeaders = () => ({
   'Content-Type': 'application/json',
-  'x-admin-password': localStorage.getItem('admin_password') || '',
 });
 
 const unwrap = (result) => result?.data ?? result ?? {};
@@ -946,7 +945,7 @@ function OraclePage() {
                   className="w-40 sm:w-52"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder="搜索名称、实例 ID、IP、shape"
+                  placeholder="搜索名称、ID、IP、shape"
                 />
                 <Select
                   aria-label="实例状态筛选"
@@ -1104,18 +1103,18 @@ function OraclePage() {
                   language="text"
                   value={consolePublicKey}
                   onChange={setConsolePublicKey}
-                  placeholder="粘贴用于创建 console connection 的 SSH 公钥"
+                  placeholder="粘贴控制台连接 SSH 公钥"
                   minHeight="10rem"
                 />
                 <div className="text-xs leading-5 text-kumo-subtle">
-                  使用本地 SSH 公钥创建 Oracle console connection，创建后可在右侧查看连接串和指纹。
+                  使用本地 SSH 公钥创建连接，创建后可在右侧查看连接串和指纹。
                 </div>
               </>
             ) : (
               <EmptyState
                 icon={Terminal}
                 title="请先选择实例"
-                description="先在“实例”页选择一台主机，再到这里创建控制台连接。"
+                description="先选实例，再来这里创建连接。"
                 card={false}
                 className="min-h-[18rem]"
               />
@@ -1133,7 +1132,7 @@ function OraclePage() {
               <EmptyState
                 icon={Terminal}
                 title="暂无可展示连接"
-                description="选中实例后，这里会展示该实例现有的控制台连接。"
+                description="选中实例后，这里显示现有连接。"
                 card={false}
                 className="min-h-[20rem]"
               />
@@ -1167,7 +1166,7 @@ function OraclePage() {
         <SectionCard
           title="Oracle 账号"
           icon={<Key className="h-4 w-4 text-kumo-brand" />}
-          description={accounts.length > 0 ? `${accounts.length} 个已配置账号` : '管理 OCI API 凭证与默认 Compartment'}
+          description={accounts.length > 0 ? `${accounts.length} 个已配置账号` : '管理 OCI 凭证和默认 Compartment'}
           className="min-h-0 flex-1"
           bodyPadding="none"
           bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
@@ -1247,7 +1246,7 @@ function OraclePage() {
         <Dialog className="!w-[min(40rem,calc(100vw-2rem))] !max-w-[min(40rem,calc(100vw-2rem))] p-6">
           <Dialog.Title className="mb-1 text-base font-bold text-kumo-strong">实例升降配</Dialog.Title>
           <Dialog.Description className="mb-4 text-xs text-kumo-subtle">
-            调整实例 shape 或 Flex 规格时，Oracle 可能会重启实例。建议在业务低峰期执行。
+            调整 shape 或 Flex 规格时，Oracle 可能重启实例，建议在低峰期执行。
           </Dialog.Description>
           {selectedInstance ? (
             <div className="space-y-4">
@@ -1345,7 +1344,7 @@ function OraclePage() {
                     </div>
                   ) : (
                     <div className="mt-4 text-xs text-kumo-subtle">
-                      该规格是固定规格，只需要切换 shape，不需要单独填写 OCPU / 内存。
+                      该规格为固定规格，只需切换 shape，无需填写 OCPU / 内存。
                     </div>
                   )}
                 </InsetPanel>
@@ -1382,7 +1381,7 @@ function OraclePage() {
             {editingAccount ? '编辑 Oracle 账号' : '添加 Oracle 账号'}
           </Dialog.Title>
           <Dialog.Description className="mb-4 text-xs text-kumo-subtle">
-            从 OCI 控制台复制 API Key 配置，把下载的 PEM 私钥全文粘贴到私钥框。
+            从 OCI 控制台复制 API Key 配置，并粘贴 PEM 私钥全文。
           </Dialog.Description>
           <div className="mb-4 space-y-2">
             <CodeEditor
@@ -1400,7 +1399,7 @@ key_file=<path to your private keyfile>`}
             />
             <div className="flex items-start gap-1.5 text-xs leading-5 text-kumo-subtle">
               <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>粘贴后自动填充 User OCID、Fingerprint、Tenancy OCID 和 Region；key_file 路径不使用，私钥请在下面粘贴或上传。</span>
+              <span>粘贴后自动填充 User OCID、Fingerprint、Tenancy OCID 和 Region；key_file 不使用，私钥请在下方粘贴或上传。</span>
             </div>
           </div>
           <div className="grid gap-3 md:grid-cols-2">
@@ -1408,13 +1407,13 @@ key_file=<path to your private keyfile>`}
               label="账号名称 *"
               value={accountForm.name}
               onChange={(event) => setAccountForm({ ...accountForm, name: event.target.value })}
-              placeholder="例如：东京主账号"
+              placeholder="如：东京主账号"
             />
             <Input
               label="Region *"
               value={accountForm.region}
               onChange={(event) => setAccountForm({ ...accountForm, region: event.target.value })}
-              placeholder="例如：ap-tokyo-1"
+              placeholder="如：ap-tokyo-1"
             />
             <Input
               label={editingAccount ? 'Tenancy OCID' : 'Tenancy OCID *'}
@@ -1432,13 +1431,13 @@ key_file=<path to your private keyfile>`}
               label="Fingerprint *"
               value={accountForm.fingerprint}
               onChange={(event) => setAccountForm({ ...accountForm, fingerprint: event.target.value })}
-              placeholder="API key fingerprint"
+              placeholder="fingerprint"
             />
             <Input
-              label="默认 Compartment OCID"
+              label="默认 Compartment"
               value={accountForm.defaultCompartmentId}
               onChange={(event) => setAccountForm({ ...accountForm, defaultCompartmentId: event.target.value })}
-              placeholder="可选；留空使用根租户"
+              placeholder="可选；留空用根租户"
             />
             <Input
               label="私钥 Passphrase"
@@ -1502,7 +1501,7 @@ key_file=<path to your private keyfile>`}
         <Dialog className="!w-[min(42rem,calc(100vw-2rem))] !max-w-[min(42rem,calc(100vw-2rem))] p-6">
           <Dialog.Title className="mb-1 text-base font-bold text-kumo-strong">导入 Oracle 账号</Dialog.Title>
           <Dialog.Description className="mb-4 text-xs text-kumo-subtle">
-            支持导入当前页面导出的 Oracle 账号 JSON 备份。可以选择文件，也可以把 JSON 内容直接粘贴到下方。
+            支持导入本页导出的 Oracle 账号 JSON，可选文件或直接粘贴。
           </Dialog.Description>
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-3">
@@ -1516,7 +1515,7 @@ key_file=<path to your private keyfile>`}
                 选择 JSON 文件
               </Button>
               <div className="min-w-0 text-xs text-kumo-subtle">
-                {accountImportFileName || '尚未选择文件'}
+                {accountImportFileName || '未选择文件'}
               </div>
             </div>
             <CodeEditor

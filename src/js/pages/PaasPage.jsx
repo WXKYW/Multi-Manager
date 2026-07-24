@@ -90,10 +90,8 @@ function PaasPage() {
 
   // Global Auth Header
   const getAuthHeaders = useCallback(() => {
-    const password = localStorage.getItem('admin_password') || '';
     return {
       'Content-Type': 'application/json',
-      'x-admin-password': password,
     };
   }, []);
 
@@ -1715,14 +1713,14 @@ function PaasPage() {
               size="base"
               icon={<RefreshCw className="h-8 w-8 animate-spin text-kumo-info" />}
               title="正在加载 Koyeb"
-              description="正在同步应用、服务、实例和域名状态。"
+              description="同步应用和域名状态"
             />
           ) : koyebAccounts.length === 0 ? (
             <Empty
               size="base"
               icon={<KoyebBrand className="h-8 w-8 text-kumo-info" />}
               title="暂无 Koyeb 账号"
-              description="请前往配置页添加 Koyeb API Token。"
+              description="需先添加 Koyeb API Token"
             />
           ) : (
             <div className="space-y-5">
@@ -1787,7 +1785,7 @@ function PaasPage() {
                           size="sm"
                           icon={<KoyebBrand className="h-8 w-8 text-kumo-info" />}
                           title="暂无应用"
-                          description="此账号下还没有 Koyeb 应用。"
+                          description="此账号暂无 Koyeb 应用。"
                         />
                       ) : (
                         <KumoGrid variant="4up" gap="sm" className="items-start">
@@ -1996,14 +1994,14 @@ function PaasPage() {
               size="base"
               icon={<RefreshCw className="h-8 w-8 animate-spin text-kumo-brand" />}
               title="正在加载 Fly.io"
-              description="正在同步应用、机器和域名状态。"
+              description="同步应用和域名状态"
             />
           ) : flyAccounts.length === 0 ? (
             <Empty
               size="base"
               icon={<FlyIoBrand className="h-8 w-8 text-kumo-brand" />}
               title="暂无 Fly.io 账号"
-              description="请前往配置页添加 Fly.io API Token。"
+              description="需先添加 Fly.io API Token"
             />
           ) : (
             <div className="space-y-5">
@@ -2066,7 +2064,7 @@ function PaasPage() {
                           size="sm"
                           icon={<FlyIoBrand className="h-8 w-8 text-kumo-brand" />}
                           title="暂无应用"
-                          description="此账号下还没有 Fly.io 应用。"
+                          description="此账号暂无 Fly.io 应用。"
                           contents={<Button size="sm" variant="primary" onClick={() => createFlyApp(account)} icon={<Plus className="h-3.5 w-3.5" />}>新建应用</Button>}
                         />
                       ) : (

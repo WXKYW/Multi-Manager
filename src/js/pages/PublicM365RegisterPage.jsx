@@ -337,7 +337,7 @@ function PublicM365RegisterPage() {
           bodyClassName="flex min-h-0 flex-1 flex-col"
           bodyPadding="lg"
           title={invite?.publicPageName || '注册链接'}
-          description="填写前缀后即可创建账号，系统会自动生成随机初始密码。"
+          description="填写前缀后创建账号"
           icon={<User className="h-4 w-4 text-kumo-brand" />}
         >
           <div className="flex min-h-0 flex-1 flex-col gap-4">
@@ -462,7 +462,7 @@ function PublicM365RegisterPage() {
         <div ref={successRef}>
           <SectionCard
             title="账号创建成功"
-            description="请及时保存登录账号和初始密码。"
+            description="请保存账号和初始密码"
             icon={<Check className="h-4 w-4 text-kumo-success" />}
             bodyPadding="lg"
           >

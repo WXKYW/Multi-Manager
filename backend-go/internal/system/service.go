@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/iwvw/api-monitor/backend-go/internal/apikeys"
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
 	"github.com/iwvw/api-monitor/backend-go/internal/database"
 	"github.com/iwvw/api-monitor/backend-go/internal/manifest"
@@ -45,6 +46,7 @@ type Service struct {
 	wg         sync.WaitGroup
 	notifier   Notifier
 	aiCaller   AICaller
+	apiKeys    *apikeys.Manager
 	alertState alertState
 }
 
@@ -66,6 +68,7 @@ func New(cfg config.Config) *Service {
 		cfg:        cfg,
 		startedAt:  time.Now(),
 		store:      database.New(cfg),
+		apiKeys:    apikeys.New(cfg),
 		statsCache: make(map[string]*APICounters),
 		stopChan:   make(chan struct{}),
 	}
@@ -302,6 +305,14 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		clone.URL = &nextURL
 		r = clone
 	}
+	if strings.HasPrefix(r.URL.Path, "/api/api-keys") {
+		clone := r.Clone(r.Context())
+		nextURL := *r.URL
+		nextURL.Path = "/api/system/api-keys" + strings.TrimPrefix(r.URL.Path, "/api/api-keys")
+		nextURL.RawPath = ""
+		clone.URL = &nextURL
+		r = clone
+	}
 
 	switch r.URL.Path {
 	case "/api/system/host-metrics":
@@ -338,6 +349,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		response.JSON(w, http.StatusOK, s.openapiDocument(r))
+	case "/api/system/api-keys":
+		s.handleAPIKeyCollection(w, r)
 	case "/api/system/ai-access":
 		if r.Method != http.MethodGet {
 			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -424,6 +437,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		response.JSON(w, status, payload)
 	default:
+		if strings.HasPrefix(r.URL.Path, "/api/system/api-keys/") {
+			s.handleAPIKeyItem(w, r)
+			return
+		}
 		if strings.HasPrefix(r.URL.Path, "/api/system/ai-access/mcp-servers/") {
 			id := strings.TrimPrefix(r.URL.Path, "/api/system/ai-access/mcp-servers/")
 			if r.Method == http.MethodDelete {
@@ -638,12 +655,7 @@ func (s *Service) openapiDocument(r *http.Request) map[string]interface{} {
 				"sessionCookie": map[string]interface{}{
 					"type": "apiKey",
 					"in":   "cookie",
-					"name": "session_id",
-				},
-				"adminPasswordHeader": map[string]interface{}{
-					"type": "apiKey",
-					"in":   "header",
-					"name": "x-admin-password",
+					"name": "sid",
 				},
 				"bearerAuth": map[string]interface{}{
 					"type":         "http",
@@ -701,10 +713,7 @@ func openAPIParameters(route apiDocRoute) []map[string]interface{} {
 func openAPISecurity(mode manifest.AuthMode) []map[string][]string {
 	switch mode {
 	case manifest.AuthSession:
-		return []map[string][]string{
-			{"sessionCookie": {}},
-			{"adminPasswordHeader": {}},
-		}
+		return []map[string][]string{{"sessionCookie": {}}}
 	case manifest.AuthAPIKey:
 		return []map[string][]string{{"bearerAuth": {}}}
 	case manifest.AuthAgent:

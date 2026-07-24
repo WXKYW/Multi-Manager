@@ -2725,7 +2725,6 @@ function ServerPage() {
 
   const getSettingsAuthHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
-    'x-admin-password': localStorage.getItem('admin_password') || useStore.getState().loginPassword || '',
   }), []);
 
   const handleServerIpDisplayModeChange = useCallback((value) => {
@@ -7723,7 +7722,7 @@ function ServerPage() {
                 <Input size="sm" label="自定义域名" value={serverStatusPageForm.domain} onChange={(event) => setServerStatusPageForm(prev => ({ ...prev, domain: normalizeServerStatusDomain(event.target.value) }))} placeholder="status.example.com" />
                 <Input size="sm" label="缓存秒数" type="number" min="30" value={serverStatusPageForm.cacheSeconds} onChange={(event) => setServerStatusPageForm(prev => ({ ...prev, cacheSeconds: event.target.value }))} />
                 <div className="sm:col-span-2">
-                  <Textarea size="sm" label="说明" value={serverStatusPageForm.description} onChange={(event) => setServerStatusPageForm(prev => ({ ...prev, description: event.target.value }))} placeholder="这里展示公开基础设施的实时状态。" rows={3} />
+                  <Textarea size="sm" label="说明" value={serverStatusPageForm.description} onChange={(event) => setServerStatusPageForm(prev => ({ ...prev, description: event.target.value }))} placeholder="可选说明" rows={3} />
                 </div>
               </div>
 
@@ -9158,7 +9157,7 @@ function ServerPage() {
                             <LayerCard.Primary className="min-w-0 overflow-hidden p-2">
                           {server.resources.containers.length === 0 ? (
                             <div className="p-8 text-center text-xs text-kumo-subtle">
-                              当前主机没有容器
+                              暂无容器
                             </div>
                           ) : (
                             <ScrollableTable layout="fixed" widths={dockerColWidths}>
@@ -9509,7 +9508,7 @@ function ServerPage() {
                             badges: running > 0 ? [{ label: `${running} 运行`, variant: 'success', appearance: 'dot' }] : [],
                             children: projects.length === 0 ? (
                               <div className="rounded-md border border-dashed border-kumo-line p-8 text-center text-xs text-kumo-subtle">
-                                当前主机未检索到 Compose 项目
+                                暂无 Compose 项目
                               </div>
                             ) : (
                               <div className="flex flex-col gap-2">
@@ -9706,7 +9705,7 @@ function ServerPage() {
                             ),
                             children: images.length === 0 ? (
                               <div className="rounded-md border border-dashed border-kumo-line p-8 text-center text-xs text-kumo-subtle">
-                                当前主机未检索到镜像
+                                暂无镜像
                               </div>
                             ) : (
                               <ScrollableTable layout="fixed" widths={[imagesColWidths[0], imagesColWidths[1], imagesColWidths[2], imagesColWidths[4]]}>
@@ -9848,7 +9847,7 @@ function ServerPage() {
                             ),
                             children: networks.length === 0 ? (
                               <div className="rounded-md border border-dashed border-kumo-line p-8 text-center text-xs text-kumo-subtle">
-                                当前主机未检索到 Docker 网络
+                                暂无 Docker 网络
                               </div>
                             ) : (
                               <ScrollableTable layout="fixed" widths={[networksColWidths[0], networksColWidths[1], networksColWidths[2], networksColWidths[3], networksColWidths[5]]}>
@@ -9977,7 +9976,7 @@ function ServerPage() {
                             ),
                             children: volumes.length === 0 ? (
                               <div className="rounded-md border border-dashed border-kumo-line p-8 text-center text-xs text-kumo-subtle">
-                                当前主机未检索到 Docker 存储卷
+                                暂无 Docker 存储卷
                               </div>
                             ) : (
                               <ScrollableTable layout="fixed" widths={[volumesColWidths[0], volumesColWidths[1], volumesColWidths[2], volumesColWidths[4]]}>
@@ -10094,7 +10093,7 @@ function ServerPage() {
                             {
                               key: 'cpu',
                               title: 'CPU 使用率',
-                              description: '当前主机容器 CPU 占用趋势',
+                              description: '容器 CPU 趋势',
                               data: buildDockerStatSeries(serverHistory, 'cpu', isDarkMode),
                               value: `${summary.cpu.toFixed(1)}%`,
                               yAxisTickFormat: formatPercentAxis,
@@ -10103,7 +10102,7 @@ function ServerPage() {
                             {
                               key: 'memory',
                               title: '内存使用率',
-                              description: '当前主机容器内存占用趋势',
+                              description: '容器内存趋势',
                               data: buildDockerStatSeries(serverHistory, 'memory', isDarkMode),
                               value: `${summary.memory.toFixed(1)}%`,
                               yAxisTickFormat: formatPercentAxis,
@@ -10112,7 +10111,7 @@ function ServerPage() {
                             {
                               key: 'network',
                               title: '网络 I/O',
-                              description: '当前主机容器接收与发送流量',
+                              description: '容器网络流量',
                               data: buildDockerPairSeries(serverHistory, [
                                 { key: 'netIn', name: '接收', color: netInColor },
                                 { key: 'netOut', name: '发送', color: netOutColor },
@@ -10124,7 +10123,7 @@ function ServerPage() {
                             {
                               key: 'disk',
                               title: '磁盘 I/O',
-                              description: '当前主机容器读取与写入流量',
+                              description: '容器磁盘流量',
                               data: buildDockerPairSeries(serverHistory, [
                                 { key: 'blockRead', name: '读取', color: readColor },
                                 { key: 'blockWrite', name: '写入', color: writeColor },
@@ -10145,7 +10144,7 @@ function ServerPage() {
                             ] : [],
                             children: currentStats.length === 0 ? (
                               <div className="rounded-md border border-dashed border-kumo-line p-8 text-center text-xs text-kumo-subtle">
-                                当前主机未检索到 Docker 资源统计
+                                暂无 Docker 资源统计
                               </div>
                             ) : (
                               <div className="grid gap-3 xl:grid-cols-2">
@@ -10206,7 +10205,7 @@ function ServerPage() {
         <div className="flex flex-col gap-4">
             <SectionCard
               title="主机偏好"
-              description="主机列表显示和 Agent 安装下载配置。"
+              description="列表与 Agent 下载配置"
               icon={<Settings className={MANAGEMENT_CARD_ICON_CLASS} />}
               actions={(
                 <Button
@@ -10263,7 +10262,7 @@ function ServerPage() {
               <div className="flex min-w-0 flex-col gap-4">
             <SectionCard
               title="批量录入"
-              description="按 CSV 格式快速添加多台主机。"
+              description="CSV 批量添加主机"
               icon={<FolderOpen className={MANAGEMENT_CARD_ICON_CLASS} />}
               meta={<span className="text-xs font-semibold text-kumo-subtle">CSV</span>}
               bodyPadding="sm"
@@ -10295,16 +10294,16 @@ function ServerPage() {
 
             <SectionCard
               title="配置迁移"
-              description="导入或导出主机配置备份。"
+              description="导入或导出主机配置"
               icon={<Database className={MANAGEMENT_CARD_ICON_CLASS} />}
               meta={<span className="text-xs font-semibold text-kumo-subtle">JSON</span>}
               bodyPadding="sm"
               bodyClassName="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
             >
                 <div className="min-w-0 space-y-1">
-                  <div className="text-xs font-medium text-kumo-strong">主机配置备份</div>
+                  <div className="text-xs font-medium text-kumo-strong">主机配置</div>
                   <div className="max-w-xl text-xs leading-5 text-kumo-subtle">
-                    包含连接信息、认证方式、标签、描述、地区和监控模式，适合跨环境迁移或本地备份。
+                    包含连接、认证、标签等配置。
                   </div>
                 </div>
                 <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
@@ -10337,7 +10336,7 @@ function ServerPage() {
               <div className="flex min-w-0 flex-col gap-4">
             <SectionCard
               title="SSH 凭据库"
-              description="保存可复用的主机登录凭据。"
+              description="复用登录凭据"
               icon={<Key className={MANAGEMENT_CARD_ICON_CLASS} />}
               actions={(
                 <Button
@@ -10417,7 +10416,7 @@ function ServerPage() {
 
             <SectionCard
               title="网络拨测目标"
-              description="按主机终端侧配置 TCP / HTTP 拨测目标。"
+              description="配置 TCP / HTTP 拨测"
               icon={<Globe className={MANAGEMENT_CARD_ICON_CLASS} />}
               actions={(
                 <Button
@@ -11114,7 +11113,7 @@ function ServerPage() {
                   </div>
 
                   <div className="mt-3 flex flex-col gap-1.5">
-                    <label className="font-semibold text-kumo-subtle">选择凭据预设进行快速填充</label>
+                    <label className="font-semibold text-kumo-subtle">凭据预设</label>
                     <Select size="sm"
                       aria-label="选择凭据预设"
                       value={selectedCredentialId}
@@ -11262,7 +11261,7 @@ function ServerPage() {
                         labels={{ copyAction: '复制安装命令' }}
                       />
                       <div className="rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 py-2 text-[11px] leading-relaxed text-kumo-subtle">
-                        <span className="font-semibold text-kumo-strong">执行环境提示</span>
+                        <span className="font-semibold text-kumo-strong">执行环境</span>
                         {getAgentInstallExecutionHint(agentInstallOS)}
                       </div>
                       <div className="grid grid-cols-1 gap-2 text-[11px] text-kumo-subtle sm:grid-cols-2">
@@ -11484,7 +11483,7 @@ function ServerPage() {
 
             {importPreview && (
               <div className="bg-kumo-success/10 border border-kumo-success/20 p-2.5 rounded text-xs text-kumo-success font-bold">
-                ✓ 识别就绪：检测到 {importPreview.length} 个有效的服务器拓扑信息，确认开始恢复？
+                ✓ 已识别 {importPreview.length} 台主机，确认恢复？
               </div>
             )}
 
@@ -11578,7 +11577,7 @@ function ServerPage() {
                     labels={{ copyAction: '复制 Agent 安装命令' }}
                   />
                   <div className="rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 py-2 text-[11px] leading-relaxed text-kumo-subtle">
-                    <span className="font-semibold text-kumo-strong">执行环境提示</span>
+                    <span className="font-semibold text-kumo-strong">执行环境</span>
                     {getAgentInstallExecutionHint(agentInstallOS)}
                   </div>
                 </div>
@@ -12236,7 +12235,7 @@ function ServerPage() {
                 required
                 value={networkTargetForm.host}
                 onChange={e => setNetworkTargetForm(prev => ({ ...prev, host: e.target.value }))}
-                placeholder="例如: hb-ct-v4.ip.zstaticcdn.com"
+                placeholder="如：hb-ct-v4.ip.zstaticcdn.com"
               />
               <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_9rem]">
                 <Input

@@ -34,7 +34,6 @@ function serverIdFromPath() {
 function authHeaders(json = false) {
   return {
     ...(json ? { 'Content-Type': 'application/json' } : {}),
-    'x-admin-password': localStorage.getItem('admin_password') || '',
   };
 }
 

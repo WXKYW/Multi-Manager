@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/iwvw/api-monitor/backend-go/internal/applog"
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
@@ -33,7 +34,16 @@ func main() {
 		applog.Info(nil, "startup", "legacy node adapter enabled", "url", cfg.LegacyBaseURL)
 	}
 
-	if err := http.ListenAndServe(cfg.ListenAddress(), handler); err != nil {
+	httpServer := &http.Server{
+		Addr:              cfg.ListenAddress(),
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
+	if err := httpServer.ListenAndServe(); err != nil {
 		applog.Error(nil, "startup", "http server stopped", "error", err.Error())
 		os.Exit(1)
 	}

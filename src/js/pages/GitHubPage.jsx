@@ -1666,7 +1666,6 @@ function GitHubPage() {
   const isDarkMode = theme === 'dark';
   const getAuthHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
-    'x-admin-password': localStorage.getItem('admin_password') || '',
   }), []);
 
   const [activeTab, setActiveTab] = useState('repositories');
@@ -2219,7 +2218,7 @@ function GitHubPage() {
             </LayerCard.Secondary>
             <LayerCard.Primary className="p-0">
             {repositories.length === 0 ? (
-              <FillEmpty title="暂无 GitHub 仓库" description="粘贴仓库 URL 后即可开始观察指标、Actions 和趋势。" />
+              <FillEmpty title="暂无 GitHub 仓库" description="先添加仓库" />
             ) : (
               <div className="grid items-start gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                 {repositories.map((repo) => {
@@ -2345,11 +2344,11 @@ function GitHubPage() {
                     <Button size="sm" variant="primary" icon={<Play className="h-3.5 w-3.5" />} onClick={dispatchWorkflow}>触发</Button>
                   </div>
                 ) : (
-                  <Badge variant="neutral">{selectedRepo.authenticated ? '当前 Token 未获得仓库写权限' : '未配置 Token，仅观察'}</Badge>
+                  <Badge variant="neutral">{selectedRepo.authenticated ? '当前 Token 无写权限' : '未配置 Token'}</Badge>
                 )}
               </LayerCard.Secondary>
               <LayerCard.Primary className="p-0">
-              {actions.length === 0 ? <FillEmpty title="暂无 Actions 记录" description="等待后台采集或手动刷新仓库后显示 workflow 运行记录。" /> : (
+              {actions.length === 0 ? <FillEmpty title="暂无 Actions 记录" description="刷新后显示 Actions 记录" /> : (
                 <DataTableFrame variant="embedded" density="compact" className="min-w-0 overflow-x-auto overflow-y-visible scrollbar-thin">
                   <AppTable layout="fixed" widths={GITHUB_ACTIONS_TABLE_WIDTHS}>
                     <colgroup>
@@ -2452,7 +2451,7 @@ function GitHubPage() {
                       />
                     )}
                   </ChartBoundaryBox>
-                ) : <FillEmpty title="趋势数据不足" description="等待后台完成至少两次采集后显示曲线。" />}
+                ) : <FillEmpty title="趋势数据不足" description="至少两次采集后显示" />}
                 </LayerCard.Primary>
               </LayerCard>
               <LayerCard className="self-start p-0 shadow-none">
@@ -2477,7 +2476,7 @@ function GitHubPage() {
                   <Text variant="body" size="sm" bold>事件与通知源</Text>
                 </LayerCard.Secondary>
                 <LayerCard.Primary className="p-0">
-                {events.length === 0 ? <FillEmpty title="暂无 GitHub 事件" description="Webhook 或后台采集触发后，事件会实时出现在这里。" /> : (
+                {events.length === 0 ? <FillEmpty title="暂无 GitHub 事件" description="等待 Webhook 或采集" /> : (
                   <DataTableFrame variant="embedded" density="compact" className="min-w-0 overflow-x-auto overflow-y-visible scrollbar-thin">
                     <AppTable layout="fixed" widths={GITHUB_EVENTS_TABLE_WIDTHS}>
                       <colgroup>
@@ -2622,7 +2621,7 @@ function GitHubPage() {
 
       {!selectedRepo && ['actions', 'trends', 'events'].includes(activeTab) && (
         <LayerCard className="p-0 shadow-none">
-          <FillEmpty title="暂无仓库详情" description="请先添加或选择一个 GitHub 仓库。" />
+          <FillEmpty title="暂无仓库详情" description="请先选择仓库" />
         </LayerCard>
       )}
 
@@ -2647,7 +2646,7 @@ function GitHubPage() {
                 label="GitHub 仓库"
                 value={repoForm.url}
                 onChange={(e) => setRepoForm((p) => ({ ...p, url: e.target.value }))}
-                placeholder="https://github.com/owner/repo 或 owner/repo"
+                placeholder="owner/repo 或完整 GitHub URL"
                 autoFocus
               />
               <div className="grid gap-3 sm:grid-cols-2">

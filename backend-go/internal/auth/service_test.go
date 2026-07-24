@@ -205,6 +205,182 @@ func Test2FAManagementFlow(t *testing.T) {
 	}
 }
 
+func TestLoginDoesNotExposeSessionIDAndProductionCookieIsSecure(t *testing.T) {
+	t.Setenv("ADMIN_PASSWORD", "")
+	service := New(config.Config{
+		Environment:   "production",
+		SecureCookies: true,
+		Host:          "127.0.0.1",
+		DataDir:       t.TempDir(),
+		DBName:        "data.db",
+	})
+	res := performAuthRequest(service, http.MethodPost, "/api/auth/set-password", `{"password":"secret123"}`, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("set password: %d %s", res.Code, res.Body.String())
+	}
+	res = performAuthRequest(service, http.MethodPost, "/api/auth/login", `{"password":"secret123"}`, nil)
+	if strings.Contains(res.Body.String(), "sessionId") {
+		t.Fatalf("login response exposed session id: %s", res.Body.String())
+	}
+	cookie := findCookie(res.Result().Cookies(), "sid")
+	if cookie == nil || !cookie.HttpOnly || !cookie.Secure {
+		t.Fatalf("expected secure HttpOnly cookie, got %#v", cookie)
+	}
+}
+
+func TestWebAuthnRegistrationBeginDoesNotRequirePasswordPrompt(t *testing.T) {
+	t.Setenv("ADMIN_PASSWORD", "")
+	t.Setenv("DEMO_MODE", "")
+	t.Setenv("ENCRYPTION_KEY", "")
+
+	service := New(config.Config{
+		Version: "test",
+		Host:    "127.0.0.1",
+		Port:    0,
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	res := performAuthRequest(service, http.MethodPost, "/api/auth/set-password", `{"password":"secret123"}`, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("set-password status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	res = performAuthRequest(service, http.MethodPost, "/api/auth/login", `{"password":"secret123"}`, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("login status = %d body=%s", res.Code, res.Body.String())
+	}
+	cookie := findCookie(res.Result().Cookies(), "sid")
+	if cookie == nil {
+		t.Fatal("expected login cookie")
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/webauthn/register/begin", strings.NewReader(`{"label":"Windows Hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://example.com")
+	req.RemoteAddr = "203.0.113.20:4567"
+	req.AddCookie(cookie)
+	res = httptest.NewRecorder()
+	service.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("register begin status = %d body=%s", res.Code, res.Body.String())
+	}
+	var payload struct {
+		Success bool   `json:"success"`
+		FlowID  string `json:"flowId"`
+	}
+	mustDecodeAuth(t, res, &payload)
+	if !payload.Success || payload.FlowID == "" {
+		t.Fatalf("unexpected register begin payload: %#v", payload)
+	}
+}
+
+func TestClientIPOnlyTrustsConfiguredProxy(t *testing.T) {
+	service := New(config.Config{TrustedProxyCIDRs: []string{"10.0.0.0/8"}})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	req.RemoteAddr = "203.0.113.8:1234"
+	req.Header.Set("X-Forwarded-For", "198.51.100.7")
+	if got := service.requestClientIP(req); got != "203.0.113.8" {
+		t.Fatalf("untrusted proxy address = %q", got)
+	}
+	req.RemoteAddr = "10.1.2.3:1234"
+	if got := service.requestClientIP(req); got != "198.51.100.7" {
+		t.Fatalf("trusted proxy address = %q", got)
+	}
+}
+
+func TestGitHubOAuthConfigRoundTripEncryptsSecret(t *testing.T) {
+	service := New(config.Config{
+		Version: "test",
+		Host:    "127.0.0.1",
+		Port:    0,
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	db, err := service.openDB(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	input := githubOAuthConfig{
+		Enabled:       true,
+		ClientID:      "client-id",
+		ClientSecret:  "super-secret",
+		AllowedLogins: normalizeGitHubList("IWVW\niwvw,Other"),
+		AllowedEmails: normalizeGitHubList("ADMIN@example.com,admin@example.com"),
+	}
+	if err := service.saveGitHubOAuthConfig(context.Background(), db, input); err != nil {
+		t.Fatal(err)
+	}
+
+	rawSecret, err := service.getConfig(context.Background(), db, githubClientSecretKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rawSecret == "" || rawSecret == input.ClientSecret {
+		t.Fatalf("expected encrypted secret, got %q", rawSecret)
+	}
+
+	loaded, err := service.loadGitHubOAuthConfig(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.Enabled || loaded.ClientID != input.ClientID || loaded.ClientSecret != input.ClientSecret {
+		t.Fatalf("unexpected config roundtrip: %#v", loaded)
+	}
+	if len(loaded.AllowedLogins) != 2 || loaded.AllowedLogins[0] != "iwvw" || loaded.AllowedLogins[1] != "other" {
+		t.Fatalf("unexpected allowed logins: %#v", loaded.AllowedLogins)
+	}
+	if len(loaded.AllowedEmails) != 1 || loaded.AllowedEmails[0] != "admin@example.com" {
+		t.Fatalf("unexpected allowed emails: %#v", loaded.AllowedEmails)
+	}
+}
+
+func TestAuthFlowIsSingleUse(t *testing.T) {
+	service := New(config.Config{
+		Version: "test",
+		Host:    "127.0.0.1",
+		Port:    0,
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	db, err := service.openDB(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	type payload struct {
+		Value string `json:"value"`
+	}
+	flowID, err := service.createAuthFlow(context.Background(), db, flowTypeGitHub2FA, payload{Value: "once"}, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var first payload
+	ok, err := service.consumeAuthFlow(context.Background(), db, flowTypeGitHub2FA, flowID, &first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || first.Value != "once" {
+		t.Fatalf("unexpected first consume result: ok=%v payload=%#v", ok, first)
+	}
+
+	var second payload
+	ok, err = service.consumeAuthFlow(context.Background(), db, flowTypeGitHub2FA, flowID, &second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatalf("expected second consume to fail, got payload=%#v", second)
+	}
+}
+
 func performAuthRequest(service *Service, method, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.RemoteAddr = "203.0.113.20:4567"

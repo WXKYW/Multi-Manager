@@ -235,18 +235,13 @@ function TotpPage() {
 
   // 获取请求 Headers
   const getAuthHeaders = () => {
-    const password = localStorage.getItem('admin_password') || '';
     return {
       'Content-Type': 'application/json',
-      'x-admin-password': password,
     };
   };
 
   const getAuthOnlyHeaders = () => {
-    const password = localStorage.getItem('admin_password') || '';
-    return {
-      'x-admin-password': password,
-    };
+    return {};
   };
 
   const cacheDetectedBrandIcon = async (item) => {
@@ -1199,29 +1194,24 @@ function TotpPage() {
   };
 
   // 同步配置到浏览器扩展
-  const syncConfigToExtension = () => {
-    const password = localStorage.getItem('admin_password') || '';
-    const serverUrl = window.location.origin;
-
-    window.postMessage(
-      {
-        type: 'API_MONITOR_SYNC_CONFIG',
-        serverUrl: serverUrl,
-        password: password,
-      },
-      '*'
-    );
-
-    const successHandler = (e) => {
-      if (e.data && e.data.type === 'API_MONITOR_SYNC_SUCCESS') {
-        toast.success('配置已成功同步到浏览器插件！');
-        window.removeEventListener('message', successHandler);
+  const syncConfigToExtension = async () => {
+    try {
+      const response = await fetch('/api/auth/plugin-pairings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ name: `浏览器插件 ${new Date().toLocaleDateString('zh-CN')}` }),
+      });
+      const result = await response.json();
+      const pairing = result.data || result;
+      if (!response.ok || !pairing.code) {
+        throw new Error(result.error || '生成插件配对码失败');
       }
-    };
-    window.addEventListener('message', successHandler);
-    setTimeout(() => {
-      window.removeEventListener('message', successHandler);
-    }, 3000);
+      await navigator.clipboard.writeText(pairing.code);
+      toast.success('一次性配对码已复制，10 分钟内到插件设置页兑换');
+    } catch (error) {
+      toast.error(error.message || '生成插件配对码失败');
+    }
   };
 
   // Helper formats code displaying
@@ -1775,7 +1765,7 @@ function TotpPage() {
                 </div>
                 <div className="min-w-0">
                   <h4 className="text-xs font-bold text-kumo-strong">API Monitor 2FA 助手</h4>
-                  <p className="text-[10px] text-kumo-subtle mt-0.5">本地免登录实时一键同步</p>
+                  <p className="text-[10px] text-kumo-subtle mt-0.5">一次性配对，使用受限、可撤销的 API Key</p>
                 </div>
               </div>
             </div>
@@ -1792,7 +1782,7 @@ function TotpPage() {
               </LinkButton>
 
               <Button size="sm" variant="primary" className="w-full" onClick={syncConfigToExtension}>
-                一键同步密码与地址到插件
+                生成安全配对码
               </Button>
 
               <Button size="sm"
@@ -1819,6 +1809,7 @@ function TotpPage() {
                   <div className="bg-kumo-brand/10 text-kumo-brand p-2 rounded border border-kumo-brand/20 mt-1 font-medium select-all">
                     配置插件地址: {window.location.origin}
                   </div>
+                  <p>在插件设置页填写上方地址，并粘贴刚生成的一次性配对码；配对码 10 分钟后失效且只能使用一次。</p>
                 </div>
               </AnimatedCollapse>
             </div>
@@ -1912,12 +1903,12 @@ function TotpPage() {
 
                 <div className="space-y-1.5 pt-2">
                   <label className="text-xs font-semibold text-kumo-subtle">
-                    批量 OTP Auth URIs 导入 (每行一条)
+                    批量导入 OTP Auth URI
                   </label>
                   <CodeEditor
                     label="批量 OTP Auth URIs"
                     language="text"
-                    placeholder="otpauth://totp/GitHub:user@example.com?secret=XXXX..."
+                    placeholder="otpauth://totp/GitHub:user@example.com?secret=..."
                     value={importUris}
                     onChange={setImportUris}
                     minHeight="8rem"
@@ -1959,11 +1950,11 @@ function TotpPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-kumo-subtle">发行商 / 服务商</label>
+                  <label className="text-xs font-semibold text-kumo-subtle">发行商</label>
                   <Input size="sm"
                     aria-label="发行商"
                     type="text"
-                    placeholder="如: GitHub, Microsoft"
+                    placeholder="如：GitHub、Microsoft"
                     value={accountForm.issuer}
                     onChange={(e) => setAccountForm((prev) => ({ ...prev, issuer: e.target.value }))}
                     className="w-full"
@@ -1971,11 +1962,11 @@ function TotpPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-kumo-subtle">账户名 / 标识</label>
+                  <label className="text-xs font-semibold text-kumo-subtle">账户名</label>
                   <Input size="sm"
                     aria-label="账户名"
                     type="text"
-                    placeholder="如: user@example.com"
+                    placeholder="如：user@example.com"
                     value={accountForm.account}
                     onChange={(e) => setAccountForm((prev) => ({ ...prev, account: e.target.value }))}
                     className="w-full"
@@ -1998,7 +1989,7 @@ function TotpPage() {
                     <Input size="sm"
                       aria-label="图标关键字"
                       type="text"
-                      placeholder="品牌名、SVG Repo 链接或 svgrepo:448239-microsoft"
+                      placeholder="品牌名或 svgrepo:448239-microsoft"
                       value={accountForm.icon}
                       onChange={(e) => setAccountForm((prev) => ({ ...prev, icon: normalizeSVGRepoIconRef(e.target.value) }))}
                       onBlur={(e) => setAccountForm((prev) => ({ ...prev, icon: normalizeSVGRepoIconRef(e.target.value) }))}

@@ -39,7 +39,7 @@ const WEEKDAY_OPTIONS = [
 const MONTH_DAY_OPTIONS = Array.from({ length: 28 }, (_, index) => ({ value: String(index + 1), label: `${index + 1} 日` }));
 
 function authHeaders() {
-  return { 'Content-Type': 'application/json', 'x-admin-password': localStorage.getItem('admin_password') || '' };
+  return { 'Content-Type': 'application/json' };
 }
 
 function formatTime(value) {
@@ -167,7 +167,7 @@ export function BackupPanel({ embedded = false } = {}) {
     });
     const data = await res.json();
     if (!data.success) return toast.error(data.error || '恢复失败');
-    toast.success('备份已恢复，建议重启服务后继续使用');
+    toast.success('备份已恢复');
   };
 
   return (
@@ -175,7 +175,6 @@ export function BackupPanel({ embedded = false } = {}) {
       {!embedded && (
         <section className="grid gap-3">
           <h1 className="text-lg font-semibold text-kumo-strong">备份中心</h1>
-          <p className="text-xs text-kumo-subtle">打包 SQLite 数据库与文件柜目录，支持本地保留和云端同步。</p>
         </section>
       )}
 
@@ -187,7 +186,7 @@ export function BackupPanel({ embedded = false } = {}) {
           actions={(
             <>
               <Button size="sm" variant="secondary" onClick={load} disabled={loading}><RefreshCw className="h-3.5 w-3.5" />刷新备份</Button>
-              <Button size="sm" variant="primary" onClick={run} disabled={running}><Play className="h-3.5 w-3.5" />立即完整备份</Button>
+              <Button size="sm" variant="primary" onClick={run} disabled={running}><Play className="h-3.5 w-3.5" />立即备份</Button>
             </>
           )}
           bodyClassName="space-y-3"
@@ -222,7 +221,7 @@ export function BackupPanel({ embedded = false } = {}) {
 
         <SectionCard
           title="备份历史"
-          description="完整备份生成后可下载、恢复或删除。"
+          description="可下载、恢复或删除"
           icon={<Clock className="h-4 w-4 text-kumo-brand" />}
           bodyPadding="none"
         >
@@ -230,7 +229,7 @@ export function BackupPanel({ embedded = false } = {}) {
             <div className="flex min-h-40 flex-col items-center justify-center gap-2 bg-kumo-control px-6 py-8 text-center text-kumo-default">
               <Database className="h-8 w-8 text-kumo-inactive" />
               <div className="text-base font-semibold text-kumo-strong">暂无备份</div>
-              <div className="max-w-96 text-xs text-kumo-subtle">点击立即备份后会生成可下载的 zip 包。</div>
+              <div className="max-w-96 text-xs text-kumo-subtle">先执行一次备份</div>
             </div>
           ) : (
             <div className="max-h-80 overflow-auto">

@@ -17,7 +17,7 @@ const LEVELS = [
 ];
 
 function authHeaders() {
-  return { 'x-admin-password': localStorage.getItem('admin_password') || '' };
+  return {};
 }
 
 function levelClass(level) {

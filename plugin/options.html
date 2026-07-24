@@ -204,19 +204,17 @@
             <span class="header-icon">2FA</span>
             <div>
                 <h1>API Monitor 双因子认证设置</h1>
-                <div class="subtitle">配置插件连接主控端并启用页面填充入口</div>
             </div>
         </div>
         <form id="settingsForm">
             <div class="form-group">
                 <label for="serverUrl">服务器地址</label>
                 <input type="url" id="serverUrl" placeholder="https://your-server.com" required>
-                <div class="hint">API Monitor 后端地址，例如 https://your-server.com</div>
             </div>
             <div class="form-group">
-                <label for="password">管理密码</label>
-                <input type="password" id="password" placeholder="填写 x-admin-password" required>
-                <div class="hint">用于访问 API Monitor 后端接口的管理密码。</div>
+                <label for="token">安全配对码 / 插件 API Key</label>
+                <input type="password" id="token" placeholder="粘贴 pair_ 配对码或 akp_ API Key" required>
+                <div class="hint">主程序需保持已登录。</div>
             </div>
             <div class="check-row">
                 <input type="checkbox" id="showFillButton">

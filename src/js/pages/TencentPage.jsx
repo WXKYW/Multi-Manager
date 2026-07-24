@@ -133,7 +133,6 @@ function TencentPage() {
 
   const getAuthHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
-    'x-admin-password': localStorage.getItem('admin_password') || '',
   }), []);
 
   const loadAccounts = useCallback(async () => {
@@ -289,7 +288,7 @@ function TencentPage() {
   };
 
   const renderDns = () => (
-    <SectionCard title="DNS 域名" description="域名列表和解析记录数量，双击后续可接入解析记录管理。" icon={<Globe className="h-4 w-4 text-kumo-brand" />} bodyPadding="none">
+    <SectionCard title="DNS 域名" description="域名与解析记录" icon={<Globe className="h-4 w-4 text-kumo-brand" />} bodyPadding="none">
       <DataTableFrame variant="embedded" density="compact">
         <AppTable layout="fixed" widths={dnsColWidths}>
           <colgroup>{dnsColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
@@ -324,7 +323,7 @@ function TencentPage() {
     const items = kind === 'cvm' ? cvmInstances : lighthouseInstances;
     const title = kind === 'cvm' ? 'CVM 实例' : '轻量应用服务器';
     return (
-      <SectionCard title={title} description="按实例状态、地域、地址和规格快速扫描资源。" icon={<Server className="h-4 w-4 text-kumo-brand" />} bodyPadding="none">
+      <SectionCard title={title} description="按状态和地域查看资源" icon={<Server className="h-4 w-4 text-kumo-brand" />} bodyPadding="none">
         <DataTableFrame variant="embedded" density="compact">
           <AppTable layout="fixed" widths={[240, 96, 140, 150, 120, 180, 116]}>
             <Table.Header sticky variant="compact">
@@ -377,7 +376,7 @@ function TencentPage() {
   const renderAccounts = () => (
     <SectionCard
       title="腾讯云账号"
-      description="真实账号走后端加密存储，Secret 保存后不会回显。"
+      description="Secret 保存后不回显"
       icon={<Cloud className="h-4 w-4 text-kumo-brand" />}
       action={<Button size="sm" onClick={openCreateModal}><Plus className="h-3.5 w-3.5" />添加账号</Button>}
       bodyPadding="none"
@@ -396,7 +395,7 @@ function TencentPage() {
           </Table.Header>
           <Table.Body>
             {accounts.length === 0 ? (
-              <Table.Row><Table.Cell colSpan={5}><EmptyState card={false} title="尚未配置账号" description="添加腾讯云账号后即可加载 DNS 和实例资源。" action={<Button size="sm" onClick={openCreateModal}><Plus className="h-3.5 w-3.5" />添加账号</Button>} /></Table.Cell></Table.Row>
+              <Table.Row><Table.Cell colSpan={5}><EmptyState card={false} title="尚未配置账号" description="添加账号后加载资源。" action={<Button size="sm" onClick={openCreateModal}><Plus className="h-3.5 w-3.5" />添加账号</Button>} /></Table.Cell></Table.Row>
             ) : accounts.map((account) => (
               <Table.Row key={account.id} title="双击编辑账号" onDoubleClick={(event) => handleEditableRowDoubleClick(event, () => openEditModal(account))}>
                 <Table.Cell><span className="font-semibold text-kumo-strong">{account.name}</span></Table.Cell>

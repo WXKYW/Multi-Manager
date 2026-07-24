@@ -143,7 +143,7 @@ const buildUptimeImportSections = (preview) => {
     {
       key: 'monitors',
       title: '监测目标',
-      description: '按名称、类型和地址匹配已有目标。',
+      description: '按名称、类型和地址匹配。',
       emptyLabel: '本次配置不包含监测目标。',
       items: (preview.monitors || []).map((item, index) => ({
         id: `monitor-${index}-${item.name || 'unnamed'}`,
@@ -155,7 +155,7 @@ const buildUptimeImportSections = (preview) => {
     {
       key: 'statusPages',
       title: '状态页',
-      description: '按 slug 匹配已有状态页。',
+      description: '按 slug 匹配。',
       emptyLabel: '本次配置不包含状态页。',
       items: (preview.statusPages || []).map((item, index) => ({
         id: `status-page-${index}-${item.slug || item.title || 'untitled'}`,
@@ -167,7 +167,7 @@ const buildUptimeImportSections = (preview) => {
     {
       key: 'maintenanceWindows',
       title: '维护窗口',
-      description: '按标题匹配已有维护窗口。',
+      description: '按标题匹配。',
       emptyLabel: '本次配置不包含维护窗口。',
       items: (preview.maintenanceWindows || []).map((item, index) => ({
         id: `maintenance-${index}-${item.title || 'untitled'}`,
@@ -285,9 +285,8 @@ function SslCertificatePanel({ monitorId }) {
     setSslLoading(true);
     setSslExpanded(true);
     try {
-      const password = localStorage.getItem('admin_password') || '';
       const res = await fetch(`/api/uptime/monitors/${monitorId}/ssl`, {
-        headers: { 'Content-Type': 'application/json', 'x-admin-password': password }
+        headers: { 'Content-Type': 'application/json' }
       });
       const data = await res.json();
       setSslData(data);
@@ -588,10 +587,8 @@ function UptimePage() {
 
   // 获取请求 Header
   const getAuthHeaders = () => {
-    const password = localStorage.getItem('admin_password') || '';
     return {
       'Content-Type': 'application/json',
-      'x-admin-password': password,
     };
   };
 
@@ -1667,7 +1664,7 @@ function UptimePage() {
         <div className="grid items-start gap-4 xl:grid-cols-[minmax(24rem,0.9fr)_minmax(0,1.1fr)]">
           <SectionCard
             title={statusPageForm.id ? '编辑状态页' : '新建状态页'}
-            description="生成可公开访问的单页状态看板，可绑定独立域名或使用 /status/slug。"
+            description="公开状态页，可绑定域名"
             icon={<Globe className="h-4 w-4 text-kumo-brand" />}
             action={statusPageForm.id ? (
               <Button size="sm" variant="secondary" shape="square" icon={<X className="h-3.5 w-3.5" />} onClick={resetStatusPageForm} aria-label="取消编辑" />
@@ -1716,7 +1713,7 @@ function UptimePage() {
                   label="说明"
                   value={statusPageForm.description}
                   onChange={(event) => setStatusPageForm(prev => ({ ...prev, description: event.target.value }))}
-                  placeholder="这里展示 DSUK Hub 公开服务的实时可用性。"
+                  placeholder="可选说明"
                   rows={3}
                 />
               </div>
@@ -1768,7 +1765,7 @@ function UptimePage() {
               </div>
               <div className="max-h-64 overflow-y-auto rounded-lg border border-kumo-line bg-kumo-base p-2 scrollbar-thin">
                 {uptimeMonitors.length === 0 ? (
-                  <div className="p-4 text-center text-xs text-kumo-subtle">暂无监测目标，请先添加监测。</div>
+                  <div className="p-4 text-center text-xs text-kumo-subtle">暂无监测目标</div>
                 ) : (
                   <div className="grid gap-1.5">
                     {uptimeMonitors.map((monitor) => (
@@ -1806,7 +1803,7 @@ function UptimePage() {
 
           <SectionCard
             title="已发布状态页"
-            description="公开单页会显示整体状态、监测项、延迟和 24h 可用率。"
+            description="已创建的状态页"
             icon={<Globe className="h-4 w-4 text-kumo-brand" />}
             className="self-start"
             actions={(
@@ -1874,7 +1871,7 @@ function UptimePage() {
       {uptimeCurrentTab === 'maintenance' && (
         <SectionCard
           title="维护窗口"
-          description="维护期内仍记录检测结果，但会抑制对应告警通知。"
+          description="维护期内抑制告警"
           icon={<Shield className="h-4 w-4 text-kumo-brand" />}
           actions={(
             <>
@@ -1931,7 +1928,7 @@ function UptimePage() {
             <EmptyState
               icon={Shield}
               title="暂无维护窗口"
-              description="创建维护窗口后，命中的监测目标会继续记录结果，但会在指定时间段内抑制告警通知。"
+              description="维护期内抑制告警"
               action={(
                 <Button size="sm" variant="primary" icon={<Plus className="w-3.5 h-3.5" />} onClick={createQuickMaintenance}>
                   创建 1 小时窗口
@@ -1943,7 +1940,7 @@ function UptimePage() {
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-kumo-line bg-kumo-recessed/20 px-4 py-3">
                 <div>
                   <div className="text-sm font-semibold text-kumo-strong">维护窗口列表</div>
-                  <div className="mt-1 text-xs text-kumo-subtle">按时间窗口查看当前所有维护计划与临时窗口。</div>
+                  <div className="mt-1 text-xs text-kumo-subtle">查看维护计划。</div>
                 </div>
                 <div className="text-xs text-kumo-subtle">
                   共 <span className="font-semibold text-kumo-strong">{uptimeMaintenanceWindows.length}</span> 条记录
@@ -2040,9 +2037,9 @@ function UptimePage() {
             {/* 目标显示名称 */}
             <div className="md:col-span-4">
               <Input
-                label="显示名称 *"
+                label="名称 *"
                 type="text" size="sm"
-                placeholder="例如：生产数据库端口"
+                placeholder="如：生产数据库端口"
                 value={uptimeForm.name}
                 onChange={(e) => setUptimeForm(prev => ({ ...prev, name: e.target.value }))}
                 className="w-full"
@@ -2076,7 +2073,7 @@ function UptimePage() {
                   <Input
                     label="主机名 / IP *"
                     type="text" size="sm"
-                    placeholder="例如：192.168.1.100 或 db.server.internal"
+                    placeholder="如：192.168.1.100 或 db.server.internal"
                     value={uptimeForm.hostname}
                     onChange={(e) => setUptimeForm(prev => ({ ...prev, hostname: e.target.value }))}
                     className="w-full"
@@ -2131,7 +2128,7 @@ function UptimePage() {
             {['http', 'json'].includes(uptimeForm.type) && (
               <div className="md:col-span-6">
                 <Input
-                  label="SSL 证书到期提醒（天）"
+                label="SSL 到期提醒（天）"
                   type="number" size="sm"
                   placeholder="7"
                   value={uptimeForm.expiryNotification}
@@ -2147,7 +2144,7 @@ function UptimePage() {
                 <Checkbox
                   checked={uptimeForm.ignoreTls}
                   onCheckedChange={(checked) => setUptimeForm(prev => ({ ...prev, ignoreTls: checked }))}
-                  label="忽略不可信或自签名 TLS 证书"
+                  label="忽略不可信 / 自签 TLS"
                 />
               </div>
             )}
@@ -2156,9 +2153,9 @@ function UptimePage() {
             {uptimeForm.type === 'keyword' && (
               <div className="md:col-span-12">
                 <Input
-                  label="关键字匹配（网页中必须包含此文字）*"
+                  label="关键字匹配 *"
                   type="text" size="sm"
-                  placeholder="例如：success 或 正常"
+                  placeholder="如：success 或 正常"
                   value={uptimeForm.keyword}
                   onChange={(e) => setUptimeForm(prev => ({ ...prev, keyword: e.target.value }))}
                   className="w-full"
@@ -2172,7 +2169,7 @@ function UptimePage() {
                   <Input
                     label="JSON 路径 *"
                     type="text" size="sm"
-                    placeholder="例如：$.data.status"
+                    placeholder="如：$.data.status"
                     value={uptimeForm.jsonQueryPath}
                     onChange={(e) => setUptimeForm(prev => ({ ...prev, jsonQueryPath: e.target.value }))}
                     className="w-full font-mono"
@@ -2180,9 +2177,9 @@ function UptimePage() {
                 </div>
                 <div className="md:col-span-4">
                   <Input
-                    label="比较操作"
+                    label="操作符"
                     type="text" size="sm"
-                    placeholder="equals / contains / gt / regex"
+                    placeholder="如：equals / regex"
                     value={uptimeForm.jsonQueryOperator}
                     onChange={(e) => setUptimeForm(prev => ({ ...prev, jsonQueryOperator: e.target.value }))}
                     className="w-full font-mono"
@@ -2192,7 +2189,7 @@ function UptimePage() {
                   <Input
                     label="期望值"
                     type="text" size="sm"
-                    placeholder="例如：ok"
+                    placeholder="如：ok"
                     value={uptimeForm.jsonExpectedValue}
                     onChange={(e) => setUptimeForm(prev => ({ ...prev, jsonExpectedValue: e.target.value }))}
                     className="w-full font-mono"
@@ -2204,7 +2201,7 @@ function UptimePage() {
             {uptimeForm.type === 'push' && (
               <div className="md:col-span-6">
                 <Input
-                  label="Push 宽限时间（秒）"
+                  label="Push 宽限（秒）"
                   type="number" size="sm"
                   min="30"
                   value={uptimeForm.pushGraceSeconds}
@@ -2244,7 +2241,7 @@ function UptimePage() {
                 {notificationChannels.filter(c => c.enabled).length === 0 && (
                   <div className="text-xs text-kumo-subtle flex items-center gap-1.5 select-none w-full">
                     <Info className="w-4 h-4 text-kumo-subtle/60" />
-                    <span>暂无启用的告警通道。请先在 "通知渠道" 标签中配置并启用。</span>
+                    <span>暂无启用的告警通道。</span>
                   </div>
                 )}
               </AppCard>
@@ -2253,9 +2250,9 @@ function UptimePage() {
             {/* 标签管理 */}
             <div className="md:col-span-12">
               <Input
-                label="分组标签 (Tags)"
+                label="分组标签"
                 type="text" size="sm"
-                placeholder="prod, api, test (逗号或空格分割)"
+                placeholder="prod, api, test（逗号或空格分隔）"
                 value={uptimeForm.tagsInput}
                 onChange={(e) => setUptimeForm(prev => ({ ...prev, tagsInput: e.target.value }))}
                 className="w-full"
@@ -2278,7 +2275,7 @@ function UptimePage() {
         <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
           <SectionCard
             title="配置导入预览"
-            description="用于导出当前 Uptime 配置，或预览外部配置导入后将创建、更新的内容。"
+            description="导出配置，或预览导入内容"
             icon={<Upload className="h-4 w-4 text-kumo-brand" />}
             actions={(
               <>
@@ -2307,7 +2304,7 @@ function UptimePage() {
                 card={false}
                 icon={Upload}
                 title="尚未选择配置文件"
-                description="支持导入由本页面导出的 Uptime JSON 备份配置，预览后会按对象类型展示将创建或更新的内容。"
+                description="导入 JSON 并预览"
                 className="min-h-[20rem] py-16"
               />
             ) : (
@@ -2319,7 +2316,7 @@ function UptimePage() {
                         本次将同步 {uptimeImportSummary.total} 个配置对象
                       </div>
                       <div className="text-xs leading-relaxed text-kumo-subtle">
-                        系统会根据现有监测、状态页和维护窗口自动判断创建或更新，确认前可先检查每一类对象的影响范围。
+                        系统会按现有监测、状态页和维护窗口判断创建或更新，确认前可先检查影响范围。
                       </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -2399,8 +2396,8 @@ function UptimePage() {
               </div>
               <div className="mt-2 text-xs leading-relaxed text-kumo-subtle">
                 {uptimeImportPreview
-                  ? `已完成导入预览，当前涉及 ${uptimeImportSummary.total} 个对象，确认后会按匹配规则执行创建或更新。`
-                  : '先选择配置文件生成预览，再决定是否将配置写入当前 Uptime 环境。'}
+                  ? `已预览 ${uptimeImportSummary.total} 个对象，确认后会按匹配规则创建或更新。`
+                  : '先选择配置文件生成预览，再决定是否导入当前 Uptime。'}
               </div>
               {uptimeImportPreview && (
                 <div className="mt-3 flex flex-wrap gap-1.5">

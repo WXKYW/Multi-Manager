@@ -39,6 +39,12 @@ window.addEventListener('DOMContentLoaded', () => {
         return code.length === 6 ? code.substring(0, 3) + ' ' + code.substring(3) : code;
     }
 
+    function escapeHTML(value) {
+        return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[char]));
+    }
+
     function renderAccounts(accounts) {
         const term = (searchInput?.value || '').toLowerCase();
         const filtered = accounts.filter(acc => 
@@ -62,16 +68,16 @@ window.addEventListener('DOMContentLoaded', () => {
 
         let html = '';
         sortedIssuers.forEach(issuer => {
-            html += `<div class="group-header">${issuer}</div>`;
+            html += `<div class="group-header">${escapeHTML(issuer)}</div>`;
             html += groups[issuer].map(acc => `
-                <div class="account-item" data-code="${acc.currentCode || ''}" title="点击复制">
+                <div class="account-item" data-code="${escapeHTML(acc.currentCode || '')}">
                     <div class="account-info">
-                        <span class="issuer">${acc.account || '未命名'}</span>
-                        <span class="account-name">${acc.issuer || '其他'}</span>
+                        <span class="issuer">${escapeHTML(acc.account || '未命名')}</span>
+                        <span class="account-name">${escapeHTML(acc.issuer || '其他')}</span>
                     </div>
                     <div class="code-container">
-                        <div class="code">${formatCode(acc.currentCode)}</div>
-                        <div class="account-progress"><div class="progress-bar" id="prog-${acc.id}"></div></div>
+                        <div class="code">${escapeHTML(formatCode(acc.currentCode))}</div>
+                        <div class="account-progress"><div class="progress-bar" id="prog-${escapeHTML(acc.id)}"></div></div>
                     </div>
                 </div>`).join('');
         });
@@ -101,7 +107,7 @@ window.addEventListener('DOMContentLoaded', () => {
         if (showLoading) mainEl.innerHTML = '<div class="state-panel">同步中...</div>';
         chrome.runtime.sendMessage({ type: 'GET_ACCOUNTS' }, (response) => {
             if (!response || !response.success) {
-                mainEl.innerHTML = `<div class="state-panel error">${response?.error || '连接失败'}</div>`;
+                mainEl.replaceChildren(Object.assign(document.createElement('div'), { className: 'state-panel error', textContent: response?.error || '连接失败' }));
                 return;
             }
             allAccounts = response.data || [];
@@ -122,7 +128,7 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 
     // 初始化加载
-    chrome.storage.sync.get(['masterEnabled', 'showFillButton'], (res) => {
+    chrome.storage.local.get(['masterEnabled', 'showFillButton'], (res) => {
         state.masterEnabled = res.masterEnabled !== false;
         state.showFillButton = res.showFillButton !== false;
         
@@ -135,7 +141,7 @@ window.addEventListener('DOMContentLoaded', () => {
     if (toggleMaster) {
         toggleMaster.onchange = () => {
             state.masterEnabled = toggleMaster.checked;
-            chrome.storage.sync.set({ masterEnabled: state.masterEnabled });
+            chrome.storage.local.set({ masterEnabled: state.masterEnabled });
             showToast(state.masterEnabled ? '已开启全局识别' : '识别已全局禁用');
         };
     }
@@ -143,7 +149,7 @@ window.addEventListener('DOMContentLoaded', () => {
     if (btnToggleFill) {
         btnToggleFill.onclick = () => {
             state.showFillButton = !state.showFillButton;
-            chrome.storage.sync.set({ showFillButton: state.showFillButton });
+            chrome.storage.local.set({ showFillButton: state.showFillButton });
             updateFillBtnUI();
             showToast(state.showFillButton ? '图标已启用' : '图标已隐藏');
         };

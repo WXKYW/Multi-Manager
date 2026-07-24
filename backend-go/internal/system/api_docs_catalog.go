@@ -408,8 +408,7 @@ func authHeaders(mode manifest.AuthMode) []apiDocParameter {
 	switch mode {
 	case manifest.AuthSession:
 		return []apiDocParameter{
-			{Name: "session_id", In: "cookie", Required: false, Description: "已登录后台会话 Cookie", Example: "<SESSION_ID>"},
-			{Name: "x-admin-password", In: "header", Required: false, Description: "管理员密码透传头；脚本或本地工具可直接带此头访问", Example: "<ADMIN_PASSWORD>"},
+			{Name: "sid", In: "cookie", Required: true, Description: "已登录后台会话 Cookie", Example: "<SESSION_ID>"},
 		}
 	case manifest.AuthAPIKey:
 		return []apiDocParameter{

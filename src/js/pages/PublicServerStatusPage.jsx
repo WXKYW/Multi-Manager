@@ -692,7 +692,7 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
                 ) : (
                   <div className={serverGridClass}>
                     {visibleServers.map((server) => <ServerCard key={server.id} server={server} />)}
-                    {visibleServers.length === 0 && <div className="col-span-full rounded-lg border border-kumo-line bg-kumo-base p-8 text-center text-sm text-kumo-subtle">当前筛选没有匹配的主机。</div>}
+                    {visibleServers.length === 0 && <div className="col-span-full rounded-lg border border-kumo-line bg-kumo-base p-8 text-center text-sm text-kumo-subtle">暂无匹配主机。</div>}
                   </div>
                 )}
               </section>
