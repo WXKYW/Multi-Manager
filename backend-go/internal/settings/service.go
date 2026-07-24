@@ -2123,12 +2123,17 @@ func (s *Service) replaceDatabase(ctx context.Context, importPath string) (strin
 	defer os.Remove(tempTarget)
 
 	cleanupSQLiteSidecars(dbPath)
-	if err := os.Remove(dbPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("替换数据库前删除旧文件失败: %w", err)
-	}
-	if err := os.Rename(tempTarget, dbPath); err != nil {
+	replaceErr := func() error {
+		if err := os.Remove(dbPath); err == nil || errors.Is(err, os.ErrNotExist) {
+			if err := os.Rename(tempTarget, dbPath); err == nil {
+				return nil
+			}
+		}
+		return copyFile(tempTarget, dbPath, 0o600)
+	}()
+	if replaceErr != nil {
 		_ = copyFile(backupPath, dbPath, 0o600)
-		return "", fmt.Errorf("替换数据库失败: %w", err)
+		return "", fmt.Errorf("替换数据库失败: %w", replaceErr)
 	}
 	cleanupSQLiteSidecars(dbPath)
 
