@@ -1802,7 +1802,7 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
     pageRef.current = page;
   }, [page]);
 
-  const refreshRepositoryDetail = useCallback(async (pageSlug, repositoryID, { markLoading = true } = {}) => {
+  const refreshRepositoryDetail = useCallback(async (pageSlug, repositoryID, { markLoading = true, runId = '' } = {}) => {
     const repoId = String(repositoryID || '');
     if (!pageSlug || !repoId) return;
 
@@ -1814,7 +1814,9 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
     }
 
     try {
-      const response = await fetch(`/api/github/public/pages/${encodeURIComponent(pageSlug)}/repositories/${encodeURIComponent(repoId)}`, {
+      const params = new URLSearchParams();
+      if (runId) params.set('run_id', String(runId));
+      const response = await fetch(`/api/github/public/pages/${encodeURIComponent(pageSlug)}/repositories/${encodeURIComponent(repoId)}${params.toString() ? `?${params}` : ''}`, {
         cache: 'no-store',
       });
       const result = await response.json().catch(() => ({}));

@@ -4861,6 +4861,21 @@ function ServerPage() {
     });
   };
 
+  const appendDockerInlineTask = (task = {}) => {
+    const taskId = task.taskId || `inline-${task.action || 'docker'}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const payload = task.payload || {};
+    const normalized = decorateDockerTask({
+      ...task,
+      taskId,
+      payload,
+      progress: task.progress ?? (isDockerTaskFinalState(task.state) ? 100 : 0),
+      domain: task.domain || 'docker',
+      targetName: task.targetName || getDockerTaskTargetLabel(payload),
+    });
+    setDockerTasks(prev => [normalized, ...prev.filter(item => item.taskId !== taskId)].slice(0, 30));
+    return taskId;
+  };
+
   const markDockerContainerUpdateComplete = (serverId, payload = {}) => {
     const normalized = {
       serverId,
@@ -5696,8 +5711,16 @@ function ServerPage() {
         if (!res.ok || !data.success) {
           throw new Error(data.error || data.message || 'Docker operation failed');
         }
+        const pruneActions = ['image.prune', 'network.prune', 'volume.prune'];
+        appendDockerInlineTask({
+          state: 'success',
+          action,
+          serverId,
+          payload,
+          silent: options.silent,
+          message: pruneActions.includes(action) ? (data?.data?.message || data?.message || '') : (data?.message || `${getDockerTaskActionLabel(action)}执行成功`),
+        });
         if (!options.silent) {
-          const pruneActions = ['image.prune', 'network.prune', 'volume.prune'];
           toast.success(pruneActions.includes(action) ? formatDockerPruneResult(action, data) : `${getDockerTaskActionLabel(action)}执行成功`);
         }
         clearDockerActionPending(serverId, action, payload);
@@ -5718,6 +5741,14 @@ function ServerPage() {
         if (!res.ok || !data.success) {
           throw new Error(data.error || data.message || 'Docker 操作失败');
         }
+        appendDockerInlineTask({
+          state: 'success',
+          action,
+          serverId,
+          payload,
+          silent: options.silent,
+          message: data?.message || `${getDockerTaskActionLabel(action)}执行成功`,
+        });
         if (!options.silent) toast.success(`${getDockerTaskActionLabel(action)}执行成功`);
         clearDockerActionPending(serverId, action, payload);
         scheduleDockerResourceRefresh(400);
@@ -5757,6 +5788,15 @@ function ServerPage() {
         return { ok: false };
       }
     } catch (e) {
+      appendDockerInlineTask({
+        state: 'failed',
+        action,
+        serverId,
+        payload,
+        silent: options.silent,
+        error: e?.message || '服务下发异常',
+        message: e?.message || '服务下发异常',
+      });
       toast.error(e?.message || '服务下发异常');
       setDockerActionPending(prev => {
         const next = { ...prev };
