@@ -1859,7 +1859,7 @@ function TotpPage() {
           </Dialog.Description>
 
           {accountModalMode === 'add' && (
-            <div className="mb-4 pt-1.5 px-0.5">
+            <div className="mb-4">
               <Tabs
                 {...TOOL_TABS_PROPS}
                 value={accountAddTab}
@@ -1876,7 +1876,7 @@ function TotpPage() {
           )}
 
           {/* Form Content */}
-          <div className="-mx-1 space-y-4 max-h-[50vh] overflow-y-auto px-1 pr-2 scrollbar-thin">
+          <div className="space-y-4 max-h-[60vh] overflow-y-auto pt-2 px-1 pb-1 scrollbar-thin">
             {accountModalMode === 'add' && accountAddTab === 'scan' ? (
               <div className="space-y-4">
                 <div className="flex gap-2 items-center">
@@ -1949,35 +1949,18 @@ function TotpPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                {/* OTP Type */}
+                {/* OTP Type 选择器 */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-kumo-subtle">验证码类型</label>
-                  <div className="flex gap-2">
-                    <Button size="sm"
-                      type="button"
-                      variant={accountForm.otp_type === 'totp' ? 'primary' : 'secondary'}
-                      onClick={() => setAccountForm((prev) => ({ ...prev, otp_type: 'totp' }))}
-                      className={`flex-1 py-1.5 text-xs font-semibold transition-colors ${
-                        accountForm.otp_type === 'totp'
-                          ? 'text-kumo-brand'
-                          : 'text-kumo-subtle'
-                      }`}
-                    >
-                      TOTP (基于时间)
-                    </Button>
-                    <Button size="sm"
-                      type="button"
-                      variant={accountForm.otp_type === 'hotp' ? 'primary' : 'secondary'}
-                      onClick={() => setAccountForm((prev) => ({ ...prev, otp_type: 'hotp' }))}
-                      className={`flex-1 py-1.5 text-xs font-semibold transition-colors ${
-                        accountForm.otp_type === 'hotp'
-                          ? 'text-kumo-brand'
-                          : 'text-kumo-subtle'
-                      }`}
-                    >
-                      HOTP (基于计数)
-                    </Button>
-                  </div>
+                  <Tabs
+                    {...TOOL_TABS_PROPS}
+                    value={accountForm.otp_type}
+                    onValueChange={(val) => setAccountForm((prev) => ({ ...prev, otp_type: val }))}
+                    tabs={[
+                      { value: 'totp', label: 'TOTP (基于时间)' },
+                      { value: 'hotp', label: 'HOTP (基于计数)' },
+                    ]}
+                  />
                 </div>
 
                 <div className="space-y-1.5">
@@ -2004,20 +1987,23 @@ function TotpPage() {
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-kumo-subtle">品牌标识</label>
-                  <div className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto_auto_minmax(0,8rem)] items-center gap-2">
+                {/* 品牌标识配置区 */}
+                <div className="space-y-2 rounded-lg border border-kumo-line bg-kumo-recessed/30 p-3">
+                  <div className="text-xs font-bold text-kumo-strong">品牌标识与主题色</div>
+                  
+                  <div className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-2">
                     <Button
                       type="button"
                       variant="secondary"
                       shape="square"
-                      className="!size-8 !p-0 transition-transform hover:scale-[1.03]"
+                      className="!size-8.5 !p-0 transition-transform hover:scale-[1.03]"
                       onClick={() => openBrandStylePicker()}
                       title="点击选择或上传品牌图标"
                     >
                       <TotpBrandMark issuer={accountForm.issuer} icon={accountForm.icon} color={resolveFormColor(accountForm)} />
                     </Button>
-                    <Input size="sm"
+                    <Input
+                      size="sm"
                       aria-label="图标关键字"
                       type="text"
                       placeholder="品牌名或 svgrepo:448239-microsoft"
@@ -2029,15 +2015,20 @@ function TotpPage() {
                     <Button size="sm" variant="secondary" onClick={detectAccountBrandIcon} loading={brandDetecting}>
                       检测
                     </Button>
-                    <Button size="sm" variant="secondary" className="px-2 text-[11px]" onClick={() => setAccountForm((prev) => ({ ...prev, icon: '', color: '' }))}>
+                    <Button size="sm" variant="secondary" onClick={() => setAccountForm((prev) => ({ ...prev, icon: '', color: '' }))}>
                       重置
                     </Button>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <span className="text-xs font-medium text-kumo-subtle shrink-0">品牌色:</span>
                     <span
-                      className="h-7 w-7 rounded-md border border-kumo-line"
+                      className="h-6 w-6 shrink-0 rounded-md border border-kumo-line shadow-xs"
                       style={{ background: resolveFormColor(accountForm) }}
                       aria-hidden="true"
                     />
-                    <Input size="sm"
+                    <Input
+                      size="sm"
                       aria-label="品牌色值"
                       type="text"
                       inputMode="text"
@@ -2045,7 +2036,7 @@ function TotpPage() {
                       value={accountForm.color}
                       onChange={(e) => setAccountForm((prev) => ({ ...prev, color: e.target.value }))}
                       onBlur={(e) => setAccountForm((prev) => ({ ...prev, color: normalizeHexColor(e.target.value) }))}
-                      className="w-full font-mono text-xs"
+                      className="w-36 font-mono text-xs"
                     />
                   </div>
                 </div>
@@ -2095,70 +2086,81 @@ function TotpPage() {
                   />
                 </div>
 
-                {/* Advanced parameters */}
-                <details className="text-xs text-kumo-subtle cursor-pointer select-none">
-                  <summary className="font-semibold text-kumo-strong hover:text-kumo-brand py-1">
-                    高级设置选项
-                  </summary>
-                  <div className="pt-3 grid grid-cols-3 gap-3">
-                    <div className="space-y-1">
-                      <label className="font-semibold">加密算法</label>
-                      <Select
-                        aria-label="加密算法" size="sm"
-                        value={accountForm.algorithm}
-                        onValueChange={(value) => setAccountForm((prev) => ({ ...prev, algorithm: String(value) }))}
-                        className="w-full"
-                        items={[
-                          { value: 'SHA1', label: 'SHA1' },
-                          { value: 'SHA256', label: 'SHA256' },
-                          { value: 'SHA512', label: 'SHA512' },
-                        ]}
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="font-semibold">码位长度</label>
-                      <Select
-                        aria-label="码位长度" size="sm"
-                        value={accountForm.digits}
-                        onValueChange={(value) => setAccountForm((prev) => ({ ...prev, digits: String(value) }))}
-                        className="w-full"
-                        items={[
-                          { value: '6', label: '6 位' },
-                          { value: '8', label: '8 位' },
-                        ]}
-                      />
-                    </div>
-
-                    {accountForm.otp_type === 'totp' ? (
+                {/* 高级参数配置折叠区 */}
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    className="flex items-center gap-1.5 text-xs font-bold text-kumo-subtle hover:text-kumo-strong transition-colors py-1 select-none"
+                    onClick={() => setShowAdvancedAccountSettings((prev) => !prev)}
+                  >
+                    <ChevronRight className={cx('size-3.5 transition-transform duration-200', showAdvancedAccountSettings && 'rotate-90')} />
+                    <span>高级参数配置 (算法 / 码位长度 / 周期)</span>
+                  </button>
+                  
+                  <AnimatedCollapse open={showAdvancedAccountSettings}>
+                    <div className="pt-2.5 grid grid-cols-3 gap-3">
                       <div className="space-y-1">
-                        <label className="font-semibold">周期数 (s)</label>
+                        <label className="text-[11px] font-semibold text-kumo-subtle">加密算法</label>
                         <Select
-                          aria-label="周期数" size="sm"
-                          value={accountForm.period}
-                          onValueChange={(value) => setAccountForm((prev) => ({ ...prev, period: String(value) }))}
+                          aria-label="加密算法"
+                          size="sm"
+                          value={accountForm.algorithm}
+                          onValueChange={(value) => setAccountForm((prev) => ({ ...prev, algorithm: String(value) }))}
                           className="w-full"
                           items={[
-                            { value: '30', label: '30 秒' },
-                            { value: '60', label: '60 秒' },
+                            { value: 'SHA1', label: 'SHA1' },
+                            { value: 'SHA256', label: 'SHA256' },
+                            { value: 'SHA512', label: 'SHA512' },
                           ]}
                         />
                       </div>
-                    ) : (
+
                       <div className="space-y-1">
-                        <label className="font-semibold">计数起始</label>
-                        <Input size="sm"
-                          aria-label="计数起始"
-                          type="number"
-                          value={accountForm.counter}
-                          onChange={(e) => setAccountForm((prev) => ({ ...prev, counter: e.target.value }))}
-                          className="w-full font-mono"
+                        <label className="text-[11px] font-semibold text-kumo-subtle">码位长度</label>
+                        <Select
+                          aria-label="码位长度"
+                          size="sm"
+                          value={accountForm.digits}
+                          onValueChange={(value) => setAccountForm((prev) => ({ ...prev, digits: String(value) }))}
+                          className="w-full"
+                          items={[
+                            { value: '6', label: '6 位' },
+                            { value: '8', label: '8 位' },
+                          ]}
                         />
                       </div>
-                    )}
 
-                  </div>
-                </details>
+                      {accountForm.otp_type === 'totp' ? (
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-semibold text-kumo-subtle">周期数 (s)</label>
+                          <Select
+                            aria-label="周期数"
+                            size="sm"
+                            value={accountForm.period}
+                            onValueChange={(value) => setAccountForm((prev) => ({ ...prev, period: String(value) }))}
+                            className="w-full"
+                            items={[
+                              { value: '30', label: '30 秒' },
+                              { value: '60', label: '60 秒' },
+                            ]}
+                          />
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-semibold text-kumo-subtle">计数起始</label>
+                          <Input
+                            size="sm"
+                            aria-label="计数起始"
+                            type="number"
+                            value={accountForm.counter}
+                            onChange={(e) => setAccountForm((prev) => ({ ...prev, counter: e.target.value }))}
+                            className="w-full font-mono"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </AnimatedCollapse>
+                </div>
               </div>
             )}
           </div>

@@ -226,7 +226,7 @@ function AuthBrandCanvas() {
   );
 }
 
-function AuthShell({ title, notice, children }) {
+function AuthShell({ title, onBack, notice, children }) {
   const surfaceRef = useCloudflareSpotlight();
 
   return (
@@ -250,7 +250,20 @@ function AuthShell({ title, notice, children }) {
 
         <div className="relative w-full max-w-sm">
           <div className="auth-login-panel">
-            <div className="auth-login-head">
+            <div className="auth-login-head flex items-center gap-2">
+              {onBack && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  shape="square"
+                  onClick={onBack}
+                  icon={<ChevronLeft className="size-4" />}
+                  aria-label="返回"
+                  title="返回修改密码"
+                  className="shrink-0 -ml-1"
+                />
+              )}
               <h1>{title}</h1>
             </div>
             {children}
@@ -681,6 +694,7 @@ function AuthPage() {
   return (
     <AuthShell
       title={title}
+      onBack={requiresSecondStep && !buttonsLocked ? (githubFlowId ? cancelGitHubFlow : cancelLogin2FA) : undefined}
       notice={<AuthStatusNotice statusKey={busyState} message={loginError} />}
     >
       <form onSubmit={handleLogin} className="auth-login-form space-y-3">
@@ -716,21 +730,21 @@ function AuthPage() {
             size="base"
             type="text"
             inputMode="numeric"
-            label="双因素验证码"
+            aria-label="双因素验证码"
             maxLength={6}
             placeholder="000000"
             value={loginTotpToken}
             onChange={handle2FAInput}
             autoComplete="one-time-code"
             className={cx(
-              'auth-login-input w-full text-center font-mono tracking-widest',
+              'auth-login-input w-full text-center font-mono tracking-widest text-lg',
               loginError && 'auth-login-input--error'
             )}
             autoFocus
           />
         )}
 
-        {!requiresSecondStep ? (
+        {!requiresSecondStep && (
           <Button
             type="submit"
             variant="primary"
@@ -746,40 +760,6 @@ function AuthPage() {
           >
             {loginLoading ? '处理中...' : isDemoMode ? '进入演示环境' : '登录'}
           </Button>
-        ) : (
-          <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-2">
-            <Button
-              type="button"
-              onClick={githubFlowId ? cancelGitHubFlow : cancelLogin2FA}
-              variant="secondary"
-              size="sm"
-              shape="square"
-              disabled={buttonsLocked}
-              icon={<ChevronLeft className="size-3.5" />}
-              className="auth-login-button--secondary"
-              aria-label="返回修改密码"
-              title="返回修改密码"
-            />
-            <Button
-              type="submit"
-              variant="primary"
-              size="sm"
-              loading={loginLoading || activeAction === 'github-2fa'}
-              disabled={Boolean(activeAction && activeAction !== 'github-2fa')}
-              icon={
-                !(loginLoading || activeAction === 'github-2fa') ? (
-                  <Key className="size-3.5" />
-                ) : undefined
-              }
-              className={getButtonClassName(
-                '2fa',
-                loginLoading || activeAction === 'github-2fa',
-                'auth-login-button--primary justify-center'
-              )}
-            >
-              {loginLoading || activeAction === 'github-2fa' ? '处理中...' : '确认'}
-            </Button>
-          </div>
         )}
 
         {!isDemoMode &&

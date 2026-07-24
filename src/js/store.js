@@ -851,10 +851,12 @@ const useStore = create((set, get) => ({
       }
 
       if (result.require2FA && !result.success) {
-        set({ loginRequire2FA: true, loginTotpToken: '' });
-        if (result.error) {
-          set({ loginError: result.error });
-        }
+        const isInitial2FA = !loginRequire2FA || !loginTotpToken;
+        set({
+          loginRequire2FA: true,
+          loginTotpToken: '',
+          loginError: isInitial2FA ? '' : (result.error || ''),
+        });
         return false;
       }
 
