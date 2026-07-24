@@ -4,7 +4,8 @@ import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Input } from '@cloudflare/kumo/components/input';
 import { ClipboardText, Tabs } from '@cloudflare/kumo';
-import { CodeFile, Download, Eye, FileText, FolderOpen } from '../components/Icons.jsx';
+import { CodeFile, Download, Eye, FileText, FolderOpen, Home, LogIn } from '../components/Icons.jsx';
+import useStore from '../store.js';
 import { SectionCard } from '../components/ui/AppPrimitives.jsx';
 import { fileboxDirectURL, fileboxDownloadEndpoint } from '../modules/fileboxLinks.js';
 import { toast } from '../modules/toast.js';
@@ -55,6 +56,7 @@ function formatExpiry(value) {
 }
 
 function PublicSharePage() {
+  const isAuthenticated = useStore((state) => state.isAuthenticated);
   const code = useMemo(shareCodeFromPath, []);
   const [entry, setEntry] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -153,9 +155,21 @@ function PublicSharePage() {
             </div>
             <div className="mt-1 font-mono text-xs text-kumo-subtle">{code || '-'}</div>
           </div>
-          <Badge variant={entry?.requiresPassword ? 'warning' : 'secondary'}>
-            {entry?.requiresPassword ? '需要密码' : '公开'}
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant={entry?.requiresPassword ? 'warning' : 'secondary'}>
+              {entry?.requiresPassword ? '需要密码' : '公开'}
+            </Badge>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => { window.location.href = '/'; }}
+              icon={isAuthenticated ? <Home className="h-3.5 w-3.5" /> : <LogIn className="h-3.5 w-3.5" />}
+              aria-label={isAuthenticated ? '主页' : '登录'}
+              title={isAuthenticated ? '跳转到主页' : '跳转到登录页'}
+            >
+              {isAuthenticated ? '主页' : '登录'}
+            </Button>
+          </div>
         </div>
 
         <SectionCard

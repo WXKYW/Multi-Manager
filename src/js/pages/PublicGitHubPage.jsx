@@ -13,12 +13,15 @@ import {
   mergePublicGithubRepositories,
   shouldLoadPublicGithubRepositoryDetail,
 } from '../modules/githubPublicRealtime.js';
+import useStore from '../store.js';
 import {
   AlertTriangle,
   ExternalLink,
   GitBranch,
   GitHubBrand,
   Globe,
+  Home,
+  LogIn,
   RefreshCw,
   Shield,
 } from '../components/Icons.jsx';
@@ -1781,6 +1784,7 @@ function RepositoryCard({ item, now, config, detailLoading = false, onSelectRun 
 }
 
 function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
+  const isAuthenticated = useStore((state) => state.isAuthenticated);
   const slug = useMemo(() => normalizePublicPath(), []);
   const surfaceRef = useCloudflareSpotlight();
   const [page, setPage] = useState(null);
@@ -2052,9 +2056,21 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
               <div className="truncate text-base font-bold text-kumo-strong">{page?.title || 'GitHub 动态'}</div>
             </div>
           </div>
-          <Button size="sm" variant="secondary" onClick={() => load({ silent: true })} loading={refreshing} icon={<RefreshCw className="h-3.5 w-3.5" />}>
-            刷新
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="secondary" onClick={() => load({ silent: true })} loading={refreshing} icon={<RefreshCw className="h-3.5 w-3.5" />}>
+              刷新
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => { window.location.href = '/'; }}
+              icon={isAuthenticated ? <Home className="h-3.5 w-3.5" /> : <LogIn className="h-3.5 w-3.5" />}
+              aria-label={isAuthenticated ? '主页' : '登录'}
+              title={isAuthenticated ? '跳转到主页' : '跳转到登录页'}
+            >
+              {isAuthenticated ? '主页' : '登录'}
+            </Button>
+          </div>
         </div>
 
         {loading && !page && (

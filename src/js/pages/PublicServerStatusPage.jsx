@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import io from 'socket.io-client';
 import { Meter, Tabs } from '@cloudflare/kumo';
 import { Button } from '@cloudflare/kumo/components/button';
-import { AlertTriangle, Globe, RefreshCw, Server, Shield } from '../components/Icons.jsx';
+import { AlertTriangle, Globe, Home, LogIn, RefreshCw, Server, Shield } from '../components/Icons.jsx';
+import useStore from '../store.js';
 import CountryFlag from '../components/CountryFlag.jsx';
 import ServerLocationMap from '../components/server/ServerLocationMap.jsx';
 import { useCloudflareSpotlight } from '../hooks/useCloudflareSpotlight.js';
@@ -494,6 +495,7 @@ function ServerCard({ server }) {
 }
 
 function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
+  const isAuthenticated = useStore((state) => state.isAuthenticated);
   const slug = useMemo(() => normalizePublicPath(), []);
   const surfaceRef = useCloudflareSpotlight();
   const [page, setPage] = useState(null);
@@ -665,6 +667,16 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
               aria-label="刷新"
               title="刷新"
             />
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => { window.location.href = '/'; }}
+              icon={isAuthenticated ? <Home className="h-3.5 w-3.5" /> : <LogIn className="h-3.5 w-3.5" />}
+              aria-label={isAuthenticated ? '主页' : '登录'}
+              title={isAuthenticated ? '跳转到主页' : '跳转到登录页'}
+            >
+              {isAuthenticated ? '主页' : '登录'}
+            </Button>
           </div>
         </header>
 

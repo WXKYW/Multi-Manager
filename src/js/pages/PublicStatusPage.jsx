@@ -24,6 +24,8 @@ import {
   Check,
   Clock,
   Globe,
+  Home,
+  LogIn,
   RefreshCw,
   Shield,
 } from '../components/Icons.jsx';
@@ -217,6 +219,7 @@ function CompactHeartbeatStrip({ beats }) {
 }
 
 function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
+  const isAuthenticated = useStore((state) => state.isAuthenticated);
   const slug = useMemo(() => normalizePublicPath(), []);
   const surfaceRef = useCloudflareSpotlight();
   const theme = useStore((state) => state.theme);
@@ -336,9 +339,21 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
               <div className="truncate text-base font-bold text-kumo-strong">{page?.title || '服务状态'}</div>
             </div>
           </div>
-          <Button size="sm" variant="secondary" onClick={load} loading={loading} icon={<RefreshCw className="h-3.5 w-3.5" />}>
-            刷新
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="secondary" onClick={load} loading={loading} icon={<RefreshCw className="h-3.5 w-3.5" />}>
+              刷新
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => { window.location.href = '/'; }}
+              icon={isAuthenticated ? <Home className="h-3.5 w-3.5" /> : <LogIn className="h-3.5 w-3.5" />}
+              aria-label={isAuthenticated ? '主页' : '登录'}
+              title={isAuthenticated ? '跳转到主页' : '跳转到登录页'}
+            >
+              {isAuthenticated ? '主页' : '登录'}
+            </Button>
+          </div>
         </div>
 
         {!loading && error && (
