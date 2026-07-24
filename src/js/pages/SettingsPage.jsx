@@ -1495,13 +1495,14 @@ function SettingsPage() {
               <div className="flex items-center gap-2">
                 <Button
                   size="sm"
+                  shape="square"
                   variant="secondary"
                   onClick={() => fetchLoginSessions().catch((error) => toast.error(error.message || '加载登录设备失败'))}
                   loading={sessionsLoading}
-                  icon={<RefreshCw className="h-4 w-4" />}
-                >
-                  刷新
-                </Button>
+                  icon={<RefreshCw className="h-3.5 w-3.5" />}
+                  aria-label="刷新登录设备"
+                  title="刷新登录设备"
+                />
                 <Button size="sm" variant="secondary-destructive" onClick={forceAllSessionsOffline}>
                   全部下线
                 </Button>
