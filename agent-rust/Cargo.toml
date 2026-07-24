@@ -11,7 +11,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
 sysinfo = { version = "0.31" }
 bollard = { version = "0.16" }
-portable-pty = { version = "0.8" }
+portable-pty = { version = "0.9" }
 clap = { version = "4.5", features = ["derive"] }
 base64 = { version = "0.22" }
 nvml-wrapper = { version = "0.10.0", optional = true }
@@ -29,8 +29,8 @@ tonic = { version = "0.12", default-features = false, features = ["codegen", "pr
 bytes = "1.10"
 enigo = { version = "0.6.1", default-features = false, features = ["platform_specific"] }
 rand = "0.8"
-rtp = "0.8.0"
-webrtc = "0.8.0"
+rtp = "0.17.2"
+webrtc = "0.17.2"
 win-native-media = { version = "0.1.1", path = "vendor/win-native-media-0.1.1" }
 windows-sys = { version = "0.61.2", features = [
   "Win32_Foundation",

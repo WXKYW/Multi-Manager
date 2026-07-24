@@ -54,6 +54,9 @@ jobs:
 
       - name: Audit Rust dependencies
         working-directory: agent-rust
+        env:
+          CARGO_HTTP_TIMEOUT: 120
+          CARGO_NET_RETRY: 10
         run: cargo audit
 
       - name: Install Gitleaks
