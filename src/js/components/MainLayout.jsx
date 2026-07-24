@@ -602,8 +602,8 @@ function MainLayout() {
 
   const viewportWorkspaceModule = ['apidocs', 'systemlogs'].includes(mainActiveTab);
   const mainCanvasClassName = viewportWorkspaceModule
-    ? 'flex-1 overflow-hidden p-3 sm:p-4 lg:p-6'
-    : 'flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-4 lg:p-6 scrollbar-thin';
+    ? 'flex-1 overflow-hidden p-3 sm:px-4 lg:px-6 pt-4! pb-4! sm:pb-6!'
+    : 'flex-1 overflow-x-hidden overflow-y-auto p-3 sm:px-4 lg:px-6 pt-4! pb-4! sm:pb-6! scrollbar-thin';
   const mainCanvasInnerClassName = `mx-auto flex w-full min-w-0 flex-col ${
     viewportWorkspaceModule ? 'h-full min-h-0' : 'min-h-full'
   } ${pageWidthClass}`;
