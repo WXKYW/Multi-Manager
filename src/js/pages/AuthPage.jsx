@@ -248,14 +248,18 @@ function AuthShell({ title, notice, children }) {
           </span>
         </div>
 
-        <div className="w-full max-w-sm flex flex-col gap-3">
+        <div className="relative w-full max-w-sm">
           <div className="auth-login-panel">
             <div className="auth-login-head">
               <h1>{title}</h1>
             </div>
             {children}
           </div>
-          {notice}
+          {notice && (
+            <div className="absolute top-full left-0 right-0 mt-3 z-10">
+              {notice}
+            </div>
+          )}
         </div>
       </section>
     </main>
