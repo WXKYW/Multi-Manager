@@ -892,7 +892,7 @@ body {
 }
 
 .auth-login-input {
-  min-height: 2.125rem;
+  min-height: 2.75rem;
   background: var(--color-kumo-control) !important;
   background-color: var(--color-kumo-control) !important;
 }

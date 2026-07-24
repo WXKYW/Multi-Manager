@@ -695,7 +695,7 @@ function AuthPage() {
 
         {!isDemoMode && !requiresSecondStep && (
           <Input
-            size="sm"
+            size="base"
             type="password"
             aria-label="管理员密码"
             placeholder="请输入管理员密码"
@@ -713,7 +713,7 @@ function AuthPage() {
 
         {requiresSecondStep && (
           <Input
-            size="sm"
+            size="base"
             type="text"
             inputMode="numeric"
             label="双因素验证码"
