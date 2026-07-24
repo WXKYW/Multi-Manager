@@ -892,7 +892,7 @@ body {
 }
 
 .auth-login-input {
-  min-height: 2.75rem;
+  min-height: 2.125rem;
   background: var(--color-kumo-control) !important;
   background-color: var(--color-kumo-control) !important;
 }
@@ -919,7 +919,7 @@ body {
 }
 
 .auth-login-button {
-  min-height: 2.65rem;
+  min-height: 2.125rem;
   border-radius: 0.5rem;
 }
 

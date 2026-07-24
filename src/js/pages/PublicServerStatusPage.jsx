@@ -691,12 +691,16 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
         {!initialLoading && page && (
           <div className="flex flex-col gap-4">
             {mapOpen ? (
-              <ServerLocationMap
-                echarts={echarts}
-                servers={visibleServers}
-                resolveStatus={(server) => (server?.online ? 'online' : 'offline')}
-                aspectRatio="16 / 9"
-              />
+              <div className="w-full overflow-hidden rounded-lg border border-kumo-line bg-kumo-base max-h-[calc(100vh-140px)] flex items-center justify-center">
+                <div className="w-full max-h-[calc(100vh-140px)]">
+                  <ServerLocationMap
+                    echarts={echarts}
+                    servers={visibleServers}
+                    resolveStatus={(server) => (server?.online ? 'online' : 'offline')}
+                    aspectRatio={wideColumns === 4 ? '2.3 / 1' : '16 / 9'}
+                  />
+                </div>
+              </div>
             ) : (
               <section>
                 {servers.length === 0 ? (
