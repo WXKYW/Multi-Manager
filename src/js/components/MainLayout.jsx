@@ -449,6 +449,28 @@ function MainLayout() {
       ? appProcessUptimeSeconds + Math.max(0, runtimeClock - appProcessUptimeMeasuredAt) / 1000
       : 0;
 
+  // 监听 1024px 响应式断点（与 Sidebar mobileBreakpoint={1024} 保持一致）
+  const [isMobileScreen, setIsMobileScreen] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth < 1024 : false
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const media = window.matchMedia('(max-width: 1023px)');
+    const updateMobile = () => setIsMobileScreen(media.matches);
+    updateMobile();
+    media.addEventListener('change', updateMobile);
+    return () => media.removeEventListener('change', updateMobile);
+  }, []);
+
+  const handleSidebarOpenChange = useCallback((open) => {
+    // 只有在桌面大屏模式下，用户的展开/收起操作才进行持久化；
+    // 移动端断点引发的自动收起绝不污染或覆盖桌面端的 sidebarCollapsed 偏好
+    if (!isMobileScreen) {
+      setSidebarCollapsed(!open);
+    }
+  }, [isMobileScreen, setSidebarCollapsed]);
+
   useEffect(() => {
     if (mainActiveTab !== 'dashboard' || !dashboardFooterVisible) return undefined;
     setRuntimeClock(Date.now());
@@ -652,9 +674,10 @@ function MainLayout() {
 
   return (
     <Sidebar.Provider
+      mobileBreakpoint={1024}
       defaultOpen={!sidebarCollapsed}
-      open={!sidebarCollapsed}
-      onOpenChange={open => setSidebarCollapsed(!open)}
+      open={isMobileScreen ? undefined : !sidebarCollapsed}
+      onOpenChange={handleSidebarOpenChange}
       peekable
       style={{
         '--sidebar-width': '11.5rem',
