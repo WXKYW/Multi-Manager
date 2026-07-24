@@ -1959,4 +1959,16 @@ button[aria-label='\6DFB\52A0\65B0\79DF\6237'] {
   padding: 0.875rem 1rem;
 }
 
+/* ==================== Hide Native Number Spin Buttons for Kumo Input ==================== */
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 
