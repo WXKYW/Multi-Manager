@@ -1191,56 +1191,58 @@ function NotificationPage() {
                   <AppCard
                     key={log.id}
                     padding="none"
-                    className="flex items-start gap-3 p-3 transition-colors duration-150 hover:bg-kumo-recessed/20 sm:px-4 sm:py-3"
+                    className="grid grid-cols-1 gap-3 p-3 transition-colors duration-150 hover:bg-kumo-recessed/20 md:grid-cols-[minmax(13rem,1fr)_minmax(0,1.8fr)] md:items-start sm:p-3.5"
                   >
-                    {/* 状态徽章点 */}
-                    <div
-                      className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold select-none ${
-                        log.status === 'sent'
-                          ? 'bg-kumo-success/15 text-kumo-success'
-                          : log.status === 'failed'
-                            ? 'bg-kumo-danger/15 text-kumo-danger'
-                            : 'bg-kumo-warning/15 text-kumo-warning'
-                      }`}
-                    >
-                      {log.status === 'sent' ? '✓' : log.status === 'failed' ? '✗' : '...'}
-                    </div>
-
-                    <div className="min-w-0 flex-1 space-y-1.5">
-                      {/* 第一行：标题 + 动态标签 + 时间 */}
-                      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                        <div className="flex flex-wrap items-center gap-2 min-w-0">
-                          <span className="text-xs font-bold text-kumo-strong truncate">
-                            {log.title}
-                          </span>
-                          {lifecycleMeta && (
-                            <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
-                              <Badge className="border border-kumo-brand/25 bg-kumo-brand/10 text-[9px] text-kumo-brand py-0 px-1.5">
-                                ↻ {mutationLabel}
-                              </Badge>
-                              {lifecycleMeta.kind && <span className="font-mono text-kumo-subtle">{lifecycleMeta.kind}</span>}
-                              {lifecycleMeta.duration && <span className="text-kumo-subtle">持续 {lifecycleMeta.duration}</span>}
-                              {lifecycleMeta.changedFields.length > 0 && (
-                                <span className="text-kumo-subtle" title={lifecycleMeta.changedFields.join(', ')}>
-                                  变化 {lifecycleMeta.changedFields.length} 项
-                                </span>
-                              )}
-                            </div>
-                          )}
+                    {/* 左栏：状态与元数据快照 */}
+                    <div className="flex flex-col gap-1.5 min-w-0 pr-0 md:pr-3 md:border-r md:border-kumo-line/40">
+                      {/* 头部：状态 Icon + 标题 */}
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div
+                          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold select-none ${
+                            log.status === 'sent'
+                              ? 'bg-kumo-success/15 text-kumo-success'
+                              : log.status === 'failed'
+                                ? 'bg-kumo-danger/15 text-kumo-danger'
+                                : 'bg-kumo-warning/15 text-kumo-warning'
+                          }`}
+                        >
+                          {log.status === 'sent' ? '✓' : log.status === 'failed' ? '✗' : '...'}
                         </div>
-                        <span className="shrink-0 font-mono text-[10px] text-kumo-subtle select-none">
-                          {new Date(log.created_at).toLocaleString()}
+                        <span className="text-xs font-bold text-kumo-strong truncate" title={log.title}>
+                          {log.title}
                         </span>
                       </div>
 
-                      {/* 消息文本块 */}
+                      {/* 动态生命周期 Badges & 细节 */}
+                      {lifecycleMeta && (
+                        <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                          <Badge className="border border-kumo-brand/25 bg-kumo-brand/10 text-[9px] text-kumo-brand py-0 px-1.5">
+                            ↻ {mutationLabel}
+                          </Badge>
+                          {lifecycleMeta.kind && <span className="font-mono text-kumo-subtle">{lifecycleMeta.kind}</span>}
+                          {lifecycleMeta.duration && <span className="text-kumo-subtle">持续 {lifecycleMeta.duration}</span>}
+                          {lifecycleMeta.changedFields.length > 0 && (
+                            <span className="text-kumo-subtle" title={lifecycleMeta.changedFields.join(', ')}>
+                              变化 {lifecycleMeta.changedFields.length} 项
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* 时间记录 */}
+                      <div className="font-mono text-[10px] text-kumo-subtle select-none pt-0.5">
+                        {new Date(log.created_at).toLocaleString()}
+                      </div>
+                    </div>
+
+                    {/* 右栏：详细消息内容与异常/重试提示 */}
+                    <div className="min-w-0 flex-1 space-y-1.5">
                       {log.message && (
                         <div className="rounded-md border border-kumo-line/60 bg-kumo-recessed/30 px-3 py-2 font-mono text-[11px] leading-relaxed text-kumo-subtle whitespace-pre-wrap break-all">
                           {log.message}
                         </div>
                       )}
 
-                      {/* 异常/重试提示 */}
                       {(log.error_message || log.retry_count > 0) && (
                         <div className="flex flex-wrap items-center gap-2 pt-0.5 select-none">
                           {log.error_message && (
