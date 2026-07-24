@@ -1264,66 +1264,54 @@ function NotificationPage() {
           title="全局配置选项"
           description="聚合、限频与看板链接"
           icon={<Settings className="w-4 h-4 text-kumo-brand" />}
-          bodyClassName="space-y-6"
-          bodyPadding="xl"
+          bodyPadding="sm"
+          bodyClassName="space-y-4"
         >
-          <div className="space-y-4">
-            {/* Base URL */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-kumo-subtle">看板基准 URL</label>
-              <Input size="sm"
-                aria-label="看板基准 URL"
-                type="text"
-                placeholder="https://monitor.domain.com"
-                value={notificationGlobalConfig.base_url || ''}
-                onChange={(e) => setNotificationGlobalConfig(prev => ({ ...prev, base_url: e.target.value }))}
-                className="w-full text-kumo-strong text-xs px-3 py-2"
+          <div className="grid gap-4">
+            <Input
+              size="sm"
+              label="看板基准 URL"
+              description="设置后，通知会附带看板链接。"
+              placeholder="https://monitor.domain.com"
+              value={notificationGlobalConfig.base_url || ''}
+              onChange={(e) => setNotificationGlobalConfig(prev => ({ ...prev, base_url: e.target.value }))}
+            />
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Input
+                size="sm"
+                label="全局限频（条/小时）"
+                description="每小时通知上限；超限后仅推 Critical。"
+                type="number"
+                min="0"
+                value={notificationGlobalConfig.global_rate_limit_per_hour ?? 100}
+                onChange={(e) => setNotificationGlobalConfig(prev => ({ ...prev, global_rate_limit_per_hour: parseInt(e.target.value) || 0 }))}
               />
-              <p className="text-[10px] text-kumo-subtle leading-tight select-none">设置后，通知会附带看板链接。</p>
+              <Input
+                size="sm"
+                label="聚合窗口（秒）"
+                description="窗口内同渠道通知合并发送。"
+                type="number"
+                min="0"
+                value={notificationGlobalConfig.batch_interval_seconds ?? 30}
+                onChange={(e) => setNotificationGlobalConfig(prev => ({ ...prev, batch_interval_seconds: parseInt(e.target.value) || 0 }))}
+              />
             </div>
 
-            {/* Rate cap & aggregation timer */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-kumo-line pt-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-kumo-subtle">全局限频（条/小时）</label>
-                <Input size="sm"
-                  aria-label="全局限频阀值"
-                  type="number"
-                  value={notificationGlobalConfig.global_rate_limit_per_hour || 100}
-                  onChange={(e) => setNotificationGlobalConfig(prev => ({ ...prev, global_rate_limit_per_hour: parseInt(e.target.value) || 0 }))}
-                  className="w-full text-kumo-strong text-xs px-3 py-2 font-mono"
-                />
-                <p className="text-[10px] text-kumo-subtle leading-tight select-none">每小时通知上限；超限后仅推 Critical。</p>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-kumo-subtle">聚合窗口（秒）</label>
-                <Input size="sm"
-                  aria-label="消息聚合归并时间"
-                  type="number"
-                  value={notificationGlobalConfig.batch_interval_seconds || 30}
-                  onChange={(e) => setNotificationGlobalConfig(prev => ({ ...prev, batch_interval_seconds: parseInt(e.target.value) || 0 }))}
-                  className="w-full text-kumo-strong text-xs px-3 py-2 font-mono"
-                />
-                <p className="text-[10px] text-kumo-subtle leading-tight select-none">窗口内同渠道通知合并发送。</p>
-              </div>
-            </div>
-
-            {/* Enable aggregate batch toggle */}
-            <div className="flex items-start justify-between border-t border-kumo-line pt-4">
-              <div className="space-y-0.5">
-                <h4 className="text-xs font-semibold text-kumo-strong">启用通知聚合</h4>
-                <p className="text-[10px] text-kumo-subtle leading-tight select-none">相同告警合并发送。</p>
+            <div className="flex items-center justify-between rounded-lg border border-kumo-line bg-kumo-recessed/30 p-3.5">
+              <div>
+                <div className="text-xs font-semibold text-kumo-strong">启用通知聚合</div>
+                <div className="mt-0.5 text-[11px] text-kumo-subtle">窗口内相同告警合并发送。</div>
               </div>
               <Switch
+                size="sm"
                 checked={!!notificationGlobalConfig.enable_batch}
                 onCheckedChange={(checked) => setNotificationGlobalConfig(prev => ({ ...prev, enable_batch: checked }))}
-                size="sm"
               />
             </div>
           </div>
 
-          <div className="flex justify-end pt-4 border-t border-kumo-line select-none">
+          <div className="flex justify-end border-t border-kumo-line pt-3 mt-2">
             <Button size="sm" variant="primary" onClick={handleSaveGlobalConfig} loading={notificationSaving} icon={<Save className="w-3.5 h-3.5" />}>
               保存全局配置
             </Button>
