@@ -62,5 +62,25 @@ jobs:
       - name: Install Gitleaks
         run: go install github.com/zricethezav/gitleaks/v8@v8.28.0
 
-      - name: Scan repository history for secrets
+      - name: Scan pushed commits for secrets
+        if: github.event_name == 'push'
+        env:
+          BASE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            gitleaks git --log-opts="${BASE_SHA}..${HEAD_SHA}" --redact --verbose
+          else
+            gitleaks git --redact --verbose
+          fi
+
+      - name: Scan pull request commits for secrets
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: gitleaks git --log-opts="${BASE_SHA}..${HEAD_SHA}" --redact --verbose
+
+      - name: Scan complete repository history for secrets
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: gitleaks git --redact --verbose
