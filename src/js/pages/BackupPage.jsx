@@ -6,7 +6,7 @@ import { Table } from '@cloudflare/kumo/components/table';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
-import { SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { AppTable, SectionCard } from '../components/ui/AppPrimitives.jsx';
 import { Clock, Database, Download, Play, RefreshCw, Save, Trash } from '../components/Icons.jsx';
 
 const PROVIDERS = [
@@ -17,6 +17,13 @@ const PROVIDERS = [
 ];
 
 const DEFAULT_CONFIG = { provider: 'local', local_dir: '', cron: '', endpoint: '', bucket: '', access_key_id: '', access_key_secret: '' };
+
+const BACKUP_RECORD_COLUMNS = [
+  { id: 'file', role: 'primary', minWidth: 200 },
+  { id: 'size', role: 'number' },
+  { id: 'createdAt', role: 'datetime', grow: 1, minWidth: 200 },
+  { id: 'actions', role: 'actions-lg', width: 200, maxWidth: 220 },
+];
 
 const SCHEDULE_TYPES = [
   { value: 'off', label: '关闭自动备份' },
@@ -233,7 +240,7 @@ export function BackupPanel({ embedded = false } = {}) {
             </div>
           ) : (
             <div className="max-h-80 overflow-auto">
-            <Table layout="fixed" className={embedded ? 'min-w-[560px]' : 'min-w-[720px]'}>
+            <AppTable tableId="backup-records" columns={BACKUP_RECORD_COLUMNS}>
               <Table.Header><Table.Row><Table.Head>文件</Table.Head><Table.Head>大小</Table.Head><Table.Head>时间</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row></Table.Header>
               <Table.Body>
                 {records.map((record) => (
@@ -241,11 +248,11 @@ export function BackupPanel({ embedded = false } = {}) {
                     <Table.Cell><div className="truncate font-mono text-xs text-kumo-strong">{record.file_name}</div><div className="mt-1 flex gap-1"><Badge variant="secondary">本地</Badge>{record.remote_url && <Badge variant="info">云端</Badge>}</div></Table.Cell>
                     <Table.Cell className="text-xs">{formatSize(record.size)}</Table.Cell>
                     <Table.Cell className="text-xs text-kumo-subtle">{formatTime(record.created_at)}</Table.Cell>
-                    <Table.Cell><div className="flex gap-1"><Button size="sm" variant="secondary" onClick={() => { window.location.href = `/api/backup/records/${encodeURIComponent(record.id)}/download`; }}><Download className="h-3.5 w-3.5" />下载</Button><Button size="sm" variant="secondary" onClick={() => restore(record)}><RefreshCw className="h-3.5 w-3.5" />恢复</Button><Button size="sm" variant="secondary-destructive" onClick={() => remove(record)}><Trash className="h-3.5 w-3.5" />删除</Button></div></Table.Cell>
+                    <Table.Cell><div className="flex justify-center gap-1"><Button size="sm" variant="secondary" onClick={() => { window.location.href = `/api/backup/records/${encodeURIComponent(record.id)}/download`; }}><Download className="h-3.5 w-3.5" />下载</Button><Button size="sm" variant="secondary" onClick={() => restore(record)}><RefreshCw className="h-3.5 w-3.5" />恢复</Button><Button size="sm" variant="secondary-destructive" onClick={() => remove(record)}><Trash className="h-3.5 w-3.5" />删除</Button></div></Table.Cell>
                   </Table.Row>
                 ))}
               </Table.Body>
-            </Table>
+            </AppTable>
             </div>
           )}
         </SectionCard>

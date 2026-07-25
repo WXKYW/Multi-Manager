@@ -5,12 +5,13 @@ services:
     container_name: api-monitor
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${PUBLISHED_HOST:-127.0.0.1}:${API_MONITOR_PORT:-3000}:3000"
     volumes:
       - ./data:/app/data
     environment:
       - TZ=Asia/Shanghai
       - APP_ENV=${APP_ENV:-production}
+      - GO_HOST=0.0.0.0
       - PORT=3000
       - DATA_DIR=/app/data
       - DB_NAME=data.db

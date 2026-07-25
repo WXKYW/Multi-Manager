@@ -46,6 +46,18 @@
 - 卡片边框统一 `border border-kumo-line`，必要时用语义 token 强调。
 - 表格内容默认一行显示，长文本用 truncation、tooltip、ClipboardText 或详情弹窗处理。
 
+## 表格布局
+
+- 业务表格继续以 Kumo `Table` 为基础，并通过应用组合层声明语义列角色。
+- 不使用纯百分比列宽。选择、开关、状态、时间、数值和操作列使用有边界的固定宽度；宽表应声明多个 `primary/content` 弹性列共同分配剩余空间，避免单列在宽屏下过度拉伸。
+- 固定布局必须提供语义 `columns` 或有效 `colgroup`，不得依赖浏览器平均分列。
+- 表体默认垂直居中；多行描述列可以显式顶部对齐。操作、选择、状态和控制列始终垂直居中。
+- 数值右对齐，状态、控制和操作居中，主内容与时间左对齐。
+- 三个文字操作必须同排时使用 `actions-xl`（280–400px）并禁止按钮组换行，避免操作列拉高整行。
+- 移动端保留最小可读宽度，溢出限制在表格框架内部；只有存在详情或主列替代信息时才允许隐藏辅助列。
+- 可拖动表格继续使用 Kumo `Table.ResizeHandle`，并遵守语义角色的最小和最大宽度。
+- 完整设计与迁移计划见 [语义化表格布局与移动端适配 PRD](./prd/semantic-table-layout-standard.md)。
+
 ## DeleteResource
 
 当前 `@cloudflare/kumo` 已导出 `DeleteResource`：

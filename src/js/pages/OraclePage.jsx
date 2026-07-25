@@ -71,11 +71,22 @@ const stateOptions = [
   { value: 'TERMINATED', label: '已终止' },
 ];
 
-const INSTANCE_TABLE_WIDTHS = [168, 100, 124, 184, 56, 72, 152];
-const ACCOUNT_TABLE_WIDTHS = [248, 108, 232, 112, 120];
-const NETWORK_TABLE_WIDTHS = [160, 96, 132, 132, 240];
-const STORAGE_TABLE_WIDTHS = [96, 96, 108, 248, 248];
-const CONSOLE_TABLE_WIDTHS = [96, 320, 168, 148];
+const INSTANCE_TABLE_COLUMNS = [
+  { id: 'name', role: 'primary' },
+  { id: 'status', role: 'status' },
+  { id: 'publicIp', role: 'identifier' },
+  { id: 'shape', role: 'meta', grow: 1, minWidth: 160 },
+  { id: 'ocpu', role: 'number', width: 88 },
+  { id: 'memory', role: 'number', width: 88 },
+  { id: 'createdAt', role: 'datetime' },
+];
+const ACCOUNT_TABLE_COLUMNS = [
+  { id: 'name', role: 'primary' },
+  { id: 'region', role: 'meta', grow: 1, minWidth: 160 },
+  { id: 'compartment', role: 'identifier' },
+  { id: 'status', role: 'status' },
+  { id: 'actions', role: 'actions-lg', width: 160, maxWidth: 200 },
+];
 const CACHE_TTL_MS = {
   accounts: 30_000,
   compartments: 5 * 60_000,
@@ -960,7 +971,7 @@ function OraclePage() {
           >
             {loadingInstances ? (
               <DataTableFrame variant="embedded" density="dense" className="min-h-0 flex-1 overflow-auto rounded-none border-0 scrollbar-thin">
-                <AppTable layout="fixed" widths={INSTANCE_TABLE_WIDTHS}>
+                <AppTable tableId="oracle-instances-loading" columns={INSTANCE_TABLE_COLUMNS}>
                   <Table.Header variant="compact">
                     <Table.Row>
                       <Table.Head>名称</Table.Head>
@@ -981,7 +992,7 @@ function OraclePage() {
               <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-kumo-subtle">暂无实例</div>
             ) : (
               <DataTableFrame variant="embedded" density="dense" className="min-h-0 flex-1 overflow-auto rounded-none border-0 scrollbar-thin">
-                <AppTable layout="fixed" widths={INSTANCE_TABLE_WIDTHS}>
+                <AppTable tableId="oracle-instances" columns={INSTANCE_TABLE_COLUMNS}>
                   <Table.Header variant="compact">
                     <Table.Row>
                       <Table.Head>名称</Table.Head>
@@ -1186,7 +1197,7 @@ function OraclePage() {
           )}
         >
           <DataTableFrame variant="embedded" density="dense" className="min-h-0 flex-1 overflow-auto rounded-none border-0 scrollbar-thin">
-            <AppTable layout="fixed" widths={ACCOUNT_TABLE_WIDTHS}>
+            <AppTable tableId="oracle-accounts" columns={ACCOUNT_TABLE_COLUMNS}>
               <Table.Header variant="compact">
                 <Table.Row>
                   <Table.Head>名称</Table.Head>
@@ -1594,7 +1605,7 @@ function ResourceList({ title, icon, items, columns, onCopy, embedded = false, l
       density="dense"
       className="min-h-0 flex-1 overflow-auto rounded-none border-0 scrollbar-thin [&_td:first-child]:!pr-1.5 [&_td:last-child]:!pl-1.5"
     >
-      <AppTable layout="fixed" widths={resourceWidths(columns, renderActions)}>
+      <AppTable tableId={`oracle-${title}-loading`} columns={resourceColumnSpecs(columns, renderActions)}>
         <Table.Header variant="compact">
           <Table.Row>
             {columns.map((column) => <Table.Head key={column}>{columnLabel(column)}</Table.Head>)}
@@ -1610,7 +1621,7 @@ function ResourceList({ title, icon, items, columns, onCopy, embedded = false, l
     <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-kumo-subtle">暂无数据</div>
   ) : (
     <DataTableFrame variant="embedded" density="dense" className="min-h-0 flex-1 overflow-auto rounded-none border-0 scrollbar-thin">
-      <AppTable layout="fixed" widths={resourceWidths(columns, renderActions)}>
+      <AppTable tableId={`oracle-${title}`} columns={resourceColumnSpecs(columns, renderActions)}>
         <Table.Header variant="compact">
           <Table.Row>
             {columns.map((column) => <Table.Head key={column}>{columnLabel(column)}</Table.Head>)}
@@ -1657,13 +1668,27 @@ function ResourceList({ title, icon, items, columns, onCopy, embedded = false, l
   );
 }
 
-function resourceWidths(columns, renderActions) {
-  const widths = columns.includes('connectionString')
-    ? CONSOLE_TABLE_WIDTHS
-    : columns.includes('volumeId')
-      ? STORAGE_TABLE_WIDTHS
-      : NETWORK_TABLE_WIDTHS;
-  return renderActions ? [...widths, 88] : widths;
+function resourceColumnSpecs(columns, renderActions) {
+  const flexibleColumn = columns.find((column) => ['displayName', 'connectionString', 'volumeId'].includes(column)) || columns[0];
+  const specs = columns.map((column) => {
+    if (column === flexibleColumn) {
+      if (column === 'connectionString') return { id: column, role: 'content' };
+      if (column === 'volumeId') return { id: column, role: 'identifier' };
+      return { id: column, role: 'primary' };
+    }
+    if (column === 'state') return { id: column, role: 'status' };
+    if (column === 'volumeType') return { id: column, role: 'type' };
+    if (column === 'timeCreated') return { id: column, role: 'datetime' };
+    if (['privateIp', 'publicIp', 'fingerprint'].includes(column)) {
+      return { id: column, role: 'identifier' };
+    }
+    if (['subnetId', 'attachmentId'].includes(column)) {
+      return { id: column, role: 'identifier', minWidth: 200 };
+    }
+    return { id: column, role: 'meta', grow: 1, minWidth: 160 };
+  });
+  if (renderActions) specs.push({ id: 'actions', role: 'actions-md' });
+  return specs;
 }
 
 function TableSkeletonRows({ columns, rows = 5 }) {

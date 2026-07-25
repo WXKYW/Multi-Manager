@@ -22,6 +22,16 @@ const emptyAccountForm = {
   description: '',
 };
 
+const ALIYUN_INSTANCE_COLUMNS = [
+  { id: 'instance', role: 'primary', minWidth: 200 },
+  { id: 'status', role: 'status' },
+  { id: 'region', role: 'meta', grow: 1, minWidth: 176 },
+  { id: 'address', role: 'identifier', minWidth: 200 },
+  { id: 'specification', role: 'meta', grow: 1, minWidth: 176 },
+  { id: 'platform', role: 'meta', grow: 1, minWidth: 176 },
+  { id: 'actions', role: 'actions-md', width: 144 },
+];
+
 const instanceIP = (inst) => inst.PublicIpAddress?.IpAddress?.[0] || inst.VpcAttributes?.PrivateIpAddress?.IpAddress?.[0] || '-';
 
 const statusTone = (status) => {
@@ -310,7 +320,7 @@ function AliyunPage() {
     return (
       <SectionCard title={title} description="按状态和地域查看资源" icon={<Server className="h-4 w-4 text-kumo-brand" />} bodyPadding="none">
         <DataTableFrame variant="embedded" density="compact">
-          <AppTable layout="fixed" widths={[240, 96, 140, 150, 180, 150, 116]}>
+          <AppTable tableId={`aliyun-${kind}-instances`} columns={ALIYUN_INSTANCE_COLUMNS}>
             <Table.Header sticky variant="compact">
               <Table.Row>
                 <Table.Head>实例</Table.Head>

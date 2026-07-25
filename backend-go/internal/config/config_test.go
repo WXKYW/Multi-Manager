@@ -92,7 +92,7 @@ func TestProductionSecurityDefaults(t *testing.T) {
 	t.Setenv("CORS_ALLOWED_ORIGINS", "https://panel.example.com")
 
 	cfg := Load("test")
-	if !cfg.IsProduction() || !cfg.SecureCookies || cfg.LocalShellTasksAllowed() {
+	if !cfg.IsProduction() || !cfg.SecureCookies || cfg.LocalShellTasksAllowed() || cfg.Host != "127.0.0.1" {
 		t.Fatalf("unexpected production defaults: %#v", cfg)
 	}
 	if len(cfg.TrustedProxyCIDRs) != 2 || len(cfg.CORSAllowedOrigins) != 1 {
@@ -101,7 +101,7 @@ func TestProductionSecurityDefaults(t *testing.T) {
 }
 
 func TestProductionSecurityValidation(t *testing.T) {
-	cfg := Config{Environment: "production"}
+	cfg := Config{Environment: "production", SecureCookies: true}
 	t.Setenv("ENCRYPTION_KEY", "")
 	t.Setenv("JWT_SECRET", "")
 	if err := cfg.ValidateSecurity(); err == nil {
@@ -114,7 +114,22 @@ func TestProductionSecurityValidation(t *testing.T) {
 		t.Fatalf("valid production secrets rejected: %v", err)
 	}
 
+	if err := (Config{Environment: "production", SecureCookies: false}).ValidateSecurity(); err == nil {
+		t.Fatal("expected insecure production cookies to be rejected")
+	}
+
 	if err := (Config{Environment: "development"}).ValidateSecurity(); err != nil {
 		t.Fatalf("development should not require production secrets: %v", err)
+	}
+}
+
+func TestDevelopmentHostDefaultRemainsNetworkAccessible(t *testing.T) {
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("NODE_ENV", "")
+	t.Setenv("GO_HOST", "")
+
+	cfg := Load("test")
+	if cfg.Host != "0.0.0.0" {
+		t.Fatalf("development Host = %q, want 0.0.0.0", cfg.Host)
 	}
 }

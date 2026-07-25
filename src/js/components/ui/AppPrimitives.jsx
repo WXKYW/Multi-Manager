@@ -5,6 +5,7 @@ import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Table } from '@cloudflare/kumo/components/table';
 import { LayerCard } from '@cloudflare/kumo';
 import { Info } from '../Icons.jsx';
+import { resolveTableColumns } from '../../modules/tableLayout.js';
 
 export const pageStackClass = 'flex w-full min-w-0 flex-col gap-3 sm:gap-4 pb-6 sm:pb-8';
 export const viewportPageStackClass = 'flex w-full min-w-0 flex-col gap-3 sm:gap-4 pb-0';
@@ -249,33 +250,86 @@ export function DataTableFrame({
   );
 }
 
-export function AppTable({ widths, fitContent = false, percentageWidths = false, className = '', style, children, ...props }) {
+export function AppTable({
+  columns,
+  widths,
+  fitContent = false,
+  tableId,
+  layout,
+  className = '',
+  style,
+  children,
+  ...props
+}) {
   const columnWeights = Array.isArray(widths)
     ? widths.map((width) => Math.max(Number(width) || 0, 0))
     : [];
   const totalWeight = columnWeights.reduce((total, width) => total + width, 0);
+  const semanticLayout = React.useMemo(
+    () => resolveTableColumns(Array.isArray(columns) ? columns : []),
+    [columns]
+  );
+  const hasSemanticColumns = semanticLayout.columns.length > 0;
   const hasExplicitColgroup = React.Children.toArray(children).some(
     (child) => React.isValidElement(child) && child.type === 'colgroup'
   );
+  const layoutWarnings = React.useMemo(() => {
+    const warnings = [...semanticLayout.warnings];
+    if (hasSemanticColumns && hasExplicitColgroup) {
+      warnings.push({ code: 'semantic-columns-with-explicit-colgroup' });
+    }
+    return warnings;
+  }, [hasExplicitColgroup, hasSemanticColumns, semanticLayout.warnings]);
+  const warningKey = JSON.stringify(layoutWarnings);
+
+  React.useEffect(() => {
+    if (!import.meta.env.DEV || layoutWarnings.length === 0) return;
+    console.warn(`[AppTable${tableId ? `:${tableId}` : ''}] layout warnings`, layoutWarnings);
+  }, [layoutWarnings, tableId, warningKey]);
+
+  const semanticStyle = hasSemanticColumns
+    ? {
+        minWidth: semanticLayout.minWidth,
+        width: fitContent ? semanticLayout.minWidth : '100%',
+      }
+    : undefined;
+  const legacyStyle = totalWeight > 0
+    ? { minWidth: totalWeight, width: fitContent ? totalWeight : '100%' }
+    : undefined;
+  const shouldRenderGeneratedColgroup = !hasExplicitColgroup && (hasSemanticColumns || totalWeight > 0);
 
   return (
     <Table
       {...props}
-      className={cx(percentageWidths && 'w-full max-w-full', className)}
+      layout={layout || (hasSemanticColumns || totalWeight > 0 ? 'fixed' : undefined)}
+      {...semanticLayout.dataAttributes}
+      data-app-table-id={tableId}
+      className={cx(
+        hasSemanticColumns && 'app-semantic-table',
+        className
+      )}
       style={{
-        ...(percentageWidths
-          ? { minWidth: 0, width: '100%', maxWidth: '100%' }
-          : totalWeight > 0
-            ? { minWidth: totalWeight, width: fitContent ? totalWeight : '100%' }
-            : undefined),
+        ...(semanticStyle || legacyStyle),
         ...style,
       }}
     >
-      {percentageWidths && totalWeight > 0 && !hasExplicitColgroup && (
+      {shouldRenderGeneratedColgroup && (
         <colgroup>
-          {columnWeights.map((width, index) => (
-            <col key={index} style={{ width: `${(width / totalWeight) * 100}%` }} />
-          ))}
+          {hasSemanticColumns
+            ? semanticLayout.columns.map((column) => (
+                <col
+                  key={column.id}
+                  data-column-id={column.id}
+                  data-column-role={column.role}
+                  style={column.width === null ? undefined : { width: column.width }}
+                />
+              ))
+            : columnWeights.map((width, index) => (
+                <col
+                  key={index}
+                  style={{ width }}
+                />
+              ))}
         </colgroup>
       )}
       {children}

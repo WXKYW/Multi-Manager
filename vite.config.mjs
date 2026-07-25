@@ -118,9 +118,15 @@ export default defineConfig(({ mode }) => {
         protocol: 'ws',
         host: 'localhost',
       },
-      // 文件系统访问控制：阻止 dev server 暴露后端源代码
+      // 文件系统访问控制：阻止 dev server 暴露后端源代码与敏感数据文件
       fs: {
         deny: [
+          '**/.env*',
+          '**/*.db',
+          '**/*.db-journal',
+          '**/*.sqlite*',
+          '**/data/**',
+          '**/backup/**',
           '**/db/**',
           '**/middleware/**',
           '**/routes/**',
@@ -129,6 +135,8 @@ export default defineConfig(({ mode }) => {
           '**/views/**',
           '**/scripts/**',
           '**/*.sql',
+          '**/*.key',
+          '**/*.pem',
         ],
       },
       proxy: {

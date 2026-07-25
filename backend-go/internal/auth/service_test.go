@@ -319,6 +319,42 @@ func TestLoginDoesNotExposeSessionIDAndProductionCookieIsSecure(t *testing.T) {
 	}
 }
 
+func TestProductionLoginOptionsDoNotExposeCredentialCount(t *testing.T) {
+	t.Setenv("ADMIN_PASSWORD", "")
+	t.Setenv("DEMO_MODE", "")
+	t.Setenv("ENCRYPTION_KEY", "")
+
+	service := New(config.Config{
+		Version:       "test",
+		Environment:   "production",
+		SecureCookies: true,
+		Host:          "127.0.0.1",
+		Port:          0,
+		DataDir:       t.TempDir(),
+		DBName:        "data.db",
+	})
+
+	res := performAuthRequest(service, http.MethodGet, "/api/auth/login-options", "", nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("login options status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	var payload struct {
+		Success  bool                   `json:"success"`
+		WebAuthn map[string]interface{} `json:"webauthn"`
+	}
+	mustDecodeAuth(t, res, &payload)
+	if !payload.Success {
+		t.Fatalf("unexpected login options payload: %#v", payload)
+	}
+	if _, ok := payload.WebAuthn["credentialCount"]; ok {
+		t.Fatalf("production login options leaked credentialCount: %#v", payload.WebAuthn)
+	}
+	if payload.WebAuthn["enabled"] != false {
+		t.Fatalf("unexpected webauthn enabled state: %#v", payload.WebAuthn)
+	}
+}
+
 func TestWebAuthnRegistrationBeginDoesNotRequirePasswordPrompt(t *testing.T) {
 	t.Setenv("ADMIN_PASSWORD", "")
 	t.Setenv("DEMO_MODE", "")

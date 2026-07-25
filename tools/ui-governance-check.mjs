@@ -163,9 +163,31 @@ function scanLegacyFrontend(files) {
   }
 }
 
+function scanTableLayouts(files) {
+  for (const rel of files.filter((file) => /\.jsx$/.test(file))) {
+    const content = fs.readFileSync(path.join(root, rel), 'utf8');
+    if (/<AppTable\b[^>]*\bpercentageWidths\b/.test(content)) {
+      failures.push(`${rel}: percentageWidths is not allowed; use semantic columns with fixed utility roles`);
+    }
+
+    for (const match of content.matchAll(/<AppTable\b(?=[^>]*\bwidths\s*=)[^>]*>([\s\S]*?)<\/AppTable>/g)) {
+      if (/<colgroup\b/.test(match[1])) continue;
+      const lineNumber = content.slice(0, match.index).split(/\r?\n/).length;
+      warnings.push(`${rel}:${lineNumber} legacy AppTable widths should migrate to semantic columns`);
+    }
+
+    for (const match of content.matchAll(/<Table\b(?=[^>]*\blayout=["']fixed["'])[^>]*>([\s\S]*?)<\/Table>/g)) {
+      if (/<colgroup\b/.test(match[1]) || /<Table\.Head\b[^>]*\bw-/.test(match[1])) continue;
+      const lineNumber = content.slice(0, match.index).split(/\r?\n/).length;
+      warnings.push(`${rel}:${lineNumber} fixed Kumo Table has no semantic AppTable columns or colgroup`);
+    }
+  }
+}
+
 const files = scanRoots.flatMap((dir) => walk(dir));
 for (const file of files) scanFile(file);
 scanLegacyFrontend(files);
+scanTableLayouts(files);
 
 if (warnings.length) {
   console.log('UI governance warnings:');

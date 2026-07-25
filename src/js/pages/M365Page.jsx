@@ -106,7 +106,16 @@ const scrollViewportClass = 'min-h-0 flex-1 overflow-auto scrollbar-thin';
 const tableFrameClass = 'flex h-0 min-h-0 flex-1 flex-col overflow-hidden';
 const DEFAULT_NEW_USER_PASSWORD = 'Mjj@1234';
 const USER_TABLE_COLUMN_WIDTHS = [96, 180, 220, 220, 260, 220];
-const REGISTRATION_TABLE_COLUMN_WIDTHS = [40, 176, 84, 168, 128, 156, 144, 236];
+const REGISTRATION_TABLE_COLUMNS = [
+  { id: 'check', role: 'check' },
+  { id: 'account', role: 'primary', minWidth: 176 },
+  { id: 'status', role: 'status' },
+  { id: 'source', role: 'identifier', minWidth: 176 },
+  { id: 'tenant', role: 'meta', grow: 1, minWidth: 160 },
+  { id: 'graphUserId', role: 'identifier', minWidth: 176 },
+  { id: 'createdAt', role: 'datetime', width: 144 },
+  { id: 'result', role: 'content', minWidth: 200, verticalAlign: 'middle' },
+];
 const publicResourceCardClass =
   'flex h-full min-h-[15rem] flex-col overflow-hidden rounded-xl border border-kumo-line bg-kumo-base';
 const publicResourceCardHeaderClass =
@@ -2471,7 +2480,7 @@ function M365Page() {
                   density="dense"
                   className="min-h-0 flex-1 overflow-auto scrollbar-thin"
                 >
-                  <AppTable layout="fixed" widths={REGISTRATION_TABLE_COLUMN_WIDTHS}>
+                  <AppTable tableId="m365-registration-records" columns={REGISTRATION_TABLE_COLUMNS}>
                     <Table.Header sticky variant="compact">
                       <Table.Row>
                         <Table.CheckHead

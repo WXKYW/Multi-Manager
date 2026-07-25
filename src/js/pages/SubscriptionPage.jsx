@@ -30,6 +30,63 @@ const LOAD_TIMEOUT_MS = 8000;
 const INITIAL_SKELETON_MS = 900;
 const DESTRUCTIVE_CONFIRM_MS = 8000;
 
+const SUBSCRIPTION_LOG_COLUMNS = [
+  { id: 'createdAt', role: 'datetime' },
+  { id: 'subscription', role: 'primary', minWidth: 176 },
+  { id: 'client', role: 'content', minWidth: 200, verticalAlign: 'middle' },
+  { id: 'format', role: 'type' },
+  { id: 'result', role: 'status' },
+  { id: 'nodes', role: 'count' },
+  { id: 'traffic', role: 'meta', grow: 1, minWidth: 176, align: 'right' },
+];
+
+const PREFERRED_ADDRESS_COLUMNS = [
+  { id: 'name', role: 'primary' },
+  { id: 'address', role: 'identifier' },
+  { id: 'actions', role: 'actions-sm' },
+];
+
+const SUBSCRIPTION_COLUMNS = [
+  { id: 'enabled', role: 'control' },
+  { id: 'subscription', role: 'primary', minWidth: 176 },
+  { id: 'status', role: 'status' },
+  { id: 'traffic', role: 'content', minWidth: 220, verticalAlign: 'middle' },
+  { id: 'access', role: 'meta', grow: 1, minWidth: 176 },
+  { id: 'actions', role: 'actions-lg', width: 208, maxWidth: 220 },
+];
+
+const PLAN_COLUMNS = [
+  { id: 'enabled', role: 'control' },
+  { id: 'plan', role: 'primary' },
+  { id: 'status', role: 'status' },
+  { id: 'quota', role: 'number', grow: 1, minWidth: 176 },
+  { id: 'reset', role: 'date', grow: 1, minWidth: 176 },
+  { id: 'nodes', role: 'meta', grow: 1, minWidth: 176 },
+  { id: 'subscriptions', role: 'count' },
+  { id: 'actions', role: 'actions-md' },
+];
+
+const NODE_COLUMNS = [
+  { id: 'enabled', role: 'control' },
+  { id: 'name', role: 'primary', minWidth: 220 },
+  { id: 'type', role: 'type' },
+  { id: 'connection', role: 'content', minWidth: 240 },
+  { id: 'host', role: 'meta', grow: 1, minWidth: 176 },
+  { id: 'actions', role: 'actions-lg', width: 160, maxWidth: 200 },
+];
+
+const RUNTIME_HOST_COLUMNS = [
+  { id: 'check', role: 'check' },
+  { id: 'status', role: 'status' },
+  { id: 'name', role: 'primary', minWidth: 240 },
+  { id: 'location', role: 'meta', grow: 1, minWidth: 240, align: 'center' },
+  { id: 'online', role: 'count', align: 'center' },
+  { id: 'agentVersion', role: 'meta', grow: 1, minWidth: 240, align: 'center' },
+  { id: 'proxy', role: 'content', grow: 0, width: 300, align: 'center', verticalAlign: 'middle' },
+  { id: 'nodeType', role: 'type', grow: 1, minWidth: 240 },
+  { id: 'actions', role: 'actions-xl', width: 360 },
+];
+
 const emptyInternalNodeForm = { server_id: '', name: '', protocol: 'vless-reality', access_mode: 'direct', preferred_address_id: '', public_host: '', server_name: 'www.cloudflare.com', certificate_pem: '', private_key_pem: '', enabled: true, stable: false };
 
 const getInstanceCountryCode = (server) => {
@@ -1893,7 +1950,7 @@ function SubscriptionPage() {
         )}
       >
         <div className="min-h-0 flex-1 overflow-x-auto overflow-y-visible overscroll-x-contain touch-pan-x scrollbar-thin">
-          <AppTable percentageWidths layout="fixed" widths={[68, 270, 120, 242, 120, 180]} style={{ minWidth: 900 }}>
+          <AppTable tableId="subscriptions" columns={SUBSCRIPTION_COLUMNS}>
             <Table.Header sticky variant="compact">
               <Table.Row>
                 <Table.Head className="text-center">启用</Table.Head>
@@ -1979,7 +2036,7 @@ function SubscriptionPage() {
   const renderPlans = () => (
     <SectionCard title={`套餐管理 (${plans.length})`} className="h-full min-h-0" bodyPadding="none" bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden" actions={<Button size="sm" variant="primary" onClick={openCreatePlan}><Plus className="h-3.5 w-3.5" />新建套餐</Button>}>
       <div className="min-h-0 flex-1 overflow-x-auto overflow-y-visible overscroll-x-contain touch-pan-x scrollbar-thin">
-        <AppTable percentageWidths layout="fixed" widths={[68, 230, 92, 160, 140, 180, 82, 128]} style={{ minWidth: 960 }} className="[&_td]:align-middle">
+        <AppTable tableId="subscription-plans" columns={PLAN_COLUMNS}>
           <Table.Header sticky variant="compact"><Table.Row><Table.Head className="text-center">启用</Table.Head><Table.Head>套餐</Table.Head><Table.Head className="text-center">状态</Table.Head><Table.Head>单订阅额度</Table.Head><Table.Head className="text-center">重置</Table.Head><Table.Head>节点范围</Table.Head><Table.Head className="text-center">订阅</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row></Table.Header>
           <Table.Body>
             {plans.map((plan) => {
@@ -2012,7 +2069,7 @@ function SubscriptionPage() {
       actions={<Button size="sm" variant="primary" disabled={runtimeReadyServers.length === 0} onClick={() => startInternalDeployment()}><Plus className="h-3.5 w-3.5" />生成节点</Button>}
     >
       <DataTableFrame variant="embedded">
-        <AppTable percentageWidths layout="fixed" widths={[92, 248, 104, 280, 172, 144]} style={{ minWidth: 860 }}>
+        <AppTable tableId="internal-proxy-nodes" columns={NODE_COLUMNS}>
           <Table.Header sticky variant="compact"><Table.Row><Table.Head className="text-center">状态</Table.Head><Table.Head>节点名称</Table.Head><Table.Head className="text-center">类型</Table.Head><Table.Head>连接</Table.Head><Table.Head>主机 / 延迟</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row></Table.Header>
           <Table.Body>
             {internalNodes.map((node) => {
@@ -2076,7 +2133,7 @@ function SubscriptionPage() {
           )}
       </div>
       <DataTableFrame variant="embedded">
-        <AppTable percentageWidths layout="fixed" widths={[92, 248, 104, 280, 172, 144]} style={{ minWidth: 860 }}>
+        <AppTable tableId="external-proxy-nodes" columns={NODE_COLUMNS}>
           <Table.Header sticky variant="compact">
             <Table.Row>
               <Table.Head className="text-center">状态</Table.Head>
@@ -2171,7 +2228,7 @@ function SubscriptionPage() {
       actions={<Button size="sm" variant="primary" loading={saving} disabled={selectedRuntimeHosts.size === 0} onClick={() => deployProxyRuntime([...selectedRuntimeHosts])}><Plus className="h-3.5 w-3.5" />批量部署程序 ({selectedRuntimeHosts.size})</Button>}
     >
       <DataTableFrame variant="embedded" className="min-h-[18rem] overflow-auto">
-        <AppTable percentageWidths layout="fixed" widths={[44, 80, 150, 90, 75, 95, 300, 95, 255]} style={{ minWidth: 1184 }} className="text-xs [&_td]:border-kumo-interact/45 [&_th]:border-kumo-interact/50">
+        <AppTable tableId="runtime-hosts" columns={RUNTIME_HOST_COLUMNS} className="text-xs [&_td]:border-kumo-interact/45 [&_th]:border-kumo-interact/50">
           <Table.Header sticky variant="compact">
             <Table.Row>
               <Table.CheckHead checked={runtimeLifecycleServers.length > 0 && selectedRuntimeHosts.size === runtimeLifecycleServers.length} indeterminate={selectedRuntimeHosts.size > 0 && selectedRuntimeHosts.size < runtimeLifecycleServers.length} onCheckedChange={(checked) => setSelectedRuntimeHosts(checked ? new Set(runtimeLifecycleServers.map((server) => server.id)) : new Set())} />
@@ -2201,9 +2258,9 @@ function SubscriptionPage() {
                   <Table.Cell className="text-center"><div className="mx-auto flex w-[64px] items-center justify-center gap-1.5">{countryCode && <CountryFlag preferSvg countryCode={countryCode} className="h-3.5 w-5 shrink-0 !rounded-[2px] text-sm" />}<span className="truncate font-semibold uppercase text-kumo-strong" title={server.location || locationLabel}>{locationLabel}</span></div></Table.Cell>
                   <Table.Cell className="text-center"><span className="font-semibold tabular-nums text-kumo-strong">{formatInstanceUptime(server.uptime)}</span></Table.Cell>
                   <Table.Cell className="text-center"><span className="font-mono text-xs">{server.agent_version && server.agent_version !== '<nil>' ? server.agent_version : '未报告'}</span></Table.Cell>
-					<Table.Cell className="text-center"><div className="flex flex-nowrap items-center justify-center gap-1.5 overflow-x-auto scrollbar-none">{runtime ? <Badge className="shrink-0" variant={runtime.apply_status === 'running' ? 'success' : ['failed', 'drifted'].includes(runtime.apply_status) ? 'error' : 'warning'}>{runtime.apply_status === 'running' ? `sing-box${runtime.version ? ` ${runtime.version}` : ''}` : runtime.apply_status === 'failed' ? '部署失败' : runtime.apply_status === 'drifted' ? '状态漂移' : '部署中'}</Badge> : <Badge variant="neutral" className="shrink-0">未安装</Badge>}{server.status === 'online' && !supportsRuntimeLifecycle && <Badge variant="warning" className="shrink-0">需升级 Agent</Badge>}{tunnel && <Badge className="shrink-0" variant={tunnel.apply_status === 'running' ? 'success' : tunnel.apply_status === 'failed' ? 'error' : 'warning'}>Tunnel {tunnel.apply_status === 'running' ? '已连接' : tunnel.apply_status}</Badge>}</div></Table.Cell>
-					<Table.Cell className="text-center"><div className="flex flex-wrap justify-center gap-1">{managed.map((node) => <Badge key={node.id} variant={nodeTypeBadgeVariant(node.protocol)}>{node.protocol === 'hysteria2' ? 'HY2' : 'VLESS'}</Badge>)}{managed.length === 0 && <span className="text-xs text-kumo-subtle">—</span>}</div></Table.Cell>
-                  <Table.Cell className="text-center"><div className="flex w-full flex-wrap items-center justify-center gap-1">{runtime?.apply_status === 'running' ? <><Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>升级 / 重装</Button><Button size="sm" variant={isDestructiveConfirmActive(`runtime-uninstall:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallProxyRuntime(server)} disabled={saving || managed.length > 0 || !supportsRuntimeLifecycle} title={managed.length > 0 ? '请先在节点管理中卸载该实例的全部节点' : !supportsRuntimeLifecycle ? '请先升级 Agent' : '卸载 sing-box'}>{isDestructiveConfirmActive(`runtime-uninstall:${server.id}`) ? '再次确认' : '卸载程序'}</Button></> : <Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>安装代理</Button>}{tunnel ? <Button size="sm" variant={isDestructiveConfirmActive(`managed-tunnel-delete:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallTunnel(server)}>{isDestructiveConfirmActive(`managed-tunnel-delete:${server.id}`) ? '再次确认' : '卸载 Tunnel'}</Button> : <Button size="sm" variant="secondary" onClick={() => openTunnelDeployment(server)} disabled={server.status !== 'online'}>部署 Tunnel</Button>}</div></Table.Cell>
+					<Table.Cell className="text-center"><div className="flex min-w-0 flex-nowrap items-center justify-center gap-2 px-2">{runtime ? <Badge className="shrink-0" variant={runtime.apply_status === 'running' ? 'success' : ['failed', 'drifted'].includes(runtime.apply_status) ? 'error' : 'warning'}>{runtime.apply_status === 'running' ? `sing-box${runtime.version ? ` ${runtime.version}` : ''}` : runtime.apply_status === 'failed' ? '部署失败' : runtime.apply_status === 'drifted' ? '状态漂移' : '部署中'}</Badge> : <Badge variant="neutral" className="shrink-0">未安装</Badge>}{server.status === 'online' && !supportsRuntimeLifecycle && <Badge variant="warning" className="shrink-0">需升级 Agent</Badge>}{tunnel && <Badge className="shrink-0" variant={tunnel.apply_status === 'running' ? 'success' : tunnel.apply_status === 'failed' ? 'error' : 'warning'}>Tunnel {tunnel.apply_status === 'running' ? '已连接' : tunnel.apply_status}</Badge>}</div></Table.Cell>
+					<Table.Cell className="text-center"><div className="flex flex-nowrap justify-center gap-1">{managed.map((node) => <Badge key={node.id} variant={nodeTypeBadgeVariant(node.protocol)}>{node.protocol === 'hysteria2' ? 'HY2' : 'VLESS'}</Badge>)}{managed.length === 0 && <span className="text-xs text-kumo-subtle">—</span>}</div></Table.Cell>
+                  <Table.Cell className="text-center"><div className="flex w-full flex-nowrap items-center justify-center gap-1">{runtime?.apply_status === 'running' ? <><Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>升级 / 重装</Button><Button size="sm" variant={isDestructiveConfirmActive(`runtime-uninstall:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallProxyRuntime(server)} disabled={saving || managed.length > 0 || !supportsRuntimeLifecycle} title={managed.length > 0 ? '请先在节点管理中卸载该实例的全部节点' : !supportsRuntimeLifecycle ? '请先升级 Agent' : '卸载 sing-box'}>{isDestructiveConfirmActive(`runtime-uninstall:${server.id}`) ? '再次确认' : '卸载程序'}</Button></> : <Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>安装代理</Button>}{tunnel ? <Button size="sm" variant={isDestructiveConfirmActive(`managed-tunnel-delete:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallTunnel(server)}>{isDestructiveConfirmActive(`managed-tunnel-delete:${server.id}`) ? '再次确认' : '卸载 Tunnel'}</Button> : <Button size="sm" variant="secondary" onClick={() => openTunnelDeployment(server)} disabled={server.status !== 'online'}>部署 Tunnel</Button>}</div></Table.Cell>
                 </Table.Row>
               );
             })}
@@ -2264,19 +2321,21 @@ function SubscriptionPage() {
       </LayerCard>
 
       <DataTableFrame>
-        <Table layout="fixed" className="min-w-[920px]">
+        <AppTable tableId="subscription-nodes-skeleton" columns={NODE_COLUMNS}>
           <Table.Header>
             <Table.Row>
+              <Table.Head className="text-center">状态</Table.Head>
               <Table.Head>节点名称</Table.Head>
-              <Table.Head>类型</Table.Head>
+              <Table.Head className="text-center">类型</Table.Head>
               <Table.Head>连接</Table.Head>
               <Table.Head>主机 / 延迟</Table.Head>
-              <Table.Head className="app-table-action">状态 / 操作</Table.Head>
+              <Table.Head className="app-table-action">操作</Table.Head>
             </Table.Row>
           </Table.Header>
           <Table.Body>
             {Array.from({ length: 6 }).map((_, index) => (
               <Table.Row key={index}>
+                <Table.Cell><SkeletonLine className="mx-auto h-5 w-9" /></Table.Cell>
                 <Table.Cell>
                   <SkeletonLine className="h-4 w-32" />
                 </Table.Cell>
@@ -2292,7 +2351,7 @@ function SubscriptionPage() {
               </Table.Row>
             ))}
           </Table.Body>
-        </Table>
+        </AppTable>
       </DataTableFrame>
     </div>
   );
@@ -2352,7 +2411,7 @@ function SubscriptionPage() {
 
   const renderLogs = () => (
     <DataTableFrame>
-      <Table layout="fixed" className="min-w-[960px]">
+      <AppTable tableId="subscription-access-logs" columns={SUBSCRIPTION_LOG_COLUMNS}>
           <Table.Header>
             <Table.Row>
               <Table.Head>时间</Table.Head>
@@ -2380,7 +2439,7 @@ function SubscriptionPage() {
               <Table.Row><Table.Cell colSpan={7} className="p-8 text-center text-kumo-subtle">暂无访问日志。</Table.Cell></Table.Row>
             )}
           </Table.Body>
-      </Table>
+      </AppTable>
     </DataTableFrame>
   );
 
@@ -2498,7 +2557,7 @@ function SubscriptionPage() {
 			<Dialog size="lg" className="!w-[min(56rem,calc(100vw-1rem))] !max-w-[min(56rem,calc(100vw-1rem))] overflow-hidden p-0">
 				<div className="border-b border-kumo-line px-3 py-3 sm:px-5 sm:py-4"><Dialog.Title>优选地址</Dialog.Title></div>
 				<div className="grid min-w-0 items-end gap-3 p-3 sm:grid-cols-2 sm:p-5 lg:grid-cols-[minmax(10rem,1fr)_minmax(14rem,1.4fr)_9rem_7rem]"><Input size="sm" label="名称" value={preferredForm.name} onChange={(event) => setPreferredForm((prev) => ({ ...prev, name: event.target.value }))} /><Input size="sm" label="域名或 IP" placeholder="saas.sin.fan" value={preferredForm.address} onChange={(event) => setPreferredForm((prev) => ({ ...prev, address: event.target.value }))} /><Input size="sm" label="端口" type="number" value={preferredForm.port} onChange={(event) => setPreferredForm((prev) => ({ ...prev, port: Number(event.target.value) || 443 }))} /><div className="min-w-0"><Label className="block h-5">全局默认</Label><div className="mt-2 flex h-[26px] items-center"><Switch size="sm" aria-label="设为全局默认" checked={!!preferredForm.is_default} onCheckedChange={(checked) => setPreferredForm((prev) => ({ ...prev, is_default: checked }))} /></div></div></div>
-				<div className="max-h-48 overflow-x-auto overflow-y-auto border-t border-kumo-line overscroll-x-contain touch-pan-x scrollbar-thin"><Table layout="fixed" className="min-w-[28rem]"><Table.Header><Table.Row><Table.Head>名称</Table.Head><Table.Head>地址</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row></Table.Header><Table.Body>{preferredAddresses.map((item) => <Table.Row key={item.id}><Table.Cell>{item.name}</Table.Cell><Table.Cell className="font-mono text-xs">{item.address}:{item.port}</Table.Cell><Table.Cell className="text-center"><Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deletePreferredAddress(item)} icon={<Trash className="h-3.5 w-3.5" />} aria-label={`删除 ${item.name}`} /></Table.Cell></Table.Row>)}</Table.Body></Table></div>
+				<div className="max-h-48 overflow-x-auto overflow-y-auto border-t border-kumo-line overscroll-x-contain touch-pan-x scrollbar-thin"><AppTable tableId="preferred-addresses" columns={PREFERRED_ADDRESS_COLUMNS}><Table.Header><Table.Row><Table.Head>名称</Table.Head><Table.Head>地址</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row></Table.Header><Table.Body>{preferredAddresses.map((item) => <Table.Row key={item.id}><Table.Cell>{item.name}</Table.Cell><Table.Cell className="font-mono text-xs">{item.address}:{item.port}</Table.Cell><Table.Cell className="text-center"><Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deletePreferredAddress(item)} icon={<Trash className="h-3.5 w-3.5" />} aria-label={`删除 ${item.name}`} /></Table.Cell></Table.Row>)}</Table.Body></AppTable></div>
 				<div className="flex justify-end gap-2 border-t border-kumo-line px-3 py-3 sm:px-5 sm:py-4"><Button size="sm" variant="secondary" onClick={() => setPreferredModalOpen(false)}>关闭</Button><Button size="sm" variant="primary" onClick={savePreferredAddress}><Save className="h-3.5 w-3.5" />保存地址</Button></div>
 			</Dialog>
 		</Dialog.Root>

@@ -28,10 +28,14 @@ type Config struct {
 func Load(version string) Config {
 	root := repoRoot()
 	environment := strings.ToLower(envString("APP_ENV", envString("NODE_ENV", "development")))
+	defaultHost := "0.0.0.0"
+	if environment == "production" {
+		defaultHost = "127.0.0.1"
+	}
 	return Config{
 		Version:              version,
 		Environment:          environment,
-		Host:                 envString("GO_HOST", "0.0.0.0"),
+		Host:                 envString("GO_HOST", defaultHost),
 		Port:                 envInt("GO_PORT", envInt("PORT", 3000)),
 		LegacyBaseURL:        strings.TrimRight(os.Getenv("NODE_LEGACY_URL"), "/"),
 		DistDir:              envPath(root, "DIST_DIR", filepath.Join(root, "dist")),
@@ -52,6 +56,9 @@ func (c Config) IsProduction() bool {
 func (c Config) ValidateSecurity() error {
 	if !c.IsProduction() {
 		return nil
+	}
+	if !c.SecureCookies {
+		return fmt.Errorf("production requires SECURE_COOKIES=true")
 	}
 	for _, item := range []struct {
 		name  string

@@ -22,6 +22,16 @@ const emptyAccountForm = {
   description: '',
 };
 
+const TENCENT_INSTANCE_COLUMNS = [
+  { id: 'instance', role: 'primary', minWidth: 200 },
+  { id: 'status', role: 'status' },
+  { id: 'region', role: 'meta', grow: 1, minWidth: 176 },
+  { id: 'address', role: 'identifier', minWidth: 200 },
+  { id: 'configuration', role: 'meta', grow: 1, minWidth: 176 },
+  { id: 'platform', role: 'meta', grow: 1, minWidth: 176 },
+  { id: 'actions', role: 'actions-md', width: 144 },
+];
+
 const extractTencentDomains = (result) => {
   if (Array.isArray(result)) return result;
   if (Array.isArray(result?.Domains)) return result.Domains;
@@ -325,7 +335,7 @@ function TencentPage() {
     return (
       <SectionCard title={title} description="按状态和地域查看资源" icon={<Server className="h-4 w-4 text-kumo-brand" />} bodyPadding="none">
         <DataTableFrame variant="embedded" density="compact">
-          <AppTable layout="fixed" widths={[240, 96, 140, 150, 120, 180, 116]}>
+          <AppTable tableId={`tencent-${kind}-instances`} columns={TENCENT_INSTANCE_COLUMNS}>
             <Table.Header sticky variant="compact">
               <Table.Row>
                 <Table.Head>实例</Table.Head>

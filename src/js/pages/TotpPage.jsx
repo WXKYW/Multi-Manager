@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import jsQR from 'jsqr';
+import { Html5Qrcode } from 'html5-qrcode';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
@@ -1009,10 +1010,6 @@ function TotpPage() {
 
   // ==================== 扫码与导入解析 ====================
   const startQrScan = async () => {
-    if (!window.Html5Qrcode) {
-      toast.error('扫码库加载失败');
-      return;
-    }
     if (
       !window.isSecureContext &&
       location.hostname !== 'localhost' &&
@@ -1068,7 +1065,7 @@ function TotpPage() {
 
     setTimeout(async () => {
       try {
-        const html5QrCode = new window.Html5Qrcode('qr-reader');
+        const html5QrCode = new Html5Qrcode('qr-reader');
         scannerRef.current = html5QrCode;
 
         const config = {
@@ -1097,7 +1094,7 @@ function TotpPage() {
           try {
             await html5QrCode.start({ facingMode: 'user' }, config, successCallback, () => {});
           } catch (err2) {
-            const devices = await window.Html5Qrcode.getCameras();
+            const devices = await Html5Qrcode.getCameras();
             if (devices && devices.length > 0) {
               await html5QrCode.start(devices[0].id, config, successCallback, () => {});
             } else {

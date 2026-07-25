@@ -88,6 +88,92 @@ func TestHealth(t *testing.T) {
 	}
 }
 
+func TestProductionHealthIsMinimized(t *testing.T) {
+	t.Setenv("JWT_SECRET", strings.Repeat("j", 32))
+	t.Setenv("ENCRYPTION_KEY", strings.Repeat("e", 32))
+
+	handler := newTestServer(t, config.Config{
+		Version:       "test",
+		Environment:   "production",
+		SecureCookies: true,
+		Host:          "127.0.0.1",
+		Port:          0,
+		DataDir:       t.TempDir(),
+		DBName:        "data.db",
+	})
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	res := httptest.NewRecorder()
+
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", res.Code, http.StatusOK)
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) != 1 || payload["status"] != "ok" {
+		t.Fatalf("unexpected production health payload: %#v", payload)
+	}
+	if _, ok := payload["service"]; ok {
+		t.Fatalf("production health leaked service metadata: %#v", payload)
+	}
+	if _, ok := payload["version"]; ok {
+		t.Fatalf("production health leaked version metadata: %#v", payload)
+	}
+}
+
+func TestProductionAPISecurityHeaders(t *testing.T) {
+	t.Setenv("JWT_SECRET", strings.Repeat("j", 32))
+	t.Setenv("ENCRYPTION_KEY", strings.Repeat("e", 32))
+
+	handler := newTestServer(t, config.Config{
+		Version:       "test",
+		Environment:   "production",
+		SecureCookies: true,
+		Host:          "127.0.0.1",
+		Port:          0,
+		DataDir:       t.TempDir(),
+		DBName:        "data.db",
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
+	res := httptest.NewRecorder()
+
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d; body=%s", res.Code, http.StatusUnauthorized, res.Body.String())
+	}
+	if got := res.Header().Get("X-XSS-Protection"); got != "0" {
+		t.Fatalf("X-XSS-Protection = %q, want %q", got, "0")
+	}
+	if got := res.Header().Get("Permissions-Policy"); got != "camera=(self), microphone=(), geolocation=()" {
+		t.Fatalf("Permissions-Policy = %q", got)
+	}
+	if got := res.Header().Get("Strict-Transport-Security"); got == "" {
+		t.Fatal("expected Strict-Transport-Security header in production")
+	}
+	if got := res.Header().Get("Content-Security-Policy"); !strings.Contains(got, "default-src 'self'") {
+		t.Fatalf("Content-Security-Policy = %q", got)
+	}
+	if got := res.Header().Get("Cross-Origin-Opener-Policy"); got != "same-origin-allow-popups" {
+		t.Fatalf("Cross-Origin-Opener-Policy = %q", got)
+	}
+	if got := res.Header().Get("Cross-Origin-Resource-Policy"); got != "same-origin" {
+		t.Fatalf("Cross-Origin-Resource-Policy = %q", got)
+	}
+	if got := res.Header().Get("X-Permitted-Cross-Domain-Policies"); got != "none" {
+		t.Fatalf("X-Permitted-Cross-Domain-Policies = %q", got)
+	}
+	if got := res.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q, want %q", got, "no-store")
+	}
+	if got := res.Header().Get("Pragma"); got != "no-cache" {
+		t.Fatalf("Pragma = %q, want %q", got, "no-cache")
+	}
+}
+
 func TestAuthSubroutesAreForwarded(t *testing.T) {
 	handler := testServer(t)
 
