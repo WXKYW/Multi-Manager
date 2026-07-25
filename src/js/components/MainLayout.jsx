@@ -279,6 +279,7 @@ const SidebarModuleSubButton = ({ module, active, onNavigate }) => {
 const SidebarModuleSubgroup = ({ subgroup, activeModule, onNavigate }) => {
   const subgroupModules = subgroup.modules || [];
   const active = subgroupModules.includes(activeModule);
+  const [open, setOpen] = useState(active);
   const ParentIcon = subgroup.icon || MODULE_GROUP_ICON_MAP[subgroup.id] || Globe;
   const quietTriggerClassName = [
     '!bg-transparent',
@@ -296,9 +297,15 @@ const SidebarModuleSubgroup = ({ subgroup, activeModule, onNavigate }) => {
     '[&_[data-slot=sidebar-menu-button-label]]:!font-normal',
   ].join(' ');
 
+  useEffect(() => {
+    if (active) {
+      setOpen(true);
+    }
+  }, [active]);
+
   return (
     <Sidebar.MenuItem>
-      <Sidebar.Collapsible defaultOpen={active}>
+      <Sidebar.Collapsible open={open} onOpenChange={setOpen} autoScrollOnOpen>
         <Sidebar.CollapsibleTrigger
           render={
             <Sidebar.MenuButton icon={ParentIcon} className={quietTriggerClassName}>
@@ -772,7 +779,7 @@ function MainLayout() {
           {/* 顶部导航 */}
           <header className="app-main-topbar box-border flex h-[58px] flex-shrink-0 items-center border-b border-kumo-line px-3 min-[450px]:px-4 md:px-6">
             <div className="flex h-full min-w-0 flex-1 items-center gap-3.5">
-              <Sidebar.Trigger className="md:hidden" />
+              <Sidebar.Trigger className="lg:hidden" />
 
               <AppPageHeader
                 className="flex-row items-center justify-between"

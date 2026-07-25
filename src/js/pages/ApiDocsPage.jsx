@@ -2210,7 +2210,7 @@ function ApiDocsPage() {
             </div>
 
             <AppCard padding="md" className="shrink-0">
-              <div className="grid min-w-0 grid-cols-[minmax(240px,1.35fr)_repeat(3,minmax(0,0.82fr))] items-center gap-2">
+              <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_repeat(3,minmax(0,0.67fr))] items-center gap-2 sm:grid-cols-[minmax(240px,1.35fr)_repeat(3,minmax(0,0.82fr))]">
                 <Input
                   size="sm"
                   aria-label="搜索接口"
