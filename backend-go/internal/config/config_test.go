@@ -88,6 +88,9 @@ func TestProductionSecurityDefaults(t *testing.T) {
 	t.Setenv("NODE_ENV", "")
 	t.Setenv("SECURE_COOKIES", "")
 	t.Setenv("ALLOW_LOCAL_SHELL_TASKS", "")
+	t.Setenv("FLY_APP_NAME", "")
+	t.Setenv("FLY_MACHINE_ID", "")
+	t.Setenv("FLY_ALLOC_ID", "")
 	t.Setenv("TRUSTED_PROXY_CIDRS", "10.0.0.0/8,192.0.2.10")
 	t.Setenv("CORS_ALLOWED_ORIGINS", "https://panel.example.com")
 
@@ -131,5 +134,17 @@ func TestDevelopmentHostDefaultRemainsNetworkAccessible(t *testing.T) {
 	cfg := Load("test")
 	if cfg.Host != "0.0.0.0" {
 		t.Fatalf("development Host = %q, want 0.0.0.0", cfg.Host)
+	}
+}
+
+func TestFlyProductionHostDefaultRemainsNetworkAccessible(t *testing.T) {
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("NODE_ENV", "")
+	t.Setenv("GO_HOST", "")
+	t.Setenv("FLY_APP_NAME", "apimnt")
+
+	cfg := Load("test")
+	if cfg.Host != "0.0.0.0" {
+		t.Fatalf("fly production Host = %q, want 0.0.0.0", cfg.Host)
 	}
 }

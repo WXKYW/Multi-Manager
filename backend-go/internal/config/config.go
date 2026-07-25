@@ -29,7 +29,7 @@ func Load(version string) Config {
 	root := repoRoot()
 	environment := strings.ToLower(envString("APP_ENV", envString("NODE_ENV", "development")))
 	defaultHost := "0.0.0.0"
-	if environment == "production" {
+	if environment == "production" && !shouldBindPublicInterfaceInProduction() {
 		defaultHost = "127.0.0.1"
 	}
 	return Config{
@@ -89,6 +89,15 @@ func (c Config) ListenAddress() string {
 
 func (c Config) DatabasePath() string {
 	return filepath.Join(c.DataDir, c.DBName)
+}
+
+func shouldBindPublicInterfaceInProduction() bool {
+	for _, name := range []string{"FLY_APP_NAME", "FLY_MACHINE_ID", "FLY_ALLOC_ID"} {
+		if strings.TrimSpace(os.Getenv(name)) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func repoRoot() string {
