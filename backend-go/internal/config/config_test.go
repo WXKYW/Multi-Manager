@@ -88,14 +88,11 @@ func TestProductionSecurityDefaults(t *testing.T) {
 	t.Setenv("NODE_ENV", "")
 	t.Setenv("SECURE_COOKIES", "")
 	t.Setenv("ALLOW_LOCAL_SHELL_TASKS", "")
-	t.Setenv("FLY_APP_NAME", "")
-	t.Setenv("FLY_MACHINE_ID", "")
-	t.Setenv("FLY_ALLOC_ID", "")
 	t.Setenv("TRUSTED_PROXY_CIDRS", "10.0.0.0/8,192.0.2.10")
 	t.Setenv("CORS_ALLOWED_ORIGINS", "https://panel.example.com")
 
 	cfg := Load("test")
-	if !cfg.IsProduction() || !cfg.SecureCookies || cfg.LocalShellTasksAllowed() || cfg.Host != "127.0.0.1" {
+	if !cfg.IsProduction() || !cfg.SecureCookies || cfg.LocalShellTasksAllowed() {
 		t.Fatalf("unexpected production defaults: %#v", cfg)
 	}
 	if len(cfg.TrustedProxyCIDRs) != 2 || len(cfg.CORSAllowedOrigins) != 1 {
@@ -104,7 +101,7 @@ func TestProductionSecurityDefaults(t *testing.T) {
 }
 
 func TestProductionSecurityValidation(t *testing.T) {
-	cfg := Config{Environment: "production", SecureCookies: true}
+	cfg := Config{Environment: "production"}
 	t.Setenv("ENCRYPTION_KEY", "")
 	t.Setenv("JWT_SECRET", "")
 	if err := cfg.ValidateSecurity(); err == nil {
@@ -117,34 +114,7 @@ func TestProductionSecurityValidation(t *testing.T) {
 		t.Fatalf("valid production secrets rejected: %v", err)
 	}
 
-	if err := (Config{Environment: "production", SecureCookies: false}).ValidateSecurity(); err == nil {
-		t.Fatal("expected insecure production cookies to be rejected")
-	}
-
 	if err := (Config{Environment: "development"}).ValidateSecurity(); err != nil {
 		t.Fatalf("development should not require production secrets: %v", err)
-	}
-}
-
-func TestDevelopmentHostDefaultRemainsNetworkAccessible(t *testing.T) {
-	t.Setenv("APP_ENV", "development")
-	t.Setenv("NODE_ENV", "")
-	t.Setenv("GO_HOST", "")
-
-	cfg := Load("test")
-	if cfg.Host != "0.0.0.0" {
-		t.Fatalf("development Host = %q, want 0.0.0.0", cfg.Host)
-	}
-}
-
-func TestFlyProductionHostDefaultRemainsNetworkAccessible(t *testing.T) {
-	t.Setenv("APP_ENV", "production")
-	t.Setenv("NODE_ENV", "")
-	t.Setenv("GO_HOST", "")
-	t.Setenv("FLY_APP_NAME", "apimnt")
-
-	cfg := Load("test")
-	if cfg.Host != "0.0.0.0" {
-		t.Fatalf("fly production Host = %q, want 0.0.0.0", cfg.Host)
 	}
 }

@@ -155,14 +155,10 @@ COPY --chown=appuser:appuser plugin /app/plugin
 
 
 # 环境变量配置
-ENV APP_ENV=production \
-    GO_HOST=0.0.0.0 \
-    PORT=3000 \
+ENV PORT=3000 \
     DATA_DIR=/app/data \
     DB_NAME=data.db \
     LOG_LEVEL=INFO \
-    SECURE_COOKIES=true \
-    ALLOW_LOCAL_SHELL_TASKS=false \
     TZ=UTC
 
 EXPOSE 3000

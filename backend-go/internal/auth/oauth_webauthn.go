@@ -165,19 +165,15 @@ func (s *Service) loginOptions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	webauthnOptions := map[string]interface{}{
-		"enabled": credentialCount > 0,
-	}
-	if !s.cfg.IsProduction() {
-		webauthnOptions["credentialCount"] = credentialCount
-	}
-
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"github": map[string]interface{}{
 			"enabled": githubConfig.complete(),
 		},
-		"webauthn": webauthnOptions,
+		"webauthn": map[string]interface{}{
+			"enabled":         credentialCount > 0,
+			"credentialCount": credentialCount,
+		},
 	})
 }
 

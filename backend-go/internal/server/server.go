@@ -356,10 +356,6 @@ func (s *Server) serveGoRoute(w http.ResponseWriter, r *http.Request, route mani
 
 	switch route.Prefix {
 	case "/health":
-		if s.cfg.IsProduction() {
-			response.JSON(w, http.StatusOK, map[string]interface{}{"status": "ok"})
-			return
-		}
 		response.JSON(w, http.StatusOK, map[string]interface{}{
 			"status":    "ok",
 			"service":   "api-monitor-go",
@@ -585,19 +581,10 @@ func joinStaticPath(rootDir, relPath string) (string, bool) {
 func (s *Server) applySecurityHeaders(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
-	w.Header().Set("X-XSS-Protection", "0")
 	w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-	w.Header().Set("Permissions-Policy", "camera=(self), microphone=(), geolocation=()")
+	w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 	if s.cfg.IsProduction() {
 		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' http: https: ws: wss:; frame-src 'self' data: blob: https:; media-src 'self' data: blob: https:; worker-src 'self' blob:; manifest-src 'self'")
-		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin-allow-popups")
-		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
-		w.Header().Set("X-Permitted-Cross-Domain-Policies", "none")
-		if strings.HasPrefix(r.URL.Path, "/api/") {
-			w.Header().Set("Cache-Control", "no-store")
-			w.Header().Set("Pragma", "no-cache")
-		}
 	}
 	origin := strings.TrimRight(strings.TrimSpace(r.Header.Get("Origin")), "/")
 	for _, allowed := range s.cfg.CORSAllowedOrigins {
