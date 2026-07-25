@@ -140,7 +140,7 @@ export const MODULE_GROUPS = [
     id: 'infrastructure',
     name: '云服务',
     icon: 'fa-cubes',
-    modules: ['paas'],
+    modules: [],
     subgroups: [
       {
         id: 'cloud-vendors',
@@ -153,7 +153,7 @@ export const MODULE_GROUPS = [
         modules: ['github'],
       },
     ],
-    trailingModules: ['server'],
+    trailingModules: ['server', 'paas'],
   },
   {
     id: 'toolbox',

@@ -57,7 +57,7 @@ const SETTINGS_TABS = [
   { value: 'about', label: <span className="inline-flex items-center gap-1.5"><Settings className="h-4 w-4" />关于</span> },
 ];
 
-const SECURITY_MASONRY_CARD_CLASS = 'mb-4 inline-block w-full align-top [break-inside:avoid]';
+const SECURITY_MASONRY_CARD_CLASS = 'mb-4 inline-block w-full align-top [break-inside:avoid] last:mb-0';
 
 const THEME_OPTIONS = [
   { value: 'auto', label: '跟随系统' },
@@ -1004,10 +1004,10 @@ function SettingsPage() {
     ? `主库 ${formatFileSize(databaseStorage.mainSizeBytes)} · WAL ${formatFileSize(databaseStorage.walSizeBytes)} · 空闲 ${formatFileSize(databaseStorage.freePageBytes)}`
     : (dbStats?.dbPath || '等待统计');
   const deprecatedTableItems = deprecatedTables?.tables || [];
-  const contentViewportClassName = 'min-h-0 md:flex-1 md:overflow-auto';
+  const contentViewportClassName = 'min-w-0';
 
   return (
-    <div className="flex min-h-full w-full min-w-0 flex-col gap-3 px-px py-px sm:gap-4 md:h-full md:min-h-0 md:flex-1 md:overflow-hidden">
+    <div className="flex min-h-full w-full min-w-0 flex-col gap-3 sm:gap-4">
       <div className="flex shrink-0 flex-col gap-3 border-b border-kumo-line pb-3 lg:flex-row lg:items-center lg:justify-between">
         <Tabs
           {...MODULE_TABS_PROPS}
@@ -1039,7 +1039,7 @@ function SettingsPage() {
 
       <div className={contentViewportClassName}>
       {activeTab === 'general' && (
-        <div className="grid min-h-0 items-start gap-4 px-px py-px pr-px md:h-full md:overflow-auto xl:grid-cols-[minmax(16rem,1fr)_minmax(0,3fr)]">
+        <div className="grid min-h-0 items-start gap-4 px-px pt-px pr-px md:h-full md:overflow-auto xl:grid-cols-[minmax(16rem,1fr)_minmax(0,3fr)]">
           <div className="grid min-h-0 gap-4">
             <StatCard label="运行状态" value="正常" hint={settingsLoading ? '同步中' : '已连接后端'} icon={Check} />
             <StatCard label="公网入口" value={settings.publicApiUrl || currentOrigin} hint="/api 自动拼接" icon={Globe} />
@@ -1078,7 +1078,7 @@ function SettingsPage() {
 
 
       {activeTab === 'modules' && (
-        <div className="min-h-0 overflow-auto px-px py-px md:h-full">
+        <div className="min-h-0 overflow-auto px-px pt-px md:h-full">
         <SectionCard
           className="flex min-h-0 md:h-full"
           headerClassName="max-sm:min-h-12 max-sm:flex-row max-sm:items-center max-sm:px-3 max-sm:py-2"
@@ -1161,7 +1161,7 @@ function SettingsPage() {
       )}
 
       {activeTab === 'security' && (
-        <div className="min-w-0 overflow-auto px-px py-px [column-gap:1rem] xl:columns-2">
+        <div className="min-w-0 overflow-auto px-px pt-px [column-gap:1rem] xl:columns-2">
           <SectionCard
             className={SECURITY_MASONRY_CARD_CLASS}
             title="管理员密码"
@@ -1557,7 +1557,7 @@ function SettingsPage() {
       )}
 
       {activeTab === 'database' && (
-        <div className="grid items-start gap-3 px-px py-px pr-px xl:grid-cols-[minmax(0,1.1fr)_minmax(24rem,0.9fr)]">
+        <div className="grid items-start gap-3 px-px pt-px pr-px xl:grid-cols-[minmax(0,1.1fr)_minmax(24rem,0.9fr)]">
           <SectionCard
             className="flex h-full min-h-0 flex-1"
             title="数据库统计"
@@ -1638,7 +1638,7 @@ function SettingsPage() {
             </div>
           </SectionCard>
 
-          <div className="grid content-start gap-3 px-px py-px">
+          <div className="grid content-start gap-3 px-px pt-px">
             <SectionCard
               title="数据库导入导出"
               description="导出数据库，或预检后替换。"
@@ -1832,7 +1832,7 @@ function SettingsPage() {
       )}
 
       {activeTab === 'logs' && (
-        <div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden px-px py-px pr-px">
+        <div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden px-px pt-px pr-px">
           <SectionCard
             className="shrink-0"
             title="审计与保留"
@@ -1900,7 +1900,7 @@ function SettingsPage() {
       )}
 
       {activeTab === 'appearance' && (
-        <div className="grid min-h-0 items-start gap-3 overflow-auto px-px py-px pr-px xl:grid-cols-[minmax(20rem,0.82fr)_minmax(0,1.18fr)]">
+        <div className="grid min-h-0 items-start gap-3 overflow-auto px-px pt-px pr-px xl:grid-cols-[minmax(20rem,0.82fr)_minmax(0,1.18fr)]">
           <SectionCard
             title="界面外观"
             description={`当前生效主题: ${theme === 'dark' ? '深色' : '浅色'}`}
@@ -1962,7 +1962,7 @@ function SettingsPage() {
       )}
 
       {activeTab === 'about' && (
-        <div className="grid items-start gap-4 overflow-auto px-px py-px pr-px lg:grid-cols-1">
+        <div className="grid items-start gap-4 overflow-auto px-px pt-px pr-px lg:grid-cols-1">
           <SectionCard
             title={<span className="app-brand-wordmark">API Monitor</span>}
             description={APP_VERSION}

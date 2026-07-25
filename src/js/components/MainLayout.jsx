@@ -607,12 +607,19 @@ function MainLayout() {
     };
   }, [triggerHaptic]);
 
+  const responsiveWorkspaceModule = ['dns', 'openai'].includes(mainActiveTab);
   const viewportWorkspaceModule = ['apidocs', 'systemlogs'].includes(mainActiveTab);
-  const mainCanvasClassName = viewportWorkspaceModule
-    ? 'flex-1 overflow-hidden p-3 sm:px-4 lg:px-6 pt-3! pb-4! sm:pb-6!'
-    : 'flex-1 overflow-x-hidden overflow-y-auto p-3 sm:px-4 lg:px-6 pt-3! pb-4! sm:pb-6! scrollbar-thin';
+  const mainCanvasClassName = responsiveWorkspaceModule
+    ? 'flex-1 overflow-x-hidden overflow-y-auto p-3 sm:px-4 lg:px-6 pt-3! pb-4! sm:pb-6! md:overflow-hidden scrollbar-thin'
+    : viewportWorkspaceModule
+      ? 'flex-1 overflow-hidden p-3 sm:px-4 lg:px-6 pt-3! pb-4! sm:pb-6!'
+      : 'flex-1 overflow-x-hidden overflow-y-auto p-3 sm:px-4 lg:px-6 pt-3! pb-4! sm:pb-6! scrollbar-thin';
   const mainCanvasInnerClassName = `mx-auto flex w-full min-w-0 flex-col ${
-    viewportWorkspaceModule ? 'h-full min-h-0' : 'min-h-full'
+    responsiveWorkspaceModule
+      ? 'min-h-full md:h-full md:min-h-0'
+      : viewportWorkspaceModule
+        ? 'h-full min-h-0'
+        : 'min-h-full'
   } ${pageWidthClass}`;
 
   // 渲染当前模块页

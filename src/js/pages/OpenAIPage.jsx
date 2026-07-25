@@ -2174,7 +2174,7 @@ function OpenAIPage() {
   };
 
   return (
-    <PageStack className="h-[calc(100dvh-5.125rem)] min-h-0 max-w-full flex-none sm:h-[calc(100dvh-5.625rem)] lg:h-[calc(100dvh-5.875rem)]">
+    <PageStack viewport className="min-h-full max-w-full md:h-full md:min-h-0 md:flex-1">
       {/* Tab Navigation */}
       <PageToolbar className="shrink-0 select-none">
         <Tabs
@@ -2670,6 +2670,7 @@ function OpenAIPage() {
       {/* ==================== 2. API 密钥 Tab ==================== */}
       {activeTab === 'keys' && (
         <GatewaySection
+          className="min-h-0 flex-1"
           title="API 密钥"
           description="管理客户端密钥"
           icon={<Key className="h-4 w-4 text-kumo-brand" />}
@@ -2697,165 +2698,167 @@ function OpenAIPage() {
               </Button>
             </div>
           }
-          bodyClassName="space-y-3"
+          bodyClassName="flex min-h-0 flex-1 flex-col gap-3"
         >
-          <LayerCard className="w-full overflow-x-auto p-0 shadow-none">
-            <Table layout="fixed" className="min-w-[1084px]">
-              <colgroup>
-                <col style={{ width: 180 }} />
-                <col style={{ width: 320 }} />
-                <col style={{ width: 92 }} />
-                <col style={{ width: 140 }} />
-                <col style={{ width: 140 }} />
-                <col style={{ width: 96 }} />
-                <col style={{ width: 172 }} />
-              </colgroup>
-              <Table.Header variant="compact">
-                <Table.Row>
-                  <Table.Head>名称</Table.Head>
-                  <Table.Head>密钥</Table.Head>
-                  <Table.Head className="text-center">状态</Table.Head>
-                  <Table.Head>最近使用</Table.Head>
-                  <Table.Head>过期时间</Table.Head>
-                  <Table.Head className="text-right">请求数</Table.Head>
-                  <Table.Head className="app-table-action">操作</Table.Head>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {gatewayKeysLoading ? (
-                  [...Array(3)].map((_, i) => (
-                    <Table.Row key={i}>
-                      <Table.Cell>
-                        <SkeletonLine className="h-4 w-24" />
-                      </Table.Cell>
-                      <Table.Cell>
-                        <SkeletonLine className="h-4 w-28" />
-                      </Table.Cell>
-                      <Table.Cell className="text-center">
-                        <SkeletonLine className="mx-auto h-4 w-12" />
-                      </Table.Cell>
-                      <Table.Cell>
-                        <SkeletonLine className="h-4 w-24" />
-                      </Table.Cell>
-                      <Table.Cell>
-                        <SkeletonLine className="h-4 w-24" />
-                      </Table.Cell>
-                      <Table.Cell className="text-right">
-                        <SkeletonLine className="ml-auto h-4 w-12" />
-                      </Table.Cell>
-                      <Table.Cell>
-                        <SkeletonLine className="mx-auto h-4 w-24" />
-                      </Table.Cell>
-                    </Table.Row>
-                  ))
-                ) : gatewayKeys.length === 0 ? (
+          <LayerCard className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden p-0 shadow-none">
+            <div className="min-h-0 min-w-0 flex-1 overflow-auto scrollbar-thin">
+              <Table layout="fixed" className="min-w-[1084px]">
+                <colgroup>
+                  <col style={{ width: 180 }} />
+                  <col style={{ width: 320 }} />
+                  <col style={{ width: 92 }} />
+                  <col style={{ width: 140 }} />
+                  <col style={{ width: 140 }} />
+                  <col style={{ width: 96 }} />
+                  <col style={{ width: 172 }} />
+                </colgroup>
+                <Table.Header sticky variant="compact">
                   <Table.Row>
-                    <Table.Cell colSpan={7} className="p-8 text-center text-kumo-subtle">
-                      暂无网关 API 密钥
-                    </Table.Cell>
+                    <Table.Head>名称</Table.Head>
+                    <Table.Head>密钥</Table.Head>
+                    <Table.Head className="text-center">状态</Table.Head>
+                    <Table.Head>最近使用</Table.Head>
+                    <Table.Head>过期时间</Table.Head>
+                    <Table.Head className="text-right">请求数</Table.Head>
+                    <Table.Head className="app-table-action">操作</Table.Head>
                   </Table.Row>
-                ) : (
-                  gatewayKeys.map(key => (
-                    <Table.Row
-                      key={key.id}
-                      className="hover:bg-kumo-recessed/5 cursor-pointer"
-                      title="双击编辑密钥"
-                      onDoubleClick={event =>
-                        handleEditableRowDoubleClick(event, () => openEditGatewayKeyModal(key))
-                      }
-                    >
-                      <Table.Cell
-                        className="truncate font-semibold text-kumo-strong"
-                        title={key.name}
-                      >
-                        {key.name || '未命名密钥'}
-                      </Table.Cell>
-                      <Table.Cell>
-                        {key.apiKey ? (
-                          <ClipboardText
-                            size="sm"
-                            text={key.apiKey}
-                            className="min-w-0 w-full font-mono text-[0.9em]"
-                            tooltip={{ text: '复制 API Key', copiedText: 'API Key 已复制' }}
-                            labels={{ copyAction: `复制 ${key.name} 的 API Key` }}
-                          />
-                        ) : (
-                          <span className="text-sm text-kumo-subtle">轮换后可查看并复制</span>
-                        )}
-                      </Table.Cell>
-                      <Table.Cell className="text-center">
-                        <InlineStatusPill tone={key.enabled ? 'success' : 'neutral'}>
-                          {key.enabled ? '已启用' : '已停用'}
-                        </InlineStatusPill>
-                      </Table.Cell>
-                      <Table.Cell className="truncate text-sm text-kumo-subtle">
-                        {key.lastUsed ? formatDateTime(key.lastUsed) : '从未使用'}
-                      </Table.Cell>
-                      <Table.Cell className="truncate text-sm text-kumo-subtle">
-                        {key.expiresAt ? formatDateTime(key.expiresAt) : '永不过期'}
-                      </Table.Cell>
-                      <Table.Cell className="text-right font-mono text-[0.9em] text-kumo-strong">
-                        {(key.requestCount || 0).toLocaleString()}
-                      </Table.Cell>
-                      <Table.Cell>
-                        <div className="flex justify-center gap-1.5">
-                          <Button
-                            shape="square"
-                            size="sm"
-                            variant={key.enabled ? 'secondary-destructive' : 'primary'}
-                            aria-label={key.enabled ? '停用密钥' : '启用密钥'}
-                            onClick={() => toggleGatewayKey(key)}
-                            title={key.enabled ? '停用密钥' : '启用密钥'}
-                            disabled={!!gatewayKeyToggleLoading[key.id]}
-                          >
-                            <span className="flex h-4 w-4 items-center justify-center">
-                              <Reboot
-                                className={cx(
-                                  'h-3.5 w-3.5',
-                                  gatewayKeyToggleLoading[key.id] && 'animate-spin'
-                                )}
-                              />
-                            </span>
-                          </Button>
-                          <Button
-                            shape="square"
-                            size="sm"
-                            variant="outline"
-                            aria-label="轮换密钥"
-                            onClick={() => rotateGatewayKey(key)}
-                            className="text-kumo-subtle hover:text-kumo-brand"
-                            title="轮换密钥"
-                          >
-                            <RotateCw className="w-3.5 h-3.5" />
-                          </Button>
-                          <Button
-                            shape="square"
-                            size="sm"
-                            variant="outline"
-                            aria-label="编辑密钥"
-                            onClick={() => openEditGatewayKeyModal(key)}
-                            className="hover:text-kumo-brand text-kumo-subtle"
-                            title="编辑密钥"
-                          >
-                            <Edit className="w-3.5 h-3.5" />
-                          </Button>
-                          <Button
-                            shape="square"
-                            size="sm"
-                            variant="secondary-destructive"
-                            aria-label="删除密钥"
-                            onClick={() => deleteGatewayKey(key)}
-                            title="删除密钥"
-                          >
-                            <Trash className="w-3.5 h-3.5" />
-                          </Button>
-                        </div>
+                </Table.Header>
+                <Table.Body>
+                  {gatewayKeysLoading ? (
+                    [...Array(3)].map((_, i) => (
+                      <Table.Row key={i}>
+                        <Table.Cell>
+                          <SkeletonLine className="h-4 w-24" />
+                        </Table.Cell>
+                        <Table.Cell>
+                          <SkeletonLine className="h-4 w-28" />
+                        </Table.Cell>
+                        <Table.Cell className="text-center">
+                          <SkeletonLine className="mx-auto h-4 w-12" />
+                        </Table.Cell>
+                        <Table.Cell>
+                          <SkeletonLine className="h-4 w-24" />
+                        </Table.Cell>
+                        <Table.Cell>
+                          <SkeletonLine className="h-4 w-24" />
+                        </Table.Cell>
+                        <Table.Cell className="text-right">
+                          <SkeletonLine className="ml-auto h-4 w-12" />
+                        </Table.Cell>
+                        <Table.Cell>
+                          <SkeletonLine className="mx-auto h-4 w-24" />
+                        </Table.Cell>
+                      </Table.Row>
+                    ))
+                  ) : gatewayKeys.length === 0 ? (
+                    <Table.Row>
+                      <Table.Cell colSpan={7} className="p-8 text-center text-kumo-subtle">
+                        暂无网关 API 密钥
                       </Table.Cell>
                     </Table.Row>
-                  ))
-                )}
-              </Table.Body>
-            </Table>
+                  ) : (
+                    gatewayKeys.map(key => (
+                      <Table.Row
+                        key={key.id}
+                        className="hover:bg-kumo-recessed/5 cursor-pointer"
+                        title="双击编辑密钥"
+                        onDoubleClick={event =>
+                          handleEditableRowDoubleClick(event, () => openEditGatewayKeyModal(key))
+                        }
+                      >
+                        <Table.Cell
+                          className="truncate font-semibold text-kumo-strong"
+                          title={key.name}
+                        >
+                          {key.name || '未命名密钥'}
+                        </Table.Cell>
+                        <Table.Cell>
+                          {key.apiKey ? (
+                            <ClipboardText
+                              size="sm"
+                              text={key.apiKey}
+                              className="min-w-0 w-full font-mono text-[0.9em]"
+                              tooltip={{ text: '复制 API Key', copiedText: 'API Key 已复制' }}
+                              labels={{ copyAction: `复制 ${key.name} 的 API Key` }}
+                            />
+                          ) : (
+                            <span className="text-sm text-kumo-subtle">轮换后可查看并复制</span>
+                          )}
+                        </Table.Cell>
+                        <Table.Cell className="text-center">
+                          <InlineStatusPill tone={key.enabled ? 'success' : 'neutral'}>
+                            {key.enabled ? '已启用' : '已停用'}
+                          </InlineStatusPill>
+                        </Table.Cell>
+                        <Table.Cell className="truncate text-sm text-kumo-subtle">
+                          {key.lastUsed ? formatDateTime(key.lastUsed) : '从未使用'}
+                        </Table.Cell>
+                        <Table.Cell className="truncate text-sm text-kumo-subtle">
+                          {key.expiresAt ? formatDateTime(key.expiresAt) : '永不过期'}
+                        </Table.Cell>
+                        <Table.Cell className="text-right font-mono text-[0.9em] text-kumo-strong">
+                          {(key.requestCount || 0).toLocaleString()}
+                        </Table.Cell>
+                        <Table.Cell>
+                          <div className="flex justify-center gap-1.5">
+                            <Button
+                              shape="square"
+                              size="sm"
+                              variant={key.enabled ? 'secondary-destructive' : 'primary'}
+                              aria-label={key.enabled ? '停用密钥' : '启用密钥'}
+                              onClick={() => toggleGatewayKey(key)}
+                              title={key.enabled ? '停用密钥' : '启用密钥'}
+                              disabled={!!gatewayKeyToggleLoading[key.id]}
+                            >
+                              <span className="flex h-4 w-4 items-center justify-center">
+                                <Reboot
+                                  className={cx(
+                                    'h-3.5 w-3.5',
+                                    gatewayKeyToggleLoading[key.id] && 'animate-spin'
+                                  )}
+                                />
+                              </span>
+                            </Button>
+                            <Button
+                              shape="square"
+                              size="sm"
+                              variant="outline"
+                              aria-label="轮换密钥"
+                              onClick={() => rotateGatewayKey(key)}
+                              className="text-kumo-subtle hover:text-kumo-brand"
+                              title="轮换密钥"
+                            >
+                              <RotateCw className="w-3.5 h-3.5" />
+                            </Button>
+                            <Button
+                              shape="square"
+                              size="sm"
+                              variant="outline"
+                              aria-label="编辑密钥"
+                              onClick={() => openEditGatewayKeyModal(key)}
+                              className="hover:text-kumo-brand text-kumo-subtle"
+                              title="编辑密钥"
+                            >
+                              <Edit className="w-3.5 h-3.5" />
+                            </Button>
+                            <Button
+                              shape="square"
+                              size="sm"
+                              variant="secondary-destructive"
+                              aria-label="删除密钥"
+                              onClick={() => deleteGatewayKey(key)}
+                              title="删除密钥"
+                            >
+                              <Trash className="w-3.5 h-3.5" />
+                            </Button>
+                          </div>
+                        </Table.Cell>
+                      </Table.Row>
+                    ))
+                  )}
+                </Table.Body>
+              </Table>
+            </div>
           </LayerCard>
         </GatewaySection>
       )}

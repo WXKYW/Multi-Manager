@@ -1921,12 +1921,10 @@ function SubscriptionPage() {
                       <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1">
                         <span className="rounded border border-kumo-info/20 bg-kumo-info/10 px-1.5 py-0.5 text-[10px] font-semibold text-kumo-info">{sub.node_count || 0} 个节点</span>
 						<Badge variant="neutral">{plans.find((plan) => plan.id === sub.plan_id)?.name || '未绑定套餐'}</Badge>
-                        <span className="truncate font-mono text-[10px] text-kumo-subtle" title={sub.public_token}>凭证 {sub.public_token}</span>
                       </div>
                     </Table.Cell>
                     <Table.Cell className="text-center">
                       <Badge variant={variant} appearance="dot">{label}</Badge>
-					  {sub.runtime_sync_status === 'pending' && <div className="mt-1 text-[10px] font-semibold text-kumo-warning">配置同步中</div>}
                     </Table.Cell>
                     <Table.Cell>
                       <Meter
@@ -1936,7 +1934,6 @@ function SubscriptionPage() {
                       />
                       <div className="mt-1 text-[10px] text-kumo-subtle">
                         {sub.traffic?.cycle_end ? `下次重置 ${formatTime(sub.traffic.cycle_end)}` : '不自动重置'}
-						{meteringAvailable && sub.traffic?.total > 0 ? ' · 超额后自动从内部节点撤销' : ''}
                       </div>
                     </Table.Cell>
                     <Table.Cell>
@@ -1982,7 +1979,7 @@ function SubscriptionPage() {
   const renderPlans = () => (
     <SectionCard title={`套餐管理 (${plans.length})`} className="h-full min-h-0" bodyPadding="none" bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden" actions={<Button size="sm" variant="primary" onClick={openCreatePlan}><Plus className="h-3.5 w-3.5" />新建套餐</Button>}>
       <div className="min-h-0 flex-1 overflow-x-auto overflow-y-visible overscroll-x-contain touch-pan-x scrollbar-thin">
-        <AppTable percentageWidths layout="fixed" widths={[68, 230, 92, 160, 140, 180, 82, 128]} style={{ minWidth: 960 }}>
+        <AppTable percentageWidths layout="fixed" widths={[68, 230, 92, 160, 140, 180, 82, 128]} style={{ minWidth: 960 }} className="[&_td]:align-middle">
           <Table.Header sticky variant="compact"><Table.Row><Table.Head className="text-center">启用</Table.Head><Table.Head>套餐</Table.Head><Table.Head className="text-center">状态</Table.Head><Table.Head>单订阅额度</Table.Head><Table.Head className="text-center">重置</Table.Head><Table.Head>节点范围</Table.Head><Table.Head className="text-center">订阅</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row></Table.Header>
           <Table.Body>
             {plans.map((plan) => {
@@ -1990,11 +1987,11 @@ function SubscriptionPage() {
 			  const internalCount = plan.selection_mode === 'all' ? (plan.include_internal_nodes ? internalNodes.length : 0) : (plan.node_ids || []).filter((id) => internalNodes.some((node) => node.id === id)).length;
 			  return <Table.Row key={plan.id} onDoubleClick={() => openEditPlan(plan)} className="cursor-pointer">
               <Table.Cell className="text-center"><Switch size="sm" aria-label={plan.enabled ? `停用套餐 ${plan.name}` : `启用套餐 ${plan.name}`} checked={!!plan.enabled} onCheckedChange={(checked) => togglePlanEnabled(plan, checked)} /></Table.Cell>
-              <Table.Cell><div className="font-semibold text-kumo-strong">{plan.name}</div><div className="mt-1 truncate text-[11px] text-kumo-subtle">{plan.remark || plan.id}</div></Table.Cell>
+              <Table.Cell><div className="font-semibold text-kumo-strong">{plan.name}</div>{plan.remark ? <div className="mt-1 truncate text-[11px] text-kumo-subtle">{plan.remark}</div> : null}</Table.Cell>
               <Table.Cell className="text-center"><Badge variant={plan.enabled ? 'success' : 'neutral'} appearance="dot">{plan.enabled ? '启用' : '停用'}</Badge></Table.Cell>
-			  <Table.Cell><div>{plan.total_bytes > 0 ? formatBytes(plan.total_bytes) : '不限'}</div>{externalCount > 0 && plan.total_bytes > 0 && <div className="mt-1 text-[10px] text-kumo-warning">仅内部节点强制执行</div>}</Table.Cell>
+			  <Table.Cell><div>{plan.total_bytes > 0 ? formatBytes(plan.total_bytes) : '不限'}</div></Table.Cell>
               <Table.Cell className="text-center">{plan.cycle_type === 'monthly' ? `每月 ${plan.cycle_day} 日` : plan.cycle_type === 'custom' ? '自定义' : '不重置'}</Table.Cell>
-				<Table.Cell><div className="text-xs font-semibold text-kumo-strong">内部 {internalCount} · 外部 {externalCount}</div>{plan.selection_mode === 'all' && <div className="mt-1 text-[10px] text-kumo-subtle">包含新增节点</div>}</Table.Cell>
+				<Table.Cell><div className="text-xs font-semibold text-kumo-strong">内部 {internalCount} · 外部 {externalCount}</div></Table.Cell>
               <Table.Cell className="text-center">{plan.subscription_count || 0}</Table.Cell>
               <Table.Cell className="text-center"><div className="inline-flex justify-center gap-2"><Button size="sm" shape="square" variant="secondary" onClick={() => openEditPlan(plan)} icon={<Edit className="h-3.5 w-3.5" />} aria-label="编辑套餐" /><Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deletePlan(plan)} icon={<Trash className="h-3.5 w-3.5" />} aria-label="删除套餐" /></div></Table.Cell>
 			</Table.Row>})}
@@ -2173,7 +2170,7 @@ function SubscriptionPage() {
       bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
       actions={<Button size="sm" variant="primary" loading={saving} disabled={selectedRuntimeHosts.size === 0} onClick={() => deployProxyRuntime([...selectedRuntimeHosts])}><Plus className="h-3.5 w-3.5" />批量部署程序 ({selectedRuntimeHosts.size})</Button>}
     >
-      <DataTableFrame variant="embedded" className="max-h-[calc(100dvh-15rem)] min-h-0 overflow-auto">
+      <DataTableFrame variant="embedded" className="min-h-[18rem] overflow-auto">
         <AppTable percentageWidths layout="fixed" widths={[44, 80, 150, 90, 75, 95, 300, 95, 255]} style={{ minWidth: 1184 }} className="text-xs [&_td]:border-kumo-interact/45 [&_th]:border-kumo-interact/50">
           <Table.Header sticky variant="compact">
             <Table.Row>
@@ -2206,7 +2203,7 @@ function SubscriptionPage() {
                   <Table.Cell className="text-center"><span className="font-mono text-xs">{server.agent_version && server.agent_version !== '<nil>' ? server.agent_version : '未报告'}</span></Table.Cell>
 					<Table.Cell className="text-center"><div className="flex flex-nowrap items-center justify-center gap-1.5 overflow-x-auto scrollbar-none">{runtime ? <Badge className="shrink-0" variant={runtime.apply_status === 'running' ? 'success' : ['failed', 'drifted'].includes(runtime.apply_status) ? 'error' : 'warning'}>{runtime.apply_status === 'running' ? `sing-box${runtime.version ? ` ${runtime.version}` : ''}` : runtime.apply_status === 'failed' ? '部署失败' : runtime.apply_status === 'drifted' ? '状态漂移' : '部署中'}</Badge> : <Badge variant="neutral" className="shrink-0">未安装</Badge>}{server.status === 'online' && !supportsRuntimeLifecycle && <Badge variant="warning" className="shrink-0">需升级 Agent</Badge>}{tunnel && <Badge className="shrink-0" variant={tunnel.apply_status === 'running' ? 'success' : tunnel.apply_status === 'failed' ? 'error' : 'warning'}>Tunnel {tunnel.apply_status === 'running' ? '已连接' : tunnel.apply_status}</Badge>}</div></Table.Cell>
 					<Table.Cell className="text-center"><div className="flex flex-wrap justify-center gap-1">{managed.map((node) => <Badge key={node.id} variant={nodeTypeBadgeVariant(node.protocol)}>{node.protocol === 'hysteria2' ? 'HY2' : 'VLESS'}</Badge>)}{managed.length === 0 && <span className="text-xs text-kumo-subtle">—</span>}</div></Table.Cell>
-                  <Table.Cell className="text-center"><div className="flex w-full flex-wrap items-center justify-center gap-1">{runtime?.apply_status === 'running' ? <><Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>升级 / 重装</Button><Button size="sm" variant={isDestructiveConfirmActive(`runtime-uninstall:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallProxyRuntime(server)} disabled={saving || managed.length > 0 || !supportsRuntimeLifecycle} title={managed.length > 0 ? '请先在节点管理中卸载该实例的全部节点' : !supportsRuntimeLifecycle ? '请先升级 Agent' : '卸载 sing-box'}>{isDestructiveConfirmActive(`runtime-uninstall:${server.id}`) ? '再次确认' : '卸载程序'}</Button></> : <Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>安装代理</Button>}{tunnel ? <Button size="sm" variant={isDestructiveConfirmActive(`managed-tunnel-delete:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallTunnel(server)}>{isDestructiveConfirmActive(`managed-tunnel-delete:${server.id}`) ? '再次确认' : '卸载 Tunnel'}</Button> : <Button size="sm" variant="secondary" onClick={() => openTunnelDeployment(server)} disabled={server.status !== 'online'}>部署</Button>}</div></Table.Cell>
+                  <Table.Cell className="text-center"><div className="flex w-full flex-wrap items-center justify-center gap-1">{runtime?.apply_status === 'running' ? <><Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>升级 / 重装</Button><Button size="sm" variant={isDestructiveConfirmActive(`runtime-uninstall:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallProxyRuntime(server)} disabled={saving || managed.length > 0 || !supportsRuntimeLifecycle} title={managed.length > 0 ? '请先在节点管理中卸载该实例的全部节点' : !supportsRuntimeLifecycle ? '请先升级 Agent' : '卸载 sing-box'}>{isDestructiveConfirmActive(`runtime-uninstall:${server.id}`) ? '再次确认' : '卸载程序'}</Button></> : <Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>安装代理</Button>}{tunnel ? <Button size="sm" variant={isDestructiveConfirmActive(`managed-tunnel-delete:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallTunnel(server)}>{isDestructiveConfirmActive(`managed-tunnel-delete:${server.id}`) ? '再次确认' : '卸载 Tunnel'}</Button> : <Button size="sm" variant="secondary" onClick={() => openTunnelDeployment(server)} disabled={server.status !== 'online'}>部署 Tunnel</Button>}</div></Table.Cell>
                 </Table.Row>
               );
             })}

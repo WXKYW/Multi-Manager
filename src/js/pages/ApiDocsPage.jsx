@@ -2128,7 +2128,7 @@ function ApiDocsPage() {
 
   if (loading) {
     return (
-      <PageStack className={apiDocsShellClass}>
+      <PageStack viewport className={apiDocsShellClass}>
         <div className="grid gap-3 md:grid-cols-4">
           {Array.from({ length: 4 }).map((_, index) => (
             <AppCard key={index} padding="md">
@@ -2146,7 +2146,7 @@ function ApiDocsPage() {
   }
 
   return (
-    <PageStack className={apiDocsShellClass}>
+    <PageStack viewport className={apiDocsShellClass}>
       <PageToolbar className="shrink-0">
         <Tabs
           {...MODULE_TABS_PROPS}

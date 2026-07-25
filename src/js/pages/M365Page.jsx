@@ -104,7 +104,6 @@ const workspaceHeightClass = '';
 const panelBodyClass = 'flex min-h-0 flex-1 flex-col';
 const scrollViewportClass = 'min-h-0 flex-1 overflow-auto scrollbar-thin';
 const tableFrameClass = 'flex h-0 min-h-0 flex-1 flex-col overflow-hidden';
-const userTableViewportClass = 'max-h-[calc(100dvh-26rem)] min-h-[18rem] overscroll-contain';
 const DEFAULT_NEW_USER_PASSWORD = 'Mjj@1234';
 const USER_TABLE_COLUMN_WIDTHS = [96, 180, 220, 220, 260, 220];
 const REGISTRATION_TABLE_COLUMN_WIDTHS = [40, 176, 84, 168, 128, 156, 144, 236];
@@ -2072,7 +2071,7 @@ function M365Page() {
   );
 
   const renderPublicPages = () => (
-    <PageStack className="min-h-0 flex-1">
+    <PageStack viewport className="min-h-0 flex-1">
       <SectionCard
         className="flex min-h-0 flex-1 flex-col"
         bodyClassName={panelBodyClass}
@@ -2610,7 +2609,7 @@ function M365Page() {
   );
 
   const renderUsers = () => (
-    <PageStack className="min-h-0 flex-1">
+    <PageStack viewport>
       <SectionCard
         className="shrink-0"
         bodyClassName={panelBodyClass}
@@ -2718,11 +2717,10 @@ function M365Page() {
       </SectionCard>
 
       <SectionCard
-        className="flex min-h-0 flex-1 flex-col"
-        bodyClassName={panelBodyClass}
         title="用户与许可证"
         description="管理用户和许可证"
         icon={<Users className="h-4 w-4" />}
+        bodyPadding="none"
         action={
           <div className="flex items-center gap-2">
             <Input
@@ -2752,156 +2750,156 @@ function M365Page() {
         }
       >
         {!selectedAccountId ? (
-          <EmptyState
-            icon={Users}
-            title="请先选择租户"
-            description="需先选择租户"
-          />
-        ) : usersLoading ? (
-          <CardTableSkeleton rows={7} />
-        ) : users.length === 0 ? (
-          <EmptyState icon={User} title="暂无用户" description="当前筛选无用户" />
-        ) : (
-          <div
-            className={cx(
-              'flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-kumo-line/80 bg-kumo-base'
-            )}
-          >
-            <DataTableFrame
-              variant="embedded"
-              density="compact"
-              className={cx('min-h-0 flex-1 overflow-auto scrollbar-thin', userTableViewportClass)}
-            >
-              <AppTable
-                layout="fixed"
-                widths={USER_TABLE_COLUMN_WIDTHS}
-                className="w-full text-xs [&_td]:align-middle"
-              >
-                <colgroup>
-                  {USER_TABLE_COLUMN_WIDTHS.map((width, index) => (
-                    <col key={index} style={{ width }} />
-                  ))}
-                </colgroup>
-                <Table.Header sticky variant="compact">
-                  <Table.Row>
-                    <Table.Head className="!px-3 !py-2 text-center">状态</Table.Head>
-                    <Table.Head className="!px-3 !py-2">显示名</Table.Head>
-                    <Table.Head className="!px-3 !py-2">登录账号</Table.Head>
-                    <Table.Head className="!px-3 !py-2">邮箱</Table.Head>
-                    <Table.Head className="!px-3 !py-2">许可证</Table.Head>
-                    <Table.Head className="app-table-action !px-3 !py-2">操作</Table.Head>
-                  </Table.Row>
-                </Table.Header>
-                <Table.Body>
-                  {users.map(user => {
-                    const assignedSkuLabels = getAssignedSkuLabels(
-                      user.assignedLicenses,
-                      skuLabelLookup
-                    );
-                    const assignedSkuSummary =
-                      assignedSkuLabels.length <= 2
-                        ? assignedSkuLabels.join('、') || '-'
-                        : `${assignedSkuLabels.slice(0, 2).join('、')} +${assignedSkuLabels.length - 2}`;
-                    const deleteArmed = String(pendingUserDeleteId) === String(user.id);
-                    return (
-                      <Table.Row
-                        key={user.id}
-                        variant={
-                          String(user.id) === String(selectedUserId) ? 'selected' : 'default'
-                        }
-                        className="h-10 cursor-pointer"
-                        onClick={() => setSelectedUserId(String(user.id))}
-                      >
-                        <Table.Cell className="!px-3 !py-1.5 text-center">
-                          <div
-                            className="flex justify-center"
-                            onClick={event => event.stopPropagation()}
-                          >
-                            <Switch
-                              size="sm"
-                              aria-label={`${getDisplayText(user.displayName)}状态开关`}
-                              checked={user.accountEnabled !== false}
-                              disabled={togglingUserId === String(user.id)}
-                              onCheckedChange={checked => toggleUserEnabled(user, checked)}
-                            />
-                          </div>
-                        </Table.Cell>
-                        <Table.Cell className="!px-3 !py-1.5">
-                          <div
-                            className="truncate font-medium text-kumo-strong"
-                            title={getDisplayText(user.displayName)}
-                          >
-                            {getDisplayText(user.displayName)}
-                          </div>
-                        </Table.Cell>
-                        <Table.Cell className="!px-3 !py-1.5">
-                          <div className="truncate" title={getDisplayText(user.userPrincipalName)}>
-                            {getDisplayText(user.userPrincipalName)}
-                          </div>
-                        </Table.Cell>
-                        <Table.Cell className="!px-3 !py-1.5">
-                          <div className="truncate" title={getDisplayText(user.mail)}>
-                            {getDisplayText(user.mail)}
-                          </div>
-                        </Table.Cell>
-                        <Table.Cell className="!px-3 !py-1.5">
-                          <div
-                            className="flex min-w-0 items-center gap-2"
-                            title={assignedSkuLabels.join('、') || '-'}
-                          >
-                            <span className="min-w-0 flex-1 truncate">{assignedSkuSummary}</span>
-                            {assignedSkuLabels.length > 1 ? (
-                              <span className="shrink-0 rounded-full border border-kumo-line/70 bg-kumo-recessed/20 px-2 py-0.5 text-[10px] text-kumo-subtle">
-                                {assignedSkuLabels.length} 项
-                              </span>
-                            ) : null}
-                          </div>
-                        </Table.Cell>
-                        <Table.Cell className="!px-3 !py-1.5">
-                          <div
-                            className="flex items-center justify-end gap-2 whitespace-nowrap"
-                            onClick={event => event.stopPropagation()}
-                          >
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              onClick={() => openEditUser(user)}
-                            >
-                              编辑
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant={deleteArmed ? 'destructive' : 'secondary-destructive'}
-                              title={deleteArmed ? '确认' : '删除用户'}
-                              aria-label={deleteArmed ? '确认' : '删除用户'}
-                              icon={<Trash className="h-3.5 w-3.5" />}
-                              className={deleteArmed ? 'ring-1 ring-kumo-danger/50' : ''}
-                              onClick={() => {
-                                if (deleteArmed) {
-                                  void deleteUser(user);
-                                  return;
-                                }
-                                setPendingUserDeleteId(String(user.id));
-                              }}
-                            >
-                              {deleteArmed ? '确认' : '删除'}
-                            </Button>
-                          </div>
-                        </Table.Cell>
-                      </Table.Row>
-                    );
-                  })}
-                </Table.Body>
-              </AppTable>
-            </DataTableFrame>
+          <div className="p-4">
+            <EmptyState
+              icon={Users}
+              title="请先选择租户"
+              description="需先选择租户"
+            />
           </div>
+        ) : usersLoading ? (
+          <div className="p-4">
+            <CardTableSkeleton rows={7} />
+          </div>
+        ) : users.length === 0 ? (
+          <div className="p-4">
+            <EmptyState icon={User} title="暂无用户" description="当前筛选无用户" />
+          </div>
+        ) : (
+          <DataTableFrame
+            variant="embedded"
+            density="compact"
+            className="overflow-auto scrollbar-thin"
+          >
+            <AppTable
+              layout="fixed"
+              widths={USER_TABLE_COLUMN_WIDTHS}
+              className="w-full text-xs [&_td]:align-middle"
+            >
+              <colgroup>
+                {USER_TABLE_COLUMN_WIDTHS.map((width, index) => (
+                  <col key={index} style={{ width }} />
+                ))}
+              </colgroup>
+              <Table.Header sticky variant="compact">
+                <Table.Row>
+                  <Table.Head className="!px-3 !py-2 text-center">状态</Table.Head>
+                  <Table.Head className="!px-3 !py-2">显示名</Table.Head>
+                  <Table.Head className="!px-3 !py-2">登录账号</Table.Head>
+                  <Table.Head className="!px-3 !py-2">邮箱</Table.Head>
+                  <Table.Head className="!px-3 !py-2">许可证</Table.Head>
+                  <Table.Head className="app-table-action !px-3 !py-2">操作</Table.Head>
+                </Table.Row>
+              </Table.Header>
+              <Table.Body>
+                {users.map(user => {
+                  const assignedSkuLabels = getAssignedSkuLabels(
+                    user.assignedLicenses,
+                    skuLabelLookup
+                  );
+                  const assignedSkuSummary =
+                    assignedSkuLabels.length <= 2
+                      ? assignedSkuLabels.join('、') || '-'
+                      : `${assignedSkuLabels.slice(0, 2).join('、')} +${assignedSkuLabels.length - 2}`;
+                  const deleteArmed = String(pendingUserDeleteId) === String(user.id);
+                  return (
+                    <Table.Row
+                      key={user.id}
+                      variant={
+                        String(user.id) === String(selectedUserId) ? 'selected' : 'default'
+                      }
+                      className="h-10 cursor-pointer"
+                      onClick={() => setSelectedUserId(String(user.id))}
+                    >
+                      <Table.Cell className="!px-3 !py-1.5 text-center">
+                        <div
+                          className="flex justify-center"
+                          onClick={event => event.stopPropagation()}
+                        >
+                          <Switch
+                            size="sm"
+                            aria-label={`${getDisplayText(user.displayName)}状态开关`}
+                            checked={user.accountEnabled !== false}
+                            disabled={togglingUserId === String(user.id)}
+                            onCheckedChange={checked => toggleUserEnabled(user, checked)}
+                          />
+                        </div>
+                      </Table.Cell>
+                      <Table.Cell className="!px-3 !py-1.5">
+                        <div
+                          className="truncate font-medium text-kumo-strong"
+                          title={getDisplayText(user.displayName)}
+                        >
+                          {getDisplayText(user.displayName)}
+                        </div>
+                      </Table.Cell>
+                      <Table.Cell className="!px-3 !py-1.5">
+                        <div className="truncate" title={getDisplayText(user.userPrincipalName)}>
+                          {getDisplayText(user.userPrincipalName)}
+                        </div>
+                      </Table.Cell>
+                      <Table.Cell className="!px-3 !py-1.5">
+                        <div className="truncate" title={getDisplayText(user.mail)}>
+                          {getDisplayText(user.mail)}
+                        </div>
+                      </Table.Cell>
+                      <Table.Cell className="!px-3 !py-1.5">
+                        <div
+                          className="flex min-w-0 items-center gap-2"
+                          title={assignedSkuLabels.join('、') || '-'}
+                        >
+                          <span className="min-w-0 flex-1 truncate">{assignedSkuSummary}</span>
+                          {assignedSkuLabels.length > 1 ? (
+                            <span className="shrink-0 rounded-full border border-kumo-line/70 bg-kumo-recessed/20 px-2 py-0.5 text-[10px] text-kumo-subtle">
+                              {assignedSkuLabels.length} 项
+                            </span>
+                          ) : null}
+                        </div>
+                      </Table.Cell>
+                      <Table.Cell className="!px-3 !py-1.5">
+                        <div
+                          className="flex items-center justify-end gap-2 whitespace-nowrap"
+                          onClick={event => event.stopPropagation()}
+                        >
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => openEditUser(user)}
+                          >
+                            编辑
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={deleteArmed ? 'destructive' : 'secondary-destructive'}
+                            title={deleteArmed ? '确认' : '删除用户'}
+                            aria-label={deleteArmed ? '确认' : '删除用户'}
+                            icon={<Trash className="h-3.5 w-3.5" />}
+                            className={deleteArmed ? 'ring-1 ring-kumo-danger/50' : ''}
+                            onClick={() => {
+                              if (deleteArmed) {
+                                void deleteUser(user);
+                                return;
+                              }
+                              setPendingUserDeleteId(String(user.id));
+                            }}
+                          >
+                            {deleteArmed ? '确认' : '删除'}
+                          </Button>
+                        </div>
+                      </Table.Cell>
+                    </Table.Row>
+                  );
+                })}
+              </Table.Body>
+            </AppTable>
+          </DataTableFrame>
         )}
       </SectionCard>
     </PageStack>
   );
 
   const renderGroups = () => (
-    <PageStack className="min-h-0 flex-1">
+    <PageStack viewport className="min-h-0 flex-1">
       <SectionCard
         className="flex min-h-0 flex-1 flex-col"
         bodyClassName={panelBodyClass}
@@ -3083,7 +3081,7 @@ function M365Page() {
   );
 
   return (
-    <PageStack className={workspaceHeightClass}>
+    <PageStack viewport className={workspaceHeightClass}>
       <PageToolbar>
         <Tabs
           {...MODULE_TABS_PROPS}

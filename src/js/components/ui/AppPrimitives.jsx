@@ -7,6 +7,7 @@ import { LayerCard } from '@cloudflare/kumo';
 import { Info } from '../Icons.jsx';
 
 export const pageStackClass = 'flex w-full min-w-0 flex-col gap-3 sm:gap-4 pb-6 sm:pb-8';
+export const viewportPageStackClass = 'flex w-full min-w-0 flex-col gap-3 sm:gap-4 pb-0';
 export const pageToolbarClass =
   'flex min-w-0 flex-col items-stretch gap-3 border-b border-kumo-line pb-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between [&>*]:min-w-0';
 export const sectionCardHeaderClass =
@@ -81,8 +82,8 @@ function withCompactCardActions(node) {
   });
 }
 
-export function PageStack({ className = '', children }) {
-  return <div className={cx(pageStackClass, className)}>{children}</div>;
+export function PageStack({ className = '', children, viewport = false }) {
+  return <div className={cx(viewport ? viewportPageStackClass : pageStackClass, className)}>{children}</div>;
 }
 
 export function PageToolbar({ className = '', children }) {

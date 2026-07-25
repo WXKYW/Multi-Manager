@@ -16,7 +16,7 @@ import 'katex/dist/katex.min.css';
 export function renderMarkdown(text) {
   if (text === undefined || text === null) return '';
 
-  let source = '';
+  let source;
 
   // 1. 处理多模态数组 (OpenAI 格式)
   if (Array.isArray(text)) {

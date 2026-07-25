@@ -1812,7 +1812,7 @@ function DnsPage() {
   };
 
   return (
-    <PageStack className={pageShellClassName}>
+    <PageStack viewport={isViewportWorkspaceTab} className={pageShellClassName}>
       <PageToolbar>
         <Tabs
           {...MODULE_TABS_PROPS}
