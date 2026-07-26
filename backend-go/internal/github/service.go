@@ -154,6 +154,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.collectorStatus(w, r)
 	case len(parts) == 1 && parts[0] == "history" && r.Method == http.MethodDelete:
 		s.deleteHistory(w, r)
+	case len(parts) == 2 && parts[0] == "history" && parts[1] == "compact" && r.Method == http.MethodPost:
+		s.compactHistory(w, r)
 	case len(parts) == 1 && parts[0] == "events" && r.Method == http.MethodGet:
 		s.events(w, r)
 	case len(parts) == 2 && parts[0] == "events" && parts[1] == "stream" && r.Method == http.MethodGet:
@@ -1427,6 +1429,43 @@ func (s *Service) deleteHistory(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	var deleted int64
+	for _, count := range result {
+		deleted += count
+	}
+	if deleted > 0 {
+		_, _ = db.ExecContext(r.Context(), `PRAGMA wal_checkpoint(TRUNCATE)`)
+		if _, err := db.ExecContext(r.Context(), `VACUUM`); err != nil {
+			response.Error(w, http.StatusInternalServerError, "github history vacuum failed: "+err.Error())
+			return
+		}
+		_, _ = db.ExecContext(r.Context(), `PRAGMA wal_checkpoint(TRUNCATE)`)
+	}
+	response.OK(w, result)
+}
+
+func (s *Service) compactHistory(w http.ResponseWriter, r *http.Request) {
+	db, err := s.open(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer db.Close()
+	repoID := int64Query(r, "repositoryId", 0)
+	result, err := compactHistoryPayloads(r.Context(), db, repoID)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	updated := result["github_events"] + result["github_webhook_deliveries"]
+	if updated > 0 {
+		_, _ = db.ExecContext(r.Context(), `PRAGMA wal_checkpoint(TRUNCATE)`)
+		if _, err := db.ExecContext(r.Context(), `VACUUM`); err != nil {
+			response.Error(w, http.StatusInternalServerError, "github history vacuum failed: "+err.Error())
+			return
+		}
+		_, _ = db.ExecContext(r.Context(), `PRAGMA wal_checkpoint(TRUNCATE)`)
+	}
 	response.OK(w, result)
 }
 
@@ -1552,6 +1591,8 @@ func (s *Service) webhook(w http.ResponseWriter, r *http.Request, parts []string
 		return
 	}
 	defer db.Close()
+	var payload map[string]interface{}
+	_ = json.Unmarshal(raw, &payload)
 	var repo Repository
 	ok := false
 	if repoID > 0 {
@@ -1561,8 +1602,6 @@ func (s *Service) webhook(w http.ResponseWriter, r *http.Request, parts []string
 			return
 		}
 	} else {
-		var payload map[string]interface{}
-		_ = json.Unmarshal(raw, &payload)
 		fullName := stringValue(objectValue(payload["repository"]), "full_name", "")
 		repo, ok, err = getRepositoryByFullName(r.Context(), db, fullName)
 		if err != nil || !ok {
@@ -1580,8 +1619,9 @@ func (s *Service) webhook(w http.ResponseWriter, r *http.Request, parts []string
 		_ = db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM github_webhook_deliveries WHERE delivery_id = ?`, delivery).Scan(&count)
 		duplicate = count > 0
 	}
+	storedPayload, _ := json.Marshal(compactWebhookDeliveryPayload(eventType, payload, raw))
 	_, _ = db.ExecContext(r.Context(), `INSERT OR IGNORE INTO github_webhook_deliveries (repository_id, delivery_id, event_type, signature_valid, duplicate, payload_json)
-		VALUES (?, ?, ?, ?, ?, ?)`, repoID, delivery, eventType, boolInt(valid), boolInt(duplicate), string(raw))
+		VALUES (?, ?, ?, ?, ?, ?)`, repoID, delivery, eventType, boolInt(valid), boolInt(duplicate), string(storedPayload))
 	if !valid {
 		response.Error(w, http.StatusUnauthorized, "GitHub webhook signature invalid")
 		return
@@ -1590,8 +1630,6 @@ func (s *Service) webhook(w http.ResponseWriter, r *http.Request, parts []string
 		response.OK(w, map[string]interface{}{"duplicate": true})
 		return
 	}
-	var payload map[string]interface{}
-	_ = json.Unmarshal(raw, &payload)
 	s.handleWebhookEvent(r.Context(), db, repo, eventType, payload)
 	response.OK(w, map[string]interface{}{"received": true, "event": eventType})
 }

@@ -43,6 +43,7 @@ type deprecatedTableCandidate struct {
 }
 
 type deprecatedTableRule struct {
+	Exact    string
 	Prefix   string
 	Category string
 	Reason   string
@@ -52,11 +53,23 @@ var deprecatedTableRules = []deprecatedTableRule{
 	{Prefix: "music_", Category: "retired_module", Reason: "Music module is retired"},
 	{Prefix: "openlist_", Category: "retired_module", Reason: "OpenList module is retired"},
 	{Prefix: "chat_", Category: "legacy_chat", Reason: "Legacy chat tables are no longer used by the current OpenAI chat UI"},
+	{Exact: "nextchat_sessions", Category: "legacy_chat", Reason: "Legacy NextChat tables are no longer used by the current OpenAI chat UI"},
+	{Exact: "nextchat_messages", Category: "legacy_chat", Reason: "Legacy NextChat tables are no longer used by the current OpenAI chat UI"},
 	{Prefix: "ai_chat_", Category: "legacy_ai", Reason: "Legacy AI chat tables are no longer used by the current UI"},
 	{Prefix: "ai_draw_", Category: "legacy_ai", Reason: "Legacy AI drawing tables are no longer used by the current UI"},
 	{Prefix: "antigravity_", Category: "legacy_ai_gateway", Reason: "Legacy Antigravity gateway tables are not used by the current Go backend"},
 	{Prefix: "gemini_cli_", Category: "legacy_ai_gateway", Reason: "Legacy Gemini CLI gateway tables are not used by the current Go backend"},
 	{Prefix: "qwen_", Category: "legacy_ai_gateway", Reason: "Legacy Qwen gateway tables are not used by the current Go backend"},
+	{Exact: "ds_accounts", Category: "legacy_ai_gateway", Reason: "Legacy DS gateway tables are not used by the current Go backend"},
+	{Exact: "ds_session_cache", Category: "legacy_ai_gateway", Reason: "Legacy DS gateway tables are not used by the current Go backend"},
+	{Exact: "ds_settings", Category: "legacy_ai_gateway", Reason: "Legacy DS gateway tables are not used by the current Go backend"},
+	{Exact: "ds_logs", Category: "legacy_ai_gateway", Reason: "Legacy DS gateway tables are not used by the current Go backend"},
+	{Exact: "ds_file_cache", Category: "legacy_ai_gateway", Reason: "Legacy DS gateway tables are not used by the current Go backend"},
+	{Exact: "ds_model_checks", Category: "legacy_ai_gateway", Reason: "Legacy DS gateway tables are not used by the current Go backend"},
+	{Exact: "ds_model_redirects", Category: "legacy_ai_gateway", Reason: "Legacy DS gateway tables are not used by the current Go backend"},
+	{Exact: "nezha_config", Category: "retired_integration", Reason: "Nezha integration is not implemented in the current Go backend"},
+	{Exact: "zeabur_accounts", Category: "retired_integration", Reason: "Zeabur integration is not implemented in the current Go backend"},
+	{Exact: "zeabur_projects", Category: "retired_integration", Reason: "Zeabur integration is not implemented in the current Go backend"},
 }
 
 func databaseStorageStats(ctx context.Context, db *sql.DB, dbPath string) databaseStorageInfo {
@@ -315,12 +328,24 @@ func deprecatedTableCandidates(ctx context.Context, db *sql.DB) ([]deprecatedTab
 
 func deprecatedTableReason(table string) (string, string, bool) {
 	name := strings.ToLower(table)
+	if isMigratedBackupTable(name) {
+		return "migration_backup", "Migration backup table superseded by the current uptime schema", true
+	}
 	for _, rule := range deprecatedTableRules {
-		if strings.HasPrefix(name, rule.Prefix) {
+		if rule.Exact != "" && name == rule.Exact {
+			return rule.Category, rule.Reason, true
+		}
+		if rule.Prefix != "" && strings.HasPrefix(name, rule.Prefix) {
 			return rule.Category, rule.Reason, true
 		}
 	}
 	return "", "", false
+}
+
+func isMigratedBackupTable(name string) bool {
+	return strings.HasPrefix(name, "uptime_") &&
+		strings.Contains(name, "_backup_") &&
+		strings.HasSuffix(name, "_migrated")
 }
 
 func selectedDeprecatedTables(raw interface{}, hasSelection bool, candidates []deprecatedTableCandidate) ([]deprecatedTableCandidate, error) {

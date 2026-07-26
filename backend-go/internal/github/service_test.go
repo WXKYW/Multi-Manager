@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -316,5 +318,199 @@ func TestTokenTestCanBindRepositoryCredential(t *testing.T) {
 	}
 	if !boundTokenID.Valid || boundTokenID.Int64 != tokenID || ownedByToken != 1 {
 		t.Fatalf("unexpected binding token=%v owned=%d", boundTokenID, ownedByToken)
+	}
+}
+
+func TestWebhookPayloadsAreStoredAsCompactSummaries(t *testing.T) {
+	dataDir, err := os.MkdirTemp("", "github-storage-")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	cfg := config.Config{DataDir: dataDir, DBName: "test.db"}
+	service := New(cfg)
+	defer func() {
+		service.Stop()
+		_ = os.RemoveAll(dataDir)
+	}()
+
+	db, err := service.open(t.Context())
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	result, err := db.Exec(`INSERT INTO github_repositories (owner, name, full_name, html_url, webhook_secret) VALUES ('openai', 'codex', 'openai/codex', 'https://github.com/openai/codex', 'secret')`)
+	if err != nil {
+		db.Close()
+		t.Fatalf("insert repository: %v", err)
+	}
+	repoID, _ := result.LastInsertId()
+	db.Close()
+
+	longBody := strings.Repeat("VERY-LONG-ISSUE-BODY-", 800)
+	raw := `{"action":"opened","issue":{"id":123,"number":7,"title":"Bug report","body":"` + longBody + `","html_url":"https://github.com/openai/codex/issues/7","state":"open","user":{"login":"alice","html_url":"https://github.com/alice","type":"User"},"labels":[{"name":"bug"},{"name":"triage"}]},"repository":{"id":1,"name":"codex","full_name":"openai/codex","html_url":"https://github.com/openai/codex"}}`
+	mac := hmac.New(sha256.New, []byte("secret"))
+	mac.Write([]byte(raw))
+	signature := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/github/webhook/"+strconv.FormatInt(repoID, 10), strings.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "issues")
+	req.Header.Set("X-GitHub-Delivery", "delivery-1")
+	req.Header.Set("X-Hub-Signature-256", signature)
+	rec := httptest.NewRecorder()
+	service.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("webhook status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	db, err = service.open(t.Context())
+	if err != nil {
+		t.Fatalf("reopen database: %v", err)
+	}
+	defer db.Close()
+
+	var deliveryPayload string
+	if err := db.QueryRow(`SELECT payload_json FROM github_webhook_deliveries WHERE delivery_id = 'delivery-1'`).Scan(&deliveryPayload); err != nil {
+		t.Fatalf("read stored delivery payload: %v", err)
+	}
+	if strings.Contains(deliveryPayload, longBody) {
+		t.Fatalf("delivery payload still contains the original large body")
+	}
+	if len(deliveryPayload) >= len(raw) {
+		t.Fatalf("delivery payload was not compacted: stored=%d raw=%d", len(deliveryPayload), len(raw))
+	}
+
+	var eventPayload string
+	if err := db.QueryRow(`SELECT payload_json FROM github_events WHERE repository_id = ? ORDER BY id DESC LIMIT 1`, repoID).Scan(&eventPayload); err != nil {
+		t.Fatalf("read stored event payload: %v", err)
+	}
+	if strings.Contains(eventPayload, longBody) {
+		t.Fatalf("event payload still contains the original large body")
+	}
+	if !strings.Contains(eventPayload, `"issue"`) || !strings.Contains(eventPayload, `"labels"`) {
+		t.Fatalf("event payload summary lost expected issue fields: %s", eventPayload)
+	}
+}
+
+func TestDeleteHistoryVacuumShrinksDatabaseFile(t *testing.T) {
+	dataDir, err := os.MkdirTemp("", "github-history-")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	cfg := config.Config{DataDir: dataDir, DBName: "test.db"}
+	service := New(cfg)
+	defer func() {
+		service.Stop()
+		_ = os.RemoveAll(dataDir)
+	}()
+
+	db, err := service.open(t.Context())
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	result, err := db.Exec(`INSERT INTO github_repositories (owner, name, full_name) VALUES ('openai', 'codex', 'openai/codex')`)
+	if err != nil {
+		db.Close()
+		t.Fatalf("insert repository: %v", err)
+	}
+	repoID, _ := result.LastInsertId()
+	largeMessage := strings.Repeat("payload-", 4000)
+	for i := 0; i < 20; i++ {
+		if _, err := db.Exec(`INSERT INTO github_events (repository_id, event_type, severity, title, message, payload_json, created_at) VALUES (?, 'issue_opened', 'info', 'Event', ?, ?, '2000-01-01T00:00:00Z')`, repoID, largeMessage, `{"body":"`+largeMessage+`"}`); err != nil {
+			db.Close()
+			t.Fatalf("insert event history: %v", err)
+		}
+		if _, err := db.Exec(`INSERT INTO github_webhook_deliveries (repository_id, delivery_id, event_type, payload_json, created_at) VALUES (?, ?, 'issues', ?, '2000-01-01T00:00:00Z')`, repoID, "old-delivery-"+strconv.Itoa(i), `{"body":"`+largeMessage+`"}`); err != nil {
+			db.Close()
+			t.Fatalf("insert delivery history: %v", err)
+		}
+	}
+	db.Close()
+
+	before, err := os.Stat(service.store.DatabasePath())
+	if err != nil {
+		t.Fatalf("stat database before cleanup: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/github/history?days=1", nil)
+	rec := httptest.NewRecorder()
+	service.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete history status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	after, err := os.Stat(service.store.DatabasePath())
+	if err != nil {
+		t.Fatalf("stat database after cleanup: %v", err)
+	}
+	if after.Size() >= before.Size() {
+		t.Fatalf("expected database file to shrink after vacuum: before=%d after=%d", before.Size(), after.Size())
+	}
+}
+
+func TestCompactHistoryEndpointRewritesLargePayloads(t *testing.T) {
+	dataDir, err := os.MkdirTemp("", "github-compact-")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	cfg := config.Config{DataDir: dataDir, DBName: "test.db"}
+	service := New(cfg)
+	defer func() {
+		service.Stop()
+		_ = os.RemoveAll(dataDir)
+	}()
+
+	db, err := service.open(t.Context())
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	result, err := db.Exec(`INSERT INTO github_repositories (owner, name, full_name) VALUES ('openai', 'codex', 'openai/codex')`)
+	if err != nil {
+		db.Close()
+		t.Fatalf("insert repository: %v", err)
+	}
+	repoID, _ := result.LastInsertId()
+	largeBody := strings.Repeat("legacy-issue-body-", 1200)
+	eventPayload := `{"id":123,"number":7,"title":"Legacy issue","body":"` + largeBody + `","html_url":"https://github.com/openai/codex/issues/7","state":"open","user":{"login":"alice"},"labels":[{"name":"bug"}],"repositoryId":` + strconv.FormatInt(repoID, 10) + `}`
+	webhookPayload := `{"action":"opened","issue":{"id":123,"number":7,"title":"Legacy issue","body":"` + largeBody + `","html_url":"https://github.com/openai/codex/issues/7","state":"open","user":{"login":"alice"},"labels":[{"name":"bug"}]},"repository":{"id":1,"name":"codex","full_name":"openai/codex"}}`
+	if _, err := db.Exec(`INSERT INTO github_events (repository_id, event_type, severity, title, message, payload_json, created_at) VALUES (?, 'issue_opened', 'info', 'Legacy issue', 'legacy', ?, '2000-01-01T00:00:00Z')`, repoID, eventPayload); err != nil {
+		db.Close()
+		t.Fatalf("insert legacy event payload: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO github_webhook_deliveries (repository_id, delivery_id, event_type, payload_json, created_at) VALUES (?, 'legacy-delivery', 'issues', ?, '2000-01-01T00:00:00Z')`, repoID, webhookPayload); err != nil {
+		db.Close()
+		t.Fatalf("insert legacy webhook payload: %v", err)
+	}
+	db.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/github/history/compact?repositoryId="+strconv.FormatInt(repoID, 10), strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	service.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("compact history status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	db, err = service.open(t.Context())
+	if err != nil {
+		t.Fatalf("reopen database: %v", err)
+	}
+	defer db.Close()
+
+	var compactEvent string
+	if err := db.QueryRow(`SELECT payload_json FROM github_events WHERE repository_id = ?`, repoID).Scan(&compactEvent); err != nil {
+		t.Fatalf("read compacted event payload: %v", err)
+	}
+	if strings.Contains(compactEvent, largeBody) {
+		t.Fatalf("event payload still contains legacy large body")
+	}
+	var compactWebhook string
+	if err := db.QueryRow(`SELECT payload_json FROM github_webhook_deliveries WHERE delivery_id = 'legacy-delivery'`).Scan(&compactWebhook); err != nil {
+		t.Fatalf("read compacted webhook payload: %v", err)
+	}
+	if strings.Contains(compactWebhook, largeBody) {
+		t.Fatalf("webhook payload still contains legacy large body")
+	}
+	if len(compactWebhook) >= len(webhookPayload) {
+		t.Fatalf("expected webhook payload to shrink: before=%d after=%d", len(webhookPayload), len(compactWebhook))
 	}
 }

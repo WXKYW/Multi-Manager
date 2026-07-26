@@ -1698,6 +1698,8 @@ function GitHubPage() {
   const [repoForm, setRepoForm] = useState({ url: '', token_id: '', collect_interval_seconds: 900, retention_days: 90, webhook_enabled: false });
   const [tokenForm, setTokenForm] = useState({ name: '', token: '', type: 'fine_grained', default_token: false });
   const [dispatchForm, setDispatchForm] = useState({ workflowId: '', ref: '' });
+  const [historyRetentionDays, setHistoryRetentionDays] = useState('90');
+  const [maintenanceAction, setMaintenanceAction] = useState('');
   const eventSourceRef = useRef(null);
   const dispatchDefaultedRepoRef = useRef(null);
   const actionJobsRef = useRef([]);
@@ -2119,6 +2121,58 @@ function GitHubPage() {
     }
   };
 
+  const cleanupGitHubHistory = async () => {
+    const days = Math.max(1, Number(historyRetentionDays) || Number(selectedRepo?.retention_days) || Number(settings?.default_retention_days) || 90);
+    const confirmed = await dialog.confirm({
+      title: '确认清理 GitHub 历史',
+      message: `确定清理 ${historyScopeLabel} ${days} 天前的 GitHub 历史记录吗？操作会同时压缩数据库文件，且不可恢复。`,
+      confirmText: '清理',
+      confirmClass: '!bg-kumo-danger !text-white',
+    });
+    if (!confirmed) return;
+    setMaintenanceAction('cleanup-history');
+    try {
+      const params = new URLSearchParams({ days: String(days) });
+      if (selectedRepo?.id) params.set('repositoryId', String(selectedRepo.id));
+      const result = await api(`/api/github/history?${params.toString()}`, { method: 'DELETE' });
+      const totalDeleted = Object.values(result || {}).reduce((sum, value) => sum + (Number(value) || 0), 0);
+      toast.success(`GitHub 历史已清理，删除 ${totalDeleted} 条记录`);
+      await loadOverview();
+      if (selectedRepo?.id) await loadRepoDetails(selectedRepo.id);
+    } catch (error) {
+      toast.error(error.message || '清理 GitHub 历史失败');
+    } finally {
+      setMaintenanceAction('');
+    }
+  };
+
+  const compactGitHubHistory = async () => {
+    const confirmed = await dialog.confirm({
+      title: '确认压缩 GitHub 历史',
+      message: `确定压缩 ${historyScopeLabel} 已有的 GitHub 事件和 Webhook Payload 吗？操作会把旧的大 JSON 改写为摘要并压缩数据库文件。`,
+      confirmText: '压缩',
+      confirmClass: '!bg-kumo-warning !text-kumo-strong',
+    });
+    if (!confirmed) return;
+    setMaintenanceAction('compact-history');
+    try {
+      const params = new URLSearchParams();
+      if (selectedRepo?.id) params.set('repositoryId', String(selectedRepo.id));
+      const result = await api(`/api/github/history/compact${params.toString() ? `?${params.toString()}` : ''}`, { method: 'POST', body: '{}' });
+      const updatedEvents = Number(result?.github_events) || 0;
+      const updatedDeliveries = Number(result?.github_webhook_deliveries) || 0;
+      const savedBytes = Number(result?.bytes_saved) || 0;
+      const savedMB = savedBytes > 0 ? `${(savedBytes / 1024 / 1024).toFixed(2)} MB` : '0 MB';
+      toast.success(`已压缩 ${updatedEvents + updatedDeliveries} 条 GitHub 记录，约节省 ${savedMB}`);
+      await loadOverview();
+      if (selectedRepo?.id) await loadRepoDetails(selectedRepo.id);
+    } catch (error) {
+      toast.error(error.message || '压缩 GitHub 历史失败');
+    } finally {
+      setMaintenanceAction('');
+    }
+  };
+
   const chartData = useMemo(() => {
     const points = trends.map((point) => ({
       ts: parseTimestamp(point.collected_at),
@@ -2139,6 +2193,7 @@ function GitHubPage() {
 
   const repoOptions = repositories.map((repo) => ({ value: String(repo.id), label: repo.full_name }));
   const tokenOptions = [{ value: '', label: '默认/公开访问' }, ...tokens.map((token) => ({ value: String(token.id), label: token.name }))];
+  const historyScopeLabel = selectedRepo ? `当前仓库 ${selectedRepo.full_name}` : '全部 GitHub 仓库';
   const workflowOptions = [
     { value: '', label: workflows.length > 0 ? '选择 Workflow' : '未发现 Workflow' },
     ...workflows
@@ -2163,6 +2218,11 @@ function GitHubPage() {
       ref: branchOptions.some((branch) => branch.value === current.ref) ? current.ref : branchOptions[0].value,
     }));
   }, [selectedRepo?.id, branchOptions]);
+
+  useEffect(() => {
+    const fallback = selectedRepo?.retention_days || settings?.default_retention_days || 90;
+    setHistoryRetentionDays(String(fallback));
+  }, [selectedRepo?.id, selectedRepo?.retention_days, settings?.default_retention_days]);
 
   useEffect(() => {
     if (String(detailsRepoId) !== String(selectedRepo?.id)) return;
@@ -2611,6 +2671,56 @@ function GitHubPage() {
             ) : (
               <FillEmpty title="设置加载中" />
             )}
+            </LayerCard.Primary>
+          </LayerCard>
+
+          <LayerCard className="self-start p-0 shadow-none xl:col-span-2">
+            <LayerCard.Secondary className="flex min-h-14 items-center justify-between gap-3 border-b border-kumo-line px-4 py-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <Activity className="h-4 w-4 text-kumo-brand" />
+                <Text variant="body" size="sm" bold>历史维护</Text>
+              </div>
+              <Badge variant={selectedRepo ? 'info' : 'secondary'}>{selectedRepo ? '当前仓库' : '全局'}</Badge>
+            </LayerCard.Secondary>
+            <LayerCard.Primary className="grid gap-4 p-4 xl:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
+              <div className="grid gap-3">
+                <Input
+                  size="sm"
+                  label="清理保留天数"
+                  type="number"
+                  min="1"
+                  value={historyRetentionDays}
+                  onChange={(e) => setHistoryRetentionDays(e.target.value)}
+                />
+                <Text variant="secondary" size="xs">
+                  当前作用范围：{historyScopeLabel}。未选中仓库时，会作用于全部 GitHub 仓库。
+                </Text>
+              </div>
+              <div className="grid gap-3">
+                <Text variant="secondary" size="xs">
+                  “清理历史”会删除旧的趋势、Actions、事件、Webhook 和审计记录；“压缩已有 Payload”会把旧的大 JSON 改写为摘要，并在结束后回收数据库空间。
+                </Text>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary-destructive"
+                    icon={<Trash className="h-3.5 w-3.5" />}
+                    onClick={cleanupGitHubHistory}
+                    loading={maintenanceAction === 'cleanup-history'}
+                  >
+                    清理历史并压缩
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon={<Save className="h-3.5 w-3.5" />}
+                    onClick={compactGitHubHistory}
+                    loading={maintenanceAction === 'compact-history'}
+                  >
+                    压缩已有 Payload
+                  </Button>
+                </div>
+              </div>
             </LayerCard.Primary>
           </LayerCard>
         </div>

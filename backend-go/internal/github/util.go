@@ -290,3 +290,247 @@ func normalizeDBValue(value interface{}) interface{} {
 		return v
 	}
 }
+
+func compactStoredEventPayload(eventType string, payload map[string]interface{}) map[string]interface{} {
+	result := map[string]interface{}{}
+	addCompactString(result, "repositoryId", payload["repositoryId"], 0)
+	addCompactString(result, "repositoryFullName", payload["repositoryFullName"], 200)
+	addCompactString(result, "owner", payload["owner"], 120)
+	addCompactString(result, "repo", payload["repo"], 120)
+	addCompactString(result, "htmlUrl", payload["htmlUrl"], 400)
+	addCompactString(result, "eventType", payload["eventType"], 120)
+	addCompactString(result, "severity", payload["severity"], 32)
+	addCompactString(result, "collectedAt", payload["collectedAt"], 64)
+	addCompactString(result, "action", payload["action"], 64)
+
+	switch eventType {
+	case "action_failed", "action_recovered":
+		if run := compactWorkflowRunValue(payload); len(run) > 0 {
+			result["workflow_run"] = run
+		}
+	case "release_published":
+		if release := compactReleaseValue(payload); len(release) > 0 {
+			result["release"] = release
+		}
+	case "issue_opened":
+		if issue := compactIssueLikeValue(payload, false); len(issue) > 0 {
+			result["issue"] = issue
+		}
+	case "pull_request_opened":
+		if pullRequest := compactIssueLikeValue(payload, true); len(pullRequest) > 0 {
+			result["pull_request"] = pullRequest
+		}
+	case "star_spike":
+		if sender := compactUserValue(payload["sender"]); len(sender) > 0 {
+			result["sender"] = sender
+		}
+		addCompactString(result, "starred_at", payload["starred_at"], 64)
+	case "webhook_ping":
+		addCompactString(result, "zen", payload["zen"], 240)
+		if hookID := int64Value(payload["hook_id"], 0); hookID > 0 {
+			result["hook_id"] = hookID
+		}
+	default:
+		copyCompactKeys(result, payload, "id", "number", "state", "status", "conclusion", "created_at", "updated_at")
+	}
+	return result
+}
+
+func compactWebhookDeliveryPayload(eventType string, payload map[string]interface{}, raw []byte) map[string]interface{} {
+	result := map[string]interface{}{
+		"storage_mode": "summary",
+		"raw_bytes":    len(raw),
+	}
+	addCompactString(result, "event_type", eventType, 64)
+	addCompactString(result, "action", payload["action"], 64)
+	if repository := compactRepositoryValue(payload["repository"]); len(repository) > 0 {
+		result["repository"] = repository
+	}
+	if sender := compactUserValue(payload["sender"]); len(sender) > 0 {
+		result["sender"] = sender
+	}
+
+	switch eventType {
+	case "workflow_run":
+		if run := compactWorkflowRunValue(payload["workflow_run"]); len(run) > 0 {
+			result["workflow_run"] = run
+		}
+	case "release":
+		if release := compactReleaseValue(payload["release"]); len(release) > 0 {
+			result["release"] = release
+		}
+	case "issues":
+		if issue := compactIssueLikeValue(payload["issue"], false); len(issue) > 0 {
+			result["issue"] = issue
+		}
+	case "pull_request":
+		if pullRequest := compactIssueLikeValue(payload["pull_request"], true); len(pullRequest) > 0 {
+			result["pull_request"] = pullRequest
+		}
+	case "star":
+		addCompactString(result, "starred_at", payload["starred_at"], 64)
+	case "ping":
+		addCompactString(result, "zen", payload["zen"], 240)
+		if hookID := int64Value(payload["hook_id"], 0); hookID > 0 {
+			result["hook_id"] = hookID
+		}
+	}
+
+	return result
+}
+
+func compactWorkflowRunValue(value interface{}) map[string]interface{} {
+	run := objectValue(value)
+	if len(run) == 0 {
+		return map[string]interface{}{}
+	}
+	result := map[string]interface{}{}
+	copyCompactKeys(result, run, "id", "run_number", "run_attempt", "workflow_id")
+	addCompactString(result, "name", run["name"], 200)
+	addCompactString(result, "display_title", run["display_title"], 240)
+	addCompactString(result, "html_url", run["html_url"], 400)
+	addCompactString(result, "status", run["status"], 32)
+	addCompactString(result, "conclusion", run["conclusion"], 32)
+	addCompactString(result, "event", run["event"], 64)
+	addCompactString(result, "head_branch", run["head_branch"], 120)
+	addCompactString(result, "head_sha", run["head_sha"], 64)
+	addCompactString(result, "created_at", run["created_at"], 64)
+	addCompactString(result, "updated_at", run["updated_at"], 64)
+	addCompactString(result, "run_started_at", run["run_started_at"], 64)
+	if actor := compactUserValue(run["actor"]); len(actor) > 0 {
+		result["actor"] = actor
+	}
+	if triggeringActor := compactUserValue(run["triggering_actor"]); len(triggeringActor) > 0 {
+		result["triggering_actor"] = triggeringActor
+	}
+	return result
+}
+
+func compactReleaseValue(value interface{}) map[string]interface{} {
+	release := objectValue(value)
+	if len(release) == 0 {
+		return map[string]interface{}{}
+	}
+	result := map[string]interface{}{}
+	copyCompactKeys(result, release, "id")
+	addCompactString(result, "tag_name", release["tag_name"], 120)
+	addCompactString(result, "name", release["name"], 240)
+	addCompactString(result, "html_url", release["html_url"], 400)
+	addCompactString(result, "target_commitish", release["target_commitish"], 120)
+	addCompactString(result, "created_at", release["created_at"], 64)
+	addCompactString(result, "published_at", release["published_at"], 64)
+	if value, ok := release["draft"]; ok {
+		result["draft"] = boolValue(value, false)
+	}
+	if value, ok := release["prerelease"]; ok {
+		result["prerelease"] = boolValue(value, false)
+	}
+	if author := compactUserValue(release["author"]); len(author) > 0 {
+		result["author"] = author
+	}
+	return result
+}
+
+func compactIssueLikeValue(value interface{}, pullRequest bool) map[string]interface{} {
+	item := objectValue(value)
+	if len(item) == 0 {
+		return map[string]interface{}{}
+	}
+	result := map[string]interface{}{}
+	copyCompactKeys(result, item, "id", "number")
+	addCompactString(result, "title", item["title"], 240)
+	addCompactString(result, "html_url", item["html_url"], 400)
+	addCompactString(result, "state", item["state"], 32)
+	addCompactString(result, "created_at", item["created_at"], 64)
+	addCompactString(result, "updated_at", item["updated_at"], 64)
+	addCompactString(result, "closed_at", item["closed_at"], 64)
+	if user := compactUserValue(item["user"]); len(user) > 0 {
+		result["user"] = user
+	}
+	if labels := compactLabels(item["labels"]); len(labels) > 0 {
+		result["labels"] = labels
+	}
+	if value, ok := item["draft"]; ok {
+		result["draft"] = boolValue(value, false)
+	}
+	if pullRequest {
+		addCompactString(result, "merged_at", item["merged_at"], 64)
+	}
+	return result
+}
+
+func compactLabels(value interface{}) []string {
+	items, ok := value.([]interface{})
+	if !ok || len(items) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		label := objectValue(item)
+		name := truncateCompactString(asString(label["name"]), 80)
+		if name != "" {
+			result = append(result, name)
+		}
+		if len(result) >= 5 {
+			break
+		}
+	}
+	return result
+}
+
+func compactUserValue(value interface{}) map[string]interface{} {
+	user := objectValue(value)
+	if len(user) == 0 {
+		return map[string]interface{}{}
+	}
+	result := map[string]interface{}{}
+	addCompactString(result, "login", user["login"], 120)
+	addCompactString(result, "html_url", user["html_url"], 400)
+	addCompactString(result, "type", user["type"], 32)
+	return result
+}
+
+func compactRepositoryValue(value interface{}) map[string]interface{} {
+	repository := objectValue(value)
+	if len(repository) == 0 {
+		return map[string]interface{}{}
+	}
+	result := map[string]interface{}{}
+	copyCompactKeys(result, repository, "id")
+	addCompactString(result, "name", repository["name"], 120)
+	addCompactString(result, "full_name", repository["full_name"], 200)
+	addCompactString(result, "html_url", repository["html_url"], 400)
+	addCompactString(result, "default_branch", repository["default_branch"], 120)
+	return result
+}
+
+func copyCompactKeys(target map[string]interface{}, source map[string]interface{}, keys ...string) {
+	for _, key := range keys {
+		if value, ok := source[key]; ok && value != nil {
+			target[key] = normalizeDBValue(value)
+		}
+	}
+}
+
+func addCompactString(target map[string]interface{}, key string, value interface{}, maxLen int) {
+	text := asString(value)
+	text = truncateCompactString(text, maxLen)
+	if text != "" {
+		target[key] = text
+	}
+}
+
+func truncateCompactString(value string, maxLen int) string {
+	value = strings.TrimSpace(value)
+	if value == "" || maxLen == 0 {
+		return value
+	}
+	runes := []rune(value)
+	if len(runes) <= maxLen {
+		return value
+	}
+	if maxLen <= 3 {
+		return string(runes[:maxLen])
+	}
+	return string(runes[:maxLen-3]) + "..."
+}

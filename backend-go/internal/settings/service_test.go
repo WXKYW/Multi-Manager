@@ -102,6 +102,34 @@ func TestUserSettingsReadPatchAndPost(t *testing.T) {
 	}
 }
 
+func TestDeprecatedTableReasonRecognizesRetiredTables(t *testing.T) {
+	cases := []struct {
+		table    string
+		wantOK   bool
+		category string
+	}{
+		{table: "uptime_heartbeats_backup_1779287377288_migrated", wantOK: true, category: "migration_backup"},
+		{table: "uptime_monitors_backup_1779287377288_migrated", wantOK: true, category: "migration_backup"},
+		{table: "nextchat_sessions", wantOK: true, category: "legacy_chat"},
+		{table: "nextchat_messages", wantOK: true, category: "legacy_chat"},
+		{table: "ds_accounts", wantOK: true, category: "legacy_ai_gateway"},
+		{table: "ds_settings", wantOK: true, category: "legacy_ai_gateway"},
+		{table: "zeabur_accounts", wantOK: true, category: "retired_integration"},
+		{table: "nezha_config", wantOK: true, category: "retired_integration"},
+		{table: "uptime_monitors", wantOK: false},
+		{table: "server_accounts", wantOK: false},
+	}
+	for _, tc := range cases {
+		category, _, ok := deprecatedTableReason(tc.table)
+		if ok != tc.wantOK {
+			t.Fatalf("%s candidate mismatch: got %v want %v", tc.table, ok, tc.wantOK)
+		}
+		if ok && category != tc.category {
+			t.Fatalf("%s category = %s want %s", tc.table, category, tc.category)
+		}
+	}
+}
+
 func TestDatabaseStatsSelfCheckAndAnalysis(t *testing.T) {
 	service := New(config.Config{
 		Version: "test",

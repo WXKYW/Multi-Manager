@@ -580,7 +580,7 @@ func insertSnapshot(ctx context.Context, db *sql.DB, repoID int64, snapshot Snap
 }
 
 func insertEvent(ctx context.Context, db *sql.DB, repoID *int64, eventType, severity, title, message, source string, payload map[string]interface{}, fingerprint string, notified bool) error {
-	body, _ := json.Marshal(payload)
+	body, _ := json.Marshal(compactStoredEventPayload(eventType, payload))
 	var id interface{}
 	if repoID != nil {
 		id = *repoID
@@ -649,6 +649,153 @@ func cleanupHistory(ctx context.Context, db *sql.DB, repoID int64, days int) (ma
 		result[table] = n
 	}
 	return result, nil
+}
+
+func compactHistoryPayloads(ctx context.Context, db *sql.DB, repoID int64) (map[string]int64, error) {
+	result := map[string]int64{
+		"github_events":             0,
+		"github_webhook_deliveries": 0,
+		"bytes_before":              0,
+		"bytes_after":               0,
+		"bytes_saved":               0,
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return result, err
+	}
+	defer tx.Rollback()
+
+	updatedEvents, beforeEvents, afterEvents, err := compactEventRows(ctx, tx, repoID)
+	if err != nil {
+		return result, err
+	}
+	updatedDeliveries, beforeDeliveries, afterDeliveries, err := compactWebhookDeliveryRows(ctx, tx, repoID)
+	if err != nil {
+		return result, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return result, err
+	}
+
+	result["github_events"] = updatedEvents
+	result["github_webhook_deliveries"] = updatedDeliveries
+	result["bytes_before"] = beforeEvents + beforeDeliveries
+	result["bytes_after"] = afterEvents + afterDeliveries
+	result["bytes_saved"] = result["bytes_before"] - result["bytes_after"]
+	return result, nil
+}
+
+func compactEventRows(ctx context.Context, tx *sql.Tx, repoID int64) (updated, beforeBytes, afterBytes int64, err error) {
+	query := `SELECT id, event_type, payload_json FROM github_events`
+	args := []interface{}{}
+	if repoID > 0 {
+		query += ` WHERE repository_id = ?`
+		args = append(args, repoID)
+	}
+	query += ` ORDER BY id ASC`
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	defer rows.Close()
+
+	stmt, err := tx.PrepareContext(ctx, `UPDATE github_events SET payload_json = ? WHERE id = ?`)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	defer stmt.Close()
+
+	for rows.Next() {
+		var id int64
+		var eventType string
+		var raw string
+		if err := rows.Scan(&id, &eventType, &raw); err != nil {
+			return 0, 0, 0, err
+		}
+		compact, ok := compactEventPayloadString(eventType, raw)
+		if !ok || compact == raw {
+			continue
+		}
+		if _, err := stmt.ExecContext(ctx, compact, id); err != nil {
+			return 0, 0, 0, err
+		}
+		updated++
+		beforeBytes += int64(len(raw))
+		afterBytes += int64(len(compact))
+	}
+	if err := rows.Err(); err != nil {
+		return 0, 0, 0, err
+	}
+	return updated, beforeBytes, afterBytes, nil
+}
+
+func compactWebhookDeliveryRows(ctx context.Context, tx *sql.Tx, repoID int64) (updated, beforeBytes, afterBytes int64, err error) {
+	query := `SELECT id, event_type, payload_json FROM github_webhook_deliveries`
+	args := []interface{}{}
+	if repoID > 0 {
+		query += ` WHERE repository_id = ?`
+		args = append(args, repoID)
+	}
+	query += ` ORDER BY id ASC`
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	defer rows.Close()
+
+	stmt, err := tx.PrepareContext(ctx, `UPDATE github_webhook_deliveries SET payload_json = ? WHERE id = ?`)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	defer stmt.Close()
+
+	for rows.Next() {
+		var id int64
+		var eventType string
+		var raw string
+		if err := rows.Scan(&id, &eventType, &raw); err != nil {
+			return 0, 0, 0, err
+		}
+		compact, ok := compactWebhookPayloadString(eventType, raw)
+		if !ok || compact == raw {
+			continue
+		}
+		if _, err := stmt.ExecContext(ctx, compact, id); err != nil {
+			return 0, 0, 0, err
+		}
+		updated++
+		beforeBytes += int64(len(raw))
+		afterBytes += int64(len(compact))
+	}
+	if err := rows.Err(); err != nil {
+		return 0, 0, 0, err
+	}
+	return updated, beforeBytes, afterBytes, nil
+}
+
+func compactEventPayloadString(eventType, raw string) (string, bool) {
+	payload := map[string]interface{}{}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return "", false
+	}
+	body, err := json.Marshal(compactStoredEventPayload(eventType, payload))
+	if err != nil {
+		return "", false
+	}
+	return string(body), true
+}
+
+func compactWebhookPayloadString(eventType, raw string) (string, bool) {
+	payload := map[string]interface{}{}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return "", false
+	}
+	body, err := json.Marshal(compactWebhookDeliveryPayload(eventType, payload, []byte(raw)))
+	if err != nil {
+		return "", false
+	}
+	return string(body), true
 }
 
 func jsonString(value interface{}) string {
