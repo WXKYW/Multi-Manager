@@ -1475,6 +1475,32 @@ func TestDockerComposeTaskNormalizesConfigFiles(t *testing.T) {
 	if res.Code != http.StatusOK {
 		t.Fatalf("compose task status=%d body=%s", res.Code, res.Body.String())
 	}
+	payload := decodePayload(t, res)
+	taskID, _ := payload["taskId"].(string)
+	if taskID == "" {
+		taskID, _ = payload["data"].(map[string]interface{})["taskId"].(string)
+	}
+	if taskID == "" {
+		t.Fatalf("missing compose task id: %#v", payload)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		task, ok := service.taskRegistry.Get(taskID)
+		if !ok {
+			t.Fatalf("compose task disappeared: %s", taskID)
+		}
+		snapshot := task.Snapshot()
+		if snapshot.Status == TaskCompleted {
+			break
+		}
+		if snapshot.Status == TaskFailed {
+			t.Fatalf("compose task failed: %s", snapshot.Error)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("compose task did not complete in time: %#v", snapshot)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func TestDockerComposeUpdateActionUsesLongTimeout(t *testing.T) {
