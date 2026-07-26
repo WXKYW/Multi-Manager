@@ -1699,6 +1699,7 @@ function GitHubPage() {
   const [tokenForm, setTokenForm] = useState({ name: '', token: '', type: 'fine_grained', default_token: false });
   const [dispatchForm, setDispatchForm] = useState({ workflowId: '', ref: '' });
   const [historyRetentionDays, setHistoryRetentionDays] = useState('90');
+  const [historyScope, setHistoryScope] = useState('all');
   const [maintenanceAction, setMaintenanceAction] = useState('');
   const eventSourceRef = useRef(null);
   const dispatchDefaultedRepoRef = useRef(null);
@@ -1709,6 +1710,12 @@ function GitHubPage() {
     () => repositories.find((repo) => String(repo.id) === String(selectedRepoId)) || repositories[0] || null,
     [repositories, selectedRepoId]
   );
+
+  useEffect(() => {
+    if (historyScope === 'current' && !selectedRepo?.id) {
+      setHistoryScope('all');
+    }
+  }, [historyScope, selectedRepo]);
   const canAttemptActionOperations = Boolean(
     selectedRepo?.authenticated && selectedRepo?.can_operate_actions
   );
@@ -2122,7 +2129,12 @@ function GitHubPage() {
   };
 
   const cleanupGitHubHistory = async () => {
-    const days = Math.max(1, Number(historyRetentionDays) || Number(selectedRepo?.retention_days) || Number(settings?.default_retention_days) || 90);
+    const days = Math.max(
+      1,
+      Number(historyRetentionDays)
+      || Number(historyScope === 'current' ? selectedRepo?.retention_days : settings?.default_retention_days)
+      || 90
+    );
     const confirmed = await dialog.confirm({
       title: '确认清理 GitHub 历史',
       message: `确定清理 ${historyScopeLabel} ${days} 天前的 GitHub 历史记录吗？操作会同时压缩数据库文件，且不可恢复。`,
@@ -2133,7 +2145,7 @@ function GitHubPage() {
     setMaintenanceAction('cleanup-history');
     try {
       const params = new URLSearchParams({ days: String(days) });
-      if (selectedRepo?.id) params.set('repositoryId', String(selectedRepo.id));
+      if (historyScope === 'current' && selectedRepo?.id) params.set('repositoryId', String(selectedRepo.id));
       const result = await api(`/api/github/history?${params.toString()}`, { method: 'DELETE' });
       const totalDeleted = Object.values(result || {}).reduce((sum, value) => sum + (Number(value) || 0), 0);
       toast.success(`GitHub 历史已清理，删除 ${totalDeleted} 条记录`);
@@ -2157,7 +2169,7 @@ function GitHubPage() {
     setMaintenanceAction('compact-history');
     try {
       const params = new URLSearchParams();
-      if (selectedRepo?.id) params.set('repositoryId', String(selectedRepo.id));
+      if (historyScope === 'current' && selectedRepo?.id) params.set('repositoryId', String(selectedRepo.id));
       const result = await api(`/api/github/history/compact${params.toString() ? `?${params.toString()}` : ''}`, { method: 'POST', body: '{}' });
       const updatedEvents = Number(result?.github_events) || 0;
       const updatedDeliveries = Number(result?.github_webhook_deliveries) || 0;
@@ -2193,7 +2205,11 @@ function GitHubPage() {
 
   const repoOptions = repositories.map((repo) => ({ value: String(repo.id), label: repo.full_name }));
   const tokenOptions = [{ value: '', label: '默认/公开访问' }, ...tokens.map((token) => ({ value: String(token.id), label: token.name }))];
-  const historyScopeLabel = selectedRepo ? `当前仓库 ${selectedRepo.full_name}` : '全部 GitHub 仓库';
+  const historyScopeOptions = [
+    { value: 'all', label: '全部仓库' },
+    ...(selectedRepo?.id ? [{ value: 'current', label: `当前仓库：${selectedRepo.full_name}` }] : []),
+  ];
+  const historyScopeLabel = historyScope === 'current' && selectedRepo ? `当前仓库 ${selectedRepo.full_name}` : '全部 GitHub 仓库';
   const workflowOptions = [
     { value: '', label: workflows.length > 0 ? '选择 Workflow' : '未发现 Workflow' },
     ...workflows
@@ -2649,41 +2665,48 @@ function GitHubPage() {
             </LayerCard.Primary>
           </LayerCard>
 
-          <LayerCard className="self-start p-0 shadow-none">
-            <LayerCard.Secondary className="flex min-h-14 items-center justify-between gap-3 border-b border-kumo-line px-4 py-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <Settings className="h-4 w-4 text-kumo-brand" />
-                <Text variant="body" size="sm" bold>采集与保留</Text>
-              </div>
-              {settings && (
-                <Switch size="sm" label="启用后台采集" controlFirst={false} checked={settings.enabled} onCheckedChange={(checked) => setSettings((p) => ({ ...p, enabled: Boolean(checked) }))} />
+          <div className="grid gap-4 self-start">
+            <LayerCard className="self-start p-0 shadow-none">
+              <LayerCard.Secondary className="flex min-h-14 items-center justify-between gap-3 border-b border-kumo-line px-4 py-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Settings className="h-4 w-4 text-kumo-brand" />
+                  <Text variant="body" size="sm" bold>采集与保留</Text>
+                </div>
+                {settings && (
+                  <Switch size="sm" label="启用后台采集" controlFirst={false} checked={settings.enabled} onCheckedChange={(checked) => setSettings((p) => ({ ...p, enabled: Boolean(checked) }))} />
+                )}
+              </LayerCard.Secondary>
+              <LayerCard.Primary className="p-4">
+              {settings ? (
+                <div className="grid gap-3">
+                  <Input size="sm" label="默认采集间隔（秒）" type="number" min="60" value={settings.default_collect_interval_seconds} onChange={(e) => setSettings((p) => ({ ...p, default_collect_interval_seconds: Number(e.target.value) }))} />
+                  <Input size="sm" label="默认保留天数" type="number" min="1" value={settings.default_retention_days} onChange={(e) => setSettings((p) => ({ ...p, default_retention_days: Number(e.target.value) }))} />
+                  <Input size="sm" label="Rate Limit 低额度阈值" type="number" min="0" value={settings.rate_limit_low_threshold} onChange={(e) => setSettings((p) => ({ ...p, rate_limit_low_threshold: Number(e.target.value) }))} />
+                  <Input size="sm" label="Star 激增阈值" type="number" min="1" value={settings.star_spike_threshold} onChange={(e) => setSettings((p) => ({ ...p, star_spike_threshold: Number(e.target.value) }))} />
+                  <Button size="sm" variant="primary" icon={<Save className="h-3.5 w-3.5" />} onClick={saveSettings} loading={saving}>保存设置</Button>
+                </div>
+              ) : (
+                <FillEmpty title="设置加载中" />
               )}
-            </LayerCard.Secondary>
-            <LayerCard.Primary className="p-4">
-            {settings ? (
-              <div className="grid gap-3">
-                <Input size="sm" label="默认采集间隔（秒）" type="number" min="60" value={settings.default_collect_interval_seconds} onChange={(e) => setSettings((p) => ({ ...p, default_collect_interval_seconds: Number(e.target.value) }))} />
-                <Input size="sm" label="默认保留天数" type="number" min="1" value={settings.default_retention_days} onChange={(e) => setSettings((p) => ({ ...p, default_retention_days: Number(e.target.value) }))} />
-                <Input size="sm" label="Rate Limit 低额度阈值" type="number" min="0" value={settings.rate_limit_low_threshold} onChange={(e) => setSettings((p) => ({ ...p, rate_limit_low_threshold: Number(e.target.value) }))} />
-                <Input size="sm" label="Star 激增阈值" type="number" min="1" value={settings.star_spike_threshold} onChange={(e) => setSettings((p) => ({ ...p, star_spike_threshold: Number(e.target.value) }))} />
-                <Button size="sm" variant="primary" icon={<Save className="h-3.5 w-3.5" />} onClick={saveSettings} loading={saving}>保存设置</Button>
-              </div>
-            ) : (
-              <FillEmpty title="设置加载中" />
-            )}
-            </LayerCard.Primary>
-          </LayerCard>
+              </LayerCard.Primary>
+            </LayerCard>
 
-          <LayerCard className="self-start p-0 shadow-none xl:col-span-2">
-            <LayerCard.Secondary className="flex min-h-14 items-center justify-between gap-3 border-b border-kumo-line px-4 py-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <Activity className="h-4 w-4 text-kumo-brand" />
-                <Text variant="body" size="sm" bold>历史维护</Text>
-              </div>
-              <Badge variant={selectedRepo ? 'info' : 'secondary'}>{selectedRepo ? '当前仓库' : '全局'}</Badge>
-            </LayerCard.Secondary>
-            <LayerCard.Primary className="grid gap-4 p-4 xl:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
-              <div className="grid gap-3">
+            <LayerCard className="self-start p-0 shadow-none">
+              <LayerCard.Secondary className="flex min-h-14 items-center justify-between gap-3 border-b border-kumo-line px-4 py-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Activity className="h-4 w-4 text-kumo-brand" />
+                  <Text variant="body" size="sm" bold>历史维护</Text>
+                </div>
+                <Badge variant={historyScope === 'current' ? 'info' : 'secondary'}>{historyScope === 'current' ? '当前仓库' : '全部仓库'}</Badge>
+              </LayerCard.Secondary>
+              <LayerCard.Primary className="grid gap-3 p-4">
+                <Select
+                  size="sm"
+                  label="清理范围"
+                  value={historyScope}
+                  onValueChange={setHistoryScope}
+                  items={historyScopeOptions}
+                />
                 <Input
                   size="sm"
                   label="清理保留天数"
@@ -2693,10 +2716,8 @@ function GitHubPage() {
                   onChange={(e) => setHistoryRetentionDays(e.target.value)}
                 />
                 <Text variant="secondary" size="xs">
-                  当前作用范围：{historyScopeLabel}。未选中仓库时，会作用于全部 GitHub 仓库。
+                  默认按全部仓库执行。当前作用范围：{historyScopeLabel}。
                 </Text>
-              </div>
-              <div className="grid gap-3">
                 <Text variant="secondary" size="xs">
                   “清理历史”会删除旧的趋势、Actions、事件、Webhook 和审计记录；“压缩已有 Payload”会把旧的大 JSON 改写为摘要，并在结束后回收数据库空间。
                 </Text>
@@ -2720,9 +2741,9 @@ function GitHubPage() {
                     压缩已有 Payload
                   </Button>
                 </div>
-              </div>
-            </LayerCard.Primary>
-          </LayerCard>
+              </LayerCard.Primary>
+            </LayerCard>
+          </div>
         </div>
       )}
 
