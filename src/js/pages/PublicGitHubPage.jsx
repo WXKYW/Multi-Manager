@@ -1558,12 +1558,19 @@ function RepositoryCard({ item, now, config, detailLoading = false, onSelectRun 
   }, [recentRuns, latestCommitSha]);
 
   const [activeRunId, setActiveRunId] = useState(() => item?.latest_run?.run_id || sameCommitRuns[0]?.run_id || null);
+  const [pendingRunId, setPendingRunId] = useState(null);
 
   useEffect(() => {
     if (sameCommitRuns.length > 0 && !sameCommitRuns.some(r => String(r.run_id) === String(activeRunId))) {
       setActiveRunId(sameCommitRuns[0]?.run_id);
     }
   }, [sameCommitRuns, activeRunId]);
+
+  useEffect(() => {
+    if (!detailLoading) {
+      setPendingRunId(null);
+    }
+  }, [detailLoading]);
 
   const activeRun = useMemo(() => {
     return sameCommitRuns.find(r => String(r.run_id) === String(activeRunId)) || sameCommitRuns[0] || item?.latest_run || null;
@@ -1587,6 +1594,10 @@ function RepositoryCard({ item, now, config, detailLoading = false, onSelectRun 
   const actionExpandedHeight = actionOverflows
     ? panelHeights.action + PUBLIC_ACTION_PANEL_INSET_Y
     : panelHeights.project;
+  const isSwitchingRun = detailLoading && Boolean(pendingRunId);
+  const pendingRunName = sameCommitRuns.find((run) => String(run.run_id) === String(pendingRunId))?.workflow_name
+    || sameCommitRuns.find((run) => String(run.run_id) === String(pendingRunId))?.display_title
+    || '工作流';
 
   useEffect(() => {
     const projectPanel = projectPanelRef.current;
@@ -1712,20 +1723,28 @@ function RepositoryCard({ item, now, config, detailLoading = false, onSelectRun 
               <div className="max-h-[64px] overflow-y-auto scrollbar-thin space-y-1 pr-0.5">
                 {sameCommitRuns.map((run) => {
                   const isSelected = String(run.run_id) === String(activeRun?.run_id);
+                  const isPending = String(run.run_id) === String(pendingRunId);
                   const tone = statusTone(run.conclusion || run.status);
                   return (
                     <button
                       key={run.run_id}
                       type="button"
                       onClick={() => {
+                        if (String(run.run_id) === String(activeRun?.run_id) && !detailLoading) return;
+                        setPendingRunId(run.run_id);
                         setActiveRunId(run.run_id);
                         onSelectRun?.(run.run_id);
                       }}
-                      className={`w-full flex items-center justify-between gap-1.5 rounded px-2 py-0.5 text-left text-[10.5px] transition-colors ${
+                      className={`w-full flex items-center justify-between gap-1.5 rounded border px-2 py-0.5 text-left text-[10.5px] transition-[background-color,border-color,transform,box-shadow,color] duration-200 ${
+                        isPending
+                          ? 'border-kumo-brand/45 bg-kumo-brand/12 text-kumo-brand shadow-[0_0_0_1px_rgba(59,130,246,0.08)]'
+                          : ''
+                      } ${
                         isSelected
-                          ? 'bg-kumo-brand/15 text-kumo-brand font-semibold border border-kumo-brand/30'
-                          : 'bg-kumo-base/60 text-kumo-subtle hover:bg-kumo-base hover:text-kumo-strong border border-transparent'
+                          ? 'bg-kumo-brand/15 text-kumo-brand font-semibold border-kumo-brand/30'
+                          : 'bg-kumo-base/60 text-kumo-subtle hover:bg-kumo-base hover:text-kumo-strong border-transparent'
                       }`}
+                      disabled={isPending}
                     >
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${
@@ -1733,8 +1752,15 @@ function RepositoryCard({ item, now, config, detailLoading = false, onSelectRun 
                         }`} />
                         <span className="truncate">{run.workflow_name || run.display_title}</span>
                       </div>
-                      <span className="text-[9px] font-mono opacity-80 shrink-0">
-                        {statusLabel(run.conclusion || run.status)}
+                      <span className="shrink-0 text-[9px] font-mono opacity-80">
+                        {isPending ? (
+                          <span className="inline-flex items-center gap-1 text-kumo-brand">
+                            <RefreshCw className="h-2.5 w-2.5 animate-spin" />
+                            切换中
+                          </span>
+                        ) : (
+                          statusLabel(run.conclusion || run.status)
+                        )}
                       </span>
                     </button>
                   );
@@ -1759,8 +1785,17 @@ function RepositoryCard({ item, now, config, detailLoading = false, onSelectRun 
           '--public-action-expanded-height': `${actionExpandedHeight}px`,
         } : undefined}
       >
+        {isSwitchingRun && (
+          <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-center justify-between rounded-md border border-kumo-brand/30 bg-kumo-base/88 px-3 py-2 text-[11px] text-kumo-brand shadow-sm backdrop-blur-sm">
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+              <RefreshCw className="h-3 w-3 animate-spin" />
+              <span className="truncate">正在切换到 {pendingRunName}</span>
+            </span>
+            <span className="font-mono text-[10px] text-kumo-subtle">加载最新 Job</span>
+          </div>
+        )}
         <div className={`w-full min-w-0 lg:flex lg:h-full ${actionOverflows ? 'lg:items-start' : 'lg:items-center'}`}>
-          <div ref={actionContentRef} className="w-full min-w-0">
+          <div ref={actionContentRef} className={`w-full min-w-0 transition-opacity duration-200 ${isSwitchingRun ? 'opacity-45' : 'opacity-100'}`}>
           {showDetailLoading ? (
             <ActionWorkflowLoadingState />
           ) : item.workflow_error && jobs.length === 0 ? (
