@@ -41,7 +41,35 @@ type Route struct {
 	MatchMode    MatchMode    `json:"matchMode,omitempty"`
 }
 
+// routeTable 在包初始化时构建一次；Match 每请求调用，不应重建 236 条路由。
+var routeTable = buildRoutes()
+
+// compiledRoute 预计算 Match 需要的 score 与 pattern 分段，避免热路径重复计算。
+type compiledRoute struct {
+	route        Route
+	score        int
+	patternParts []string
+}
+
+var compiledRoutes = compileRoutes()
+
+func compileRoutes() []compiledRoute {
+	compiled := make([]compiledRoute, len(routeTable))
+	for i, route := range routeTable {
+		compiled[i] = compiledRoute{route: route, score: routeScore(route)}
+		if route.MatchMode == MatchPattern {
+			compiled[i].patternParts = splitPath(route.Prefix)
+		}
+	}
+	return compiled
+}
+
+// Routes 返回副本，避免调用方改动共享路由表。
 func Routes() []Route {
+	return append([]Route(nil), routeTable...)
+}
+
+func buildRoutes() []Route {
 	return []Route{
 		{Prefix: "/health", Module: "health", Owner: OwnerGo, Auth: AuthPublic, ResponseMode: ResponseJSON, Description: "Go shell health check"},
 		{Prefix: "/api/migration/status", Module: "migration", Owner: OwnerGo, Auth: AuthPublic, ResponseMode: ResponseJSON, Description: "Go migration status and route ownership"},
@@ -291,15 +319,45 @@ func Routes() []Route {
 }
 
 func Match(path string) (Route, bool) {
-	var best Route
+	var best compiledRoute
 	found := false
-	for _, route := range Routes() {
-		if matchesRoute(path, route) && (!found || routeScore(route) > routeScore(best)) {
-			best = route
+	pathParts := splitPath(path)
+	for _, candidate := range compiledRoutes {
+		if matchesCompiled(path, pathParts, candidate) && (!found || candidate.score > best.score) {
+			best = candidate
 			found = true
 		}
 	}
-	return best, found
+	return best.route, found
+}
+
+func matchesCompiled(path string, pathParts []string, candidate compiledRoute) bool {
+	switch candidate.route.MatchMode {
+	case MatchExact:
+		return path == candidate.route.Prefix
+	case MatchPattern:
+		return matchesPatternParts(pathParts, candidate.patternParts)
+	default:
+		return matchesPrefix(path, candidate.route.Prefix)
+	}
+}
+
+func matchesPatternParts(pathParts, patternParts []string) bool {
+	if len(pathParts) != len(patternParts) {
+		return false
+	}
+	for i, part := range patternParts {
+		if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
+			if pathParts[i] == "" {
+				return false
+			}
+			continue
+		}
+		if pathParts[i] != part {
+			return false
+		}
+	}
+	return true
 }
 
 func Summary() map[string]int {
@@ -328,37 +386,6 @@ func matchesPrefix(path, prefix string) bool {
 		return true
 	}
 	return strings.HasPrefix(path, strings.TrimRight(prefix, "/")+"/")
-}
-
-func matchesRoute(path string, route Route) bool {
-	switch route.MatchMode {
-	case MatchExact:
-		return path == route.Prefix
-	case MatchPattern:
-		return matchesPattern(path, route.Prefix)
-	default:
-		return matchesPrefix(path, route.Prefix)
-	}
-}
-
-func matchesPattern(path, pattern string) bool {
-	pathParts := splitPath(path)
-	patternParts := splitPath(pattern)
-	if len(pathParts) != len(patternParts) {
-		return false
-	}
-	for i, part := range patternParts {
-		if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
-			if pathParts[i] == "" {
-				return false
-			}
-			continue
-		}
-		if pathParts[i] != part {
-			return false
-		}
-	}
-	return true
 }
 
 func splitPath(path string) []string {

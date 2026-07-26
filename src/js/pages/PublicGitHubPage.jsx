@@ -13,6 +13,7 @@ import {
   mergePublicGithubRepositories,
   shouldLoadPublicGithubRepositoryDetail,
 } from '../modules/githubPublicRealtime.js';
+import { useNowTick } from '../modules/usePageVisibility.js';
 import useStore from '../store.js';
 import {
   AlertTriangle,
@@ -1791,7 +1792,7 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
-  const [currentTime, setCurrentTime] = useState(() => Date.now());
+  const currentTime = useNowTick(1000);
   const [detailStatusByRepo, setDetailStatusByRepo] = useState({});
   const [repositoryFilter, setRepositoryFilter] = useState('all');
   const pageRef = useRef(null);
@@ -1983,13 +1984,9 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
   }, [page?.title]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setCurrentTime(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
     if (typeof window.EventSource === 'function') return undefined;
     const interval = window.setInterval(() => {
+      if (document.hidden) return;
       void loadSummary({ silent: true, showRefreshing: false }).then((nextPage) => {
         const currentPage = nextPage || pageRef.current;
         if (!currentPage?.slug) return;

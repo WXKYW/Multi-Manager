@@ -38,6 +38,15 @@ const (
 	healthConcurrencyMax     = 200
 )
 
+// 热路径正则预编译：chat completion 每请求都会用到，避免逐请求编译。
+var (
+	localURLRegex         = regexp.MustCompile(`(?i)^https?://(localhost|127\.0\.0\.1|0\.0\.0\.0|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)`)
+	promptTokensRegex     = regexp.MustCompile(`"prompt_tokens"\s*:\s*(\d+)`)
+	completionTokensRegex = regexp.MustCompile(`"completion_tokens"\s*:\s*(\d+)`)
+	totalTokensRegex      = regexp.MustCompile(`"total_tokens"\s*:\s*(\d+)`)
+	versionPathRegex      = regexp.MustCompile(`(?i)/v\d+/?`)
+)
+
 type Endpoint struct {
 	ID           string   `json:"id"`
 	Name         string   `json:"name"`
@@ -73,10 +82,12 @@ type HealthSummary struct {
 }
 
 type Service struct {
-	cfg     config.Config
-	store   *database.Store
-	client  *http.Client
-	apiKeys *apikeys.Manager
+	cfg        config.Config
+	store      *database.Store
+	client     *http.Client
+	apiKeys    *apikeys.Manager
+	schemaOnce sync.Once
+	schemaErr  error
 }
 
 func New(cfg config.Config) *Service {
@@ -112,9 +123,13 @@ func (s *Service) open(ctx context.Context) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := ensureSchema(ctx, db); err != nil {
+	// schema 幂等且启动后不变，进程内只执行一次，避免每次打开连接都重放 DDL。
+	s.schemaOnce.Do(func() {
+		s.schemaErr = ensureSchema(ctx, db)
+	})
+	if s.schemaErr != nil {
 		db.Close()
-		return nil, err
+		return nil, s.schemaErr
 	}
 	return db, nil
 }
@@ -1502,7 +1517,7 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	fullURL += "/chat/completions"
 
-	isLocal := regexp.MustCompile(`(?i)^https?://(localhost|127\.0\.0\.1|0\.0\.0\.0|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)`).MatchString(fullURL)
+	isLocal := localURLRegex.MatchString(fullURL)
 
 	if !isLocal {
 		if messages, ok := parsedBody["messages"].([]interface{}); ok {
@@ -1581,12 +1596,18 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 		flusher, ok := w.(http.Flusher)
 		buf := make([]byte, 4096)
-		var accumulatedResponse strings.Builder
+		// usage 信息总在最后一个 SSE chunk 里，只保留响应尾部即可，
+		// 避免长对话把整个流式响应累积在内存中。
+		const usageTailLimit = 64 * 1024
+		tail := make([]byte, 0, usageTailLimit)
 		for {
 			n, err := resp.Body.Read(buf)
 			if n > 0 {
 				_, _ = w.Write(buf[:n])
-				accumulatedResponse.Write(buf[:n])
+				tail = append(tail, buf[:n]...)
+				if len(tail) > usageTailLimit {
+					tail = tail[len(tail)-usageTailLimit:]
+				}
 				if ok {
 					flusher.Flush()
 				}
@@ -1601,18 +1622,14 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 		completionTokens := 0
 		totalTokens := 0
 
-		promptRegex := regexp.MustCompile(`"prompt_tokens"\s*:\s*(\d+)`)
-		completionRegex := regexp.MustCompile(`"completion_tokens"\s*:\s*(\d+)`)
-		totalRegex := regexp.MustCompile(`"total_tokens"\s*:\s*(\d+)`)
-
-		accumulatedStr := accumulatedResponse.String()
-		if matches := promptRegex.FindStringSubmatch(accumulatedStr); len(matches) > 1 {
+		accumulatedStr := string(tail)
+		if matches := promptTokensRegex.FindStringSubmatch(accumulatedStr); len(matches) > 1 {
 			promptTokens, _ = strconv.Atoi(matches[1])
 		}
-		if matches := completionRegex.FindStringSubmatch(accumulatedStr); len(matches) > 1 {
+		if matches := completionTokensRegex.FindStringSubmatch(accumulatedStr); len(matches) > 1 {
 			completionTokens, _ = strconv.Atoi(matches[1])
 		}
-		if matches := totalRegex.FindStringSubmatch(accumulatedStr); len(matches) > 1 {
+		if matches := totalTokensRegex.FindStringSubmatch(accumulatedStr); len(matches) > 1 {
 			totalTokens, _ = strconv.Atoi(matches[1])
 		} else if promptTokens > 0 || completionTokens > 0 {
 			totalTokens = promptTokens + completionTokens
@@ -1721,7 +1738,7 @@ func (s *Service) normalizeBaseURL(u string) string {
 
 	// Append version path if missing
 	hasVersion := false
-	if reg := regexp.MustCompile(`(?i)/v\d+/?`); reg.MatchString(u) {
+	if reg := versionPathRegex; reg.MatchString(u) {
 		hasVersion = true
 	}
 	if !hasVersion {

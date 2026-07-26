@@ -62,19 +62,26 @@ export default defineConfig(({ mode }) => {
       emptyOutDir: true,
       sourcemap: !isProduction,
       minify: isProduction,
+      // 禁止把小资源内联为 data URI：flag-icons 的 280+ 面国旗 SVG 会被
+      // 默认策略（<4KB 内联）全部塞进渲染阻塞的 index.css（+600KB）。
+      // 改为独立文件后按需加载，首屏 CSS 大幅缩小。
+      assetsInlineLimit: 0,
       rollupOptions: {
         output: {
           // 代码分割策略
           manualChunks: id => {
             if (id.includes('node_modules')) {
-              // React 核心库
+              // React 核心库（精确匹配包目录，避免把 @uiw/react-codemirror、
+              // @phosphor-icons/react 等路径含 react 的包误打进首屏 vendor）
               if (
-                id.includes('react') ||
-                id.includes('react-dom') ||
-                id.includes('scheduler')
+                /node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)
               ) {
                 return 'vendor-react';
               }
+              // 注意：不要给 @phosphor-icons / @cloudflare/kumo 建手动 chunk。
+              // 手动分组会把「入口用的少量组件」和「懒加载页面用的全量组件」
+              // 合并进同一 chunk 并被入口预载，反而放大首屏体积；
+              // 交给自动分割可以让入口只带实际用到的部分。
               // 终端组件
               if (id.includes('@xterm')) {
                 return 'vendor-xterm';

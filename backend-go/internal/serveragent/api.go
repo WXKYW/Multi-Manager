@@ -530,12 +530,13 @@ func asInt64(v interface{}) int64 {
 	return 0
 }
 
+var diskStringRegex = regexp.MustCompile(`([^/]+)/([^\s]+)\s+\(([^)]+)\)`)
+
 func parseDiskString(diskStr string) []map[string]interface{} {
 	if diskStr == "" {
 		return nil
 	}
-	re := regexp.MustCompile(`([^/]+)/([^\s]+)\s+\(([^)]+)\)`)
-	matches := re.FindStringSubmatch(diskStr)
+	matches := diskStringRegex.FindStringSubmatch(diskStr)
 	if len(matches) == 4 {
 		return []map[string]interface{}{
 			{

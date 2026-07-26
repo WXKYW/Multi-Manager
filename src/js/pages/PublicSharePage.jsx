@@ -9,7 +9,8 @@ import useStore from '../store.js';
 import { SectionCard } from '../components/ui/AppPrimitives.jsx';
 import { fileboxDirectURL, fileboxDownloadEndpoint } from '../modules/fileboxLinks.js';
 import { toast } from '../modules/toast.js';
-import { formatDateTime, formatFileSize, renderMarkdown } from '../modules/utils.js';
+import { formatDateTime, formatFileSize } from '../modules/utils.js';
+import { renderMarkdown } from '../modules/markdown.js';
 import { TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 
 const CodeEditor = lazy(() => import('../components/ui/CodeEditor.jsx'));

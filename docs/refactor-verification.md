@@ -8,7 +8,7 @@ This file records allowed exceptions so future AI audits do not repeatedly flag 
 
 | Area | Files | Reason | Follow-up rule |
 |------|-------|--------|----------------|
-| Brand colors | `src/js/components/ui/BrandIcon.jsx` | External brand identity colors cannot be represented by Kumo semantic tokens without losing meaning. | Keep limited to brand icon rendering. Do not reuse these colors for general UI chrome. |
+| Brand colors | `src/js/components/ui/BrandIcon.jsx`, generated `src/css/simple-icons.css` | External brand identity colors cannot be represented by Kumo semantic tokens without losing meaning. | Keep limited to brand icon rendering. Do not reuse these colors for general UI chrome. |
 | QR code colors | `src/js/pages/FileboxPage.jsx`, `src/js/pages/VoidRoomPage.jsx` | QR code dark/light colors and white QR backgrounds are functional contrast requirements. | Keep colors local to QR generation or QR image presentation. |
 | Camera/QR scanner surface | `src/js/pages/TotpPage.jsx` | The scanner preview uses black as a content surface, not a theme color. | Do not extend this to surrounding UI. |
 | Terminal colors | `src/css/app.css`, `src/js/pages/ServerPage.jsx` | xterm fallback colors are readability fallbacks when Kumo CSS variables are unavailable. | Prefer Kumo variables first; raw fallback values stay behind `getKumoToken` or CSS variable fallbacks. |

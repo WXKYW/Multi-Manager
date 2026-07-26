@@ -4,7 +4,7 @@ import { Button } from '@cloudflare/kumo/components/button';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Table } from '@cloudflare/kumo/components/table';
 import { LayerCard } from '@cloudflare/kumo';
-import { Info } from '../Icons.jsx';
+import { Info } from '../IconsCore.jsx';
 import { resolveTableColumns } from '../../modules/tableLayout.js';
 
 export const pageStackClass = 'flex w-full min-w-0 flex-col gap-3 sm:gap-4 pb-6 sm:pb-8';

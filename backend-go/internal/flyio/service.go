@@ -25,6 +25,7 @@ const requestTimeout = 30 * time.Second
 type Service struct {
 	cfg         config.Config
 	store       *database.Store
+	schema      database.SchemaEnsurer
 	graphqlURL  string
 	machinesURL string
 	logsURL     string
@@ -121,7 +122,7 @@ func (s *Service) open(ctx context.Context) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := ensureSchema(ctx, db); err != nil {
+	if err := s.schema.Ensure(func() error { return ensureSchema(ctx, db) }); err != nil {
 		db.Close()
 		return nil, err
 	}

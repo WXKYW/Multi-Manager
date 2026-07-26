@@ -1013,9 +1013,13 @@ func (s *Service) validateSession(ctx context.Context, db *sql.DB, sid string) (
 		_, _ = db.ExecContext(ctx, `UPDATE sessions SET is_active = 0 WHERE session_id = ?`, sid)
 		return session, false, nil
 	}
-	_, err = db.ExecContext(ctx, `UPDATE sessions SET last_accessed_at = ? WHERE session_id = ?`, formatTime(time.Now().UTC()), sid)
-	if err != nil {
-		return sessionRecord{}, false, fmt.Errorf("touch session: %w", err)
+	// 节流写入：last_accessed_at 仅用于会话排序与展示，60s 粒度足够。
+	// SQLite 单写者模型下，避免每个鉴权请求都产生一次写事务。
+	if lastAccessed, parseErr := parseDBTime(session.LastAccessedAt); parseErr != nil || time.Now().UTC().Sub(lastAccessed) >= time.Minute {
+		_, err = db.ExecContext(ctx, `UPDATE sessions SET last_accessed_at = ? WHERE session_id = ?`, formatTime(time.Now().UTC()), sid)
+		if err != nil {
+			return sessionRecord{}, false, fmt.Errorf("touch session: %w", err)
+		}
 	}
 	return session, true, nil
 }

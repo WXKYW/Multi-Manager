@@ -23,7 +23,8 @@ import {
 } from '@cloudflare/kumo';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
-import { renderMarkdown, formatDateTime } from '../modules/utils.js';
+import { formatDateTime } from '../modules/utils.js';
+import { renderMarkdown } from '../modules/markdown.js';
 import {
   DEFAULT_MODEL_HEALTH_CONCURRENCY,
   MAX_BATCH_MODEL_HEALTH_TARGETS,

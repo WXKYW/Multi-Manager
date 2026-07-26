@@ -34,6 +34,7 @@ const (
 type Service struct {
 	cfg             config.Config
 	store           *database.Store
+	schema          database.SchemaEnsurer
 	scheduler       *cron.Cron
 	entries         map[int64]cron.EntryID
 	workflowEntries map[int64]cron.EntryID
@@ -639,7 +640,7 @@ func (s *Service) open(ctx context.Context) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := ensureSchema(ctx, db); err != nil {
+	if err := s.schema.Ensure(func() error { return ensureSchema(ctx, db) }); err != nil {
 		db.Close()
 		return nil, err
 	}

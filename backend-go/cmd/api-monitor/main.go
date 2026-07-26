@@ -8,6 +8,7 @@ import (
 
 	"github.com/iwvw/api-monitor/backend-go/internal/applog"
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
+	"github.com/iwvw/api-monitor/backend-go/internal/httpcompress"
 	"github.com/iwvw/api-monitor/backend-go/internal/memguard"
 	"github.com/iwvw/api-monitor/backend-go/internal/server"
 )
@@ -26,7 +27,7 @@ func main() {
 		applog.Error(nil, "startup", "backend initialization failed", "error", err.Error())
 		os.Exit(1)
 	}
-	handler := applog.Middleware(appServer)
+	handler := applog.Middleware(httpcompress.Middleware(appServer))
 
 	applog.Info(nil, "startup", "api-monitor go shell listening", "address", cfg.ListenAddress())
 	applog.Info(nil, "startup", "static files configured", "dist", cfg.DistDir, "public", cfg.PublicDir)

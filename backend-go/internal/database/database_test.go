@@ -26,6 +26,31 @@ func TestStoreEnablesSQLiteForeignKeys(t *testing.T) {
 	}
 }
 
+func TestStoreConfiguresSQLiteForWALWorkloads(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir(), DBName: "wal-performance.db"}
+	db, err := New(cfg).Open(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	var journalMode string
+	var synchronous int
+	var tempStore int
+	if err := db.QueryRow(`PRAGMA journal_mode`).Scan(&journalMode); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`PRAGMA synchronous`).Scan(&synchronous); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`PRAGMA temp_store`).Scan(&tempStore); err != nil {
+		t.Fatal(err)
+	}
+	if journalMode != "wal" || synchronous != 1 || tempStore != 2 {
+		t.Fatalf("journal_mode=%q synchronous=%d temp_store=%d, want wal/1/2", journalMode, synchronous, tempStore)
+	}
+}
+
 func TestWithSchemaLockSerializesMigrations(t *testing.T) {
 	firstEntered := make(chan struct{})
 	releaseFirst := make(chan struct{})

@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
@@ -34,9 +35,11 @@ const (
 )
 
 type Service struct {
-	cfg    config.Config
-	store  *database.Store
-	client *http.Client
+	cfg        config.Config
+	store      *database.Store
+	client     *http.Client
+	schemaOnce sync.Once
+	schemaErr  error
 }
 
 type Channel struct {
@@ -1897,9 +1900,14 @@ func (s *Service) open(ctx context.Context) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := ensureSchema(ctx, db); err != nil {
+	// schema 幂等且启动后不变，进程内只执行一次，避免 24 个调用点每次
+	// 打开连接都重放 ~30 条 DDL。
+	s.schemaOnce.Do(func() {
+		s.schemaErr = ensureSchema(ctx, db)
+	})
+	if s.schemaErr != nil {
 		_ = db.Close()
-		return nil, err
+		return nil, s.schemaErr
 	}
 	return db, nil
 }
@@ -2000,6 +2008,7 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_alert_rules_source ON alert_rules(source_module, enabled)`,
 		`CREATE INDEX IF NOT EXISTS idx_notification_history_rule ON notification_history(rule_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_notification_history_status ON notification_history(status, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_notification_history_created ON notification_history(created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_notification_message_resource ON notification_message_state(source_module, resource_key, lifecycle_kind)`,
 		`CREATE INDEX IF NOT EXISTS idx_alert_state_tracking_rule ON alert_state_tracking(rule_id, fingerprint)`,
 		`CREATE INDEX IF NOT EXISTS idx_alert_state_tracking_triggered ON alert_state_tracking(last_triggered_at)`,

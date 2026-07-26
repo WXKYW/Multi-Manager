@@ -1,8 +1,11 @@
 import React, { lazy, Suspense, useEffect, useState } from 'react';
 import useStore, { applyThemeMode, getPendingAuthProvider } from './store.js';
 import AuthPage from './pages/AuthPage.jsx';
-import MainLayout from './components/MainLayout.jsx';
-import { GitHubBrand, Shield } from './components/Icons.jsx';
+import { GitHubBrand, Shield } from './components/IconsCore.jsx';
+
+// MainLayout 携带侧边栏、图标库等大量依赖，懒加载让登录页与公开
+// 状态页不必下载主应用的 JS。
+const MainLayout = lazy(() => import('./components/MainLayout.jsx'));
 
 const PublicSharePage = lazy(() => import('./pages/PublicSharePage.jsx'));
 const PublicM365RegisterPage = lazy(() => import('./pages/PublicM365RegisterPage.jsx'));
@@ -177,7 +180,7 @@ function App() {
     if (remoteDesktopRoute) {
       return <Suspense fallback={null}><RemoteDesktopPage /></Suspense>;
     }
-    return <MainLayout />;
+    return <Suspense fallback={null}><MainLayout /></Suspense>;
   }
 
   if (publicStatusRouteMode === 'domain') {

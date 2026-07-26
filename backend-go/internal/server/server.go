@@ -469,6 +469,7 @@ func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request) {
 	if cleanPath == "." || cleanPath == "" || ext == "" {
 		indexPath := filepath.Join(s.cfg.DistDir, "index.html")
 		if _, err := os.Stat(indexPath); err == nil {
+			setStaticCacheHeaders(w, "index.html")
 			http.ServeFile(w, r, indexPath)
 			return
 		}
@@ -497,11 +498,23 @@ func (s *Server) tryServeFile(w http.ResponseWriter, r *http.Request, dir string
 
 	// 只在文件存在时返回
 	if fileInfo, err := os.Stat(candidate); err == nil && !fileInfo.IsDir() {
+		setStaticCacheHeaders(w, cleanPath)
 		http.ServeFile(w, r, candidate)
 		return true
 	}
 
 	return false
+}
+
+func setStaticCacheHeaders(w http.ResponseWriter, cleanPath string) {
+	cleanPath = filepath.ToSlash(cleanPath)
+	if cleanPath == "index.html" {
+		w.Header().Set("Cache-Control", "no-cache")
+		return
+	}
+	if strings.HasPrefix(cleanPath, "assets/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	}
 }
 
 func (s *Server) tryServeAssetFallback(w http.ResponseWriter, r *http.Request) bool {

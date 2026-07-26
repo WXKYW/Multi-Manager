@@ -6,16 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
 	_ "modernc.org/sqlite"
 )
 
 type Store struct {
-	cfg        config.Config
-	schemaOnce sync.Once
-	schemaErr  error
+	cfg config.Config
 }
 
 func New(cfg config.Config) *Store {
@@ -34,39 +31,23 @@ func (s *Store) Open(ctx context.Context) (*sql.DB, error) {
 	if !filepath.IsAbs(dbPath) {
 		dbPath = filepath.Clean(dbPath)
 	}
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("open sqlite: %w", err)
-	}
+	// 物理连接来自进程级池（见 connpool.go）：db.Close() 时归还复用，
+	// PRAGMA 只在物理连接首次建立时执行。调用方「Open → defer Close」的
+	// 使用方式保持不变。
+	pool := poolFor(dbPath)
+	pool.addRef()
+	db := sql.OpenDB(&poolConnector{pool: pool})
 	db.SetMaxOpenConns(1)
-	if _, err := db.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("configure sqlite foreign_keys: %w", err)
-	}
-	if _, err := db.ExecContext(ctx, "PRAGMA busy_timeout = 5000"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("configure sqlite busy_timeout: %w", err)
-	}
-	if _, err := db.ExecContext(ctx, "PRAGMA journal_mode = WAL"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("configure sqlite journal_mode: %w", err)
-	}
-	if _, err := db.ExecContext(ctx, "PRAGMA wal_autocheckpoint = 256"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("configure sqlite wal_autocheckpoint: %w", err)
-	}
-	if _, err := db.ExecContext(ctx, "PRAGMA journal_size_limit = 8388608"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("configure sqlite journal_size_limit: %w", err)
-	}
-	s.schemaOnce.Do(func() {
-		s.schemaErr = WithSchemaLock(ctx, func() error {
+	// core schema 按数据库路径全局执行一次（此前 per-Store，20 个服务
+	// 首次 Open 时各自重复执行）。
+	pool.schemaOnce.Do(func() {
+		pool.schemaErr = WithSchemaLock(ctx, func() error {
 			return EnsureCoreSchema(ctx, db)
 		})
 	})
-	if s.schemaErr != nil {
+	if pool.schemaErr != nil {
 		db.Close()
-		return nil, s.schemaErr
+		return nil, pool.schemaErr
 	}
 	return db, nil
 }

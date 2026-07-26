@@ -50,14 +50,13 @@ var nodeLinkPattern = regexp.MustCompile(`(?im)(vmess|vless|trojan|ss|hysteria2|
 var defaultMihomoTemplateEmbedded string
 
 type Service struct {
-	cfg         config.Config
-	store       *database.Store
-	client      *http.Client
-	refreshMu   sync.Mutex
-	schemaMu    sync.Mutex
-	schemaReady bool
-	stopAuto    context.CancelFunc
-	autoClosed  chan struct{}
+	cfg        config.Config
+	store      *database.Store
+	schema     database.SchemaEnsurer
+	client     *http.Client
+	refreshMu  sync.Mutex
+	stopAuto   context.CancelFunc
+	autoClosed chan struct{}
 }
 
 type Subscription struct {
@@ -264,24 +263,17 @@ func (s *Service) Initialize(ctx context.Context) error {
 		return err
 	}
 	defer db.Close()
-	s.schemaMu.Lock()
-	defer s.schemaMu.Unlock()
-	if s.schemaReady {
-		return nil
-	}
-	if err := database.WithSchemaLock(ctx, func() error {
-		if err := ensureSchema(ctx, db); err != nil {
-			return err
-		}
-		if err := ensureBuiltins(ctx, db, false); err != nil {
-			return err
-		}
-		return ensureDefaultNodeLibrary(ctx, db)
-	}); err != nil {
-		return err
-	}
-	s.schemaReady = true
-	return nil
+	return s.schema.Ensure(func() error {
+		return database.WithSchemaLock(ctx, func() error {
+			if err := ensureSchema(ctx, db); err != nil {
+				return err
+			}
+			if err := ensureBuiltins(ctx, db, false); err != nil {
+				return err
+			}
+			return ensureDefaultNodeLibrary(ctx, db)
+		})
+	})
 }
 
 func (s *Service) StartAutoRefresh(ctx context.Context) {
@@ -554,24 +546,20 @@ func (s *Service) open(ctx context.Context) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.schemaMu.Lock()
-	defer s.schemaMu.Unlock()
-	if s.schemaReady {
-		return db, nil
-	}
-	if err := database.WithSchemaLock(ctx, func() error {
-		if err := ensureSchema(ctx, db); err != nil {
-			return err
-		}
-		if err := ensureBuiltins(ctx, db, false); err != nil {
-			return err
-		}
-		return ensureDefaultNodeLibrary(ctx, db)
+	if err := s.schema.Ensure(func() error {
+		return database.WithSchemaLock(ctx, func() error {
+			if err := ensureSchema(ctx, db); err != nil {
+				return err
+			}
+			if err := ensureBuiltins(ctx, db, false); err != nil {
+				return err
+			}
+			return ensureDefaultNodeLibrary(ctx, db)
+		})
 	}); err != nil {
 		db.Close()
 		return nil, err
 	}
-	s.schemaReady = true
 	return db, nil
 }
 
@@ -4401,13 +4389,15 @@ func isRegionalIndicator(value rune) bool {
 	return value >= 0x1F1E6 && value <= 0x1F1FF
 }
 
+var twoLetterCodeRegex = regexp.MustCompile(`^[A-Za-z]{2}$`)
+
 func countryCodePrefix(name string) string {
 	name = strings.TrimSpace(name)
 	if len(name) < 2 {
 		return ""
 	}
 	prefix := name[:2]
-	if !regexp.MustCompile(`^[A-Za-z]{2}$`).MatchString(prefix) {
+	if !twoLetterCodeRegex.MatchString(prefix) {
 		return ""
 	}
 	if len(name) == 2 {

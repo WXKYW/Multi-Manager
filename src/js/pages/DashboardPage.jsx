@@ -832,7 +832,10 @@ function DashboardPage({ onNavigate } = {}) {
     };
 
     fetchHostMetrics();
-    const interval = window.setInterval(fetchHostMetrics, HOST_METRICS_POLL_MS);
+    const interval = window.setInterval(() => {
+      if (document.hidden) return;
+      fetchHostMetrics();
+    }, HOST_METRICS_POLL_MS);
 
     return () => {
       stopped = true;

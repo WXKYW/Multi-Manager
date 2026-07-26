@@ -70,6 +70,7 @@ type Pairing struct {
 
 type Manager struct {
 	store             *database.Store
+	schema            database.SchemaEnsurer
 	trustedProxyCIDRs []string
 }
 
@@ -82,7 +83,7 @@ func (m *Manager) open(ctx context.Context) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := ensureSchema(ctx, db); err != nil {
+	if err := m.schema.Ensure(func() error { return ensureSchema(ctx, db) }); err != nil {
 		db.Close()
 		return nil, err
 	}

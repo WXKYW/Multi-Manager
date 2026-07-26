@@ -54,6 +54,7 @@ type Notifier interface {
 type Service struct {
 	cfg                  config.Config
 	store                *database.Store
+	schema               database.SchemaEnsurer
 	auth                 Authenticator
 	notifier             Notifier
 	heartbeatBroadcaster func(monitorID int64, beat map[string]interface{})
@@ -298,7 +299,7 @@ func (s *Service) open(ctx context.Context) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := ensureSchema(ctx, db); err != nil {
+	if err := s.schema.Ensure(func() error { return ensureSchema(ctx, db) }); err != nil {
 		db.Close()
 		return nil, err
 	}

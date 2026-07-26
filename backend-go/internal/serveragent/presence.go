@@ -51,6 +51,7 @@ type agentPresenceManager struct {
 	mu        sync.RWMutex
 	records   map[string]*agentPresenceRecord
 	stopCh    chan struct{}
+	seedOnce  sync.Once
 }
 
 func newAgentPresenceManager(s *Service) *agentPresenceManager {
@@ -246,7 +247,9 @@ func (p *agentPresenceManager) check() {
 	if p == nil || p.legacyMode() {
 		return
 	}
-	p.ensureOnlineRows()
+	// 数据库播种只需一次：运行期间新上线的服务器会通过
+	// recordConnect/recordHeartbeat 直接建立记录，无需每 5 秒全表扫描。
+	p.seedOnce.Do(p.ensureOnlineRows)
 	now := time.Now()
 	var offlineIDs []string
 	var suspectIDs []string

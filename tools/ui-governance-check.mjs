@@ -84,6 +84,9 @@ function allowedColorReason(rel, line, value) {
   if (rel === 'src/js/components/ui/BrandIcon.jsx' && value.startsWith('#')) {
     return 'external brand identity color';
   }
+  if (rel === 'src/css/simple-icons.css' && value.startsWith('#')) {
+    return 'generated external brand identity color';
+  }
   if (rel === 'src/css/app.css' && line.includes('--app-terminal-')) {
     return 'terminal fallback color';
   }

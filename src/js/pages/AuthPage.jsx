@@ -20,7 +20,7 @@ import {
   Key,
   LogIn,
   Shield,
-} from '../components/Icons.jsx';
+} from '../components/IconsCore.jsx';
 
 const AUTH_WAVE_SAMPLE_RATE = 30;
 const AUTH_WAVE_TRAVEL_SECONDS = 15;

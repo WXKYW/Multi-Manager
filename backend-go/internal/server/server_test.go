@@ -227,6 +227,39 @@ func TestStaticRouteServesPublicAssets(t *testing.T) {
 	}
 }
 
+func TestStaticRouteCachePolicy(t *testing.T) {
+	distDir := t.TempDir()
+	assetsDir := filepath.Join(distDir, "assets")
+	if err := os.MkdirAll(assetsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(distDir, "index.html"), []byte("<!doctype html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(assetsDir, "app-contenthash.js"), []byte("export {};"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := newTestServer(t, config.Config{
+		Version: "test", Host: "127.0.0.1", DistDir: distDir,
+		DataDir: t.TempDir(), DBName: "data.db",
+	})
+
+	assetReq := httptest.NewRequest(http.MethodGet, "/assets/app-contenthash.js", nil)
+	assetRes := httptest.NewRecorder()
+	handler.ServeHTTP(assetRes, assetReq)
+	if got := assetRes.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+		t.Fatalf("asset Cache-Control=%q", got)
+	}
+
+	indexReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	indexRes := httptest.NewRecorder()
+	handler.ServeHTTP(indexRes, indexReq)
+	if got := indexRes.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("index Cache-Control=%q", got)
+	}
+}
+
 func TestStaticRouteFallsBackToHashedDistLogo(t *testing.T) {
 	distDir := t.TempDir()
 	assetsDir := filepath.Join(distDir, "assets")

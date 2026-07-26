@@ -81,6 +81,7 @@ import { CanvasRenderer } from 'echarts/renderers';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
+import '@xterm/xterm/css/xterm.css';
 import io from 'socket.io-client';
 import {
   Server,
@@ -2903,6 +2904,7 @@ function ServerPage() {
       connectMetricsStream();
     }, 0);
     const serverListSyncTimer = setInterval(() => {
+      if (document.hidden) return;
       loadServerList({ silent: true });
     }, SERVER_STATUS_SYNC_INTERVAL_MS);
 

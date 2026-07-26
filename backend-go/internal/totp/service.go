@@ -37,6 +37,7 @@ const backupVersion = 1
 
 var base32SecretPattern = regexp.MustCompile(`^[A-Z2-7]+=*$`)
 var safeBrandIconKeyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,95}$`)
+var hexColorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 var svgRepoIconRefPattern = regexp.MustCompile(`(?i)(?:svgrepo:)?(?:https?://(?:www\.)?svgrepo\.com/(?:show|download|svg)/)?([0-9]{3,9})[-/:]([a-z0-9][a-z0-9-]{0,80})(?:\.svg)?`)
 
 type brandIconEntry struct {
@@ -172,6 +173,7 @@ var svgRepoBrandIcons = []brandIconEntry{
 type Service struct {
 	cfg                    config.Config
 	store                  *database.Store
+	schema                 database.SchemaEnsurer
 	remoteBrandIconFetcher remoteBrandIconFetcher
 }
 
@@ -1213,7 +1215,7 @@ func serveFallbackBrandIcon(w http.ResponseWriter, entry brandIconEntry) {
 		}
 	}
 	color := strings.TrimSpace(entry.Color)
-	if !regexp.MustCompile(`^#[0-9a-fA-F]{6}$`).MatchString(color) {
+	if !hexColorPattern.MatchString(color) {
 		color = "#8b5cf6"
 	}
 	svg := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="%s"><rect width="64" height="64" rx="14" fill="%s"/><text x="32" y="40" text-anchor="middle" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="28" font-weight="700" fill="#fff">%s</text></svg>`, html.EscapeString(name), color, html.EscapeString(letter))
@@ -1363,7 +1365,7 @@ func (s *Service) open(ctx context.Context) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := ensureSchema(ctx, db); err != nil {
+	if err := s.schema.Ensure(func() error { return ensureSchema(ctx, db) }); err != nil {
 		db.Close()
 		return nil, err
 	}

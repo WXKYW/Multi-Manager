@@ -49,7 +49,6 @@ import {
   Hexagon as PhHexagon,
   House,
   Image as PhImage,
-  Info as PhInfo,
   Key as PhKey,
   List,
   ListBullets,
@@ -99,8 +98,7 @@ import {
   Warning,
   X as PhX,
 } from '@phosphor-icons/react';
-
-import tencentCloudIcon from '../../assets/brand-icons/tencentcloud.svg';
+import { createFontIcon, GitHubBrand } from './IconsCore.jsx';
 
 const createIcon = (Icon) => {
   const AppIcon = ({
@@ -125,23 +123,22 @@ const createIcon = (Icon) => {
   return AppIcon;
 };
 
-const createFontIcon = (iconClass, label) => {
-  const FontIcon = ({ className = '', style, ...props }) => {
-    const fontSize = className.includes('size-3.5') ? '0.875rem' : '1rem';
+// 首屏所需的最小图标集合定义在 IconsCore.jsx（登录页/全局对话框使用），
+// 这里 re-export 以保持既有导入路径兼容。
+export {
+  AlertTriangle,
+  ArrowRight,
+  ChevronLeft,
+  Info,
+  Key,
+  LogIn,
+  RefreshCw,
+  Shield,
+  X,
+  GitHubBrand,
+} from './IconsCore.jsx';
 
-    return (
-      <i
-        {...props}
-        className={`app-icon app-font-icon ${iconClass} ${className}`.trim()}
-        aria-hidden={props['aria-label'] ? undefined : true}
-        style={{ fontSize, ...style }}
-      />
-    );
-  };
-
-  FontIcon.displayName = `AppIcon(${label})`;
-  return FontIcon;
-};
+import tencentCloudIcon from '../../assets/brand-icons/tencentcloud.svg';
 
 const createAssetIcon = (asset, label) => {
   const AssetIcon = ({ className = '', style, ...props }) => (
@@ -184,22 +181,14 @@ export const Palette = createIcon(PhPalette);
 export const LogOut = createIcon(SignOut);
 export const Menu = createIcon(List);
 export const Clock = createIcon(PhClock);
-export const ChevronLeft = createIcon(CaretLeft);
 export const ChevronRight = createIcon(CaretRight);
-export const ArrowRight = createIcon(PhArrowRight);
 export const History = createIcon(ClockCounterClockwise);
-export const RefreshCw = createIcon(ArrowsClockwise);
 export const Box = createIcon(Cube);
 export const Send = createIcon(PaperPlaneTilt);
-export const Shield = createIcon(PhShield);
 export const TrendingUp = createIcon(TrendUp);
 export const Rocket = createIcon(RocketLaunch);
-export const Key = createIcon(PhKey);
 export const CheckDouble = createIcon(Checks);
-export const Info = createIcon(PhInfo);
 export const Lock = createIcon(PhLock);
-export const AlertTriangle = createIcon(Warning);
-export const LogIn = createIcon(SignIn);
 export const LayoutSidebar = createIcon(PhSidebar);
 export const Plus = createIcon(PhPlus);
 export const Minus = createIcon(PhMinus);
@@ -217,7 +206,6 @@ export const Search = createIcon(MagnifyingGlass);
 export const Upload = createIcon(UploadSimple);
 export const Download = createIcon(DownloadSimple);
 export const Edit = createIcon(PencilSimple);
-export const X = createIcon(PhX);
 export const Reboot = createIcon(Power);
 export const ChevronDown = createIcon(CaretDown);
 export const ChevronUp = createIcon(CaretUp);
@@ -264,7 +252,6 @@ export const AlibabaCloudBrand = createFontIcon('si si-alibabacloud', 'AlibabaCl
 export const TencentCloudBrand = createAssetIcon(tencentCloudIcon, 'TencentCloud');
 export const KoyebBrand = createFontIcon('si si-koyeb', 'Koyeb');
 export const FlyIoBrand = createFontIcon('si si-flydotio', 'Fly.io');
-export const GitHubBrand = createFontIcon('si si-github', 'GitHub');
 
 export const MODULE_ICON_MAP = {
   dashboard: LayoutDashboard,

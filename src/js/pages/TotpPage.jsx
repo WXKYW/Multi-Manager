@@ -1008,7 +1008,35 @@ function TotpPage() {
   };
 
   // ==================== 扫码与导入解析 ====================
+  // 扫码库按需加载：仅在用户点击扫码时注入，避免所有访客都下载 ~380KB 第三方脚本
+  const loadHtml5Qrcode = () =>
+    new Promise((resolve, reject) => {
+      if (window.Html5Qrcode) {
+        resolve();
+        return;
+      }
+      const existing = document.querySelector('script[data-html5-qrcode]');
+      if (existing) {
+        existing.addEventListener('load', resolve);
+        existing.addEventListener('error', reject);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
+      script.async = true;
+      script.dataset.html5Qrcode = 'true';
+      script.addEventListener('load', resolve);
+      script.addEventListener('error', reject);
+      document.head.appendChild(script);
+    });
+
   const startQrScan = async () => {
+    try {
+      await loadHtml5Qrcode();
+    } catch {
+      toast.error('扫码库加载失败');
+      return;
+    }
     if (!window.Html5Qrcode) {
       toast.error('扫码库加载失败');
       return;

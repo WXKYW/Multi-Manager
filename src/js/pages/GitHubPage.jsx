@@ -25,6 +25,7 @@ import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
 import { formatGitHubRepositoryDescription } from '../modules/githubEmoji.js';
 import { normalizeWorkflowJobName, workflowJobMatchesDefinition } from '../modules/githubWorkflowJobs.js';
+import { useNowTick } from '../modules/usePageVisibility.js';
 import { useDraggableScroll } from '../hooks/useDraggableScroll.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import useStore from '../store.js';
@@ -1688,7 +1689,7 @@ function GitHubPage() {
   const [workflows, setWorkflows] = useState([]);
   const [branches, setBranches] = useState([]);
   const [detailsRepoId, setDetailsRepoId] = useState(null);
-  const [currentTime, setCurrentTime] = useState(() => Date.now());
+  const currentTime = useNowTick(1000);
   const [saving, setSaving] = useState(false);
   const [testingTokenId, setTestingTokenId] = useState(null);
   const [refreshingRepositoryId, setRefreshingRepositoryId] = useState(null);
@@ -1797,11 +1798,6 @@ function GitHubPage() {
     loadOverview();
   }, [loadOverview]);
 
-  useEffect(() => {
-    const timer = window.setInterval(() => setCurrentTime(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-
   useEffect(() => () => {
     if (actionCollapseTimerRef.current) window.clearTimeout(actionCollapseTimerRef.current);
   }, []);
@@ -1816,6 +1812,7 @@ function GitHubPage() {
 
   useEffect(() => {
     const timer = window.setInterval(() => {
+      if (document.hidden) return;
       void loadOverview();
       void loadRepoDetails();
     }, 60_000);

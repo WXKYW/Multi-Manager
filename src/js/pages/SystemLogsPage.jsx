@@ -163,7 +163,10 @@ export default function SystemLogsPage() {
   useEffect(() => { load(); }, [level]);
   useEffect(() => {
     if (!autoRefresh) return undefined;
-    const timer = window.setInterval(load, 5000);
+    const timer = window.setInterval(() => {
+      if (document.hidden) return;
+      load();
+    }, 5000);
     return () => window.clearInterval(timer);
   }, [autoRefresh, level, query]);
 

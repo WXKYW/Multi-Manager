@@ -47,6 +47,7 @@ var (
 type Service struct {
 	cfg       config.Config
 	store     *database.Store
+	schema    database.SchemaEnsurer
 	client    *http.Client
 	graphBase string
 	loginBase string
@@ -207,7 +208,7 @@ func (s *Service) open(ctx context.Context) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := ensureSchema(ctx, db); err != nil {
+	if err := s.schema.Ensure(func() error { return ensureSchema(ctx, db) }); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -1907,11 +1908,11 @@ func generateInviteCode() (string, error) {
 
 func generateTemporaryPassword() (string, error) {
 	const (
-		passwordLength  = 18
-		upperCharset    = "ABCDEFGHJKLMNPQRSTUVWXYZ"
-		lowerCharset    = "abcdefghijkmnopqrstuvwxyz"
-		digitCharset    = "23456789"
-		symbolCharset   = "!@#$%^*-_+=?"
+		passwordLength = 18
+		upperCharset   = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+		lowerCharset   = "abcdefghijkmnopqrstuvwxyz"
+		digitCharset   = "23456789"
+		symbolCharset  = "!@#$%^*-_+=?"
 	)
 	requiredCharsets := []string{upperCharset, lowerCharset, digitCharset, symbolCharset}
 	allCharsets := upperCharset + lowerCharset + digitCharset + symbolCharset

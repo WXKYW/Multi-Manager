@@ -4,7 +4,7 @@ import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input } from '@cloudflare/kumo/components/input';
 import { cancelDialog, resolveDialog, subscribeDialog } from '../modules/dialog.js';
-import { X } from './Icons.jsx';
+import { X } from './IconsCore.jsx';
 
 const QUOTE_PAIRS = [
   ['"', '"'],

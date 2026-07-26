@@ -990,6 +990,8 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_server_accounts_status ON server_accounts(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_server_monitor_logs_server ON server_monitor_logs(server_id, checked_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_server_monitor_logs_status ON server_monitor_logs(status, checked_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_server_command_history_created ON server_command_history(created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_server_command_history_server_created ON server_command_history(server_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_metrics_history_server_time ON server_metrics_history(server_id, recorded_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_metrics_history_time ON server_metrics_history(recorded_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_network_quality_samples_server_time ON server_network_quality_samples(server_id, checked_at DESC)`,
@@ -1731,9 +1733,11 @@ func scanServerStatusPageRows(rows *sql.Rows) (map[string]interface{}, error) {
 	}, nil
 }
 
+var nonSlugCharsRegex = regexp.MustCompile(`[^a-z0-9]+`)
+
 func normalizeServerStatusSlug(value string) string {
 	text := strings.ToLower(strings.TrimSpace(value))
-	text = regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(text, "-")
+	text = nonSlugCharsRegex.ReplaceAllString(text, "-")
 	text = strings.Trim(text, "-")
 	if text == "" {
 		return "servers"
