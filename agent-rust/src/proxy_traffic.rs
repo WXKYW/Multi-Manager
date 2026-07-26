@@ -23,6 +23,8 @@ use tonic::transport::Channel;
 const STATE_ROOT: &str = "/var/lib/api-monitor/proxy/nodes";
 #[cfg(unix)]
 const TRAFFIC_STATE_PATH: &str = "/var/lib/api-monitor/proxy/traffic-state.json";
+#[cfg(unix)]
+const REPORT_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 #[cfg(unix)]
 #[derive(Clone, PartialEq, Message)]
@@ -101,7 +103,7 @@ pub async fn run(config: Config) {
             return;
         }
     };
-    let mut timer = tokio::time::interval(Duration::from_secs(30));
+    let mut timer = tokio::time::interval(REPORT_INTERVAL);
     timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     timer.tick().await;
     loop {

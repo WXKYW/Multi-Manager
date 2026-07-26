@@ -267,7 +267,7 @@ func (s *Service) handleDockerProxyStacks(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Service) syncDockerStacks(w http.ResponseWriter, r *http.Request, db *sql.DB, serverID string) {
-	result, err := s.runAgentTaskAndWait(serverID, dockerTaskComposeList, "", 30*time.Second)
+	result, err := s.runAgentTaskAndWaitTransient(serverID, dockerTaskComposeList, "", 30*time.Second)
 	if err != nil {
 		writeDockerProxyError(w, err)
 		return
@@ -284,7 +284,7 @@ func (s *Service) syncDockerStacks(w http.ResponseWriter, r *http.Request, db *s
 }
 
 func (s *Service) writeDockerComposeProjects(w http.ResponseWriter, r *http.Request, db *sql.DB, serverID string) {
-	result, err := s.runAgentTaskAndWait(serverID, dockerTaskComposeList, "", 30*time.Second)
+	result, err := s.runAgentTaskAndWaitTransient(serverID, dockerTaskComposeList, "", 30*time.Second)
 	if err != nil {
 		writeDockerProxyError(w, err)
 		return
@@ -316,7 +316,7 @@ func (s *Service) writeDockerContainerLogs(w http.ResponseWriter, r *http.Reques
 		response.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	result, err := s.runAgentTaskAndWait(serverID, dockerTaskLogs, string(data), 60*time.Second)
+	result, err := s.runAgentTaskAndWaitTransient(serverID, dockerTaskLogs, string(data), 60*time.Second)
 	if err != nil {
 		writeDockerProxyError(w, err)
 		return
@@ -328,7 +328,7 @@ func (s *Service) writeDockerContainerLogs(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Service) writeDockerTaskJSON(w http.ResponseWriter, r *http.Request, serverID string, taskType int, command string, timeout time.Duration) {
-	result, err := s.runAgentTaskAndWait(serverID, taskType, command, timeout)
+	result, err := s.runAgentTaskAndWaitTransient(serverID, taskType, command, timeout)
 	if err != nil {
 		writeDockerProxyError(w, err)
 		return

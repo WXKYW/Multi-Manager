@@ -24,6 +24,8 @@ const (
 	TaskCancelled TaskStatus = "cancelled"
 )
 
+const taskHistoryRetention = 24 * time.Hour
+
 // Task 任务
 type Task struct {
 	ID          string
@@ -107,7 +109,7 @@ func (r *TaskRegistry) AttachPersistence(ctx context.Context, persistence taskPe
 	if persistence == nil {
 		return nil
 	}
-	tasks, err := persistence.LoadRecent(ctx, 7*24*time.Hour)
+	tasks, err := persistence.LoadRecent(ctx, taskHistoryRetention)
 	if err != nil {
 		return err
 	}
@@ -125,6 +127,7 @@ func (r *TaskRegistry) AttachPersistence(ctx context.Context, persistence taskPe
 		r.tasks[task.ID] = task
 	}
 	r.mu.Unlock()
+	_ = persistence.Prune(context.Background(), time.Now().Add(-taskHistoryRetention))
 	return nil
 }
 
@@ -383,7 +386,7 @@ func (r *TaskRegistry) pruneIfDue() {
 		return
 	}
 	r.lastPrune = time.Now()
-	cutoff := time.Now().Add(-7 * 24 * time.Hour)
+	cutoff := time.Now().Add(-taskHistoryRetention)
 	for id, task := range r.tasks {
 		task.mu.RLock()
 		terminal := task.Status == TaskCompleted || task.Status == TaskFailed || task.Status == TaskCancelled

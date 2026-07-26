@@ -14,15 +14,20 @@ import (
 func (s *Service) startSubscriptionReconcileLoop(ctx context.Context) {
 	ticker := time.NewTicker(3 * time.Second)
 	cycleTicker := time.NewTicker(time.Minute)
+	maintenanceTicker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
 	defer cycleTicker.Stop()
+	defer maintenanceTicker.Stop()
 	s.scheduleSubscriptionCycleTransitions(ctx)
+	s.pruneSubscriptionLedger(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-cycleTicker.C:
 			s.scheduleSubscriptionCycleTransitions(ctx)
+		case <-maintenanceTicker.C:
+			s.pruneSubscriptionLedger(ctx)
 		case <-ticker.C:
 			for processed := 0; processed < 8; processed++ {
 				if !s.processSubscriptionReconcileJob(ctx) {
@@ -42,6 +47,17 @@ func (s *Service) scheduleSubscriptionCycleTransitions(parent context.Context) {
 	}
 	defer db.Close()
 	_ = subscriptionledger.ScheduleCycleTransitions(ctx, db, time.Now().UTC())
+}
+
+func (s *Service) pruneSubscriptionLedger(parent context.Context) {
+	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
+	defer cancel()
+	db, err := s.open(ctx)
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	_ = subscriptionledger.Prune(ctx, db, time.Now().UTC())
 }
 
 func (s *Service) processSubscriptionReconcileJob(parent context.Context) bool {

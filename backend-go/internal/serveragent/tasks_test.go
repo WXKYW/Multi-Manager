@@ -80,3 +80,43 @@ func TestStreamTaskReplaysCompletedTask(t *testing.T) {
 		t.Fatalf("completed task was not replayed: %s", body)
 	}
 }
+
+func TestTaskPersistencePrunesHistoryOutsideRetention(t *testing.T) {
+	ctx := context.Background()
+	store := database.New(config.Config{DataDir: t.TempDir(), DBName: filepath.Base("tasks.db")})
+	persistence := newSQLiteTaskPersistence(store)
+	if err := persistence.Ensure(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	oldCreated := time.Now().Add(-48 * time.Hour)
+	oldCompleted := oldCreated.Add(5 * time.Minute)
+	if err := persistence.Save(ctx, &Task{
+		ID:          "old-task",
+		ServerID:    "server-1",
+		Type:        "docker.internal.3",
+		Command:     "inspect",
+		Status:      TaskCompleted,
+		Progress:    100,
+		Result:      "ok",
+		CreatedAt:   oldCreated,
+		CompletedAt: &oldCompleted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	registry := NewTaskRegistry()
+	if err := registry.AttachPersistence(ctx, persistence); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := registry.Get("old-task"); ok {
+		t.Fatal("expected old task to stay out of in-memory history")
+	}
+	loaded, err := persistence.LoadRecent(ctx, 7*24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 0 {
+		t.Fatalf("expected pruned history, got %#v", loaded)
+	}
+}

@@ -212,7 +212,7 @@ func (s *Service) collectNetworkQualitySamples(w http.ResponseWriter, r *http.Re
 				"timeout_ms": 4000,
 			})
 			// 发送探测任务并等待结果 (最多等 8 秒)
-			resultStr, err := s.runAgentTaskAndWait(serverID, 40, string(targetsJSON), 8*time.Second)
+			resultStr, err := s.runAgentTaskAndWaitTransient(serverID, 40, string(targetsJSON), 8*time.Second)
 			if err == nil {
 				var nqData interface{}
 				if json.Unmarshal([]byte(resultStr), &nqData) == nil {

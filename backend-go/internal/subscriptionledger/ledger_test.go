@@ -124,3 +124,48 @@ func TestRecordBatchRejectsCrossServerNodeReport(t *testing.T) {
 		t.Fatal("expected cross-server report to be rejected")
 	}
 }
+
+func TestPruneKeepsAggregatedUsageWhileDroppingOldRawRows(t *testing.T) {
+	db := ledgerTestDB(t)
+	ctx := context.Background()
+	_, _ = db.Exec(`INSERT INTO subscription_plans VALUES('plan',1,0,'monthly',1,'explicit',1)`)
+	_, _ = db.Exec(`INSERT INTO subscription_subscriptions VALUES('sub','plan',1,'uuid','password','2026-01-01 00:00:00')`)
+	_, _ = db.Exec(`INSERT INTO managed_proxy_nodes VALUES('node','host',1,'running',21000)`)
+	_, _ = db.Exec(`INSERT INTO subscription_plan_nodes VALUES('plan','node','internal')`)
+
+	oldNow := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	newNow := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
+	if _, err := RecordBatchDetailed(ctx, db, []Report{{
+		ServerID: "host", NodeID: "node", CredentialID: "sub", BootID: "boot", Sequence: 1, UploadBytes: 11, DownloadBytes: 22,
+	}}, oldNow); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RecordBatchDetailed(ctx, db, []Report{{
+		ServerID: "host", NodeID: "node", CredentialID: "sub", BootID: "boot", Sequence: 2, UploadBytes: 33, DownloadBytes: 44,
+	}}, newNow); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := pruneHistory(ctx, db, newNow, 24*time.Hour, 24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+
+	var reports, keys int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM subscription_usage_reports`).Scan(&reports); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM subscription_usage_report_keys`).Scan(&keys); err != nil {
+		t.Fatal(err)
+	}
+	if reports != 1 || keys != 1 {
+		t.Fatalf("reports=%d keys=%d", reports, keys)
+	}
+
+	usage, err := Current(ctx, db, "sub", "monthly", 1, "2026-01-01 00:00:00", newNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.UploadBytes != 44 || usage.DownloadBytes != 66 {
+		t.Fatalf("usage=%#v", usage)
+	}
+}

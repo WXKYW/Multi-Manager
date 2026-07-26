@@ -46,6 +46,11 @@ type BatchResult struct {
 	DownloadBytes int64
 }
 
+const (
+	reportRetentionWindow    = 72 * time.Hour
+	replayKeyRetentionWindow = 14 * 24 * time.Hour
+)
+
 func EnsureSchema(ctx context.Context, db *sql.DB) error {
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS subscription_usage_reports (
@@ -99,6 +104,41 @@ func EnsureSchema(ctx context.Context, db *sql.DB) error {
 			SELECT server_id,node_id,subscription_id,boot_id,sequence,reported_at
 			FROM subscription_usage_reports`); err != nil {
 			return fmt.Errorf("backfill subscription ledger replay keys: %w", err)
+		}
+	}
+	return nil
+}
+
+// Prune removes short-lived raw traffic history after it has already been
+// folded into subscription_usage_cycles. Aggregated cycle usage remains intact.
+func Prune(ctx context.Context, db *sql.DB, now time.Time) error {
+	return pruneHistory(ctx, db, now, reportRetentionWindow, replayKeyRetentionWindow)
+}
+
+func pruneHistory(ctx context.Context, db *sql.DB, now time.Time, reportRetention, replayKeyRetention time.Duration) error {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	now = now.UTC()
+	cutoffs := []struct {
+		query  string
+		cutoff time.Time
+		label  string
+	}{
+		{
+			query:  `DELETE FROM subscription_usage_reports WHERE datetime(reported_at) < datetime(?)`,
+			cutoff: now.Add(-reportRetention),
+			label:  "raw usage reports",
+		},
+		{
+			query:  `DELETE FROM subscription_usage_report_keys WHERE datetime(reported_at) < datetime(?)`,
+			cutoff: now.Add(-replayKeyRetention),
+			label:  "usage replay keys",
+		},
+	}
+	for _, item := range cutoffs {
+		if _, err := db.ExecContext(ctx, item.query, item.cutoff.Format(time.RFC3339)); err != nil {
+			return fmt.Errorf("prune %s: %w", item.label, err)
 		}
 	}
 	return nil

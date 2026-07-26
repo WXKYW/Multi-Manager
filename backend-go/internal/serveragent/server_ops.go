@@ -671,11 +671,24 @@ func (s *Service) hasAgentConnection(serverID string) bool {
 }
 
 func (s *Service) runAgentFileTask(serverID string, taskType int, payload map[string]interface{}, timeout time.Duration) (string, error) {
+	return s.runAgentFileTaskMode(serverID, taskType, payload, timeout, false)
+}
+
+func (s *Service) runAgentTransientFileTask(serverID string, taskType int, payload map[string]interface{}, timeout time.Duration) (string, error) {
+	return s.runAgentFileTaskMode(serverID, taskType, payload, timeout, true)
+}
+
+func (s *Service) runAgentFileTaskMode(serverID string, taskType int, payload map[string]interface{}, timeout time.Duration, transient bool) (string, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("AGENT_FILE_ERROR: %w", err)
 	}
-	result, err := s.runAgentTaskAndWait(serverID, taskType, string(data), timeout)
+	var result string
+	if transient {
+		result, err = s.runAgentTaskAndWaitTransient(serverID, taskType, string(data), timeout)
+	} else {
+		result, err = s.runAgentTaskAndWait(serverID, taskType, string(data), timeout)
+	}
 	if err != nil {
 		return "", fmt.Errorf("AGENT_FILE_ERROR: %w", err)
 	}
@@ -683,7 +696,7 @@ func (s *Service) runAgentFileTask(serverID string, taskType int, payload map[st
 }
 
 func (s *Service) handleAgentFileList(w http.ResponseWriter, serverID, remotePath string) {
-	result, err := s.runAgentFileTask(serverID, agentFileListTask, map[string]interface{}{
+	result, err := s.runAgentTransientFileTask(serverID, agentFileListTask, map[string]interface{}{
 		"path": normalizeRemotePath(remotePath),
 	}, agentFileTimeout)
 	if err != nil {
@@ -712,7 +725,7 @@ func (s *Service) handleAgentFileList(w http.ResponseWriter, serverID, remotePat
 }
 
 func (s *Service) handleAgentFileRead(w http.ResponseWriter, serverID, remotePath string) {
-	content, err := s.runAgentFileTask(serverID, agentFileReadTask, map[string]interface{}{
+	content, err := s.runAgentTransientFileTask(serverID, agentFileReadTask, map[string]interface{}{
 		"path":    normalizeRemotePath(remotePath),
 		"maxSize": int64(1024 * 1024),
 	}, agentFileTimeout)
@@ -818,7 +831,7 @@ func (s *Service) handleAgentFileDownload(w http.ResponseWriter, serverID, remot
 	w.WriteHeader(http.StatusOK)
 
 	for offset := int64(0); ; offset += agentFileChunkSize {
-		encoded, err := s.runAgentFileTask(serverID, agentFileDownloadChunkTask, map[string]interface{}{
+		encoded, err := s.runAgentTransientFileTask(serverID, agentFileDownloadChunkTask, map[string]interface{}{
 			"path":   remotePath,
 			"offset": offset,
 			"size":   agentFileChunkSize,
@@ -1917,6 +1930,10 @@ func stringFromAny(value interface{}) string {
 
 func (s *Service) runAgentTaskAndWait(serverID string, taskType int, command string, timeout time.Duration) (string, error) {
 	return s.runAgentTaskAndWaitMode(serverID, taskType, command, timeout, false)
+}
+
+func (s *Service) runAgentTaskAndWaitTransient(serverID string, taskType int, command string, timeout time.Duration) (string, error) {
+	return s.runAgentTaskAndWaitMode(serverID, taskType, command, timeout, true)
 }
 
 func (s *Service) runAgentTaskAndWaitMode(serverID string, taskType int, command string, timeout time.Duration, transient bool) (string, error) {
