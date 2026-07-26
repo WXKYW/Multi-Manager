@@ -71,6 +71,9 @@ func (p *connPool) release() {
 	if p.refs <= 0 {
 		drained = p.idle
 		p.idle = nil
+		poolsMu.Lock()
+		delete(pools, p.dbPath)
+		poolsMu.Unlock()
 	}
 	p.mu.Unlock()
 	for _, conn := range drained {
@@ -101,7 +104,7 @@ func (p *connPool) get(ctx context.Context) (driver.Conn, error) {
 
 func (p *connPool) put(conn driver.Conn) error {
 	p.mu.Lock()
-	if len(p.idle) < maxIdlePhysicalConns {
+	if p.refs > 0 && len(p.idle) < maxIdlePhysicalConns {
 		p.idle = append(p.idle, conn)
 		p.mu.Unlock()
 		return nil
