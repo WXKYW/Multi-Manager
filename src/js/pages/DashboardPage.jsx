@@ -123,6 +123,11 @@ function formatDashboardTime(timestamp) {
   return `${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
+function formatKCount(count) {
+  const number = Number(count) || 0;
+  return `${(number / 1000).toFixed(1)}K`;
+}
+
 function formatDashboardAxisValue(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return '-';
@@ -844,10 +849,10 @@ function DashboardPage({ onNavigate } = {}) {
   const hasApiTrendCalls = apiTrend.length >= 2 && apiTrendTotal > 0;
   
   const apiStatsDetailText = apiTrendTotal > 0
-    ? `读取 ${apiTrendAudit}次 (${Math.round((apiTrendAudit / apiTrendTotal) * 100)}%) / 变更 ${apiTrendOps}次`
+    ? `读取 ${formatKCount(apiTrendAudit)}次 (${Math.round((apiTrendAudit / apiTrendTotal) * 100)}%) / 变更 ${formatKCount(apiTrendOps)}次`
     : '暂无系统 API 调用记录';
   const apiTrendStatusText = apiTrendTotal > 0
-    ? `最近 7 天系统共处理了 ${apiTrendTotal} 次有效 API 请求`
+    ? `最近 7 天系统共处理了 ${formatKCount(apiTrendTotal)} 次有效 API 请求`
     : '最近 7 天暂无系统 API 调用记录';
 
   const apiTrendChartData = useMemo(() => [
@@ -1023,7 +1028,7 @@ function DashboardPage({ onNavigate } = {}) {
           badge="系统 API"
           badgeClassName="text-kumo-subtle bg-kumo-recessed border-kumo-line"
           label="系统 API 调用"
-          value={apiTrendTotal}
+          value={formatKCount(apiTrendTotal)}
           unit="次"
           detail={apiStatsDetailText}
         />
@@ -1035,9 +1040,6 @@ function DashboardPage({ onNavigate } = {}) {
         
         <SectionCard
           title="API 调用趋势"
-          icon={<Activity className="h-4 w-4 text-kumo-brand" />}
-          meta={<Badge variant="neutral">最近 7 天</Badge>}
-          className="order-1 hidden min-w-0 sm:flex"
           bodyClassName="flex min-h-0 flex-1 flex-col p-2.5 sm:p-5"
         >
           <div className="min-w-0 overflow-hidden" style={{ height: apiChartHeight }}>

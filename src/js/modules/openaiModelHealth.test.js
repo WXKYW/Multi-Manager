@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_MODEL_HEALTH_CONCURRENCY,
+  MAX_BATCH_MODEL_HEALTH_TARGETS,
   countModelHealthResults,
   endpointModelIds,
+  limitModelHealthTargets,
   modelHealthKey,
   modelHealthTargets,
   normalizeModelHealthRecord,
+  resolveModelHealthConcurrency,
 } from './openaiModelHealth.js';
 
 describe('OpenAI model health helpers', () => {
@@ -41,5 +45,27 @@ describe('OpenAI model health helpers', () => {
     expect(results[0]).toMatchObject({ status: 'healthy', latency: 120, loading: false });
     expect(results[2]).toMatchObject({ status: 'error', error: 'HTTP 429' });
     expect(countModelHealthResults(results)).toEqual({ healthy: 1, degraded: 1, failed: 1 });
+  });
+
+  it('clamps batch health-check concurrency to a safe range', () => {
+    expect(resolveModelHealthConcurrency(undefined, 5)).toBe(5);
+    expect(resolveModelHealthConcurrency(0, 5)).toBe(5);
+    expect(resolveModelHealthConcurrency(undefined, 50)).toBe(DEFAULT_MODEL_HEALTH_CONCURRENCY);
+    expect(resolveModelHealthConcurrency(9, 3)).toBe(3);
+    expect(resolveModelHealthConcurrency(99, 20)).toBe(20);
+    expect(resolveModelHealthConcurrency(99, 50)).toBe(DEFAULT_MODEL_HEALTH_CONCURRENCY);
+  });
+
+  it('caps full-batch targets while preserving order', () => {
+    const targets = Array.from({ length: MAX_BATCH_MODEL_HEALTH_TARGETS + 5 }, (_, index) => ({
+      endpointId: `endpoint-${index}`,
+      modelId: `model-${index}`,
+    }));
+
+    expect(limitModelHealthTargets(targets)).toHaveLength(MAX_BATCH_MODEL_HEALTH_TARGETS);
+    expect(limitModelHealthTargets(targets).at(-1)).toEqual({
+      endpointId: `endpoint-${MAX_BATCH_MODEL_HEALTH_TARGETS - 1}`,
+      modelId: `model-${MAX_BATCH_MODEL_HEALTH_TARGETS - 1}`,
+    });
   });
 });

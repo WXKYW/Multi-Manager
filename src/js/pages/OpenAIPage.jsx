@@ -10,7 +10,6 @@ import { Switch } from '@cloudflare/kumo/components/switch';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Autocomplete } from '@cloudflare/kumo/components/autocomplete';
 import {
-  Banner,
   ClipboardText,
   DatePicker,
   Label,
@@ -26,11 +25,15 @@ import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
 import { renderMarkdown, formatDateTime } from '../modules/utils.js';
 import {
+  DEFAULT_MODEL_HEALTH_CONCURRENCY,
+  MAX_BATCH_MODEL_HEALTH_TARGETS,
   countModelHealthResults,
   endpointModelIds,
+  limitModelHealthTargets,
   modelHealthKey,
   modelHealthTargets,
   normalizeModelHealthRecord,
+  resolveModelHealthConcurrency,
 } from '../modules/openaiModelHealth.js';
 import {
   PageStack,
@@ -528,6 +531,7 @@ function OpenAIPage() {
   const [healthCheckModal, setHealthCheckModal] = useState(false);
   const [healthCheckForm, setHealthCheckForm] = useState({
     timeout: 30,
+    concurrency: DEFAULT_MODEL_HEALTH_CONCURRENCY,
   });
   const modelHealthAbortControllersRef = useRef(new Map());
 
@@ -700,7 +704,7 @@ function OpenAIPage() {
     return results;
   };
 
-  const testModelHealth = async (model, targetEndpointId) => {
+  const testModelHealth = async (model, targetEndpointId, silentToast = false) => {
     const modelId = String(model?.id || '').trim();
     if (!modelId || !targetEndpointId) return null;
     const healthKey = modelHealthKey(targetEndpointId, modelId);
@@ -718,7 +722,7 @@ function OpenAIPage() {
           error: '检测已停止',
         },
       }));
-      toast.warning(`${modelId} 检测已停止`);
+      if (!silentToast) toast.warning(`${modelId} 检测已停止`);
       return null;
     }
 
@@ -746,18 +750,20 @@ function OpenAIPage() {
       }
 
       const result = applyEndpointHealthResults(targetEndpointId, [modelId], [data])[0];
-      if (result.status === 'healthy') {
-        toast.success(`${modelId} 可用，延迟 ${result.latency ?? '-'} ms`);
-      } else if (result.status === 'degraded') {
-        toast.warning(`${modelId} 响应较慢，延迟 ${result.latency ?? '-'} ms`);
-      } else {
-        toast.error(`${modelId} 检测失败: ${result.error || '未知错误'}`);
+      if (!silentToast) {
+        if (result.status === 'healthy') {
+          toast.success(`${modelId} 可用，延迟 ${result.latency ?? '-'} ms`);
+        } else if (result.status === 'degraded') {
+          toast.warning(`${modelId} 响应较慢，延迟 ${result.latency ?? '-'} ms`);
+        } else {
+          toast.error(`${modelId} 检测失败: ${result.error || '未知错误'}`);
+        }
       }
       return result;
     } catch (e) {
       if (controller.signal.aborted) return null;
       const result = applyEndpointHealthResults(targetEndpointId, [modelId], [], e.message)[0];
-      toast.error(`${modelId} 检测失败: ${result.error || e.message}`);
+      if (!silentToast) toast.error(`${modelId} 检测失败: ${result.error || e.message}`);
       return result;
     } finally {
       if (modelHealthAbortControllersRef.current.get(healthKey) === controller) {
@@ -766,87 +772,69 @@ function OpenAIPage() {
     }
   };
 
-  const runEndpointHealthCheck = async (endpoint, trackProgress = false) => {
-    const modelIds = endpointModelIds(endpoint);
-    let results;
+  const runModelHealthChecksWithPool = async targets => {
+    if (!Array.isArray(targets) || targets.length === 0) return [];
 
-    try {
-      const response = await fetch(
-        `/api/openai/endpoints/${encodeURIComponent(endpoint.id)}/health-check-all`,
-        {
-          method: 'POST',
-          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            timeout: Math.max(1, Number(healthCheckForm.timeout) || 30) * 1000,
-            concurrency: Math.max(1, modelIds.length),
-          }),
-        }
-      );
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data.error || `HTTP ${response.status}`);
-      }
-      results = applyEndpointHealthResults(
-        endpoint.id,
-        modelIds,
-        data.summary?.results,
-        '检测未返回结果'
-      );
-    } catch (error) {
-      results = applyEndpointHealthResults(endpoint.id, modelIds, [], error.message);
-    }
+    const results = new Array(targets.length);
+    const concurrency = resolveModelHealthConcurrency(healthCheckForm.concurrency, targets.length);
+    let cursor = 0;
 
-    if (trackProgress) {
-      const counts = countModelHealthResults(results);
+    const commitProgress = result => {
+      const healthy = result?.status === 'healthy' ? 1 : 0;
+      const degraded = result?.status === 'degraded' ? 1 : 0;
+      const failed = healthy || degraded ? 0 : 1;
       setHealthCheckProgress(prev => ({
         ...prev,
-        completed: Math.min(prev.total, prev.completed + results.length),
-        healthy: prev.healthy + counts.healthy,
-        degraded: prev.degraded + counts.degraded,
-        failed: prev.failed + counts.failed,
+        completed: Math.min(prev.total, prev.completed + 1),
+        healthy: prev.healthy + healthy,
+        degraded: prev.degraded + degraded,
+        failed: prev.failed + failed,
       }));
-    }
+    };
 
+    const workers = Array.from({ length: concurrency }, async () => {
+      while (true) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= targets.length) return;
+
+        const target = targets[index];
+        const result = await testModelHealth({ id: target.modelId }, target.endpointId, true);
+        const normalizedResult =
+          result ||
+          normalizeModelHealthRecord(
+            {
+              status: 'failed',
+              error: '检测未返回结果',
+              checkedAt: Date.now(),
+            },
+            '检测未返回结果'
+          );
+
+        results[index] = normalizedResult;
+        commitProgress(normalizedResult);
+      }
+    });
+
+    await Promise.all(workers);
     return results;
   };
 
-  const runAllEndpointHealthChecks = async endpointTargets => {
-    try {
-      const response = await fetch('/api/openai/health-check-all', {
-        method: 'POST',
-        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          timeout: Math.max(1, Number(healthCheckForm.timeout) || 30) * 1000,
-          concurrency: 12,
-        }),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data.error || `HTTP ${response.status}`);
-      }
-      return endpointTargets.flatMap(endpoint => {
-        const endpointResult = (data.endpoints || []).find(item => item.endpointId === endpoint.id);
-        const modelIds = endpointModelIds(endpoint);
-        return applyEndpointHealthResults(
-          endpoint.id,
-          modelIds,
-          endpointResult?.results,
-          endpointResult?.skipped ? '该端点没有可检测模型' : '检测未返回结果'
-        );
-      });
-    } catch (error) {
-      return endpointTargets.flatMap(endpoint =>
-        applyEndpointHealthResults(endpoint.id, endpointModelIds(endpoint), [], error.message)
-      );
-    }
-  };
+  const runEndpointHealthCheck = async endpoint =>
+    runModelHealthChecksWithPool(
+      endpointModelIds(endpoint).map(modelId => ({ endpointId: endpoint.id, modelId }))
+    );
+
+  const runAllEndpointHealthChecks = async targets => runModelHealthChecksWithPool(targets);
 
   const startBatchHealthCheck = async () => {
     const endpointTargets = endpoints.filter(
       endpoint => endpoint.enabled && endpointModelIds(endpoint).length > 0
     );
-    const targets = modelHealthTargets(endpointTargets);
-    if (targets.length === 0) {
+    const allTargets = modelHealthTargets(endpointTargets);
+    const targets = limitModelHealthTargets(allTargets);
+    const concurrency = resolveModelHealthConcurrency(healthCheckForm.concurrency, targets.length);
+    if (allTargets.length === 0) {
       toast.warning('没有找到任何启用的端点或模型');
       return;
     }
@@ -854,15 +842,14 @@ function OpenAIPage() {
     setHealthCheckModal(false);
     setModelHealthBatchLoading(true);
     setHealthCheckProgress(createHealthCheckProgress(targets.length, true));
-    setExpandedEndpoints(prev => ({
-      ...prev,
-      ...Object.fromEntries(endpointTargets.map(endpoint => [endpoint.id, true])),
-    }));
-    markModelsChecking(targets);
-    toast.info(`正在同时检测 ${targets.length} 个模型...`);
+    toast.info(
+      allTargets.length > targets.length
+        ? `正在按 ${concurrency} 并发实时检测前 ${targets.length} 个模型（全部检测上限 ${MAX_BATCH_MODEL_HEALTH_TARGETS}）...`
+        : `正在按 ${concurrency} 并发实时检测 ${targets.length} 个模型...`
+    );
 
     try {
-      const results = await runAllEndpointHealthChecks(endpointTargets);
+      const results = await runAllEndpointHealthChecks(targets);
       const counts = countModelHealthResults(results);
       setHealthCheckProgress({
         running: false,
@@ -871,7 +858,10 @@ function OpenAIPage() {
         ...counts,
       });
 
-      const message = `检测完成：可用 ${counts.healthy}，较慢 ${counts.degraded}，失败 ${counts.failed}`;
+      const message =
+        allTargets.length > targets.length
+          ? `检测完成：已检测前 ${targets.length} 个模型，可用 ${counts.healthy}，较慢 ${counts.degraded}，失败 ${counts.failed}`
+          : `检测完成：可用 ${counts.healthy}，较慢 ${counts.degraded}，失败 ${counts.failed}`;
       if (counts.failed > 0) toast.warning(message);
       else toast.success(message);
     } finally {
@@ -882,19 +872,20 @@ function OpenAIPage() {
   const openHealthCheckForEndpoint = async endpointId => {
     const ep = endpoints.find(e => e.id === endpointId);
     const modelIds = endpointModelIds(ep);
+    const concurrency = resolveModelHealthConcurrency(healthCheckForm.concurrency, modelIds.length);
     if (!ep || modelIds.length === 0) {
       toast.warning('该端点无可用模型');
       return;
     }
 
     setModelHealthBatchLoading(true);
-    setExpandedEndpoints(prev => ({ ...prev, [ep.id]: true }));
     setHealthCheckProgress(createHealthCheckProgress(modelIds.length, true));
-    markModelsChecking(modelIds.map(modelId => ({ endpointId: ep.id, modelId })));
-    toast.info(`正在同时检测 ${ep.name || '端点'} 的 ${modelIds.length} 个模型...`);
+    toast.info(
+      `正在按 ${concurrency} 并发实时检测 ${ep.name || '端点'} 的 ${modelIds.length} 个模型...`
+    );
 
     try {
-      const results = await runEndpointHealthCheck(ep, true);
+      const results = await runEndpointHealthCheck(ep);
       const counts = countModelHealthResults(results);
       setHealthCheckProgress({
         running: false,
@@ -2259,55 +2250,6 @@ function OpenAIPage() {
           }
           bodyClassName="flex min-h-0 flex-1 flex-col gap-2.5"
         >
-          {healthCheckProgress.total > 0 && (
-            <Banner
-              size="sm"
-              variant={
-                healthCheckProgress.failed > 0
-                  ? 'alert'
-                  : healthCheckProgress.running
-                    ? 'default'
-                    : 'secondary'
-              }
-              icon={
-                <Activity
-                  className={cx('h-4 w-4', healthCheckProgress.running && 'animate-pulse')}
-                />
-              }
-              title={
-                healthCheckProgress.running
-                  ? `检测中 ${healthCheckProgress.completed}/${healthCheckProgress.total}`
-                  : '最近一次检测'
-              }
-              description={
-                <div className="space-y-2">
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-                    <span>可用 {healthCheckProgress.healthy}</span>
-                    <span>较慢 {healthCheckProgress.degraded}</span>
-                    <span>失败 {healthCheckProgress.failed}</span>
-                  </div>
-                  <div
-                    className="h-1.5 overflow-hidden rounded-full bg-kumo-line"
-                    aria-hidden="true"
-                  >
-                    <div
-                      className={cx(
-                        'h-full rounded-full transition-all duration-300',
-                        healthCheckProgress.failed > 0 ? 'bg-kumo-warning' : 'bg-kumo-success'
-                      )}
-                      style={{
-                        width: `${Math.min(
-                          100,
-                          (healthCheckProgress.completed / Math.max(1, healthCheckProgress.total)) *
-                            100
-                        )}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-              }
-            />
-          )}
           <LayerCard className="flex flex-col gap-2 p-2 shadow-none sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-center gap-2">
               <Server className="h-4 w-4 shrink-0 text-kumo-brand" />
@@ -2381,14 +2323,14 @@ function OpenAIPage() {
                         <Table layout="fixed" className="w-full text-xs">
                           <colgroup>
                             <col />
-                            <col style={{ width: 92 }} />
-                            <col style={{ width: 58 }} />
+                            <col style={{ width: 60 }} />
+                            <col style={{ width: 60 }} />
                           </colgroup>
                           <Table.Header sticky variant="compact">
                             <Table.Row className="h-8">
                               <Table.Head className="!px-2.5 !py-1.5">端点</Table.Head>
+                              <Table.Head className="!px-2 !py-1.5 text-center">模型</Table.Head>
                               <Table.Head className="!px-2 !py-1.5 text-center">状态</Table.Head>
-                              <Table.Head className="!px-2 !py-1.5 text-right">模型</Table.Head>
                             </Table.Row>
                           </Table.Header>
                           <Table.Body>
@@ -2415,6 +2357,9 @@ function OpenAIPage() {
                                     </div>
                                   </div>
                                 </Table.Cell>
+                                <Table.Cell className="!px-2 !py-1.5 text-center font-mono text-kumo-strong">
+                                  {item.models?.length || 0}
+                                </Table.Cell>
                                 <Table.Cell className="!px-2 !py-1.5 text-center">
                                   <div
                                     className="flex justify-center"
@@ -2422,21 +2367,12 @@ function OpenAIPage() {
                                   >
                                     <Switch
                                       size="sm"
-                                      label={
-                                        item.enabled
-                                          ? item.status === 'valid'
-                                            ? '可用'
-                                            : '待检'
-                                          : '停用'
-                                      }
+                                      aria-label={item.enabled ? '停用端点' : '启用端点'}
                                       checked={item.enabled}
                                       onCheckedChange={() => toggleEndpointEnabled(item)}
                                       disabled={!!endpointToggleLoading[item.id]}
                                     />
                                   </div>
-                                </Table.Cell>
-                                <Table.Cell className="!px-2 !py-1.5 text-right font-mono text-kumo-strong">
-                                  {item.models?.length || 0}
                                 </Table.Cell>
                               </Table.Row>
                             ))}
@@ -2549,8 +2485,7 @@ function OpenAIPage() {
                                 const canStopHealthCheck =
                                   health?.loading &&
                                   modelHealthAbortControllersRef.current.has(healthKey);
-                                const healthCheckAnimating =
-                                  modelHealthBatchLoading || health?.loading;
+                                const healthCheckAnimating = !!health?.loading;
                                 const healthTone = health?.loading
                                   ? 'info'
                                   : health?.status === 'healthy'
@@ -2611,13 +2546,13 @@ function OpenAIPage() {
                                           onClick={() =>
                                             testModelHealth({ id: modelId }, endpoint.id)
                                           }
-                                          disabled={modelHealthBatchLoading && !canStopHealthCheck}
+                                          disabled={!!health?.loading}
                                           title={
                                             health?.error ||
                                             (canStopHealthCheck
                                               ? '停止检测'
-                                              : modelHealthBatchLoading
-                                                ? '批量检测中'
+                                              : health?.loading
+                                                ? '检测中'
                                                 : '检测模型')
                                           }
                                           icon={
@@ -3389,7 +3324,7 @@ function OpenAIPage() {
             模型健康检测
           </Dialog.Title>
           <Dialog.Description className="text-sm text-kumo-subtle mb-4">
-            向所有启用端点同时发送轻量请求，测试每个模型的可用性与延迟。
+            按设定并发逐批发送轻量请求，测试每个模型的可用性与延迟。
           </Dialog.Description>
 
           <div className="space-y-4">
@@ -3398,12 +3333,12 @@ function OpenAIPage() {
                 <AlertTriangle className="w-3.5 h-3.5" />
                 警告
               </p>
-              <p>所有模型会同时收到真实请求，可能产生小额账单，也可能触发供应商并发或速率限制。</p>
+              <p>批量检测会发送真实请求；并发数越高，越容易触发供应商限流、风控或短时失败。</p>
             </div>
 
             <div className="flex items-center justify-between text-sm">
               <span className="font-semibold text-kumo-strong">检测方式</span>
-              <InlineStatusPill tone="info">全部模型同时检测</InlineStatusPill>
+              <InlineStatusPill tone="info">实时逐项回填</InlineStatusPill>
             </div>
 
             <div className="flex items-center justify-between text-sm">
@@ -3424,6 +3359,33 @@ function OpenAIPage() {
                 <span className="text-kumo-subtle">秒</span>
               </div>
             </div>
+
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-semibold text-kumo-strong">并发数</span>
+              <div className="flex items-center gap-1.5">
+                <Input
+                  size="sm"
+                  aria-label="健康检测并发数"
+                  type="number"
+                  value={healthCheckForm.concurrency}
+                  onChange={e =>
+                    setHealthCheckForm({
+                      ...healthCheckForm,
+                      concurrency: Number(e.target.value),
+                    })
+                  }
+                  min={1}
+                  max={30}
+                  className="w-16 text-kumo-strong text-sm px-2 py-1 text-center"
+                />
+                <span className="text-kumo-subtle">个请求</span>
+              </div>
+            </div>
+
+            <p className="text-xs text-kumo-subtle">
+              默认 {DEFAULT_MODEL_HEALTH_CONCURRENCY}；点击“开始检测”时最多检测前{' '}
+              {MAX_BATCH_MODEL_HEALTH_TARGETS} 个模型，并按返回顺序实时显示结果。
+            </p>
 
             <div className="flex justify-end gap-3 pt-2">
               <Dialog.Close

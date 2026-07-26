@@ -556,7 +556,6 @@ function RouteList({ routes, selectedRoute, onSelect }) {
   return (
     <SectionCard
       title={`接口列表 (${routes.length})`}
-      description="按路径、认证、状态筛选"
       icon={<Search className="h-4 w-4 text-kumo-brand" />}
       className={cx(fixedPanelClass, 'min-h-0')}
       bodyPadding="none"
@@ -704,7 +703,6 @@ function RouteDetail({ route, openapiRoute }) {
   return (
     <SectionCard
       title={<span className="break-all font-mono text-base">{route.prefix}</span>}
-      description={route.detail || route.description}
       icon={<FileText className="h-4 w-4 text-kumo-brand" />}
       meta={
         <div className="flex flex-wrap items-center gap-2">

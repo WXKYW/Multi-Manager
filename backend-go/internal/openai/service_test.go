@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -279,6 +280,8 @@ func TestGetModelsListIncludesEnabledEndpointPendingVerification(t *testing.T) {
 }
 
 func TestOpenAILifecycleAndProxy(t *testing.T) {
+	var activeChatRequests int32
+
 	// Spin up a mock upstream OpenAI server
 	mockUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
@@ -303,10 +306,22 @@ func TestOpenAILifecycleAndProxy(t *testing.T) {
 		}
 
 		if r.Method == http.MethodPost && path == "/v1/chat/completions" {
+			current := atomic.AddInt32(&activeChatRequests, 1)
+			defer atomic.AddInt32(&activeChatRequests, -1)
+
 			var body struct {
 				Stream bool `json:"stream"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
+
+			if current > 1 {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+				return
+			}
+
+			time.Sleep(20 * time.Millisecond)
 
 			if body.Stream {
 				w.Header().Set("Content-Type", "text/event-stream")
@@ -460,7 +475,53 @@ func TestOpenAILifecycleAndProxy(t *testing.T) {
 		t.Fatalf("expected operational status, got %s error=%s", healthRes.Status, healthRes.Error)
 	}
 
-	// 9. Export
+	// 9. Health check all models on one endpoint
+	wHealthAll := httptest.NewRecorder()
+	rHealthAll, _ := http.NewRequest("POST", "/api/openai/endpoints/"+endpointID+"/health-check-all", strings.NewReader(`{
+		"timeout": 5000,
+		"concurrency": 1
+	}`))
+	service.ServeHTTP(wHealthAll, rHealthAll)
+	if wHealthAll.Code != http.StatusOK {
+		t.Fatalf("health check all status = %d body=%s", wHealthAll.Code, wHealthAll.Body.String())
+	}
+	var endpointHealthAll struct {
+		Success bool          `json:"success"`
+		Summary HealthSummary `json:"summary"`
+	}
+	mustDecode(t, wHealthAll.Body.String(), &endpointHealthAll)
+	if !endpointHealthAll.Success || endpointHealthAll.Summary.Operational != 2 || endpointHealthAll.Summary.Failed != 0 {
+		t.Fatalf("unexpected endpoint batch health summary: %#v", endpointHealthAll)
+	}
+
+	// 10. Health check all enabled endpoints
+	wGlobalHealthAll := httptest.NewRecorder()
+	rGlobalHealthAll, _ := http.NewRequest("POST", "/api/openai/health-check-all", strings.NewReader(`{
+		"timeout": 5000,
+		"concurrency": 1
+	}`))
+	service.ServeHTTP(wGlobalHealthAll, rGlobalHealthAll)
+	if wGlobalHealthAll.Code != http.StatusOK {
+		t.Fatalf("global health check all status = %d body=%s", wGlobalHealthAll.Code, wGlobalHealthAll.Body.String())
+	}
+	var globalHealthAll struct {
+		Success   bool `json:"success"`
+		Endpoints []struct {
+			EndpointID  string         `json:"endpointId"`
+			Operational int            `json:"operational"`
+			Failed      int            `json:"failed"`
+			Results     []HealthRecord `json:"results"`
+		} `json:"endpoints"`
+	}
+	mustDecode(t, wGlobalHealthAll.Body.String(), &globalHealthAll)
+	if !globalHealthAll.Success || len(globalHealthAll.Endpoints) != 1 {
+		t.Fatalf("unexpected global batch health payload: %#v", globalHealthAll)
+	}
+	if globalHealthAll.Endpoints[0].EndpointID != endpointID || globalHealthAll.Endpoints[0].Operational != 2 || globalHealthAll.Endpoints[0].Failed != 0 {
+		t.Fatalf("unexpected global batch health endpoint result: %#v", globalHealthAll.Endpoints[0])
+	}
+
+	// 11. Export
 	wExport := httptest.NewRecorder()
 	rExport, _ := http.NewRequest("GET", "/api/openai/export", nil)
 	service.ServeHTTP(wExport, rExport)
@@ -475,7 +536,7 @@ func TestOpenAILifecycleAndProxy(t *testing.T) {
 		t.Fatalf("expected 1 exported endpoint, got %d", len(exportPayload.Endpoints))
 	}
 
-	// 10. Import
+	// 12. Import
 	wImport := httptest.NewRecorder()
 	rImport, _ := http.NewRequest("POST", "/api/openai/import", strings.NewReader(fmt.Sprintf(`{
 		"endpoints": [{
@@ -498,6 +559,87 @@ func TestOpenAILifecycleAndProxy(t *testing.T) {
 	service.ServeHTTP(wDel, rDel)
 	if wDel.Code != http.StatusOK {
 		t.Fatalf("delete status = %d body=%s", wDel.Code, wDel.Body.String())
+	}
+}
+
+func TestHealthCheckRequiresValidOutput(t *testing.T) {
+	mockUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-api-key" {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error":{"message":"Invalid API Key"}}`))
+			return
+		}
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		var body struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		switch body.Model {
+		case "empty-model":
+			w.Write([]byte(`{
+				"id": "chatcmpl-empty",
+				"object": "chat.completion",
+				"choices": [
+					{"message": {"role": "assistant", "content": "   "}}
+				]
+			}`))
+		case "array-model":
+			w.Write([]byte(`{
+				"id": "chatcmpl-array",
+				"object": "chat.completion",
+				"choices": [
+					{"message": {"role": "assistant", "content": [{"type":"text","text":"ok"}]}}
+				]
+			}`))
+		default:
+			w.Write([]byte(`{
+				"id": "chatcmpl-default",
+				"object": "chat.completion",
+				"choices": [
+					{"message": {"role": "assistant", "content": "hello"}}
+				]
+			}`))
+		}
+	}))
+	defer mockUpstream.Close()
+
+	service := New(config.Config{
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	success := service.healthCheckSingleModel(
+		context.Background(),
+		"",
+		mockUpstream.URL+"/v1",
+		"test-api-key",
+		"array-model",
+		5*time.Second,
+	)
+	if success.Status == "failed" || success.Error != "" {
+		t.Fatalf("expected valid output to pass, got status=%s error=%s", success.Status, success.Error)
+	}
+
+	failed := service.healthCheckSingleModel(
+		context.Background(),
+		"",
+		mockUpstream.URL+"/v1",
+		"test-api-key",
+		"empty-model",
+		5*time.Second,
+	)
+	if failed.Status != "failed" {
+		t.Fatalf("expected empty output to fail, got status=%s error=%s", failed.Status, failed.Error)
+	}
+	if !strings.Contains(failed.Error, "有效输出") {
+		t.Fatalf("expected effective output error, got %s", failed.Error)
 	}
 }
 

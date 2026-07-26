@@ -2106,13 +2106,9 @@ function SubscriptionPage() {
       </DataTableFrame>
     </SectionCard>
     <SectionCard
-      title={`节点列表 (${filteredNodes.length})`}
-      className="min-h-0"
-      bodyPadding="none"
-      bodyClassName="min-h-0"
-      actions={<Button size="sm" variant="primary" onClick={() => openImportModal()} aria-label="导入外部节点" title="导入外部节点"><Download className="h-3.5 w-3.5" />导入外部节点</Button>}
-    >
-      <div className="flex min-w-0 items-center gap-2 overflow-x-auto border-b border-kumo-line px-3 py-2 overscroll-x-contain whitespace-nowrap touch-pan-x scrollbar-thin">
+      title={(
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <span>节点列表 ({filteredNodes.length})</span>
           <Tabs
             {...TOOL_TABS_PROPS}
             value={protocolFilter}
@@ -2131,7 +2127,13 @@ function SubscriptionPage() {
               className="w-36 shrink-0"
             />
           )}
-      </div>
+        </div>
+      )}
+      className="min-h-0"
+      bodyPadding="none"
+      bodyClassName="min-h-0"
+      actions={<Button size="sm" variant="primary" onClick={() => openImportModal()} aria-label="导入外部节点" title="导入外部节点"><Download className="h-3.5 w-3.5" />导入外部节点</Button>}
+    >
       <DataTableFrame variant="embedded">
         <AppTable tableId="external-proxy-nodes" columns={NODE_COLUMNS}>
           <Table.Header sticky variant="compact">

@@ -179,11 +179,9 @@ export default function SystemLogsPage() {
       <SectionCard
         className="shrink-0"
         title="系统日志"
-        description={logPath || '查看、筛选并下载 Go 后端应用日志。'}
         icon={<FileText className="h-4 w-4 text-kumo-brand" />}
         actions={(
           <>
-            <Badge variant="secondary">{lines.length} 条</Badge>
             <label className="flex h-8 items-center gap-2 rounded-md border border-kumo-line bg-kumo-recessed px-2 text-xs text-kumo-subtle">
               <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />
               自动刷新

@@ -2,6 +2,10 @@ export function modelHealthKey(endpointId, modelId) {
   return JSON.stringify([String(endpointId || ''), String(modelId || '').trim()]);
 }
 
+export const DEFAULT_MODEL_HEALTH_CONCURRENCY = 30;
+const MAX_MODEL_HEALTH_CONCURRENCY = 30;
+export const MAX_BATCH_MODEL_HEALTH_TARGETS = 30;
+
 export function endpointModelIds(endpoint) {
   const models = Array.isArray(endpoint?.models) ? endpoint.models : [];
   return Array.from(
@@ -19,6 +23,14 @@ export function modelHealthTargets(endpoints) {
     if (!endpoint?.enabled) return [];
     return endpointModelIds(endpoint).map(modelId => ({ endpointId: endpoint.id, modelId }));
   });
+}
+
+export function limitModelHealthTargets(
+  targets,
+  maxTargets = MAX_BATCH_MODEL_HEALTH_TARGETS
+) {
+  const safeMax = Math.max(1, Math.floor(Number(maxTargets) || MAX_BATCH_MODEL_HEALTH_TARGETS));
+  return (Array.isArray(targets) ? targets : []).slice(0, safeMax);
 }
 
 export function normalizeModelHealthRecord(record, fallbackError = '检测未返回结果') {
@@ -51,4 +63,20 @@ export function countModelHealthResults(results) {
     },
     { healthy: 0, degraded: 0, failed: 0 }
   );
+}
+
+export function resolveModelHealthConcurrency(
+  requestedConcurrency,
+  totalTargets,
+  fallback = DEFAULT_MODEL_HEALTH_CONCURRENCY,
+  maxConcurrency = MAX_MODEL_HEALTH_CONCURRENCY
+) {
+  const total = Math.max(0, Math.floor(Number(totalTargets) || 0));
+  if (total === 0) return 0;
+
+  const safeMax = Math.max(1, Math.floor(Number(maxConcurrency) || MAX_MODEL_HEALTH_CONCURRENCY));
+  const safeFallback = Math.max(1, Math.min(Math.floor(Number(fallback) || 0) || 1, safeMax, total));
+  const parsed = Math.floor(Number(requestedConcurrency) || 0);
+  if (!Number.isFinite(parsed) || parsed <= 0) return safeFallback;
+  return Math.max(1, Math.min(parsed, safeMax, total));
 }

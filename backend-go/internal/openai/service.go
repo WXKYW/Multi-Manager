@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -30,10 +31,11 @@ import (
 )
 
 const (
-	defaultTimeout       = 60 * time.Second
-	degradedThreshold    = 3 * time.Second
-	healthTimeoutDefault = 30 * time.Second
-	healthConcurrencyMax = 12
+	defaultTimeout           = 60 * time.Second
+	degradedThreshold        = 3 * time.Second
+	healthTimeoutDefault     = 30 * time.Second
+	healthConcurrencyDefault = 4
+	healthConcurrencyMax     = 200
 )
 
 type Endpoint struct {
@@ -78,10 +80,23 @@ type Service struct {
 }
 
 func New(cfg config.Config) *Service {
+	tr := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          500,
+		MaxIdleConnsPerHost:   100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
 	s := &Service{
 		cfg:     cfg,
 		store:   database.New(cfg),
-		client:  &http.Client{Timeout: defaultTimeout},
+		client:  &http.Client{Transport: tr, Timeout: defaultTimeout},
 		apiKeys: apikeys.New(cfg),
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -890,7 +905,7 @@ func (s *Service) healthCheckAllModelsRoute(w http.ResponseWriter, r *http.Reque
 
 	var models []string
 	if modelsRaw != "" {
-		_ = json.Unmarshal([]byte(modelsRaw), &models)
+		models = parseModelIDsFromRaw(modelsRaw)
 	}
 
 	if len(models) == 0 {
@@ -910,7 +925,7 @@ func (s *Service) healthCheckAllModelsRoute(w http.ResponseWriter, r *http.Reque
 		timeoutDuration = time.Duration(req.Timeout) * time.Millisecond
 	}
 
-	concurrency := 5
+	concurrency := healthConcurrencyDefault
 	if req.Concurrency > 0 {
 		concurrency = req.Concurrency
 	}
@@ -1123,7 +1138,7 @@ func (s *Service) healthCheckAllRoute(w http.ResponseWriter, r *http.Request) {
 		timeoutDuration = time.Duration(req.Timeout) * time.Millisecond
 	}
 
-	concurrency := 5
+	concurrency := healthConcurrencyDefault
 	if req.Concurrency > 0 {
 		concurrency = req.Concurrency
 	}
@@ -1135,10 +1150,7 @@ func (s *Service) healthCheckAllRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	targets := make([]endpointTarget, 0, len(items))
 	for _, it := range items {
-		var models []string
-		if it.modelsRaw != "" {
-			_ = json.Unmarshal([]byte(it.modelsRaw), &models)
-		}
+		models := parseModelIDsFromRaw(it.modelsRaw)
 		targets = append(targets, endpointTarget{item: it, models: models})
 	}
 
@@ -1824,6 +1836,48 @@ func (s *Service) listModelsRaw(ctx context.Context, u string, key string) ([]st
 	return nil, fmt.Errorf("unexpected models structure")
 }
 
+func parseModelIDsFromRaw(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	var strList []string
+	if err := json.Unmarshal([]byte(raw), &strList); err == nil && len(strList) > 0 {
+		out := make([]string, 0, len(strList))
+		for _, s := range strList {
+			if trimmed := strings.TrimSpace(s); trimmed != "" {
+				out = append(out, trimmed)
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	var anyList []interface{}
+	if err := json.Unmarshal([]byte(raw), &anyList); err == nil {
+		out := make([]string, 0, len(anyList))
+		for _, item := range anyList {
+			switch v := item.(type) {
+			case string:
+				if trimmed := strings.TrimSpace(v); trimmed != "" {
+					out = append(out, trimmed)
+				}
+			case map[string]interface{}:
+				if id, ok := v["id"].(string); ok {
+					if trimmed := strings.TrimSpace(id); trimmed != "" {
+						out = append(out, trimmed)
+					}
+				} else if name, ok := v["name"].(string); ok {
+					if trimmed := strings.TrimSpace(name); trimmed != "" {
+						out = append(out, trimmed)
+					}
+				}
+			}
+		}
+		return out
+	}
+	return nil
+}
+
 func (s *Service) healthCheckSingleModel(ctx context.Context, endpointID, baseURL, apiKey, model string, timeout time.Duration) HealthRecord {
 	startTime := time.Now()
 	record := HealthRecord{
@@ -1835,9 +1889,9 @@ func (s *Service) healthCheckSingleModel(ctx context.Context, endpointID, baseUR
 	reqURL := fmt.Sprintf("%s/chat/completions", strings.TrimSuffix(baseURL, "/"))
 	payload := map[string]interface{}{
 		"model":      model,
-		"messages":   []map[string]string{{"role": "user", "content": "hi"}},
-		"stream":     true,
-		"max_tokens": 1,
+		"messages":   []map[string]string{{"role": "user", "content": "Reply with any short non-empty text."}},
+		"stream":     false,
+		"max_tokens": 16,
 	}
 	bodyBytes, _ := json.Marshal(payload)
 
@@ -1851,7 +1905,7 @@ func (s *Service) healthCheckSingleModel(ctx context.Context, endpointID, baseUR
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "text/event-stream")
+	httpReq.Header.Set("Accept", "application/json, text/event-stream")
 
 	resp, err := s.client.Do(httpReq)
 	if err != nil {
@@ -1870,12 +1924,17 @@ func (s *Service) healthCheckSingleModel(ctx context.Context, endpointID, baseUR
 		return record
 	}
 
-	// Read first chunk
-	buf := make([]byte, 256)
-	_, _ = resp.Body.Read(buf) // Ignore error, we just care if we read something
-
 	latency := time.Since(startTime)
 	record.Latency = latency.Milliseconds()
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		record.Error = err.Error()
+		return record
+	}
+	if output := extractHealthCheckOutput(respBytes); output == "" {
+		record.Error = "模型未返回有效输出"
+		return record
+	}
 	if latency <= degradedThreshold {
 		record.Status = "operational"
 	} else {
@@ -1883,6 +1942,79 @@ func (s *Service) healthCheckSingleModel(ctx context.Context, endpointID, baseUR
 	}
 
 	return record
+}
+
+func extractHealthCheckOutput(body []byte) string {
+	trimmedBody := strings.TrimSpace(string(body))
+	if trimmedBody == "" {
+		return ""
+	}
+
+	if strings.Contains(trimmedBody, "data:") {
+		if output := extractHealthCheckOutputFromSSE(trimmedBody); output != "" {
+			return output
+		}
+	}
+
+	var parsed interface{}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return ""
+	}
+	return extractHealthCheckOutputValue(parsed)
+}
+
+func extractHealthCheckOutputFromSSE(body string) string {
+	parts := []string{}
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" || payload == "[DONE]" {
+			continue
+		}
+		var parsed interface{}
+		if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
+			continue
+		}
+		if text := extractHealthCheckOutputValue(parsed); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, " "))
+}
+
+func extractHealthCheckOutputValue(value interface{}) string {
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case []interface{}:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			if text := extractHealthCheckOutputValue(item); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.TrimSpace(strings.Join(parts, " "))
+	case map[string]interface{}:
+		for _, key := range []string{
+			"choices",
+			"output",
+			"message",
+			"delta",
+			"content",
+			"text",
+			"output_text",
+			"reasoning_content",
+			"refusal",
+		} {
+			if text := extractHealthCheckOutputValue(v[key]); text != "" {
+				return text
+			}
+		}
+	}
+	return ""
 }
 
 func (s *Service) runBatchHealthCheck(ctx context.Context, endpointID, baseURL, apiKey string, models []string, timeout time.Duration, concurrency int) HealthSummary {
