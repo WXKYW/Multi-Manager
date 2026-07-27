@@ -55,6 +55,13 @@ const getCheckingAuthProvider = () => {
   return String(new URLSearchParams(window.location.search).get('provider') || '').trim();
 };
 
+const normalizeLegacyDashboardPath = () => {
+  if (typeof window === 'undefined') return;
+  const normalized = window.location.pathname.replace(/\/+$/, '') || '/';
+  if (normalized !== '/dashboard') return;
+  window.history.replaceState(window.history.state, '', `/${window.location.search}${window.location.hash}`);
+};
+
 function AuthTransitionScreen() {
   const provider = getCheckingAuthProvider();
   const isGitHub = provider === 'github';
@@ -103,6 +110,10 @@ function App() {
     }
     checkAuth();
   }, [checkAuth, dockerMockPreview]);
+
+  useEffect(() => {
+    normalizeLegacyDashboardPath();
+  }, []);
 
   // 同步主题至 html class
   useEffect(() => {

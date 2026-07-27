@@ -738,8 +738,8 @@ function AuthPage() {
           autoComplete={requiresSecondStep ? 'one-time-code' : 'current-password'}
           spellCheck={false}
           className={cx(
-            'auth-login-input w-full transition-all duration-200',
-            requiresSecondStep && 'text-center font-mono tracking-widest text-lg',
+            'auth-login-input w-full text-center transition-all duration-200',
+            requiresSecondStep && 'font-mono tracking-widest text-lg',
             loginError && 'auth-login-input--error'
           )}
           autoFocus

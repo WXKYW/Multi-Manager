@@ -1518,7 +1518,7 @@ th > button[aria-label='Resize column'] > span {
 
 :root[data-mode='dark'] .public-server-status-card {
   box-shadow:
-    0 1px 0 color-mix(in oklab, var(--color-kumo-line) 82%, transparent),
+    0 2px 6px color-mix(in oklab, var(--color-kumo-line) 24%, transparent),
     0 12px 28px color-mix(in oklab, var(--color-kumo-canvas) 34%, transparent);
 }
 

@@ -119,10 +119,11 @@ const MODULE_PATHS = Object.keys(MODULE_CONFIG).reduce(
     paths[moduleId] = `/${moduleId}`;
     return paths;
   },
-  { dashboard: '/dashboard' }
+  { dashboard: '/' }
 );
 
 const LEGACY_MODULE_PATHS = {
+  dashboard: 'dashboard',
   'self-h': 'scheduler',
 };
 
@@ -361,7 +362,7 @@ const SidebarBrand = ({ onHome }) => (
   </Button>
 );
 
-const SidebarStyleSwitches = ({
+const SidebarStyleSwitchItems = ({
   pageWidthMode,
   onPageWidthChange,
   themeMode,
@@ -382,49 +383,46 @@ const SidebarStyleSwitches = ({
   ].join(' ');
 
   return (
-    <Sidebar.Group className="mt-auto">
-      <Sidebar.GroupLabel>样式切换</Sidebar.GroupLabel>
-      <Sidebar.Menu>
-        <Sidebar.MenuItem>
-          <div className={controlRowClassName} data-sidebar="menu-button">
-            <div className={controlRowInnerClassName}>
-              <span className="h-4 w-4 shrink-0 opacity-40" title="页面宽度" aria-label="页面宽度">
-                <AppWindow className="h-4 w-4" />
-              </span>
-              <div className="sidebar-style-tabs min-w-0 flex-1 group-data-[state=collapsed]/sidebar:hidden">
-                <Tabs
-                  {...TOOL_TABS_PROPS}
-                  className="w-full min-w-0"
-                  listClassName="grid w-full grid-cols-3"
-                  value={pageWidthMode}
-                  onValueChange={onPageWidthChange}
-                  tabs={PAGE_WIDTH_OPTIONS}
-                />
-              </div>
+    <>
+      <Sidebar.MenuItem>
+        <div className={controlRowClassName} data-sidebar="menu-button">
+          <div className={controlRowInnerClassName}>
+            <span className="h-4 w-4 shrink-0 opacity-40" title="页面宽度" aria-label="页面宽度">
+              <AppWindow className="h-4 w-4" />
+            </span>
+            <div className="sidebar-style-tabs min-w-0 flex-1 group-data-[state=collapsed]/sidebar:hidden">
+              <Tabs
+                {...TOOL_TABS_PROPS}
+                className="w-full min-w-0"
+                listClassName="grid w-full grid-cols-3"
+                value={pageWidthMode}
+                onValueChange={onPageWidthChange}
+                tabs={PAGE_WIDTH_OPTIONS}
+              />
             </div>
           </div>
-        </Sidebar.MenuItem>
-        <Sidebar.MenuItem>
-          <div className={controlRowClassName} data-sidebar="menu-button">
-            <div className={controlRowInnerClassName}>
-              <span className="h-4 w-4 shrink-0 opacity-40" title="主题模式" aria-label="主题模式">
-                <Palette className="h-4 w-4" />
-              </span>
-              <div className="sidebar-style-tabs min-w-0 flex-1 group-data-[state=collapsed]/sidebar:hidden">
-                <Tabs
-                  {...TOOL_TABS_PROPS}
-                  className="w-full min-w-0"
-                  listClassName="grid w-full grid-cols-3"
-                  value={themeMode}
-                  onValueChange={onThemeModeChange}
-                  tabs={THEME_MODE_OPTIONS}
-                />
-              </div>
+        </div>
+      </Sidebar.MenuItem>
+      <Sidebar.MenuItem>
+        <div className={controlRowClassName} data-sidebar="menu-button">
+          <div className={controlRowInnerClassName}>
+            <span className="h-4 w-4 shrink-0 opacity-40" title="主题模式" aria-label="主题模式">
+              <Palette className="h-4 w-4" />
+            </span>
+            <div className="sidebar-style-tabs min-w-0 flex-1 group-data-[state=collapsed]/sidebar:hidden">
+              <Tabs
+                {...TOOL_TABS_PROPS}
+                className="w-full min-w-0"
+                listClassName="grid w-full grid-cols-3"
+                value={themeMode}
+                onValueChange={onThemeModeChange}
+                tabs={THEME_MODE_OPTIONS}
+              />
             </div>
           </div>
-        </Sidebar.MenuItem>
-      </Sidebar.Menu>
-    </Sidebar.Group>
+        </div>
+      </Sidebar.MenuItem>
+    </>
   );
 };
 
@@ -710,11 +708,12 @@ function MainLayout() {
           {/* 导航栏项 */}
           <Sidebar.Content>
             {visibleModuleGroups.map(group => {
-              const groupLabel = group.id === 'overview' ? '总览' : group.name;
+              const showGroupLabel = group.id !== 'overview';
+              const groupLabel = group.name;
 
               return (
                 <Sidebar.Group key={group.id}>
-                  <Sidebar.GroupLabel>{groupLabel}</Sidebar.GroupLabel>
+                  {showGroupLabel ? <Sidebar.GroupLabel>{groupLabel}</Sidebar.GroupLabel> : null}
                   <Sidebar.Menu>
                     {group.modules.map(module => (
                       <SidebarModuleButton
@@ -746,7 +745,7 @@ function MainLayout() {
                 </Sidebar.Group>
               );
             })}
-            <Sidebar.Group>
+            <Sidebar.Group className="mt-auto">
               <Sidebar.GroupLabel>系统</Sidebar.GroupLabel>
               <Sidebar.Menu>
                 <SidebarModuleSubgroup
@@ -763,16 +762,15 @@ function MainLayout() {
                   activeModule={mainActiveTab}
                   onNavigate={navigateToModule}
                 />
-
+                <SidebarStyleSwitchItems
+                  pageWidthMode={pageWidthMode}
+                  onPageWidthChange={setPageWidthMode}
+                  themeMode={themeMode}
+                  onThemeModeChange={setThemeMode}
+                />
                 <SidebarLogoutButton onLogout={logout} />
               </Sidebar.Menu>
             </Sidebar.Group>
-            <SidebarStyleSwitches
-              pageWidthMode={pageWidthMode}
-              onPageWidthChange={setPageWidthMode}
-              themeMode={themeMode}
-              onThemeModeChange={setThemeMode}
-            />
           </Sidebar.Content>
 
           {/* 底部功能栏 */}
