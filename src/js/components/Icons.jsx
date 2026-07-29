@@ -279,9 +279,14 @@ export const MODULE_GROUP_ICON_MAP = {
   overview: LayoutDashboard,
   'api-gateway': TrendingUp,
   infrastructure: Layers,
+  'cloud-vendors': Cloud,
   devops: GitBranch,
   toolbox: Grid,
+  'system-tools': Sliders,
+  'utility-tools': FolderOpen,
   system: Settings,
+  'global-config': Settings,
+  configuration: Settings,
 };
 
 export const getModuleIconComponent = (moduleId, fallback = Server) => (

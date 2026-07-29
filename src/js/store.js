@@ -20,7 +20,7 @@ export const MODULE_CONFIG = {
     name: '系统设置',
     shortName: '设置',
     icon: 'fa-cog',
-    description: '全局配置',
+    description: '系统设置',
   },
   openai: {
     name: '模型网关',
@@ -108,10 +108,10 @@ export const MODULE_CONFIG = {
     description: '文件分享',
   },
   notification: {
-    name: '通知',
-    shortName: '通知',
+    name: '通知中心',
+    shortName: '通知中心',
     icon: 'fa-bell',
-    description: '通知渠道',
+    description: '通知中心',
   },
   apidocs: {
     name: 'API 接口',
@@ -159,7 +159,20 @@ export const MODULE_GROUPS = [
     id: 'toolbox',
     name: '工具箱',
     icon: 'fa-toolbox',
-    modules: ['scheduler', 'totp', 'uptime', 'filebox', 'notification'],
+    modules: [],
+    subgroups: [
+      {
+        id: 'system-tools',
+        name: '系统工具',
+        modules: ['scheduler', 'uptime'],
+      },
+      {
+        id: 'utility-tools',
+        name: '实用工具',
+        modules: ['filebox'],
+      },
+    ],
+    trailingModules: ['totp'],
   },
   {
     id: 'api-gateway',
@@ -171,7 +184,14 @@ export const MODULE_GROUPS = [
     id: 'system',
     name: '系统',
     icon: 'fa-cog',
-    modules: ['apidocs', 'systemlogs'],
+    modules: [],
+    subgroups: [
+      {
+        id: 'global-config',
+        name: '系统设置',
+        modules: ['notification', 'apidocs', 'systemlogs', 'settings'],
+      },
+    ],
   },
 ];
 

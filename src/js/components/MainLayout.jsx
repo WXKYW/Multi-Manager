@@ -750,10 +750,10 @@ function MainLayout() {
               <Sidebar.Menu>
                 <SidebarModuleSubgroup
                   subgroup={{
-                    id: 'configuration',
-                    name: '配置',
+                    id: 'global-config',
+                    name: '系统设置',
                     icon: Settings,
-                    modules: ['apidocs', 'systemlogs', 'settings'].filter(
+                    modules: ['notification', 'apidocs', 'systemlogs', 'settings'].filter(
                       module =>
                         module === 'settings' ||
                         (moduleOrder.includes(module) && moduleVisibility[module] !== false)
