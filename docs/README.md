@@ -48,7 +48,10 @@
 ## 参考资料
 
 - [PRD](./prd/)
+- [Draw.io 图编辑工具模块 PRD](./prd/drawio-diagram-editor.md)
+- [文档编辑器重构 PRD](./prd/document-editor-refactor.md)
 - [Oracle OCI 主机管理模块 PRD](./prd/oracle-oci-server-management.md)
+- [提示词库模块 PRD](./prd/prompt-library.md)
 - [Kumo 参考资料](./reference/)
 
 ## 文档安全约定
