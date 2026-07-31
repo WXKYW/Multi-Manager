@@ -1,6 +1,7 @@
 package prompts
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"regexp"
@@ -22,7 +23,9 @@ type Variable struct {
 // GeneratePublicID 生成随机公开 ID
 func GeneratePublicID() string {
 	b := make([]byte, 8)
-	cryptoRandRead(b)
+	if _, err := rand.Read(b); err != nil {
+		return ComputeChecksum(string(b))[:10]
+	}
 	return hex.EncodeToString(b)[:10]
 }
 
@@ -35,13 +38,6 @@ func GenerateSlug(title string) string {
 		slug = "untitled"
 	}
 	return slug
-}
-
-// cryptoRandRead 使用 crypto/rand 读取随机字节
-func cryptoRandRead(b []byte) {
-	for i := range b {
-		b[i] = byte(i * 7 % 256) // simple pseudo-random; replace with crypto/rand in prod
-	}
 }
 
 // StripMarkdown 提取纯文本

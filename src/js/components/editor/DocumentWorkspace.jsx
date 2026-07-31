@@ -39,6 +39,7 @@ export default function DocumentWorkspace({
   leftPanel,
   extraToolbarActions,
   placeholder = '开始输入 Markdown 内容…',
+	autosaveDelay = 0,
   className = '',
 }) {
   const state = useDocumentEditorState(initialMarkdown, {
@@ -53,7 +54,9 @@ export default function DocumentWorkspace({
   useEffect(() => {
     if (initialMarkdown !== state.markdownRef.current && adapterRef.current) {
       adapterRef.current.setMarkdown(initialMarkdown);
-      state.setMarkdown(initialMarkdown);
+	  state.resetMarkdown(initialMarkdown);
+	} else if (initialMarkdown !== state.markdownRef.current) {
+	  state.resetMarkdown(initialMarkdown);
     }
   }, [initialMarkdown]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -78,6 +81,12 @@ export default function DocumentWorkspace({
       state.markSaveError();
     }
   }, [onSave, state]);
+
+	useEffect(() => {
+		if (!autosaveDelay || !onSave || !state.dirty || state.saveState === 'saving') return;
+		const timer = window.setTimeout(() => handleSave(), autosaveDelay);
+		return () => window.clearTimeout(timer);
+	}, [autosaveDelay, handleSave, onSave, state.dirty, state.saveState]);
 
   const handleCopyMarkdown = useCallback(async () => {
     try {
@@ -120,6 +129,10 @@ export default function DocumentWorkspace({
         </div>
       );
     }
+
+	if (state.showPreview) {
+	  return <DocumentPreviewPane markdown={state.markdown} />;
+	}
 
     // write mode
     return (
@@ -181,7 +194,8 @@ export default function DocumentWorkspace({
                 outline={state.outline}
                 onHeadingClick={(item) => {
                   // Scroll to heading in editor
-                  const el = document.querySelector(`[data-heading-id="${item.id}"]`);
+				  const index = Number(String(item.id).replace('heading-', ''));
+				  const el = document.querySelectorAll('.app-markdown-visual-editor h1, .app-markdown-visual-editor h2, .app-markdown-visual-editor h3, .app-markdown-visual-editor h4, .app-markdown-visual-editor h5, .app-markdown-visual-editor h6')[index];
                   el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }}
               />

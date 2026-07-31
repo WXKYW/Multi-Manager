@@ -1725,6 +1725,73 @@ th > button[aria-label='Resize column'] > span {
   padding: 18px 20px 32px;
 }
 
+.app-markdown-visual-canvas,
+.app-markdown-visual-editor,
+.app-markdown-visual-editor .milkdown {
+  background: var(--color-kumo-base);
+  color: var(--text-color-kumo-default);
+}
+
+.app-markdown-visual-editor .milkdown,
+.app-markdown-visual-editor .ProseMirror {
+  min-height: 100%;
+}
+
+.app-markdown-visual-editor .ProseMirror {
+  margin: 0 auto;
+  width: min(100%, 52rem);
+  padding: 28px 32px 64px;
+  outline: none;
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+.app-markdown-visual-editor .ProseMirror > :first-child,
+.app-markdown-preview > :first-child {
+  margin-top: 0;
+}
+
+.app-markdown-visual-editor .ProseMirror h1,
+.app-markdown-visual-editor .ProseMirror h2,
+.app-markdown-visual-editor .ProseMirror h3 {
+  margin: 1.5em 0 0.65em;
+  color: var(--text-color-kumo-strong);
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.app-markdown-visual-editor .ProseMirror h1 { font-size: 1.7rem; }
+.app-markdown-visual-editor .ProseMirror h2 { font-size: 1.35rem; }
+.app-markdown-visual-editor .ProseMirror h3 { font-size: 1.1rem; }
+
+.app-markdown-visual-editor .ProseMirror p,
+.app-markdown-visual-editor .ProseMirror ul,
+.app-markdown-visual-editor .ProseMirror ol,
+.app-markdown-visual-editor .ProseMirror blockquote,
+.app-markdown-visual-editor .ProseMirror pre {
+  margin: 0.8em 0;
+}
+
+.app-markdown-visual-editor .ProseMirror blockquote {
+  border-left: 3px solid var(--color-kumo-brand);
+  color: var(--text-color-kumo-subtle);
+  padding-left: 14px;
+}
+
+.app-markdown-visual-editor .ProseMirror pre,
+.app-markdown-visual-editor .ProseMirror code {
+  border-radius: 4px;
+  background: var(--color-kumo-recessed);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.app-markdown-visual-editor .ProseMirror pre { overflow: auto; padding: 12px 14px; }
+.app-markdown-visual-editor .ProseMirror :not(pre) > code { padding: 1px 4px; }
+
+@media (max-width: 640px) {
+  .app-markdown-visual-editor .ProseMirror { padding: 20px 16px 48px; }
+}
+
 .app-markdown-editor-state {
   position: absolute;
   inset: 0;

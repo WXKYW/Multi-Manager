@@ -76,38 +76,38 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.listRenderJobs(ctx, w)
 
 	// Document-specific routes
-	case len(parts) >= 2:
-		docID, err := strconv.ParseInt(parts[0], 10, 64)
+	case len(parts) >= 2 && parts[0] == "documents":
+		docID, err := strconv.ParseInt(parts[1], 10, 64)
 		if err != nil {
 			response.Error(w, http.StatusBadRequest, "Invalid document ID")
 			return
 		}
 
 		switch {
-		case len(parts) == 1 && r.Method == http.MethodGet:
+		case len(parts) == 2 && r.Method == http.MethodGet:
 			s.getDocument(ctx, w, docID)
-		case len(parts) == 1 && r.Method == http.MethodPut:
+		case len(parts) == 2 && r.Method == http.MethodPut:
 			s.updateDocument(ctx, w, r, docID)
-		case len(parts) == 1 && r.Method == http.MethodDelete:
+		case len(parts) == 2 && r.Method == http.MethodDelete:
 			s.deleteDocument(ctx, w, docID)
 
-		case len(parts) == 2 && parts[1] == "clone" && r.Method == http.MethodPost:
+		case len(parts) == 3 && parts[2] == "clone" && r.Method == http.MethodPost:
 			s.cloneDocument(ctx, w, docID)
-		case len(parts) == 2 && parts[1] == "draft" && r.Method == http.MethodGet:
+		case len(parts) == 3 && parts[2] == "draft" && r.Method == http.MethodGet:
 			s.getDraft(ctx, w, docID)
-		case len(parts) == 2 && parts[1] == "draft" && r.Method == http.MethodPut:
+		case len(parts) == 3 && parts[2] == "draft" && r.Method == http.MethodPut:
 			s.saveDraft(ctx, w, r, docID)
-		case len(parts) == 2 && parts[1] == "versions" && r.Method == http.MethodGet:
+		case len(parts) == 3 && parts[2] == "versions" && r.Method == http.MethodGet:
 			s.listVersions(ctx, w, docID)
-		case len(parts) == 2 && parts[1] == "versions" && r.Method == http.MethodPost:
+		case len(parts) == 3 && parts[2] == "versions" && r.Method == http.MethodPost:
 			s.saveVersion(ctx, w, r, docID)
-		case len(parts) == 2 && parts[1] == "export" && r.Method == http.MethodGet:
+		case len(parts) == 3 && parts[2] == "export" && r.Method == http.MethodGet:
 			s.exportDocument(ctx, w, r, docID)
-		case len(parts) == 3 && parts[1] == "thumbnails" && parts[2] == "rebuild" && r.Method == http.MethodPost:
+		case len(parts) == 4 && parts[2] == "thumbnails" && parts[3] == "rebuild" && r.Method == http.MethodPost:
 			s.rebuildThumbnail(ctx, w, docID)
 
-		case len(parts) == 3 && parts[1] == "versions":
-			versionID, verr := strconv.ParseInt(parts[2], 10, 64)
+		case len(parts) == 4 && parts[2] == "versions":
+			versionID, verr := strconv.ParseInt(parts[3], 10, 64)
 			if verr != nil {
 				response.Error(w, http.StatusBadRequest, "Invalid version ID")
 				return
@@ -119,8 +119,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				response.Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 			}
 
-		case len(parts) == 4 && parts[1] == "versions" && parts[3] == "restore" && r.Method == http.MethodPost:
-			versionID, verr := strconv.ParseInt(parts[2], 10, 64)
+		case len(parts) == 5 && parts[2] == "versions" && parts[4] == "restore" && r.Method == http.MethodPost:
+			versionID, verr := strconv.ParseInt(parts[3], 10, 64)
 			if verr != nil {
 				response.Error(w, http.StatusBadRequest, "Invalid version ID")
 				return
@@ -313,8 +313,7 @@ func (s *Service) saveDraft(ctx context.Context, w http.ResponseWriter, r *http.
 	draft, newRev, err := s.store.SaveDraft(ctx, docID, req)
 	if err != nil {
 		if strings.Contains(err.Error(), "conflict") {
-			// 获取当前 rev 用于冲突响应
-			_, currentRev, _ := s.store.SaveDraft(ctx, docID, SaveDraftRequest{ExpectedDraftRev: 0})
+			currentRev, _ := s.store.GetDraftRevision(ctx, docID)
 			conflict := ConflictResponse{
 				CurrentDraftRev: currentRev,
 				Message:         "Draft has been modified by another session",

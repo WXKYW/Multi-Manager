@@ -622,7 +622,11 @@ func joinStaticPath(rootDir, relPath string) (string, bool) {
 
 func (s *Server) applySecurityHeaders(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("X-Frame-Options", "DENY")
+	if strings.HasPrefix(r.URL.Path, "/vendor/drawio/") {
+		w.Header().Set("Content-Security-Policy", "frame-ancestors 'self'")
+	} else {
+		w.Header().Set("X-Frame-Options", "DENY")
+	}
 	w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 	w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 	if s.cfg.IsProduction() {

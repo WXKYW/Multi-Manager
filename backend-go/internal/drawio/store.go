@@ -270,6 +270,17 @@ func (s *Store) GetDraft(ctx context.Context, documentID int64) (*DraftPayload, 
 	return &d, nil
 }
 
+func (s *Store) GetDraftRevision(ctx context.Context, documentID int64) (int, error) {
+	db, err := s.open(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer db.Close()
+	var revision int
+	err = db.QueryRowContext(ctx, `SELECT current_draft_rev FROM drawio_documents WHERE id = ?`, documentID).Scan(&revision)
+	return revision, err
+}
+
 func (s *Store) SaveDraft(ctx context.Context, documentID int64, req SaveDraftRequest) (*DraftPayload, int, error) {
 	db, err := s.open(ctx)
 	if err != nil {
@@ -283,8 +294,14 @@ func (s *Store) SaveDraft(ctx context.Context, documentID int64, req SaveDraftRe
 	externalAssets := ExtractExternalAssets(req.XMLContent)
 	assetsJSON := assetsToJSON(externalAssets)
 
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer tx.Rollback()
+
 	// 乐观锁：检查 draft_rev
-	result, err := db.ExecContext(ctx,
+	result, err := tx.ExecContext(ctx,
 		`UPDATE drawio_documents SET current_draft_rev = current_draft_rev + 1,
 		page_count = ?, page_names_json = ?, cover_page_id = ?, cover_page_name = ?,
 		updated_at = ?
@@ -299,12 +316,12 @@ func (s *Store) SaveDraft(ctx context.Context, documentID int64, req SaveDraftRe
 	if rowsAffected == 0 {
 		// 冲突：获取当前 rev
 		var currentRev int
-		db.QueryRowContext(ctx, `SELECT current_draft_rev FROM drawio_documents WHERE id = ?`, documentID).Scan(&currentRev)
+		tx.QueryRowContext(ctx, `SELECT current_draft_rev FROM drawio_documents WHERE id = ?`, documentID).Scan(&currentRev)
 		return nil, currentRev, fmt.Errorf("conflict")
 	}
 
 	// Upsert 草稿
-	_, err = db.ExecContext(ctx,
+	_, err = tx.ExecContext(ctx,
 		`INSERT INTO drawio_drafts (document_id, xml_content, xml_hash, editor_state_json, external_assets_json, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(document_id) DO UPDATE SET
@@ -319,7 +336,10 @@ func (s *Store) SaveDraft(ctx context.Context, documentID int64, req SaveDraftRe
 
 	// 获取更新后的 draft_rev
 	var newRev int
-	db.QueryRowContext(ctx, `SELECT current_draft_rev FROM drawio_documents WHERE id = ?`, documentID).Scan(&newRev)
+	tx.QueryRowContext(ctx, `SELECT current_draft_rev FROM drawio_documents WHERE id = ?`, documentID).Scan(&newRev)
+	if err := tx.Commit(); err != nil {
+		return nil, 0, err
+	}
 
 	draft := &DraftPayload{
 		DocumentID:         documentID,
@@ -430,14 +450,14 @@ func (s *Store) SaveVersion(ctx context.Context, documentID int64, req SaveVersi
 		versionID, nextVersionNo, now, documentID)
 
 	return &VersionPayload{
-		ID:         versionID,
-		DocumentID: documentID,
-		VersionNo:  nextVersionNo,
-		Summary:    req.Summary,
-		XMLHash:    draft.XMLHash,
-		PageCount:  len(pages),
+		ID:            versionID,
+		DocumentID:    documentID,
+		VersionNo:     nextVersionNo,
+		Summary:       req.Summary,
+		XMLHash:       draft.XMLHash,
+		PageCount:     len(pages),
 		CoverPageName: coverName,
-		CreatedAt:  now,
+		CreatedAt:     now,
 	}, nil
 }
 

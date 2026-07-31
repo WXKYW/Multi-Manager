@@ -1,4 +1,5 @@
 import React from 'react';
+import { LayerCard } from '@cloudflare/kumo';
 import { Button } from '@cloudflare/kumo/components/button';
 import { LayoutSidebar, X } from '../Icons.jsx';
 import { iconButtonIconClass } from '../ui/AppPrimitives.jsx';
@@ -16,16 +17,16 @@ export default function DocumentSidebar({
   className = '',
 }) {
   return (
-    <div
-      className={`flex shrink-0 flex-col border-l border-kumo-line bg-kumo-base transition-all duration-200 ${
-        open ? width : 'w-0 overflow-hidden border-l-0'
+    <LayerCard
+	  className={`hidden shrink-0 flex-col rounded-none transition-[width] duration-200 xl:flex ${
+        open ? width : 'w-0 overflow-hidden ring-0'
       } ${className}`.trim()}
     >
       {open && (
         <>
           <div className="flex shrink-0 items-center justify-between border-b border-kumo-line px-3 py-2">
             <span className="text-xs font-semibold text-kumo-strong">{title}</span>
-            <Button
+			{onToggle && <Button
               type="button"
               size="sm"
               variant="ghost"
@@ -33,12 +34,12 @@ export default function DocumentSidebar({
               aria-label={`关闭${title}`}
               icon={<X className={iconButtonIconClass} />}
               onClick={onToggle}
-            />
+			/>}
           </div>
           <div className="min-h-0 flex-1 overflow-auto">{children}</div>
         </>
       )}
-    </div>
+    </LayerCard>
   );
 }
 

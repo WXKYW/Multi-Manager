@@ -35,7 +35,7 @@ COPY . .
 ENV PATH=/app/node_modules/.bin:$PATH \
     VITE_USE_CDN=false \
     VITE_APP_VERSION=${APP_VERSION}
-RUN npm run build
+RUN npm run drawio:install && npm run build
 
 # 阶段 2: 构建 Go 后端 (Go Backend Builder)
 FROM --platform=$BUILDPLATFORM golang:1.26.5-alpine3.24 AS go-builder

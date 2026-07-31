@@ -48,6 +48,7 @@ export default function CodeEditor({
   readOnly = false,
   className = '',
   minHeight = '16rem',
+  height,
   placeholder = '',
   showLanguage = true,
   showHeader = true,
@@ -95,7 +96,10 @@ export default function CodeEditor({
   const isEmbedded = variant === 'embedded';
 
   return (
-    <div className={`app-code-editor ${isEmbedded ? 'app-code-editor--embedded' : ''} ${className}`.trim()} style={{ minHeight }}>
+    <div
+      className={`app-code-editor ${isEmbedded ? 'app-code-editor--embedded' : ''} ${className}`.trim()}
+      style={{ minHeight, ...(height ? { height } : {}) }}
+    >
       {showHeader ? (
         <div className="app-code-editor-header">
           <span className="truncate font-semibold">{label}</span>

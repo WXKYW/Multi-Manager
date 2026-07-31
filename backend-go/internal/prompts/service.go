@@ -281,9 +281,9 @@ func (s *Service) saveDraft(ctx context.Context, w http.ResponseWriter, r *http.
 	if err != nil {
 		if strings.Contains(err.Error(), "conflict") {
 			response.JSON(w, http.StatusConflict, map[string]interface{}{
-				"error":            "conflict",
+				"error":             "conflict",
 				"current_draft_rev": newRev,
-				"message":          "Draft has been modified by another session",
+				"message":           "Draft has been modified by another session",
 			})
 			return
 		}
@@ -357,7 +357,7 @@ func (s *Service) regeneratePublicID(ctx context.Context, w http.ResponseWriter,
 	}
 	defer db.Close()
 
-	publicID := generatePublicID()
+	publicID := GeneratePublicID()
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err = db.ExecContext(ctx,
 		`UPDATE prompt_entries SET public_id = ?, updated_at = ? WHERE id = ?`,

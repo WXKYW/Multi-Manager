@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "concurrently \"npm run backend-go:dev\" \"vite\" --names \"backend,frontend\" --prefix-colors \"blue,green\"",
     "dev:simple": "vite",
+	"drawio:install": "node tools/install-drawio.mjs",
     "icons:generate": "node tools/generate-simple-icons-css.mjs",
     "build": "npm run icons:generate && vite build",
     "preview": "vite preview",

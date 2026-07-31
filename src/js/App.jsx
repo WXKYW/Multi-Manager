@@ -14,6 +14,7 @@ const PublicServerStatusPage = lazy(() => import('./pages/PublicServerStatusPage
 const PublicGitHubPage = lazy(() => import('./pages/PublicGitHubPage.jsx'));
 const VoidRoomPage = lazy(() => import('./pages/VoidRoomPage.jsx'));
 const RemoteDesktopPage = lazy(() => import('./pages/RemoteDesktopPage.jsx'));
+const PublicPromptPage = lazy(() => import('./pages/PublicPromptPage.jsx'));
 
 const isLocalHost = (host) => /^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(host || '');
 
@@ -95,6 +96,7 @@ function App() {
   const publicM365RegisterRoute = isPublicM365RegisterRoute();
   const dockerMockPreview = isDockerMockPreviewRoute();
   const remoteDesktopRoute = /^\/remote-desktop\/[^/]+$/.test(window.location.pathname);
+	const publicPromptRoute = /^\/p\/[^/]+$/.test(window.location.pathname);
 
   // 挂载时自动运行初始身份校验
   useEffect(() => {
@@ -182,6 +184,10 @@ function App() {
       </Suspense>
     );
   }
+
+	if (publicPromptRoute) {
+		return <Suspense fallback={null}><PublicPromptPage /></Suspense>;
+	}
 
   if (isCheckingAuth) {
     return getCheckingAuthProvider() ? <AuthTransitionScreen /> : null;

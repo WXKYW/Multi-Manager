@@ -133,7 +133,8 @@ const getPathModule = pathname => {
   const normalized = pathname.replace(/\/+$/, '') || '/';
   if (
     typeof window !== 'undefined' &&
-    new URLSearchParams(window.location.search).has('mockDocker')
+	new URLSearchParams(window.location.search).has('mockDocker') &&
+	normalized === '/server'
   ) {
     return 'server';
   }

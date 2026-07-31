@@ -22,8 +22,9 @@ export function useDocumentEditorState(initialMarkdown = '', settings = {}) {
   const [showOutline, setShowOutline] = useState(merged.showOutline);
   const [showPreview, setShowPreview] = useState(merged.defaultMode === 'split');
   const [outline, setOutline] = useState([]);
-  const [wordCount, setWordCount] = useState(0);
-  const [charCount, setCharCount] = useState(0);
+	const initialText = String(initialMarkdown ?? '');
+  const [wordCount, setWordCount] = useState(initialText.trim() ? initialText.trim().split(/\s+/).length : 0);
+  const [charCount, setCharCount] = useState(initialText.length);
 
   const dirtyRef = useRef(false);
   const markdownRef = useRef(initialMarkdown);
@@ -48,6 +49,17 @@ export function useDocumentEditorState(initialMarkdown = '', settings = {}) {
     setSaveState('saved');
     setLastSavedAt(Date.now());
   }, []);
+
+	const resetMarkdown = useCallback((next) => {
+		const value = String(next ?? '');
+		markdownRef.current = value;
+		dirtyRef.current = false;
+		setMarkdown(value);
+		setDirty(false);
+		setSaveState('idle');
+		setCharCount(value.length);
+		setWordCount(value.trim() ? value.trim().split(/\s+/).length : 0);
+	}, []);
 
   const markSaving = useCallback(() => {
     setSaveState('saving');
@@ -103,5 +115,6 @@ export function useDocumentEditorState(initialMarkdown = '', settings = {}) {
     wordCount,
     charCount,
     markdownRef,
+	resetMarkdown,
   };
 }

@@ -14,7 +14,7 @@ import { listener, listenerCtx } from '@milkdown/kit/plugin/listener';
 import { clipboard } from '@milkdown/kit/plugin/clipboard';
 import { indent, indentConfig } from '@milkdown/kit/plugin/indent';
 import { trailing } from '@milkdown/kit/plugin/trailing';
-import { getMarkdown } from '@milkdown/kit/utils';
+import { getMarkdown, replaceAll } from '@milkdown/kit/utils';
 
 /**
  * 创建 headless Milkdown 编辑器实例。
@@ -77,14 +77,9 @@ export function createMilkdownAdapter({ root, defaultValue = '', editorViewOptio
 
     /** 替换全部 Markdown 内容 */
     setMarkdown(markdown) {
-      editor.action((ctx) => {
-        const view = ctx.get(editorViewCtx);
-        if (!view) return;
-        const { state } = view;
-        const doc = state.schema.text(markdown || '');
-        const tr = state.tr.replaceWith(0, state.doc.content.size, doc.content);
-        view.dispatch(tr);
-      });
+	  if (editor.status === EditorStatus.Created) {
+		editor.action(replaceAll(String(markdown ?? ''), true));
+	  }
     },
 
     /** 设置只读模式 */
@@ -131,16 +126,33 @@ export function createMilkdownAdapter({ root, defaultValue = '', editorViewOptio
     /** 注册选区变更回调 */
     onSelectionChange(fn) {
       onSelectionChangeListener = fn;
+	  if (editor.status === EditorStatus.Created) {
+		editor.action((ctx) => {
+		  const view = ctx.get(editorViewCtx);
+		  const previous = view.props.handleDOMEvents || {};
+		  view.setProps({
+			handleDOMEvents: {
+			  ...previous,
+			  selectionchange: (currentView) => {
+				onSelectionChangeListener?.(currentView.state.selection);
+				return false;
+			  },
+			},
+		  });
+		});
+	  }
     },
 
     /** 注册聚焦回调 */
     onFocus(fn) {
       focusListener = fn;
+	  root.addEventListener('focusin', () => focusListener?.());
     },
 
     /** 注册失焦回调 */
     onBlur(fn) {
       blurListener = fn;
+	  root.addEventListener('focusout', () => blurListener?.());
     },
 
     /** 获取底层 Milkdown Editor（仅限内部使用） */

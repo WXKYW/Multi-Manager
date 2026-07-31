@@ -1,12 +1,19 @@
 package drawio
 
 import (
+	"bytes"
+	"compress/flate"
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/xml"
 	"fmt"
+	"io"
+	"net"
+	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -71,10 +78,25 @@ func ComputeXMLHash(xmlContent string) string {
 // NormalizeXML 归一化 XML 为未压缩 mxfile 格式
 func NormalizeXML(content string) (string, error) {
 	content = strings.TrimSpace(content)
+	content = strings.TrimPrefix(content, "\ufeff")
+	if strings.HasPrefix(content, "<?xml") {
+		if end := strings.Index(content, "?>"); end >= 0 {
+			content = strings.TrimSpace(content[end+2:])
+		}
+	}
 
-	// 如果已经是 mxfile，直接返回
 	if strings.HasPrefix(content, "<mxfile") {
-		return content, nil
+		normalized, err := decompressDiagramBodies(content)
+		if err != nil {
+			return "", err
+		}
+		var root struct {
+			XMLName xml.Name `xml:"mxfile"`
+		}
+		if err := xml.Unmarshal([]byte(normalized), &root); err != nil || root.XMLName.Local != "mxfile" {
+			return "", fmt.Errorf("无效的 mxfile XML")
+		}
+		return normalized, nil
 	}
 
 	// 如果是单个 mxGraphModel，包装为 mxfile
@@ -87,12 +109,38 @@ func NormalizeXML(content string) (string, error) {
 		return wrapped, nil
 	}
 
-	// 如果看起来是完整 XML，尝试当作 mxfile
-	if strings.HasPrefix(content, "<?xml") || strings.HasPrefix(content, "<") {
-		return content, nil
-	}
-
 	return "", fmt.Errorf("无法识别的 drawio 格式")
+}
+
+var compressedDiagramPattern = regexp.MustCompile(`(?s)<diagram([^>]*)>\s*([^<\s][^<]*?)\s*</diagram>`)
+
+func decompressDiagramBodies(content string) (string, error) {
+	var decodeErr error
+	result := compressedDiagramPattern.ReplaceAllStringFunc(content, func(match string) string {
+		parts := compressedDiagramPattern.FindStringSubmatch(match)
+		if len(parts) != 3 {
+			return match
+		}
+		decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(parts[2]))
+		if err != nil {
+			decodeErr = fmt.Errorf("无效的压缩 drawio 页面: %w", err)
+			return match
+		}
+		reader := flate.NewReader(bytes.NewReader(decoded))
+		inflated, err := io.ReadAll(reader)
+		reader.Close()
+		if err != nil {
+			decodeErr = fmt.Errorf("无法解压 drawio 页面: %w", err)
+			return match
+		}
+		pageXML, err := url.QueryUnescape(string(inflated))
+		if err != nil {
+			decodeErr = fmt.Errorf("无法解码 drawio 页面: %w", err)
+			return match
+		}
+		return "<diagram" + parts[1] + ">" + pageXML + "</diagram>"
+	})
+	return result, decodeErr
 }
 
 // DefaultBlankMXFile 生成默认空白文档
@@ -160,29 +208,30 @@ func extractDomain(url string) string {
 
 // IsPrivateNetworkURL 检查 URL 是否指向私网地址
 func IsPrivateNetworkURL(url string) bool {
-	host := extractDomain(url)
-	host = strings.Split(host, ":")[0] // 去掉端口
+	parsed, err := urlpkgParse(url)
+	if err != nil {
+		return true
+	}
+	host := parsed.Hostname()
 
 	// 阻止 localhost
 	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
 		return true
 	}
 
-	// 简单检查私网前缀
-	for _, prefix := range []string{
-		"10.",
-		"172.16.", "172.17.", "172.18.", "172.19.",
-		"172.20.", "172.21.", "172.22.", "172.23.",
-		"172.24.", "172.25.", "172.26.", "172.27.",
-		"172.28.", "172.29.", "172.30.", "172.31.",
-		"192.168.",
-	} {
-		if strings.HasPrefix(host, prefix) {
-			return true
-		}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified()
 	}
 
 	return false
+}
+
+func urlpkgParse(raw string) (*url.URL, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" {
+		return nil, fmt.Errorf("invalid URL")
+	}
+	return parsed, nil
 }
 
 // formatTime 格式化时间为 ISO 字符串

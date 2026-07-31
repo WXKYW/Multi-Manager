@@ -218,7 +218,18 @@ func (s *Store) CreateEntry(ctx context.Context, req CreateEntryRequest) (*Entry
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	slug := GenerateSlug(req.Title)
-	publicID := generatePublicID()
+	baseSlug := slug
+	for suffix := 2; ; suffix++ {
+		var exists int
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM prompt_entries WHERE internal_slug = ?`, slug).Scan(&exists); err != nil {
+			return nil, err
+		}
+		if exists == 0 {
+			break
+		}
+		slug = fmt.Sprintf("%s-%d", baseSlug, suffix)
+	}
+	publicID := GeneratePublicID()
 
 	visibility := req.Visibility
 	if visibility == "" {
@@ -391,8 +402,14 @@ func (s *Store) SaveDraft(ctx context.Context, entryID int64, req SaveDraftReque
 	variablesJSON, _ := json.Marshal(variables)
 	excerpt := ExtractExcerpt(req.ContentMD, 200)
 
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer tx.Rollback()
+
 	// Optimistic lock
-	result, err := db.ExecContext(ctx,
+	result, err := tx.ExecContext(ctx,
 		`UPDATE prompt_entries SET current_draft_rev = current_draft_rev + 1, updated_at = ?,
 		summary = ? WHERE id = ? AND current_draft_rev = ?`,
 		now, excerpt, entryID, req.ExpectedDraftRev)
@@ -403,11 +420,11 @@ func (s *Store) SaveDraft(ctx context.Context, entryID int64, req SaveDraftReque
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		var currentRev int
-		db.QueryRowContext(ctx, `SELECT current_draft_rev FROM prompt_entries WHERE id = ?`, entryID).Scan(&currentRev)
+		tx.QueryRowContext(ctx, `SELECT current_draft_rev FROM prompt_entries WHERE id = ?`, entryID).Scan(&currentRev)
 		return nil, currentRev, fmt.Errorf("conflict")
 	}
 
-	_, err = db.ExecContext(ctx,
+	_, err = tx.ExecContext(ctx,
 		`INSERT INTO prompt_drafts (entry_id, content_md, content_text, outline_json, variables_json, excerpt_text, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(entry_id) DO UPDATE SET
@@ -420,7 +437,10 @@ func (s *Store) SaveDraft(ctx context.Context, entryID int64, req SaveDraftReque
 	}
 
 	var newRev int
-	db.QueryRowContext(ctx, `SELECT current_draft_rev FROM prompt_entries WHERE id = ?`, entryID).Scan(&newRev)
+	tx.QueryRowContext(ctx, `SELECT current_draft_rev FROM prompt_entries WHERE id = ?`, entryID).Scan(&newRev)
+	if err := tx.Commit(); err != nil {
+		return nil, 0, err
+	}
 
 	draft := &DraftPayload{
 		EntryID:       entryID,
