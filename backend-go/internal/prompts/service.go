@@ -96,7 +96,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					s.publishEntry(ctx, w, r, id)
 				case len(parts) == 3 && parts[2] == "versions" && r.Method == http.MethodGet:
 					s.listVersions(ctx, w, id)
-				case len(parts) == 3 && parts[2] == "public" && len(parts) == 4 && parts[3] == "regenerate" && r.Method == http.MethodPost:
+				case len(parts) == 4 && parts[2] == "public" && parts[3] == "regenerate" && r.Method == http.MethodPost:
 					s.regeneratePublicID(ctx, w, id)
 				case len(parts) == 4 && parts[2] == "versions":
 					versionID, verr := strconv.ParseInt(parts[3], 10, 64)

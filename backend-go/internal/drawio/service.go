@@ -103,7 +103,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.saveVersion(ctx, w, r, docID)
 		case len(parts) == 2 && parts[1] == "export" && r.Method == http.MethodGet:
 			s.exportDocument(ctx, w, r, docID)
-		case len(parts) == 2 && parts[1] == "thumbnails" && len(parts) == 3 && parts[2] == "rebuild" && r.Method == http.MethodPost:
+		case len(parts) == 3 && parts[1] == "thumbnails" && parts[2] == "rebuild" && r.Method == http.MethodPost:
 			s.rebuildThumbnail(ctx, w, docID)
 
 		case len(parts) == 3 && parts[1] == "versions":
