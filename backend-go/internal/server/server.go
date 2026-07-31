@@ -18,6 +18,7 @@ import (
 	"github.com/iwvw/api-monitor/backend-go/internal/cloudflare"
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
 	"github.com/iwvw/api-monitor/backend-go/internal/cronjobs"
+	drawiomodule "github.com/iwvw/api-monitor/backend-go/internal/drawio"
 	"github.com/iwvw/api-monitor/backend-go/internal/filebox"
 	"github.com/iwvw/api-monitor/backend-go/internal/flyio"
 	githubmodule "github.com/iwvw/api-monitor/backend-go/internal/github"
@@ -27,6 +28,7 @@ import (
 	"github.com/iwvw/api-monitor/backend-go/internal/notification"
 	"github.com/iwvw/api-monitor/backend-go/internal/openai"
 	"github.com/iwvw/api-monitor/backend-go/internal/oracle"
+	promptsmodule "github.com/iwvw/api-monitor/backend-go/internal/prompts"
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
 	"github.com/iwvw/api-monitor/backend-go/internal/serveragent"
 	"github.com/iwvw/api-monitor/backend-go/internal/settings"
@@ -61,6 +63,8 @@ type Server struct {
 	backup   *backup.Service
 	logs     *systemlogs.Service
 	sub      *subscription.Service
+	drawio   *drawiomodule.Service
+	prompts  *promptsmodule.Service
 }
 
 func New(cfg config.Config) http.Handler {
@@ -109,6 +113,8 @@ func newServer(cfg config.Config) (*Server, error) {
 	uptimeService.SetHeartbeatBroadcaster(serverAgentService.BroadcastUptimeHeartbeat)
 	githubService := githubmodule.New(cfg)
 	githubService.SetNotifier(notifyService)
+	drawioService := drawiomodule.New(cfg)
+	promptsService := promptsmodule.New(cfg)
 	systemService := systemmetrics.New(cfg)
 	systemService.SetNotifier(notifyService)
 	backupService := backup.New(cfg)
@@ -136,6 +142,8 @@ func newServer(cfg config.Config) (*Server, error) {
 		backup:   backupService,
 		logs:     systemlogs.New(cfg),
 		sub:      subscriptionService,
+		drawio:   drawioService,
+		prompts:  promptsService,
 	}
 	systemService.SetAICaller(server.callAPIFromAI)
 	return server, nil
@@ -153,6 +161,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	if s.github != nil {
 		s.github.Stop()
+	}
+	if s.drawio != nil {
+		s.drawio.Stop()
 	}
 	if s.cron == nil {
 		return nil
@@ -395,6 +406,12 @@ func (s *Server) serveGoRoute(w http.ResponseWriter, r *http.Request, route mani
 		s.flyio.ServeHTTP(w, r)
 	case "/api/github", "/api/github/webhook/{repositoryId}", "/api/github/webhook", "/api/github/events/stream":
 		s.github.ServeHTTP(w, r)
+	case "/api/drawio", "/api/drawio/documents", "/api/drawio/documents/{id}", "/api/drawio/documents/{id}/clone", "/api/drawio/documents/{id}/draft", "/api/drawio/documents/{id}/export", "/api/drawio/documents/{id}/versions", "/api/drawio/documents/{id}/versions/{versionId}", "/api/drawio/documents/{id}/versions/{versionId}/restore", "/api/drawio/documents/{id}/thumbnails/rebuild", "/api/drawio/import", "/api/drawio/thumbnails/rebuild", "/api/drawio/render-jobs", "/api/drawio/settings":
+		s.drawio.ServeHTTP(w, r)
+	case "/api/prompts", "/api/prompts/collections", "/api/prompts/collections/{id}", "/api/prompts/entries", "/api/prompts/entries/{id}", "/api/prompts/entries/{id}/duplicate", "/api/prompts/entries/{id}/draft", "/api/prompts/entries/{id}/publish", "/api/prompts/entries/{id}/versions", "/api/prompts/entries/{id}/versions/{versionId}", "/api/prompts/entries/{id}/versions/{versionId}/restore", "/api/prompts/entries/{id}/public/regenerate", "/api/prompts/settings":
+		s.prompts.ServeHTTP(w, r)
+	case "/api/prompts/public/{publicId}", "/api/prompts/d/{publicId}", "/api/prompts/d/{publicId}/versions/{versionNo}":
+		s.prompts.ServePublic(w, r)
 	case "/api/aliyun":
 		s.aliyun.ServeHTTP(w, r)
 	case "/api/tencent":
@@ -432,6 +449,14 @@ func (s *Server) serveGoRoute(w http.ResponseWriter, r *http.Request, route mani
 		}
 		if strings.HasPrefix(route.Prefix, "/api/github") {
 			s.github.ServeHTTP(w, r)
+			return
+		}
+		if strings.HasPrefix(route.Prefix, "/api/drawio") {
+			s.drawio.ServeHTTP(w, r)
+			return
+		}
+		if strings.HasPrefix(route.Prefix, "/api/prompts") {
+			s.prompts.ServeHTTP(w, r)
 			return
 		}
 		response.Error(w, http.StatusNotFound, "go route not implemented: "+route.Prefix)

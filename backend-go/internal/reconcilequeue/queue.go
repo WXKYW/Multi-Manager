@@ -105,6 +105,53 @@ func NodeIDsForPlan(ctx context.Context, queryer Queryer, planID string) ([]stri
 	return ids, rows.Err()
 }
 
+// NodeIDsForSubscription resolves managed node IDs for a subscription,
+// supporting both plan-based and profile-based subscriptions.
+func NodeIDsForSubscription(ctx context.Context, queryer Queryer, subscriptionID string) ([]string, error) {
+	// Try plan-based first
+	rows, err := queryer.QueryContext(ctx,
+		`SELECT COALESCE(s.plan_id,''),COALESCE(s.profile_id,'') FROM subscription_subscriptions s WHERE s.id=?`,
+		subscriptionID)
+	if err != nil {
+		return nil, err
+	}
+	var planID, profileID string
+	if rows.Next() {
+		rows.Scan(&planID, &profileID)
+	}
+	rows.Close()
+
+	if planID != "" {
+		return NodeIDsForPlan(ctx, queryer, planID)
+	}
+	// For profile-based subscriptions
+	if profileID != "" {
+		nodeRows, err := queryer.QueryContext(ctx, `SELECT n.id
+			FROM managed_proxy_nodes n
+			JOIN subscription_profiles pf ON pf.id=?
+			WHERE n.enabled=1 AND pf.include_internal_nodes=1 AND (
+				COALESCE(pf.selection_mode,'explicit')='all' OR EXISTS(
+					SELECT 1 FROM subscription_plan_nodes pn WHERE pn.plan_id=pf.id AND pn.node_id=n.id AND pn.source='internal'
+				)
+			)
+			ORDER BY n.id`, profileID)
+		if err != nil {
+			return nil, err
+		}
+		defer nodeRows.Close()
+		ids := []string{}
+		for nodeRows.Next() {
+			var id string
+			if err := nodeRows.Scan(&id); err != nil {
+				return nil, err
+			}
+			ids = append(ids, id)
+		}
+		return ids, nodeRows.Err()
+	}
+	return nil, nil
+}
+
 func NodeIDsForPlans(ctx context.Context, queryer Queryer, planIDs ...string) ([]string, error) {
 	seen := map[string]struct{}{}
 	ids := []string{}

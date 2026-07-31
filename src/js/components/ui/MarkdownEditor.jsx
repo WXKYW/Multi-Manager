@@ -3,6 +3,7 @@ import { Tabs } from '@cloudflare/kumo';
 import { CodeFile, Eye } from '../Icons.jsx';
 import { TOOL_TABS_PROPS } from '../../modules/kumoTabs.js';
 import CodeEditor from './CodeEditor.jsx';
+import { createMilkdownAdapter } from '../editor/adapters/milkdownAdapter.js';
 
 const EDITOR_MODES = [
   {
@@ -27,74 +28,55 @@ const EDITOR_MODES = [
 
 function VisualMarkdownEditor({ value, onChange, readOnly, label, placeholder }) {
   const rootRef = useRef(null);
-  const crepeRef = useRef(null);
-  const valueRef = useRef(String(value ?? ''));
-  const onChangeRef = useRef(onChange);
-  const [revision, setRevision] = useState(0);
+  const adapterRef = useRef(null);
   const [status, setStatus] = useState('loading');
 
   useEffect(() => {
-    onChangeRef.current = onChange;
-  }, [onChange]);
+    let cancelled = false;
+    let adapter = null;
+    const root = rootRef.current;
+    if (!root) return;
 
+    setStatus('loading');
+
+    adapter = createMilkdownAdapter({
+      root,
+      defaultValue: String(value ?? ''),
+    });
+
+    adapter.onChange((markdown) => {
+      onChange?.(markdown);
+    });
+
+    adapter.create().then(() => {
+      if (cancelled) {
+        adapter.destroy();
+        return;
+      }
+      adapterRef.current = adapter;
+      setStatus('ready');
+    }).catch(() => {
+      if (!cancelled) setStatus('error');
+    });
+
+    return () => {
+      cancelled = true;
+      if (adapterRef.current === adapter) adapterRef.current = null;
+      if (adapter) adapter.destroy();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync external value changes
   useEffect(() => {
-    const nextValue = String(value ?? '');
-    valueRef.current = nextValue;
-    const crepe = crepeRef.current;
-    if (crepe && crepe.getMarkdown() !== nextValue) {
-      setRevision(current => current + 1);
+    const adapter = adapterRef.current;
+    if (adapter && adapter.getMarkdown() !== String(value ?? '')) {
+      adapter.setMarkdown(String(value ?? ''));
     }
   }, [value]);
 
   useEffect(() => {
-    crepeRef.current?.setReadonly(readOnly);
+    adapterRef.current?.setReadonly(readOnly);
   }, [readOnly]);
-
-  useEffect(() => {
-    let cancelled = false;
-    let instance = null;
-    setStatus('loading');
-
-    const createEditor = async () => {
-      try {
-        const [{ createMarkdownWysiwyg }] = await Promise.all([
-          import('../../modules/markdownWysiwygRuntime.js'),
-          import('@milkdown/crepe/theme/common/style.css'),
-          import('@milkdown/crepe/theme/classic.css'),
-        ]);
-        if (cancelled || !rootRef.current) return;
-
-        instance = createMarkdownWysiwyg({
-          root: rootRef.current,
-          defaultValue: valueRef.current,
-          placeholder,
-        });
-        instance.on(listener => {
-          listener.markdownUpdated((_ctx, markdown) => {
-            valueRef.current = markdown;
-            onChangeRef.current?.(markdown);
-          });
-        });
-        instance.setReadonly(readOnly);
-        await instance.create();
-        if (cancelled) {
-          await instance.destroy();
-          return;
-        }
-        crepeRef.current = instance;
-        setStatus('ready');
-      } catch {
-        if (!cancelled) setStatus('error');
-      }
-    };
-
-    void createEditor();
-    return () => {
-      cancelled = true;
-      if (crepeRef.current === instance) crepeRef.current = null;
-      if (instance) void instance.destroy();
-    };
-  }, [placeholder, readOnly, revision]);
 
   return (
     <div className="app-markdown-editor-visual" aria-label={label} aria-busy={status === 'loading'}>

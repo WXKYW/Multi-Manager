@@ -50,6 +50,8 @@ const SettingsPage = lazy(() => import('../pages/SettingsPage.jsx'));
 const SchedulerPage = lazy(() => import('../pages/SchedulerPage.jsx'));
 const ApiDocsPage = lazy(() => import('../pages/ApiDocsPage.jsx'));
 const SystemLogsPage = lazy(() => import('../pages/SystemLogsPage.jsx'));
+const DrawioPage = lazy(() => import('../pages/DrawioPage.jsx'));
+const PromptLibraryPage = lazy(() => import('../pages/PromptLibraryPage.jsx'));
 
 const PageLoadingFallback = () => (
   <div className="flex min-h-[240px] items-center justify-center">
@@ -606,7 +608,7 @@ function MainLayout() {
   }, [triggerHaptic]);
 
   const responsiveWorkspaceModule = ['dns', 'openai'].includes(mainActiveTab);
-  const viewportWorkspaceModule = ['apidocs', 'systemlogs'].includes(mainActiveTab);
+  const viewportWorkspaceModule = ['apidocs', 'systemlogs', 'drawio', 'prompts'].includes(mainActiveTab);
   const mainCanvasClassName = responsiveWorkspaceModule
     ? 'flex-1 overflow-x-hidden overflow-y-auto p-3 sm:px-4 lg:px-6 pt-3! pb-4! sm:pb-6! md:overflow-hidden scrollbar-thin'
     : viewportWorkspaceModule
@@ -662,6 +664,10 @@ function MainLayout() {
         return <ApiDocsPage />;
       case 'systemlogs':
         return <SystemLogsPage />;
+      case 'drawio':
+        return <DrawioPage />;
+      case 'prompts':
+        return <PromptLibraryPage />;
       default:
         const ActiveIcon = getModuleIconComponent(mainActiveTab, Server);
         return (

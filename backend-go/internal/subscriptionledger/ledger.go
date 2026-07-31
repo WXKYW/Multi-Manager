@@ -146,9 +146,14 @@ func pruneHistory(ctx context.Context, db *sql.DB, now time.Time, reportRetentio
 
 // ScheduleCycleTransitions enqueues runtime synchronization when a plan enters
 // a new quota cycle so previously exhausted subscribers become usable again.
+// Profile-based subscriptions are also included.
 func ScheduleCycleTransitions(ctx context.Context, db *sql.DB, now time.Time) error {
-	rows, err := db.QueryContext(ctx, `SELECT s.id,COALESCE(s.plan_id,''),COALESCE(p.cycle_type,'none'),COALESCE(p.cycle_day,1),COALESCE(s.created_at,datetime('now'))
-		FROM subscription_subscriptions s JOIN subscription_plans p ON p.id=s.plan_id`)
+	rows, err := db.QueryContext(ctx, `SELECT s.id,COALESCE(s.plan_id,''),COALESCE(s.profile_id,''),
+		COALESCE(p.cycle_type,pf.cycle_type,'none'),COALESCE(p.cycle_day,pf.cycle_day,1),COALESCE(s.created_at,datetime('now'))
+		FROM subscription_subscriptions s
+		LEFT JOIN subscription_plans p ON p.id=s.plan_id
+		LEFT JOIN subscription_profiles pf ON pf.id=s.profile_id
+		WHERE (s.plan_id IS NOT NULL AND s.plan_id != '') OR (s.profile_id IS NOT NULL AND s.profile_id != '')`)
 	if err != nil {
 		return err
 	}
@@ -159,7 +164,8 @@ func ScheduleCycleTransitions(ctx context.Context, db *sql.DB, now time.Time) er
 	items := []item{}
 	for rows.Next() {
 		var value item
-		if err := rows.Scan(&value.subscriptionID, &value.planID, &value.cycleType, &value.cycleDay, &value.createdAt); err != nil {
+		var profileID string
+		if err := rows.Scan(&value.subscriptionID, &value.planID, &profileID, &value.cycleType, &value.cycleDay, &value.createdAt); err != nil {
 			rows.Close()
 			return err
 		}
@@ -183,7 +189,8 @@ func ScheduleCycleTransitions(ctx context.Context, db *sql.DB, now time.Time) er
 		}
 		changed, _ := result.RowsAffected()
 		if changed > 0 {
-			nodeIDs, err := reconcilequeue.NodeIDsForPlan(ctx, tx, value.planID)
+			// Resolve node IDs from either plan or profile
+			nodeIDs, err := reconcilequeue.NodeIDsForSubscription(ctx, tx, value.subscriptionID)
 			if err != nil {
 				tx.Rollback()
 				return err

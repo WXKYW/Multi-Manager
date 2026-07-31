@@ -273,6 +273,8 @@ export const MODULE_ICON_MAP = {
   notification: Bell,
   apidocs: CodeFile,
   systemlogs: LogList,
+  drawio: Compass,
+  prompts: MessageSquare,
 };
 
 export const MODULE_GROUP_ICON_MAP = {

@@ -125,7 +125,18 @@ export const MODULE_CONFIG = {
     icon: 'fa-file-alt',
     description: '统一日志查看器',
   },
-
+  drawio: {
+    name: '图编辑器',
+    shortName: '图编辑',
+    icon: 'fa-diagram-project',
+    description: 'Draw.io 图文档',
+  },
+  prompts: {
+    name: '提示词库',
+    shortName: '提示词',
+    icon: 'fa-message',
+    description: '提示词管理与发布',
+  },
 };
 
 // ==================== 模块分组配置 ====================
@@ -169,7 +180,7 @@ export const MODULE_GROUPS = [
       {
         id: 'utility-tools',
         name: '实用工具',
-        modules: ['filebox'],
+        modules: ['filebox', 'drawio', 'prompts'],
       },
     ],
     trailingModules: ['totp'],
