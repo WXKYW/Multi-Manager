@@ -92,6 +92,8 @@ func buildRoutes() []Route {
 		{Prefix: "/api/settings/enforce-log-limits", Module: "settings-logs", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Log retention enforcement"},
 		{Prefix: "/api/settings/clear-logs", Module: "settings-logs", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Database log cleanup"},
 		{Prefix: "/api/settings/clear-app-logs", Module: "settings-logs", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "App log truncation"},
+		{Prefix: "/api/settings/site-brand/icons/{id}", Module: "settings-site-brand", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Site brand icon asset", MatchMode: MatchPattern},
+		{Prefix: "/api/settings/site-brand/icons", Module: "settings-site-brand", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Site brand icon library", MatchMode: MatchExact},
 		{Prefix: "/api/settings/database-stats", Module: "settings-database", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Database table counts and file size"},
 		{Prefix: "/api/settings/database-analysis", Module: "settings-database", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Database table row counts and size estimates"},
 		{Prefix: "/api/settings/deprecated-tables", Module: "settings-database", Owner: OwnerGo, Auth: AuthSession, ResponseMode: ResponseJSON, Description: "Deprecated database table cleanup preview"},

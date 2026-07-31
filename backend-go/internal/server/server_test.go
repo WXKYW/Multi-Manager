@@ -1,8 +1,10 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -224,6 +226,123 @@ func TestStaticRouteServesPublicAssets(t *testing.T) {
 	}
 	if strings.TrimSpace(res.Body.String()) != "<svg></svg>" {
 		t.Fatalf("expected public logo body, got %q", res.Body.String())
+	}
+}
+
+func TestSiteBrandIconRoutesRequireSessionAndPublicIconRouteServesUploadedIcon(t *testing.T) {
+	distDir := t.TempDir()
+	publicDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(distDir, "index.html"), []byte("<!doctype html><div id=\"root\"></div>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(publicDir, "logo.svg"), []byte("<svg>default</svg>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := newTestServer(t, config.Config{
+		Version:   "test",
+		Host:      "127.0.0.1",
+		Port:      0,
+		DistDir:   distDir,
+		PublicDir: publicDir,
+		DataDir:   t.TempDir(),
+		DBName:    "data.db",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/settings/site-brand/icons", nil)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated site brand icon list status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	cookie := loginServerForTest(t, handler)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("name", "公开页图标"); err != nil {
+		t.Fatal(err)
+	}
+	part, err := writer.CreateFormFile("file", "brand.svg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><text x="1" y="12">custom-brand</text></svg>`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/settings/site-brand/icons", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.AddCookie(cookie)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("upload site brand icon status = %d body=%s", res.Code, res.Body.String())
+	}
+	var uploadPayload struct {
+		Success bool `json:"success"`
+		Data    struct {
+			ID  string `json:"id"`
+			URL string `json:"url"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &uploadPayload); err != nil {
+		t.Fatalf("decode upload payload: %v body=%s", err, res.Body.String())
+	}
+	if !uploadPayload.Success || uploadPayload.Data.ID == "" || uploadPayload.Data.URL == "" {
+		t.Fatalf("unexpected upload payload: %#v", uploadPayload)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, uploadPayload.Data.URL, nil)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("site brand asset route should require session, status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/site-brand-icons/"+uploadPayload.Data.ID, nil)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("public site brand icon status = %d body=%s", res.Code, res.Body.String())
+	}
+	if got := res.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+		t.Fatalf("public site brand icon cache-control = %q", got)
+	}
+	if !strings.Contains(res.Header().Get("Content-Type"), "image/svg+xml") {
+		t.Fatalf("public site brand icon content type = %q", res.Header().Get("Content-Type"))
+	}
+	if !strings.Contains(res.Body.String(), "custom-brand") {
+		t.Fatalf("expected public icon route to serve uploaded icon, got %q", res.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/logo.svg", nil)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("public logo status = %d body=%s", res.Code, res.Body.String())
+	}
+	if strings.TrimSpace(res.Body.String()) != "<svg>default</svg>" {
+		t.Fatalf("expected public logo body to stay default, got %q", res.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/api/settings/site-brand/icons/"+uploadPayload.Data.ID, nil)
+	req.AddCookie(cookie)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("delete site brand icon status = %d body=%s", res.Code, res.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, uploadPayload.Data.URL, nil)
+	req.AddCookie(cookie)
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("deleted site brand asset route status = %d body=%s", res.Code, res.Body.String())
 	}
 }
 

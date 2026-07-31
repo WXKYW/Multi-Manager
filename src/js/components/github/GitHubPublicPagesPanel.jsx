@@ -33,6 +33,7 @@ const createEmptyGitHubPublicPageForm = () => ({
   showDescriptions: true,
   showRepositoryStats: true,
   showOnDashboard: true,
+  publicIconId: '',
   repositoryIds: [],
 });
 
@@ -139,6 +140,7 @@ function GitHubPublicPagesPanel({ repositories = [] }) {
       showDescriptions: config.showDescriptions !== false,
       showRepositoryStats: config.showRepositoryStats !== false,
       showOnDashboard: !!config.showOnDashboard,
+      publicIconId: String(config.publicIconId || '').trim(),
       repositoryIds: Array.isArray(page.repositoryIds) ? page.repositoryIds : [],
     });
   };
@@ -170,6 +172,7 @@ function GitHubPublicPagesPanel({ repositories = [] }) {
           showDescriptions: !!form.showDescriptions,
           showRepositoryStats: !!form.showRepositoryStats,
           showOnDashboard: !!form.showOnDashboard,
+          ...(form.publicIconId ? { publicIconId: form.publicIconId } : {}),
         },
       };
       const endpoint = form.id ? `/api/github/public-pages/${form.id}` : '/api/github/public-pages';

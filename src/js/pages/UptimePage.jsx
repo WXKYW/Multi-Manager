@@ -83,6 +83,7 @@ const createEmptyStatusPageForm = () => ({
   hideTargets: false,
   linkMonitorNames: false,
   showOnDashboard: true,
+  publicIconId: '',
   cacheSeconds: 300,
   monitorIds: [],
 });
@@ -771,6 +772,7 @@ function UptimePage() {
       hideTargets: !!config.hideTargets,
       linkMonitorNames: !!config.linkMonitorNames,
       showOnDashboard: !!config.showOnDashboard,
+      publicIconId: String(config.publicIconId || '').trim(),
       cacheSeconds: page.cacheSeconds || 300,
       monitorIds: Array.isArray(page.monitorIds) ? page.monitorIds : [],
     });
@@ -800,6 +802,7 @@ function UptimePage() {
           hideTargets: !!statusPageForm.hideTargets,
           linkMonitorNames: !!statusPageForm.linkMonitorNames,
           showOnDashboard: !!statusPageForm.showOnDashboard,
+          ...(statusPageForm.publicIconId ? { publicIconId: statusPageForm.publicIconId } : {}),
         },
         monitorIds: statusPageForm.monitorIds,
       };

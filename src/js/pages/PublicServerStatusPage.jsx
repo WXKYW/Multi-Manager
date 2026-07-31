@@ -2,12 +2,19 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import io from 'socket.io-client';
 import { Meter, Tabs } from '@cloudflare/kumo';
 import { Button } from '@cloudflare/kumo/components/button';
-import { AlertTriangle, Globe, Home, LogIn, RefreshCw, Server, Shield } from '../components/Icons.jsx';
+import { AlertTriangle, Globe, Home, LogIn, RefreshCw, Shield } from '../components/Icons.jsx';
+import PublicPageIconPicker from '../components/public/PublicPageIconPicker.jsx';
 import useStore from '../store.js';
 import CountryFlag from '../components/CountryFlag.jsx';
 import ServerLocationMap from '../components/server/ServerLocationMap.jsx';
 import { useCloudflareSpotlight } from '../hooks/useCloudflareSpotlight.js';
 import { FLOW_UNIT_BADGE_CLASS, getFlowUnitClassName } from '../modules/flowUnits.js';
+import {
+  getPublicPageFaviconHref,
+  swapPublicPageFavicon,
+  withPublicPageIconId,
+} from '../modules/publicPageBranding.js';
+import { toast } from '../modules/toast.js';
 import { normalizeTrafficLimitMode, resolveTrafficUsedBytes } from '../modules/trafficMetrics.js';
 import { TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import * as echarts from 'echarts/core';
@@ -555,6 +562,8 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
     };
   }, [page?.title]);
 
+  useEffect(() => swapPublicPageFavicon(getPublicPageFaviconHref('server', page?.config)), [page?.config]);
+
   const servers = Array.isArray(page?.servers) ? page.servers : [];
   const serverIdKey = useMemo(() => servers.map(item => String(item.id)).sort().join('|'), [servers]);
 
@@ -626,15 +635,47 @@ function PublicServerStatusPage({ domainOnly = false, onDomainNotFound }) {
     : 'grid gap-3 md:grid-cols-2 xl:grid-cols-3';
   const visibleServers = servers;
 
+  const updatePageIcon = async (iconId) => {
+    if (!page?.id) return;
+    const response = await fetch(`/api/server/status-pages/${page.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: page.title || '主机状态',
+        slug: page.slug || '',
+        domain: page.domain || '',
+        description: page.description || '',
+        public: page.public !== false,
+        cacheSeconds: page.cacheSeconds || 300,
+        serverIds: Array.isArray(page.serverIds) ? page.serverIds : [],
+        config: withPublicPageIconId(page.config, iconId),
+      }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.success === false) {
+      throw new Error(result.error || '保存主机状态页图标失败');
+    }
+    setPage((current) => (current ? {
+      ...current,
+      config: withPublicPageIconId(current.config, iconId),
+    } : current));
+    toast.success(iconId ? '主机状态页图标已更新' : '已恢复主机状态页默认图标');
+  };
+
   return (
     <div ref={surfaceRef} className="cf-ai-background-surface public-server-status-page relative isolate min-h-screen text-kumo-default">
       <div aria-hidden="true" className="cf-ai-background pointer-events-none absolute inset-0" />
       <main className={`relative z-10 mx-auto flex min-h-screen w-full ${pageMaxWidthClass} flex-col px-4 py-6 sm:px-6 lg:px-8`}>
         <header className="mb-6 flex items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-kumo-line bg-kumo-base text-kumo-brand">
-              <Server className="h-4 w-4" />
-            </div>
+            <PublicPageIconPicker
+              pageKind="server"
+              config={page?.config}
+              isAuthenticated={isAuthenticated}
+              onChange={updatePageIcon}
+              triggerClassName="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-kumo-line bg-kumo-base text-kumo-brand"
+              iconClassName="h-5 w-5"
+            />
             <div className="min-w-0">
               <div className="truncate text-base font-bold text-kumo-strong">{page?.title || '主机状态'}</div>
             </div>

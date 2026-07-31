@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@cloudflare/kumo/components/button';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
+import PublicPageIconPicker from '../components/public/PublicPageIconPicker.jsx';
 import { useCloudflareSpotlight } from '../hooks/useCloudflareSpotlight.js';
 import { useDraggableScroll } from '../hooks/useDraggableScroll.js';
 import PublicOverviewStats from '../components/public/PublicOverviewStats.jsx';
@@ -13,6 +14,12 @@ import {
   mergePublicGithubRepositories,
   shouldLoadPublicGithubRepositoryDetail,
 } from '../modules/githubPublicRealtime.js';
+import {
+  getPublicPageFaviconHref,
+  swapPublicPageFavicon,
+  withPublicPageIconId,
+} from '../modules/publicPageBranding.js';
+import { toast } from '../modules/toast.js';
 import { useNowTick } from '../modules/usePageVisibility.js';
 import useStore from '../store.js';
 import {
@@ -2018,6 +2025,8 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
     };
   }, [page?.title]);
 
+  useEffect(() => swapPublicPageFavicon(getPublicPageFaviconHref('github', page?.config)), [page?.config]);
+
   useEffect(() => {
     if (typeof window.EventSource === 'function') return undefined;
     const interval = window.setInterval(() => {
@@ -2077,15 +2086,40 @@ function PublicGitHubPage({ domainOnly = false, onDomainNotFound }) {
     : '全部仓库的最新工作流状态正常';
   const config = page?.config || {};
 
+  const updatePageIcon = async (iconId) => {
+    if (!page?.id) return;
+    const response = await fetch(`/api/github/public-pages/${page.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        config: withPublicPageIconId(page.config, iconId),
+      }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.success === false) {
+      throw new Error(result.error || '保存 GitHub 公开页图标失败');
+    }
+    setPage((current) => (current ? {
+      ...current,
+      config: withPublicPageIconId(current.config, iconId),
+    } : current));
+    toast.success(iconId ? 'GitHub 公开页图标已更新' : '已恢复 GitHub 公开页默认图标');
+  };
+
   return (
     <div ref={surfaceRef} className="cf-ai-background-surface public-github-page relative isolate min-h-screen text-kumo-default">
       <div aria-hidden="true" className="cf-ai-background pointer-events-none absolute inset-0" />
       <main className="relative z-10 mx-auto flex min-h-screen w-full max-w-[96rem] flex-col px-4 py-5 sm:px-6 lg:px-8">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2.5">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-kumo-interact/80 bg-kumo-base text-kumo-brand">
-              <GitHubBrand className="h-4 w-4" />
-            </div>
+            <PublicPageIconPicker
+              pageKind="github"
+              config={page?.config}
+              isAuthenticated={isAuthenticated}
+              onChange={updatePageIcon}
+              triggerClassName="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-kumo-interact/80 bg-kumo-base text-kumo-brand"
+              iconClassName="h-5 w-5"
+            />
             <div className="min-w-0">
               <div className="truncate text-base font-bold text-kumo-strong">{page?.title || 'GitHub 动态'}</div>
             </div>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
+import { collapseNotificationHistory, parseLifecycleHistoryMeta } from '../modules/notificationHistory.js';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
@@ -158,21 +159,6 @@ const parseNotificationPreviewLine = (line = '') => {
       : rawValue,
     code: ['地址', '链接', '云端链接', 'URL', 'Host'].includes(label),
   };
-};
-
-const parseLifecycleHistoryMeta = (rawData) => {
-  try {
-    const data = typeof rawData === 'string' ? JSON.parse(rawData || '{}') : (rawData || {});
-    if (!data.lifecycleKind) return null;
-    return {
-      mutation: data.lifecycleMutation || data.lifecyclePhase || '',
-      kind: data.lifecycleKind,
-      duration: data.downDuration || '',
-      changedFields: Object.keys(data.lifecycleChanges || {}),
-    };
-  } catch (_) {
-    return null;
-  }
 };
 
 function NotificationPage() {
@@ -760,10 +746,12 @@ function NotificationPage() {
     return notificationRules.filter(r => r.source_module === notificationRuleFilter);
   }, [notificationRules, notificationRuleFilter]);
 
+  const visibleHistory = useMemo(() => collapseNotificationHistory(notificationHistory), [notificationHistory]);
+
   const filteredHistory = useMemo(() => {
-    if (!notificationHistoryFilter) return notificationHistory;
-    return notificationHistory.filter(h => h.status === notificationHistoryFilter);
-  }, [notificationHistory, notificationHistoryFilter]);
+    if (!notificationHistoryFilter) return visibleHistory;
+    return visibleHistory.filter(h => h.status === notificationHistoryFilter);
+  }, [visibleHistory, notificationHistoryFilter]);
 
   const catalogModuleItems = useMemo(() => {
     const source = notificationEventCatalog.length > 0 ? notificationEventCatalog : FALLBACK_EVENT_CATALOG;
@@ -1183,7 +1171,7 @@ function NotificationPage() {
           ) : (
             <div className="flex flex-col gap-2.5">
               {filteredHistory.map((log) => {
-                const lifecycleMeta = parseLifecycleHistoryMeta(log.data);
+                const lifecycleMeta = log.lifecycle_meta || parseLifecycleHistoryMeta(log.data);
                 const mutationLabel = lifecycleMeta ? ({
                   open: '告警打开',
                   refresh: '动态更新',
@@ -1248,6 +1236,11 @@ function NotificationPage() {
                               {lifecycleMeta.kind}
                             </span>
                           )}
+                          {log.lifecycle_update_count > 1 && (
+                            <span className="rounded border border-kumo-brand/20 bg-kumo-brand/5 px-1.5 py-0.5 text-[10px] font-medium text-kumo-subtle">
+                              更新 {log.lifecycle_update_count - 1} 次
+                            </span>
+                          )}
                           {lifecycleMeta.duration && (
                             <span className="text-[11px] text-kumo-subtle">
                               持续 {lifecycleMeta.duration}
@@ -1266,6 +1259,12 @@ function NotificationPage() {
                         <span className="opacity-60">🕒</span>
                         {new Date(log.created_at).toLocaleString()}
                       </div>
+                      {log.lifecycle_update_count > 1 && log.lifecycle_first_created_at && log.lifecycle_first_created_at !== log.created_at && (
+                        <div className="font-mono text-[11px] text-kumo-subtle/80 select-none flex items-center gap-1">
+                          <span className="opacity-50">↺</span>
+                          首次告警 {new Date(log.lifecycle_first_created_at).toLocaleString()}
+                        </div>
+                      )}
                     </div>
 
                     {/* 右栏：详细消息内容与异常/重试提示 */}

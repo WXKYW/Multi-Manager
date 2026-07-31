@@ -38,6 +38,7 @@ type userSettingsRow struct {
 	ThemeMode             sql.NullString
 	PageWidthMode         sql.NullString
 	SidebarCollapsed      sql.NullInt64
+	SiteBrandIconID       sql.NullString
 	KoyebRefreshInterval  sql.NullInt64
 	FlyRefreshInterval    sql.NullInt64
 	ModuleVisibility      sql.NullString
@@ -99,6 +100,29 @@ func New(cfg config.Config) *Service {
 }
 
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/api/settings/site-brand/icons" {
+		switch r.Method {
+		case http.MethodGet:
+			s.listSiteBrandIcons(w, r)
+		case http.MethodPost:
+			s.uploadSiteBrandIcon(w, r)
+		default:
+			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/api/settings/site-brand/icons/") {
+		switch r.Method {
+		case http.MethodGet:
+			s.serveSiteBrandIcon(w, r, strings.TrimPrefix(r.URL.Path, "/api/settings/site-brand/icons/"))
+		case http.MethodDelete:
+			s.deleteSiteBrandIcon(w, r, strings.TrimPrefix(r.URL.Path, "/api/settings/site-brand/icons/"))
+		default:
+			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+		return
+	}
+
 	switch r.URL.Path {
 	case "/api/settings":
 		switch r.Method {
@@ -272,11 +296,16 @@ func (s *Service) saveSettings(w http.ResponseWriter, r *http.Request, mergeCurr
 		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": err.Error()})
 		return
 	}
+	settings, err := loadUserSettings(r.Context(), db)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": err.Error()})
+		return
+	}
 	message := "设置已保存"
 	if mergeCurrent {
 		message = "设置已更新"
 	}
-	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "message": message})
+	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "message": message, "data": settings})
 }
 
 func (s *Service) getDatabaseStats(w http.ResponseWriter, r *http.Request) {
@@ -967,6 +996,7 @@ func loadUserSettings(ctx context.Context, db *sql.DB) (map[string]interface{}, 
 			theme_mode,
 			page_width_mode,
 			sidebar_collapsed,
+			site_brand_icon_id,
 			koyeb_refresh_interval,
 			fly_refresh_interval,
 			module_visibility,
@@ -988,6 +1018,7 @@ func loadUserSettings(ctx context.Context, db *sql.DB) (map[string]interface{}, 
 		&row.ThemeMode,
 		&row.PageWidthMode,
 		&row.SidebarCollapsed,
+		&row.SiteBrandIconID,
 		&row.KoyebRefreshInterval,
 		&row.FlyRefreshInterval,
 		&row.ModuleVisibility,
@@ -1057,6 +1088,7 @@ func loadUserSettings(ctx context.Context, db *sql.DB) (map[string]interface{}, 
 	settings := map[string]interface{}{
 		"customCss":               nullString(row.CustomCSS, ""),
 		"sidebarCollapsed":        nullInt(row.SidebarCollapsed, 0) != 0,
+		"siteBrandIconId":         nullString(row.SiteBrandIconID, ""),
 		"koyebRefreshInterval":    nullInt(row.KoyebRefreshInterval, 30000),
 		"flyRefreshInterval":      nullInt(row.FlyRefreshInterval, 30000),
 		"moduleVisibility":        visibility,
@@ -1087,6 +1119,7 @@ func saveUserSettings(ctx context.Context, db *sql.DB, settings map[string]inter
 	assignString(updates, "theme_mode", settings, "themeMode", "theme_mode")
 	assignString(updates, "page_width_mode", settings, "pageWidthMode", "page_width_mode")
 	assignBoolInt(updates, "sidebar_collapsed", settings, "sidebarCollapsed", "sidebar_collapsed")
+	assignString(updates, "site_brand_icon_id", settings, "siteBrandIconId", "site_brand_icon_id")
 	assignInt(updates, "koyeb_refresh_interval", settings, "koyebRefreshInterval", "koyeb_refresh_interval")
 	assignInt(updates, "fly_refresh_interval", settings, "flyRefreshInterval", "fly_refresh_interval")
 	assignJSON(updates, "module_visibility", settings, "moduleVisibility", "module_visibility")
@@ -1111,6 +1144,7 @@ func saveUserSettings(ctx context.Context, db *sql.DB, settings map[string]inter
 		"theme_mode",
 		"page_width_mode",
 		"sidebar_collapsed",
+		"site_brand_icon_id",
 		"koyeb_refresh_interval",
 		"fly_refresh_interval",
 		"module_visibility",
@@ -1478,7 +1512,7 @@ func estimateTableSize(ctx context.Context, db *sql.DB, table string) (int64, er
 
 func migrationRequiredTables() map[string][]string {
 	return map[string][]string{
-		"user_settings":         {"id", "theme_mode", "page_width_mode", "sidebar_collapsed", "module_visibility", "module_order", "time_zone"},
+		"user_settings":         {"id", "theme_mode", "page_width_mode", "sidebar_collapsed", "site_brand_icon_id", "module_visibility", "module_order", "time_zone"},
 		"operation_logs":        {"id", "operation_type", "table_name", "trace_id"},
 		"totp_accounts":         {"id", "secret", "secret_encrypted_at", "last_revealed_at"},
 		"filebox_entries":       {"code", "type", "expiry", "downloads"},

@@ -371,7 +371,7 @@ func (s *Server) serveGoRoute(w http.ResponseWriter, r *http.Request, route mani
 			"routes":        manifest.Routes(),
 			"retired":       []string{},
 		})
-	case "/api/settings", "/api/settings/database-stats", "/api/settings/migration-self-check", "/api/settings/database-analysis", "/api/settings/deprecated-tables", "/api/settings/cleanup-deprecated-tables", "/api/settings/export-database", "/api/settings/database/import", "/api/settings/import-database", "/api/settings/operation-logs", "/api/settings/sys-logs", "/api/settings/app-log-file", "/api/settings/log-settings", "/api/settings/clear-app-logs", "/api/settings/vacuum-database", "/api/settings/clear-logs", "/api/settings/enforce-log-limits", "/api/settings/clear-chat-messages":
+	case "/api/settings", "/api/settings/site-brand/icons", "/api/settings/site-brand/icons/{id}", "/api/settings/database-stats", "/api/settings/migration-self-check", "/api/settings/database-analysis", "/api/settings/deprecated-tables", "/api/settings/cleanup-deprecated-tables", "/api/settings/export-database", "/api/settings/database/import", "/api/settings/import-database", "/api/settings/operation-logs", "/api/settings/sys-logs", "/api/settings/app-log-file", "/api/settings/log-settings", "/api/settings/clear-app-logs", "/api/settings/vacuum-database", "/api/settings/clear-logs", "/api/settings/enforce-log-limits", "/api/settings/clear-chat-messages":
 		s.settings.ServeHTTP(w, r)
 	case "/api/system/host-metrics", "/api/system/api-stats", "/api/system/api-docs", "/api/system/openapi.json", "/api/api-keys", "/api/system/api-keys", "/api/system/ai-access/key/rotate", "/api/system/ai-access/mcp-servers/{id}", "/api/system/ai-access/mcp-servers", "/api/system/ai-access/skills/{id}", "/api/system/ai-access/skills", "/api/system/ai-access/audit/clear", "/api/system/ai-access", "/api/ai-access/key/rotate", "/api/ai-access/mcp-servers/{id}", "/api/ai-access/mcp-servers", "/api/ai-access/skills/{id}", "/api/ai-access/skills", "/api/ai-access/audit/clear", "/api/ai-access", "/api/ai/manifest", "/api/ai/mcp":
 		s.system.ServeHTTP(w, r)
@@ -441,6 +441,10 @@ func (s *Server) serveGoRoute(w http.ResponseWriter, r *http.Request, route mani
 func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	if s.settings != nil && s.settings.ServePublicSiteBrandIconAsset(w, r) {
 		return
 	}
 
@@ -527,7 +531,7 @@ func (s *Server) tryServeAssetFallback(w http.ResponseWriter, r *http.Request) b
 		return false
 	}
 	switch cleanPath {
-	case "logo.svg":
+	case "logo-default.svg", "logo.svg":
 		matches, err := filepath.Glob(filepath.Join(s.cfg.DistDir, "assets", "logo-*.svg"))
 		if err != nil || len(matches) == 0 {
 			return false

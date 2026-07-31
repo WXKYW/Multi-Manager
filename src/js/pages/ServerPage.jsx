@@ -290,6 +290,7 @@ const createEmptyServerStatusPageForm = () => ({
   showTraffic: true,
   showCharts: true,
   showOnDashboard: true,
+  publicIconId: '',
   cacheSeconds: 300,
   serverIds: [],
 });
@@ -3134,6 +3135,7 @@ function ServerPage() {
       showTraffic: config.showTraffic !== false,
       showCharts: config.showCharts !== false,
       showOnDashboard: !!config.showOnDashboard,
+      publicIconId: String(config.publicIconId || '').trim(),
       cacheSeconds: page.cacheSeconds || 300,
       serverIds: Array.isArray(page.serverIds) ? page.serverIds : [],
     });
@@ -3173,6 +3175,7 @@ function ServerPage() {
           showTraffic: !!serverStatusPageForm.showTraffic,
           showCharts: !!serverStatusPageForm.showCharts,
           showOnDashboard: !!serverStatusPageForm.showOnDashboard,
+          ...(serverStatusPageForm.publicIconId ? { publicIconId: serverStatusPageForm.publicIconId } : {}),
         },
       };
       const isEdit = !!serverStatusPageForm.id;
@@ -11317,7 +11320,6 @@ function ServerPage() {
                         labels={{ copyAction: '复制安装命令' }}
                       />
                       <div className="rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 py-2 text-[11px] leading-relaxed text-kumo-subtle">
-                        <span className="font-semibold text-kumo-strong">执行环境</span>
                         {getAgentInstallExecutionHint(agentInstallOS)}
                       </div>
                       <div className="grid grid-cols-1 gap-2 text-[11px] text-kumo-subtle sm:grid-cols-2">
@@ -11633,7 +11635,6 @@ function ServerPage() {
                     labels={{ copyAction: '复制 Agent 安装命令' }}
                   />
                   <div className="rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 py-2 text-[11px] leading-relaxed text-kumo-subtle">
-                    <span className="font-semibold text-kumo-strong">执行环境</span>
                     {getAgentInstallExecutionHint(agentInstallOS)}
                   </div>
                 </div>

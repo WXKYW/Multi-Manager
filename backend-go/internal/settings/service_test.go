@@ -102,6 +102,117 @@ func TestUserSettingsReadPatchAndPost(t *testing.T) {
 	}
 }
 
+func TestSiteBrandIconUploadSelectAndServe(t *testing.T) {
+	service := New(config.Config{
+		Version: "test",
+		Host:    "127.0.0.1",
+		Port:    0,
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" fill="#111827"/></svg>`)
+	uploadRes := performMultipartFileSettingsRequest(t, service, "/api/settings/site-brand/icons", "file", "brand.svg", svg, map[string]string{
+		"name": "品牌图标",
+	})
+	if uploadRes.Code != http.StatusOK {
+		t.Fatalf("upload site brand icon status = %d body=%s", uploadRes.Code, uploadRes.Body.String())
+	}
+	var uploadPayload struct {
+		Success bool `json:"success"`
+		Data    struct {
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			URL         string `json:"url"`
+			ContentType string `json:"contentType"`
+		} `json:"data"`
+	}
+	mustDecodeSettings(t, uploadRes, &uploadPayload)
+	if !uploadPayload.Success || uploadPayload.Data.ID == "" || uploadPayload.Data.URL == "" || uploadPayload.Data.Name != "品牌图标" {
+		t.Fatalf("unexpected upload payload: %#v", uploadPayload)
+	}
+	if !strings.Contains(uploadPayload.Data.ContentType, "image/svg+xml") {
+		t.Fatalf("unexpected upload content type: %#v", uploadPayload)
+	}
+
+	listRes := performSettingsRequest(service, http.MethodGet, "/api/settings/site-brand/icons", "")
+	if listRes.Code != http.StatusOK {
+		t.Fatalf("list site brand icons status = %d body=%s", listRes.Code, listRes.Body.String())
+	}
+	var listPayload struct {
+		Success bool `json:"success"`
+		Data    []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+			URL  string `json:"url"`
+		} `json:"data"`
+	}
+	mustDecodeSettings(t, listRes, &listPayload)
+	if !listPayload.Success || len(listPayload.Data) != 1 || listPayload.Data[0].ID != uploadPayload.Data.ID {
+		t.Fatalf("unexpected site brand icon list: %#v", listPayload)
+	}
+	if listPayload.Data[0].Name != "品牌图标" {
+		t.Fatalf("unexpected site brand icon name in list: %#v", listPayload)
+	}
+
+	assetRes := performSettingsRequest(service, http.MethodGet, uploadPayload.Data.URL, "")
+	if assetRes.Code != http.StatusOK {
+		t.Fatalf("site brand icon asset status = %d body=%s", assetRes.Code, assetRes.Body.String())
+	}
+	if !strings.Contains(assetRes.Header().Get("Content-Type"), "image/svg+xml") || !strings.Contains(assetRes.Body.String(), "<svg") {
+		t.Fatalf("unexpected site brand icon asset response: content-type=%q body=%q", assetRes.Header().Get("Content-Type"), assetRes.Body.String())
+	}
+
+	patchBody, err := json.Marshal(map[string]string{"siteBrandIconId": uploadPayload.Data.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	saveRes := performSettingsRequest(service, http.MethodPatch, "/api/settings", string(patchBody))
+	if saveRes.Code != http.StatusOK {
+		t.Fatalf("patch site brand setting status = %d body=%s", saveRes.Code, saveRes.Body.String())
+	}
+	var savePayload struct {
+		Success bool                   `json:"success"`
+		Data    map[string]interface{} `json:"data"`
+	}
+	mustDecodeSettings(t, saveRes, &savePayload)
+	if !savePayload.Success || savePayload.Data["siteBrandIconId"] != uploadPayload.Data.ID {
+		t.Fatalf("site brand selection not returned from patch response: %#v", savePayload)
+	}
+
+	getRes := performSettingsRequest(service, http.MethodGet, "/api/settings", "")
+	if getRes.Code != http.StatusOK {
+		t.Fatalf("get settings after site brand patch status = %d body=%s", getRes.Code, getRes.Body.String())
+	}
+	var getPayload struct {
+		Success bool                   `json:"success"`
+		Data    map[string]interface{} `json:"data"`
+	}
+	mustDecodeSettings(t, getRes, &getPayload)
+	if !getPayload.Success || getPayload.Data["siteBrandIconId"] != uploadPayload.Data.ID {
+		t.Fatalf("site brand icon id not persisted: %#v", getPayload)
+	}
+
+	deleteRes := performSettingsRequest(service, http.MethodDelete, "/api/settings/site-brand/icons/"+uploadPayload.Data.ID, "")
+	if deleteRes.Code != http.StatusOK {
+		t.Fatalf("delete site brand icon status = %d body=%s", deleteRes.Code, deleteRes.Body.String())
+	}
+
+	listRes = performSettingsRequest(service, http.MethodGet, "/api/settings/site-brand/icons", "")
+	if listRes.Code != http.StatusOK {
+		t.Fatalf("list site brand icons after delete status = %d body=%s", listRes.Code, listRes.Body.String())
+	}
+	mustDecodeSettings(t, listRes, &listPayload)
+	if !listPayload.Success || len(listPayload.Data) != 0 {
+		t.Fatalf("unexpected site brand icon list after delete: %#v", listPayload)
+	}
+
+	assetRes = performSettingsRequest(service, http.MethodGet, uploadPayload.Data.URL, "")
+	if assetRes.Code != http.StatusNotFound {
+		t.Fatalf("deleted site brand icon asset status = %d body=%s", assetRes.Code, assetRes.Body.String())
+	}
+}
+
 func TestDeprecatedTableReasonRecognizesRetiredTables(t *testing.T) {
 	cases := []struct {
 		table    string
@@ -909,6 +1020,33 @@ func performMultipartSettingsRequest(t *testing.T, service *Service, path, fileP
 		t.Fatal(err)
 	}
 	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, path, &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	res := httptest.NewRecorder()
+	service.ServeHTTP(res, req)
+	return res
+}
+
+func performMultipartFileSettingsRequest(t *testing.T, service *Service, path, fieldName, fileName string, content []byte, fields map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	for key, value := range fields {
+		if err := writer.WriteField(key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	part, err := writer.CreateFormFile(fieldName, fileName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(content); err != nil {
 		t.Fatal(err)
 	}
 	if err := writer.Close(); err != nil {

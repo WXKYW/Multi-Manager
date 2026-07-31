@@ -18,6 +18,7 @@ import useStore, {
 } from '../store.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { APP_VERSION } from '../modules/appVersion.js';
+import { applySiteBrandFaviconHref, getDefaultSiteBrandPreviewUrl } from '../modules/siteBrand.js';
 import { AppCard, SectionCard, cx } from '../components/ui/AppPrimitives.jsx';
 import CodeEditor from '../components/ui/CodeEditor.jsx';
 import { BackupPanel } from './BackupPage.jsx';
@@ -250,12 +251,17 @@ function SettingsPage() {
   } = useStore();
 
   const fileInputRef = useRef(null);
+  const siteBrandInputRef = useRef(null);
   const [activeTab, setActiveTab] = useState('general');
   const [settings, setSettings] = useState(() => normalizeUserSettings());
   const [settingsPatch, setSettingsPatch] = useState({});
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [moduleSearch, setModuleSearch] = useState('');
+  const [siteBrandIcons, setSiteBrandIcons] = useState([]);
+  const [siteBrandIconsLoading, setSiteBrandIconsLoading] = useState(false);
+  const [siteBrandIconsLoaded, setSiteBrandIconsLoaded] = useState(false);
+  const [siteBrandIconUploading, setSiteBrandIconUploading] = useState(false);
 
 
 
@@ -486,12 +492,28 @@ function SettingsPage() {
     }
   }, []);
 
+  const loadSiteBrandIcons = useCallback(async () => {
+    setSiteBrandIconsLoading(true);
+    try {
+      const response = await fetch('/api/settings/site-brand/icons', { headers: getAuthHeaders() });
+      const result = await response.json();
+      if (!response.ok || result.success === false) throw new Error(result.error || '加载站点图标失败');
+      const items = Array.isArray(result.data) ? result.data : [];
+      setSiteBrandIcons(items);
+      setSiteBrandIconsLoaded(true);
+      return items;
+    } finally {
+      setSiteBrandIconsLoading(false);
+    }
+  }, []);
+
 
 
   const refreshCurrent = useCallback(async (showFeedback = false) => {
     setSettingsLoading(true);
     try {
       await fetchSettings();
+      if (activeTab === 'appearance') await loadSiteBrandIcons();
       if (activeTab === 'database') await fetchDbState();
       if (activeTab === 'logs') await fetchLogState();
       if (activeTab === 'security') await Promise.all([fetchTwoFAStatus(), fetchLoginSessions(), fetchGitHubAuthConfig(), fetchPasskeys()]);
@@ -501,7 +523,7 @@ function SettingsPage() {
     } finally {
       setSettingsLoading(false);
     }
-  }, [activeTab, fetchDbState, fetchGitHubAuthConfig, fetchLogState, fetchLoginSessions, fetchPasskeys, fetchSettings, fetchTwoFAStatus]);
+  }, [activeTab, fetchDbState, fetchGitHubAuthConfig, fetchLogState, fetchLoginSessions, fetchPasskeys, fetchSettings, fetchTwoFAStatus, loadSiteBrandIcons]);
 
   useEffect(() => {
     let cancelled = false;
@@ -553,6 +575,12 @@ function SettingsPage() {
       fetchPasskeys().catch((error) => toast.error(error.message || '加载通行密钥失败'));
     }
   }, [activeTab, fetchPasskeys, passkeysLoaded, passkeysLoading]);
+
+  useEffect(() => {
+    if (activeTab === 'appearance' && !siteBrandIconsLoaded && !siteBrandIconsLoading) {
+      loadSiteBrandIcons().catch((error) => toast.error(error.message || '加载站点图标失败'));
+    }
+  }, [activeTab, loadSiteBrandIcons, siteBrandIconsLoaded, siteBrandIconsLoading]);
 
   const forceSessionOffline = async (session) => {
     try {
@@ -619,6 +647,56 @@ function SettingsPage() {
       setSettingsSaving(false);
     }
   };
+
+  const selectedSiteBrandIcon = useMemo(
+    () => siteBrandIcons.find((item) => item.id === settings.siteBrandIconId) || null,
+    [settings.siteBrandIconId, siteBrandIcons],
+  );
+
+  const siteBrandPreviewUrl = selectedSiteBrandIcon?.url || getDefaultSiteBrandPreviewUrl();
+
+  const previewSiteBrandIcon = useCallback((iconId) => {
+    const nextSelected = siteBrandIcons.find((item) => item.id === iconId) || null;
+    applySiteBrandFaviconHref(nextSelected?.url || getDefaultSiteBrandPreviewUrl());
+  }, [siteBrandIcons]);
+
+  const chooseSiteBrandIcon = useCallback((iconId) => {
+    patchSettings({ siteBrandIconId: iconId });
+    previewSiteBrandIcon(iconId);
+  }, [patchSettings, previewSiteBrandIcon]);
+
+  const triggerSiteBrandUpload = useCallback(() => {
+    siteBrandInputRef.current?.click();
+  }, []);
+
+  const uploadSiteBrandIcon = useCallback(async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('name', file.name.replace(/\.[^.]+$/, ''));
+    setSiteBrandIconUploading(true);
+    try {
+      const response = await fetch('/api/settings/site-brand/icons', {
+        method: 'POST',
+        headers: getUploadHeaders(),
+        body: formData,
+      });
+      const result = await response.json();
+      if (!response.ok || result.success === false) throw new Error(result.error || '上传站点图标失败');
+      const item = result.data || result;
+      setSiteBrandIcons((prev) => [item, ...prev.filter((entry) => entry.id !== item.id)]);
+      setSiteBrandIconsLoaded(true);
+      chooseSiteBrandIcon(item.id || '');
+      toast.success('图标已上传，保存当前页设置后生效');
+    } catch (error) {
+      toast.error(error.message || '上传站点图标失败');
+    } finally {
+      setSiteBrandIconUploading(false);
+      if (event.target) event.target.value = '';
+    }
+  }, [chooseSiteBrandIcon]);
 
 
 

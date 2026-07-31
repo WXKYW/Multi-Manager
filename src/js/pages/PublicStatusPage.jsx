@@ -14,8 +14,15 @@ import {
 import { CanvasRenderer } from 'echarts/renderers';
 import { io } from 'socket.io-client';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
+import PublicPageIconPicker from '../components/public/PublicPageIconPicker.jsx';
 import PublicOverviewStats from '../components/public/PublicOverviewStats.jsx';
 import { useCloudflareSpotlight } from '../hooks/useCloudflareSpotlight.js';
+import {
+  getPublicPageFaviconHref,
+  swapPublicPageFavicon,
+  withPublicPageIconId,
+} from '../modules/publicPageBranding.js';
+import { toast } from '../modules/toast.js';
 import useStore from '../store.js';
 import {
   Activity,
@@ -237,7 +244,7 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
       const endpoint = slug && !domainOnly
         ? `/api/uptime/public/status-pages/${encodeURIComponent(slug)}`
         : `/api/uptime/public/status-page-by-domain?domain=${encodeURIComponent(window.location.host)}`;
-      const response = await fetch(endpoint);
+      const response = await fetch(endpoint, { cache: 'no-store' });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || result.success === false) {
         const error = new Error(result.error || '状态页不存在或未公开');
@@ -269,6 +276,8 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
       document.title = previousTitle;
     };
   }, [page?.title]);
+
+  useEffect(() => swapPublicPageFavicon(getPublicPageFaviconHref('uptime', page?.config)), [page?.config]);
 
   useEffect(() => {
     if (!page) return undefined;
@@ -326,15 +335,40 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
       ? `${warningCount} 项服务需要关注`
       : '全部服务运行正常';
 
+  const updatePageIcon = async (iconId) => {
+    if (!page?.id) return;
+    const response = await fetch(`/api/uptime/status-pages/${page.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        config: withPublicPageIconId(page.config, iconId),
+      }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.success === false) {
+      throw new Error(result.error || '保存状态页图标失败');
+    }
+    setPage((current) => (current ? {
+      ...current,
+      config: withPublicPageIconId(current.config, iconId),
+    } : current));
+    toast.success(iconId ? '状态页图标已更新' : '已恢复状态页默认图标');
+  };
+
   return (
     <div ref={surfaceRef} className="cf-ai-background-surface public-status-page relative isolate min-h-screen text-kumo-default">
       <div aria-hidden="true" className="cf-ai-background pointer-events-none absolute inset-0" />
       <main className="relative z-10 mx-auto flex min-h-screen w-full max-w-5xl flex-col px-4 py-6 sm:px-6 lg:px-8">
         <div className="mb-6 flex items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-kumo-interact/80 bg-kumo-base text-kumo-brand">
-              <Activity className="h-4 w-4" />
-            </div>
+            <PublicPageIconPicker
+              pageKind="uptime"
+              config={page?.config}
+              isAuthenticated={isAuthenticated}
+              onChange={updatePageIcon}
+              triggerClassName="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-kumo-interact/80 bg-kumo-base text-kumo-brand"
+              iconClassName="h-5 w-5"
+            />
             <div className="min-w-0">
               <div className="truncate text-base font-bold text-kumo-strong">{page?.title || '服务状态'}</div>
             </div>

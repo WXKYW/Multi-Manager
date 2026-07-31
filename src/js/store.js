@@ -441,6 +441,11 @@ export const normalizeUserSettings = (settings = {}) => {
       settings.dashboardFooterRecordNumber ?? settings.dashboard_footer_record_number,
       typeof getInitialDashboardFooterRecordNumber === 'function' ? getInitialDashboardFooterRecordNumber() : ''
     ),
+    siteBrandIconId: typeof settings.siteBrandIconId === 'string'
+      ? settings.siteBrandIconId
+      : typeof settings.site_brand_icon_id === 'string'
+        ? settings.site_brand_icon_id
+        : '',
     koyebRefreshInterval: Number(settings.koyebRefreshInterval) || 30000,
     flyRefreshInterval: Number(settings.flyRefreshInterval) || 30000,
     moduleVisibility,
@@ -568,6 +573,7 @@ const useStore = create((set, get) => ({
   sidebarCollapsed: initialSidebarCollapsed,
   dashboardFooterVisible: initialDashboardFooterVisible,
   dashboardFooterRecordNumber: initialDashboardFooterRecordNumber,
+  siteBrandIconId: '',
   appProcessUptimeSeconds: 0,
   appProcessUptimeMeasuredAt: 0,
   themeMode: initialThemeMode,
@@ -727,6 +733,7 @@ const useStore = create((set, get) => ({
       sidebarCollapsed: normalized.sidebarCollapsed,
       dashboardFooterVisible: normalized.dashboardFooterVisible,
       dashboardFooterRecordNumber: normalized.dashboardFooterRecordNumber,
+      siteBrandIconId: normalized.siteBrandIconId,
       customCss: normalized.customCss,
       moduleVisibility: normalized.moduleVisibility,
       moduleOrder: normalized.moduleOrder,
