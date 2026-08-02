@@ -39,7 +39,7 @@ export default function DocumentWorkspace({
   leftPanel,
   extraToolbarActions,
   placeholder = '开始输入 Markdown 内容…',
-	autosaveDelay = 0,
+  autosaveDelay = 0,
   className = '',
 }) {
   const state = useDocumentEditorState(initialMarkdown, {
@@ -54,9 +54,9 @@ export default function DocumentWorkspace({
   useEffect(() => {
     if (initialMarkdown !== state.markdownRef.current && adapterRef.current) {
       adapterRef.current.setMarkdown(initialMarkdown);
-	  state.resetMarkdown(initialMarkdown);
-	} else if (initialMarkdown !== state.markdownRef.current) {
-	  state.resetMarkdown(initialMarkdown);
+      state.resetMarkdown(initialMarkdown);
+    } else if (initialMarkdown !== state.markdownRef.current) {
+      state.resetMarkdown(initialMarkdown);
     }
   }, [initialMarkdown]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -65,7 +65,7 @@ export default function DocumentWorkspace({
       root,
       defaultValue: state.markdownRef.current,
     });
-    adapter.onChange((markdown) => {
+    adapter.onChange(markdown => {
       state.setMarkdown(markdown);
     });
     return adapter;
@@ -82,11 +82,11 @@ export default function DocumentWorkspace({
     }
   }, [onSave, state]);
 
-	useEffect(() => {
-		if (!autosaveDelay || !onSave || !state.dirty || state.saveState === 'saving') return;
-		const timer = window.setTimeout(() => handleSave(), autosaveDelay);
-		return () => window.clearTimeout(timer);
-	}, [autosaveDelay, handleSave, onSave, state.dirty, state.saveState]);
+  useEffect(() => {
+    if (!autosaveDelay || !onSave || !state.dirty || state.saveState === 'saving') return;
+    const timer = window.setTimeout(() => handleSave(), autosaveDelay);
+    return () => window.clearTimeout(timer);
+  }, [autosaveDelay, handleSave, onSave, state.dirty, state.saveState]);
 
   const handleCopyMarkdown = useCallback(async () => {
     try {
@@ -130,9 +130,9 @@ export default function DocumentWorkspace({
       );
     }
 
-	if (state.showPreview) {
-	  return <DocumentPreviewPane markdown={state.markdown} />;
-	}
+    if (state.showPreview) {
+      return <DocumentPreviewPane markdown={state.markdown} />;
+    }
 
     // write mode
     return (
@@ -146,9 +146,7 @@ export default function DocumentWorkspace({
   };
 
   return (
-    <div
-      className={`flex h-full min-h-0 w-full min-w-0 flex-1 flex-col ${className}`.trim()}
-    >
+    <div className={`flex h-full min-h-0 w-full min-w-0 flex-1 flex-col ${className}`.trim()}>
       {/* Toolbar */}
       <DocumentToolbar
         title={title}
@@ -172,15 +170,15 @@ export default function DocumentWorkspace({
       <div className="flex min-h-0 flex-1">
         {/* Left Panel */}
         {hasLeftPanel && (
-          <div className="flex w-56 shrink-0 flex-col border-r border-kumo-line bg-kumo-base">
+          <div
+            className={`flex w-56 shrink-0 flex-col border-r border-kumo-line bg-kumo-base ${leftPanel.className || ''}`.trim()}
+          >
             {leftPanel.content}
           </div>
         )}
 
         {/* Center Editor */}
-        <div className="flex min-h-0 flex-1 flex-col">
-          {renderEditor()}
-        </div>
+        <div className="flex min-h-0 flex-1 flex-col">{renderEditor()}</div>
 
         {/* Right Panel (Outline + Custom) */}
         {rightPanelOpen && (
@@ -189,13 +187,16 @@ export default function DocumentWorkspace({
             onToggle={hasRightPanel ? undefined : state.toggleOutline}
             title={hasRightPanel ? rightPanel.title : '大纲'}
           >
-            {state.showOutline && (
+            {state.showOutline && (!hasRightPanel || state.outline.length > 0) && (
               <DocumentOutline
                 outline={state.outline}
-                onHeadingClick={(item) => {
+                className={hasRightPanel ? 'border-b border-kumo-line' : ''}
+                onHeadingClick={item => {
                   // Scroll to heading in editor
-				  const index = Number(String(item.id).replace('heading-', ''));
-				  const el = document.querySelectorAll('.app-markdown-visual-editor h1, .app-markdown-visual-editor h2, .app-markdown-visual-editor h3, .app-markdown-visual-editor h4, .app-markdown-visual-editor h5, .app-markdown-visual-editor h6')[index];
+                  const index = Number(String(item.id).replace('heading-', ''));
+                  const el = document.querySelectorAll(
+                    '.app-markdown-visual-editor h1, .app-markdown-visual-editor h2, .app-markdown-visual-editor h3, .app-markdown-visual-editor h4, .app-markdown-visual-editor h5, .app-markdown-visual-editor h6'
+                  )[index];
                   el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }}
               />

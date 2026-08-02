@@ -154,7 +154,7 @@ func (s *Store) ListEntries(ctx context.Context, collectionID *int64, q, tag str
 	}
 	defer db.Close()
 
-	query := `SELECT id, collection_id, title, summary, tags_json, starred, visibility,
+	query := `SELECT id, public_id, collection_id, title, summary, tags_json, starred, visibility,
 		latest_published_version_no, latest_published_at, created_at, updated_at
 		FROM prompt_entries WHERE archived = 0`
 	args := []interface{}{}
@@ -192,7 +192,7 @@ func (s *Store) ListEntries(ctx context.Context, collectionID *int64, q, tag str
 		var e EntrySummary
 		var collID sql.NullInt64
 		var starred int
-		if err := rows.Scan(&e.ID, &collID, &e.Title, &e.Summary, &e.TagsJSON, &starred,
+		if err := rows.Scan(&e.ID, &e.PublicID, &collID, &e.Title, &e.Summary, &e.TagsJSON, &starred,
 			&e.Visibility, &e.LatestPublishedVersionNo, &e.LatestPublishedAt,
 			&e.CreatedAt, &e.UpdatedAt); err != nil {
 			return nil, err

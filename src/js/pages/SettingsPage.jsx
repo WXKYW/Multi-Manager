@@ -122,7 +122,7 @@ const toInt = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const moduleRows = DEFAULT_MODULE_ORDER.map((moduleId) => {
+const moduleRows = DEFAULT_MODULE_ORDER.filter((moduleId) => moduleId !== 'prompts').map((moduleId) => {
   const group = MODULE_GROUPS.find((item) => getGroupModuleIds(item).includes(moduleId));
   return {
     id: moduleId,

@@ -16,17 +16,18 @@ type Collection struct {
 
 // EntrySummary 条目列表摘要
 type EntrySummary struct {
-	ID                     int64  `json:"id"`
-	CollectionID           *int64 `json:"collection_id"`
-	Title                  string `json:"title"`
-	Summary                string `json:"summary"`
-	TagsJSON               string `json:"tags_json"`
-	Starred                bool   `json:"starred"`
-	Visibility             string `json:"visibility"`
-	LatestPublishedVersionNo int  `json:"latest_published_version_no"`
-	LatestPublishedAt      string `json:"latest_published_at"`
-	CreatedAt              string `json:"created_at"`
-	UpdatedAt              string `json:"updated_at"`
+	ID                       int64  `json:"id"`
+	PublicID                 string `json:"public_id"`
+	CollectionID             *int64 `json:"collection_id"`
+	Title                    string `json:"title"`
+	Summary                  string `json:"summary"`
+	TagsJSON                 string `json:"tags_json"`
+	Starred                  bool   `json:"starred"`
+	Visibility               string `json:"visibility"`
+	LatestPublishedVersionNo int    `json:"latest_published_version_no"`
+	LatestPublishedAt        string `json:"latest_published_at"`
+	CreatedAt                string `json:"created_at"`
+	UpdatedAt                string `json:"updated_at"`
 }
 
 // EntryDetail 条目详情

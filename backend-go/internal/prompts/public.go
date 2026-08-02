@@ -120,9 +120,7 @@ func (s *Service) serveDirectLink(w http.ResponseWriter, r *http.Request) {
 func (s *Service) logPublicAccess(entryID int64, versionID *int64, routeKind, format string, r *http.Request) {
 	remoteAddr := r.RemoteAddr
 	userAgent := r.UserAgent()
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		s.store.LogAccess(ctx, entryID, versionID, routeKind, format, HashIP(remoteAddr), userAgent)
-	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	s.store.LogAccess(ctx, entryID, versionID, routeKind, format, HashIP(remoteAddr), userAgent)
 }

@@ -30,6 +30,20 @@ if (digest.digest('hex') !== expectedSha256) {
   throw new Error('draw.io archive checksum mismatch');
 }
 
-const result = spawnSync('tar', ['-xf', tempFile, '-C', target], { stdio: 'inherit' });
-if (result.status !== 0 || !existsSync(indexFile)) throw new Error('draw.io archive extraction failed');
+const extractionCommands = [
+  ['python3', ['-c', 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])', tempFile, target]],
+  ['python', ['-c', 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])', tempFile, target]],
+  ['tar', ['-xf', tempFile, '-C', target]],
+];
+
+let extractionSucceeded = false;
+for (const [command, args] of extractionCommands) {
+  const result = spawnSync(command, args, { stdio: 'inherit' });
+  if (result.status === 0 && existsSync(indexFile)) {
+    extractionSucceeded = true;
+    break;
+  }
+}
+
+if (!extractionSucceeded) throw new Error('draw.io archive extraction failed');
 process.stdout.write(`draw.io ${version} installed in ${target}.\n`);

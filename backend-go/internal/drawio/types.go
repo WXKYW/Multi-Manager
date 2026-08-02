@@ -108,6 +108,11 @@ type SaveVersionRequest struct {
 	ExpectedDraftRev int    `json:"expected_draft_rev"`
 }
 
+// UpdateThumbnailRequest 更新文档缩略图
+type UpdateThumbnailRequest struct {
+	ThumbnailPath string `json:"thumbnail_path"`
+}
+
 // ConflictResponse 冲突响应
 type ConflictResponse struct {
 	CurrentDraftRev int    `json:"current_draft_rev"`

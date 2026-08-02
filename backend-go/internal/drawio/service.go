@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/iwvw/api-monitor/backend-go/internal/config"
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
@@ -97,6 +98,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.getDraft(ctx, w, docID)
 		case len(parts) == 3 && parts[2] == "draft" && r.Method == http.MethodPut:
 			s.saveDraft(ctx, w, r, docID)
+		case len(parts) == 3 && parts[2] == "thumbnail" && r.Method == http.MethodPut:
+			s.saveThumbnail(ctx, w, r, docID)
 		case len(parts) == 3 && parts[2] == "versions" && r.Method == http.MethodGet:
 			s.listVersions(ctx, w, docID)
 		case len(parts) == 3 && parts[2] == "versions" && r.Method == http.MethodPost:
@@ -177,7 +180,7 @@ func (s *Service) createDocument(ctx context.Context, w http.ResponseWriter, r *
 	}
 
 	if req.Title == "" {
-		req.Title = "未命名图表"
+		req.Title = time.Now().Format("01021504")
 	}
 	if req.TagsJSON == "" {
 		req.TagsJSON = "[]"
@@ -330,6 +333,31 @@ func (s *Service) saveDraft(ctx context.Context, w http.ResponseWriter, r *http.
 		"draft":    draft,
 		"draftRev": newRev,
 	})
+}
+
+func (s *Service) saveThumbnail(ctx context.Context, w http.ResponseWriter, r *http.Request, docID int64) {
+	var req UpdateThumbnailRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	req.ThumbnailPath = strings.TrimSpace(req.ThumbnailPath)
+	if req.ThumbnailPath == "" {
+		response.Error(w, http.StatusBadRequest, "Thumbnail content is required")
+		return
+	}
+
+	if err := s.store.SaveDocumentThumbnail(ctx, docID, req.ThumbnailPath); err != nil {
+		if err == sql.ErrNoRows {
+			response.Error(w, http.StatusNotFound, "Document not found")
+			return
+		}
+		log.Printf("[drawio] save thumbnail %d: %v", docID, err)
+		response.Error(w, http.StatusInternalServerError, "Failed to save thumbnail")
+		return
+	}
+
+	response.OK(w, map[string]interface{}{"saved": true})
 }
 
 // --- Version handlers ---

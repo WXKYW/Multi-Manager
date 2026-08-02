@@ -327,6 +327,9 @@ export const DEFAULT_MODULE_VISIBILITY = DEFAULT_MODULE_ORDER.reduce((acc, modul
   return acc;
 }, {});
 
+DEFAULT_MODULE_VISIBILITY.drawio = false;
+DEFAULT_MODULE_VISIBILITY.prompts = false;
+
 
 export const DEFAULT_CHANNEL_ENABLED = {};
 
@@ -413,6 +416,7 @@ export const normalizeUserSettings = (settings = {}) => {
       : rawVisibility[moduleId] ?? rawVisibility[legacyModuleId] ?? DEFAULT_MODULE_VISIBILITY[moduleId] ?? true;
     return acc;
   }, {});
+  moduleVisibility.prompts = false;
 
   const rawChannelEnabled = {
     ...DEFAULT_CHANNEL_ENABLED,

@@ -190,6 +190,30 @@ func (s *Store) UpdateDocument(ctx context.Context, id int64, req UpdateDocument
 	return s.GetDocument(ctx, id)
 }
 
+func (s *Store) SaveDocumentThumbnail(ctx context.Context, documentID int64, thumbnailPath string) error {
+	db, err := s.open(ctx)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	result, err := db.ExecContext(ctx,
+		`UPDATE drawio_documents SET
+		thumbnail_path = ?, thumbnail_status = 'ready', thumbnail_error = '',
+		thumbnail_updated_at = ?
+		WHERE id = ?`,
+		thumbnailPath, now, documentID)
+	if err != nil {
+		return err
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (s *Store) DeleteDocument(ctx context.Context, id int64) error {
 	db, err := s.open(ctx)
 	if err != nil {
@@ -304,7 +328,8 @@ func (s *Store) SaveDraft(ctx context.Context, documentID int64, req SaveDraftRe
 	result, err := tx.ExecContext(ctx,
 		`UPDATE drawio_documents SET current_draft_rev = current_draft_rev + 1,
 		page_count = ?, page_names_json = ?, cover_page_id = ?, cover_page_name = ?,
-		updated_at = ?
+		thumbnail_path = '', thumbnail_status = 'missing', thumbnail_error = '',
+		thumbnail_updated_at = '', updated_at = ?
 		WHERE id = ? AND current_draft_rev = ?`,
 		len(pages), pagesToJSON(pages), coverID, coverName,
 		now, documentID, req.ExpectedDraftRev)
