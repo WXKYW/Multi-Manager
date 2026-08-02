@@ -40,6 +40,7 @@ type alertState struct {
 type Service struct {
 	cfg                           config.Config
 	store                         *database.Store
+	now                           func() time.Time
 	taskRegistry                  *TaskRegistry
 	agentBatches                  *AgentBatchManager
 	engineIO                      *EngineIOServer
@@ -130,6 +131,7 @@ func New(cfg config.Config) *Service {
 	s := &Service{
 		cfg:                           cfg,
 		store:                         store,
+		now:                           time.Now,
 		taskRegistry:                  taskRegistry,
 		agentBatches:                  agentBatches,
 		engineIO:                      engineIO,

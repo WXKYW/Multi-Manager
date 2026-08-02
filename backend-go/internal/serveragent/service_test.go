@@ -2222,6 +2222,8 @@ func TestProxyTrafficReportsAreIdempotent(t *testing.T) {
 func TestProxyTrafficHTTPBatchValidatesScopeAndQuota(t *testing.T) {
 	service, db := testService(t)
 	ctx := context.Background()
+	fixedNow := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	service.now = func() time.Time { return fixedNow }
 	if err := subscriptionservice.New(service.cfg).Initialize(ctx); err != nil {
 		t.Fatalf("initialize subscription schema: %v", err)
 	}
@@ -2252,7 +2254,7 @@ func TestProxyTrafficHTTPBatchValidatesScopeAndQuota(t *testing.T) {
 	if status != http.StatusOK || payload["data"].(map[string]interface{})["accepted"] != float64(1) {
 		t.Fatalf("accepted batch status=%d payload=%#v", status, payload)
 	}
-	usage, err := subscriptionledger.Current(ctx, db, "traffic-sub", "monthly", 1, "2026-01-01 00:00:00", time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC))
+	usage, err := subscriptionledger.Current(ctx, db, "traffic-sub", "monthly", 1, "2026-01-01 00:00:00", fixedNow)
 	if err != nil || usage.UploadBytes != 80 || usage.DownloadBytes != 20 {
 		t.Fatalf("clamped usage=%#v err=%v", usage, err)
 	}

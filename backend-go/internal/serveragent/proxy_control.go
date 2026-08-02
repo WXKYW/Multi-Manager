@@ -179,6 +179,10 @@ func (s *Service) recordProxyTraffic(w http.ResponseWriter, r *http.Request, db 
 		response.Error(w, http.StatusUnauthorized, "invalid agent credential")
 		return
 	}
+	now := time.Now().UTC()
+	if s != nil && s.now != nil {
+		now = s.now().UTC()
+	}
 	var input struct {
 		BootID        string `json:"boot_id"`
 		Sequence      int64  `json:"sequence"`
@@ -207,7 +211,7 @@ func (s *Service) recordProxyTraffic(w http.ResponseWriter, r *http.Request, db 
 			}
 			reports = append(reports, report)
 		}
-		result, err := subscriptionledger.RecordBatchDetailed(r.Context(), db, reports, time.Now().UTC())
+		result, err := subscriptionledger.RecordBatchDetailed(r.Context(), db, reports, now)
 		if err != nil {
 			response.Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -220,7 +224,7 @@ func (s *Service) recordProxyTraffic(w http.ResponseWriter, r *http.Request, db 
 		return
 	}
 	if strings.TrimSpace(input.CredentialID) != "" {
-		result, err := subscriptionledger.RecordBatchDetailed(r.Context(), db, []subscriptionledger.Report{{ServerID: serverID, NodeID: input.NodeID, CredentialID: input.CredentialID, BootID: input.BootID, Sequence: input.Sequence, UploadBytes: input.UploadBytes, DownloadBytes: input.DownloadBytes}}, time.Now().UTC())
+		result, err := subscriptionledger.RecordBatchDetailed(r.Context(), db, []subscriptionledger.Report{{ServerID: serverID, NodeID: input.NodeID, CredentialID: input.CredentialID, BootID: input.BootID, Sequence: input.Sequence, UploadBytes: input.UploadBytes, DownloadBytes: input.DownloadBytes}}, now)
 		if err != nil {
 			response.Error(w, http.StatusBadRequest, err.Error())
 			return
