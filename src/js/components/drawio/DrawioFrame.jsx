@@ -8,7 +8,7 @@ import React, {
 } from 'react';
 import { Loader } from '@cloudflare/kumo/components/loader';
 
-const EDITOR_PATH = '/vendor/drawio/index.html';
+const EDITOR_PATH = '/vendor/drawio/';
 
 const DrawioFrame = forwardRef(function DrawioFrame(
   { xml = '', theme = 'light', readOnly = false, onChange, onReady, onError },

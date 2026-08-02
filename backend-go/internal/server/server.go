@@ -525,19 +525,37 @@ func (s *Server) tryServeFile(w http.ResponseWriter, r *http.Request, dir string
 		return false
 	}
 
-	// 只在文件存在时返回
-	if fileInfo, err := os.Stat(candidate); err == nil && !fileInfo.IsDir() {
+	fileInfo, err := os.Stat(candidate)
+	if err != nil {
+		return false
+	}
+	if !fileInfo.IsDir() {
 		setStaticCacheHeaders(w, cleanPath)
 		http.ServeFile(w, r, candidate)
 		return true
 	}
 
-	return false
+	indexPath := filepath.Join(candidate, "index.html")
+	indexInfo, err := os.Stat(indexPath)
+	if err != nil || indexInfo.IsDir() {
+		return false
+	}
+	if !strings.HasSuffix(r.URL.Path, "/") {
+		redirectURL := *r.URL
+		redirectURL.Path += "/"
+		redirectURL.RawPath = ""
+		http.Redirect(w, r, redirectURL.String(), http.StatusPermanentRedirect)
+		return true
+	}
+	setStaticCacheHeaders(w, filepath.Join(cleanPath, "index.html"))
+	http.ServeFile(w, r, indexPath)
+	return true
+
 }
 
 func setStaticCacheHeaders(w http.ResponseWriter, cleanPath string) {
 	cleanPath = filepath.ToSlash(cleanPath)
-	if cleanPath == "index.html" {
+	if filepath.Base(cleanPath) == "index.html" {
 		w.Header().Set("Cache-Control", "no-cache")
 		return
 	}

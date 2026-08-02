@@ -229,6 +229,40 @@ func TestStaticRouteServesPublicAssets(t *testing.T) {
 	}
 }
 
+func TestStaticRouteServesDirectoryIndex(t *testing.T) {
+	distDir := t.TempDir()
+	drawioDir := filepath.Join(distDir, "vendor", "drawio")
+	if err := os.MkdirAll(drawioDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(distDir, "index.html"), []byte("<title>API Monitor</title>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(drawioDir, "index.html"), []byte("<title>Draw.io</title>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := newTestServer(t, config.Config{
+		Version: "test",
+		Host:    "127.0.0.1",
+		Port:    0,
+		DistDir: distDir,
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+	req := httptest.NewRequest(http.MethodGet, "/vendor/drawio/?embed=1&proto=json", nil)
+	res := httptest.NewRecorder()
+
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", res.Code, http.StatusOK, res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), "<title>Draw.io</title>") {
+		t.Fatalf("expected directory index body, got %q", res.Body.String())
+	}
+}
+
 func TestSiteBrandIconRoutesRequireSessionAndPublicIconRouteServesUploadedIcon(t *testing.T) {
 	distDir := t.TempDir()
 	publicDir := t.TempDir()
