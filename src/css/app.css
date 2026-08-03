@@ -2140,26 +2140,6 @@ table td > * {
   .app-semantic-table[data-app-table-hide-sm~='16'] :is(col, th, td):nth-child(16) {
     display: none;
   }
-
-  .app-semantic-table[data-app-table-action-columns~='1'] tbody td:nth-child(1) :is(button, a[role='button']),
-  .app-semantic-table[data-app-table-action-columns~='2'] tbody td:nth-child(2) :is(button, a[role='button']),
-  .app-semantic-table[data-app-table-action-columns~='3'] tbody td:nth-child(3) :is(button, a[role='button']),
-  .app-semantic-table[data-app-table-action-columns~='4'] tbody td:nth-child(4) :is(button, a[role='button']),
-  .app-semantic-table[data-app-table-action-columns~='5'] tbody td:nth-child(5) :is(button, a[role='button']),
-  .app-semantic-table[data-app-table-action-columns~='6'] tbody td:nth-child(6) :is(button, a[role='button']),
-  .app-semantic-table[data-app-table-action-columns~='7'] tbody td:nth-child(7) :is(button, a[role='button']),
-  .app-semantic-table[data-app-table-action-columns~='8'] tbody td:nth-child(8) :is(button, a[role='button']),
-  .app-semantic-table[data-app-table-action-columns~='9'] tbody td:nth-child(9) :is(button, a[role='button']),
-  .app-semantic-table[data-app-table-action-columns~='10'] tbody td:nth-child(10) :is(button, a[role='button']),
-  .app-semantic-table[data-app-table-action-columns~='11'] tbody td:nth-child(11) :is(button, a[role='button']),
-  .app-semantic-table[data-app-table-action-columns~='12'] tbody td:nth-child(12) :is(button, a[role='button']),
-  .app-semantic-table[data-app-table-action-columns~='13'] tbody td:nth-child(13) :is(button, a[role='button']),
-  .app-semantic-table[data-app-table-action-columns~='14'] tbody td:nth-child(14) :is(button, a[role='button']),
-  .app-semantic-table[data-app-table-action-columns~='15'] tbody td:nth-child(15) :is(button, a[role='button']),
-  .app-semantic-table[data-app-table-action-columns~='16'] tbody td:nth-child(16) :is(button, a[role='button']) {
-    min-width: 44px;
-    min-height: 44px;
-  }
 }
 
 /* Keep operation headers and their row actions on the same visual axis. */

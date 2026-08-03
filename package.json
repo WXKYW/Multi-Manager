@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "concurrently \"npm run backend-go:dev\" \"vite\" --names \"backend,frontend\" --prefix-colors \"blue,green\"",
     "dev:simple": "vite",
-	"drawio:install": "node tools/install-drawio.mjs",
+    "drawio:install": "node tools/install-drawio.mjs",
     "icons:generate": "node tools/generate-simple-icons-css.mjs",
     "build": "npm run icons:generate && vite build",
     "preview": "vite preview",
@@ -36,7 +36,7 @@
     "clean:workspace": "node tools/workspace-cleanup.mjs --apply"
   },
   "dependencies": {
-    "@cloudflare/kumo": "2.8.0",
+    "@cloudflare/kumo": "2.9.0",
     "@codemirror/lang-markdown": "^6.5.1",
     "@codemirror/language": "^6.12.4",
     "@codemirror/language-data": "^6.5.2",
