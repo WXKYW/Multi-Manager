@@ -14,7 +14,7 @@
 6. 字段归一化与错误处理
 7. 日志、安全与测试要求
 
-对应产品文档见 [Oracle OCI 主机管理模块 PRD](./prd/oracle-oci-server-management.md)。
+对应产品文档见 [Oracle OCI 主机管理模块 PRD](./prd/OracleOCI主机管理模块.md)。
 
 ## 2. 设计目标
 

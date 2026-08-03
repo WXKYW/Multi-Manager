@@ -10,8 +10,8 @@
 - [API 接口文档](./API接口文档.md)
 - [项目架构与技术详解](./项目架构与技术详解.md)
 - [设计文档](./设计文档.md)
-- [Oracle OCI 模块技术设计文档](./oracle-oci-technical-design.md)
-- [Oracle OCI 模块 API 路由清单](./oracle-oci-api-routes.md)
+- [Oracle OCI 模块技术设计文档](./OracleOCI模块技术设计文档.md)
+- [Oracle OCI 模块 API 路由清单](./OracleOCI模块API路由清单.md)
 - [目录结构说明](./目录结构说明.md)
 - [贡献指南](./贡献指南.md)
 
@@ -19,7 +19,7 @@
 
 - [前端开发最佳实践](./前端开发最佳实践.md)
 - [Kumo UI 规则](./Kumo%20UI%20规则.md)
-- [重构验证与例外清单](./refactor-verification.md)
+- [重构验证与例外清单](./重构验证与例外清单.md)
 - [新模块接入指南](./新模块接入指南.md)
 - [Go 后端启动指南](./GO后端启动指南.md)
 
@@ -48,11 +48,29 @@
 ## 参考资料
 
 - [PRD](./prd/)
-- [Draw.io 图编辑工具模块 PRD](./prd/drawio-diagram-editor.md)
-- [文档编辑器重构 PRD](./prd/document-editor-refactor.md)
-- [Oracle OCI 主机管理模块 PRD](./prd/oracle-oci-server-management.md)
-- [提示词库模块 PRD](./prd/prompt-library.md)
+- [Draw.io 图编辑工具模块 PRD](./prd/Drawio图编辑工具模块.md)
+- [文档编辑器重构 PRD](./prd/文档编辑器重构.md)
+- [Oracle OCI 主机管理模块 PRD](./prd/OracleOCI主机管理模块.md)
+- [提示词库模块 PRD](./prd/提示词库模块.md)
 - [Kumo 参考资料](./reference/)
+
+## 文档命名与内容规范
+
+### 文件名
+
+- 文档使用简体中文命名，文件名取自 H1 标题并移除空格，例如 `Oracle OCI 模块 API 路由清单` 对应 `OracleOCI模块API路由清单.md`。
+- 专有名词缩写保留原文大小写，如 `OCI`、`API`、`PRD`、`Kumo`、`Go`。
+- `reference/` 下的 Kumo 快照由上游自动生成并随 Kumo 升级刷新，保留上游英文名，不参与汉化。
+- 文档链接使用相对路径；文件名含空格时使用 `%20` 编码，例如 `[Kumo UI 规则](./Kumo%20UI%20规则.md)`。
+
+### 内容
+
+- 正文使用简体中文；代码、命令、API 路径、组件名等技术标识符保留英文原样。
+- 首行 H1 标题与文件名保持一致。
+- 维护型文档在标题下方标注 `最后更新：YYYY-MM-DD`。
+- PRD 统一使用英文小节结构：`Problem Statement` / `Solution` / `User Stories` / `Functional Requirements` / `API Contract` / `Acceptance Criteria` / `Out of Scope`。
+- 已废弃、历史或一次性内容必须显式标注，避免被误认为现行标准。
+- 遵循下方文档安全约定。
 
 ## 文档安全约定
 

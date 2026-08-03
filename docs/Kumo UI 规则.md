@@ -56,7 +56,7 @@
 - 三个文字操作必须同排时使用 `actions-xl`（280–400px）并禁止按钮组换行，避免操作列拉高整行。
 - 移动端保留最小可读宽度，溢出限制在表格框架内部；只有存在详情或主列替代信息时才允许隐藏辅助列。
 - 可拖动表格继续使用 Kumo `Table.ResizeHandle`，并遵守语义角色的最小和最大宽度。
-- 完整设计与迁移计划见 [语义化表格布局与移动端适配 PRD](./prd/semantic-table-layout-standard.md)。
+- 完整设计与迁移计划见 [语义化表格布局与移动端适配 PRD](./prd/语义化表格布局与移动端适配.md)。
 
 ## DeleteResource
 
@@ -129,6 +129,6 @@ rg -n 'quick-fade-in|motion-pop-in|app-collapse-panel|transition-shadow|hover:sh
 如果 Kumo 缺少某项能力，必须：
 
 1. 先确认当前 `@cloudflare/kumo` 包和注册表确实没有对应组件/API。
-2. 在 [refactor-verification.md](./refactor-verification.md) 记录例外原因。
+2. 在 [重构验证与例外清单](./重构验证与例外清单.md) 记录例外原因。
 3. 使用最小语义实现，不做视觉组件封装。
 4. 后续一旦 Kumo 提供能力，迁回 Kumo。

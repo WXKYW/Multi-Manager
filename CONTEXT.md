@@ -11,7 +11,7 @@ This is the first file an AI maintainer should read before changing API Monitor.
 - Backend: Go single-process backend in `backend-go/`, with routes governed by `backend-go/internal/manifest/manifest.go`.
 - Persistence: SQLite remains the only durable store. Do not replace it unless there is an explicit product decision.
 - Agent: Rust agent in `agent-rust/`, connected through the Go backend's Engine.IO/Socket.IO-compatible server.
-- Managed proxy runtime: Linux-only Agent capability that reconciles the pinned sing-box runtime and per-subscription users. Xray is not installed or managed by the control plane. See `docs/adr/0001-managed-proxy-runtime.md`.
+- Managed proxy runtime: Linux-only Agent capability that reconciles the pinned sing-box runtime and per-subscription users. Xray is not installed or managed by the control plane. See `docs/adr/0001-托管代理运行时.md`.
 - Subscription accounting: the Agent reads loopback-only sing-box V2Ray Stats counters, persists a baseline, and sends idempotent deltas to the Go subscription ledger. Imported external nodes are never included in that ledger.
 - Runtime data: data, backups, uploads, secrets, and local environment files are intentionally ignored and must be protected.
 
@@ -112,7 +112,7 @@ Always preserve:
 
 ## UI Exception List
 
-Allowed UI exceptions are documented in `docs/refactor-verification.md`. Future audits should use that file before flagging hardcoded colors or file-input patterns as regressions.
+Allowed UI exceptions are documented in `docs/重构验证与例外清单.md`. Future audits should use that file before flagging hardcoded colors or file-input patterns as regressions.
 
 Current known exception groups:
 

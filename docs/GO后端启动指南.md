@@ -146,4 +146,4 @@ npm run audit:fast
 npm run clean:check
 ```
 
-完整状态见 [Go 后端迁移状态](./backend-migration-complete.md)。
+完整状态见 [Go 后端迁移状态](./Go后端迁移状态.md)。
