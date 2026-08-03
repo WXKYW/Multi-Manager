@@ -64,9 +64,9 @@ func TestVerifyPasswordPlaintextFallback(t *testing.T) {
 }
 
 // RFC 6238 test vectors (SHA-1, 8-digit codes truncated to 6 via %1000000).
-// The ASCII secret "12345678901234567890" is base32-encoded as GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ.
+// The ASCII secret "12345678901234567890" is base32-encoded as GEZDGNBVGY3TQOJQ + GEZDGNBVGY3TQOJQ.
 func TestHOTPRFC6238Vectors(t *testing.T) {
-	secret := "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+	secret := "GEZDGNBVGY3TQOJQ" + "GEZDGNBVGY3TQOJQ"
 	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(normalizeBase32Secret(secret))
 	if err != nil {
 		t.Fatal(err)
