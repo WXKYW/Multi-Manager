@@ -16,11 +16,12 @@ export default defineConfig({
             provider: 'v8',
             reporter: ['text', 'json', 'html'],
             reportsDirectory: './coverage',
+            include: ['src/js/modules/**'],
             exclude: [
                 'node_modules/**',
                 'dist/**',
                 'test/**',
-                'src/js/**', // 前端代码需要不同的测试环境
+                'src/js/modules/**/*.test.js',
                 'public/**',
                 '*.config.js',
             ],
