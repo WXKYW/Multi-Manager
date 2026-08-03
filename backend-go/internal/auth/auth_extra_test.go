@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"encoding/base32"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -64,13 +63,9 @@ func TestVerifyPasswordPlaintextFallback(t *testing.T) {
 }
 
 // RFC 6238 test vectors (SHA-1, 8-digit codes truncated to 6 via %1000000).
-// The ASCII secret "12345678901234567890" is base32-encoded as GEZDGNBVGY3TQOJQ + GEZDGNBVGY3TQOJQ.
+// The shared secret is the ASCII bytes "12345678901234567890".
 func TestHOTPRFC6238Vectors(t *testing.T) {
-	secret := "GEZDGNBVGY3TQOJQ" + "GEZDGNBVGY3TQOJQ"
-	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(normalizeBase32Secret(secret))
-	if err != nil {
-		t.Fatal(err)
-	}
+	key := []byte("12345678901234567890")
 	cases := []struct {
 		counter uint64
 		want    string
