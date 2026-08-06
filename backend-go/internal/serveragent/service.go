@@ -4096,6 +4096,16 @@ func (s *Service) buildAccountResponse(
 	effectiveStatus := status
 	if agentOnline {
 		effectiveStatus = "online"
+	} else if s.presence != nil {
+		// 实时在线性以 Agent 心跳为准：连接中断时不应沿用数据库里的陈旧
+		// "online" 状态，避免仪表盘把"中断"误判为在线。
+		presenceStatus, _ := s.presence.snapshot(id)["presence_status"].(string)
+		switch presenceStatus {
+		case string(agentPresenceSuspect):
+			effectiveStatus = "interrupted"
+		case string(agentPresenceOffline):
+			effectiveStatus = "offline"
+		}
 	}
 	isOnline := effectiveStatus == "online"
 

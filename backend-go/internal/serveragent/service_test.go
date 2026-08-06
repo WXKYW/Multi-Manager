@@ -2086,6 +2086,45 @@ func TestListAccountsUsesLiveAgentConnectionAsOnlineStatus(t *testing.T) {
 	}
 }
 
+func TestListAccountsReportsInterruptedAsNotOnline(t *testing.T) {
+	service, db := testService(t)
+	_, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id, name, host, username, auth_type, status, cached_info, tags, order_index) VALUES
+		('interrupted-agent', '中断主机', '0.0.0.0', 'agent', 'password', 'online', '{}', '[]', 1),
+		('offline-agent', '离线主机', '0.0.0.0', 'agent', 'password', 'online', '{}', '[]', 2)`)
+	if err != nil {
+		t.Fatalf("insert accounts: %v", err)
+	}
+
+	service.presence.mu.Lock()
+	interrupted := service.presence.ensureLocked("interrupted-agent")
+	interrupted.Status = agentPresenceSuspect
+	offline := service.presence.ensureLocked("offline-agent")
+	offline.Status = agentPresenceOffline
+	service.presence.mu.Unlock()
+
+	res := perform(service, http.MethodGet, "/api/server/accounts", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", res.Code, res.Body.String())
+	}
+	payload := decodePayload(t, res)
+	list := payload["data"].([]interface{})
+	byID := map[string]map[string]interface{}{}
+	for _, item := range list {
+		server := item.(map[string]interface{})
+		byID[server["id"].(string)] = server
+	}
+
+	if got := byID["interrupted-agent"]["status"]; got != "interrupted" {
+		t.Fatalf("interrupted host status = %#v, want interrupted", got)
+	}
+	if byID["interrupted-agent"]["agent_online"] != false {
+		t.Fatalf("interrupted host agent_online = %#v, want false", byID["interrupted-agent"]["agent_online"])
+	}
+	if got := byID["offline-agent"]["status"]; got != "offline" {
+		t.Fatalf("offline host status = %#v, want offline", got)
+	}
+}
+
 func TestConnectionRegistryIgnoresStaleSocketDisconnect(t *testing.T) {
 	registry := NewConnectionRegistry()
 	oldSocket := &taskReplySocket{t: t, reply: func(int, string) string { return "" }}
