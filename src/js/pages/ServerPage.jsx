@@ -11306,7 +11306,6 @@ function ServerPage() {
                         label="安装目标" size="sm"
                         value={agentInstallOS}
                         onValueChange={setAgentInstallOS}
-                        container={serverModalPortalRef}
                         items={[
                           { value: 'linux', label: 'Linux / macOS' },
                           { value: 'win', label: 'Windows PowerShell' },

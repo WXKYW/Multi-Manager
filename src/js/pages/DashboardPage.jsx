@@ -177,7 +177,7 @@ function formatHostCpuDetail(cpu = {}, usage = 0) {
 
 function normalizeServerStatus(status) {
   if (status === 'online') return 'online';
-  if (status === 'error') return 'error';
+  if (status === 'error' || status === 'interrupted' || status === 'suspect') return 'error';
   return 'offline';
 }
 
@@ -948,8 +948,14 @@ function DashboardPage({ onNavigate } = {}) {
     : stats.servers.online === stats.servers.total
       ? '所有主机运行正常'
       : stats.servers.online === 0
-        ? '全部主机发生故障'
-        : `${stats.servers.offline} 台离线`;
+        ? stats.servers.offline > 0 && stats.servers.error > 0
+          ? `${stats.servers.offline} 台离线，${stats.servers.error} 台异常`
+          : stats.servers.error > 0
+            ? `${stats.servers.error} 台异常`
+            : '全部主机发生故障'
+        : stats.servers.error > 0
+          ? `${stats.servers.error} 台异常`
+          : `${stats.servers.offline} 台离线`;
   const serverDetailClassName = stats.servers.total > 0 && stats.servers.online < stats.servers.total
     ? (stats.servers.online === 0 ? 'text-kumo-danger font-semibold' : 'text-kumo-warning font-semibold')
     : '';
