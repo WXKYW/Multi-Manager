@@ -26,10 +26,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout control plane
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.2.2
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
 
       - name: Set up pinned Go toolchain
-        uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v5.2.0
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: false
@@ -68,7 +68,7 @@ jobs:
           sha256sum sing-box-* > SHA256SUMS
 
       - name: Publish immutable managed runtime release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.2.1
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: managed-runtime-v1.13.14
           name: Managed sing-box runtime v1.13.14

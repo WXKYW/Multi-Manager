@@ -62,7 +62,7 @@ RUN CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     -o api-monitor ./cmd/api-monitor
 
 # 阶段 3: 构建 Rust Agent 二进制 (Agent Builder) - 优化为基于 TARGETARCH 进行条件式本机编译，以最大化编译性能并防止复杂的跨平台交叉编译错误
-FROM --platform=$TARGETPLATFORM rust:slim AS agent-builder
+FROM rust:slim AS agent-builder
 ARG USE_PREBUILT_AGENT=false
 RUN if [ "$USE_PREBUILT_AGENT" != "true" ]; then \
         apt-get update && apt-get install -y --no-install-recommends \
@@ -112,7 +112,7 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
 # 注意：deps-builder 阶段已移除，Go 后端不需要 Node.js 依赖
 
 # 阶段 4: 运行时镜像 (Runner) - 纯净的运行环境
-FROM --platform=$TARGETPLATFORM alpine:3.24.1 AS runner
+FROM alpine:3.24.1 AS runner
 
 LABEL org.opencontainers.image.title="API Monitor"
 LABEL org.opencontainers.image.description="API聚合监控面板"
