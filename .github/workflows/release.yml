@@ -640,13 +640,23 @@ jobs:
 
     steps:
       - name: Delete temporary build images
-        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
-        with:
-          package-name: ${{ env.IMAGE_NAME }}
-          package-type: container
-          min-versions-to-keep: 0
-          delete-only-untagged-versions: false
-          ignore-versions: "^(?!build-${{ github.run_id }}).*$"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_OWNER: ${{ github.repository_owner }}
+          PACKAGE: ${{ env.IMAGE_NAME }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          LIST_URLS=(
+            "https://api.github.com/users/$GH_OWNER/packages/container/$PACKAGE/versions"
+            "https://api.github.com/orgs/$GH_OWNER/packages/container/$PACKAGE/versions"
+          )
+          for LIST_URL in "${LIST_URLS[@]}"; do
+            VERSION_IDS=$(gh api "$LIST_URL" --paginate \
+              --jq '.[] | select(.metadata.container.tags[]? | startswith("build-'"$RUN_ID"'")) | .id' 2>/dev/null) || continue
+            for ID in $VERSION_IDS; do
+              gh api --method DELETE "${LIST_URL%/versions}/versions/$ID" 2>/dev/null || true
+            done
+          done
         continue-on-error: true
 
   # ==========================================
