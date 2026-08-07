@@ -635,7 +635,11 @@ mod windows_impl {
         let (session, frames) = capture::start(
             CaptureConfig {
                 target: CaptureTarget::Monitor(0),
-                capture_cursor: true,
+                // WGC burned the real system cursor into the video frames while
+                // the frontend also renders a virtual cursor, producing duplicate
+                // (sometimes three) cursors. Keep cursor capture off and let the
+                // frontend's pointer-position echo be the single cursor layer.
+                capture_cursor: false,
             },
             1,
         )
@@ -682,16 +686,29 @@ mod windows_impl {
             }
             last_encoded_timestamp = frame.timestamp;
 
+            // Encode at a capped resolution while `geometry` keeps the native
+            // desktop size for pointer coordinate math. Downscaling the stream
+            // is the biggest win for the software H.264 encoder: a 4K desktop
+            // encodes at 1080p, cutting encode time and network bytes sharply.
+            let (encode_width, encode_height) = scaled_encode_size(frame.width, frame.height);
+
             if encoder.is_none()
-                || encoded_size != (frame.width, frame.height)
+                || encoded_size != (encode_width, encode_height)
                 || encoded_profile != desired_profile
             {
-                let config = video_config(frame.width, frame.height, desired_profile);
-                encoder = Some(
-                    MfH264Encoder::new(session.device(), config)
-                        .map_err(|err| format!("create Media Foundation H.264 encoder: {err}"))?,
-                );
-                encoded_size = (frame.width, frame.height);
+                let config = video_config(encode_width, encode_height, desired_profile);
+                let mut fresh = MfH264Encoder::new_with_input_size(
+                    session.device(),
+                    config,
+                    frame.width,
+                    frame.height,
+                )
+                .map_err(|err| format!("create Media Foundation H.264 encoder: {err}"))?;
+                // Idle desktops produce identical frames; skip encoding them
+                // (heartbeat keyframe every so often) to cut CPU and heap churn.
+                fresh.set_static_skip(true);
+                encoder = Some(fresh);
+                encoded_size = (encode_width, encode_height);
                 encoded_profile = desired_profile;
             }
 
@@ -726,6 +743,25 @@ mod windows_impl {
             }
         }
         Ok(())
+    }
+
+    /// Cap the encoder resolution so the software H.264 encoder never runs on
+    /// the full desktop size. Keeps aspect ratio, clamps to the long edge at
+    /// 1080p, and rounds to even dimensions (NV12 requires even sizes). The
+    /// stream geometry for pointer math stays at the native desktop size.
+    fn scaled_encode_size(width: u32, height: u32) -> (u32, u32) {
+        const MAX_LONG_EDGE: u32 = 1920;
+        let long_edge = width.max(height);
+        let scale = if long_edge > MAX_LONG_EDGE {
+            MAX_LONG_EDGE as f64 / long_edge as f64
+        } else {
+            1.0
+        };
+        let mut w = (width as f64 * scale).round() as u32;
+        let mut h = (height as f64 * scale).round() as u32;
+        w &= !1;
+        h &= !1;
+        (w.max(2), h.max(2))
     }
 
     fn video_config(width: u32, height: u32, profile: StreamProfile) -> VideoConfig {
@@ -1204,6 +1240,29 @@ mod windows_impl {
                     bitrate: 6_000_000
                 }
             );
+        }
+
+        #[test]
+        fn scaled_encode_size_caps_large_desktops_and_keeps_even_dimensions() {
+            // 4K is capped to a 1920-long-edge, even, aspect-preserving size.
+            let (w, h) = scaled_encode_size(3_840, 2_160);
+            assert_eq!((w, h), (1_920, 1_080));
+            assert_eq!(w % 2, 0);
+            assert_eq!(h % 2, 0);
+
+            // A non-16:9 4K desktop keeps its aspect ratio under the cap.
+            let (w, h) = scaled_encode_size(3_440, 1_440);
+            assert_eq!((w, h), (1_920, 804));
+
+            // Below the cap the native size is preserved (still even).
+            let (w, h) = scaled_encode_size(1_920, 1_080);
+            assert_eq!((w, h), (1_920, 1_080));
+
+            // Odd desktop sizes are rounded down to even dimensions.
+            let (w, h) = scaled_encode_size(1_365, 767);
+            assert_eq!(w % 2, 0);
+            assert_eq!(h % 2, 0);
+            assert!(w <= 1_365 && h <= 767);
         }
 
         #[test]

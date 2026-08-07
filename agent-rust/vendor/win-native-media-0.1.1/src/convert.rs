@@ -16,6 +16,7 @@ pub struct Bgra2Nv12 {
     processor: ID3D11VideoProcessor,
     enumerator: ID3D11VideoProcessorEnumerator,
     device: ID3D11Device,
+    /// Encoder (output) frame size in pixels.
     width: u32,
     height: u32,
     /// Reused NV12 output texture (bind flag RENDER_TARGET so it can be a
@@ -27,7 +28,25 @@ pub struct Bgra2Nv12 {
 }
 
 impl Bgra2Nv12 {
+    /// Create a 1:1 converter: output size equals input size.
     pub fn new(device: &ID3D11Device, width: u32, height: u32) -> Result<Self> {
+        Self::new_with_scale(device, width, height, width, height)
+    }
+
+    /// Create a converter that scales captured frames from `input_width` x
+    /// `input_height` down (or up) to `width` x `height` via the D3D11 video
+    /// processor. Useful for remote desktop: encode at a capped resolution even
+    /// when the desktop is much larger, which is a large win for software
+    /// encoders. Both input and output sizes must be even for NV12.
+    pub fn new_with_scale(
+        device: &ID3D11Device,
+        input_width: u32,
+        input_height: u32,
+        width: u32,
+        height: u32,
+    ) -> Result<Self> {
+        debug_assert!(input_width % 2 == 0 && input_height % 2 == 0);
+        debug_assert!(width % 2 == 0 && height % 2 == 0);
         unsafe {
             let video_device: ID3D11VideoDevice = device.cast()?;
             let context = device.GetImmediateContext()?;
@@ -39,8 +58,8 @@ impl Bgra2Nv12 {
                     Numerator: 30,
                     Denominator: 1,
                 },
-                InputWidth: width,
-                InputHeight: height,
+                InputWidth: input_width,
+                InputHeight: input_height,
                 OutputFrameRate: DXGI_RATIONAL {
                     Numerator: 30,
                     Denominator: 1,

@@ -507,8 +507,15 @@ export default function RemoteDesktopPage() {
   }, [controlEnabled, sendControl]);
 
   useEffect(() => {
-    if (videoReady && touchInputMode === 'trackpad') requestPointerPosition();
-  }, [requestPointerPosition, touchInputMode, videoReady]);
+    if (!videoReady) return undefined;
+    const syncCursor = () => requestPointerPosition();
+    syncCursor();
+    // The Agent no longer burns the system cursor into the captured frames
+    // (single-cursor layer). Poll the real remote pointer position so the
+    // virtual cursor stays visible and tracks movements made outside this tab.
+    const timer = window.setInterval(syncCursor, 2000);
+    return () => window.clearInterval(timer);
+  }, [requestPointerPosition, videoReady]);
 
   const pointerPosition = (event, clampOutside = false) => {
     const rect = surfaceRef.current?.getBoundingClientRect();

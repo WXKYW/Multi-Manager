@@ -25,6 +25,11 @@ use crate::{PipelineError, Result, VideoConfig};
 /// 100ns ticks per second (MF time base).
 const HNS_PER_SEC: i64 = 10_000_000;
 
+/// Static-frame detection: when the desktop content is unchanged, the software
+/// H.264 MFT is expensive to run per frame. Skip encoding identical frames and
+/// emit a heartbeat keyframe every so often so the WebRTC decoder stays healthy.
+const STATIC_HEARTBEAT_FRAMES: u32 = 60;
+
 pub struct MfH264Encoder {
     transform: IMFTransform,
     input_stream_id: u32,
@@ -48,6 +53,13 @@ pub struct MfH264Encoder {
     /// samples come from here (MFT-owned NV12 textures) instead of textures we
     /// create — hardware MFTs reject foreign textures at ProcessInput.
     allocator: Option<IMFVideoSampleAllocatorEx>,
+    /// Static-frame skip (software path only). Enables skipping encoding when
+    /// the frame content is unchanged since the previous frame.
+    static_skip: bool,
+    /// FNV-1a hash of the last encoded CPU NV12 frame, for change detection.
+    last_frame_hash: Option<u64>,
+    /// Consecutive identical frames skipped since the last emitted sample.
+    static_frames_skipped: u32,
     // Declared last so COM is uninitialized after every MFT/DXGI field is
     // released. Media Foundation itself is process-scoped and remains started
     // until process exit, as required by the MF lifetime contract.
@@ -97,11 +109,48 @@ impl MfH264Encoder {
         Self::new_with(device, cfg, false)
     }
 
+    /// Create the encoder assuming the captured frames are `input_width` x
+    /// `input_height` and the encoder output should be `cfg.width` x
+    /// `cfg.height`. The video processor scales input to output, which lets
+    /// remote desktop encode a downscaled stream (huge win for software H.264).
+    pub fn new_with_input_size(
+        device: &ID3D11Device,
+        cfg: VideoConfig,
+        input_width: u32,
+        input_height: u32,
+    ) -> Result<Self> {
+        Self::new_with_input_size_and_hw(device, cfg, input_width, input_height, false)
+    }
+
+    fn new_with_input_size_and_hw(
+        device: &ID3D11Device,
+        cfg: VideoConfig,
+        input_width: u32,
+        input_height: u32,
+        prefer_hardware: bool,
+    ) -> Result<Self> {
+        Self::build(device, cfg, input_width, input_height, prefer_hardware)
+    }
+
     /// Create the encoder, explicitly choosing hardware or software. Hardware
     /// currently returns an error so callers safely fall back to software.
     pub fn new_with(
         device: &ID3D11Device,
         cfg: VideoConfig,
+        prefer_hardware: bool,
+    ) -> Result<Self> {
+        Self::build(device, cfg, cfg.width, cfg.height, prefer_hardware)
+    }
+
+    /// Shared construction: input frames are `input_width` x `input_height`,
+    /// encoder output is `cfg.width` x `cfg.height`. When the input is larger
+    /// than the output the video processor downscales during the BGRA->NV12
+    /// conversion, so the H.264 encoder never sees the full desktop size.
+    fn build(
+        device: &ID3D11Device,
+        cfg: VideoConfig,
+        input_width: u32,
+        input_height: u32,
         prefer_hardware: bool,
     ) -> Result<Self> {
         if prefer_hardware {
@@ -151,8 +200,16 @@ impl MfH264Encoder {
             // take ARGB32 directly from a CPU buffer.
             let input_format = set_input_type(&transform, input_id, &cfg, is_async)?;
             // Hardware MFTs require NV12; build the on-GPU converter for that path.
+            // It scales input frames to the encoder output size via the video
+            // processor, so a 4K desktop can be encoded at 1080p.
             let converter = if input_format == InputFormat::Nv12 {
-                Some(Bgra2Nv12::new(device, cfg.width, cfg.height)?)
+                Some(Bgra2Nv12::new_with_scale(
+                    device,
+                    input_width,
+                    input_height,
+                    cfg.width,
+                    cfg.height,
+                )?)
             } else {
                 None
             };
@@ -187,6 +244,9 @@ impl MfH264Encoder {
                 converter,
                 cpu_nv12: Vec::new(),
                 allocator,
+                static_skip: false,
+                last_frame_hash: None,
+                static_frames_skipped: 0,
                 _runtime: runtime,
             })
         }
@@ -205,6 +265,51 @@ impl MfH264Encoder {
                 let _ = codec.SetValue(&CODECAPI_AVEncVideoForceKeyFrame, &value);
             }
         }
+    }
+
+    /// Enable static-frame skipping for the software path. When enabled, frames
+    /// whose CPU NV12 content is identical to the previous encoded frame are
+    /// skipped instead of encoded, cutting CPU and heap churn for idle desktops.
+    /// A heartbeat keyframe is still emitted every [`STATIC_HEARTBEAT_FRAMES`]
+    /// identical frames so the WebRTC decoder never stalls. No-op on the
+    /// hardware (async) path, where encoding is cheap and content lives on GPU.
+    pub fn set_static_skip(&mut self, enabled: bool) {
+        self.static_skip = enabled;
+        if !enabled {
+            self.last_frame_hash = None;
+            self.static_frames_skipped = 0;
+        }
+    }
+
+    /// FNV-1a 64-bit hash of the CPU NV12 buffer. Cheap enough per frame.
+    fn nv12_hash(data: &[u8]) -> u64 {
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for &byte in data {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        hash
+    }
+
+    /// Decide whether the current CPU NV12 frame should be skipped as unchanged.
+    /// Returns true to skip encoding this frame entirely.
+    fn should_skip_static_frame(&mut self, nv12: &[u8]) -> bool {
+        if !self.static_skip || nv12.is_empty() {
+            return false;
+        }
+        let hash = Self::nv12_hash(nv12);
+        if self.last_frame_hash == Some(hash) {
+            self.static_frames_skipped += 1;
+            if self.static_frames_skipped >= STATIC_HEARTBEAT_FRAMES {
+                self.static_frames_skipped = 0;
+                self.force_keyframe();
+                return false;
+            }
+            return true;
+        }
+        self.last_frame_hash = Some(hash);
+        self.static_frames_skipped = 0;
+        false
     }
 
     fn ensure_started(&mut self) -> Result<()> {
@@ -236,7 +341,15 @@ impl MfH264Encoder {
         let sample = match (self.converter.as_mut(), self.is_async) {
             (Some(conv), false) => {
                 conv.convert_to_cpu_into(texture, &mut self.cpu_nv12)?;
-                self.wrap_cpu_nv12(&self.cpu_nv12, timestamp)?
+                let frame_nv12 = std::mem::take(&mut self.cpu_nv12);
+                let skip = self.should_skip_static_frame(&frame_nv12);
+                if skip {
+                    self.cpu_nv12 = frame_nv12;
+                    return Ok(());
+                }
+                let sample = self.wrap_cpu_nv12(&frame_nv12, timestamp)?;
+                self.cpu_nv12 = frame_nv12;
+                sample
             }
             (Some(_), true) => {
                 // Hardware path: get an MFT-owned NV12 sample from the allocator,
