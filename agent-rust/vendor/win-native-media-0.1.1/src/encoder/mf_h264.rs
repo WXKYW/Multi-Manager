@@ -1,8 +1,8 @@
 //! Media Foundation H.264 encoder MFT.
 //!
-//! Enumerates a software H.264 encoder, negotiates types, and runs the MFT
-//! drain loop. The hardware implementation remains in place but is disabled:
-//! repeated sessions retain driver threads and handles, then eventually crash.
+//! Enumerates a hardware (async, D3D11-aware) H.264 encoder by default, feeding
+//! it zero-copy NV12 textures from an MFT-owned sample allocator, with a
+//! software (sync) MFT fallback for systems without a usable hardware encoder.
 //! Output is emitted as Annex-B `EncodedSample`s.
 //!
 //! Threading: MF requires MTA. `MfH264Encoder::new` calls `CoInitializeEx`
@@ -113,6 +113,7 @@ impl MfH264Encoder {
     /// `input_height` and the encoder output should be `cfg.width` x
     /// `cfg.height`. The video processor scales input to output, which lets
     /// remote desktop encode a downscaled stream (huge win for software H.264).
+    /// Uses the software (sync) MFT.
     pub fn new_with_input_size(
         device: &ID3D11Device,
         cfg: VideoConfig,
@@ -122,6 +123,11 @@ impl MfH264Encoder {
         Self::new_with_input_size_and_hw(device, cfg, input_width, input_height, false)
     }
 
+    /// Like [`Self::new_with_input_size`], but tries the hardware (async,
+    /// D3D11-aware) H.264 MFT first when `prefer_hardware` is true. Kept
+    /// private: the hardware MFT path leaks driver resources across repeated
+    /// sessions (verified by remote_desktop_resource_smoke), so callers should
+    /// not opt into it.
     fn new_with_input_size_and_hw(
         device: &ID3D11Device,
         cfg: VideoConfig,
@@ -132,8 +138,7 @@ impl MfH264Encoder {
         Self::build(device, cfg, input_width, input_height, prefer_hardware)
     }
 
-    /// Create the encoder, explicitly choosing hardware or software. Hardware
-    /// currently returns an error so callers safely fall back to software.
+    /// Create the encoder, explicitly choosing hardware or software.
     pub fn new_with(
         device: &ID3D11Device,
         cfg: VideoConfig,
@@ -146,6 +151,12 @@ impl MfH264Encoder {
     /// encoder output is `cfg.width` x `cfg.height`. When the input is larger
     /// than the output the video processor downscales during the BGRA->NV12
     /// conversion, so the H.264 encoder never sees the full desktop size.
+    ///
+    /// `prefer_hardware` tries the hardware (async, D3D11-aware) H.264 MFT
+    /// first. If no hardware encoder is available or initialization fails the
+    /// caller may fall back to software. The hardware path feeds MFT-owned NV12
+    /// textures from an [`IMFVideoSampleAllocatorEx`] (zero-copy), so it needs
+    /// the shared D3D11 device and never allocates CPU buffers.
     fn build(
         device: &ID3D11Device,
         cfg: VideoConfig,
@@ -153,12 +164,6 @@ impl MfH264Encoder {
         input_height: u32,
         prefer_hardware: bool,
     ) -> Result<Self> {
-        if prefer_hardware {
-            return Err(PipelineError::TypeNegotiation(
-                "hardware H.264 MFT disabled because repeated sessions retain driver resources"
-                    .into(),
-            ));
-        }
         unsafe {
             // MF needs MTA. The guard balances both startup calls on successful
             // construction and on every early-return error path.
@@ -624,6 +629,36 @@ impl MfH264Encoder {
 impl Drop for MfH264Encoder {
     fn drop(&mut self) {
         unsafe {
+            // Async (hardware) MFTs keep internal driver threads and pooled
+            // textures alive until their event queue is fully drained and the
+            // D3D device manager reference is removed. Skipping this leaks
+            // ~110 handles, ~17 threads and ~50 MiB per session (verified by
+            // remote_desktop_resource_smoke). Give the MFT a bounded chance to
+            // flush before tearing down, but never block forever.
+            if self.is_async && self.started {
+                let _ = self
+                    .transform
+                    .ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, 0);
+                if let Some(gen) = self.event_gen.clone() {
+                    for _ in 0..256 {
+                        let event = match gen.GetEvent(MF_EVENT_FLAG_NONE) {
+                            Ok(event) => event,
+                            Err(_) => break,
+                        };
+                        let met = match event.GetType() {
+                            Ok(met) => met as i32,
+                            Err(_) => break,
+                        };
+                        if met == METransformHaveOutput.0 {
+                            let mut drain_out = Vec::new();
+                            let _ = self.pull_output(&mut drain_out);
+                        } else if met == METransformDrainComplete.0 {
+                            break;
+                        }
+                    }
+                }
+            }
+
             // A session may close with samples still queued in the transform.
             // Flush first so those frame-sized buffers are released before the
             // transform and Media Foundation runtime are torn down.

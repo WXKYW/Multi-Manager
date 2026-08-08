@@ -32,7 +32,9 @@ mod windows_impl {
     use webrtc::track::track_local::{TrackLocal, TrackLocalWriter};
     use win_native_media::capture::{self, CaptureConfig};
     use win_native_media::encoder::mf_h264::MfH264Encoder;
+    use win_native_media::encoder::EncodedSample;
     use win_native_media::{CaptureTarget, VideoConfig};
+    use windows::Win32::Graphics::Direct3D11::ID3D11Texture2D;
     use windows_sys::Win32::Foundation::{POINT, RECT};
     use windows_sys::Win32::System::ProcessStatus::K32EmptyWorkingSet;
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
@@ -56,6 +58,11 @@ mod windows_impl {
     const RTP_HEADER_SIZE: usize = 12;
     const PEER_DISCONNECT_GRACE: Duration = Duration::from_secs(5);
     const WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
+
+    /// WebRTC PLI keyframe requests for the NVENC path. The `DesktopEncoder`
+    /// trait's `force_keyframe(&self)` cannot take `&mut self`, so the capture
+    /// loop flips this atomic and the next `encode` call consumes it.
+    static NVENC_FORCE_IDR: AtomicBool = AtomicBool::new(false);
 
     #[derive(Debug, Deserialize)]
     pub struct StartPayload {
@@ -487,6 +494,9 @@ mod windows_impl {
                     .map(|(_, session)| session)
                     .collect::<Vec<_>>()
             };
+            // Clear any pending PLI keyframe request left over from a previous
+            // session so a fresh session does not emit a spurious IDR.
+            NVENC_FORCE_IDR.store(false, Ordering::Release);
             for session in sessions {
                 shutdown_session(session).await;
             }
@@ -625,6 +635,244 @@ mod windows_impl {
         }
     }
 
+    /// Unified H.264 encoder surface used by the capture loop. The Media
+    /// Foundation encoder and the NVENC encoder both implement this so the loop
+    /// does not care which hardware path is active.
+    trait DesktopEncoder {
+        /// Encode one captured texture. The encoder owns the resolution scaling
+        /// (input size vs its configured output size) internally.
+        fn encode(
+            &mut self,
+            texture: &ID3D11Texture2D,
+            input_width: u32,
+            input_height: u32,
+            timestamp: Duration,
+            out: &mut Vec<EncodedSample>,
+        ) -> Result<(), String>;
+
+        fn force_keyframe(&self);
+    }
+
+    /// Media Foundation H.264 encoder adapted to the [`DesktopEncoder`] trait.
+    /// Wraps the vendored `MfH264Encoder` and maps its error type to `String`.
+    struct MftH264EncoderAdapter(MfH264Encoder);
+
+    impl DesktopEncoder for MftH264EncoderAdapter {
+        fn encode(
+            &mut self,
+            texture: &ID3D11Texture2D,
+            _input_width: u32,
+            _input_height: u32,
+            timestamp: Duration,
+            out: &mut Vec<EncodedSample>,
+        ) -> Result<(), String> {
+            self.0
+                .encode(texture, timestamp, out)
+                .map_err(|err| format!("Media Foundation H.264 encode failed: {err}"))
+        }
+
+        fn force_keyframe(&self) {
+            self.0.force_keyframe();
+        }
+    }
+
+    /// NVIDIA NVENC encoder over `nvEncodeAPI64.dll`, loaded at runtime via
+    /// `libloading`. NVENC does not resize ARGB/RGB input itself, so captured
+    /// BGRA frames are scaled to the encode size by the D3D11 video processor
+    /// (`Bgra2Nv12`) and fed as NV12. This keeps the encoded resolution equal
+    /// to the configured target regardless of the native desktop size.
+    struct NvencH264Encoder {
+        encoder: nvenc::encoder::Encoder,
+        converter: win_native_media::convert::Bgra2Nv12,
+        input_buffer: nvenc::input_buffer::InputBuffer,
+        bitstream: nvenc::bitstream::BitStream,
+        /// Reused NV12 CPU buffer; avoids a heap allocation per frame.
+        nv12_buffer: Vec<u8>,
+        keyframe_interval: u32,
+        frame_count: u64,
+    }
+
+    impl NvencH264Encoder {
+        /// Create a low-latency H.264 session bound to `device`. Captured
+        /// frames (`input_width` x `input_height`) are downscaled by the video
+        /// processor to `cfg.width` x `cfg.height` before encoding.
+        fn new(
+            device: &windows::Win32::Graphics::Direct3D11::ID3D11Device,
+            cfg: VideoConfig,
+            input_width: u32,
+            input_height: u32,
+        ) -> Result<Self, String> {
+            use nvenc::session::{InitParams, Session};
+            use nvenc::sys::enums::{
+                NVencBufferFormat, NVencMemoryHeap, NVencTuningInfo,
+            };
+            use nvenc::sys::guids::{NV_ENC_CODEC_H264_GUID, NV_ENC_PRESET_P3_GUID};
+
+            let session: Session<nvenc::session::NeedsConfig> = Session::open_dx(device)
+                .map_err(|err| format!("open NVENC session: {err:?}"))?;
+            let codecs = session
+                .get_encode_codecs()
+                .map_err(|err| format!("query NVENC codecs: {err:?}"))?;
+            if !codecs.contains(&NV_ENC_CODEC_H264_GUID) {
+                return Err("NVENC reports no H.264 encoder".into());
+            }
+            let (session, mut config) = session
+                .get_encode_preset_config_ex(
+                    NV_ENC_CODEC_H264_GUID,
+                    NV_ENC_PRESET_P3_GUID,
+                    NVencTuningInfo::LowLatency,
+                )
+                .map_err(|err| format!("NVENC preset config: {err:?}"))?;
+
+            // Low-latency VBR targeting the requested bitrate.
+            config.preset_cfg.rc_params.rate_control_mode =
+                nvenc::sys::enums::NVencParamsRcMode::VBR;
+            config.preset_cfg.rc_params.average_bit_rate = cfg.bitrate;
+            config.preset_cfg.gop_len = cfg.keyframe_interval;
+            config.preset_cfg.frame_interval_p = 1;
+
+            let init_params = InitParams {
+                encode_guid: NV_ENC_CODEC_H264_GUID,
+                preset_guid: NV_ENC_PRESET_P3_GUID,
+                aspect_ratio: [cfg.width, cfg.height],
+                encode_config: &mut config.preset_cfg,
+                tuning_info: NVencTuningInfo::LowLatency,
+                // NVENC encodes NV12 natively; the video processor scales the
+                // captured BGRA to the target size and converts to NV12.
+                buffer_format: NVencBufferFormat::NV12,
+                frame_rate: [cfg.fps, 1],
+                resolution: [cfg.width, cfg.height],
+                enable_ptd: true,
+                max_encoder_resolution: [0, 0],
+            };
+            let encoder = session
+                .init_encoder(init_params)
+                .map_err(|err| format!("init NVENC session: {err:?}"))?;
+            let converter = win_native_media::convert::Bgra2Nv12::new_with_scale(
+                device,
+                input_width,
+                input_height,
+                cfg.width,
+                cfg.height,
+            )
+            .map_err(|err| format!("create BGRA->NV12 converter: {err:?}"))?;
+            let input_buffer = encoder
+                .create_input_buffer(
+                    cfg.width,
+                    cfg.height,
+                    NVencMemoryHeap::SystemCached,
+                    NVencBufferFormat::NV12,
+                )
+                .map_err(|err| format!("create NVENC input buffer: {err:?}"))?;
+            let bitstream = encoder
+                .create_bitstream_buffer()
+                .map_err(|err| format!("create NVENC bitstream: {err:?}"))?;
+            Ok(Self {
+                encoder,
+                converter,
+                input_buffer,
+                bitstream,
+                nv12_buffer: Vec::new(),
+                keyframe_interval: cfg.keyframe_interval,
+                frame_count: 0,
+            })
+        }
+    }
+
+    impl DesktopEncoder for NvencH264Encoder {
+        fn encode(
+            &mut self,
+            texture: &ID3D11Texture2D,
+            _input_width: u32,
+            _input_height: u32,
+            timestamp: Duration,
+            out: &mut Vec<EncodedSample>,
+        ) -> Result<(), String> {
+            use nvenc::sys::enums::{NVencPicStruct, NVencPicType};
+
+            // Scale BGRA -> NV12 at the encode size and read back to the reused
+            // CPU buffer, then copy it into the NVENC input buffer.
+            self.converter
+                .convert_to_cpu_into(texture, &mut self.nv12_buffer)
+                .map_err(|err| format!("NVENC BGRA->NV12 convert: {err:?}"))?;
+
+            let lock = self
+                .input_buffer
+                .lock()
+                .map_err(|err| format!("NVENC lock input buffer: {err:?}"))?;
+            let dst = unsafe { lock.data_ptr() };
+            let pitch = lock.pitch() as usize;
+            let (w, h) = (lock.width() as usize, lock.height() as usize);
+            let y_size = w * h;
+            // `convert_to_cpu_into` packs rows tightly (no pitch padding); the
+            // NVENC input buffer may have a larger pitch. Copy row by row.
+            unsafe {
+                for row in 0..h {
+                    std::ptr::copy_nonoverlapping(
+                        self.nv12_buffer.as_ptr().add(row * w),
+                        dst.add(row * pitch),
+                        w,
+                    );
+                }
+                let uv_src = self.nv12_buffer.as_ptr().add(y_size);
+                for row in 0..(h / 2) {
+                    std::ptr::copy_nonoverlapping(
+                        uv_src.add(row * w),
+                        dst.add(y_size + row * pitch),
+                        w,
+                    );
+                }
+            }
+            drop(lock);
+
+            self.frame_count += 1;
+            let pli_idr = NVENC_FORCE_IDR.swap(false, Ordering::AcqRel);
+            let periodic_idr = self.frame_count % u64::from(self.keyframe_interval.max(1)) == 1;
+            let is_keyframe = pli_idr || periodic_idr;
+            let pic_type = if is_keyframe {
+                NVencPicType::IDR
+            } else {
+                NVencPicType::P
+            };
+            self.encoder
+                .encode_picture(
+                    &self.input_buffer,
+                    &self.bitstream,
+                    self.frame_count as usize,
+                    timestamp.as_millis() as u64,
+                    nvenc::sys::enums::NVencBufferFormat::NV12,
+                    NVencPicStruct::Frame,
+                    pic_type,
+                    None,
+                )
+                .map_err(|err| format!("NVENC encode: {err:?}"))?;
+
+            // Lock and drain the produced access unit. `try_lock(true)` waits.
+            let bl = self
+                .bitstream
+                .try_lock(true)
+                .map_err(|err| format!("NVENC lock bitstream: {err:?}"))?;
+            let data = bl.as_slice().to_vec();
+            if !data.is_empty() {
+                out.push(EncodedSample {
+                    data,
+                    timestamp,
+                    is_keyframe,
+                });
+            }
+            Ok(())
+        }
+
+        fn force_keyframe(&self) {
+            // A WebRTC PLI wants an IDR as soon as possible. The next encode
+            // call checks this flag and schedules an IDR regardless of the
+            // periodic interval. `force_keyframe(&self)` cannot take `&mut self`
+            // (the capture loop calls it through the trait), so a process-wide
+            // atomic flag is consumed by the next `encode`.
+            NVENC_FORCE_IDR.store(true, Ordering::Release);
+        }
+    }
+
     fn capture_and_encode(
         stop: Arc<AtomicBool>,
         geometry: Arc<Mutex<DesktopGeometry>>,
@@ -655,7 +903,7 @@ mod windows_impl {
             }
         }
 
-        let mut encoder: Option<MfH264Encoder> = None;
+        let mut encoder: Option<Box<dyn DesktopEncoder>> = None;
         let mut encoded_size = (0, 0);
         let mut encoded_profile = StreamProfile::default();
         let mut last_encoded_timestamp = Duration::ZERO;
@@ -688,8 +936,8 @@ mod windows_impl {
 
             // Encode at a capped resolution while `geometry` keeps the native
             // desktop size for pointer coordinate math. Downscaling the stream
-            // is the biggest win for the software H.264 encoder: a 4K desktop
-            // encodes at 1080p, cutting encode time and network bytes sharply.
+            // keeps encode time and network bytes proportional to the visible
+            // content rather than the full desktop.
             let (encode_width, encode_height) = scaled_encode_size(frame.width, frame.height);
 
             if encoder.is_none()
@@ -697,16 +945,37 @@ mod windows_impl {
                 || encoded_profile != desired_profile
             {
                 let config = video_config(encode_width, encode_height, desired_profile);
-                let mut fresh = MfH264Encoder::new_with_input_size(
-                    session.device(),
-                    config,
-                    frame.width,
-                    frame.height,
-                )
-                .map_err(|err| format!("create Media Foundation H.264 encoder: {err}"))?;
-                // Idle desktops produce identical frames; skip encoding them
-                // (heartbeat keyframe every so often) to cut CPU and heap churn.
-                fresh.set_static_skip(true);
+                // Prefer NVENC (GPU, zero CPU encode cost, video-processor
+                // scaling), then fall back to the software Media Foundation MFT.
+                // NVENC loads nvEncodeAPI64.dll at runtime, so machines without
+                // an NVIDIA GPU simply fall through to MFT.
+                //
+                // Deliberately NOT trying the MFT hardware path: repeated
+                // hardware MFT sessions leak driver threads/handles (~17 threads
+                // and ~50 MiB per session, crashing WGC after a few), which is
+                // why the hardware MFT was originally disabled. Software MFT is
+                // leak-free and still fine at the downscaled 1080p encode size.
+                let fresh: Box<dyn DesktopEncoder> =
+                    match NvencH264Encoder::new(session.device(), config, frame.width, frame.height)
+                    {
+                        Ok(nvenc) => Box::new(nvenc),
+                        Err(_) => {
+                            let mut mft = MfH264Encoder::new_with_input_size(
+                                session.device(),
+                                config,
+                                frame.width,
+                                frame.height,
+                            )
+                            .map_err(|err| {
+                                format!("create Media Foundation H.264 encoder: {err}")
+                            })?;
+                            // Idle desktops produce identical frames; skip
+                            // encoding them (heartbeat keyframe every so often)
+                            // to cut CPU and heap churn on the software path.
+                            mft.set_static_skip(true);
+                            Box::new(MftH264EncoderAdapter(mft))
+                        }
+                    };
                 encoder = Some(fresh);
                 encoded_size = (encode_width, encode_height);
                 encoded_profile = desired_profile;
@@ -719,11 +988,16 @@ mod windows_impl {
                     .expect("encoder initialized")
                     .force_keyframe();
             }
-            let encode_result = encoder.as_mut().expect("encoder initialized").encode(
-                &frame.texture,
-                frame.timestamp,
-                &mut samples,
-            );
+            let encode_result = encoder
+                .as_mut()
+                .expect("encoder initialized")
+                .encode(
+                    &frame.texture,
+                    frame.width,
+                    frame.height,
+                    frame.timestamp,
+                    &mut samples,
+                );
             if let Err(encode_error) = encode_result {
                 return Err(format!(
                     "Media Foundation H.264 encode failed: {encode_error}"

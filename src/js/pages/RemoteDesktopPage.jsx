@@ -57,7 +57,25 @@ function stateLabel(state) {
     closed: '会话已结束',
     error: '连接错误',
   };
-  return labels[state] || state || '等待连接';
+  return labels[state] || state;
+}
+
+// Map a WebRTC candidate type to a user-meaningful label. `host` means a direct
+// LAN path (bypasses proxies/TUN); `srflx` is a public-IP hole-punch; `relay`
+// goes through a TURN server. Knowing which one is active helps diagnose why a
+// proxied/TUN machine cannot connect.
+function candidateTypeLabel(candidate) {
+  const parts = String(candidate || '').split(' · ');
+  const type = (parts[0] || '').trim();
+  const protocol = (parts[1] || '').trim();
+  const typeLabel = {
+    host: '同网直连',
+    srflx: '公网打洞',
+    prflx: '双向打洞',
+    relay: '中继转发',
+  }[type] || type || '';
+  const protoLabel = protocol === 'tcp' ? 'TCP' : 'UDP';
+  return `${typeLabel}${protoLabel ? `(${protoLabel})` : ''}`;
 }
 
 export default function RemoteDesktopPage() {
@@ -79,6 +97,8 @@ export default function RemoteDesktopPage() {
     rtt: 0,
     local: '',
     remote: '',
+    localLabel: '',
+    remoteLabel: '',
     fps: 0,
     receivedFps: 0,
     droppedFps: 0,
@@ -96,6 +116,7 @@ export default function RemoteDesktopPage() {
   const sessionRef = useRef('');
   const stoppedRef = useRef(false);
   const connectionGenerationRef = useRef(0);
+  const autoReconnectRef = useRef(0);
   const lastSignalRef = useRef(0);
   const pendingLocalIceRef = useRef([]);
   const pendingRemoteIceRef = useRef([]);
@@ -186,7 +207,7 @@ export default function RemoteDesktopPage() {
     channel.onerror = () => {
       if (peer !== peerRef.current || generation !== connectionGenerationRef.current) return;
       setState('failed');
-      setError('P2P 数据通道异常。当前网络可能存在对称 NAT、CGNAT 或 UDP 防火墙。');
+      setError('P2P 数据通道异常。网络可能存在对称 NAT、CGNAT 或 UDP 防火墙。');
     };
   }, []);
 
@@ -232,6 +253,7 @@ export default function RemoteDesktopPage() {
   const closeSession = useCallback(async () => {
     connectionGenerationRef.current += 1;
     stoppedRef.current = true;
+    autoReconnectRef.current = 0;
     const sessionId = sessionRef.current;
     sessionRef.current = '';
     channelRef.current?.close?.();
@@ -256,6 +278,20 @@ export default function RemoteDesktopPage() {
     }
   }, []);
 
+  // Retry a failed P2P attempt after a short backoff. Under a global proxy /
+  // TUN the first hole-punch often fails while later attempts (after ICE has
+  // gathered more candidates) succeed. Stop after a few tries to avoid a loop.
+  const scheduleAutoReconnect = useCallback(() => {
+    if (stoppedRef.current) return;
+    if (autoReconnectRef.current >= 3) return;
+    autoReconnectRef.current += 1;
+    const attempt = autoReconnectRef.current;
+    window.setTimeout(() => {
+      if (stoppedRef.current || attempt !== autoReconnectRef.current) return;
+      connect();
+    }, 800 * attempt);
+  }, [connect]);
+
   const connect = useCallback(async () => {
     await closeSession();
     const generation = connectionGenerationRef.current;
@@ -268,6 +304,7 @@ export default function RemoteDesktopPage() {
     lastSignalRef.current = 0;
     pendingLocalIceRef.current = [];
     pendingRemoteIceRef.current = [];
+    autoReconnectRef.current = 0;
     try {
       const server = await apiRequest(`/api/server/s/${encodeURIComponent(serverId)}`, { headers: authHeaders(), cache: 'no-store' });
       if (generation !== connectionGenerationRef.current) return;
@@ -277,8 +314,19 @@ export default function RemoteDesktopPage() {
       peer.onconnectionstatechange = () => {
         if (peer !== peerRef.current || generation !== connectionGenerationRef.current) return;
         const next = peer.connectionState;
-        if (next === 'connected') setState('connected');
-        else if (['failed', 'disconnected', 'closed'].includes(next)) setState(next);
+        if (next === 'connected') {
+          setState('connected');
+          autoReconnectRef.current = 0;
+        } else if (next === 'failed') {
+          setState('failed');
+          scheduleAutoReconnect();
+        } else if (next === 'disconnected') {
+          setState('disconnected');
+          // ICE may recover on its own after a brief probe; only auto-reconnect
+          // on the hard `failed` state to avoid thundering reconnect loops.
+        } else if (next === 'closed') {
+          setState('closed');
+        }
       };
       peer.onicecandidate = (event) => {
         if (event.candidate) postSignal({ kind: 'ice', candidate: event.candidate.toJSON() }, peer, generation).catch(() => {});
@@ -435,6 +483,8 @@ export default function RemoteDesktopPage() {
         rtt: measuredRtt,
         local: localCandidate ? `${localCandidate.candidateType || 'host'} · ${localCandidate.protocol || 'udp'}` : '',
         remote: remoteCandidate ? `${remoteCandidate.candidateType || 'host'} · ${remoteCandidate.protocol || 'udp'}` : '',
+        localLabel: candidateTypeLabel(localCandidate ? `${localCandidate.candidateType || 'host'} · ${localCandidate.protocol || 'udp'}` : ''),
+        remoteLabel: candidateTypeLabel(remoteCandidate ? `${remoteCandidate.candidateType || 'host'} · ${remoteCandidate.protocol || 'udp'}` : ''),
         fps: measuredFps,
         receivedFps: measuredReceivedFps,
         droppedFps: measuredDroppedFps,
@@ -910,7 +960,9 @@ export default function RemoteDesktopPage() {
             {stats.bitrate ? `${(stats.bitrate / 1_000_000).toFixed(1)} Mbps · ` : ''}
             {stats.bufferMs ? `缓冲 ${stats.bufferMs.toFixed(0)} ms · ` : ''}
             {stats.loss ? `丢包 ${stats.loss.toFixed(1)}% · ` : ''}
-            {stats.local && stats.remote ? `${stats.local} ↔ ${stats.remote}` : 'ICE 协商中'}
+            {stats.local && stats.remote
+              ? `${stats.localLabel || stats.local} ↔ ${stats.remoteLabel || stats.remote}`
+              : 'ICE 协商中'}
           </span>
           <Button size="sm" variant={controlEnabled ? 'primary' : 'secondary'} onClick={() => setControlEnabled(value => !value)}>
             {controlEnabled ? (controlAcknowledged ? '控制通道正常' : '控制已开启') : '仅观看'}
@@ -967,7 +1019,7 @@ export default function RemoteDesktopPage() {
             <div className="flex flex-col items-center gap-3 text-center text-kumo-inverse/70">
               <DesktopDisplay className="h-12 w-12" />
               <div className="text-sm">{stateLabel(state)}</div>
-              <div className="max-w-lg text-xs text-kumo-inverse/45">正在通过 STUN 交换公网候选地址并尝试 UDP 打洞。严格直连模式不会使用 fly.io 转发桌面数据。</div>
+              <div className="max-w-lg text-xs text-kumo-inverse/45">正在交换公网候选地址并尝试 UDP 打洞。严格直连模式不会使用 fly.io 转发桌面数据。</div>
             </div>
           )}
           {virtualCursor.visible && (

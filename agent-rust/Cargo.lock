@@ -123,6 +123,7 @@ dependencies = [
  "enigo",
  "futures-util",
  "hostname",
+ "nvenc",
  "nvml-wrapper",
  "portable-pty",
  "prost",
@@ -141,6 +142,7 @@ dependencies = [
  "webpki-roots 0.26.11",
  "webrtc",
  "win-native-media",
+ "windows 0.62.2",
  "windows-sys 0.61.2",
 ]
 
@@ -301,6 +303,27 @@ name = "base64ct"
 version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
+
+[[package]]
+name = "bitfields"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef6e59298da389bc0649c7463856b34c6e17fe542f88939426ede4436c6b1195"
+dependencies = [
+ "bitfields-impl",
+]
+
+[[package]]
+name = "bitfields-impl"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2c044f98f86f15414668d6c8187c7e4fadab1ad2b31680f648703e0fe07c555"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "bitflags"
@@ -1883,6 +1906,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "nvenc"
+version = "0.1.0"
+dependencies = [
+ "bitfields",
+ "libloading",
+ "windows 0.62.2",
 ]
 
 [[package]]
