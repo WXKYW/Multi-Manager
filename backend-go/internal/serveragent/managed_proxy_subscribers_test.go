@@ -102,3 +102,54 @@ func TestBindManagedNodeSubscribersWritesHY2Passwords(t *testing.T) {
 		t.Fatalf("unexpected users: %#v", users)
 	}
 }
+
+func seedPlainSubscriberBindingTest(t *testing.T, protocol string) (*sql.DB, string) {
+	t.Helper()
+	db, nodeID := seedSubscriberBindingTest(t, protocol)
+	statements := []string{
+		`UPDATE managed_proxy_nodes SET protocol=? WHERE id=?`,
+	}
+	for _, statement := range statements {
+		if _, err := db.Exec(statement, protocol, nodeID); err != nil {
+			t.Fatalf("seed plain statement: %v", err)
+		}
+	}
+	return db, nodeID
+}
+
+func TestBindManagedNodeSubscribersWritesSOCKSUsers(t *testing.T) {
+	db, nodeID := seedPlainSubscriberBindingTest(t, "socks")
+	raw := `{"inbounds":[{"type":"socks","listen_port":45654,"users":[{"username":"bootstrap","password":"bootstrap"}]}]}`
+	encoded, count, err := bindManagedNodeSubscribers(context.Background(), db, nodeID, "socks", raw)
+	if err != nil || count != 1 {
+		t.Fatalf("count=%d err=%v", count, err)
+	}
+	var root map[string]interface{}
+	_ = json.Unmarshal([]byte(encoded), &root)
+	bound := root["inbounds"].([]interface{})[0].(map[string]interface{})["users"].([]interface{})
+	user := bound[0].(map[string]interface{})
+	if user["username"] != "11111111-1111-4111-8111-111111111111" || user["password"] != "pass-a" {
+		t.Fatalf("unexpected socks users: %#v", bound)
+	}
+	v2ray := root["experimental"].(map[string]interface{})["v2ray_api"].(map[string]interface{})
+	statsUsers := v2ray["stats"].(map[string]interface{})["users"].([]interface{})
+	if len(statsUsers) != 1 || statsUsers[0] != "11111111-1111-4111-8111-111111111111" {
+		t.Fatalf("unexpected socks stats users: %#v", statsUsers)
+	}
+}
+
+func TestBindManagedNodeSubscribersWritesHTTPUsers(t *testing.T) {
+	db, nodeID := seedPlainSubscriberBindingTest(t, "http")
+	raw := `{"inbounds":[{"type":"http","listen_port":45654,"users":[{"username":"bootstrap","password":"bootstrap"}]}]}`
+	encoded, count, err := bindManagedNodeSubscribers(context.Background(), db, nodeID, "http", raw)
+	if err != nil || count != 1 {
+		t.Fatalf("count=%d err=%v", count, err)
+	}
+	var root map[string]interface{}
+	_ = json.Unmarshal([]byte(encoded), &root)
+	bound := root["inbounds"].([]interface{})[0].(map[string]interface{})["users"].([]interface{})
+	user := bound[0].(map[string]interface{})
+	if user["username"] != "11111111-1111-4111-8111-111111111111" || user["password"] != "pass-a" {
+		t.Fatalf("unexpected http users: %#v", bound)
+	}
+}

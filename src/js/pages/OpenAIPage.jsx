@@ -38,10 +38,11 @@ import {
 } from '../modules/openaiModelHealth.js';
 import {
   PageStack,
-  PageToolbar,
   AppCard,
   InlineStatusPill,
   EmptyState,
+  stickyTabsBaseClass,
+  TabBarOverflowActions,
   iconButtonIconClass,
   actionIconClass,
   cx,
@@ -272,6 +273,9 @@ function OpenAIPage() {
     baseUrl: '',
     apiKey: '',
     notes: '',
+    headers: [],
+    proxyPool: [],
+    autoSwitch: false,
   });
   const [endpointFormError, setEndpointFormError] = useState('');
   const [endpointSaving, setEndpointSaving] = useState(false);
@@ -337,6 +341,17 @@ function OpenAIPage() {
     () => endpoints.find(endpoint => endpoint.id === selectedEndpointId) || endpoints[0] || null,
     [endpoints, selectedEndpointId]
   );
+
+  const defaultGatewayKey = useMemo(
+    () => gatewayKeys.find(key => key.isDefault) || gatewayKeys[0] || null,
+    [gatewayKeys]
+  );
+
+  useEffect(() => {
+    if (activeTab === 'endpoints' || activeTab === 'keys') {
+      loadGatewayKeys();
+    }
+  }, [activeTab, loadGatewayKeys]);
 
   useEffect(() => {
     if (endpoints.length === 0) {
@@ -440,9 +455,51 @@ function OpenAIPage() {
     }
   };
 
+  const modelSwitchLoadingRef = useRef({});
+  const toggleModelEnabled = async (endpoint, modelId, enabled) => {
+    const key = `${endpoint.id}:${modelId}`;
+    if (modelSwitchLoadingRef.current[key]) return;
+    modelSwitchLoadingRef.current[key] = true;
+    try {
+      const response = await fetch(`/api/openai/endpoints/${endpoint.id}/models/toggle`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ model: modelId, enabled }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) throw new Error(data.error || '更新失败');
+      setEndpoints(prev =>
+        prev.map(e =>
+          e.id === endpoint.id
+            ? { ...e, disabledModels: Array.isArray(data.disabledModels) ? data.disabledModels : [] }
+            : e
+        )
+      );
+      toast.success(enabled ? `${modelId} 已启用` : `${modelId} 已停用`);
+      await loadAllModels(true);
+    } catch (error) {
+      toast.error(`更新模型状态失败: ${error.message}`);
+    } finally {
+      modelSwitchLoadingRef.current[key] = false;
+    }
+  };
+
+  const modelEnabledForEndpoint = (endpoint, modelId) => {
+    const disabled = Array.isArray(endpoint?.disabledModels) ? endpoint.disabledModels : [];
+    return !disabled.includes(modelId);
+  };
+
   const openAddEndpointModal = () => {
     setEditingEndpoint(null);
-    setEndpointForm({ name: '', baseUrl: '', apiKey: '', notes: '' });
+    setEndpointForm({
+      name: '',
+      baseUrl: '',
+      apiKey: '',
+      notes: '',
+      headers: [],
+      proxyPool: [],
+      autoSwitch: false,
+    });
     setEndpointFormError('');
     setEndpointFormOpen(true);
   };
@@ -454,9 +511,115 @@ function OpenAIPage() {
       baseUrl: endpoint.baseUrl || '',
       apiKey: endpoint.apiKey || '',
       notes: endpoint.notes || '',
+      headers: Array.isArray(endpoint.headers) ? endpoint.headers : [],
+      proxyPool: Array.isArray(endpoint.proxyPool) ? endpoint.proxyPool : [],
+      autoSwitch: Boolean(endpoint.autoSwitch),
     });
     setEndpointFormError('');
     setEndpointFormOpen(true);
+  };
+
+  const updateEndpointProxy = (index, value) => {
+    setEndpointForm(current => {
+      const proxyPool = (current.proxyPool || []).map((proxy, i) => (i === index ? value : proxy));
+      return { ...current, proxyPool };
+    });
+  };
+
+  const addEndpointProxy = () => {
+    setEndpointForm(current => ({
+      ...current,
+      proxyPool: [...(current.proxyPool || []), ''],
+    }));
+  };
+
+  const removeEndpointProxy = index => {
+    setEndpointForm(current => ({
+      ...current,
+      proxyPool: (current.proxyPool || []).filter((_, i) => i !== index),
+    }));
+  };
+
+  const [proxyBatchOpen, setProxyBatchOpen] = useState(false);
+  const [proxyBatchText, setProxyBatchText] = useState('');
+  const [proxyImportLoading, setProxyImportLoading] = useState(false);
+
+  const appendProxyPoolEntries = entries => {
+    const cleaned = (Array.isArray(entries) ? entries : [])
+      .map(entry => String(entry || '').trim())
+      .filter(Boolean);
+    if (cleaned.length === 0) return;
+    setEndpointForm(current => ({
+      ...current,
+      proxyPool: Array.from(new Set([...(current.proxyPool || []), ...cleaned])),
+    }));
+  };
+
+  const saveProxyBatch = () => {
+    const lines = proxyBatchText
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(Boolean);
+    if (lines.length === 0) {
+      toast.warning('请粘贴至少一个代理地址');
+      return;
+    }
+    appendProxyPoolEntries(lines);
+    setProxyBatchText('');
+    setProxyBatchOpen(false);
+    toast.success(`已批量添加 ${lines.length} 个代理`);
+  };
+
+  const loadSubscriptionSocksProxies = async () => {
+    if (proxyImportLoading) return;
+    setProxyImportLoading(true);
+    try {
+      const response = await fetch('/api/openai/proxies/subscription-nodes', {
+        headers: getAuthHeaders(),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      const list = Array.isArray(data.proxies) ? data.proxies : [];
+      if (list.length === 0) {
+        toast.info('订阅里暂无可用的 socks/http 节点');
+        return;
+      }
+      const existing = new Set(endpointForm.proxyPool || []);
+      const added = list.filter(item => !existing.has(item.proxy)).length;
+      appendProxyPoolEntries(list.map(item => item.proxy));
+      if (added === 0) {
+        toast.info('订阅节点代理均已导入，无需重复添加');
+      } else {
+        toast.success(`已从订阅导入 ${added} 个代理`);
+      }
+    } catch (error) {
+      toast.error('导入订阅代理失败: ' + error.message);
+    } finally {
+      setProxyImportLoading(false);
+    }
+  };
+
+  const updateEndpointHeader = (index, field, value) => {
+    setEndpointForm(current => {
+      const headers = (current.headers || []).map((header, i) =>
+        i === index ? { ...header, [field]: value } : header
+      );
+      return { ...current, headers };
+    });
+  };
+
+  const addEndpointHeader = () => {
+    setEndpointForm(current => ({
+      ...current,
+      headers: [...(current.headers || []), { name: '', value: '' }],
+    }));
+  };
+
+  const removeEndpointHeader = index => {
+    setEndpointForm(current => ({
+      ...current,
+      headers: (current.headers || []).filter((_, i) => i !== index),
+    }));
   };
 
   const saveEndpoint = async () => {
@@ -492,7 +655,7 @@ function OpenAIPage() {
   };
 
   const deleteEndpoint = async endpoint => {
-    if (!(await dialog.confirm(`确定要删除端点 "${endpoint.name || endpoint.baseUrl}" 吗？`))) {
+    if (!(await dialog.deleteResource(`确定要删除端点 "${endpoint.name || endpoint.baseUrl}" 吗？`))) {
       return;
     }
     try {
@@ -650,6 +813,21 @@ function OpenAIPage() {
     }
   };
 
+  const setDefaultGatewayKey = async key => {
+    try {
+      const response = await fetch(`/api/openai/keys/${key.id}/default`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) throw new Error(data.error || '设置默认密钥失败');
+      toast.success(`已将 "${key.name}" 设为默认密钥`);
+      await loadGatewayKeys();
+    } catch (error) {
+      toast.error('设置默认密钥失败: ' + error.message);
+    }
+  };
+
   const rotateGatewayKey = async key => {
     if (!(await dialog.confirm(`确认轮换 "${key.name}"？旧密钥会立即失效。`))) return;
     try {
@@ -668,7 +846,7 @@ function OpenAIPage() {
   };
 
   const deleteGatewayKey = async key => {
-    if (!(await dialog.confirm(`确定删除网关密钥 "${key.name}" 吗？`))) return;
+    if (!(await dialog.deleteResource(`确定删除网关密钥 "${key.name}" 吗？`))) return;
     try {
       const response = await fetch(`/api/openai/keys/${key.id}`, {
         method: 'DELETE',
@@ -1204,7 +1382,7 @@ function OpenAIPage() {
   };
 
   const deletePersona = async personaId => {
-    if (!(await dialog.confirm('确定要删除这个 AI 人设吗？'))) {
+    if (!(await dialog.deleteResource('确定要删除这个 AI 人设吗？'))) {
       return;
     }
     try {
@@ -1435,7 +1613,7 @@ function OpenAIPage() {
 
   const deleteSession = async (sessionId, e) => {
     if (e) e.stopPropagation();
-    if (!(await dialog.confirm('确定要删除这个对话吗？此操作不可撤销。'))) return;
+    if (!(await dialog.deleteResource('确定要删除这个对话吗？此操作不可撤销。'))) return;
     try {
       const response = await fetch(`/api/openai/sessions/${sessionId}`, {
         method: 'DELETE',
@@ -1455,7 +1633,7 @@ function OpenAIPage() {
 
   const deleteSelectedSessions = async () => {
     if (selectedSessionIds.length === 0) return;
-    if (!(await dialog.confirm(`确定要删除选中的 ${selectedSessionIds.length} 个对话吗？`))) return;
+    if (!(await dialog.deleteResource(`确定要删除选中的 ${selectedSessionIds.length} 个对话吗？`))) return;
     try {
       for (const id of selectedSessionIds) {
         await fetch(`/api/openai/sessions/${id}`, {
@@ -1477,7 +1655,7 @@ function OpenAIPage() {
 
   const clearAllSessions = async () => {
     if (sessions.length === 0) return;
-    if (!(await dialog.confirm('确定要清空所有会话历史吗？此操作不可撤销。'))) return;
+    if (!(await dialog.deleteResource('确定要清空所有会话历史吗？此操作不可撤销。'))) return;
     try {
       const response = await fetch('/api/openai/sessions', {
         method: 'DELETE',
@@ -2166,9 +2344,9 @@ function OpenAIPage() {
   };
 
   return (
-    <PageStack viewport className="min-h-full max-w-full md:h-full md:min-h-0 md:flex-1">
+    <PageStack viewport>
       {/* Tab Navigation */}
-      <PageToolbar className="shrink-0 select-none">
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <Tabs
           {...MODULE_TABS_PROPS}
           value={activeTab}
@@ -2203,65 +2381,58 @@ function OpenAIPage() {
             },
           ]}
         />
-      </PageToolbar>
+        <TabBarOverflowActions
+          items={[
+            {
+              key: 'health',
+              label: '健康检测',
+              icon: <Activity className={cx(iconButtonIconClass, modelHealthBatchLoading && 'animate-pulse')} />,
+              onClick: () => setHealthCheckModal(true),
+              disabled: modelHealthBatchLoading,
+            },
+            {
+              key: 'refresh',
+              label: '刷新列表',
+              icon: <RefreshCw className={cx(iconButtonIconClass, endpointsRefreshing && 'animate-spin')} />,
+              onClick: refreshAllEndpoints,
+              disabled: endpointsRefreshing,
+            },
+            {
+              key: 'add',
+              label: '新增端点',
+              icon: <Plus className={iconButtonIconClass} />,
+              onClick: openAddEndpointModal,
+              variant: 'primary',
+            },
+          ]}
+        />
+      </div>
 
       {/* ==================== 1. API 端点 Tab ==================== */}
       {activeTab === 'endpoints' && (
-        <GatewaySection
-          className="min-h-0 flex-1"
-          title="API 端点"
-          description={
-            modelHealthBatchLoading ? '正在批量检测模型可用性...' : `共 ${endpoints.length} 个端点`
-          }
-          icon={<Server className="h-4 w-4 text-kumo-brand" />}
-          actions={
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                onClick={() => setHealthCheckModal(true)}
-                disabled={modelHealthBatchLoading}
-                className="flex items-center gap-1.5"
-              >
-                <Activity
-                  className={cx(iconButtonIconClass, modelHealthBatchLoading && 'animate-pulse')}
-                />
-                <span>健康检测</span>
-              </Button>
-              <Button
-                size="sm"
-                onClick={refreshAllEndpoints}
-                disabled={endpointsRefreshing}
-                className="flex items-center gap-1.5"
-              >
-                <RefreshCw
-                  className={cx(iconButtonIconClass, endpointsRefreshing && 'animate-spin')}
-                />
-                <span>刷新列表</span>
-              </Button>
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={openAddEndpointModal}
-                className="flex items-center gap-1.5"
-              >
-                <Plus className={iconButtonIconClass} />
-                <span>新增端点</span>
-              </Button>
-            </div>
-          }
-          bodyClassName="flex min-h-0 flex-1 flex-col gap-2.5"
-        >
-          <LayerCard className="flex flex-col gap-2 p-2 shadow-none sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 items-center gap-2">
-              <Server className="h-4 w-4 shrink-0 text-kumo-brand" />
-              <span className="shrink-0 text-xs font-medium text-kumo-subtle">OpenAI 兼容入口</span>
+        <div className="flex min-h-0 flex-1 flex-col gap-2.5">
+          <div className="flex flex-col gap-2 rounded-lg border border-kumo-line bg-kumo-base p-2 shadow-none sm:flex-row sm:items-center sm:justify-between">
+<div className="flex min-w-0 items-center gap-2">
               <ClipboardText
                 size="sm"
                 text={`${gatewayOrigin}/v1`}
                 className="min-w-0 max-w-md flex-1 font-mono text-[0.9em]"
-                tooltip={{ text: '复制 API Base URL', copiedText: '地址已复制' }}
+                tooltip={{ text: '复制 API Base URL', copiedText: '地址已复制', side: 'bottom' }}
                 labels={{ copyAction: '复制 API Base URL' }}
               />
+              {defaultGatewayKey?.apiKey ? (
+                <ClipboardText
+                  size="sm"
+                  text={defaultGatewayKey.apiKey}
+                  className="min-w-0 max-w-md flex-1 font-mono text-[0.9em]"
+                  tooltip={{ text: '复制默认密钥', copiedText: '密钥已复制', side: 'bottom' }}
+                  labels={{ copyAction: '复制默认密钥' }}
+                />
+              ) : (
+                <span className="shrink-0 text-xs font-medium text-kumo-subtle">
+                  未设置默认密钥
+                </span>
+              )}
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
               <InlineStatusPill tone="neutral">
@@ -2282,7 +2453,7 @@ function OpenAIPage() {
                 个模型
               </InlineStatusPill>
             </div>
-          </LayerCard>
+          </div>
           {endpointsLoading ? (
             <div className="space-y-2.5">
               {[...Array(2)].map((_, i) => (
@@ -2310,8 +2481,8 @@ function OpenAIPage() {
               const invalidStatus = endpoint.status === 'invalid';
 
               return (
-                <div className="grid min-h-0 min-w-0 flex-1 gap-3 lg:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]">
-                  <section className="flex min-h-0 min-w-0 flex-col gap-2">
+                <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]">
+                  <section className="flex min-w-0 flex-col gap-2 lg:sticky lg:top-[70px] lg:self-start">
                     <div className="flex min-h-8 items-center justify-between gap-2 px-1">
                       <div className="flex items-center gap-2 text-xs text-kumo-subtle">
                         <Server className="h-3.5 w-3.5" />
@@ -2319,8 +2490,8 @@ function OpenAIPage() {
                       </div>
                       <span className="text-xs text-kumo-subtle">{endpoints.length} 个</span>
                     </div>
-                    <LayerCard className="min-h-0 flex-1 overflow-hidden p-0 shadow-none">
-                      <div className="h-full overflow-auto scrollbar-thin">
+                    <LayerCard className="p-0 shadow-none">
+                      <div className="scrollbar-thin">
                         <Table layout="fixed" className="w-full text-xs">
                           <colgroup>
                             <col />
@@ -2394,6 +2565,16 @@ function OpenAIPage() {
                         >
                           {validStatus ? '有效' : invalidStatus ? '无效' : '待检测'}
                         </InlineStatusPill>
+                        {Array.isArray(endpoint.headers) && endpoint.headers.length > 0 && (
+                          <InlineStatusPill
+                            tone="info"
+                            title={(endpoint.headers || [])
+                              .map(h => `${h.name}: ${h.value}`)
+                              .join('\n')}
+                          >
+                            {endpoint.headers.length} 请求头
+                          </InlineStatusPill>
+                        )}
                         <span
                           className="hidden truncate font-mono text-[10px] text-kumo-subtle sm:block"
                           title={endpoint.baseUrl}
@@ -2455,10 +2636,11 @@ function OpenAIPage() {
                       </div>
                     </div>
 
-                    <LayerCard className="min-h-0 min-w-0 flex-1 overflow-hidden p-0 shadow-none">
-                      <div className="h-full overflow-auto scrollbar-thin">
+                    <LayerCard className="min-w-0 p-0 shadow-none">
+                      <div className="scrollbar-thin">
                         <Table layout="fixed" className="min-w-[640px] text-xs">
                           <colgroup>
+                            <col style={{ width: 56 }} />
                             <col />
                             <col style={{ width: 92 }} />
                             <col style={{ width: 96 }} />
@@ -2467,6 +2649,7 @@ function OpenAIPage() {
                           </colgroup>
                           <Table.Header sticky variant="compact">
                             <Table.Row className="h-8">
+                              <Table.Head className="!px-2 !py-1.5 text-center">启用</Table.Head>
                               <Table.Head className="!px-2.5 !py-1.5">模型</Table.Head>
                               <Table.Head className="!px-2 !py-1.5 text-center">健康</Table.Head>
                               <Table.Head className="!px-2 !py-1.5 text-right">延迟</Table.Head>
@@ -2510,6 +2693,22 @@ function OpenAIPage() {
 
                                 return (
                                   <Table.Row key={modelId} className="h-9">
+                                    <Table.Cell className="!px-2 !py-1.5 text-center">
+                                      <div
+                                        className="flex justify-center"
+                                        onClick={event => event.stopPropagation()}
+                                      >
+                                        <Switch
+                                          size="sm"
+                                          aria-label={modelEnabledForEndpoint(endpoint, modelId) ? `停用 ${modelId}` : `启用 ${modelId}`}
+                                          checked={modelEnabledForEndpoint(endpoint, modelId)}
+                                          onCheckedChange={enabled =>
+                                            toggleModelEnabled(endpoint, modelId, enabled)
+                                          }
+                                          disabled={!!modelSwitchLoadingRef.current[`${endpoint.id}:${modelId}`]}
+                                        />
+                                      </div>
+                                    </Table.Cell>
                                     <Table.Cell className="!px-2.5 !py-1.5">
                                       <span
                                         className="block truncate font-medium text-kumo-strong"
@@ -2584,7 +2783,7 @@ function OpenAIPage() {
                             ) : (
                               <Table.Row>
                                 <Table.Cell
-                                  colSpan={5}
+                                  colSpan={6}
                                   className="py-10 text-center text-kumo-subtle"
                                 >
                                   暂无模型数据，可刷新端点获取
@@ -2600,7 +2799,7 @@ function OpenAIPage() {
               );
             })()
           )}
-        </GatewaySection>
+        </div>
       )}
 
       {/* ==================== 2. API 密钥 Tab ==================== */}
@@ -2754,6 +2953,18 @@ function OpenAIPage() {
                                   )}
                                 />
                               </span>
+                            </Button>
+                            <Button
+                              shape="square"
+                              size="sm"
+                              variant={key.isDefault ? 'primary' : 'outline'}
+                              aria-label={key.isDefault ? '默认密钥' : '设为默认密钥'}
+                              onClick={() => setDefaultGatewayKey(key)}
+                              disabled={key.isDefault}
+                              className={key.isDefault ? undefined : 'text-kumo-subtle hover:text-kumo-brand'}
+                              title={key.isDefault ? '当前为默认密钥' : '设为默认密钥'}
+                            >
+                              <Star className="w-3.5 h-3.5" />
                             </Button>
                             <Button
                               shape="square"
@@ -3161,6 +3372,176 @@ function OpenAIPage() {
               placeholder="选填"
               className="w-full text-kumo-strong text-sm font-sans"
             />
+
+            <div className="space-y-1.5">
+              <Label showOptional>自定义请求头</Label>
+              <div className="space-y-2">
+                {(endpointForm.headers || []).map((header, index) => (
+                  <div
+                    key={index}
+                    className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1.8fr)_2rem] items-center gap-2"
+                  >
+                    <Input
+                      size="sm"
+                      type="text"
+                      value={header.name}
+                      onChange={e => updateEndpointHeader(index, 'name', e.target.value)}
+                      placeholder="Header 名称"
+                      spellCheck={false}
+                      autoComplete="off"
+                      data-1p-ignore
+                      className="w-full text-kumo-strong font-mono text-[0.85em]"
+                    />
+                    <Input
+                      size="sm"
+                      type="text"
+                      value={header.value}
+                      onChange={e => updateEndpointHeader(index, 'value', e.target.value)}
+                      placeholder="Header 值"
+                      spellCheck={false}
+                      autoComplete="off"
+                      data-1p-ignore
+                      className="w-full text-kumo-strong font-mono text-[0.85em]"
+                    />
+                    <Button
+                      shape="square"
+                      size="sm"
+                      variant="secondary-destructive"
+                      aria-label="删除请求头"
+                      onClick={() => removeEndpointHeader(index)}
+                      title="删除请求头"
+                      icon={<Trash className="h-3.5 w-3.5" />}
+                    />
+                  </div>
+                ))}
+              </div>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={addEndpointHeader}
+                icon={<Plus className="h-3.5 w-3.5" />}
+              >
+                添加请求头
+              </Button>
+              <p className="text-xs leading-snug text-kumo-subtle">
+                随请求一并发送到上游，可用于传入鉴权、CF-Access 等身份头。Authorization 由网关自动设置。
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label showOptional>出口代理池 (IP)</Label>
+              <div className="space-y-2">
+                {(endpointForm.proxyPool || []).map((proxy, index) => (
+                  <div
+                    key={index}
+                    className="grid grid-cols-[minmax(0,1fr)_2rem] items-center gap-2"
+                  >
+                    <Input
+                      size="sm"
+                      type="text"
+                      value={proxy}
+                      onChange={e => updateEndpointProxy(index, e.target.value)}
+                      placeholder="socks5://user:pass@host:port 或 http://host:port"
+                      spellCheck={false}
+                      autoComplete="off"
+                      data-1p-ignore
+                      className="w-full text-kumo-strong font-mono text-[0.85em]"
+                    />
+                    <Button
+                      shape="square"
+                      size="sm"
+                      variant="secondary-destructive"
+                      aria-label="删除代理"
+                      onClick={() => removeEndpointProxy(index)}
+                      title="删除代理"
+                      icon={<Trash className="h-3.5 w-3.5" />}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={addEndpointProxy}
+                  icon={<Plus className="h-3.5 w-3.5" />}
+                >
+                  添加代理
+                </Button>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => setProxyBatchOpen(current => !current)}
+                  icon={<ClipboardText className="h-3.5 w-3.5" />}
+                >
+                  批量添加
+                </Button>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={loadSubscriptionSocksProxies}
+                  disabled={proxyImportLoading}
+                  icon={
+                    proxyImportLoading ? (
+                      <Loader size="sm" />
+                    ) : (
+                      <Download className="h-3.5 w-3.5" />
+                    )
+                  }
+                >
+                  {proxyImportLoading ? '导入中...' : '从订阅节点导入'}
+                </Button>
+              </div>
+              {proxyBatchOpen && (
+                <div className="space-y-2 rounded-md border border-kumo-line bg-kumo-recessed/25 p-3">
+                  <Textarea
+                    size="sm"
+                    value={proxyBatchText}
+                    onChange={e => setProxyBatchText(e.target.value)}
+                    placeholder={'每行一个代理地址，支持 socks5://、http(s):// 或 host:port\n如：\nsocks5://user:pass@1.2.3.4:1080\nhttp://5.6.7.8:8080'}
+                    spellCheck={false}
+                    rows={5}
+                    className="w-full font-mono text-[0.85em]"
+                  />
+                  <div className="flex items-center justify-end gap-2">
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      onClick={() => {
+                        setProxyBatchText('');
+                        setProxyBatchOpen(false);
+                      }}
+                    >
+                      取消
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="primary"
+                      onClick={saveProxyBatch}
+                      icon={<Check className="h-3.5 w-3.5" />}
+                    >
+                      确定添加
+                    </Button>
+                  </div>
+                </div>
+              )}
+              <div className="flex min-h-8 items-center gap-2">
+                <Switch
+                  size="sm"
+                  aria-label="限流自动切换代理"
+                  checked={!!endpointForm.autoSwitch}
+                  onCheckedChange={checked =>
+                    setEndpointForm(current => ({ ...current, autoSwitch: checked }))
+                  }
+                />
+                <span className="text-xs text-kumo-subtle">
+                  检测到限流（429/503 等）或连接失败时自动切换下一个代理
+                </span>
+              </div>
+              <p className="text-xs leading-snug text-kumo-subtle">
+                每个条目为一个出口代理，请求按池轮换出口 IP。适合 IP 敏感的源；留空则直连。
+              </p>
+            </div>
 
             {endpointFormError && (
               <p className="text-sm text-kumo-danger font-semibold">{endpointFormError}</p>

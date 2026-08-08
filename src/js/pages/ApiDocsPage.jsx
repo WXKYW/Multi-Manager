@@ -15,9 +15,10 @@ import {
   EmptyState,
   InlineStatusPill,
   PageStack,
-  PageToolbar,
   SectionCard,
+  TabBarOverflowActions,
   cx,
+  stickyTabsBaseClass,
 } from '../components/ui/AppPrimitives.jsx';
 import {
   Activity,
@@ -84,8 +85,8 @@ const API_SEGMENT = 'api';
 const routePrefixLiteral = (...segments) => `/${segments.join('/')}`;
 
 const apiDocsShellClass =
-  'api-docs-workspace flex h-full min-h-0 flex-1 w-full min-w-0 flex-col gap-3';
-const fixedPanelClass = 'h-full min-h-0';
+  'api-docs-workspace flex min-h-full w-full min-w-0 flex-col gap-3';
+const fixedPanelClass = 'min-h-0';
 
 const defaultMCPForm = {
   name: '',
@@ -557,22 +558,22 @@ function RouteList({ routes, selectedRoute, onSelect }) {
     <SectionCard
       title={`接口列表 (${routes.length})`}
       icon={<Search className="h-4 w-4 text-kumo-brand" />}
-      className={cx(fixedPanelClass, 'min-h-0')}
+      className="min-h-0"
       bodyPadding="none"
-      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
+      bodyClassName="flex min-w-0 flex-col"
     >
       {routes.length === 0 ? (
-        <AppCard padding="none" className="flex min-h-0 flex-1">
+        <AppCard padding="none" className="flex min-h-0">
           <EmptyState
             icon={Search}
             title="没有匹配的接口"
             description="换个筛选条件试试"
             card={false}
-            className="min-h-0 flex-1"
+            className="min-h-0"
           />
         </AppCard>
       ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto divide-y divide-kumo-line/80">
+        <div className="divide-y divide-kumo-line/80">
           {routes.map(route => {
             const active = selectedRoute && getRouteKey(selectedRoute) === getRouteKey(route);
             return (
@@ -684,14 +685,14 @@ function RouteDetail({ route, openapiRoute }) {
 
   if (!route) {
     return (
-      <div className={fixedPanelClass}>
-        <AppCard padding="none" className="flex h-full min-h-0">
+      <div>
+        <AppCard padding="none" className="flex min-h-0">
           <EmptyState
             icon={FileText}
             title="选择一个接口"
             description="从左侧选择接口"
             card={false}
-            className="min-h-0 flex-1"
+            className="min-h-0"
           />
         </AppCard>
       </div>
@@ -739,9 +740,9 @@ function RouteDetail({ route, openapiRoute }) {
           </Button>
         </div>
       }
-      className={cx(fixedPanelClass, 'min-h-0')}
+      className="min-h-0"
       bodyPadding="lg"
-      bodyClassName="flex min-h-0 flex-1 flex-col overflow-y-auto"
+      bodyClassName="flex min-w-0 flex-col"
     >
       <div className="grid gap-3 py-4 sm:grid-cols-2">
         <InfoRow label="模块" value={route.module} />
@@ -2145,7 +2146,7 @@ function ApiDocsPage() {
 
   return (
     <PageStack viewport className={apiDocsShellClass}>
-      <PageToolbar className="shrink-0">
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <Tabs
           {...MODULE_TABS_PROPS}
           value={activeView}
@@ -2157,34 +2158,31 @@ function ApiDocsPage() {
           ]}
         />
         {activeView === 'routes' && (
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={refreshing}
-            onClick={() => loadDocs(true)}
-            className="gap-1.5"
-          >
-            <RefreshCw className={cx('h-3.5 w-3.5', refreshing && 'animate-spin')} />
-            <span>刷新</span>
-          </Button>
-          <Button
-            size="sm"
-            variant="primary"
-            disabled={!summary.openapiRoute}
-            onClick={exportOpenAPI}
-            className="gap-1.5"
-          >
-            <Download className="h-3.5 w-3.5" />
-            <span>OpenAPI</span>
-          </Button>
-        </div>
+        <TabBarOverflowActions
+          items={[
+            {
+              key: 'refresh',
+              label: '刷新',
+              icon: <RefreshCw className={cx('h-3.5 w-3.5', refreshing && 'animate-spin')} />,
+              onClick: () => loadDocs(true),
+              disabled: refreshing,
+            },
+            {
+              key: 'export',
+              label: 'OpenAPI',
+              icon: <Download className="h-3.5 w-3.5" />,
+              onClick: exportOpenAPI,
+              disabled: !summary.openapiRoute,
+              variant: 'primary',
+            },
+          ]}
+        />
         )}
-      </PageToolbar>
+      </div>
 
       {activeView === 'routes' && (
-        <div className="flex min-h-0 flex-1 flex-col gap-2">
-          <div className="shrink-0 space-y-2">
+        <div className="flex min-w-0 flex-col gap-2">
+          <div className="space-y-2">
             <div className="grid grid-cols-4 gap-2 sm:gap-3">
               <StatCard icon={FileText} label="接口总数" value={summary.total} />
               <StatCard
@@ -2250,13 +2248,15 @@ function ApiDocsPage() {
             </AppCard>
           </div>
 
-          <div className="grid min-h-0 min-w-0 flex-1 gap-3 xl:grid-cols-[minmax(340px,0.9fr)_minmax(0,1.1fr)] 2xl:grid-cols-[minmax(360px,0.84fr)_minmax(0,1.16fr)]">
+          <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(340px,0.9fr)_minmax(0,1.1fr)] 2xl:grid-cols-[minmax(360px,0.84fr)_minmax(0,1.16fr)]">
             <RouteList
               routes={filteredRoutes}
               selectedRoute={selectedRoute}
               onSelect={route => setSelectedKey(getRouteKey(route))}
             />
-            <RouteDetail route={selectedRoute} openapiRoute={summary.openapiRoute} />
+            <div className="min-w-0 xl:sticky xl:top-[70px] xl:max-h-[calc(100vh-82px)] xl:overflow-y-auto xl:overscroll-contain xl:self-start">
+              <RouteDetail route={selectedRoute} openapiRoute={summary.openapiRoute} />
+            </div>
           </div>
         </div>
       )}

@@ -392,7 +392,7 @@ function PublicM365RegisterPage() {
               ) : null}
             </div>
             <div className="rounded-md border border-kumo-line bg-kumo-recessed/30 px-3 py-2 text-sm text-kumo-subtle">
-              初始密码将由系统自动生成，并在创建成功后展示。
+              初始密码由系统自动生成，创建成功后展示。
               {invite?.forceChangePasswordNextSignIn ? ' 首次登录后会要求立即修改密码。' : ''}
             </div>
             {error ? (
@@ -451,7 +451,7 @@ function PublicM365RegisterPage() {
             <div className="rounded-md border border-kumo-line bg-kumo-recessed/30 p-3">
               <div className="text-xs text-kumo-subtle">说明</div>
               <div className="mt-1 text-kumo-subtle">
-                一个邀请码只能使用一次。创建成功后，请前往微软登录页，使用新生成的账号和密码登录。
+                一个邀请码只能使用一次。创建成功后，请前往微软登录页登录。
               </div>
             </div>
           </div>
@@ -470,7 +470,6 @@ function PublicM365RegisterPage() {
               <div className="rounded-md border border-kumo-success/30 bg-kumo-success/10 p-4 text-sm text-kumo-success">
                 账号已创建成功，请保存下方登录账号和初始密码。
               </div>
-
               <div className="grid gap-3 rounded-md border border-kumo-line bg-kumo-recessed/30 p-4 text-sm md:grid-cols-2">
                 <div className="rounded-md border border-kumo-line/70 bg-kumo-base/70 p-3">
                   <div className="text-xs text-kumo-subtle">登录账号</div>

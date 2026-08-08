@@ -54,7 +54,7 @@ export default function DrawioLibraryView({
           className="min-h-80"
           icon={<Image className="h-10 w-10 text-kumo-inactive" />}
           title={search ? '没有匹配的图表' : '图库还是空的'}
-          description={search ? '尝试调整搜索关键词。' : '新建图表或导入已有 draw.io 文件。'}
+          description={search ? '调整搜索关键词。' : '新建或导入 draw.io 文件。'}
           contents={
             !search ? (
               <div className="flex items-center gap-2">

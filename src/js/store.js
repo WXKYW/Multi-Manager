@@ -886,7 +886,7 @@ const useStore = create((set, get) => ({
       const result = await response.json();
 
       if (response.status === 429) {
-        const errorMsg = result.error || '登录尝试过于频繁，请稍后再试';
+        const errorMsg = result.error || '登录过于频繁，请稍后再试';
         set({ loginError: errorMsg });
         toastManager.warning(errorMsg);
         return false;
@@ -919,7 +919,7 @@ const useStore = create((set, get) => ({
         }
         return true;
       } else {
-        let errorMsg = '密码错误，请重试';
+        let errorMsg = '密码错误';
         const errData = result.error;
         if (errData) {
           if (typeof errData === 'string') {
@@ -976,10 +976,10 @@ const useStore = create((set, get) => ({
       if (!response.ok || result.success === false) {
         throw new Error(result.error || '后端会话注销失败');
       }
-      toastManager.success('已安全登出');
+      toastManager.success('已登出');
     } catch (error) {
       console.error('Logout request failed:', error);
-      toastManager.warning('本地已登出，后端会话注销失败');
+      toastManager.warning('本地已登出，后端注销失败');
     }
   },
 }));

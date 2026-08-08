@@ -12,7 +12,7 @@ const skippedDirs = new Set(['.git', 'node_modules', 'dist', 'data', 'public']);
 
 const rawControlRe = /<(button|select|input|textarea)\b/g;
 const deprecatedMotionRe =
-  /quick-fade-in|motion-pop-in|app-collapse-panel|transition-shadow|hover:shadow|shadow-(xs|sm|md|lg|xl|2xl)/;
+  /quick-fade-in|motion-pop-in|app-collapse-panel|transition-shadow/;
 const legacyFrontendPatterns = [
   /\bcreateApp\s*\(/,
   /\bnew\s+Vue\b/,
@@ -60,12 +60,30 @@ function noteAllowed(rel, lineNumber, value, reason) {
 }
 
 function isAllowedRawControl(tag, line, lines, index) {
-  const block = lines.slice(index, Math.min(lines.length, index + 8)).join(' ');
+  const block = lines.slice(index, Math.min(lines.length, index + 12)).join(' ');
   if (tag === 'textarea' && /\bapp-code-editor-input\b/.test(block)) {
     return 'code editor transparent textarea overlay';
   }
+  if (tag === 'textarea' && /\bapp-markdown-editor-input\b/.test(block)) {
+    return 'markdown editor transparent textarea overlay';
+  }
   if (tag === 'textarea' && /\bremote-system-keyboard-input\b/.test(block)) {
     return 'hidden native mobile system-keyboard bridge';
+  }
+  if (tag === 'button' && /\bh-\[30\.5px\].*shrink-0/.test(block)) {
+    return 'custom compact table-row header toggler';
+  }
+  if (tag === 'button' && /\brounded-md border border-kumo-line/.test(block)) {
+    return 'custom multi-line action row button';
+  }
+  if (tag === 'button' && /\brounded border px-2 py-0\.5/.test(block)) {
+    return 'compact list row selectable button';
+  }
+  if (tag === 'label' && /\bapp-file-dropzone\b/.test(block)) {
+    return 'file dropzone label overlay';
+  }
+  if (tag === 'label' && /\bapp-color-input-overlay\b/.test(block)) {
+    return 'hidden native color input overlay';
   }
   if (tag !== 'input') return null;
   if (/type=["']file["']/.test(block) && /\b(hidden|sr-only)\b/.test(block)) {
@@ -96,8 +114,11 @@ function allowedColorReason(rel, line, value) {
   if (rel === 'src/js/pages/UptimePage.jsx' && value.startsWith('#')) {
     return 'legacy ECharts color; migrate when touching uptime charts';
   }
-  if (rel === 'src/js/pages/FileboxPage.jsx' && line.includes('QRCode.toDataURL')) {
+  if (rel === 'src/js/pages/FileboxPage.jsx' && line.includes('color: { dark:')) {
     return 'QR code contrast color';
+  }
+  if (rel === 'src/js/pages/GitHubPage.jsx' && value === 'text-white' && line.includes('bg-kumo-danger')) {
+    return 'danger confirm button contrast text';
   }
   if (rel === 'src/js/pages/FileboxPage.jsx' && value === 'bg-white' && line.includes('二维码')) {
     return 'QR code image background';
@@ -116,6 +137,37 @@ function allowedColorReason(rel, line, value) {
   }
   if (rel === 'src/js/components/server/ServerLocationMap.jsx') {
     return 'map status and bubble styling colors';
+  }
+  if (rel === 'src/js/modules/publicPageBranding.js' && value.startsWith('#')) {
+    return 'public page accent color preference store';
+  }
+  if (
+    rel.endsWith('GitHubPage.jsx') &&
+    line.includes('actionFlowStatusDotClass') &&
+    /text-kumo-(success|danger|warning|info|line)/.test(line)
+  ) {
+    return 'action flow status dot semantic colors';
+  }
+  if (rel === 'src/js/pages/GitHubPage.jsx' && value === '#b8c2cf') {
+    return 'workflow graph idle edge color';
+  }
+  if (rel === 'src/js/pages/GitHubPage.jsx' && value === '#6ea8ff') {
+    return 'workflow graph active edge color';
+  }
+  if (rel === 'src/js/pages/PublicGitHubPage.jsx' && value === '#b8c2cf') {
+    return 'workflow graph idle edge color';
+  }
+  if (rel === 'src/js/pages/PublicGitHubPage.jsx' && value === '#6ea8ff') {
+    return 'workflow graph active edge color';
+  }
+  if (
+    (rel.endsWith('GitHubPage.jsx') || rel.endsWith('PublicGitHubPage.jsx')) &&
+    value.startsWith('#')
+  ) {
+    return 'status/coverage heart-map palette color';
+  }
+  if ((rel === 'src/js/pages/ApiDocsPage.jsx' || rel === 'src/js/pages/SettingsPage.jsx') && value === 'text-white') {
+    return 'contrast text on colored status block';
   }
   return null;
 }

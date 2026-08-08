@@ -24,7 +24,7 @@ import useStore from '../store.js';
 import useTableResize from '../composables/useTableResize.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
-import { AppCard, PageStack, PageToolbar, SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { AppCard, PageStack, ResponsiveSearchInput, SectionCard, TabBarOverflowActions, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
 import CodeEditor from '../components/ui/CodeEditor.jsx';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
 import { toast } from '../modules/toast.js';
@@ -812,7 +812,7 @@ function DnsPage() {
   };
 
   const deleteAccount = async (account) => {
-    if (!(await dialog.confirm(`确定要删除 Cloudflare 账号“${account.name}”吗？`))) return;
+    if (!(await dialog.deleteResource(`确定要删除 Cloudflare 账号“${account.name}”吗？`))) return;
     try {
       await cfApi(`/accounts/${account.id}`, { method: 'DELETE' });
       toast.success('账号已删除');
@@ -937,7 +937,7 @@ function DnsPage() {
 
   const deleteZone = async (zone = selectedZone) => {
     if (!zone || !selectedAccountId) return;
-    if (!(await dialog.confirm(`确定要从 Cloudflare 删除域名“${zone.name}”吗？此操作不可恢复。`))) return;
+    if (!(await dialog.deleteResource(`确定要从 Cloudflare 删除域名“${zone.name}”吗？此操作不可恢复。`))) return;
     try {
       await cfApi(`/accounts/${selectedAccountId}/zones/${zone.id}`, { method: 'DELETE' });
       toast.success('域名已删除');
@@ -954,7 +954,7 @@ function DnsPage() {
       toast.warning('请先选择域名');
       return;
     }
-    if (!(await dialog.confirm(`确定要清除“${selectedZone?.name}”的全部 CDN 缓存吗？`))) return;
+    if (!(await dialog.deleteResource({ message: `确定要清除“${selectedZone?.name}”的全部 CDN 缓存吗？`, confirmText: '清除' }))) return;
     setLoadingKey('purge', true);
     try {
       await cfApi(`/accounts/${selectedAccountId}/zones/${selectedZoneId}/purge`, {
@@ -1037,7 +1037,7 @@ function DnsPage() {
   };
 
   const deleteRecord = async (record) => {
-    if (!(await dialog.confirm(`确定要删除记录“${record.name}”吗？`))) return;
+    if (!(await dialog.deleteResource(`确定要删除记录“${record.name}”吗？`))) return;
     try {
       await cfApi(`/accounts/${selectedAccountId}/zones/${selectedZoneId}/records/${record.id}`, {
         method: 'DELETE',
@@ -1051,7 +1051,7 @@ function DnsPage() {
 
   const batchDeleteRecords = async () => {
     if (selectedRecordIds.length === 0) return;
-    if (!(await dialog.confirm(`确定要删除选中的 ${selectedRecordIds.length} 条 DNS 记录吗？`))) return;
+    if (!(await dialog.deleteResource(`确定要删除选中的 ${selectedRecordIds.length} 条 DNS 记录吗？`))) return;
     setLoadingKey('batchDeleteRecords', true);
     try {
       await Promise.all(selectedRecords.map((record) => cfApi(
@@ -1141,7 +1141,7 @@ function DnsPage() {
   };
 
   const deleteTemplate = async (template) => {
-    if (!(await dialog.confirm(`确定要删除模板“${template.name}”吗？`))) return;
+    if (!(await dialog.deleteResource(`确定要删除模板“${template.name}”吗？`))) return;
     try {
       await cfApi(`/templates/${template.id}`, { method: 'DELETE' });
       toast.success('模板已删除');
@@ -1213,7 +1213,7 @@ function DnsPage() {
   };
 
   const deleteWorker = async (worker) => {
-    if (!(await dialog.confirm(`确定要删除 Worker“${worker.name}”吗？`))) return;
+    if (!(await dialog.deleteResource(`确定要删除 Worker“${worker.name}”吗？`))) return;
     try {
       await cfApi(`/accounts/${selectedAccountId}/workers/${encodeURIComponent(worker.name)}`, {
         method: 'DELETE',
@@ -1285,7 +1285,7 @@ function DnsPage() {
   };
 
   const deleteWorkerRoute = async (route) => {
-    if (!(await dialog.confirm(`确定要删除路由“${route.pattern}”吗？`))) return;
+    if (!(await dialog.deleteResource(`确定要删除路由“${route.pattern}”吗？`))) return;
     try {
       await cfApi(`/accounts/${selectedAccountId}/zones/${selectedZoneId}/workers/routes/${route.id}`, {
         method: 'DELETE',
@@ -1335,7 +1335,7 @@ function DnsPage() {
   };
 
   const deleteWorkerDomain = async (domain) => {
-    if (!(await dialog.confirm(`确定要删除 Worker 域名“${domain.hostname}”吗？`))) return;
+    if (!(await dialog.deleteResource(`确定要删除 Worker 域名“${domain.hostname}”吗？`))) return;
     try {
       await cfApi(
         `/accounts/${selectedAccountId}/workers/${encodeURIComponent(workerDomainState.worker.name)}/domains/${domain.id}`,
@@ -1363,7 +1363,7 @@ function DnsPage() {
   };
 
   const deletePagesProject = async (project) => {
-    if (!(await dialog.confirm(`确定要删除 Pages 项目“${project.name}”吗？`))) return;
+    if (!(await dialog.deleteResource(`确定要删除 Pages 项目“${project.name}”吗？`))) return;
     try {
       await cfApi(`/accounts/${selectedAccountId}/pages/${encodeURIComponent(project.name)}`, {
         method: 'DELETE',
@@ -1390,7 +1390,7 @@ function DnsPage() {
   };
 
   const deletePagesDeployment = async (deployment) => {
-    if (!(await dialog.confirm(`确定要删除该 Pages 部署吗？`))) return;
+    if (!(await dialog.deleteResource(`确定要删除该 Pages 部署吗？`))) return;
     try {
       await cfApi(
         `/accounts/${selectedAccountId}/pages/${encodeURIComponent(pagesDeployState.project.name)}/deployments/${deployment.id}`,
@@ -1438,7 +1438,7 @@ function DnsPage() {
   };
 
   const deletePagesDomain = async (domain) => {
-    if (!(await dialog.confirm(`确定要删除 Pages 域名“${domain.name}”吗？`))) return;
+    if (!(await dialog.deleteResource(`确定要删除 Pages 域名“${domain.name}”吗？`))) return;
     try {
       await cfApi(
         `/accounts/${selectedAccountId}/pages/${encodeURIComponent(pagesDomainState.project.name)}/domains/${encodeURIComponent(domain.name)}`,
@@ -1474,7 +1474,7 @@ function DnsPage() {
   };
 
   const deleteR2Bucket = async (bucket) => {
-    if (!(await dialog.confirm(`确定要删除 R2 存储桶“${bucket.name}”吗？`))) return;
+    if (!(await dialog.deleteResource(`确定要删除 R2 存储桶“${bucket.name}”吗？`))) return;
     try {
       await cfApi(`/accounts/${selectedAccountId}/r2/buckets/${encodeURIComponent(bucket.name)}`, {
         method: 'DELETE',
@@ -1559,7 +1559,7 @@ function DnsPage() {
   };
 
   const deleteR2Object = async (objectKey) => {
-    if (!(await dialog.confirm(`确定要删除对象“${objectKey}”吗？`))) return;
+    if (!(await dialog.deleteResource(`确定要删除对象“${objectKey}”吗？`))) return;
     try {
       await cfApi(
         `/accounts/${selectedAccountId}/r2/buckets/${encodeURIComponent(r2SelectedBucket.name)}/objects/${encodeURIComponent(objectKey)}`,
@@ -1574,7 +1574,7 @@ function DnsPage() {
 
   const batchDeleteR2Objects = async () => {
     if (selectedR2Objects.length === 0) return;
-    if (!(await dialog.confirm(`确定要删除选中的 ${selectedR2Objects.length} 个 R2 对象吗？`))) return;
+    if (!(await dialog.deleteResource(`确定要删除选中的 ${selectedR2Objects.length} 个 R2 对象吗？`))) return;
     setLoadingKey('batchDeleteR2', true);
     try {
       await Promise.all(selectedR2Objects.map((objectKey) => cfApi(
@@ -1651,7 +1651,7 @@ function DnsPage() {
   };
 
   const deleteTunnel = async (tunnel) => {
-    if (!(await dialog.confirm(`确定要删除 Tunnel“${tunnel.name}”吗？`))) return;
+    if (!(await dialog.deleteResource(`确定要删除 Tunnel“${tunnel.name}”吗？`))) return;
     try {
       await cfApi(`/accounts/${selectedAccountId}/tunnels/${tunnel.id}`, { method: 'DELETE' });
       toast.success('Tunnel 已删除');
@@ -1791,9 +1791,7 @@ function DnsPage() {
   );
   const isViewportWorkspaceTab = ['dns', 'r2'].includes(activeTab);
   const pageShellClassName = 'dns-workspace min-h-full max-w-full md:h-full md:min-h-0 md:flex-1';
-  const contentAreaClassName = isViewportWorkspaceTab
-    ? 'flex min-w-0 flex-col md:min-h-0 md:flex-1'
-    : 'min-w-0';
+  const contentAreaClassName = 'flex min-w-0 flex-col';
   const renderResizeHead = (label, index, startResize, align = 'left') => {
     const alignClassName = {
       left: 'justify-start text-left',
@@ -1812,8 +1810,8 @@ function DnsPage() {
   };
 
   return (
-    <PageStack viewport={isViewportWorkspaceTab} className={pageShellClassName}>
-      <PageToolbar>
+    <PageStack viewport className="dns-workspace min-h-full max-w-full">
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <Tabs
           {...MODULE_TABS_PROPS}
           value={activeTab}
@@ -1821,30 +1819,36 @@ function DnsPage() {
           tabs={CLOUDFLARE_TABS}
         />
 
-        <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto">
-          {!['accounts', 'templates'].includes(activeTab) && (
-            <Select size="sm"
-              aria-label="选择 Cloudflare 账号"
-              value={selectedAccountId || null}
-              onValueChange={(value) => setSelectedAccountId(value ? String(value) : '')}
-              placeholder="选择账号"
-              className="min-w-0 flex-1 sm:w-48 sm:flex-none"
-              items={accounts.map((account) => ({
-                value: String(account.id),
-                label: account.name,
-              }))}
-            />
-          )}
-          <Button size="sm"
-            shape="square"
-            variant="secondary"
-            onClick={refreshCurrentTab}
-            aria-label="刷新当前 Cloudflare 数据"
-            title="刷新"
-            icon={<RefreshCw className={`h-4 w-4 ${Object.values(loading).some(Boolean) ? 'animate-spin' : ''}`} />}
-          />
-        </div>
-      </PageToolbar>
+        <TabBarOverflowActions
+          items={[
+            ...(!['accounts', 'templates'].includes(activeTab)
+              ? [
+                  {
+                    key: 'account',
+                    type: 'select',
+                    label: '账号',
+                    icon: <Cloud className="h-3.5 w-3.5" />,
+                    value: selectedAccountId || '',
+                    onValueChange: (value) => setSelectedAccountId(value ? String(value) : ''),
+                    disabled: false,
+                    options: [
+                      ...accounts.map((account) => ({
+                        value: String(account.id),
+                        label: account.name,
+                      })),
+                    ],
+                  },
+                ]
+              : []),
+            {
+              key: 'refresh',
+              label: '刷新',
+              icon: <RefreshCw className={`h-4 w-4 ${Object.values(loading).some(Boolean) ? 'animate-spin' : ''}`} />,
+              onClick: refreshCurrentTab,
+            },
+          ]}
+        />
+      </div>
 
       <div className={contentAreaClassName}>
         {!selectedAccountId && !['accounts', 'templates'].includes(activeTab) ? (
@@ -1865,8 +1869,8 @@ function DnsPage() {
         ) : (
           <>
           {activeTab === 'dns' && (
-            <div className="dns-split grid min-w-0 gap-3 md:min-h-0 md:flex-1">
-              <section className="flex min-w-0 flex-col gap-2 md:min-h-0">
+            <div className="dns-split grid min-w-0 gap-3">
+              <section className="flex min-w-0 flex-col gap-2 lg:sticky lg:top-[70px] lg:max-h-[calc(100vh-82px)] lg:overflow-y-auto lg:overscroll-contain lg:self-start">
               <div className="flex min-h-8 shrink-0 flex-col gap-2 pl-px sm:flex-row sm:items-center sm:justify-between">
                 <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:items-center">
                   <Button size="sm" variant="secondary" onClick={openZoneModal} icon={<Plus className="h-4 w-4" />} className="w-full justify-center sm:w-auto">
@@ -1912,7 +1916,7 @@ function DnsPage() {
                 ))}
               </div>
 
-              <div className="dns-table-frame hidden min-h-0 max-w-full flex-1 md:flex">
+              <div className="dns-table-frame hidden max-w-full md:flex">
                 <div className="dns-table-scroll scrollbar-thin">
                 <Table layout="fixed" className="w-full text-xs">
                   <colgroup>
@@ -2044,7 +2048,7 @@ function DnsPage() {
 
               </section>
 
-              <section className="flex min-w-0 flex-col gap-2 md:min-h-0">
+              <section className="flex min-w-0 flex-col gap-2">
               <div className="flex min-h-8 shrink-0 items-center justify-between gap-2 px-1">
                 <div className="flex min-w-0 items-center gap-2 text-xs text-kumo-subtle">
                   <Globe className="h-3.5 w-3.5 shrink-0" />
@@ -2231,7 +2235,7 @@ function DnsPage() {
                     ))}
                   </div>
 
-                  <div className="dns-table-frame order-2 hidden min-h-0 max-w-full flex-1 md:flex md:order-none">
+                  <div className="dns-table-frame order-2 hidden max-w-full md:flex md:order-none">
                     <div className="dns-table-scroll scrollbar-thin">
                     <Table layout="fixed" className="w-full text-xs" style={{ minWidth: recordColWidths.reduce((sum, width) => sum + width, 0) }}>
                       <colgroup>
@@ -2450,17 +2454,12 @@ function DnsPage() {
                   />
                 </div>
 
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-kumo-subtle" />
-                  <Input
-                    size="sm"
-                    aria-label="搜索 R2 存储桶"
-                    value={r2BucketSearch}
-                    onChange={(event) => setR2BucketSearch(event.target.value)}
-                    placeholder="搜索存储桶"
-                    className="pl-8"
-                  />
-                </div>
+                <ResponsiveSearchInput
+                  value={r2BucketSearch}
+                  onChange={(event) => setR2BucketSearch(event.target.value)}
+                  placeholder="搜索存储桶"
+                  ariaLabel="搜索 R2 存储桶"
+                />
 
                 <div className="flex min-h-0 flex-col gap-2 overflow-y-auto pr-1">
                   {loading.r2 ? Array.from({ length: 5 }).map((_, index) => (
@@ -2602,15 +2601,12 @@ function DnsPage() {
                           <Badge variant="outline">{formatBytes(r2ObjectTotalBytes)}</Badge>
                           {selectedR2Objects.length > 0 && <Badge variant="info">已选择 {selectedR2Objects.length}</Badge>}
                         </div>
-                        <div className="relative w-full max-w-md">
-                          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-kumo-subtle" />
-                          <Input
-                            size="sm"
-                            aria-label="搜索当前 R2 目录"
+                        <div className="w-full max-w-md">
+                          <ResponsiveSearchInput
                             value={r2ObjectSearch}
                             onChange={(event) => setR2ObjectSearch(event.target.value)}
                             placeholder="搜索当前目录"
-                            className="pl-8"
+                            ariaLabel="搜索当前 R2 目录"
                           />
                         </div>
                       </div>
@@ -2883,7 +2879,7 @@ function DnsPage() {
                 {modal.data ? '编辑 Cloudflare 账号' : '添加 Cloudflare 账号'}
               </Dialog.Title>
               <Dialog.Description className="text-sm text-kumo-subtle">
-                推荐使用 Cloudflare API Token，邮箱留空；账户 API Token（cfat_）需要额外填写 Account ID。Origin CA Key（v1.0-）已弃用且不可用于这里。
+                推荐使用 API Token，邮箱可留空；账户 Token（cfat_）需额外填 Account ID。Origin CA Key（v1.0-）已弃用。
               </Dialog.Description>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <Input size="sm" label="备注名称" value={accountForm.name} onChange={(event) => setAccountForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="生产账号" />
@@ -3272,10 +3268,10 @@ function DnsPage() {
                 ) : (
                   <div className="flex min-h-[28rem] flex-col items-center justify-center gap-3 p-8 text-center">
                     <FileText className="h-8 w-8 text-kumo-subtle" />
-                    <div>
-                      <div className="font-medium text-kumo-strong">该类型暂不支持内嵌预览</div>
-                      <div className="mt-1 text-sm text-kumo-subtle">可以在新窗口打开，浏览器会按文件类型处理。</div>
-                    </div>
+                      <div>
+                        <div className="font-medium text-kumo-strong">该类型暂不支持内嵌预览</div>
+                        <div className="mt-1 text-sm text-kumo-subtle">可在新窗口打开，由浏览器按文件类型处理。</div>
+                      </div>
                     <Button size="sm" onClick={() => window.open(modal.data?.url, '_blank', 'noopener,noreferrer')} icon={<ExternalLink className="h-4 w-4" />}>
                       打开对象
                     </Button>

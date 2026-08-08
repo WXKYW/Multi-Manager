@@ -22,7 +22,7 @@ import { Table } from '@cloudflare/kumo/components/table';
 import { ChartPalette, ClipboardText, Tabs, TimeseriesChart } from '@cloudflare/kumo';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { AnimatedCollapse, DeferredRender } from '../components/AnimatedCollapse.jsx';
-import { AppCard, ChartCard, ChartWarmupSkeleton, DataTableFrame, EmptyState, SectionCard, StatusBadge } from '../components/ui/AppPrimitives.jsx';
+import { AppCard, ChartCard, ChartWarmupSkeleton, DataTableFrame, EmptyState, ResponsiveSearchInput, SectionCard, StatusBadge, TabBarOverflowActions, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
 import useStore from '../store.js';
 import {
   Activity,
@@ -1352,7 +1352,7 @@ function UptimePage() {
   return (
     <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4">
       {/* ==================== 顶部 Tab 导航 ==================== */}
-      <div className="flex flex-wrap items-center justify-between border-b border-kumo-line pb-3 gap-4">
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <Tabs
           {...MODULE_TABS_PROPS}
           value={uptimeCurrentTab}
@@ -1375,25 +1375,26 @@ function UptimePage() {
         />
 
         {uptimeCurrentTab === 'list' && (
-          <div className="flex items-center gap-2 w-full md:w-auto">
-            {/* 搜索框 */}
-            <div className="relative flex-1 md:w-56">
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-kumo-subtle">
-                <Search className="w-3.5 h-3.5" />
-              </span>
-              <Input size="sm"
-                type="text"
-                aria-label="搜索监测目标"
-                placeholder="搜索监测目标..."
-                value={uptimeSearchText}
-                onChange={(e) => setUptimeSearchText(e.target.value)}
-                className="w-full text-kumo-strong text-xs pl-8 pr-3 py-1.5"
-              />
-            </div>
+          <div className="flex min-w-0 items-center gap-2">
+            <ResponsiveSearchInput
+              value={uptimeSearchText}
+              onChange={(e) => setUptimeSearchText(e.target.value)}
+              placeholder="搜索监测目标..."
+              ariaLabel="搜索监测目标"
+              className="md:w-56"
+            />
 
-            <Button size="sm" variant="primary" icon={<Plus className="w-4 h-4" />} onClick={handleOpenAdd}>
-              新建目标
-            </Button>
+            <TabBarOverflowActions
+              items={[
+                {
+                  key: 'add-target',
+                  label: '新建目标',
+                  icon: <Plus className="w-4 h-4" />,
+                  onClick: handleOpenAdd,
+                  variant: 'primary',
+                },
+              ]}
+            />
           </div>
         )}
       </div>

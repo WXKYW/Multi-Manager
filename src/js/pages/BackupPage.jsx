@@ -158,7 +158,7 @@ export function BackupPanel({ embedded = false } = {}) {
   };
 
   const remove = async (record) => {
-    if (!(await dialog.confirm(`删除备份 ${record.file_name}？`))) return;
+    if (!(await dialog.deleteResource(`删除备份 ${record.file_name}？`))) return;
     const res = await fetch(`/api/backup/records/${encodeURIComponent(record.id)}`, { method: 'DELETE', headers: authHeaders() });
     const data = await res.json();
     if (!data.success) return toast.error(data.error || '删除失败');

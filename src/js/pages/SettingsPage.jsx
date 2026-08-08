@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
-import { Input } from '@cloudflare/kumo/components/input';
+import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
@@ -19,7 +19,7 @@ import useStore, {
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { APP_VERSION } from '../modules/appVersion.js';
 import { applySiteBrandFaviconHref, getDefaultSiteBrandPreviewUrl } from '../modules/siteBrand.js';
-import { AppCard, SectionCard, cx } from '../components/ui/AppPrimitives.jsx';
+import { AppCard, ResponsiveSearchInput, SectionCard, TabBarOverflowActions, cx, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
 import CodeEditor from '../components/ui/CodeEditor.jsx';
 import { BackupPanel } from './BackupPage.jsx';
 import { browserSupportsWebAuthn, createPasskeyCredential } from '../modules/webauthn.js';
@@ -892,7 +892,7 @@ function SettingsPage() {
   };
 
   const removePasskey = async (passkey) => {
-    if (!(await dialog.confirm(`确定删除“${passkey.label || '通行密钥'}”吗？`))) return;
+    if (!(await dialog.deleteResource(`确定删除“${passkey.label || '通行密钥'}”吗？`))) return;
 
     setPasskeyBusy(true);
     try {
@@ -1086,7 +1086,7 @@ function SettingsPage() {
 
   return (
     <div className="flex min-h-full w-full min-w-0 flex-col gap-3 sm:gap-4">
-      <div className="flex shrink-0 flex-col gap-3 border-b border-kumo-line pb-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <Tabs
           {...MODULE_TABS_PROPS}
           value={activeTab}
@@ -1094,25 +1094,29 @@ function SettingsPage() {
           tabs={SETTINGS_TABS}
         />
 
-        <div className="flex flex-row flex-wrap items-center gap-2 lg:justify-end">
-          <Button size="sm"
-            onClick={() => refreshCurrent(true)}
-            loading={settingsLoading || (activeTab === 'database' && databaseBusy) || (activeTab === 'logs' && logsBusy)}
-            icon={<RefreshCw className="h-4 w-4" />}
-          >
-            刷新
-          </Button>
-          {['general', 'modules', 'appearance'].includes(activeTab) && (
-            <Button size="sm"
-              variant="primary"
-              onClick={() => persistSettings()}
-              loading={settingsSaving}
-              icon={<Save className="h-4 w-4" />}
-            >
-              保存当前页设置
-            </Button>
-          )}
-        </div>
+        <TabBarOverflowActions
+          items={[
+            {
+              key: 'refresh',
+              label: '刷新',
+              icon: <RefreshCw className="h-4 w-4" />,
+              onClick: () => refreshCurrent(true),
+              loading: settingsLoading || (activeTab === 'database' && databaseBusy) || (activeTab === 'logs' && logsBusy),
+            },
+            ...(['general', 'modules', 'appearance'].includes(activeTab)
+              ? [
+                  {
+                    key: 'save',
+                    label: '保存当前页设置',
+                    icon: <Save className="h-4 w-4" />,
+                    onClick: () => persistSettings(),
+                    loading: settingsSaving,
+                    variant: 'primary',
+                  },
+                ]
+              : []),
+          ]}
+        />
       </div>
 
       <div className={contentViewportClassName}>
@@ -1166,31 +1170,17 @@ function SettingsPage() {
           actionsClassName="max-sm:ml-auto max-sm:w-auto max-sm:gap-1.5"
           actions={
               <>
-                <Input
-                  size="sm"
-                  aria-label="搜索模块"
+                <ResponsiveSearchInput
                   value={moduleSearch}
                   onChange={(event) => setModuleSearch(event.target.value)}
                   placeholder="搜索模块"
-                  className="hidden w-52 sm:block"
-                  prefix={<Search className="h-4 w-4" />}
+                  ariaLabel="搜索模块"
+                  className="sm:w-52"
                 />
               </>
           }
           bodyClassName="flex min-h-0 flex-1 flex-col gap-3 overflow-auto"
         >
-          <div className="sm:hidden">
-            <Input
-              size="sm"
-              aria-label="搜索模块"
-              value={moduleSearch}
-              onChange={(event) => setModuleSearch(event.target.value)}
-              placeholder="搜索模块"
-              className="w-full"
-              prefix={<Search className="h-4 w-4" />}
-            />
-          </div>
-
           <div className="flex flex-col gap-3 sm:gap-4">
             {moduleGroups.map((group) => {
               const groupRows = filteredModuleRows.filter((row) => row.groupId === group.id);
@@ -1536,20 +1526,20 @@ function SettingsPage() {
               <div className="grid gap-3 xl:grid-cols-2">
                 <label className="grid gap-1.5 text-xs text-kumo-subtle">
                   <span className="font-semibold text-kumo-strong">允许登录的 GitHub 用户名</span>
-                  <textarea
+                  <Textarea
                     value={githubAuth.allowedLoginsText}
                     onChange={(event) => setGitHubAuth((prev) => ({ ...prev, allowedLoginsText: event.target.value }))}
                     placeholder={'一行一个或逗号分隔\n如：iwvw'}
-                    className="min-h-24 rounded-md border border-kumo-line bg-kumo-base px-3 py-2 text-sm text-kumo-strong outline-none transition-colors focus:border-kumo-brand"
+                    className="min-h-24"
                   />
                 </label>
                 <label className="grid gap-1.5 text-xs text-kumo-subtle">
                   <span className="font-semibold text-kumo-strong">允许登录的邮箱</span>
-                  <textarea
+                  <Textarea
                     value={githubAuth.allowedEmailsText}
                     onChange={(event) => setGitHubAuth((prev) => ({ ...prev, allowedEmailsText: event.target.value }))}
                     placeholder={'可选；支持私人邮箱校验\n如：admin@example.com'}
-                    className="min-h-24 rounded-md border border-kumo-line bg-kumo-base px-3 py-2 text-sm text-kumo-strong outline-none transition-colors focus:border-kumo-brand"
+                    className="min-h-24"
                   />
                 </label>
               </div>

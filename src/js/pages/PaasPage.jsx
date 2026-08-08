@@ -11,7 +11,7 @@ import { Badge, ClipboardText, Empty, Grid as KumoGrid, LayerCard, Link, Tabs, T
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
 import useStore from '../store.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
-import { getStatusPillClass, SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { getStatusPillClass, ResponsiveSearchInput, SectionCard, TabBarOverflowActions, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
 import {
   Server,
   Users,
@@ -1067,7 +1067,7 @@ function PaasPage() {
   };
 
   const deleteFlyMachine = async (account, app, machine) => {
-    if (!(await dialog.confirm(`确定要删除 Fly.io 机器 "${machine.id}" 吗？`))) return;
+    if (!(await dialog.deleteResource(`确定要删除 Fly.io 机器 "${machine.id}" 吗？`))) return;
     try {
       await callFlyMachineEndpoint(account, app, machine, '', { method: 'DELETE', body: { force: true } });
       toast.success('机器已删除');
@@ -1287,7 +1287,7 @@ function PaasPage() {
   };
 
   const deleteFlyApp = async (account, app) => {
-    if (!(await dialog.confirm(`确定要永久删除 Fly.io 应用 "${app.name}" 吗？此操作会销毁所有底层的机器并且不可逆！`))) return;
+    if (!(await dialog.deleteResource(`确定要永久删除 Fly.io 应用 "${app.name}" 吗？此操作会销毁所有底层机器且不可逆！`))) return;
     try {
       const response = await fetch(`/api/flyio/apps/${app.name}`, {
         method: 'DELETE',
@@ -1423,7 +1423,7 @@ function PaasPage() {
   };
 
   const removeKoyebAccount = async (id) => {
-    if (!(await dialog.confirm('确认删除此 Koyeb 账号吗？'))) return;
+    if (!(await dialog.deleteResource('确认删除此 Koyeb 账号吗？'))) return;
     try {
       const response = await fetch(`/api/koyeb/accounts/${id}`, {
         method: 'DELETE',
@@ -1478,7 +1478,7 @@ function PaasPage() {
   };
 
   const removeFlyAccount = async (id, name) => {
-    if (!(await dialog.confirm(`确认删除 Fly.io 账号 "${name}" 吗？`))) return;
+    if (!(await dialog.deleteResource(`确认删除 Fly.io 账号 "${name}" 吗？`))) return;
     try {
       const response = await fetch(`/api/flyio/accounts/${id}`, {
         method: 'DELETE',
@@ -1675,7 +1675,7 @@ function PaasPage() {
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-kumo-line pb-3">
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <div className="min-w-0 w-full md:w-auto">
           <Tabs
             {...MODULE_TABS_PROPS}
@@ -1689,18 +1689,21 @@ function PaasPage() {
           />
         </div>
 
-        {(activeTab === 'koyeb' || activeTab === 'fly') && (
-          <Button
-            onClick={() => (activeTab === 'koyeb' ? loadKoyebData(true) : loadFlyData(true))}
-            disabled={activeTab === 'koyeb' ? koyebRefreshing : flyRefreshing}
-            variant="secondary"
-            size="sm"
-            shape="square"
-            aria-label="刷新"
-            title="刷新"
-            icon={<RefreshCw className={`w-3.5 h-3.5 ${(activeTab === 'koyeb' ? koyebRefreshing : flyRefreshing) ? 'animate-spin' : ''}`} />}
-          />
-        )}
+        <TabBarOverflowActions
+          items={
+            activeTab === 'koyeb' || activeTab === 'fly'
+              ? [
+                  {
+                    key: 'refresh',
+                    label: '刷新',
+                    icon: <RefreshCw className={`w-3.5 h-3.5 ${(activeTab === 'koyeb' ? koyebRefreshing : flyRefreshing) ? 'animate-spin' : ''}`} />,
+                    onClick: () => (activeTab === 'koyeb' ? loadKoyebData(true) : loadFlyData(true)),
+                    disabled: activeTab === 'koyeb' ? koyebRefreshing : flyRefreshing,
+                  },
+                ]
+              : []
+          }
+        />
       </div>
 
       <div className="min-w-0">
@@ -2494,14 +2497,12 @@ function PaasPage() {
           {/* Log Controls */}
           <div className="p-3 border-b border-kumo-line flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 text-xs bg-kumo-base">
             <div className="flex items-center gap-2 w-full sm:w-auto">
-              <Search className="w-3.5 h-3.5 text-kumo-subtle" />
-              <Input size="sm"
-                aria-label="搜索日志消息"
-                type="text"
+              <ResponsiveSearchInput
                 value={logFilterText}
                 onChange={(e) => setLogFilterText(e.target.value)}
                 placeholder="搜索日志消息..."
-                className="px-2 py-1 w-full sm:w-48 text-kumo-strong"
+                ariaLabel="搜索日志消息"
+                className="sm:w-48"
               />
             </div>
             <div className="flex flex-wrap items-center gap-2 text-[10px]">

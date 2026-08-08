@@ -4,16 +4,23 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 // NodeTableDDL is shared by the subscription control plane and the Agent
 // runtime service. Keeping one canonical definition prevents startup order
 // from silently producing different managed-node schemas.
+// indexNodeProtocols are the agent-rendered node protocols a managed inbound
+// can assume. SOCKS (socks5) and HTTP inbounds are plaintext transport; they
+// are still individually metered because sing-box populates metadata.User for
+// authenticated users on every inbound type.
+var indexNodeProtocols = []string{"vless-reality", "hysteria2", "vless-ws-tunnel", "socks", "http"}
+
 const NodeTableDDL = `CREATE TABLE IF NOT EXISTS managed_proxy_nodes (
 	id TEXT PRIMARY KEY,
 	server_id TEXT NOT NULL,
 	name TEXT NOT NULL,
-	protocol TEXT NOT NULL CHECK(protocol IN ('vless-reality', 'hysteria2', 'vless-ws-tunnel')),
+	protocol TEXT NOT NULL CHECK(protocol IN ('vless-reality', 'hysteria2', 'vless-ws-tunnel', 'socks', 'http')),
 	runtime TEXT NOT NULL DEFAULT 'sing-box',
 	public_host TEXT NOT NULL,
 	assigned_port INTEGER NOT NULL DEFAULT 0,
@@ -76,7 +83,127 @@ func EnsureNodeColumns(ctx context.Context, db *sql.DB) error {
 		}
 		columns[migration.name] = true
 	}
+	if err := rebuildNodeProtocolConstraint(ctx, db); err != nil {
+		return err
+	}
 	return nil
+}
+
+// nodeProtocolConstraintOK reports whether the persisted managed_proxy_nodes
+// table already accepts a wildcard that includes socks5/http. The CHECK was
+// widened from the original three-protocol list; SQLite cannot alter a CHECK
+// in place, so a table rebuild is required to admit the new protocols.
+func nodeProtocolConstraintOK(ctx context.Context, db *sql.DB) (bool, error) {
+	var ddl string
+	err := db.QueryRowContext(ctx,
+		`SELECT sql FROM sqlite_master WHERE type='table' AND name='managed_proxy_nodes'`).Scan(&ddl)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	for _, protocol := range indexNodeProtocols {
+		if !strings.Contains(strings.ToLower(ddl), "'"+protocol+"'") {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// rebuildNodeProtocolConstraint widens the persisted managed_proxy_nodes
+// protocol CHECK constraint. SQLite cannot alter a CHECK in place, so the
+// table is rebuilt: every dependent index and trigger is replayed from
+// sqlite_master after the swap so routing behavior survives startup.
+func rebuildNodeProtocolConstraint(ctx context.Context, db *sql.DB) error {
+	ok, err := nodeProtocolConstraintOK(ctx, db)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+	columns, err := tableColumns(ctx, db, "managed_proxy_nodes")
+	if err != nil {
+		return err
+	}
+	if len(columns) == 0 {
+		return nil
+	}
+	columnList := make([]string, 0, len(columns))
+	ordered := []string{
+		"id", "server_id", "name", "protocol", "runtime", "public_host", "assigned_port",
+		"stats_port", "transport", "config_encrypted", "client_uri_encrypted", "revision",
+		"enabled", "stable", "publishable", "apply_status", "last_error", "observed_status",
+		"observed_revision", "observed_port", "observed_at", "health_status", "access_mode",
+		"tunnel_path", "preferred_address_id", "connect_address", "connect_port",
+		"tunnel_hostname", "created_at", "updated_at",
+	}
+	for _, name := range ordered {
+		if columns[name] {
+			columnList = append(columnList, name)
+		}
+	}
+	if len(columnList) == 0 {
+		return nil
+	}
+	listText := strings.Join(columnList, ", ")
+	// Capture dependent schema (indexes and triggers) before dropping the
+	// legacy table so they can be replayed after the rename.
+	dependents := []string{}
+	rows, err := db.QueryContext(ctx, `SELECT sql FROM sqlite_master WHERE type IN ('index','trigger') AND tbl_name='managed_proxy_nodes' AND sql IS NOT NULL AND sql<>''`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var statement string
+		if err := rows.Scan(&statement); err != nil {
+			rows.Close()
+			return err
+		}
+		dependents = append(dependents, statement)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	_, err = db.ExecContext(ctx, `BEGIN IMMEDIATE`)
+	if err != nil {
+		return fmt.Errorf("begin managed proxy node rebuild: %w", err)
+	}
+	defer func() {
+		_, _ = db.ExecContext(context.Background(), `ROLLBACK`)
+	}()
+	createSQL := strings.Replace(NodeTableDDL, "CREATE TABLE IF NOT EXISTS managed_proxy_nodes", "CREATE TABLE IF NOT EXISTS managed_proxy_node_v2", 1)
+	if _, err := db.ExecContext(ctx, createSQL); err != nil {
+		return fmt.Errorf("create managed proxy node v2: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT OR REPLACE INTO managed_proxy_node_v2 (`+listText+`) SELECT `+listText+` FROM managed_proxy_nodes`); err != nil {
+		return fmt.Errorf("copy managed proxy node rows: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TABLE managed_proxy_nodes`); err != nil {
+		return fmt.Errorf("drop managed proxy node legacy table: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `ALTER TABLE managed_proxy_node_v2 RENAME TO managed_proxy_nodes`); err != nil {
+		return fmt.Errorf("rename managed proxy node v2: %w", err)
+	}
+	for _, statement := range dependents {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("replay managed proxy node dependent %s: %w", truncateSQL(statement, 72), err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `COMMIT`); err != nil {
+		return err
+	}
+	return nil
+}
+
+func truncateSQL(statement string, limit int) string {
+	compact := strings.Join(strings.Fields(strings.ReplaceAll(statement, "\n", " ")), " ")
+	runes := []rune(compact)
+	if len(runes) <= limit {
+		return compact
+	}
+	return string(runes[:limit]) + "…"
 }
 
 func tableColumns(ctx context.Context, db *sql.DB, table string) (map[string]bool, error) {

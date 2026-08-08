@@ -9,7 +9,7 @@ import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Badge, ClipboardText, Code, DropdownMenu, LayerCard, Meter, Tabs } from '@cloudflare/kumo';
-import { AppTable, DataTableFrame, PageStack, PageToolbar, SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { AppTable, DataTableFrame, PageStack, SectionCard, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
 import CodeEditor from '../components/ui/CodeEditor.jsx';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { getOSIconClass, getServerPlatformLabel } from '../modules/osPlatform.js';
@@ -48,7 +48,7 @@ const PREFERRED_ADDRESS_COLUMNS = [
 
 const SUBSCRIPTION_COLUMNS = [
   { id: 'enabled', role: 'control' },
-  { id: 'subscription', role: 'primary', minWidth: 176 },
+  { id: 'subscription', role: 'primary', minWidth: 176, maxWidth: 220, grow: 0 },
   { id: 'status', role: 'status' },
   { id: 'traffic', role: 'content', minWidth: 220, verticalAlign: 'middle' },
   { id: 'access', role: 'meta', grow: 1, minWidth: 176 },
@@ -68,7 +68,7 @@ const PLAN_COLUMNS = [
 
 const NODE_COLUMNS = [
   { id: 'enabled', role: 'control' },
-  { id: 'name', role: 'primary', minWidth: 220 },
+  { id: 'name', role: 'primary', minWidth: 176, maxWidth: 200, grow: 0 },
   { id: 'type', role: 'type' },
   { id: 'connection', role: 'content', minWidth: 240 },
   { id: 'host', role: 'meta', grow: 1, minWidth: 176 },
@@ -78,13 +78,13 @@ const NODE_COLUMNS = [
 const RUNTIME_HOST_COLUMNS = [
   { id: 'check', role: 'check' },
   { id: 'status', role: 'status' },
-  { id: 'name', role: 'primary', minWidth: 240 },
-  { id: 'location', role: 'meta', grow: 1, minWidth: 240, align: 'center' },
-  { id: 'online', role: 'count', align: 'center' },
-  { id: 'agentVersion', role: 'meta', grow: 1, minWidth: 240, align: 'center' },
-  { id: 'proxy', role: 'content', grow: 0, width: 300, align: 'center', verticalAlign: 'middle' },
-  { id: 'nodeType', role: 'type', grow: 1, minWidth: 240 },
-  { id: 'actions', role: 'actions-xl', width: 360 },
+  { id: 'name', role: 'primary', minWidth: 120, width: 120, grow: 0 },
+  { id: 'location', role: 'meta', grow: 1, minWidth: 104, align: 'center' },
+  { id: 'online', role: 'count', grow: 1, minWidth: 104 },
+  { id: 'agentVersion', role: 'meta', grow: 1, minWidth: 104, align: 'center' },
+  { id: 'proxy', role: 'content', grow: 0, width: 180, align: 'center', verticalAlign: 'middle' },
+  { id: 'nodeType', role: 'type', grow: 1, minWidth: 120 },
+  { id: 'actions', role: 'actions-xl', width: 320 },
 ];
 
 const emptyInternalNodeForm = { server_id: '', name: '', protocol: 'vless-reality', access_mode: 'direct', preferred_address_id: '', public_host: '', server_name: 'www.cloudflare.com', certificate_pem: '', private_key_pem: '', enabled: true, stable: false };
@@ -2086,7 +2086,7 @@ function SubscriptionPage() {
                 : (node.assigned_port || '-');
               const connectionTags = isTunnelNode
                 ? ['ws', 'tls', 'tunnel', node.runtime].filter(Boolean)
-                : [node.transport, node.protocol === 'vless-reality' ? 'reality' : 'tls', node.runtime].filter(Boolean);
+                : [node.transport, node.protocol === 'vless-reality' ? 'reality' : (node.protocol === 'hysteria2' ? 'tls' : null), node.runtime].filter(Boolean);
               const reconciling = !!internalNodeActions[`${node.id}:reconcile`];
               const deleting = !!internalNodeActions[`${node.id}:delete`];
               const deleteConfirmKey = `internal-node-delete:${node.id}`;
@@ -2094,7 +2094,7 @@ function SubscriptionPage() {
               return <Table.Row key={node.id} onDoubleClick={() => openEditInternalNode(node)} className="cursor-pointer">
                 <Table.Cell className="text-center"><Switch size="sm" aria-label={node.enabled ? '停用内部节点' : '启用内部节点'} checked={!!node.enabled} onCheckedChange={(checked) => toggleInternalNodeEnabled(node, checked)} /></Table.Cell>
                 <Table.Cell><div className="flex min-w-0 items-center gap-1.5 truncate text-sm font-bold text-kumo-strong">{node.stable && <Star className="h-3.5 w-3.5 shrink-0 text-kumo-warning" />}{node.name}{node.stable && <Badge variant="success">稳定</Badge>}</div>{!node.publishable && (() => { const [stateLabel, stateVariant] = managedNodeState(node); return <div className="mt-1"><Badge variant={stateVariant}>{stateLabel}</Badge></div>; })()}</Table.Cell>
-                <Table.Cell className="text-center"><Badge variant={nodeTypeBadgeVariant(protocol)} className="uppercase">{node.protocol === 'vless-reality' ? 'VLESS' : 'HYSTERIA2'}</Badge></Table.Cell>
+                <Table.Cell className="text-center"><Badge variant={nodeTypeBadgeVariant(protocol)} className="uppercase">{node.protocol === 'vless-reality' ? 'VLESS' : node.protocol === 'hysteria2' ? 'HYSTERIA2' : node.protocol === 'socks' ? 'SOCKS5' : node.protocol === 'http' ? 'HTTP' : String(node.protocol || 'UNKNOWN').toUpperCase()}</Badge></Table.Cell>
                 <Table.Cell><div className="truncate font-mono text-xs text-kumo-strong">{displayHost}:{displayPort}</div><div className="mt-1 flex min-w-0 flex-nowrap items-center gap-1 overflow-x-auto scrollbar-none">{connectionTags.map((tag) => <span key={tag} className={`${tag === node.runtime ? 'hidden sm:inline-flex' : 'inline-flex'} shrink-0 rounded-[3px] border px-1.5 py-0.5 font-mono text-[10px] leading-4 ${nodeNetworkTagClass({ key: tag === 'tls' ? 'tls' : 'network', tone: tag })}`}>{tag}</span>)}</div></Table.Cell>
                 <Table.Cell>{server?.status === 'online' ? <NodeHostQuality node={{ ...node, traffic_server_id: node.server_id }} serverNameById={serverNameById} /> : <div className="flex min-w-0 flex-col items-start gap-1"><span className="inline-flex max-w-full rounded-[3px] border border-kumo-info/25 bg-kumo-info/10 px-1.5 py-0.5 text-[10px] font-semibold leading-4 text-kumo-info"><span className="truncate">{server?.name || node.server_name || node.server_id}</span></span><span className={`inline-flex rounded-[3px] border px-1.5 py-0.5 text-[10px] font-semibold leading-4 ${latencyChipClass(0)}`}>主机离线</span></div>}</Table.Cell>
                 <Table.Cell className="text-center"><div className="inline-flex items-center justify-center gap-2"><Button size="sm" shape="square" variant="secondary" aria-label={`编辑 ${node.name}`} title={`编辑 ${node.name}`} disabled={reconciling || deleting} onClick={(event) => { event.stopPropagation(); openEditInternalNode(node); }} icon={<Edit className="h-3.5 w-3.5" />} /><RefreshButton size="sm" variant="secondary" loading={reconciling} aria-label={`重新部署 ${node.name}`} title={`重新部署 ${node.name}`} disabled={reconciling || deleting} onClick={(event) => { event.stopPropagation(); reconcileInternalNode(node); }} /><Button size="sm" shape="square" variant={confirmingDelete ? 'destructive' : 'secondary-destructive'} aria-label={confirmingDelete ? `再次确认卸载 ${node.name}` : `卸载 ${node.name}`} title={confirmingDelete ? '再次点击确认卸载' : `卸载 ${node.name}`} disabled={reconciling || deleting} onClick={(event) => { event.stopPropagation(); deleteInternalNode(node); }} icon={deleting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash className="h-3.5 w-3.5" />} /></div></Table.Cell>
@@ -2261,7 +2261,7 @@ function SubscriptionPage() {
                   <Table.Cell className="text-center"><span className="font-semibold tabular-nums text-kumo-strong">{formatInstanceUptime(server.uptime)}</span></Table.Cell>
                   <Table.Cell className="text-center"><span className="font-mono text-xs">{server.agent_version && server.agent_version !== '<nil>' ? server.agent_version : '未报告'}</span></Table.Cell>
 					<Table.Cell className="text-center"><div className="flex min-w-0 flex-nowrap items-center justify-center gap-2 px-2">{runtime ? <Badge className="shrink-0" variant={runtime.apply_status === 'running' ? 'success' : ['failed', 'drifted'].includes(runtime.apply_status) ? 'error' : 'warning'}>{runtime.apply_status === 'running' ? `sing-box${runtime.version ? ` ${runtime.version}` : ''}` : runtime.apply_status === 'failed' ? '部署失败' : runtime.apply_status === 'drifted' ? '状态漂移' : '部署中'}</Badge> : <Badge variant="neutral" className="shrink-0">未安装</Badge>}{server.status === 'online' && !supportsRuntimeLifecycle && <Badge variant="warning" className="shrink-0">需升级 Agent</Badge>}{tunnel && <Badge className="shrink-0" variant={tunnel.apply_status === 'running' ? 'success' : tunnel.apply_status === 'failed' ? 'error' : 'warning'}>Tunnel {tunnel.apply_status === 'running' ? '已连接' : tunnel.apply_status}</Badge>}</div></Table.Cell>
-					<Table.Cell className="text-center"><div className="flex flex-nowrap justify-center gap-1">{managed.map((node) => <Badge key={node.id} variant={nodeTypeBadgeVariant(node.protocol)}>{node.protocol === 'hysteria2' ? 'HY2' : 'VLESS'}</Badge>)}{managed.length === 0 && <span className="text-xs text-kumo-subtle">—</span>}</div></Table.Cell>
+					<Table.Cell className="text-center"><div className="flex flex-nowrap justify-center gap-1">{managed.map((node) => <Badge key={node.id} variant={nodeTypeBadgeVariant(node.protocol)}>{node.protocol === 'hysteria2' ? 'HY2' : node.protocol === 'socks' ? 'SOCKS5' : node.protocol === 'http' ? 'HTTP' : 'VLESS'}</Badge>)}{managed.length === 0 && <span className="text-xs text-kumo-subtle">—</span>}</div></Table.Cell>
                   <Table.Cell className="text-center"><div className="flex w-full flex-nowrap items-center justify-center gap-1">{runtime?.apply_status === 'running' ? <><Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>升级 / 重装</Button><Button size="sm" variant={isDestructiveConfirmActive(`runtime-uninstall:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallProxyRuntime(server)} disabled={saving || managed.length > 0 || !supportsRuntimeLifecycle} title={managed.length > 0 ? '请先在节点管理中卸载该实例的全部节点' : !supportsRuntimeLifecycle ? '请先升级 Agent' : '卸载 sing-box'}>{isDestructiveConfirmActive(`runtime-uninstall:${server.id}`) ? '再次确认' : '卸载程序'}</Button></> : <Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>安装代理</Button>}{tunnel ? <Button size="sm" variant={isDestructiveConfirmActive(`managed-tunnel-delete:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallTunnel(server)}>{isDestructiveConfirmActive(`managed-tunnel-delete:${server.id}`) ? '再次确认' : '卸载 Tunnel'}</Button> : <Button size="sm" variant="secondary" onClick={() => openTunnelDeployment(server)} disabled={server.status !== 'online'}>部署 Tunnel</Button>}</div></Table.Cell>
                 </Table.Row>
               );
@@ -2467,13 +2467,11 @@ function SubscriptionPage() {
 
   return (
     <PageStack>
-      <PageToolbar>
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <Tabs
           {...MODULE_TABS_PROPS}
           value={activeTab}
           onValueChange={(value) => setActiveTab(String(value))}
-          className="w-fit max-w-full min-w-0"
-          listClassName="max-w-full overflow-x-auto whitespace-nowrap scrollbar-thin"
           tabs={[
             { value: 'instances', label: '实例管理' },
             { value: 'nodes', label: '节点管理' },
@@ -2482,7 +2480,7 @@ function SubscriptionPage() {
             { value: 'templates', label: '模板管理' },
           ]}
         />
-      </PageToolbar>
+      </div>
 
       <div className="min-w-0">
         {loading && servers.length === 0 && nodes.length === 0 && plans.length === 0 && subscriptions.length === 0 ? renderNodesSkeleton() : (
@@ -2535,11 +2533,12 @@ function SubscriptionPage() {
                 </div>
               </div>
             </div>}
-            {!editingInternalNodeId && <Select size="sm" label="节点协议" value={internalNodeForm.protocol} onValueChange={(value) => setInternalNodeForm((prev) => ({ ...prev, protocol: String(value) }))} items={[{ value: 'vless-reality', label: 'VLESS REALITY' }, { value: 'hysteria2', label: 'Hysteria2' }]} />}
+            {!editingInternalNodeId && <Select size="sm" label="节点协议" value={internalNodeForm.protocol} onValueChange={(value) => setInternalNodeForm((prev) => ({ ...prev, protocol: String(value), access_mode: String(value) === 'socks' || String(value) === 'http' ? 'direct' : prev.access_mode }))} items={[{ value: 'vless-reality', label: 'VLESS REALITY' }, { value: 'hysteria2', label: 'Hysteria2' }, { value: 'socks', label: 'SOCKS5' }, { value: 'http', label: 'HTTP' }]} />}
             <Input size="sm" label={editingInternalNodeId ? '节点名称' : selectedInternalHosts.size > 1 ? '节点名称前缀（可选）' : '节点名称（可选）'} placeholder="留空按实例名生成" value={internalNodeForm.name} onChange={(event) => setInternalNodeForm((prev) => ({ ...prev, name: event.target.value }))} />
             {!editingInternalNodeId && internalNodeForm.protocol === 'vless-reality' && <Input size="sm" label="REALITY 握手站点" placeholder="默认 www.cloudflare.com" value={internalNodeForm.server_name} onChange={(event) => setInternalNodeForm((prev) => ({ ...prev, server_name: event.target.value }))} />}
             {!editingInternalNodeId && internalNodeForm.protocol === 'hysteria2' && <div className="flex min-h-8 items-center rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 text-xs text-kumo-subtle">TLS 信息自动生成。</div>}
-            {!editingInternalNodeId && <Select size="sm" label="接入方式" value={internalNodeForm.access_mode || 'direct'} onValueChange={(value) => setInternalNodeForm((prev) => ({ ...prev, access_mode: String(value) }))} items={[{ value: 'direct', label: '直连节点' }, { value: 'cloudflare_tunnel', label: 'Cloudflare Tunnel（VLESS WS）' }]} />}
+            {!editingInternalNodeId && (internalNodeForm.protocol === 'socks' || internalNodeForm.protocol === 'http') && <div className="flex min-h-8 items-center rounded-md border border-kumo-info/25 bg-kumo-info/10 px-3 text-xs text-kumo-subtle">明文字段：SOCKS/HTTP 仅直连，无 TLS 加密。</div>}
+            {!editingInternalNodeId && <Select size="sm" label="接入方式" value={internalNodeForm.access_mode || 'direct'} disabled={internalNodeForm.protocol === 'socks' || internalNodeForm.protocol === 'http'} onValueChange={(value) => setInternalNodeForm((prev) => ({ ...prev, access_mode: String(value) }))} items={[{ value: 'direct', label: '直连节点' }, { value: 'cloudflare_tunnel', label: 'Cloudflare Tunnel（VLESS WS）' }]} />}
             {internalNodeForm.access_mode === 'cloudflare_tunnel' && <Select size="sm" label="优选地址" value={internalNodeForm.preferred_address_id || ''} onValueChange={(value) => setInternalNodeForm((prev) => ({ ...prev, preferred_address_id: String(value) }))} items={[{ value: '', label: '继承默认地址' }, ...preferredAddresses.map((item) => ({ value: item.id, label: `${item.name} · ${item.address}` }))]} />}
             <div className="flex min-h-8 items-center rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 py-2"><Switch size="sm" label="稳定节点" controlFirst={false} checked={!!internalNodeForm.stable} onCheckedChange={(checked) => setInternalNodeForm((prev) => ({ ...prev, stable: checked }))} /></div>
           </div>

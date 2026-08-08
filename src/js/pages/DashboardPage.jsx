@@ -852,7 +852,7 @@ function DashboardPage({ onNavigate } = {}) {
   const hasApiTrendCalls = apiTrend.length >= 2 && apiTrendTotal > 0;
   
   const apiStatsDetailText = apiTrendTotal > 0
-    ? `读取 ${formatKCount(apiTrendAudit)}次 (${Math.round((apiTrendAudit / apiTrendTotal) * 100)}%) / 变更 ${formatKCount(apiTrendOps)}次`
+    ? `读取 ${formatKCount(apiTrendAudit)}次 / 变更 ${formatKCount(apiTrendOps)}次`
     : '暂无系统 API 调用记录';
   const apiTrendStatusText = apiTrendTotal > 0
     ? `最近 7 天系统共处理了 ${formatKCount(apiTrendTotal)} 次有效 API 请求`

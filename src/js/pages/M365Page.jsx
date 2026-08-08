@@ -18,9 +18,11 @@ import {
   DataTableFrame,
   EmptyState,
   PageStack,
-  PageToolbar,
+  ResponsiveSearchInput,
   SectionCard,
   StatusBadge,
+  TabBarOverflowActions,
+  stickyTabsBaseClass,
 } from '../components/ui/AppPrimitives.jsx';
 import CodeEditor from '../components/ui/CodeEditor.jsx';
 import {
@@ -100,7 +102,7 @@ const defaultInviteCodeGeneratorForm = {
   quantity: 1,
 };
 
-const workspaceHeightClass = '';
+const workspaceHeightClass = 'min-h-0 flex-1';
 const panelBodyClass = 'flex min-h-0 flex-1 flex-col';
 const scrollViewportClass = 'min-h-0 flex-1 overflow-auto scrollbar-thin';
 const tableFrameClass = 'flex h-0 min-h-0 flex-1 flex-col overflow-hidden';
@@ -1879,20 +1881,6 @@ function M365Page() {
     }
   }, [requestJSON, selectedAccountId]);
 
-  const renderToolbarSelector = ['users', 'groups'].includes(activeTab) ? (
-    <div className="flex shrink-0 flex-wrap items-center gap-2">
-      <span className="shrink-0 text-xs font-medium text-kumo-subtle">租户</span>
-      <Select
-        aria-label="Microsoft 365 租户"
-        size="sm"
-        className="w-32 sm:w-48"
-        value={selectedAccountId}
-        onValueChange={setSelectedAccountId}
-        items={accountSelectItems}
-      />
-    </div>
-  ) : null;
-
   const renderTenants = () => (
     <SectionCard
       className="flex min-h-0 flex-1 flex-col"
@@ -2732,20 +2720,13 @@ function M365Page() {
         bodyPadding="none"
         action={
           <div className="flex items-center gap-2">
-            <Input
-              aria-label="搜索用户"
-              size="sm"
+            <ResponsiveSearchInput
               value={userSearch}
               onChange={event => setUserSearch(event.target.value)}
+              onSearch={loadUsers}
               placeholder="搜索显示名或 UPN"
-            />
-            <Button
-              size="sm"
-              variant="secondary"
-              shape="square"
-              icon={<Search className="h-3.5 w-3.5" />}
-              onClick={loadUsers}
-              aria-label="搜索"
+              ariaLabel="搜索用户"
+              className="sm:w-56"
             />
             <Button
               size="sm"
@@ -3091,7 +3072,7 @@ function M365Page() {
 
   return (
     <PageStack viewport className={workspaceHeightClass}>
-      <PageToolbar>
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <Tabs
           {...MODULE_TABS_PROPS}
           value={activeTab}
@@ -3134,18 +3115,33 @@ function M365Page() {
             },
           ]}
         />
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            variant="secondary"
-            icon={<Shield className="h-3.5 w-3.5" />}
-            onClick={() => setShowPermissionDialog(true)}
-          >
-            权限说明
-          </Button>
-          {renderToolbarSelector}
+        <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2">
+          <TabBarOverflowActions
+            items={[
+              {
+                key: 'permission',
+                label: '权限说明',
+                icon: <Shield className="h-3.5 w-3.5" />,
+                onClick: () => setShowPermissionDialog(true),
+              },
+              ...(['users', 'groups'].includes(activeTab)
+                ? [
+                    {
+                      key: 'tenant',
+                      type: 'select',
+                      label: '租户',
+                      icon: <Cloud className="h-3.5 w-3.5" />,
+                      value: selectedAccountId,
+                      onValueChange: setSelectedAccountId,
+                      disabled: false,
+                      options: accountSelectItems,
+                    },
+                  ]
+                : []),
+            ]}
+          />
         </div>
-      </PageToolbar>
+      </div>
 
       {activeTab === 'tenants' && renderTenants()}
       {activeTab === 'users' && renderUsers()}
@@ -3642,8 +3638,8 @@ function M365Page() {
                 />
                 <div className="rounded-lg border border-kumo-line/80 bg-kumo-recessed/10 p-3">
                   <div className="text-sm font-medium text-kumo-strong">目标租户与域名</div>
-                  <div className="mt-1 text-xs text-kumo-subtle">
-                    先勾选租户，再在下方展开该租户的全部域名做收缩选择。未取消的域名都会被允许注册。
+                  <div className="text-xs text-kumo-subtle">
+                    先勾选租户，再展开其全部域名做收缩选择。未取消的域名都会被允许注册。
                   </div>
                   <div className="mt-3 grid gap-2">
                     {accounts.map(account => {
@@ -3712,7 +3708,7 @@ function M365Page() {
                             <div className="mt-2 border-t border-kumo-line/60 pt-2">
                               {accountDomains.length === 0 ? (
                                 <div className="text-[11px] text-kumo-subtle">
-                                  当前租户还没有读取到可选域名，请先校验租户连接。
+                                  当前租户未读取到可选域名，请先校验租户连接。
                                 </div>
                               ) : (
                                 <div className="grid gap-1">

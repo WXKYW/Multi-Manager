@@ -44,6 +44,13 @@ var retiredTableHints = []string{"music", "openlist", "chat_persona", "chat_sess
 var optionalReferencedTables = map[string]bool{
 	"chat_messages": true,
 	"chat_sessions": true,
+	"managed_proxy_node_v2": true, // 临时重建表名，最终 RENAME TO managed_proxy_nodes
+}
+
+// migratableColumns 由后端启动时的 ensure/migrate 自动补齐，审计对它们的缺失降级为 warning，
+// 避免在尚未启动后端或迁移轮次之前的库上误报硬错误。key 形如 "table.column"。
+var migratableColumns = map[string]bool{
+	"server_proxy_desired_state.stats_port": true,
 }
 
 func main() {
@@ -284,6 +291,10 @@ func compareSchemas(source sourceSchema, actual map[string]tableInfo) ([]issue, 
 		missingColumns := []string{}
 		for column := range columns {
 			if !actualTable.Columns[column] {
+				if migratableColumns[table+"."+column] {
+					warnings = append(warnings, issue{Kind: "migratable_column", Table: table, Details: column + " added by runtime migration"})
+					continue
+				}
 				missingColumns = append(missingColumns, column)
 			}
 		}

@@ -29,6 +29,7 @@ type GatewayKey struct {
 	MaskedKey    string  `json:"maskedKey"`
 	APIKey       string  `json:"apiKey,omitempty"`
 	Enabled      bool    `json:"enabled"`
+	IsDefault    bool    `json:"isDefault"`
 	CreatedAt    string  `json:"createdAt"`
 	LastUsed     *string `json:"lastUsed"`
 	ExpiresAt    *string `json:"expiresAt"`
@@ -121,9 +122,9 @@ func (s *Service) listGatewayKeys(w http.ResponseWriter, r *http.Request) {
 	defer db.Close()
 
 	rows, err := db.QueryContext(ctx, `
-		SELECT id, name, key_cipher, key_prefix, key_suffix, enabled, created_at, last_used, expires_at, request_count
+		SELECT id, name, key_cipher, key_prefix, key_suffix, enabled, is_default, created_at, last_used, expires_at, request_count
 		FROM openai_gateway_keys
-		ORDER BY created_at DESC`)
+		ORDER BY is_default DESC, created_at DESC`)
 	if err != nil {
 		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -302,6 +303,42 @@ func (s *Service) rotateGatewayKey(w http.ResponseWriter, r *http.Request, id st
 	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "apiKey": rawKey})
 }
 
+func (s *Service) setDefaultGatewayKey(w http.ResponseWriter, r *http.Request, id string) {
+	ctx := r.Context()
+	db, err := s.open(ctx)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer db.Close()
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer tx.Rollback()
+
+	var exists int
+	if err := tx.QueryRowContext(ctx, "SELECT 1 FROM openai_gateway_keys WHERE id = ?", id).Scan(&exists); err != nil {
+		response.JSON(w, http.StatusNotFound, map[string]string{"error": errGatewayKeyNotFound.Error()})
+		return
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE openai_gateway_keys SET is_default = 0"); err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE openai_gateway_keys SET is_default = 1 WHERE id = ?", id); err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true})
+}
+
 func (s *Service) deleteGatewayKey(w http.ResponseWriter, r *http.Request, id string) {
 	db, err := s.open(r.Context())
 	if err != nil {
@@ -322,6 +359,7 @@ func scanGatewayKey(scanner interface {
 }) (GatewayKey, error) {
 	var key GatewayKey
 	var enabled int
+	var isDefault int
 	var keyCipher, lastUsed, expiresAt sql.NullString
 	err := scanner.Scan(
 		&key.ID,
@@ -330,6 +368,7 @@ func scanGatewayKey(scanner interface {
 		&key.KeyPrefix,
 		&key.KeySuffix,
 		&enabled,
+		&isDefault,
 		&key.CreatedAt,
 		&lastUsed,
 		&expiresAt,
@@ -339,6 +378,7 @@ func scanGatewayKey(scanner interface {
 		return key, err
 	}
 	key.Enabled = enabled == 1
+	key.IsDefault = isDefault == 1
 	key.MaskedKey = maskGatewayKey(key.KeyPrefix, key.KeySuffix)
 	if keyCipher.Valid && secure.IsEncrypted(keyCipher.String) {
 		if rawKey, decryptErr := secure.DecryptNodeGCM(keyCipher.String); decryptErr == nil {

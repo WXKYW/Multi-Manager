@@ -15,7 +15,7 @@ import { fileboxDirectURL, fileboxShareURL } from '../modules/fileboxLinks.js';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { formatDateTime, formatFileSize } from '../modules/utils.js';
 import { Clock, ExternalLink, FileText, FolderOpen, History, Lock, RefreshCw, Send, Settings, Trash, Upload, X } from '../components/Icons.jsx';
-import { SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { SectionCard, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
 
 const MarkdownEditor = lazy(() => import('../components/ui/MarkdownEditor.jsx'));
 
@@ -319,7 +319,7 @@ function FileboxPage() {
   };
 
   const deleteEntry = async (code) => {
-    if (!(await dialog.confirm(`确定删除分享 ${code}？`))) return;
+    if (!(await dialog.deleteResource(`确定删除分享 ${code}？`))) return;
     try {
       await axios.delete(`/api/filebox/${code}`, { headers: authHeaders() });
       toast.success('分享已删除');
@@ -333,7 +333,7 @@ function FileboxPage() {
   };
 
   const runCleanup = async () => {
-    if (!(await dialog.confirm('清理所有过期分享？'))) return;
+    if (!(await dialog.deleteResource('清理所有过期分享？'))) return;
     setHistoryLoading(true);
     try {
       const res = await axios.post('/api/filebox/jobs/cleanup', {}, { headers: authHeaders() });
@@ -457,16 +457,14 @@ function FileboxPage() {
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-kumo-line pb-3">
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <Tabs {...MODULE_TABS_PROPS} value={activeTab} onValueChange={setActiveTab} tabs={PAGE_TABS} />
-        <div className="text-xs text-kumo-subtle">文件与文本临时分享</div>
       </div>
 
       {activeTab === 'share' && (
         <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(22rem,1fr)]">
           <SectionCard
             title="创建分享"
-            description="生成下载链接"
             icon={<Send className="h-4 w-4 text-kumo-brand" />}
             action={
               <Tabs
@@ -601,7 +599,6 @@ function FileboxPage() {
         <div className="grid gap-4">
           <SectionCard
             title="分享记录"
-            description="本地记录与有效分享"
             icon={<History className="h-4 w-4 text-kumo-brand" />}
             actions={
               <>
@@ -721,7 +718,6 @@ function FileboxPage() {
       {activeTab === 'settings' && (
         <SectionCard
           title="文件柜策略"
-          description="影响新建分享"
           icon={<Settings className="h-4 w-4 text-kumo-brand" />}
           action={
             <Button size="sm" variant="secondary" onClick={loadSettings} loading={settingsLoading} icon={<RefreshCw className="h-4 w-4" />}>
@@ -779,7 +775,6 @@ function FileboxPage() {
         <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(22rem,0.8fr)]">
           <SectionCard
             title="房间管理"
-            description="创建和进入房间"
             icon={<Send className="h-4 w-4 text-kumo-brand" />}
             action={
               <Button size="sm" variant="secondary" onClick={loadVoidRooms} loading={voidRoomsLoading} icon={<RefreshCw className="h-4 w-4" />}>

@@ -10,7 +10,7 @@ import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
-import { AppTable, DataTableFrame, EmptyState, InsetPanel, KeyValueGrid, PageStack, PageToolbar, SectionCard, StatusBadge } from '../components/ui/AppPrimitives.jsx';
+import { AppTable, DataTableFrame, EmptyState, InsetPanel, KeyValueGrid, PageStack, ResponsiveSearchInput, SectionCard, StatusBadge, TabBarOverflowActions, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
 import CodeEditor from '../components/ui/CodeEditor.jsx';
 import {
   Cloud,
@@ -21,6 +21,7 @@ import {
   HardDrive,
   Info,
   Key,
+  Layers,
   MoreVertical,
   Play,
   Plus,
@@ -711,7 +712,7 @@ function OraclePage() {
   };
 
   const deleteAccount = async (accountId) => {
-    if (!(await dialog.confirm('确定要删除此 Oracle 账号吗？私钥不会被恢复。'))) return;
+    if (!(await dialog.deleteResource('确定要删除此 Oracle 账号吗？私钥不会被恢复。'))) return;
     try {
       const response = await fetch(`/api/oracle/accounts/${accountId}`, { method: 'DELETE', headers: getAuthHeaders() });
       const result = await response.json();
@@ -880,7 +881,7 @@ function OraclePage() {
 
   const deleteConsoleConnection = async (connectionId) => {
     if (!selectedInstance || !connectionId) return;
-    if (!(await dialog.confirm('确定要删除这个控制台连接吗？删除后可重新创建。'))) return;
+    if (!(await dialog.deleteResource('确定要删除这个控制台连接吗？删除后可重新创建。'))) return;
     setDeletingConsoleId(connectionId);
     try {
       const response = await fetch(`/api/oracle/accounts/${selectedAccountId}/console-connections/${encodeURIComponent(connectionId)}`, {
@@ -906,41 +907,49 @@ function OraclePage() {
   };
 
   return (
-    <PageStack>
-      <PageToolbar>
+    <PageStack viewport>
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <Tabs
           {...MODULE_TABS_PROPS}
           value={activeTab}
           onValueChange={setActiveTab}
           tabs={tabs}
         />
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <Select
-            aria-label="Oracle 账号"
-            size="sm"
-            className="w-32 sm:w-44"
-            value={selectedAccountId}
-            onValueChange={setSelectedAccountId}
-            disabled={loadingAccounts}
-            items={accounts.map((account) => ({ value: String(account.id), label: account.name }))}
-          />
-          <Select
-            aria-label="Oracle Compartment"
-            size="sm"
-            className="w-36 sm:w-52"
-            value={selectedCompartmentId}
-            onValueChange={setSelectedCompartmentId}
-            disabled={!selectedAccountId || compartments.length === 0}
-            items={compartments.map((item) => ({ value: String(item.id), label: item.name || item.id }))}
-          />
-          <Button type="button" size="sm" variant="secondary" onClick={refreshCurrentWorkspace} disabled={!selectedAccountId} icon={<RefreshCw className="h-4 w-4" />}>
-            刷新
-          </Button>
-        </div>
-      </PageToolbar>
+        <TabBarOverflowActions
+          items={[
+            {
+              key: 'account',
+              type: 'select',
+              label: '账号',
+              icon: <Cloud className="h-3.5 w-3.5" />,
+              value: selectedAccountId,
+              onValueChange: setSelectedAccountId,
+              disabled: loadingAccounts,
+              options: accounts.map((account) => ({ value: String(account.id), label: account.name })),
+            },
+            {
+              key: 'compartment',
+              type: 'select',
+              label: '分区',
+              icon: <Layers className="h-3.5 w-3.5" />,
+              value: selectedCompartmentId,
+              onValueChange: setSelectedCompartmentId,
+              disabled: !selectedAccountId || compartments.length === 0,
+              options: compartments.map((item) => ({ value: String(item.id), label: item.name || item.id })),
+            },
+            {
+              key: 'refresh',
+              label: '刷新',
+              icon: <RefreshCw className="h-4 w-4" />,
+              onClick: refreshCurrentWorkspace,
+              disabled: !selectedAccountId,
+            },
+          ]}
+        />
+      </div>
 
       {activeTab === 'instances' && (
-        <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.75fr)]">
+        <div className="grid min-h-0 gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.75fr)]">
           <SectionCard
             title="实例列表"
             description={`${filteredInstances.length} 台实例`}
@@ -950,13 +959,12 @@ function OraclePage() {
             icon={<Server className="h-4 w-4 text-kumo-brand" />}
             actions={(
               <>
-                <Input
-                  aria-label="搜索 Oracle 实例"
-                  size="sm"
-                  className="w-40 sm:w-52"
+                <ResponsiveSearchInput
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="搜索名称、ID、IP、shape"
+                  ariaLabel="搜索 Oracle 实例"
+                  className="w-40 sm:w-52"
                 />
                 <Select
                   aria-label="实例状态筛选"
@@ -1040,7 +1048,7 @@ function OraclePage() {
           <SectionCard
             title="实例详情"
             icon={<Settings className="h-4 w-4" />}
-            className="min-h-0"
+            className="min-h-0 xl:sticky xl:top-[70px] xl:max-h-[calc(100vh-82px)] xl:overflow-y-auto xl:self-start"
             bodyPadding="none"
             bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
             actions={selectedInstance && (

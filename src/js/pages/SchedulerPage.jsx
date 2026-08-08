@@ -14,7 +14,7 @@ import { Flow } from '@cloudflare/kumo/components/flow';
 import { Tooltip, TooltipProvider } from '@cloudflare/kumo/components/tooltip';
 import { LayerCard, Tabs } from '@cloudflare/kumo';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
-import { SectionCard } from '../components/ui/AppPrimitives.jsx';
+import { SectionCard, TabBarOverflowActions, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
 import CodeEditor from '../components/ui/CodeEditor.jsx';
 import {
   Activity,
@@ -705,7 +705,7 @@ function SchedulerPage() {
   };
 
   const deleteTask = async (task) => {
-    if (!(await dialog.confirm(`确定删除任务“${task.name}”吗？`))) return;
+    if (!(await dialog.deleteResource(`确定删除任务“${task.name}”吗？`))) return;
     try {
       const res = await fetch(`/api/scheduler/tasks/${task.id}`, { method: 'DELETE', headers: authHeaders() });
       const data = await res.json();
@@ -846,7 +846,7 @@ function SchedulerPage() {
   };
 
   const deleteWorkflow = async (workflow) => {
-    if (!(await dialog.confirm(`确定删除工作流“${workflow.name}”吗？`))) return;
+    if (!(await dialog.deleteResource(`确定删除工作流“${workflow.name}”吗？`))) return;
     try {
       const res = await fetch(`/api/scheduler/workflows/${workflow.id}`, { method: 'DELETE', headers: authHeaders() });
       const data = await res.json();
@@ -928,7 +928,7 @@ function SchedulerPage() {
   };
 
   const clearOldRuns = async () => {
-    if (!(await dialog.confirm('确定清理 30 天前的工作流运行记录吗？'))) return;
+    if (!(await dialog.deleteResource('确定清理 30 天前的工作流运行记录吗？'))) return;
     try {
       const res = await fetch('/api/scheduler/runs?days=30', { method: 'DELETE', headers: authHeaders() });
       const data = await res.json();
@@ -941,7 +941,7 @@ function SchedulerPage() {
   };
 
   const clearAllRuns = async () => {
-    if (!(await dialog.confirm('确定清空全部工作流运行记录吗？此操作不可恢复。'))) return;
+    if (!(await dialog.deleteResource('确定清空全部工作流运行记录吗？此操作不可恢复。'))) return;
     try {
       const res = await fetch('/api/scheduler/runs?all=true', { method: 'DELETE', headers: authHeaders() });
       const data = await res.json();
@@ -1032,26 +1032,46 @@ function SchedulerPage() {
   return (
     <TooltipProvider>
       <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4">
-        <div className="flex flex-wrap items-center justify-between border-b border-kumo-line pb-3 gap-4">
+        <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
           <Tabs
             {...MODULE_TABS_PROPS}
             value={activeTab}
             onValueChange={setActiveTab}
             tabs={TASK_TABS}
           />
-          <div className="flex flex-wrap items-center gap-2">
-            <IconButton label="刷新" onClick={loadAll} icon={<RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />} />
-            {activeTab === 'workflows' && (
-              <>
-                <IconButton label="导入工作流" onClick={importWorkflows} icon={<Download className="h-3.5 w-3.5" />} />
-                <IconButton label="导出工作流" onClick={exportWorkflows} icon={<Upload className="h-3.5 w-3.5" />} />
-              </>
-            )}
-            <Button size="sm" variant="primary" onClick={activeTab === 'workflows' ? openCreateWorkflow : openCreateTask}>
-              <Plus className="h-3.5 w-3.5" />
-              {activeTab === 'workflows' ? '新建工作流' : '新建任务'}
-            </Button>
-          </div>
+          <TabBarOverflowActions
+            items={[
+              {
+                key: 'refresh',
+                label: '刷新',
+                icon: <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />,
+                onClick: loadAll,
+              },
+              ...(activeTab === 'workflows'
+                ? [
+                    {
+                      key: 'import',
+                      label: '导入工作流',
+                      icon: <Download className="h-3.5 w-3.5" />,
+                      onClick: importWorkflows,
+                    },
+                    {
+                      key: 'export',
+                      label: '导出工作流',
+                      icon: <Upload className="h-3.5 w-3.5" />,
+                      onClick: exportWorkflows,
+                    },
+                  ]
+                : []),
+              {
+                key: 'create',
+                label: activeTab === 'workflows' ? '新建工作流' : '新建任务',
+                icon: <Plus className="h-3.5 w-3.5" />,
+                onClick: activeTab === 'workflows' ? openCreateWorkflow : openCreateTask,
+                variant: 'primary',
+              },
+            ]}
+          />
         </div>
 
         <div className="grid grid-cols-4 gap-2 sm:gap-3">

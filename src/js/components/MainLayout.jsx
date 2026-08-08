@@ -92,7 +92,7 @@ class ModuleErrorBoundary extends React.Component {
         <AppCard padding="none" className="w-full max-w-xl p-5">
           <div className="mb-2 text-sm font-bold text-kumo-strong">模块加载失败</div>
           <div className="mb-4 text-xs leading-relaxed text-kumo-subtle">
-            前端资源可能已更新或缓存仍指向旧文件。请重新加载当前页面后再试。
+            前端资源已更新或缓存过期，请重新加载页面。
           </div>
           <div className="mb-4 rounded-md border border-kumo-line bg-kumo-recessed/50 p-3 font-mono text-[11px] leading-relaxed text-kumo-subtle">
             {this.state.error?.message || '未知错误'}
@@ -338,12 +338,12 @@ const SidebarModuleSubgroup = ({ subgroup, activeModule, onNavigate }) => {
 const SidebarLogoutButton = ({ onLogout }) => {
   return (
     <SidebarTooltipMenuButton
-      label="安全退出"
+      label="退出"
       onClick={onLogout}
       className="text-kumo-danger hover:bg-kumo-danger/10"
       icon={LogOut}
     >
-      安全退出
+      退出
     </SidebarTooltipMenuButton>
   );
 };
@@ -608,16 +608,35 @@ function MainLayout() {
     };
   }, [triggerHaptic]);
 
-  const responsiveWorkspaceModule = ['dns', 'openai'].includes(mainActiveTab);
-  const viewportWorkspaceModule = ['apidocs', 'systemlogs', 'drawio', 'prompts'].includes(mainActiveTab);
-  const mainCanvasClassName = responsiveWorkspaceModule
-    ? 'flex-1 overflow-x-hidden overflow-y-auto p-3 sm:px-4 lg:px-6 pt-3! pb-4! sm:pb-6! md:overflow-hidden scrollbar-thin'
-    : viewportWorkspaceModule
-      ? 'flex-1 overflow-hidden p-3 sm:px-4 lg:px-6 pt-3! pb-4! sm:pb-6!'
-      : 'flex-1 overflow-x-hidden overflow-y-auto p-3 sm:px-4 lg:px-6 pt-3! pb-4! sm:pb-6! scrollbar-thin';
+const viewportWorkspaceModule = ['systemlogs', 'drawio', 'prompts'].includes(mainActiveTab);
+  const stickyHeaderScrollModule = [
+    'server',
+    'github',
+    'settings',
+    'paas',
+    'scheduler',
+    'uptime',
+    'totp',
+    'notification',
+    'filebox',
+    'subscription',
+    'openai',
+    'apidocs',
+    'dns',
+    'oracle',
+    'aliyun',
+    'tencent',
+    'm365',
+  ].includes(mainActiveTab);
+  const mainCanvasClassName =
+    stickyHeaderScrollModule
+      ? 'flex-1 min-w-0 overflow-x-clip px-[var(--app-canvas-gutter-x)] pb-[var(--app-canvas-gutter-bottom)]'
+      : viewportWorkspaceModule
+        ? 'flex-1 overflow-hidden px-[var(--app-canvas-gutter-x)] pt-[var(--app-canvas-gutter-top)] pb-[var(--app-canvas-gutter-bottom)]'
+        : 'flex-1 overflow-x-hidden overflow-y-auto px-[var(--app-canvas-gutter-x)] pt-[var(--app-canvas-gutter-top)] pb-[var(--app-canvas-gutter-bottom)] scrollbar-thin';
   const mainCanvasInnerClassName = `mx-auto flex w-full min-w-0 flex-col ${
-    responsiveWorkspaceModule
-      ? 'min-h-full md:h-full md:min-h-0'
+    stickyHeaderScrollModule
+      ? 'min-h-full'
       : viewportWorkspaceModule
         ? 'h-full min-h-0'
         : 'min-h-full'
@@ -683,15 +702,14 @@ function MainLayout() {
               {getModuleName(mainActiveTab)} 模块重构中
             </h2>
             <p className="text-xs text-kumo-subtle max-w-sm leading-relaxed">
-              我们正在使用 React + Kumo + Tailwind v4
-              像素级重构该页面，在此期间原有逻辑将暂时不可用。
+              页面正在使用 React + Kumo + Tailwind v4 重构，原有逻辑暂时不可用。
             </p>
           </AppCard>
         );
     }
   };
 
-  return (
+return (
     <Sidebar.Provider
       mobileBreakpoint={1024}
       defaultOpen={!sidebarCollapsed}
@@ -787,13 +805,21 @@ function MainLayout() {
         </Sidebar>
 
         {/* ==================== 2. 主页面区 (Main Panel) ==================== */}
-        <div className="app-main-panel flex-1 flex flex-col h-full overflow-hidden">
+        <div
+          className={`app-main-panel flex-1 flex flex-col h-full ${
+            stickyHeaderScrollModule ? 'overflow-x-hidden overflow-y-auto scrollbar-thin' : 'overflow-hidden'
+          }`}
+        >
           {/* 顶部导航 */}
-          <header className="app-main-topbar box-border flex h-[58px] flex-shrink-0 items-center border-b border-kumo-line px-3 min-[450px]:px-4 md:px-6">
+          <header
+            className={`app-main-topbar box-border flex h-[58px] flex-shrink-0 items-center border-b border-kumo-line px-3 min-[450px]:px-4 md:px-6 ${
+              stickyHeaderScrollModule ? 'sticky top-0 z-20' : ''
+            }`}
+          >
             <div className="flex h-full min-w-0 flex-1 items-center gap-3.5">
               <Sidebar.Trigger className="lg:hidden" />
 
-              <AppPageHeader
+<AppPageHeader
                 className="flex-row items-center justify-between"
                 spacing="compact"
                 breadcrumbs={
@@ -804,14 +830,9 @@ function MainLayout() {
                   </AppBreadcrumbs>
                 }
               >
-                {/* <div className="flex h-6.5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-kumo-success/20 bg-kumo-success/10 px-2 text-[11px] text-kumo-success">
-                  <span className="w-1 h-1 rounded-full bg-current animate-pulse"></span>
-                  <span className="hidden min-[520px]:inline">健康</span>
-                  <span className="min-[520px]:hidden">正常</span>
-                </div> */}
               </AppPageHeader>
             </div>
-          </header>
+            </header>
 
           {/* 主内容画布 */}
           <main className={mainCanvasClassName}>
@@ -862,7 +883,7 @@ function MainLayout() {
               </div>
             </footer>
           )}
-        </div>
+</div>
       </>
     </Sidebar.Provider>
   );

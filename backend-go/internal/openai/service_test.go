@@ -648,3 +648,358 @@ func mustDecode(t *testing.T, body string, v interface{}) {
 		t.Fatalf("json decode failed: %v body=%q", err, body)
 	}
 }
+
+func TestEndpointCustomHeadersForwardedToUpstream(t *testing.T) {
+	gotHeaders := make(chan map[string]string, 16)
+
+	mockUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/chat/completions") {
+			headers := map[string]string{
+				"X-Custom-Header": r.Header.Get("X-Custom-Header"),
+				"CF-Access-Key":    r.Header.Get("CF-Access-Key"),
+				"HTTP-Referer":     r.Header.Get("HTTP-Referer"),
+				"User-Agent":       r.Header.Get("User-Agent"),
+			}
+			gotHeaders <- headers
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`))
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/models" {
+			if r.Header.Get("X-Custom-Header") != "from-endpoint" {
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte(`{"error":{"message":"missing custom header"}}`))
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":[{"id":"gpt-4","object":"model"}]}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer mockUpstream.Close()
+
+	service := New(config.Config{
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	createPayload := fmt.Sprintf(`{
+		"name": "Headers Mock",
+		"baseUrl": "%s",
+		"apiKey": "test-api-key",
+		"headers": [
+			{"name": "X-Custom-Header", "value": "from-endpoint"},
+			{"name": "CF-Access-Key", "value": "secret-token"},
+			{"name": "HTTP-Referer", "value": "https://api-monitor.local"},
+			{"name": "User-Agent", "value": "api-monitor-test/1.0"}
+		]
+	}`, mockUpstream.URL)
+
+	wCreate := httptest.NewRecorder()
+	rCreate, _ := http.NewRequest("POST", "/api/openai/endpoints", strings.NewReader(createPayload))
+	service.ServeHTTP(wCreate, rCreate)
+	if wCreate.Code != http.StatusOK {
+		t.Fatalf("create status = %d body=%s", wCreate.Code, wCreate.Body.String())
+	}
+
+	var createRes struct {
+		Success  bool     `json:"success"`
+		Endpoint Endpoint `json:"endpoint"`
+	}
+	mustDecode(t, wCreate.Body.String(), &createRes)
+	if !createRes.Success || createRes.Endpoint.Status != "valid" {
+		t.Fatalf("create with headers failed (verify should forward custom headers): %#v", createRes)
+	}
+
+	// Chat completions proxy should carry custom headers upstream.
+	wChat := httptest.NewRecorder()
+	rChat, _ := http.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{
+		"model": "gpt-4",
+		"messages": [{"role":"user","content":"hello"}]
+	}`))
+	rChat.Header.Set("x-endpoint-id", createRes.Endpoint.ID)
+	service.ServeHTTP(wChat, rChat)
+	if wChat.Code != http.StatusOK {
+		t.Fatalf("chat proxy status = %d body=%s", wChat.Code, wChat.Body.String())
+	}
+
+	select {
+	case headers := <-gotHeaders:
+		if headers["X-Custom-Header"] != "from-endpoint" {
+			t.Errorf("X-Custom-Header = %q, want from-endpoint", headers["X-Custom-Header"])
+		}
+		if headers["CF-Access-Key"] != "secret-token" {
+			t.Errorf("CF-Access-Key = %q, want secret-token", headers["CF-Access-Key"])
+		}
+		if headers["HTTP-Referer"] != "https://api-monitor.local" {
+			t.Errorf("HTTP-Referer = %q, want https://api-monitor.local", headers["HTTP-Referer"])
+		}
+		if headers["User-Agent"] != "api-monitor-test/1.0" {
+			t.Errorf("User-Agent = %q, want api-monitor-test/1.0", headers["User-Agent"])
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for upstream headers")
+	}
+
+	// Listed endpoint should expose stored headers.
+	wList := httptest.NewRecorder()
+	rList, _ := http.NewRequest("GET", "/api/openai/endpoints", nil)
+	service.ServeHTTP(wList, rList)
+	var endpoints []Endpoint
+	mustDecode(t, wList.Body.String(), &endpoints)
+	found := false
+	for _, ep := range endpoints {
+		if ep.ID == createRes.Endpoint.ID {
+			found = true
+			if len(ep.Headers) != 4 {
+				t.Fatalf("expected 4 stored headers, got %#v", ep.Headers)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("created endpoint not found in list")
+	}
+}
+
+func TestEndpointModelEnableToggleFiltersRouting(t *testing.T) {
+	mockUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/models" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":[{"id":"gpt-4","object":"model"},{"id":"gpt-4-mini","object":"model"}]}`))
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/chat/completions" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer mockUpstream.Close()
+
+	service := New(config.Config{
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	createPayload := fmt.Sprintf(`{
+		"name": "Model Switch Mock",
+		"baseUrl": "%s",
+		"apiKey": "test-api-key",
+		"skipVerify": true
+	}`, mockUpstream.URL)
+
+	wCreate := httptest.NewRecorder()
+	rCreate, _ := http.NewRequest("POST", "/api/openai/endpoints", strings.NewReader(createPayload))
+	service.ServeHTTP(wCreate, rCreate)
+	if wCreate.Code != http.StatusOK {
+		t.Fatalf("create status = %d body=%s", wCreate.Code, wCreate.Body.String())
+	}
+	var createRes struct {
+		Success  bool     `json:"success"`
+		Endpoint Endpoint `json:"endpoint"`
+	}
+	mustDecode(t, wCreate.Body.String(), &createRes)
+	endpointID := createRes.Endpoint.ID
+
+	// 手动插入模型列表，模拟已刷新过模型。
+	db, err := service.open(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`UPDATE openai_endpoints SET models = ? WHERE id = ?`, `["gpt-4","gpt-4-mini"]`, endpointID)
+	db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 通过路由 toggle 禁用 gpt-4。
+	wToggle := httptest.NewRecorder()
+	rToggle, _ := http.NewRequest("POST", "/api/openai/endpoints/"+endpointID+"/models/toggle", strings.NewReader(`{"model":"gpt-4","enabled":false}`))
+	service.ServeHTTP(wToggle, rToggle)
+	if wToggle.Code != http.StatusOK {
+		t.Fatalf("toggle status = %d body=%s", wToggle.Code, wToggle.Body.String())
+	}
+	var toggleRes struct {
+		Success        bool     `json:"success"`
+		Enabled        bool     `json:"enabled"`
+		DisabledModels []string `json:"disabledModels"`
+	}
+	mustDecode(t, wToggle.Body.String(), &toggleRes)
+	if !toggleRes.Success || toggleRes.Enabled {
+		t.Fatalf("toggle response unexpected: %#v", toggleRes)
+	}
+	if len(toggleRes.DisabledModels) != 1 || toggleRes.DisabledModels[0] != "gpt-4" {
+		t.Fatalf("disabled models = %#v", toggleRes.DisabledModels)
+	}
+
+	// 再次开启 gpt-4-mini 保持启用，断言 disabled 不再包含它。
+	wToggle2 := httptest.NewRecorder()
+	rToggle2, _ := http.NewRequest("POST", "/api/openai/endpoints/"+endpointID+"/models/toggle", strings.NewReader(`{"model":"gpt-4-mini","enabled":true}`))
+	service.ServeHTTP(wToggle2, rToggle2)
+	if wToggle2.Code != http.StatusOK {
+		t.Fatalf("toggle2 status = %d body=%s", wToggle2.Code, wToggle2.Body.String())
+	}
+
+	// /v1/models 不应再包含被禁用的 gpt-4。
+	wModels := httptest.NewRecorder()
+	rModels, _ := http.NewRequest("GET", "/v1/models", nil)
+	service.ServeHTTP(wModels, rModels)
+	if wModels.Code != http.StatusOK {
+		t.Fatalf("models proxy status = %d body=%s", wModels.Code, wModels.Body.String())
+	}
+	var modelsRes struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	mustDecode(t, wModels.Body.String(), &modelsRes)
+	foundIDs := map[string]bool{}
+	for _, m := range modelsRes.Data {
+		foundIDs[m.ID] = true
+	}
+	if foundIDs["gpt-4"] {
+		t.Fatalf("disabled model gpt-4 should not appear in /v1/models, got %#v", modelsRes.Data)
+	}
+	if !foundIDs["gpt-4-mini"] {
+		t.Fatalf("enabled model gpt-4-mini should appear in /v1/models, got %#v", modelsRes.Data)
+	}
+
+	// 指定端点请求被禁用模型应失败，被启用模型应成功。
+	wChatDisabled := httptest.NewRecorder()
+	rChatDisabled, _ := http.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{
+		"model": "gpt-4",
+		"messages": [{"role":"user","content":"hello"}]
+	}`))
+	rChatDisabled.Header.Set("x-endpoint-id", endpointID)
+	service.ServeHTTP(wChatDisabled, rChatDisabled)
+	if wChatDisabled.Code == http.StatusOK {
+		t.Fatalf("disabled model request should fail, got %d body=%s", wChatDisabled.Code, wChatDisabled.Body.String())
+	}
+
+	wChatEnabled := httptest.NewRecorder()
+	rChatEnabled, _ := http.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{
+		"model": "gpt-4-mini",
+		"messages": [{"role":"user","content":"hello"}]
+	}`))
+	rChatEnabled.Header.Set("x-endpoint-id", endpointID)
+	service.ServeHTTP(wChatEnabled, rChatEnabled)
+	if wChatEnabled.Code != http.StatusOK {
+		t.Fatalf("enabled model request failed: %d body=%s", wChatEnabled.Code, wChatEnabled.Body.String())
+	}
+}
+
+func TestConvertNodeToProxy(t *testing.T) {
+	cases := []struct {
+		nodeType, raw, server string
+		port                  int
+		wantPrefix            string
+	}{
+		{"socks", "socks://user:pass@1.2.3.4:1080#台湾-01", "", 0, "socks5://user:pass@1.2.3.4:1080"},
+		{"http", "http://u:p@5.6.7.8:8080#HK", "", 0, "http://u:p@5.6.7.8:8080"},
+		{"socks", "socks5://1.2.3.4:1081#Socks", "", 0, "socks5://1.2.3.4:1081"},
+		{"http", "", "9.9.9.9", 8899, "socks5://9.9.9.9:8899"},
+	}
+	for _, tc := range cases {
+		proxy, _, ok := convertNodeToProxy(tc.nodeType, tc.raw, tc.server, tc.port, "节点")
+		if !ok {
+			t.Fatalf("convertNodeToProxy(%q) returned ok=false", tc.raw)
+		}
+		if !strings.HasPrefix(proxy, tc.wantPrefix) {
+			t.Errorf("proxy = %q, want prefix %q", proxy, tc.wantPrefix)
+		}
+	}
+}
+
+func TestProxyPoolRotationAndAutoSwitch(t *testing.T) {
+	// 第一个代理命中限流（429），第二个代理正常。网关应在第一次 429 后自动切到第二个。
+	var proxy1Hits, proxy2Hits int32
+
+	proxy1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&proxy1Hits, 1)
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":{"message":"rate limited"}}`))
+	}))
+	defer proxy1.Close()
+
+	proxy2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&proxy2Hits, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`))
+	}))
+	defer proxy2.Close()
+
+	// 上游 /v1/models 需要一个正常响应以确认端点验证；chat 请求会经代理池转发。
+	mockUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"data":[{"id":"gpt-4","object":"model"}]}`))
+	}))
+	defer mockUpstream.Close()
+
+	service := New(config.Config{
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	createPayload := fmt.Sprintf(`{
+		"name": "Proxy Switch Mock",
+		"baseUrl": "%s",
+		"apiKey": "test-api-key",
+		"skipVerify": true,
+		"proxyPool": ["%s", "%s"],
+		"autoSwitch": true
+	}`, mockUpstream.URL, proxy1.URL, proxy2.URL)
+
+	wCreate := httptest.NewRecorder()
+	rCreate, _ := http.NewRequest("POST", "/api/openai/endpoints", strings.NewReader(createPayload))
+	service.ServeHTTP(wCreate, rCreate)
+	if wCreate.Code != http.StatusOK {
+		t.Fatalf("create status = %d body=%s", wCreate.Code, wCreate.Body.String())
+	}
+	var createRes struct {
+		Success  bool     `json:"success"`
+		Endpoint Endpoint `json:"endpoint"`
+	}
+	mustDecode(t, wCreate.Body.String(), &createRes)
+	if len(createRes.Endpoint.ProxyPool) != 2 || !createRes.Endpoint.AutoSwitch {
+		t.Fatalf("proxy pool not persisted: %#v", createRes.Endpoint)
+	}
+
+	// 写入 models，绕过前面手动确认端点模型列表。
+	db, err := service.open(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`UPDATE openai_endpoints SET models = ? WHERE id = ?`, `["gpt-4"]`, createRes.Endpoint.ID)
+	db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 触发 /v1/chat/completions：第一次请求经 proxy1 拿 429，网关应切到 proxy2 并成功返回 200。
+	wChat := httptest.NewRecorder()
+	rChat, _ := http.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{
+		"model": "gpt-4",
+		"messages": [{"role":"user","content":"hello"}]
+	}`))
+	rChat.Header.Set("x-endpoint-id", createRes.Endpoint.ID)
+	service.ServeHTTP(wChat, rChat)
+
+	// 最终响应必须是 200（来自 proxy2）。
+	if wChat.Code != http.StatusOK {
+		t.Fatalf("chat via proxy pool failed: code=%d body=%s", wChat.Code, wChat.Body.String())
+	}
+	if atomic.LoadInt32(&proxy1Hits) < 1 {
+		t.Fatalf("proxy1 was never used, expected first attempt to hit it")
+	}
+	if atomic.LoadInt32(&proxy2Hits) < 1 {
+		t.Fatalf("proxy2 was never used, expected retry to hit it")
+	}
+}

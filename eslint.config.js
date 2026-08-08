@@ -153,6 +153,7 @@ module.exports = [
       'agent-rust/**',
       'modules/_template/**', // 模板文件包含占位符语法
       'plugin/**', // 浏览器扩展使用特殊 API
+      'src/pwa-public/vendor/**', // 第三方 vendor 归档（Draw.io 等）
       'src/js/modules/template.js', // 模板文件
       'src/*_snippet*.js', // 代码片段
 

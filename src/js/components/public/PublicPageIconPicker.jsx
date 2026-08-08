@@ -315,7 +315,7 @@ export default function PublicPageIconPicker({
               <div>
                 <Dialog.Title className="text-base font-semibold text-kumo-strong">公开页图标</Dialog.Title>
                 <Dialog.Description className="mt-1 text-xs leading-relaxed text-kumo-subtle">
-                  只修改当前这个公开页。上传后可直接切换，也可以随时恢复默认。
+                  只影响当前公开页，可随时恢复默认。
                 </Dialog.Description>
               </div>
               <Dialog.Close />
@@ -361,7 +361,7 @@ export default function PublicPageIconPicker({
                 <PublicPageIconOption
                   active={!selectedIconId}
                   title="默认图标"
-                  description="恢复当前公开页自己的默认图标。"
+                  description="恢复该公开页的默认图标。"
                   onClick={() => commitChange('')}
                   disabled={saving}
                   preview={<PublicPageBrandIcon pageKind={pageKind} config={{}} iconClassName="h-6 w-6" />}

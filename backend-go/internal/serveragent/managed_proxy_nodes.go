@@ -342,8 +342,14 @@ func (s *Service) createManagedProxyNode(w http.ResponseWriter, r *http.Request,
 		response.Error(w, 400, "server_id is required")
 		return
 	}
-	if input.Protocol != "vless-reality" && input.Protocol != "hysteria2" {
-		response.Error(w, 400, "protocol must be vless-reality or hysteria2")
+	switch input.Protocol {
+	case "vless-reality", "hysteria2", "socks", "http":
+	default:
+		response.Error(w, 400, "protocol must be vless-reality, hysteria2, socks or http")
+		return
+	}
+	if (input.Protocol == "socks" || input.Protocol == "http") && input.AccessMode != "direct" {
+		response.Error(w, 400, "socks and http nodes must use direct access mode")
 		return
 	}
 	var tunnelHostname, tunnelPath string
@@ -493,6 +499,19 @@ func generateManagedNode(id, name, protocol, host, serverName, cert, key string,
 		q := url.Values{"encryption": {"none"}, "security": {"tls"}, "sni": {tunnelHostname}, "fp": {"chrome"}, "type": {"ws"}, "host": {tunnelHostname}, "path": {tunnelPath}}
 		return string(encoded), fmt.Sprintf("vless://%s@%s:%d?%s#%s", userID, connectAddress, connectPort, q.Encode(), url.QueryEscape(name)), "tcp", nil
 	}
+	if protocol == "socks" || protocol == "http" {
+		username, password, err := generatePlainProtocolCredential()
+		if err != nil {
+			return "", "", "", err
+		}
+		inbound := map[string]interface{}{
+			"type": protocol, "tag": id, "listen": "::", "listen_port": 0,
+			"users": []interface{}{map[string]interface{}{"username": username, "password": password}},
+		}
+		root := map[string]interface{}{"log": map[string]interface{}{"level": "warn"}, "inbounds": []interface{}{inbound}, "outbounds": []interface{}{map[string]interface{}{"type": "direct", "tag": "direct"}}}
+		encoded, _ := json.Marshal(root)
+		return string(encoded), fmt.Sprintf("%s://%s:%s@%s:0#%s", protocol, username, password, host, url.QueryEscape(name)), "tcp", nil
+	}
 	if protocol == "vless-reality" {
 		if serverName == "" {
 			serverName = "www.cloudflare.com"
@@ -549,6 +568,24 @@ func generateManagedNode(id, name, protocol, host, serverName, cert, key string,
 	encoded, _ := json.Marshal(root)
 	q := url.Values{"sni": {serverName}, "insecure": {"1"}}
 	return string(encoded), fmt.Sprintf("hysteria2://%s@%s:0?%s#%s", password, host, q.Encode(), url.QueryEscape(name)), "udp", nil
+}
+
+// generatePlainProtocolCredential creates a username:password pair for a
+// plaintext (socks/http) managed inbound. The bootstrap credential is replaced
+// by per-subscription credentials when the node binds subscribers, matching
+// the way vless/hysteria2 inbound users are bound.
+func generatePlainProtocolCredential() (string, string, error) {
+	usernameBytes := make([]byte, 16)
+	if _, err := rand.Read(usernameBytes); err != nil {
+		return "", "", err
+	}
+	passwordBytes := make([]byte, 18)
+	if _, err := rand.Read(passwordBytes); err != nil {
+		return "", "", err
+	}
+	username := base64.RawURLEncoding.EncodeToString(usernameBytes)
+	password := base64.RawURLEncoding.EncodeToString(passwordBytes)
+	return username, password, nil
 }
 
 func generateManagedTLSCertificate(host string) (string, string, error) {

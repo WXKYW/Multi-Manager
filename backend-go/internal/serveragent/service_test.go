@@ -2418,6 +2418,53 @@ func TestGeneratedRealityNodeHasMihomoCompatibleFields(t *testing.T) {
 	}
 }
 
+func TestGeneratedSocksNodeHasPlainUsernamePassword(t *testing.T) {
+	config, raw, transport, err := generateManagedNode("mnode-socks", "LA SOCKS", "socks", "edge.example.com", "www.cloudflare.com", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transport != "tcp" {
+		t.Fatalf("transport=%s", transport)
+	}
+	if !strings.HasPrefix(raw, "socks://") || !strings.Contains(raw, "@edge.example.com:0#") {
+		t.Fatalf("invalid client URI: %s", raw)
+	}
+	var root map[string]interface{}
+	if err := json.Unmarshal([]byte(config), &root); err != nil {
+		t.Fatal(err)
+	}
+	inbound := root["inbounds"].([]interface{})[0].(map[string]interface{})
+	if inbound["type"] != "socks" {
+		t.Fatalf("inbound type=%v", inbound["type"])
+	}
+	users := inbound["users"].([]interface{})
+	user := users[0].(map[string]interface{})
+	if strings.TrimSpace(user["username"].(string)) == "" || strings.TrimSpace(user["password"].(string)) == "" {
+		t.Fatalf("missing plain credential: %#v", user)
+	}
+}
+
+func TestGeneratedHTTPNodeHasPlainUsernamePassword(t *testing.T) {
+	config, raw, transport, err := generateManagedNode("mnode-http", "Tokyo HTTP", "http", "edge.example.com", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transport != "tcp" {
+		t.Fatalf("transport=%s", transport)
+	}
+	if !strings.HasPrefix(raw, "http://") || !strings.Contains(raw, "@edge.example.com:0#") {
+		t.Fatalf("invalid client URI: %s", raw)
+	}
+	var root map[string]interface{}
+	if err := json.Unmarshal([]byte(config), &root); err != nil {
+		t.Fatal(err)
+	}
+	inbound := root["inbounds"].([]interface{})[0].(map[string]interface{})
+	if inbound["type"] != "http" {
+		t.Fatalf("inbound type=%v", inbound["type"])
+	}
+}
+
 func TestFailedManagedProxyNodeCanBeDeletedWithoutAgentCleanup(t *testing.T) {
 	service, db := testService(t)
 	if _, err := db.ExecContext(context.Background(), `INSERT INTO server_accounts (id,name,host,username,auth_type) VALUES ('failed-proxy-host','Debian 11','192.0.2.10','agent','password')`); err != nil {

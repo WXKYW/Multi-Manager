@@ -11,7 +11,7 @@ import { dialog } from '../modules/dialog.js';
 import { toast } from '../modules/toast.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
-import { AppTable, DataTableFrame, EmptyState, InlineStatusPill, PageStack, PageToolbar, SectionCard, getStatusPillClass } from '../components/ui/AppPrimitives.jsx';
+import { AppTable, DataTableFrame, EmptyState, InlineStatusPill, PageStack, SectionCard, TabBarOverflowActions, getStatusPillClass, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
 import { Cloud, Globe, Play, Plus, RefreshCw, RotateCw, Server, Settings, Square, Trash } from '../components/Icons.jsx';
 
 const emptyAccountForm = {
@@ -62,7 +62,7 @@ function LoadingRows({ columns = 5, rows = 5 }) {
 
 function CloudToolbar({ activeTab, setActiveTab, accounts, selectedAccountId, setSelectedAccountId, refreshing, refreshData }) {
   return (
-    <PageToolbar>
+    <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
       <Tabs
         {...MODULE_TABS_PROPS}
         value={activeTab}
@@ -75,28 +75,29 @@ function CloudToolbar({ activeTab, setActiveTab, accounts, selectedAccountId, se
         ]}
       />
       {activeTab !== 'accounts' && (
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <Select
-            size="sm"
-            aria-label="阿里云账号"
-            value={selectedAccountId}
-            onValueChange={(value) => setSelectedAccountId(String(value))}
-            items={accounts.map((account) => ({ value: String(account.id), label: account.name }))}
-            className="w-56 min-w-0"
-          />
-          <Button
-            size="sm"
-            shape="square"
-            variant="secondary"
-            onClick={refreshData}
-            disabled={refreshing || !selectedAccountId}
-            aria-label="刷新"
-            title="刷新"
-            icon={<RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />}
-          />
-        </div>
+        <TabBarOverflowActions
+          items={[
+            {
+              key: 'account',
+              type: 'select',
+              label: '账号',
+              icon: <Cloud className="h-3.5 w-3.5" />,
+              value: selectedAccountId,
+              onValueChange: (value) => setSelectedAccountId(String(value)),
+              disabled: false,
+              options: accounts.map((account) => ({ value: String(account.id), label: account.name })),
+            },
+            {
+              key: 'refresh',
+              label: '刷新',
+              icon: <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />,
+              onClick: refreshData,
+              disabled: refreshing || !selectedAccountId,
+            },
+          ]}
+        />
       )}
-    </PageToolbar>
+    </div>
   );
 }
 
@@ -232,7 +233,7 @@ function AliyunPage() {
   };
 
   const deleteAccount = async (account) => {
-    if (!(await dialog.confirm(`确定要删除阿里云账号“${account.name}”吗？`))) return;
+    if (!(await dialog.deleteResource(`确定要删除阿里云账号“${account.name}”吗？`))) return;
     try {
       const response = await fetch(`/api/aliyun/accounts/${account.id}`, { method: 'DELETE', headers: getAuthHeaders() });
       const result = await response.json();
@@ -410,7 +411,7 @@ function AliyunPage() {
   );
 
   return (
-    <PageStack>
+    <PageStack viewport className="min-h-0 flex-1">
       <CloudToolbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}

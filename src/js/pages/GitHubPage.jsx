@@ -30,7 +30,7 @@ import { useDraggableScroll } from '../hooks/useDraggableScroll.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import useStore from '../store.js';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
-import { AppTable, ChartBoundaryBox, DataTableFrame } from '../components/ui/AppPrimitives.jsx';
+import { AppTable, ChartBoundaryBox, DataTableFrame, TabBarOverflowActions, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
 import GitHubPublicPagesPanel from '../components/github/GitHubPublicPagesPanel.jsx';
 import {
   Activity,
@@ -181,26 +181,26 @@ const formatActionDuration = (startedAt, finishedAt, now) => {
 const actionFlowStatusDotClass = (status) => {
   const value = String(status || '').toLowerCase();
   if (['success', 'completed', 'active'].includes(value)) {
-    return 'bg-emerald-500 ring-emerald-200 shadow-[0_0_0_1px_rgba(16,185,129,0.28)]';
+    return 'bg-kumo-success ring-1 ring-kumo-success/30';
   }
   if (['partial', 'partial_success', 'partial-success', 'in_progress', 'queued', 'pending', 'requested', 'waiting', 'running', 'warning', 'rate_limited'].includes(value)) {
-    return 'bg-amber-500 ring-amber-200 shadow-[0_0_0_1px_rgba(245,158,11,0.24)]';
+    return 'bg-kumo-warning ring-1 ring-kumo-warning/30';
   }
   if (['failure', 'failed', 'error', 'timed_out', 'action_required', 'startup_failure', 'critical'].includes(value)) {
-    return 'bg-rose-500 ring-rose-200 shadow-[0_0_0_1px_rgba(244,63,94,0.24)]';
+    return 'bg-kumo-danger ring-1 ring-kumo-danger/30';
   }
   if (['cancelled', 'skipped', 'stale', 'disabled'].includes(value)) {
-    return 'bg-slate-700 ring-slate-300 shadow-[0_0_0_1px_rgba(51,65,85,0.26)]';
+    return 'bg-kumo-line ring-1 ring-kumo-line/40';
   }
-  return 'bg-sky-600 ring-sky-200 shadow-[0_0_0_1px_rgba(2,132,199,0.24)]';
+  return 'bg-kumo-info ring-1 ring-kumo-info/30';
 };
 
 const actionFlowStatusMetaClass = (status, muted = false) => {
   if (muted) return 'text-kumo-subtle/80';
   const tone = statusTone(status);
-  if (tone === 'success') return 'text-emerald-700';
-  if (tone === 'error') return 'text-rose-700';
-  if (tone === 'warning') return 'text-amber-800';
+  if (tone === 'success') return 'text-kumo-success';
+  if (tone === 'error') return 'text-kumo-danger';
+  if (tone === 'warning') return 'text-kumo-warning';
   return 'text-kumo-subtle';
 };
 
@@ -1630,7 +1630,7 @@ function PermissionChecks({ token }) {
   const scopes = Array.isArray(permissions.scopes) ? permissions.scopes : [];
   if (checks.length === 0 && scopes.length === 0 && !token.last_test_error) {
     if (token.last_test_status === 'success' && token.last_test_at) {
-      return <Text variant="secondary" size="xs">基础认证通过。选择仓库后再次检测，可验证 Actions 和 Traffic 权限。检测时间：{formatDateTime(token.last_test_at)}</Text>;
+      return <Text variant="secondary" size="xs">基础认证通过。选择仓库后再次检测可验证 Actions 和 Traffic 权限。检测时间：{formatDateTime(token.last_test_at)}</Text>;
     }
     return <Text variant="secondary" size="xs">尚未检测。点击“检测权限”验证 Token；选择仓库后可同时验证仓库权限。</Text>;
   }
@@ -2263,16 +2263,24 @@ function GitHubPage() {
 
   return (
     <div className="flex min-h-full w-full min-w-0 flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-kumo-line pb-3">
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <Tabs
           {...MODULE_TABS_PROPS}
           value={activeTab}
           onValueChange={(value) => setActiveTab(String(value))}
           tabs={tabs}
         />
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="primary" icon={<Play className="h-3.5 w-3.5" />} onClick={runCollector}>立即采集</Button>
-        </div>
+        <TabBarOverflowActions
+          items={[
+            {
+              key: 'collect',
+              label: '立即采集',
+              icon: <Play className="h-3.5 w-3.5" />,
+              onClick: runCollector,
+              variant: 'primary',
+            },
+          ]}
+        />
       </div>
 
       {activeTab === 'repositories' && (
@@ -2624,7 +2632,7 @@ function GitHubPage() {
             </LayerCard.Secondary>
             <LayerCard.Primary className="grid gap-3 p-4">
               <Text variant="secondary" size="xs">
-                组织仓库请在 GitHub 创建页将 Resource owner 设为仓库所属组织，并等待组织审批；仓库 Webhook 使用的是仓库级 Webhooks: read/write，不需要额外申请组织级 Webhooks 权限。
+                组织仓库请在 GitHub 创建页将 Resource owner 设为仓库所属组织，并等待组织审批；仓库 Webhook 使用仓库级 Webhooks: read/write，无需申请组织级权限。
               </Text>
               <Input size="sm" label="Token 名称" value={tokenForm.name} onChange={(e) => setTokenForm((p) => ({ ...p, name: e.target.value }))} placeholder="生产账号" />
               <Input size="sm" label="Token" value={tokenForm.token} onChange={(e) => setTokenForm((p) => ({ ...p, token: e.target.value }))} placeholder="github_pat_..." autoComplete="off" spellCheck={false} className="font-mono" />
@@ -2719,7 +2727,7 @@ function GitHubPage() {
                   默认按全部仓库执行。当前作用范围：{historyScopeLabel}。
                 </Text>
                 <Text variant="secondary" size="xs">
-                  “清理历史”会删除旧的趋势、Actions、事件、Webhook 和审计记录；“压缩已有 Payload”会把旧的大 JSON 改写为摘要，并在结束后回收数据库空间。
+                  “清理历史”删除旧的趋势、Actions、事件、Webhook 和审计记录；“压缩 Payload”将旧的大 JSON 改写为摘要，并在结束后回收数据库空间。
                 </Text>
                 <div className="flex flex-wrap gap-2">
                   <Button

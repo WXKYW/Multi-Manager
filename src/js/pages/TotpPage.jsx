@@ -17,7 +17,7 @@ import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
 import { buildTotpAccountPayload } from '../modules/totpPayload.js';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
 import BrandIcon, { BRAND_COLOR_FALLBACK, getIssuerColor } from '../components/ui/BrandIcon.jsx';
-import { AppCard, SectionCard, cx } from '../components/ui/AppPrimitives.jsx';
+import { AppCard, ResponsiveSearchInput, SectionCard, TabBarOverflowActions, cx, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
 import CodeEditor from '../components/ui/CodeEditor.jsx';
 import {
   Key,
@@ -858,7 +858,7 @@ function TotpPage() {
         }
       }
       if (!uploaded) {
-        throw new Error('剪贴板里没有检测到可上传的图标或图片链接');
+        throw new Error('剪贴板中没有可上传的图标或图片链接');
       }
       toast.success(importedFromURL ? '已从链接下载并应用图标' : '已从剪贴板粘贴并应用图标');
     } catch (error) {
@@ -961,7 +961,7 @@ function TotpPage() {
   };
 
   const handleDeleteAccount = async account => {
-    if (!(await dialog.confirm(`确定要删除 "${account.issuer}" 的账号吗？`))) {
+    if (!(await dialog.deleteResource(`确定要删除 "${account.issuer}" 的账号吗？`))) {
       return;
     }
 
@@ -1188,7 +1188,7 @@ function TotpPage() {
           toast.success('二维码解析成功');
         }
       } else {
-        setQrError('无法识别二维码或二维码不是有效的 OTP URI');
+        setQrError('无法识别二维码或不是有效的 OTP URI');
       }
       URL.revokeObjectURL(img.src);
     } catch (e) {
@@ -1315,7 +1315,7 @@ function TotpPage() {
   };
 
   const handleDeleteGroup = async group => {
-    if (!(await dialog.confirm(`确定要删除分组 "${group.name}" 吗？分组内的账号不会被删除。`))) {
+    if (!(await dialog.deleteResource(`确定要删除分组 "${group.name}" 吗？分组内的账号不会被删除。`))) {
       return;
     }
 
@@ -1454,7 +1454,7 @@ function TotpPage() {
   return (
     <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4">
       {/* ==================== 顶部 Tab 导航 ==================== */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-kumo-line pb-3">
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <Tabs
           {...MODULE_TABS_PROPS}
           value={totpCurrentTab}
@@ -1491,7 +1491,7 @@ function TotpPage() {
         />
 
         {totpCurrentTab === 'accounts' && (
-          <div className="flex w-full min-w-0 flex-wrap items-center gap-2 md:w-auto md:flex-1 md:justify-end">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             {hasGroupTabs && (
               <Tabs
                 {...TOOL_TABS_PROPS}
@@ -1505,41 +1505,40 @@ function TotpPage() {
               />
             )}
 
-            <div className="relative min-w-40 flex-1 md:max-w-48">
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-kumo-subtle">
-                <Search className="w-3.5 h-3.5" />
-              </span>
-              <Input
-                size="sm"
-                aria-label="搜索 TOTP 账号"
-                type="text"
-                placeholder="搜索账号..."
-                value={totpSearchQuery}
-                onChange={e => setTotpSearchQuery(e.target.value)}
-                className="w-full text-kumo-strong text-xs pl-8 pr-3 py-1.5"
-              />
-            </div>
+            <ResponsiveSearchInput
+              value={totpSearchQuery}
+              onChange={e => setTotpSearchQuery(e.target.value)}
+              placeholder="搜索账号..."
+              ariaLabel="搜索 TOTP 账号"
+              className="md:max-w-48"
+            />
 
-            <Button
-              size="sm"
-              variant="primary"
-              icon={<Plus className="w-4 h-4" />}
-              onClick={handleOpenAddAccount}
-            >
-              添加账号
-            </Button>
+            <TabBarOverflowActions
+              items={[
+                {
+                  key: 'add-account',
+                  label: '添加账号',
+                  icon: <Plus className="w-4 h-4" />,
+                  onClick: handleOpenAddAccount,
+                  variant: 'primary',
+                },
+              ]}
+            />
           </div>
         )}
 
         {totpCurrentTab === 'groups' && (
-          <Button
-            size="sm"
-            variant="primary"
-            icon={<Plus className="w-4 h-4" />}
-            onClick={handleOpenAddGroup}
-          >
-            新建分组
-          </Button>
+          <TabBarOverflowActions
+            items={[
+              {
+                key: 'add-group',
+                label: '新建分组',
+                icon: <Plus className="w-4 h-4" />,
+                onClick: handleOpenAddGroup,
+                variant: 'primary',
+              },
+            ]}
+          />
         )}
       </div>
 
@@ -1836,7 +1835,7 @@ function TotpPage() {
               <div className="min-w-0 pr-4">
                 <h4 className="text-xs font-semibold leading-5 text-kumo-strong">账号名称打码</h4>
                 <p className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
-                  对邮箱或长账号名称进行脱敏隐藏保护，避免屏幕泄露。
+                  对邮箱或长账号名称脱敏隐藏，避免屏幕泄露。
                 </p>
               </div>
               <Switch
@@ -1851,7 +1850,7 @@ function TotpPage() {
               <div className="min-w-0 pr-4">
                 <h4 className="text-xs font-semibold leading-5 text-kumo-strong">遮挡实时验证码</h4>
                 <p className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
-                  隐藏验证码数值，仅在悬浮或点击复制时显示，防止身旁窥屏。
+                  隐藏验证码数值，仅在悬浮或点击复制时显示，防止窥屏。
                 </p>
               </div>
               <Switch
@@ -1867,7 +1866,7 @@ function TotpPage() {
                   允许悬浮显示验证码
                 </h4>
                 <p className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
-                  开启后鼠标悬浮在验证码卡片上时临时显示被遮挡的验证码。
+                  开启后鼠标悬浮验证码卡片时临时显示被遮挡的验证码。
                 </p>
               </div>
               <Switch
@@ -1882,7 +1881,7 @@ function TotpPage() {
               <div className="min-w-0 pr-4">
                 <h4 className="text-xs font-semibold leading-5 text-kumo-strong">按站点分组</h4>
                 <p className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
-                  将相同站点或服务（如 Google, GitHub）下的账号汇聚在一起分组显示。
+                  将相同站点或服务（如 Google、GitHub）的账号汇聚分组显示。
                 </p>
               </div>
               <Switch
@@ -1929,7 +1928,7 @@ function TotpPage() {
                   解析二维码后自动导入
                 </h4>
                 <p className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
-                  扫码或选取二维码图片后自动读取数据入库，不需要手动核对表单保存。
+                  扫码或选取二维码图片后自动读取数据入库，无需手动核对表单保存。
                 </p>
               </div>
               <Switch
@@ -1946,7 +1945,7 @@ function TotpPage() {
                   锁定默认录入类型
                 </h4>
                 <p className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
-                  开启后添加账号弹窗默认直接使用锁定的选项，不用每次手动选。
+                  开启后添加账号弹窗默认直接使用锁定的选项，无需每次手动选择。
                 </p>
               </div>
               <Switch
@@ -2011,7 +2010,7 @@ function TotpPage() {
           >
             <div className="space-y-3.5">
               <p className="text-xs text-kumo-subtle leading-relaxed">
-                下载安装 2FA 浏览器插件，在 PC 端登录账号需要验证码时可一键实现自动检索与快捷填充。
+                下载安装 2FA 浏览器插件，在 PC 端登录账号需要验证码时可一键自动检索与快捷填充。
               </p>
 
               <div className="p-3 bg-kumo-recessed/60 border border-kumo-line rounded-lg flex items-start gap-3 mt-3">
@@ -2515,7 +2514,7 @@ function TotpPage() {
                 选择品牌标识样式
               </Dialog.Title>
               <Dialog.Description className="mt-1 text-xs leading-5 text-kumo-subtle">
-                选择系统样式或管理自定义图标；保存账号后会同步到同发行商账号。
+                选择系统样式或管理自定义图标；保存账号后同步到同发行商账号。
               </Dialog.Description>
             </div>
             <Dialog.Close

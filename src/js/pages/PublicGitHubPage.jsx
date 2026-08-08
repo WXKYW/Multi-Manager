@@ -127,26 +127,26 @@ const formatNumber = (value) => Number(value || 0).toLocaleString();
 const actionFlowStatusDotClass = (status) => {
   const value = String(status || '').toLowerCase();
   if (['success', 'completed', 'active'].includes(value)) {
-    return 'bg-emerald-500 ring-emerald-200 shadow-[0_0_0_1px_rgba(16,185,129,0.28)]';
+    return 'bg-kumo-success ring-1 ring-kumo-success/30';
   }
   if (['partial', 'partial_success', 'partial-success', 'in_progress', 'queued', 'pending', 'requested', 'waiting', 'running', 'warning', 'rate_limited'].includes(value)) {
-    return 'bg-amber-500 ring-amber-200 shadow-[0_0_0_1px_rgba(245,158,11,0.24)]';
+    return 'bg-kumo-warning ring-1 ring-kumo-warning/30';
   }
   if (['failure', 'failed', 'error', 'timed_out', 'action_required', 'startup_failure', 'critical'].includes(value)) {
-    return 'bg-rose-500 ring-rose-200 shadow-[0_0_0_1px_rgba(244,63,94,0.24)]';
+    return 'bg-kumo-danger ring-1 ring-kumo-danger/30';
   }
   if (['cancelled', 'skipped', 'stale', 'disabled'].includes(value)) {
-    return 'bg-slate-700 ring-slate-300 shadow-[0_0_0_1px_rgba(51,65,85,0.26)]';
+    return 'bg-kumo-line ring-1 ring-kumo-line/40';
   }
-  return 'bg-sky-600 ring-sky-200 shadow-[0_0_0_1px_rgba(2,132,199,0.24)]';
+  return 'bg-kumo-info ring-1 ring-kumo-info/30';
 };
 
 const actionFlowStatusMetaClass = (status, muted = false) => {
   if (muted) return 'text-kumo-subtle/80';
   const tone = statusTone(status);
-  if (tone === 'success') return 'text-emerald-700';
-  if (tone === 'error') return 'text-rose-700';
-  if (tone === 'warning') return 'text-amber-800';
+  if (tone === 'success') return 'text-kumo-success';
+  if (tone === 'error') return 'text-kumo-danger';
+  if (tone === 'warning') return 'text-kumo-warning';
   return 'text-kumo-subtle';
 };
 
@@ -1755,7 +1755,7 @@ function RepositoryCard({ item, now, config, detailLoading = false, onSelectRun 
                     >
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${
-                          tone === 'success' ? 'bg-emerald-500' : tone === 'error' ? 'bg-rose-500' : 'bg-amber-500'
+                          tone === 'success' ? 'bg-kumo-success' : tone === 'error' ? 'bg-kumo-danger' : 'bg-kumo-warning'
                         }`} />
                         <span className="truncate">{run.workflow_name || run.display_title}</span>
                       </div>

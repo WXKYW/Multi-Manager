@@ -1037,6 +1037,7 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 func migrateColumns(ctx context.Context, db *sql.DB) error {
 	proxyFields := []struct{ Name, SQL string }{
 		{"assigned_port", "ALTER TABLE server_proxy_desired_state ADD COLUMN assigned_port INTEGER NOT NULL DEFAULT 0"},
+		{"stats_port", "ALTER TABLE server_proxy_desired_state ADD COLUMN stats_port INTEGER NOT NULL DEFAULT 0"},
 		{"transport", "ALTER TABLE server_proxy_desired_state ADD COLUMN transport TEXT NOT NULL DEFAULT 'tcp'"},
 	}
 	for _, f := range proxyFields {

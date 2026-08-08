@@ -22,7 +22,12 @@ import {
   Upload,
 } from '../components/Icons.jsx';
 import { AlertTriangle } from '../components/IconsCore.jsx';
-import { iconButtonIconClass } from '../components/ui/AppPrimitives.jsx';
+import {
+  PageStack,
+  ResponsiveSearchInput,
+  iconButtonIconClass,
+  stickyTabsBaseClass,
+} from '../components/ui/AppPrimitives.jsx';
 
 const API = '/api/drawio';
 const TABS = [
@@ -84,7 +89,7 @@ export default function DrawioPage() {
   const [dirty, setDirty] = useState(false);
   const [saveState, setSaveState] = useState('idle');
   const [conflictOpen, setConflictOpen] = useState(false);
-  const [xmlOpen, setXmlOpen] = useState(true);
+  const [xmlOpen, setXmlOpen] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [libraryCopyJob, setLibraryCopyJob] = useState(null);
   const [thumbnailRenderTask, setThumbnailRenderTask] = useState(null);
@@ -437,7 +442,7 @@ export default function DrawioPage() {
   }, [draft?.external_assets_json]);
 
   const editorView = (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <LayerCard className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_20rem]">
         {selectedId && draft ? (
           <DrawioFrame
@@ -781,12 +786,11 @@ export default function DrawioPage() {
 
   const libraryToolbar = (
     <>
-      <Input
-        size="sm"
+      <ResponsiveSearchInput
         value={search}
         onChange={event => setSearch(event.target.value)}
         placeholder="搜索图表"
-        aria-label="搜索图表"
+        ariaLabel="搜索图表"
         className="w-56 max-w-full"
       />
       <Button
@@ -800,7 +804,7 @@ export default function DrawioPage() {
       />
       <Button
         size="sm"
-        variant="primary"
+variant="primary"
         icon={<Plus className={iconButtonIconClass} />}
         onClick={createDocument}
       >
@@ -809,8 +813,11 @@ export default function DrawioPage() {
     </>
   );
 
+  const renderToolbar = () =>
+    activeTab === 'editor' ? editorToolbar : activeTab === 'library' ? libraryToolbar : null;
+
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col gap-3">
+    <PageStack viewport className="h-full min-h-0 min-w-0 flex-col">
       <Input
         ref={fileRef}
         type="file"
@@ -822,21 +829,23 @@ export default function DrawioPage() {
           event.target.value = '';
         }}
       />
-      <div className="flex w-full shrink-0 flex-wrap items-center gap-2">
+      <div
+        id="drawioTabRow"
+        className="flex min-h-(--app-header-height) shrink-0 items-center justify-between gap-2 border-b border-kumo-line bg-[var(--app-main-surface)] px-[var(--app-tab-gutter-x)] -mx-[var(--app-canvas-gutter-x)] -mt-[var(--app-canvas-gutter-top)] [&>*]:min-w-0"
+      >
         <Tabs
-          className="shrink-0"
           {...MODULE_TABS_PROPS}
           value={activeTab}
           onValueChange={setActiveTab}
           tabs={TABS}
         />
         {activeTab !== 'settings' && (
-          <div className="ml-auto flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2 max-md:basis-full">
+          <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
             {activeTab === 'editor' ? editorToolbar : libraryToolbar}
           </div>
         )}
       </div>
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {activeTab === 'editor' && editorView}
         {activeTab === 'library' && libraryView}
         {activeTab === 'settings' && settingsView}
@@ -878,7 +887,7 @@ export default function DrawioPage() {
             <Dialog.Title>草稿冲突</Dialog.Title>
           </div>
           <Dialog.Description className="mt-3 text-kumo-subtle">
-            另一会话已经保存了更新版本。你可以复制本地 XML，或加载数据库中的最新草稿。
+            另一会话已保存更新版本。可复制本地 XML，或加载数据库中的最新草稿。
           </Dialog.Description>
           <div className="mt-6 flex justify-end gap-2">
             <Button
@@ -901,6 +910,6 @@ export default function DrawioPage() {
           </div>
         </Dialog>
       </Dialog.Root>
-    </div>
+    </PageStack>
   );
 }

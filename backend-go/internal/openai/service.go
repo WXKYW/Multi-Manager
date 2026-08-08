@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -47,19 +48,28 @@ var (
 	versionPathRegex      = regexp.MustCompile(`(?i)/v\d+/?`)
 )
 
+type HeaderItem struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
 type Endpoint struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	BaseURL      string   `json:"baseUrl"`
-	APIKey       string   `json:"apiKey"`
-	Notes        string   `json:"notes"`
-	Status       string   `json:"status"`
-	Enabled      bool     `json:"enabled"`
-	Models       []string `json:"models"`
-	CreatedAt    string   `json:"createdAt"`
-	LastUsed     *string  `json:"lastUsed"`
-	LastChecked  *string  `json:"lastChecked"`
-	HealthStatus string   `json:"healthStatus,omitempty"`
+	ID             string       `json:"id"`
+	Name           string       `json:"name"`
+	BaseURL        string       `json:"baseUrl"`
+	APIKey         string       `json:"apiKey"`
+	Notes          string       `json:"notes"`
+	Status         string       `json:"status"`
+	Enabled        bool         `json:"enabled"`
+	Models         []string     `json:"models"`
+	Headers        []HeaderItem `json:"headers,omitempty"`
+	DisabledModels []string     `json:"disabledModels,omitempty"`
+	ProxyPool      []string     `json:"proxyPool,omitempty"`
+	AutoSwitch     bool         `json:"autoSwitch"`
+	CreatedAt      string       `json:"createdAt"`
+	LastUsed       *string      `json:"lastUsed"`
+	LastChecked    *string      `json:"lastChecked"`
+	HealthStatus   string       `json:"healthStatus,omitempty"`
 }
 
 type HealthRecord struct {
@@ -88,6 +98,15 @@ type Service struct {
 	apiKeys    *apikeys.Manager
 	schemaOnce sync.Once
 	schemaErr  error
+
+	// proxyStateByEndpoint 记录每个端点的代理池运行时状态（当前游标、冷却中的代理）。
+	proxyMu         sync.Mutex
+	proxyStateByEndpoint map[string]*endpointProxyState
+}
+
+type endpointProxyState struct {
+	cursor   int
+	cooldown map[string]time.Time
 }
 
 func New(cfg config.Config) *Service {
@@ -105,10 +124,11 @@ func New(cfg config.Config) *Service {
 		ExpectContinueTimeout: 1 * time.Second,
 	}
 	s := &Service{
-		cfg:     cfg,
-		store:   database.New(cfg),
-		client:  &http.Client{Transport: tr, Timeout: defaultTimeout},
-		apiKeys: apikeys.New(cfg),
+		cfg:                   cfg,
+		store:                 database.New(cfg),
+		client:                &http.Client{Transport: tr, Timeout: defaultTimeout},
+		apiKeys:               apikeys.New(cfg),
+		proxyStateByEndpoint:  make(map[string]*endpointProxyState),
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -141,6 +161,10 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			name TEXT NOT NULL,
 			base_url TEXT NOT NULL,
 			api_key TEXT NOT NULL,
+			headers TEXT,
+			disabled_models TEXT,
+			proxy_pool TEXT,
+			auto_switch INTEGER DEFAULT 0,
 			status TEXT DEFAULT 'unknown',
 			enabled INTEGER DEFAULT 1,
 			models TEXT,
@@ -207,6 +231,7 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			key_prefix TEXT NOT NULL,
 			key_suffix TEXT NOT NULL,
 			enabled INTEGER DEFAULT 1,
+			is_default INTEGER NOT NULL DEFAULT 0,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			last_used DATETIME,
 			expires_at DATETIME,
@@ -229,6 +254,21 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 	if err := ensureSQLiteColumn(ctx, db, "openai_gateway_keys", "key_cipher", "TEXT"); err != nil {
+		return err
+	}
+	if err := ensureSQLiteColumn(ctx, db, "openai_gateway_keys", "is_default", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureSQLiteColumn(ctx, db, "openai_endpoints", "headers", "TEXT"); err != nil {
+		return err
+	}
+	if err := ensureSQLiteColumn(ctx, db, "openai_endpoints", "disabled_models", "TEXT"); err != nil {
+		return err
+	}
+	if err := ensureSQLiteColumn(ctx, db, "openai_endpoints", "proxy_pool", "TEXT"); err != nil {
+		return err
+	}
+	if err := ensureSQLiteColumn(ctx, db, "openai_endpoints", "auto_switch", "INTEGER DEFAULT 0"); err != nil {
 		return err
 	}
 	if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_openai_analytics_gateway_key ON openai_gateway_analytics(gateway_key_id, timestamp)`); err != nil {
@@ -298,6 +338,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.verifyEndpoint(w, r, parts[1])
 	case len(parts) == 3 && parts[0] == "endpoints" && parts[2] == "models" && method == http.MethodGet:
 		s.getEndpointModels(w, r, parts[1])
+	case len(parts) == 4 && parts[0] == "endpoints" && parts[2] == "models" && parts[3] == "toggle" && method == http.MethodPost:
+		s.toggleEndpointModel(w, r, parts[1])
 	case len(parts) == 3 && parts[0] == "endpoints" && parts[2] == "test" && method == http.MethodPost:
 		s.testEndpointChat(w, r, parts[1])
 	case len(parts) == 3 && parts[0] == "endpoints" && parts[2] == "health-check" && method == http.MethodPost:
@@ -322,10 +364,14 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.toggleGatewayKey(w, r, parts[1])
 	case len(parts) == 3 && parts[0] == "keys" && parts[2] == "rotate" && method == http.MethodPost:
 		s.rotateGatewayKey(w, r, parts[1])
+	case len(parts) == 3 && parts[0] == "keys" && parts[2] == "default" && method == http.MethodPut:
+		s.setDefaultGatewayKey(w, r, parts[1])
 	case len(parts) == 1 && parts[0] == "export" && method == http.MethodGet:
 		s.exportEndpointsRoute(w, r)
 	case len(parts) == 1 && parts[0] == "import" && method == http.MethodPost:
 		s.importEndpointsRoute(w, r)
+	case len(parts) == 2 && parts[0] == "proxies" && parts[1] == "subscription-nodes" && method == http.MethodGet:
+		s.listSubscriptionSocksProxies(w, r)
 	case len(parts) == 2 && parts[0] == "analytics" && parts[1] == "summary" && method == http.MethodGet:
 		s.getAnalyticsSummary(w, r)
 	case len(parts) == 2 && parts[0] == "analytics" && parts[1] == "charts" && method == http.MethodGet:
@@ -372,7 +418,7 @@ func (s *Service) listEndpoints(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
-	rows, err := db.QueryContext(ctx, "SELECT id, name, base_url, api_key, status, enabled, models, created_at, last_used, last_checked FROM openai_endpoints")
+	rows, err := db.QueryContext(ctx, "SELECT id, name, base_url, api_key, headers, disabled_models, proxy_pool, auto_switch, status, enabled, models, created_at, last_used, last_checked FROM openai_endpoints")
 	if err != nil {
 		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -382,11 +428,11 @@ func (s *Service) listEndpoints(w http.ResponseWriter, r *http.Request) {
 	endpoints := []Endpoint{}
 	for rows.Next() {
 		var ep Endpoint
-		var modelsRaw sql.NullString
+		var headersRaw, modelsRaw, disabledRaw, proxyRaw sql.NullString
 		var created, used, checked sql.NullString
-		var enabledInt int
+		var enabledInt, autoSwitchInt int
 
-		err := rows.Scan(&ep.ID, &ep.Name, &ep.BaseURL, &ep.APIKey, &ep.Status, &enabledInt, &modelsRaw, &created, &used, &checked)
+		err := rows.Scan(&ep.ID, &ep.Name, &ep.BaseURL, &ep.APIKey, &headersRaw, &disabledRaw, &proxyRaw, &autoSwitchInt, &ep.Status, &enabledInt, &modelsRaw, &created, &used, &checked)
 		if err != nil {
 			response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -394,6 +440,7 @@ func (s *Service) listEndpoints(w http.ResponseWriter, r *http.Request) {
 
 		ep.APIKey = secure.SecureDecrypt(ep.APIKey)
 		ep.Enabled = enabledInt == 1
+		ep.AutoSwitch = autoSwitchInt == 1
 		ep.CreatedAt = created.String
 		if used.Valid {
 			v := used.String
@@ -408,6 +455,18 @@ func (s *Service) listEndpoints(w http.ResponseWriter, r *http.Request) {
 		if modelsRaw.Valid && modelsRaw.String != "" {
 			_ = json.Unmarshal([]byte(modelsRaw.String), &ep.Models)
 		}
+		ep.Headers = []HeaderItem{}
+		if headersRaw.Valid && headersRaw.String != "" {
+			_ = json.Unmarshal([]byte(headersRaw.String), &ep.Headers)
+		}
+		ep.DisabledModels = []string{}
+		if disabledRaw.Valid && disabledRaw.String != "" {
+			_ = json.Unmarshal([]byte(disabledRaw.String), &ep.DisabledModels)
+		}
+		ep.ProxyPool = []string{}
+		if proxyRaw.Valid && proxyRaw.String != "" {
+			_ = json.Unmarshal([]byte(proxyRaw.String), &ep.ProxyPool)
+		}
 		endpoints = append(endpoints, ep)
 	}
 
@@ -416,11 +475,14 @@ func (s *Service) listEndpoints(w http.ResponseWriter, r *http.Request) {
 
 func (s *Service) createEndpoint(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name       string `json:"name"`
-		BaseURL    string `json:"baseUrl"`
-		APIKey     string `json:"apiKey"`
-		Notes      string `json:"notes"`
-		SkipVerify bool   `json:"skipVerify"`
+		Name       string       `json:"name"`
+		BaseURL    string       `json:"baseUrl"`
+		APIKey     string       `json:"apiKey"`
+		Notes      string       `json:"notes"`
+		Headers    []HeaderItem `json:"headers"`
+		ProxyPool  []string     `json:"proxyPool"`
+		AutoSwitch bool         `json:"autoSwitch"`
+		SkipVerify bool         `json:"skipVerify"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -440,20 +502,24 @@ func (s *Service) createEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
+	headersJSON, _ := json.Marshal(cleanHeaders(req.Headers))
+	proxyJSON, _ := json.Marshal(cleanProxyPool(req.ProxyPool))
+	autoSwitchInt := boolToInt(req.AutoSwitch)
+
 	id := fmt.Sprintf("oai_%d_%s", time.Now().UnixNano(), s.randString(9))
 	status := "unknown"
 	modelsList := []string{}
 	var verification map[string]interface{}
 
 	if !req.SkipVerify {
-		vOk, count, err := s.verifyAPIKeyRaw(ctx, normalizedURL, req.APIKey)
+		vOk, count, err := s.verifyAPIKeyRaw(ctx, normalizedURL, req.APIKey, cleanHeaders(req.Headers))
 		if err == nil && vOk {
 			status = "valid"
 			verification = map[string]interface{}{
 				"valid":       true,
 				"modelsCount": count,
 			}
-			mList, mErr := s.listModelsRaw(ctx, normalizedURL, req.APIKey)
+			mList, mErr := s.listModelsRaw(ctx, normalizedURL, req.APIKey, cleanHeaders(req.Headers))
 			if mErr == nil {
 				modelsList = mList
 			}
@@ -483,9 +549,9 @@ func (s *Service) createEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err = db.ExecContext(ctx, `
-		INSERT INTO openai_endpoints (id, name, base_url, api_key, status, enabled, models, created_at, last_checked)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, req.Name, normalizedURL, encryptedKey, status, 1, string(modelsJSON), createdAt, lastCheckedVal)
+		INSERT INTO openai_endpoints (id, name, base_url, api_key, headers, disabled_models, proxy_pool, auto_switch, status, enabled, models, created_at, last_checked)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, req.Name, normalizedURL, encryptedKey, string(headersJSON), "[]", string(proxyJSON), autoSwitchInt, status, 1, string(modelsJSON), createdAt, lastCheckedVal)
 	if err != nil {
 		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -502,6 +568,9 @@ func (s *Service) createEndpoint(w http.ResponseWriter, r *http.Request) {
 		BaseURL:     normalizedURL,
 		APIKey:      req.APIKey,
 		Notes:       req.Notes,
+		Headers:     cleanHeaders(req.Headers),
+		ProxyPool:   cleanProxyPool(req.ProxyPool),
+		AutoSwitch:  req.AutoSwitch,
 		Status:      status,
 		Enabled:     true,
 		Models:      modelsList,
@@ -518,10 +587,13 @@ func (s *Service) createEndpoint(w http.ResponseWriter, r *http.Request) {
 
 func (s *Service) updateEndpoint(w http.ResponseWriter, r *http.Request, id string) {
 	var req struct {
-		Name    string `json:"name"`
-		BaseURL string `json:"baseUrl"`
-		APIKey  string `json:"apiKey"`
-		Notes   string `json:"notes"`
+		Name       string        `json:"name"`
+		BaseURL    string        `json:"baseUrl"`
+		APIKey     string        `json:"apiKey"`
+		Notes      string        `json:"notes"`
+		Headers    *[]HeaderItem `json:"headers"`
+		ProxyPool  *[]string     `json:"proxyPool"`
+		AutoSwitch *bool         `json:"autoSwitch"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -552,15 +624,38 @@ func (s *Service) updateEndpoint(w http.ResponseWriter, r *http.Request, id stri
 	if req.APIKey != "" {
 		targetAPIKey = req.APIKey
 	}
+	headersJSON, _ := json.Marshal([]HeaderItem{})
+	headersChanged := false
+	if req.Headers != nil {
+		headersJSON, _ = json.Marshal(cleanHeaders(*req.Headers))
+		headersChanged = true
+	}
+	proxyJSON, _ := json.Marshal([]string{})
+	proxyChanged := false
+	if req.ProxyPool != nil {
+		proxyJSON, _ = json.Marshal(cleanProxyPool(*req.ProxyPool))
+		proxyChanged = true
+	}
+	autoSwitchInt := 0
+	autoSwitchChanged := false
+	if req.AutoSwitch != nil {
+		autoSwitchInt = boolToInt(*req.AutoSwitch)
+		autoSwitchChanged = true
+	}
 
 	if req.APIKey != "" || req.BaseURL != "" {
 		status := "unknown"
 		modelsList := []string{}
 
-		vOk, _, err := s.verifyAPIKeyRaw(ctx, targetBaseURL, targetAPIKey)
+		verifyHeaders := []HeaderItem(nil)
+		if req.Headers != nil {
+			verifyHeaders = cleanHeaders(*req.Headers)
+		}
+
+		vOk, _, err := s.verifyAPIKeyRaw(ctx, targetBaseURL, targetAPIKey, verifyHeaders)
 		if err == nil && vOk {
 			status = "valid"
-			mList, mErr := s.listModelsRaw(ctx, targetBaseURL, targetAPIKey)
+			mList, mErr := s.listModelsRaw(ctx, targetBaseURL, targetAPIKey, verifyHeaders)
 			if mErr == nil {
 				modelsList = mList
 			}
@@ -578,9 +673,16 @@ func (s *Service) updateEndpoint(w http.ResponseWriter, r *http.Request, id stri
 
 		_, err = db.ExecContext(ctx, `
 			UPDATE openai_endpoints
-			SET name = ?, base_url = ?, api_key = ?, status = ?, models = ?, last_checked = ?
+			SET name = ?, base_url = ?, api_key = ?, headers = ?, proxy_pool = ?, auto_switch = ?, status = ?, models = ?, last_checked = ?
 			WHERE id = ?`,
-			req.Name, targetBaseURL, encryptedKey, status, string(modelsJSON), lastChecked, id)
+			req.Name, targetBaseURL, encryptedKey, string(headersJSON), string(proxyJSON), autoSwitchInt, status, string(modelsJSON), lastChecked, id)
+		if err != nil {
+			response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	} else if headersChanged || proxyChanged || autoSwitchChanged {
+		_, err = db.ExecContext(ctx, "UPDATE openai_endpoints SET name = ?, headers = ?, proxy_pool = ?, auto_switch = ? WHERE id = ?",
+			req.Name, string(headersJSON), string(proxyJSON), autoSwitchInt, id)
 		if err != nil {
 			response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -594,6 +696,196 @@ func (s *Service) updateEndpoint(w http.ResponseWriter, r *http.Request, id stri
 	}
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true})
+}
+
+func cleanProxyPool(pool []string) []string {
+	out := make([]string, 0, len(pool))
+	seen := make(map[string]bool, len(pool))
+	for _, raw := range pool {
+		entry := strings.TrimSpace(raw)
+		if entry == "" {
+			continue
+		}
+		if seen[entry] {
+			continue
+		}
+		seen[entry] = true
+		out = append(out, entry)
+	}
+	return out
+}
+
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
+}
+
+// proxyCooldown 是一个代理被标记限流/失败后的冷却间隔，避免立即又被选回。
+const proxyCooldown = 60 * time.Second
+
+// clientForEndpoint 按端点代理池选择下一个可用代理，返回绑定该代理的 http.Client。
+// pool 为空时回退到默认客户端（直连 / 环境代理）。
+func (s *Service) clientForEndpoint(endpointID string, pool []string, _ bool) (*http.Client, string) {
+	if len(pool) == 0 {
+		return s.client, ""
+	}
+	cleaned := cleanProxyPool(pool)
+	if len(cleaned) == 0 {
+		return s.client, ""
+	}
+	now := time.Now()
+
+	s.proxyMu.Lock()
+	state, ok := s.proxyStateByEndpoint[endpointID]
+	if !ok {
+		state = &endpointProxyState{cursor: 0, cooldown: make(map[string]time.Time)}
+		s.proxyStateByEndpoint[endpointID] = state
+	}
+	if state.cursor >= len(cleaned) || state.cursor < 0 {
+		state.cursor = 0
+	}
+	selected := -1
+	for i := 0; i < len(cleaned); i++ {
+		idx := (state.cursor + i) % len(cleaned)
+		if until, cooled := state.cooldown[cleaned[idx]]; !cooled || now.After(until) {
+			selected = idx
+			break
+		}
+	}
+	if selected < 0 {
+		selected = state.cursor % len(cleaned)
+	}
+	state.cursor = (selected + 1) % len(cleaned)
+	selectedProxy := cleaned[selected]
+	s.proxyMu.Unlock()
+
+	client, err := s.proxyClient(selectedProxy)
+	if err != nil {
+		return s.client, selectedProxy
+	}
+	return client, selectedProxy
+}
+
+// markProxyFailed 将某个代理标记为冷却，后续选择会跳过它。
+func (s *Service) markProxyFailed(endpointID, proxy string) {
+	if proxy == "" {
+		return
+	}
+	s.proxyMu.Lock()
+	defer s.proxyMu.Unlock()
+	state, ok := s.proxyStateByEndpoint[endpointID]
+	if !ok {
+		return
+	}
+	state.cooldown[proxy] = time.Now().Add(proxyCooldown)
+}
+
+// proxyClients 按代理 URL 缓存 http.Client，避免每次请求重建 transport。
+var proxyClients = struct {
+	sync.Mutex
+	m map[string]*http.Client
+}{m: make(map[string]*http.Client)}
+
+func (s *Service) proxyClient(proxyURL string) (*http.Client, error) {
+	u, err := url.Parse(proxyURL)
+	if err != nil {
+		return nil, err
+	}
+	switch u.Scheme {
+	case "socks5":
+		u.Scheme = "socks5"
+	case "":
+		// 裸地址（host:port）默认按 socks5 处理，便于直接粘贴节点地址。
+		u = &url.URL{Scheme: "socks5", Host: proxyURL}
+	default:
+		if u.Scheme != "http" && u.Scheme != "https" && u.Scheme != "socks5h" {
+			return nil, fmt.Errorf("不支持的代理协议: %s", u.Scheme)
+		}
+	}
+	proxyClients.Lock()
+	defer proxyClients.Unlock()
+	if c, ok := proxyClients.m[proxyURL]; ok {
+		return c, nil
+	}
+	tr := &http.Transport{
+		Proxy: http.ProxyURL(u),
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          500,
+		MaxIdleConnsPerHost:   100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+	c := &http.Client{Transport: tr, Timeout: s.client.Timeout}
+	proxyClients.m[proxyURL] = c
+	return c, nil
+}
+
+// isRateLimitResponse 判断上游响应是否命中限流（429/439/503/529 或正文含限流关键词）。
+func isRateLimitResponse(resp *http.Response, body []byte) bool {
+	switch resp.StatusCode {
+	case http.StatusTooManyRequests, 439, http.StatusServiceUnavailable, 529:
+		return true
+	}
+	if len(body) > 0 {
+		lower := strings.ToLower(string(body))
+		for _, keyword := range []string{"rate limit", "rate_limit", "too many requests", "overloaded", "throttled"} {
+			if strings.Contains(lower, keyword) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// cleanHeaders 过滤掉空名称的条目，其余原样保留。
+func cleanHeaders(headers []HeaderItem) []HeaderItem {
+	out := make([]HeaderItem, 0, len(headers))
+	for _, h := range headers {
+		name := strings.TrimSpace(h.Name)
+		if name == "" {
+			continue
+		}
+		out = append(out, HeaderItem{Name: name, Value: h.Value})
+	}
+	return out
+}
+
+// isModelDisabled 判断给定模型是否在端点禁用的模型列表中。
+func isModelDisabled(disabled []string, model string) bool {
+	for _, m := range disabled {
+		if m == model {
+			return true
+		}
+	}
+	return false
+}
+
+// decodeEndpointHeaders 从数据库的 headers JSON 列还原自定义请求头。
+func decodeEndpointHeaders(raw sql.NullString) []HeaderItem {
+	headers := []HeaderItem{}
+	if raw.Valid && raw.String != "" {
+		_ = json.Unmarshal([]byte(raw.String), &headers)
+	}
+	return cleanHeaders(headers)
+}
+
+// applyCustomHeaders 把端点配置的自定义请求头写入待发请求。
+// 网关自身的鉴权（Authorization 等）在调用方设置，自定义头允许覆盖非鉴权头。
+func applyCustomHeaders(req *http.Request, headers []HeaderItem) {
+	for _, h := range headers {
+		name := strings.TrimSpace(h.Name)
+		if name == "" {
+			continue
+		}
+		req.Header.Set(name, h.Value)
+	}
 }
 
 func (s *Service) toggleEndpoint(w http.ResponseWriter, r *http.Request, id string) {
@@ -668,24 +960,26 @@ func (s *Service) verifyEndpoint(w http.ResponseWriter, r *http.Request, id stri
 	defer db.Close()
 
 	var name, baseURL, apiKey string
-	err = db.QueryRowContext(ctx, "SELECT name, base_url, api_key FROM openai_endpoints WHERE id = ?", id).Scan(&name, &baseURL, &apiKey)
+	var headersRaw sql.NullString
+	err = db.QueryRowContext(ctx, "SELECT name, base_url, api_key, headers FROM openai_endpoints WHERE id = ?", id).Scan(&name, &baseURL, &apiKey, &headersRaw)
 	if err != nil {
 		response.JSON(w, http.StatusNotFound, map[string]string{"error": "端点不存在"})
 		return
 	}
 	apiKey = secure.SecureDecrypt(apiKey)
+	headers := decodeEndpointHeaders(headersRaw)
 
 	startTime := time.Now()
 	status := "invalid"
 	modelsList := []string{}
 	var errMsg string
 
-	vOk, _, vErr := s.verifyAPIKeyRaw(ctx, baseURL, apiKey)
+	vOk, _, vErr := s.verifyAPIKeyRaw(ctx, baseURL, apiKey, headers)
 	responseTime := time.Since(startTime).Milliseconds()
 
 	if vErr == nil && vOk {
 		status = "valid"
-		mList, mErr := s.listModelsRaw(ctx, baseURL, apiKey)
+		mList, mErr := s.listModelsRaw(ctx, baseURL, apiKey, headers)
 		if mErr == nil {
 			modelsList = mList
 		}
@@ -731,14 +1025,15 @@ func (s *Service) getEndpointModels(w http.ResponseWriter, r *http.Request, id s
 	defer db.Close()
 
 	var baseURL, apiKey string
-	err = db.QueryRowContext(ctx, "SELECT base_url, api_key FROM openai_endpoints WHERE id = ?", id).Scan(&baseURL, &apiKey)
+	var headersRaw sql.NullString
+	err = db.QueryRowContext(ctx, "SELECT base_url, api_key, headers FROM openai_endpoints WHERE id = ?", id).Scan(&baseURL, &apiKey, &headersRaw)
 	if err != nil {
 		response.JSON(w, http.StatusNotFound, map[string]string{"error": "端点不存在"})
 		return
 	}
 	apiKey = secure.SecureDecrypt(apiKey)
 
-	modelsList, err := s.listModelsRaw(ctx, baseURL, apiKey)
+	modelsList, err := s.listModelsRaw(ctx, baseURL, apiKey, decodeEndpointHeaders(headersRaw))
 	if err != nil {
 		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -753,6 +1048,173 @@ func (s *Service) getEndpointModels(w http.ResponseWriter, r *http.Request, id s
 		"success": true,
 		"models":  modelsList,
 	})
+}
+
+func (s *Service) toggleEndpointModel(w http.ResponseWriter, r *http.Request, id string) {
+	var req struct {
+		Model   string `json:"model"`
+		Enabled bool   `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	model := strings.TrimSpace(req.Model)
+	if model == "" {
+		response.JSON(w, http.StatusBadRequest, map[string]string{"error": "模型名称必填"})
+		return
+	}
+
+	ctx := r.Context()
+	db, err := s.open(ctx)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer db.Close()
+
+	var disabledRaw sql.NullString
+	err = db.QueryRowContext(ctx, "SELECT disabled_models FROM openai_endpoints WHERE id = ?", id).Scan(&disabledRaw)
+	if err != nil {
+		response.JSON(w, http.StatusNotFound, map[string]string{"error": "端点不存在"})
+		return
+	}
+
+	disabled := []string{}
+	if disabledRaw.Valid && disabledRaw.String != "" {
+		_ = json.Unmarshal([]byte(disabledRaw.String), &disabled)
+	}
+
+	disabledSet := make(map[string]bool, len(disabled)+1)
+	for _, m := range disabled {
+		disabledSet[m] = true
+	}
+	if req.Enabled {
+		delete(disabledSet, model)
+	} else {
+		disabledSet[model] = true
+	}
+
+	next := make([]string, 0, len(disabledSet))
+	for m := range disabledSet {
+		next = append(next, m)
+	}
+	sort.Strings(next)
+
+	disabledJSON, _ := json.Marshal(next)
+	_, err = db.ExecContext(ctx, "UPDATE openai_endpoints SET disabled_models = ? WHERE id = ?", string(disabledJSON), id)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success":        true,
+		"model":          model,
+		"enabled":        req.Enabled,
+		"disabledModels": next,
+	})
+}
+
+// subscriptionProxy 描述一个可从订阅节点导入到端点代理池的 socks/http 出口。
+type subscriptionProxy struct {
+	NodeID   string `json:"nodeId"`
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Server   string `json:"server"`
+	Port     int    `json:"port"`
+	Proxy    string `json:"proxy"`
+	Location string `json:"location,omitempty"`
+}
+
+// listSubscriptionSocksProxies 读取订阅板块中的 socks/http 协议节点，转换为可直接使用的代理 URL。
+func (s *Service) listSubscriptionSocksProxies(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	db, err := s.open(ctx)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer db.Close()
+
+	rows, err := db.QueryContext(ctx, `SELECT id, COALESCE(name,''), COALESCE(type,''), COALESCE(server,''), COALESCE(port,0), COALESCE(location,''), COALESCE(raw_encrypted,'') FROM subscription_nodes WHERE enabled = 1`)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	proxies := []subscriptionProxy{}
+	seen := make(map[string]bool)
+	for rows.Next() {
+		var item subscriptionProxy
+		var rawEnc string
+		if err := rows.Scan(&item.NodeID, &item.Name, &item.Type, &item.Server, &item.Port, &item.Location, &rawEnc); err != nil {
+			continue
+		}
+		item.Type = strings.ToLower(strings.TrimSpace(item.Type))
+		if item.Type != "socks" && item.Type != "socks5" && item.Type != "http" && item.Type != "https" {
+			continue
+		}
+		raw := secure.SecureDecrypt(rawEnc)
+		proxy, name, ok := convertNodeToProxy(item.Type, raw, item.Server, item.Port, item.Name)
+		if !ok || proxy == "" {
+			continue
+		}
+		item.Proxy = proxy
+		item.Name = name
+		if seen[proxy] {
+			continue
+		}
+		seen[proxy] = true
+		proxies = append(proxies, item)
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "proxies": proxies})
+}
+
+// convertNodeToProxy 把订阅节点 raw URI 转换为网关可用的 socks5/http 代理 URL。
+// 优先复用 raw 中的用户凭据；raw 无法解析时回退为 server:port。
+func convertNodeToProxy(nodeType, raw, server string, port int, fallbackName string) (proxy, name string, ok bool) {
+	name = strings.TrimSpace(fallbackName)
+	if name == "" {
+		name = server
+	}
+	trimmed := strings.TrimSpace(raw)
+	if strings.HasPrefix(strings.ToLower(trimmed), "socks://") ||
+		strings.HasPrefix(strings.ToLower(trimmed), "socks5://") ||
+		strings.HasPrefix(strings.ToLower(trimmed), "http://") ||
+		strings.HasPrefix(strings.ToLower(trimmed), "https://") {
+		u, err := url.Parse(trimmed)
+		if err == nil && u.Host != "" {
+			scheme := u.Scheme
+			if scheme == "socks" || scheme == "socks5" {
+				scheme = "socks5"
+			}
+			u.Scheme = scheme
+			// 去掉 fragment（节点名常放在 # 后）。
+			u.Fragment = ""
+			if fragName := parseNodeFragment(trimmed); fragName != "" {
+				name = fragName
+			}
+			return u.String(), name, true
+		}
+	}
+	// 无 raw 或解析失败：直接用 server:port 构造成 socks5。
+	if server == "" || port < 1 || port > 65535 {
+		return "", name, false
+	}
+	return fmt.Sprintf("socks5://%s", net.JoinHostPort(server, strconv.Itoa(port))), name, true
+}
+
+func parseNodeFragment(raw string) string {
+	idx := strings.LastIndex(raw, "#")
+	if idx < 0 || idx+1 >= len(raw) {
+		return ""
+	}
+	name := strings.TrimSpace(raw[idx+1:])
+	name = strings.Trim(name, "\"")
+	return name
 }
 
 func (s *Service) testEndpointChat(w http.ResponseWriter, r *http.Request, id string) {
@@ -774,7 +1236,8 @@ func (s *Service) testEndpointChat(w http.ResponseWriter, r *http.Request, id st
 	defer db.Close()
 
 	var baseURL, apiKey string
-	err = db.QueryRowContext(ctx, "SELECT base_url, api_key FROM openai_endpoints WHERE id = ?", id).Scan(&baseURL, &apiKey)
+	var headersRaw sql.NullString
+	err = db.QueryRowContext(ctx, "SELECT base_url, api_key, headers FROM openai_endpoints WHERE id = ?", id).Scan(&baseURL, &apiKey, &headersRaw)
 	if err != nil {
 		response.JSON(w, http.StatusNotFound, map[string]string{"error": "端点不存在"})
 		return
@@ -801,6 +1264,7 @@ func (s *Service) testEndpointChat(w http.ResponseWriter, r *http.Request, id st
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 	httpReq.Header.Set("Content-Type", "application/json")
+	applyCustomHeaders(httpReq, decodeEndpointHeaders(headersRaw))
 
 	resp, err := s.client.Do(httpReq)
 	if err != nil {
@@ -864,7 +1328,8 @@ func (s *Service) healthCheckModelRoute(w http.ResponseWriter, r *http.Request, 
 	defer db.Close()
 
 	var baseURL, apiKey string
-	err = db.QueryRowContext(ctx, "SELECT base_url, api_key FROM openai_endpoints WHERE id = ?", id).Scan(&baseURL, &apiKey)
+	var headersRaw sql.NullString
+	err = db.QueryRowContext(ctx, "SELECT base_url, api_key, headers FROM openai_endpoints WHERE id = ?", id).Scan(&baseURL, &apiKey, &headersRaw)
 	if err != nil {
 		response.JSON(w, http.StatusNotFound, map[string]string{"error": "端点不存在"})
 		return
@@ -879,7 +1344,7 @@ func (s *Service) healthCheckModelRoute(w http.ResponseWriter, r *http.Request, 
 	// Touch endpoint
 	_, _ = db.ExecContext(ctx, "UPDATE openai_endpoints SET last_used = ? WHERE id = ?", time.Now().Format(time.RFC3339), id)
 
-	result := s.healthCheckSingleModel(ctx, id, baseURL, apiKey, req.Model, timeoutDuration)
+	result := s.healthCheckSingleModel(ctx, id, baseURL, apiKey, req.Model, timeoutDuration, decodeEndpointHeaders(headersRaw))
 
 	// Save check to health history
 	var errMsg sql.NullString
@@ -911,12 +1376,14 @@ func (s *Service) healthCheckAllModelsRoute(w http.ResponseWriter, r *http.Reque
 	defer db.Close()
 
 	var baseURL, apiKey, modelsRaw string
-	err = db.QueryRowContext(ctx, "SELECT base_url, api_key, models FROM openai_endpoints WHERE id = ?", id).Scan(&baseURL, &apiKey, &modelsRaw)
+	var headersRaw sql.NullString
+	err = db.QueryRowContext(ctx, "SELECT base_url, api_key, models, headers FROM openai_endpoints WHERE id = ?", id).Scan(&baseURL, &apiKey, &modelsRaw, &headersRaw)
 	if err != nil {
 		response.JSON(w, http.StatusNotFound, map[string]string{"error": "端点不存在"})
 		return
 	}
 	apiKey = secure.SecureDecrypt(apiKey)
+	endpointHeaders := decodeEndpointHeaders(headersRaw)
 
 	var models []string
 	if modelsRaw != "" {
@@ -946,7 +1413,7 @@ func (s *Service) healthCheckAllModelsRoute(w http.ResponseWriter, r *http.Reque
 	}
 	concurrency = min(max(concurrency, 1), healthConcurrencyMax)
 
-	summary := s.runBatchHealthCheck(ctx, id, baseURL, apiKey, models, timeoutDuration, concurrency)
+	summary := s.runBatchHealthCheck(ctx, id, baseURL, apiKey, models, timeoutDuration, concurrency, endpointHeaders)
 
 	// Save check results to db history
 	for _, result := range summary.Results {
@@ -1040,7 +1507,7 @@ func (s *Service) refreshAllEndpointsRoute(w http.ResponseWriter, r *http.Reques
 	}
 	defer db.Close()
 
-	rows, err := db.QueryContext(ctx, "SELECT id, name, base_url, api_key FROM openai_endpoints WHERE enabled = 1")
+	rows, err := db.QueryContext(ctx, "SELECT id, name, base_url, api_key, headers FROM openai_endpoints WHERE enabled = 1")
 	if err != nil {
 		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -1049,12 +1516,15 @@ func (s *Service) refreshAllEndpointsRoute(w http.ResponseWriter, r *http.Reques
 
 	type item struct {
 		id, name, url, key string
+		headers            []HeaderItem
 	}
 	items := []item{}
 	for rows.Next() {
 		var it item
-		if err := rows.Scan(&it.id, &it.name, &it.url, &it.key); err == nil {
+		var headersRaw sql.NullString
+		if err := rows.Scan(&it.id, &it.name, &it.url, &it.key, &headersRaw); err == nil {
 			it.key = secure.SecureDecrypt(it.key)
+			it.headers = decodeEndpointHeaders(headersRaw)
 			items = append(items, it)
 		}
 	}
@@ -1071,10 +1541,10 @@ func (s *Service) refreshAllEndpointsRoute(w http.ResponseWriter, r *http.Reques
 			modelsList := []string{}
 			var errStr string
 
-			vOk, _, err := s.verifyAPIKeyRaw(ctx, it.url, it.key)
+			vOk, _, err := s.verifyAPIKeyRaw(ctx, it.url, it.key, it.headers)
 			if err == nil && vOk {
 				status = "valid"
-				mList, mErr := s.listModelsRaw(ctx, it.url, it.key)
+				mList, mErr := s.listModelsRaw(ctx, it.url, it.key, it.headers)
 				if mErr == nil {
 					modelsList = mList
 				}
@@ -1129,7 +1599,7 @@ func (s *Service) healthCheckAllRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
-	rows, err := db.QueryContext(ctx, "SELECT id, name, base_url, api_key, models FROM openai_endpoints WHERE enabled = 1")
+	rows, err := db.QueryContext(ctx, "SELECT id, name, base_url, api_key, models, headers FROM openai_endpoints WHERE enabled = 1")
 	if err != nil {
 		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -1138,12 +1608,15 @@ func (s *Service) healthCheckAllRoute(w http.ResponseWriter, r *http.Request) {
 
 	type item struct {
 		id, name, url, key, modelsRaw string
+		headers                       []HeaderItem
 	}
 	items := []item{}
 	for rows.Next() {
 		var it item
-		if err := rows.Scan(&it.id, &it.name, &it.url, &it.key, &it.modelsRaw); err == nil {
+		var headersRaw sql.NullString
+		if err := rows.Scan(&it.id, &it.name, &it.url, &it.key, &it.modelsRaw, &headersRaw); err == nil {
 			it.key = secure.SecureDecrypt(it.key)
+			it.headers = decodeEndpointHeaders(headersRaw)
 			items = append(items, it)
 		}
 	}
@@ -1186,7 +1659,7 @@ func (s *Service) healthCheckAllRoute(w http.ResponseWriter, r *http.Request) {
 				}
 				defer func() { <-sem }()
 
-				result := s.healthCheckSingleModel(ctx, target.id, target.url, target.key, model, timeoutDuration)
+				result := s.healthCheckSingleModel(ctx, target.id, target.url, target.key, model, timeoutDuration, target.headers)
 				resultsMu.Lock()
 				resultsByEndpoint[target.id] = append(resultsByEndpoint[target.id], result)
 				resultsMu.Unlock()
@@ -1252,7 +1725,7 @@ func (s *Service) exportEndpointsRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
-	rows, err := db.QueryContext(ctx, "SELECT id, name, base_url, api_key, status, enabled, models, created_at, last_used, last_checked FROM openai_endpoints")
+	rows, err := db.QueryContext(ctx, "SELECT id, name, base_url, api_key, headers, disabled_models, proxy_pool, auto_switch, status, enabled, models, created_at, last_used, last_checked FROM openai_endpoints")
 	if err != nil {
 		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -1262,11 +1735,11 @@ func (s *Service) exportEndpointsRoute(w http.ResponseWriter, r *http.Request) {
 	endpoints := []Endpoint{}
 	for rows.Next() {
 		var ep Endpoint
-		var modelsRaw sql.NullString
+		var headersRaw, modelsRaw, disabledRaw, proxyRaw sql.NullString
 		var created, used, checked sql.NullString
-		var enabledInt int
+		var enabledInt, autoSwitchInt int
 
-		err := rows.Scan(&ep.ID, &ep.Name, &ep.BaseURL, &ep.APIKey, &ep.Status, &enabledInt, &modelsRaw, &created, &used, &checked)
+		err := rows.Scan(&ep.ID, &ep.Name, &ep.BaseURL, &ep.APIKey, &headersRaw, &disabledRaw, &proxyRaw, &autoSwitchInt, &ep.Status, &enabledInt, &modelsRaw, &created, &used, &checked)
 		if err != nil {
 			response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -1274,6 +1747,7 @@ func (s *Service) exportEndpointsRoute(w http.ResponseWriter, r *http.Request) {
 
 		ep.APIKey = secure.SecureDecrypt(ep.APIKey)
 		ep.Enabled = enabledInt == 1
+		ep.AutoSwitch = autoSwitchInt == 1
 		ep.CreatedAt = created.String
 		if used.Valid {
 			v := used.String
@@ -1287,6 +1761,18 @@ func (s *Service) exportEndpointsRoute(w http.ResponseWriter, r *http.Request) {
 		ep.Models = []string{}
 		if modelsRaw.Valid && modelsRaw.String != "" {
 			_ = json.Unmarshal([]byte(modelsRaw.String), &ep.Models)
+		}
+		ep.Headers = []HeaderItem{}
+		if headersRaw.Valid && headersRaw.String != "" {
+			_ = json.Unmarshal([]byte(headersRaw.String), &ep.Headers)
+		}
+		ep.DisabledModels = []string{}
+		if disabledRaw.Valid && disabledRaw.String != "" {
+			_ = json.Unmarshal([]byte(disabledRaw.String), &ep.DisabledModels)
+		}
+		ep.ProxyPool = []string{}
+		if proxyRaw.Valid && proxyRaw.String != "" {
+			_ = json.Unmarshal([]byte(proxyRaw.String), &ep.ProxyPool)
 		}
 		endpoints = append(endpoints, ep)
 	}
@@ -1373,15 +1859,28 @@ func (s *Service) importEndpointsRoute(w http.ResponseWriter, r *http.Request) {
 			modelsJSON = []byte("[]")
 		}
 
-		encryptedKey, err := secure.SecureEncrypt(ep.APIKey)
-		if err != nil {
+		var encryptedKey, err_enc = secure.SecureEncrypt(ep.APIKey)
+		if err_enc != nil {
 			skippedCount++
 			continue
 		}
+		headersJSON, _ := json.Marshal([]HeaderItem{})
+		if len(ep.Headers) > 0 {
+			headersJSON, _ = json.Marshal(cleanHeaders(ep.Headers))
+		}
+		disabledJSON, _ := json.Marshal([]string{})
+		if len(ep.DisabledModels) > 0 {
+			disabledJSON, _ = json.Marshal(ep.DisabledModels)
+		}
+		proxyJSON, _ := json.Marshal([]string{})
+		if len(ep.ProxyPool) > 0 {
+			proxyJSON, _ = json.Marshal(cleanProxyPool(ep.ProxyPool))
+		}
+		autoSwitchInt := boolToInt(ep.AutoSwitch)
 		_, err = tx.ExecContext(ctx, `
-			INSERT OR REPLACE INTO openai_endpoints (id, name, base_url, api_key, status, enabled, models, created_at, last_used, last_checked)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			id, ep.Name, ep.BaseURL, encryptedKey, status, enabledInt, string(modelsJSON), createdAt, ep.LastUsed, ep.LastChecked)
+			INSERT OR REPLACE INTO openai_endpoints (id, name, base_url, api_key, headers, disabled_models, proxy_pool, auto_switch, status, enabled, models, created_at, last_used, last_checked)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, ep.Name, ep.BaseURL, encryptedKey, string(headersJSON), string(disabledJSON), string(proxyJSON), autoSwitchInt, status, enabledInt, string(modelsJSON), createdAt, ep.LastUsed, ep.LastChecked)
 		if err != nil {
 			response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -1436,41 +1935,69 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	if targetEndpointID != "" {
 		var ep Endpoint
-		var modelsRaw sql.NullString
-		var enabledInt int
+		var headersRaw, modelsRaw, disabledRaw, proxyRaw sql.NullString
+		var enabledInt, autoSwitchInt int
 		err := db.QueryRowContext(ctx, `
-			SELECT id, name, base_url, api_key, status, enabled, models
+			SELECT id, name, base_url, api_key, headers, disabled_models, proxy_pool, auto_switch, status, enabled, models
 			FROM openai_endpoints WHERE id = ? AND enabled = 1`, targetEndpointID).
-			Scan(&ep.ID, &ep.Name, &ep.BaseURL, &ep.APIKey, &ep.Status, &enabledInt, &modelsRaw)
+			Scan(&ep.ID, &ep.Name, &ep.BaseURL, &ep.APIKey, &headersRaw, &disabledRaw, &proxyRaw, &autoSwitchInt, &ep.Status, &enabledInt, &modelsRaw)
 
 		if err == nil {
 			ep.APIKey = secure.SecureDecrypt(ep.APIKey)
 			ep.Enabled = enabledInt == 1
+			ep.AutoSwitch = autoSwitchInt == 1
 			if modelsRaw.Valid {
 				_ = json.Unmarshal([]byte(modelsRaw.String), &ep.Models)
 			}
-			selected = ep
-			found = true
+			ep.Headers = []HeaderItem{}
+			if headersRaw.Valid && headersRaw.String != "" {
+				_ = json.Unmarshal([]byte(headersRaw.String), &ep.Headers)
+			}
+			ep.DisabledModels = []string{}
+			if disabledRaw.Valid && disabledRaw.String != "" {
+				_ = json.Unmarshal([]byte(disabledRaw.String), &ep.DisabledModels)
+			}
+			ep.ProxyPool = []string{}
+			if proxyRaw.Valid && proxyRaw.String != "" {
+				_ = json.Unmarshal([]byte(proxyRaw.String), &ep.ProxyPool)
+			}
+			if !isModelDisabled(ep.DisabledModels, model) {
+				selected = ep
+				found = true
+			}
 		}
 	}
 
 	if !found {
 		// Enabled is the administrator's routing decision; status is the latest verification result.
 		rows, err := db.QueryContext(ctx, `
-			SELECT id, name, base_url, api_key, status, enabled, models
+			SELECT id, name, base_url, api_key, headers, disabled_models, proxy_pool, auto_switch, status, enabled, models
 			FROM openai_endpoints WHERE enabled = 1`)
 		if err == nil {
 			defer rows.Close()
 			endpoints := []Endpoint{}
 			for rows.Next() {
 				var ep Endpoint
-				var modelsRaw sql.NullString
-				var enabledInt int
-				if errScan := rows.Scan(&ep.ID, &ep.Name, &ep.BaseURL, &ep.APIKey, &ep.Status, &enabledInt, &modelsRaw); errScan == nil {
+				var headersRaw, modelsRaw, disabledRaw, proxyRaw sql.NullString
+				var enabledInt, autoSwitchInt int
+				if errScan := rows.Scan(&ep.ID, &ep.Name, &ep.BaseURL, &ep.APIKey, &headersRaw, &disabledRaw, &proxyRaw, &autoSwitchInt, &ep.Status, &enabledInt, &modelsRaw); errScan == nil {
 					ep.APIKey = secure.SecureDecrypt(ep.APIKey)
 					ep.Enabled = enabledInt == 1
+					ep.AutoSwitch = autoSwitchInt == 1
 					if modelsRaw.Valid {
 						_ = json.Unmarshal([]byte(modelsRaw.String), &ep.Models)
+					}
+					ep.Headers = []HeaderItem{}
+					if headersRaw.Valid && headersRaw.String != "" {
+						_ = json.Unmarshal([]byte(headersRaw.String), &ep.Headers)
+					}
+					ep.DisabledModels = []string{}
+					if disabledRaw.Valid && disabledRaw.String != "" {
+						_ = json.Unmarshal([]byte(disabledRaw.String), &ep.DisabledModels)
+					}
+					ep.ProxyPool = []string{}
+					if proxyRaw.Valid && proxyRaw.String != "" {
+						_ = json.Unmarshal([]byte(proxyRaw.String), &ep.ProxyPool)
 					}
 					endpoints = append(endpoints, ep)
 				}
@@ -1479,7 +2006,7 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 			eligible := []Endpoint{}
 			for _, ep := range endpoints {
 				for _, m := range ep.Models {
-					if m == model {
+					if m == model && !isModelDisabled(ep.DisabledModels, model) {
 						eligible = append(eligible, ep)
 						break
 					}
@@ -1488,7 +2015,12 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 			targets := eligible
 			if len(targets) == 0 {
-				targets = endpoints
+				// 兜底：模型列表尚未刷新时仍尝试已启用端点，但跳过已禁用该模型的端点。
+				for _, ep := range endpoints {
+					if !isModelDisabled(ep.DisabledModels, model) {
+						targets = append(targets, ep)
+					}
+				}
 			}
 
 			if len(targets) > 0 {
@@ -1560,26 +2092,75 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	upstreamBodyBytes, _ := json.Marshal(parsedBody)
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", fullURL, bytes.NewReader(upstreamBodyBytes))
-	if err != nil {
-		s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, http.StatusInternalServerError, time.Since(requestStarted).Milliseconds(), 0, 0, 0)
-		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-
-	httpReq.Header.Set("Authorization", "Bearer "+selected.APIKey)
-	httpReq.Header.Set("Content-Type", "application/json")
-	if stream {
-		httpReq.Header.Set("Accept", "text/event-stream")
-	} else {
-		httpReq.Header.Set("Accept", "application/json")
-	}
-
 	startTime := time.Now()
-	resp, err := s.client.Do(httpReq)
-	if err != nil {
+
+	// 代理池选择 + 限流自动切换：最多尝试 len(pool) 个代理，池为空时只尝试一次。
+	maxProxyAttempts := len(selected.ProxyPool)
+	if maxProxyAttempts == 0 {
+		maxProxyAttempts = 1
+	}
+	// 未开启自动切换时，即使有代理池也只试一次（仍按池轮换，但不因限流重试）。
+	if !selected.AutoSwitch {
+		maxProxyAttempts = 1
+	}
+
+	var resp *http.Response
+	var lastErr error
+	var attempt int
+
+	for attempt = 0; attempt < maxProxyAttempts; attempt++ {
+		client, currentProxy := s.clientForEndpoint(selected.ID, selected.ProxyPool, attempt == 0)
+
+		httpReq, err := http.NewRequestWithContext(ctx, "POST", fullURL, bytes.NewReader(upstreamBodyBytes))
+		if err != nil {
+			s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, http.StatusInternalServerError, time.Since(requestStarted).Milliseconds(), 0, 0, 0)
+			response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		httpReq.Header.Set("Authorization", "Bearer "+selected.APIKey)
+		httpReq.Header.Set("Content-Type", "application/json")
+		if stream {
+			httpReq.Header.Set("Accept", "text/event-stream")
+		} else {
+			httpReq.Header.Set("Accept", "application/json")
+		}
+		applyCustomHeaders(httpReq, selected.Headers)
+
+		resp, lastErr = client.Do(httpReq)
+		if lastErr != nil {
+			// 连接失败（例如该代理不可用）：标记失败，若有池则切下一个继续。
+			s.markProxyFailed(selected.ID, currentProxy)
+			if attempt+1 < maxProxyAttempts {
+				continue
+			}
+			break
+		}
+
+		// 非流式：读取正文判断限流，失败时在循环内重试。
+		if !stream && selected.AutoSwitch && attempt+1 < maxProxyAttempts {
+			bodyBytesRead, readErr := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if readErr == nil && isRateLimitResponse(resp, bodyBytesRead) {
+				s.markProxyFailed(selected.ID, currentProxy)
+				continue
+			}
+			// 不是限流：重建带正文的响应继续处理。
+			resp.Body = io.NopCloser(bytes.NewReader(bodyBytesRead))
+			break
+		}
+
+		// 流式：仅按状态码判断，限流时切换代理重试一次。
+		if stream && selected.AutoSwitch && attempt+1 < maxProxyAttempts && isRateLimitResponse(resp, nil) {
+			resp.Body.Close()
+			s.markProxyFailed(selected.ID, currentProxy)
+			continue
+		}
+		break
+	}
+
+	if lastErr != nil && resp == nil {
 		s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, http.StatusBadGateway, time.Since(startTime).Milliseconds(), 0, 0, 0)
-		response.JSON(w, http.StatusBadGateway, map[string]interface{}{"error": map[string]string{"message": err.Error(), "type": "proxy_error"}})
+		response.JSON(w, http.StatusBadGateway, map[string]interface{}{"error": map[string]string{"message": lastErr.Error(), "type": "proxy_error"}})
 		return
 	}
 	defer resp.Body.Close()
@@ -1664,7 +2245,7 @@ func (s *Service) GetModelsList(ctx context.Context) ([]map[string]interface{}, 
 	}
 	defer db.Close()
 
-	rows, err := db.QueryContext(ctx, "SELECT name, enabled, status, models FROM openai_endpoints WHERE enabled = 1")
+	rows, err := db.QueryContext(ctx, "SELECT name, enabled, status, models, disabled_models FROM openai_endpoints WHERE enabled = 1")
 	if err != nil {
 		return nil, err
 	}
@@ -1674,12 +2255,20 @@ func (s *Service) GetModelsList(ctx context.Context) ([]map[string]interface{}, 
 	for rows.Next() {
 		var name, status, modelsRaw string
 		var enabledInt int
-		if err := rows.Scan(&name, &enabledInt, &status, &modelsRaw); err == nil {
+		var disabledRaw sql.NullString
+		if err := rows.Scan(&name, &enabledInt, &status, &modelsRaw, &disabledRaw); err == nil {
 			var models []string
 			if modelsRaw != "" {
 				_ = json.Unmarshal([]byte(modelsRaw), &models)
 			}
+			disabled := []string{}
+			if disabledRaw.Valid && disabledRaw.String != "" {
+				_ = json.Unmarshal([]byte(disabledRaw.String), &disabled)
+			}
 			for _, mID := range models {
+				if isModelDisabled(disabled, mID) {
+					continue
+				}
 				if _, ok := modelMap[mID]; !ok {
 					modelMap[mID] = map[string]interface{}{
 						"id":       mID,
@@ -1748,13 +2337,16 @@ func (s *Service) normalizeBaseURL(u string) string {
 	return u
 }
 
-func (s *Service) verifyAPIKeyRaw(ctx context.Context, u string, key string) (bool, int, error) {
+func (s *Service) verifyAPIKeyRaw(ctx context.Context, u string, key string, headers ...[]HeaderItem) (bool, int, error) {
 	reqURL := fmt.Sprintf("%s/models", strings.TrimSuffix(u, "/"))
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
 		return false, 0, err
 	}
 	req.Header.Set("Authorization", "Bearer "+key)
+	if len(headers) > 0 {
+		applyCustomHeaders(req, headers[0])
+	}
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -1786,13 +2378,16 @@ func (s *Service) verifyAPIKeyRaw(ctx context.Context, u string, key string) (bo
 	return true, 0, nil
 }
 
-func (s *Service) listModelsRaw(ctx context.Context, u string, key string) ([]string, error) {
+func (s *Service) listModelsRaw(ctx context.Context, u string, key string, headers ...[]HeaderItem) ([]string, error) {
 	reqURL := fmt.Sprintf("%s/models", strings.TrimSuffix(u, "/"))
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+key)
+	if len(headers) > 0 {
+		applyCustomHeaders(req, headers[0])
+	}
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -1895,7 +2490,7 @@ func parseModelIDsFromRaw(raw string) []string {
 	return nil
 }
 
-func (s *Service) healthCheckSingleModel(ctx context.Context, endpointID, baseURL, apiKey, model string, timeout time.Duration) HealthRecord {
+func (s *Service) healthCheckSingleModel(ctx context.Context, endpointID, baseURL, apiKey, model string, timeout time.Duration, headers ...[]HeaderItem) HealthRecord {
 	startTime := time.Now()
 	record := HealthRecord{
 		Model:     model,
@@ -1923,6 +2518,9 @@ func (s *Service) healthCheckSingleModel(ctx context.Context, endpointID, baseUR
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json, text/event-stream")
+	if len(headers) > 0 {
+		applyCustomHeaders(httpReq, headers[0])
+	}
 
 	resp, err := s.client.Do(httpReq)
 	if err != nil {
@@ -2034,7 +2632,7 @@ func extractHealthCheckOutputValue(value interface{}) string {
 	return ""
 }
 
-func (s *Service) runBatchHealthCheck(ctx context.Context, endpointID, baseURL, apiKey string, models []string, timeout time.Duration, concurrency int) HealthSummary {
+func (s *Service) runBatchHealthCheck(ctx context.Context, endpointID, baseURL, apiKey string, models []string, timeout time.Duration, concurrency int, headers ...[]HeaderItem) HealthSummary {
 	var mu sync.Mutex
 	results := []HealthRecord{}
 
@@ -2048,7 +2646,7 @@ func (s *Service) runBatchHealthCheck(ctx context.Context, endpointID, baseURL, 
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			res := s.healthCheckSingleModel(ctx, endpointID, baseURL, apiKey, m, timeout)
+			res := s.healthCheckSingleModel(ctx, endpointID, baseURL, apiKey, m, timeout, headers...)
 
 			mu.Lock()
 			results = append(results, res)

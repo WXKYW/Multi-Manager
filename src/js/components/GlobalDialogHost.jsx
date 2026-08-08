@@ -66,7 +66,7 @@ const getDeleteResourceType = (options = {}) => {
 const getDeleteDescription = (options, resourceName, resourceType) => {
   const explicitMessage = String(options?.message || '').trim();
   if (explicitMessage) return explicitMessage;
-  return `此操作无法撤销。删除后，将永久移除 ${resourceType}“${resourceName}”。`;
+  return `此操作无法撤销，将永久移除 ${resourceType}“${resourceName}”。`;
 };
 
 const dialogWidthClass = '!w-[min(34rem,calc(100vw-2rem))] !max-w-[min(34rem,calc(100vw-2rem))]';
@@ -126,7 +126,7 @@ function DeleteResourceDialog({ options, promptValue, setPromptValue, onCancel }
 
             <div className="space-y-2">
               <div className="text-sm text-kumo-default">
-                请输入下方内容以确认删除：
+                输入以下内容确认删除：
               </div>
               <ClipboardText
                 size="sm"

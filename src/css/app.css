@@ -31,6 +31,11 @@ html {
   --app-terminal-fg: var(--color-kumo-neutral-50, #f8f8f8);
   --app-main-bg: color-mix(in oklab, var(--color-kumo-canvas) 92%, #dbeafe 8%);
   --app-main-surface: color-mix(in oklab, var(--color-kumo-base) 92%, var(--color-kumo-canvas) 8%);
+  --app-header-height: 58px;
+  --app-canvas-gutter-x: 12px;
+  --app-canvas-gutter-top: 12px;
+  --app-canvas-gutter-bottom: 12px;
+  --app-tab-gutter-x: 12px;
 }
 
 :root[data-mode='light'] {
@@ -1358,9 +1363,7 @@ th > button[aria-label='Resize column'] > span {
 }
 
 .dns-table-frame {
-  min-height: 0;
   position: relative;
-  overflow: hidden;
   border-radius: 0.5rem;
   background-color: var(--color-kumo-base);
 }
@@ -1377,11 +1380,8 @@ th > button[aria-label='Resize column'] > span {
 
 .dns-table-scroll {
   flex: 1 1 auto;
-  min-height: 0;
   position: relative;
   z-index: 0;
-  height: 100%;
-  overflow: auto;
 }
 
 .dns-toolbar-frame {
@@ -1403,7 +1403,7 @@ th > button[aria-label='Resize column'] > span {
 @container (min-width: 980px) {
   .dns-split {
     grid-template-columns: clamp(292px, 36%, 396px) minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr);
+    grid-template-rows: auto;
   }
 }
 

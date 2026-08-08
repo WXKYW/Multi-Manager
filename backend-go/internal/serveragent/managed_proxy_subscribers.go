@@ -49,6 +49,14 @@ func bindManagedNodeSubscribers(ctx context.Context, db *sql.DB, nodeID, protoco
 			if credential.Hysteria2Password != "" {
 				users = append(users, map[string]interface{}{"name": credential.SubscriptionID, "password": credential.Hysteria2Password})
 			}
+		case "socks", "http":
+			// Plaintext proxy inbounds authenticate by username/password.
+			// Reuse the subscription VLESS UUID as the username and the
+			// Hysteria2 password as the password so credentials stay unique
+			// per subscription without adding new columns.
+			if credential.VLESSUUID != "" && credential.Hysteria2Password != "" {
+				users = append(users, map[string]interface{}{"username": credential.VLESSUUID, "password": credential.Hysteria2Password})
+			}
 		default:
 			return "", 0, fmt.Errorf("unsupported managed node protocol %q", protocol)
 		}
@@ -56,7 +64,14 @@ func bindManagedNodeSubscribers(ctx context.Context, db *sql.DB, nodeID, protoco
 	inbound["users"] = users
 	userNames := make([]interface{}, 0, len(credentials))
 	for _, credential := range credentials {
-		userNames = append(userNames, credential.SubscriptionID)
+		switch protocol {
+		case "socks", "http":
+			if credential.VLESSUUID != "" {
+				userNames = append(userNames, credential.VLESSUUID)
+			}
+		default:
+			userNames = append(userNames, credential.SubscriptionID)
+		}
 	}
 	experimental, _ := root["experimental"].(map[string]interface{})
 	if experimental == nil {

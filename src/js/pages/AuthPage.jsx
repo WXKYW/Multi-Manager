@@ -474,12 +474,12 @@ function AuthPage() {
     setSetupError('');
 
     if (!newPassword || newPassword.length < 6) {
-      setSetupError('密码长度至少 6 位。');
+      setSetupError('密码长度至少 6 位');
       return;
     }
 
     if (newPassword !== confirmPassword) {
-      setSetupError('两次输入的密码不一致。');
+      setSetupError('两次输入的密码不一致');
       return;
     }
 
@@ -493,14 +493,14 @@ function AuthPage() {
       const result = await response.json();
 
       if (!result.success) {
-        setSetupError(result.error || '设置密码失败。');
+        setSetupError(result.error || '设置密码失败');
         return;
       }
 
       setLoginPassword(newPassword);
       await verifyPassword(false);
     } catch (error) {
-      setSetupError('设置失败，请检查网络连接。');
+      setSetupError('设置失败，请检查网络');
     } finally {
       setSetupLoading(false);
     }

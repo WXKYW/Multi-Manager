@@ -24,8 +24,11 @@ import {
   ChartBoundaryBox,
   ChartWarmupSkeleton,
   AppCard,
+  ResponsiveSearchInput,
   ScrollableTable,
   SectionCard,
+  stickyTabsBaseClass,
+  TabBarOverflowActions,
 } from '../components/ui/AppPrimitives.jsx';
 import useTableResize from '../composables/useTableResize.js';
 import { formatUptime, formatFileSize, formatDateTime, maskAddress, parseSpeed } from '../modules/utils.js';
@@ -3266,7 +3269,7 @@ function ServerPage() {
   };
 
   const deleteNetworkTarget = async (id) => {
-    if (!await dialog.confirm({ title: '确认删除', message: '确认要删除此网络拨测目标吗？' })) {
+    if (!await dialog.deleteResource({ title: '确认删除', message: '确认要删除此网络拨测目标吗？' })) {
       return;
     }
     try {
@@ -5560,19 +5563,19 @@ function ServerPage() {
       },
       'image.prune': {
         title: '清理未使用镜像',
-        message: '确定要清理该主机上的未使用 Docker 镜像吗？未被容器引用的镜像会被删除。',
+        message: '确定要清理该主机上未被容器引用的 Docker 镜像吗？',
         confirmText: '清理镜像',
         variant: 'danger',
       },
       'network.prune': {
         title: '清理未使用网络',
-        message: '确定要清理该主机上的未使用 Docker 网络吗？未被容器使用的自定义网络会被删除。',
+        message: '确定要清理该主机上未被容器使用的自定义 Docker 网络吗？',
         confirmText: '清理网络',
         variant: 'danger',
       },
       'volume.prune': {
         title: '清理未使用存储卷',
-        message: '确定要清理该主机上的未使用 Docker 存储卷吗？未被容器使用的数据卷会被删除。',
+        message: '确定要清理该主机上未被容器使用的 Docker 数据卷吗？',
         confirmText: '清理存储卷',
         variant: 'danger',
       },
@@ -6059,7 +6062,7 @@ function ServerPage() {
       { label: '主机', value: hosts.length, className: 'text-kumo-subtle' },
     ].slice(0, 4);
     return (
-      <div className="flex min-w-0 flex-col gap-3 xl:sticky xl:top-0 xl:self-start">
+      <div className="flex min-w-0 flex-col gap-3 xl:sticky xl:top-[70px] xl:max-h-[calc(100vh-82px)] xl:overflow-y-auto xl:overscroll-contain xl:self-start">
         <LayerCard className="overflow-hidden p-0">
           <LayerCard.Secondary className="flex min-h-[52px] items-center justify-between gap-2 px-3 py-3.5">
             <span className="inline-flex min-w-0 items-center gap-2 text-xs font-bold text-kumo-strong">
@@ -7666,7 +7669,7 @@ function ServerPage() {
         onClose={() => setCompactColumnMenu(prev => ({ ...prev, open: false }))}
       />
       {/* 顶部标签导航 */}
-      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-kumo-line pb-3 [&>*]:min-w-0">
+      <div className={`${stickyTabsBaseClass} justify-between gap-2 border-b border-kumo-line [&>*]:min-w-0`}>
         <Tabs
           {...MODULE_TABS_PROPS}
           value={serverCurrentTab}
@@ -7692,73 +7695,57 @@ function ServerPage() {
         />
 
         {/* 右侧快速连接 */}
-        <div className="flex shrink-0 items-center justify-end gap-2">
-          {serverCurrentTab === 'list' && (
-            <div className="flex items-center justify-end gap-2">
-              <Button size="sm"
-                variant="secondary"
-                icon={<Upload className="w-3.5 h-3.5" />}
-                onClick={openUpgradeModal}
-                title="升级所有在线 Agent"
-                className="hidden md:inline-flex"
-              >
-                升级 Agent
-              </Button>
-              <Button size="sm"
-                variant="secondary"
-                icon={<Shield className="w-3.5 h-3.5" />}
-                onClick={openBatchAgentModal}
-                title="批量部署 Agent"
-                className="hidden md:inline-flex"
-              >
-                批量部署
-              </Button>
-              <Button
-                shape="square" size="sm"
-                variant="secondary"
-                icon={<RefreshCw className="w-3.5 h-3.5" />}
-                onClick={refreshServerLocationsAndList}
-                loading={serverLoading}
-                title="刷新列表和地理位置"
-                aria-label="刷新列表和地理位置"
-              />
-              <Button shape="square" size="sm"
-                variant="secondary"
-                icon={<Upload className="w-3.5 h-3.5" />}
-                onClick={exportServers}
-                title="导出主机配置"
-                className="hidden md:inline-flex"
-              >
-                {/* 导出 */}
-              </Button>
-              <Button shape="square" size="sm"
-                variant="secondary"
-                icon={<Download className="w-3.5 h-3.5" />}
-                onClick={openImportServerModal}
-                title="导入主机配置"
-                className="hidden md:inline-flex"
-              >
-                {/* 导入 */}
-              </Button>
-              {/* <Button size="sm"
-                variant="secondary"
-                icon={<RotateCw className="w-3.5 h-3.5" />}
-                onClick={probeAllServers}
-                title="触发所有主机探测"
-                className="hidden sm:inline-flex"
-              >
-                探测
-              </Button> */}
-              <Button shape="square" size="sm"
-                variant="primary"
-                icon={<Plus className="w-3.5 h-3.5" />}
-                onClick={openAddServerModal}
-              >
-                {/* 新增主机 */}
-              </Button>
-            </div>
-          )}
-        </div>
+        <TabBarOverflowActions
+          items={
+            serverCurrentTab === 'list'
+              ? [
+                  {
+                    key: 'upgrade-agent',
+                    label: '升级 Agent',
+                    title: '升级所有在线 Agent',
+                    icon: <Upload className="w-3.5 h-3.5" />,
+                    onClick: openUpgradeModal,
+                  },
+                  {
+                    key: 'batch-deploy',
+                    label: '批量部署',
+                    title: '批量部署 Agent',
+                    icon: <Shield className="w-3.5 h-3.5" />,
+                    onClick: openBatchAgentModal,
+                  },
+                  {
+                    key: 'refresh',
+                    label: '刷新列表',
+                    title: '刷新列表和地理位置',
+                    icon: <RefreshCw className="w-3.5 h-3.5" />,
+                    onClick: refreshServerLocationsAndList,
+                    loading: serverLoading,
+                  },
+                  {
+                    key: 'export',
+                    label: '导出配置',
+                    title: '导出主机配置',
+                    icon: <Upload className="w-3.5 h-3.5" />,
+                    onClick: exportServers,
+                  },
+                  {
+                    key: 'import',
+                    label: '导入配置',
+                    title: '导入主机配置',
+                    icon: <Download className="w-3.5 h-3.5" />,
+                    onClick: openImportServerModal,
+                  },
+                  {
+                    key: 'add',
+                    label: '新增主机',
+                    icon: <Plus className="w-3.5 h-3.5" />,
+                    onClick: openAddServerModal,
+                    variant: 'primary',
+                  },
+                ]
+              : []
+          }
+        />
       </div>
 
       {serverCurrentTab === 'status-pages' && (
@@ -7949,17 +7936,13 @@ function ServerPage() {
               />
             </div>
 
-            <div className="relative w-full lg:w-72">
-              <Search className="pointer-events-none absolute left-3 top-1/2 z-1 h-3.5 w-3.5 -translate-y-1/2 text-kumo-subtle" />
-              <Input
-                type="text"
-                placeholder="搜索主机名称、IP 或标签..."
-                aria-label="搜索主机" size="sm"
-                value={serverSearchText}
-                onChange={e => setServerSearchText(e.target.value)}
-                className="w-full pl-9"
-              />
-            </div>
+            <ResponsiveSearchInput
+              value={serverSearchText}
+              onChange={e => setServerSearchText(e.target.value)}
+              placeholder="搜索主机名称、IP 或标签..."
+              ariaLabel="搜索主机"
+              className="lg:w-72"
+            />
           </div>
 
           {/* 列表渲染 */}
@@ -10305,7 +10288,7 @@ function ServerPage() {
                   <div className="min-w-0">
                     <div className="text-xs font-semibold leading-5 text-kumo-strong">Agent 下载目录</div>
                     <div className="mt-0.5 text-[11px] leading-4 text-kumo-subtle">
-                      留空使用主控端内置 /agent 目录；自定义时填写目录 URL，不填写文件名。
+                      留空使用主控端内置 /agent 目录；自定义时填目录 URL，不填文件名。
                     </div>
                   </div>
                   <Input
@@ -11299,7 +11282,6 @@ function ServerPage() {
                   <div className="rounded-lg border border-kumo-line bg-kumo-recessed/35 p-3 text-[11px] leading-relaxed text-kumo-subtle">
                     Agent 模式会创建或复用主机记录，并生成目标机器上的安装命令。
                   </div>
-
                   {quickDeployResult && (
                     <div className="flex flex-col gap-3">
                       <Select

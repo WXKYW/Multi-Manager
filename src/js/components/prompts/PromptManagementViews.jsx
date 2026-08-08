@@ -29,7 +29,7 @@ export function PromptCollectionsView({
         <div>
           <h2 className="text-base font-semibold text-kumo-strong">集合</h2>
           <p className="mt-1 text-xs text-kumo-subtle">
-            按用途整理提示词，集合不会改变提示词的发布地址。
+            按用途整理提示词，不影响发布地址。
           </p>
         </div>
         <Button
