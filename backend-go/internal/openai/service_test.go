@@ -656,9 +656,9 @@ func TestEndpointCustomHeadersForwardedToUpstream(t *testing.T) {
 		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/chat/completions") {
 			headers := map[string]string{
 				"X-Custom-Header": r.Header.Get("X-Custom-Header"),
-				"CF-Access-Key":    r.Header.Get("CF-Access-Key"),
-				"HTTP-Referer":     r.Header.Get("HTTP-Referer"),
-				"User-Agent":       r.Header.Get("User-Agent"),
+				"CF-Access-Key":   r.Header.Get("CF-Access-Key"),
+				"HTTP-Referer":    r.Header.Get("HTTP-Referer"),
+				"User-Agent":      r.Header.Get("User-Agent"),
 			}
 			gotHeaders <- headers
 			w.Header().Set("Content-Type", "application/json")
@@ -1001,5 +1001,34 @@ func TestProxyPoolRotationAndAutoSwitch(t *testing.T) {
 	}
 	if atomic.LoadInt32(&proxy2Hits) < 1 {
 		t.Fatalf("proxy2 was never used, expected retry to hit it")
+	}
+}
+
+func TestWeightedProxyPick(t *testing.T) {
+	// 快代理应被更频繁选中，但慢代理仍有机会出现（不独占）。
+	fast, slow := 400, 3000
+	candidates := []proxyCandidate{
+		{idx: 0, ttfb: int64(fast), known: true},
+		{idx: 1, ttfb: int64(slow), known: true},
+	}
+	fastCount, slowCount := 0, 0
+	trials := 20000
+	for i := 0; i < trials; i++ {
+		if weightedProxyPick(candidates) == 0 {
+			fastCount++
+		} else {
+			slowCount++
+		}
+	}
+	// 快代理权重明显更高（400 vs 3000 毫秒 => 权重 14 vs 1），应占绝大多数。
+	if fastCount <= slowCount {
+		t.Fatalf("expected fast proxy to dominate, fast=%d slow=%d", fastCount, slowCount)
+	}
+	if slowCount == 0 {
+		t.Fatalf("expected slow proxy to still get occasional pick, slow=%d", slowCount)
+	}
+	// 全部冷却退化的场景：单候选直接返回。
+	if weightedProxyPick([]proxyCandidate{{idx: 2, ttfb: 100, known: true}}) != 2 {
+		t.Fatalf("single candidate should be picked directly")
 	}
 }

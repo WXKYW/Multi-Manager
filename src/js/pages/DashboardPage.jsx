@@ -925,6 +925,7 @@ function DashboardPage({ onNavigate } = {}) {
         showSymbol: true,
         symbol: 'circle',
         symbolSize: 4,
+        smooth: true,
         lineStyle: { color: series.color, width: 2 },
         itemStyle: { color: series.color },
         emphasis: { focus: 'series' },

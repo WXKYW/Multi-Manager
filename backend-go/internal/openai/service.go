@@ -37,6 +37,9 @@ const (
 	healthTimeoutDefault     = 30 * time.Second
 	healthConcurrencyDefault = 4
 	healthConcurrencyMax     = 200
+	// firstTokenTimeout 是流式请求等待首个字节的上限。超时后视为该代理出网链路
+	// 不可用，网关会取消当前连接并切换下一个代理（仅在代理池+自动切换启用时生效）。
+	firstTokenTimeout = 20 * time.Second
 )
 
 // 热路径正则预编译：chat completion 每请求都会用到，避免逐请求编译。
@@ -55,23 +58,23 @@ type HeaderItem struct {
 }
 
 type Endpoint struct {
-	ID             string       `json:"id"`
-	Name           string       `json:"name"`
-	BaseURL        string       `json:"baseUrl"`
-	APIKey         string       `json:"apiKey"`
-	Notes          string       `json:"notes"`
-	Status         string       `json:"status"`
-	Enabled        bool         `json:"enabled"`
-	Models         []string     `json:"models"`
-	Headers        []HeaderItem `json:"headers,omitempty"`
-	DisabledModels []string     `json:"disabledModels,omitempty"`
-	ProxyPool      []string     `json:"proxyPool,omitempty"`
-	AutoSwitch     bool         `json:"autoSwitch"`
+	ID             string            `json:"id"`
+	Name           string            `json:"name"`
+	BaseURL        string            `json:"baseUrl"`
+	APIKey         string            `json:"apiKey"`
+	Notes          string            `json:"notes"`
+	Status         string            `json:"status"`
+	Enabled        bool              `json:"enabled"`
+	Models         []string          `json:"models"`
+	Headers        []HeaderItem      `json:"headers,omitempty"`
+	DisabledModels []string          `json:"disabledModels,omitempty"`
+	ProxyPool      []string          `json:"proxyPool,omitempty"`
+	AutoSwitch     bool              `json:"autoSwitch"`
 	ModelMappings  map[string]string `json:"modelMappings,omitempty"`
-	CreatedAt      string       `json:"createdAt"`
-	LastUsed       *string      `json:"lastUsed"`
-	LastChecked    *string      `json:"lastChecked"`
-	HealthStatus   string       `json:"healthStatus,omitempty"`
+	CreatedAt      string            `json:"createdAt"`
+	LastUsed       *string           `json:"lastUsed"`
+	LastChecked    *string           `json:"lastChecked"`
+	HealthStatus   string            `json:"healthStatus,omitempty"`
 }
 
 type HealthRecord struct {
@@ -102,13 +105,19 @@ type Service struct {
 	schemaErr  error
 
 	// proxyStateByEndpoint 记录每个端点的代理池运行时状态（当前游标、冷却中的代理）。
-	proxyMu         sync.Mutex
+	proxyMu              sync.Mutex
 	proxyStateByEndpoint map[string]*endpointProxyState
+
+	// warmupMu 保护预热 goroutine 只启动一次。
+	warmupOnce sync.Once
 }
 
 type endpointProxyState struct {
 	cursor   int
 	cooldown map[string]time.Time
+	// lastTTFB 记录每个代理最近一次请求的首字耗时（毫秒），用于择优选择延迟最低的代理。
+	// 尚未产生记录的代理按 cursor 轮询，保证首次使用可测出延迟。
+	lastTTFB map[string]int64
 }
 
 func New(cfg config.Config) *Service {
@@ -126,11 +135,11 @@ func New(cfg config.Config) *Service {
 		ExpectContinueTimeout: 1 * time.Second,
 	}
 	s := &Service{
-		cfg:                   cfg,
-		store:                 database.New(cfg),
-		client:                &http.Client{Transport: tr, Timeout: defaultTimeout},
-		apiKeys:               apikeys.New(cfg),
-		proxyStateByEndpoint:  make(map[string]*endpointProxyState),
+		cfg:                  cfg,
+		store:                database.New(cfg),
+		client:               &http.Client{Transport: tr, Timeout: defaultTimeout},
+		apiKeys:              apikeys.New(cfg),
+		proxyStateByEndpoint: make(map[string]*endpointProxyState),
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -138,6 +147,99 @@ func New(cfg config.Config) *Service {
 		db.Close()
 	}
 	return s
+}
+
+// warmupInterval 是代理池预热的保活周期。
+const warmupInterval = 10 * time.Minute
+
+// StartWarmup 在后台周期性地对启用了代理池的端点发起轻量 /models 请求，
+// 预建立 SOCKS5/TLS 连接并复用连接池，避免首次请求承受完整的冷启动握手。
+// 进程结束前保持运行；端点或代理池为空时自动跳过。
+func (s *Service) StartWarmup(ctx context.Context) {
+	s.warmupOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(warmupInterval)
+			defer ticker.Stop()
+			s.warmupOnceNow(ctx)
+			for {
+				select {
+				case <-ticker.C:
+					s.warmupOnceNow(ctx)
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	})
+}
+
+// warmupOnceNow 对每个启用了代理池的端点，尝试通过每个代理建连一次。
+func (s *Service) warmupOnceNow(ctx context.Context) {
+	db, err := s.open(ctx)
+	if err != nil {
+		return
+	}
+	defer db.Close()
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT id, base_url, api_key, proxy_pool
+		FROM openai_endpoints WHERE enabled = 1 AND proxy_pool IS NOT NULL AND proxy_pool != ''`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id, baseURL, apiKey string
+		var proxyRaw string
+		if err := rows.Scan(&id, &baseURL, &apiKey, &proxyRaw); err != nil {
+			continue
+		}
+		var pool []string
+		if err := json.Unmarshal([]byte(proxyRaw), &pool); err != nil {
+			continue
+		}
+		pool = cleanProxyPool(pool)
+		if len(pool) == 0 {
+			continue
+		}
+		for _, proxyURL := range pool {
+			if ctx.Err() != nil {
+				return
+			}
+			s.warmProxyConnection(ctx, baseURL, apiKey, proxyURL)
+		}
+	}
+}
+
+// warmProxyConnection 通过指定代理向端点的 models 地址发起一次请求，触发连接建立。
+func (s *Service) warmProxyConnection(ctx context.Context, baseURL, apiKey, proxyURL string) {
+	client, err := s.proxyClient(proxyURL)
+	if err != nil {
+		return
+	}
+	fullURL := strings.TrimSuffix(baseURL, "/")
+	if !strings.HasSuffix(strings.ToLower(fullURL), "/v1") && !strings.Contains(strings.ToLower(fullURL), "/v1/") {
+		fullURL += "/v1"
+	}
+	fullURL += "/models"
+
+	reqCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, fullURL, nil)
+	if err != nil {
+		return
+	}
+	if apiKey != "" && apiKey != "public" {
+		req.Header.Set("Authorization", "Bearer "+secure.SecureDecrypt(apiKey))
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return
+	}
+	// 读取并关闭响应，让连接回到空闲连接池供后续复用。
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 16*1024))
+	resp.Body.Close()
 }
 
 func (s *Service) open(ctx context.Context) (*sql.DB, error) {
@@ -338,6 +440,12 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Responses proxy (OpenAI Responses API)
+	if method == http.MethodPost && (path == "/v1/responses" || path == "/responses") {
+		s.proxyResponses(w, r)
+		return
+	}
+
 	// Models proxy
 	if method == http.MethodGet && (path == "/v1/models" || path == "/models" || path == "/api/openai/v1/models" || path == "/api/openai/models") {
 		s.proxyModels(w, r)
@@ -403,6 +511,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.importEndpointsRoute(w, r)
 	case len(parts) == 2 && parts[0] == "proxies" && parts[1] == "subscription-nodes" && method == http.MethodGet:
 		s.listSubscriptionSocksProxies(w, r)
+	case len(parts) == 2 && parts[0] == "proxies" && parts[1] == "resolve-subscription" && method == http.MethodPost:
+		s.resolveSubscriptionProxies(w, r)
 	case len(parts) == 2 && parts[0] == "analytics" && parts[1] == "summary" && method == http.MethodGet:
 		s.getAnalyticsSummary(w, r)
 	case len(parts) == 2 && parts[0] == "analytics" && parts[1] == "charts" && method == http.MethodGet:
@@ -834,25 +944,52 @@ func (s *Service) clientForEndpoint(endpointID string, pool []string, _ bool) (*
 	s.proxyMu.Lock()
 	state, ok := s.proxyStateByEndpoint[endpointID]
 	if !ok {
-		state = &endpointProxyState{cursor: 0, cooldown: make(map[string]time.Time)}
+		state = &endpointProxyState{cursor: 0, cooldown: make(map[string]time.Time), lastTTFB: make(map[string]int64)}
 		s.proxyStateByEndpoint[endpointID] = state
 	}
 	if state.cursor >= len(cleaned) || state.cursor < 0 {
 		state.cursor = 0
 	}
-	selected := -1
-	for i := 0; i < len(cleaned); i++ {
-		idx := (state.cursor + i) % len(cleaned)
-		if until, cooled := state.cooldown[cleaned[idx]]; !cooled || now.After(until) {
-			selected = idx
-			break
+
+	// 可用代理：未在冷却中的代理集合。
+	candidates := []proxyCandidate{}
+	for i := range cleaned {
+		if until, cooled := state.cooldown[cleaned[i]]; cooled && !now.After(until) {
+			continue
+		}
+		ttfb, known := state.lastTTFB[cleaned[i]]
+		candidates = append(candidates, proxyCandidate{idx: i, ttfb: ttfb, known: known})
+	}
+
+	// 从候选集中选一个：优先让没有延迟记录的代理进入轮询（探索），
+	// 全部已知后按延迟加权选择，避免单个最快代理独占全部流量。
+	selectedIdx := -1
+	switch {
+	case len(candidates) == 0:
+		// 全部冷却：退化为 cursor 轮询，先满足请求再说。
+		selectedIdx = state.cursor % len(cleaned)
+	case len(candidates) == 1:
+		selectedIdx = candidates[0].idx
+	default:
+		unknownAny := false
+		for _, c := range candidates {
+			if !c.known {
+				unknownAny = true
+				break
+			}
+		}
+		if unknownAny {
+			// 探索：在候选（未冷却）集合内按 cursor 轮询，绝不选中冷却代理。
+			cursorPos := state.cursor % len(candidates)
+			selectedIdx = candidates[cursorPos].idx
+		} else {
+			// 全部已知：延迟加权随机。延迟越低权重越高，但保留次优代理出现的机会，
+			// 兼顾「选快代理」与「多代理分摊流量」。
+			selectedIdx = weightedProxyPick(candidates)
 		}
 	}
-	if selected < 0 {
-		selected = state.cursor % len(cleaned)
-	}
-	state.cursor = (selected + 1) % len(cleaned)
-	selectedProxy := cleaned[selected]
+	state.cursor = (selectedIdx + 1) % len(cleaned)
+	selectedProxy := cleaned[selectedIdx]
 	s.proxyMu.Unlock()
 
 	client, err := s.proxyClient(selectedProxy)
@@ -860,6 +997,64 @@ func (s *Service) clientForEndpoint(endpointID string, pool []string, _ bool) (*
 		return s.client, selectedProxy
 	}
 	return client, selectedProxy
+}
+
+// proxyCandidate 是择优时的候选代理：idx 为 cleaned 池中的下标，ttfb 为最近一次
+// 首字耗时（毫秒），known 表示是否已产生过 TTFB 记录。
+type proxyCandidate struct {
+	idx   int
+	ttfb  int64
+	known bool
+}
+
+// weightedProxyPick 在全部已知延迟的候选代理中做加权选择：
+// 权重 = 1 + (maxTTFB - ttfb) / 200，延迟越低的代理权重越高。
+// 权重差按 200ms 为一档，既能让几百毫秒的快慢差异被感知，又不会让
+// 极端慢代理彻底失去机会，从而兼顾「优先选快代理」与「多代理分摊流量」。
+func weightedProxyPick(candidates []proxyCandidate) int {
+	maxTTFB := int64(0)
+	for _, c := range candidates {
+		if c.ttfb > maxTTFB {
+			maxTTFB = c.ttfb
+		}
+	}
+	total := int64(0)
+	weights := make([]int64, len(candidates))
+	for i, c := range candidates {
+		weight := int64(1) + (maxTTFB-c.ttfb)/200
+		if weight < 1 {
+			weight = 1
+		}
+		weights[i] = weight
+		total += weight
+	}
+	if total <= 0 {
+		return candidates[0].idx
+	}
+	n, _ := rand.Int(rand.Reader, big.NewInt(total))
+	acc := int64(0)
+	for i, w := range weights {
+		acc += w
+		if n.Int64() < acc {
+			return candidates[i].idx
+		}
+	}
+	return candidates[len(candidates)-1].idx
+}
+
+// recordProxyTTFB 记录某端点下某代理的一次首字耗时，供后续请求择优。
+func (s *Service) recordProxyTTFB(endpointID, proxy string, ttfbMs int64) {
+	if endpointID == "" || proxy == "" || ttfbMs <= 0 {
+		return
+	}
+	s.proxyMu.Lock()
+	defer s.proxyMu.Unlock()
+	state, ok := s.proxyStateByEndpoint[endpointID]
+	if !ok {
+		state = &endpointProxyState{cursor: 0, cooldown: make(map[string]time.Time), lastTTFB: make(map[string]int64)}
+		s.proxyStateByEndpoint[endpointID] = state
+	}
+	state.lastTTFB[proxy] = ttfbMs
 }
 
 // markProxyFailed 将某个代理标记为冷却，后续选择会跳过它。
@@ -888,13 +1083,14 @@ func (s *Service) proxyClient(proxyURL string) (*http.Client, error) {
 		return nil, err
 	}
 	switch u.Scheme {
-	case "socks5":
+	case "socks5", "socks", "socks5h":
+		// socks:// 是常见订阅节点前缀，socks5h 表示远端解析域名，均按 SOCKS5 处理。
 		u.Scheme = "socks5"
 	case "":
 		// 裸地址（host:port）默认按 socks5 处理，便于直接粘贴节点地址。
 		u = &url.URL{Scheme: "socks5", Host: proxyURL}
 	default:
-		if u.Scheme != "http" && u.Scheme != "https" && u.Scheme != "socks5h" {
+		if u.Scheme != "http" && u.Scheme != "https" {
 			return nil, fmt.Errorf("不支持的代理协议: %s", u.Scheme)
 		}
 	}
@@ -1265,6 +1461,134 @@ func (s *Service) listSubscriptionSocksProxies(w http.ResponseWriter, r *http.Re
 	}
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "proxies": proxies})
+}
+
+// resolveSubscriptionProxies 拉取用户粘贴的订阅链接，解析其中的 socks/http 节点，
+// 转换为可直接写入端点代理池的代理 URL。
+func (s *Service) resolveSubscriptionProxies(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.JSON(w, http.StatusBadRequest, map[string]string{"error": "请求体解析失败"})
+		return
+	}
+	req.URL = strings.TrimSpace(req.URL)
+	if req.URL == "" {
+		response.JSON(w, http.StatusBadRequest, map[string]string{"error": "请填写订阅链接"})
+		return
+	}
+	if !strings.HasPrefix(strings.ToLower(req.URL), "http://") && !strings.HasPrefix(strings.ToLower(req.URL), "https://") {
+		response.JSON(w, http.StatusBadRequest, map[string]string{"error": "订阅链接必须以 http:// 或 https:// 开头"})
+		return
+	}
+
+	ctx := r.Context()
+	fetchCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	httpReq, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, req.URL, nil)
+	if err != nil {
+		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": "构造请求失败: " + err.Error()})
+		return
+	}
+	httpReq.Header.Set("User-Agent", "API-Monitor-OpenAI/1.0")
+	resp, err := s.client.Do(httpReq)
+	if err != nil {
+		response.JSON(w, http.StatusBadGateway, map[string]string{"error": "拉取订阅失败: " + err.Error()})
+		return
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
+	resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		response.JSON(w, http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("订阅源返回 HTTP %d", resp.StatusCode)})
+		return
+	}
+
+	proxies := parseSubscriptionProxyText(string(body))
+	if len(proxies) == 0 {
+		response.JSON(w, http.StatusOK, map[string]interface{}{
+			"success": true,
+			"proxies": []subscriptionProxy{},
+			"message": "订阅内容中没有找到 socks/http 节点",
+		})
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "proxies": proxies})
+}
+
+// parseSubscriptionProxyText 解析订阅内容（可能是 base64 节点列表或纯文本），
+// 提取其中的 socks/socks5/http/https 节点为代理 URL。
+func parseSubscriptionProxyText(content string) []subscriptionProxy {
+	text := strings.TrimSpace(content)
+	lines := []string{}
+	// 尝试 base64 解码：订阅常见格式是 base64 编码的每行一个节点 URI。
+	decoded := decodeBase64Text(text)
+	if decoded != "" {
+		text = decoded
+	}
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+
+	proxies := []subscriptionProxy{}
+	seen := make(map[string]bool)
+	for _, line := range lines {
+		proxy, name, ok := convertNodeToProxy("", line, "", 0, "")
+		if !ok || proxy == "" {
+			continue
+		}
+		// 仅接受 socks/http 出口；裸 server:port 也归为 socks5 出口。
+		scheme := proxy
+		if idx := strings.Index(proxy, "://"); idx >= 0 {
+			scheme = strings.ToLower(proxy[:idx])
+		}
+		if scheme != "socks5" && scheme != "http" && scheme != "https" {
+			continue
+		}
+		if seen[proxy] {
+			continue
+		}
+		seen[proxy] = true
+		proxies = append(proxies, subscriptionProxy{
+			Name:   name,
+			Type:   scheme,
+			Proxy:  proxy,
+			Server: hostFromProxyURL(proxy),
+		})
+	}
+	return proxies
+}
+
+// decodeBase64Text 尝试将内容按 base64 解码；成功且结果可读时返回解码文本。
+func decodeBase64Text(text string) string {
+	compact := strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == ' ' || r == '\t' {
+			return -1
+		}
+		return r
+	}, text)
+	raw, err := base64.StdEncoding.DecodeString(compact)
+	if err != nil {
+		return ""
+	}
+	decoded := string(raw)
+	if strings.Contains(decoded, "://") || strings.Contains(decoded, "vmess://") || strings.Contains(decoded, "trojan://") || strings.Contains(decoded, "ss://") {
+		return decoded
+	}
+	return ""
+}
+
+// hostFromProxyURL 从代理 URL 中提取 host 部分用于展示。
+func hostFromProxyURL(proxy string) string {
+	u, err := url.Parse(proxy)
+	if err != nil {
+		return proxy
+	}
+	return u.Host
 }
 
 // convertNodeToProxy 把订阅节点 raw URI 转换为网关可用的 socks5/http 代理 URL。
@@ -1998,6 +2322,105 @@ func (s *Service) importEndpointsRoute(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// selectEndpointForModel 根据模型名从已启用端点中选出一个能服务该模型的端点，
+// 优先使用请求头 x-endpoint-id 指定的端点，否则随机选一个可用的。
+// 返回选中的端点、上游真实模型名（已应用 model_mappings 别名）、以及是否找到。
+func (s *Service) selectEndpointForModel(ctx context.Context, db *sql.DB, model, targetEndpointID string) (Endpoint, string, bool) {
+	var selected Endpoint
+	var found bool
+	selectedModel := model
+
+	loadEndpoint := func(ep *Endpoint, headersRaw, modelsRaw, disabledRaw, proxyRaw, mappingsRaw sql.NullString, enabledInt, autoSwitchInt int) {
+		ep.APIKey = secure.SecureDecrypt(ep.APIKey)
+		ep.Enabled = enabledInt == 1
+		ep.AutoSwitch = autoSwitchInt == 1
+		if mappingsRaw.Valid && mappingsRaw.String != "" {
+			_ = json.Unmarshal([]byte(mappingsRaw.String), &ep.ModelMappings)
+		}
+		if modelsRaw.Valid {
+			_ = json.Unmarshal([]byte(modelsRaw.String), &ep.Models)
+		}
+		ep.Headers = []HeaderItem{}
+		if headersRaw.Valid && headersRaw.String != "" {
+			_ = json.Unmarshal([]byte(headersRaw.String), &ep.Headers)
+		}
+		ep.DisabledModels = []string{}
+		if disabledRaw.Valid && disabledRaw.String != "" {
+			_ = json.Unmarshal([]byte(disabledRaw.String), &ep.DisabledModels)
+		}
+		ep.ProxyPool = []string{}
+		if proxyRaw.Valid && proxyRaw.String != "" {
+			_ = json.Unmarshal([]byte(proxyRaw.String), &ep.ProxyPool)
+		}
+	}
+
+	if targetEndpointID != "" {
+		var ep Endpoint
+		var headersRaw, modelsRaw, disabledRaw, proxyRaw, mappingsRaw sql.NullString
+		var enabledInt, autoSwitchInt int
+		err := db.QueryRowContext(ctx, `
+			SELECT id, name, base_url, api_key, headers, disabled_models, proxy_pool, auto_switch, status, enabled, models, model_mappings
+			FROM openai_endpoints WHERE id = ? AND enabled = 1`, targetEndpointID).
+			Scan(&ep.ID, &ep.Name, &ep.BaseURL, &ep.APIKey, &headersRaw, &disabledRaw, &proxyRaw, &autoSwitchInt, &ep.Status, &enabledInt, &modelsRaw, &mappingsRaw)
+		if err == nil {
+			loadEndpoint(&ep, headersRaw, modelsRaw, disabledRaw, proxyRaw, mappingsRaw, enabledInt, autoSwitchInt)
+			if s.endpointHasModel(ep, model) && !isModelDisabled(ep.DisabledModels, model) {
+				selected = ep
+				selectedModel, _ = s.resolveEndpointModel(ep, model)
+				found = true
+			}
+		}
+	}
+
+	if !found {
+		// Enabled is the administrator's routing decision; status is the latest verification result.
+		rows, err := db.QueryContext(ctx, `
+			SELECT id, name, base_url, api_key, headers, disabled_models, proxy_pool, auto_switch, status, enabled, models, model_mappings
+			FROM openai_endpoints WHERE enabled = 1`)
+		if err != nil {
+			return selected, selectedModel, false
+		}
+		defer rows.Close()
+		endpoints := []Endpoint{}
+		for rows.Next() {
+			var ep Endpoint
+			var headersRaw, modelsRaw, disabledRaw, proxyRaw, mappingsRaw sql.NullString
+			var enabledInt, autoSwitchInt int
+			if errScan := rows.Scan(&ep.ID, &ep.Name, &ep.BaseURL, &ep.APIKey, &headersRaw, &disabledRaw, &proxyRaw, &autoSwitchInt, &ep.Status, &enabledInt, &modelsRaw, &mappingsRaw); errScan == nil {
+				loadEndpoint(&ep, headersRaw, modelsRaw, disabledRaw, proxyRaw, mappingsRaw, enabledInt, autoSwitchInt)
+				endpoints = append(endpoints, ep)
+			}
+		}
+
+		eligible := []Endpoint{}
+		for _, ep := range endpoints {
+			real, _ := s.resolveEndpointModel(ep, model)
+			if s.endpointHasModel(ep, model) && !isModelDisabled(ep.DisabledModels, real) {
+				eligible = append(eligible, ep)
+			}
+		}
+
+		targets := eligible
+		if len(targets) == 0 {
+			// 兜底：模型列表尚未刷新时仍尝试已启用端点，但跳过已禁用该模型的端点。
+			for _, ep := range endpoints {
+				if s.endpointHasModel(ep, model) && !isModelDisabled(ep.DisabledModels, model) {
+					targets = append(targets, ep)
+				}
+			}
+		}
+
+		if len(targets) > 0 {
+			nBig, _ := rand.Int(rand.Reader, big.NewInt(int64(len(targets))))
+			selected = targets[nBig.Int64()]
+			selectedModel, _ = s.resolveEndpointModel(selected, model)
+			found = true
+		}
+	}
+
+	return selected, selectedModel, found
+}
+
 func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	requestStarted := time.Now()
@@ -2029,113 +2452,7 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
-	var selected Endpoint
-	var found bool
-
-	if targetEndpointID != "" {
-		var ep Endpoint
-		var headersRaw, modelsRaw, disabledRaw, proxyRaw, mappingsRaw sql.NullString
-		var enabledInt, autoSwitchInt int
-		err := db.QueryRowContext(ctx, `
-			SELECT id, name, base_url, api_key, headers, disabled_models, proxy_pool, auto_switch, status, enabled, models, model_mappings
-			FROM openai_endpoints WHERE id = ? AND enabled = 1`, targetEndpointID).
-			Scan(&ep.ID, &ep.Name, &ep.BaseURL, &ep.APIKey, &headersRaw, &disabledRaw, &proxyRaw, &autoSwitchInt, &ep.Status, &enabledInt, &modelsRaw, &mappingsRaw)
-
-		if err == nil {
-			ep.APIKey = secure.SecureDecrypt(ep.APIKey)
-			ep.Enabled = enabledInt == 1
-			ep.AutoSwitch = autoSwitchInt == 1
-			if mappingsRaw.Valid && mappingsRaw.String != "" {
-				_ = json.Unmarshal([]byte(mappingsRaw.String), &ep.ModelMappings)
-			}
-			if modelsRaw.Valid {
-				_ = json.Unmarshal([]byte(modelsRaw.String), &ep.Models)
-			}
-			ep.Headers = []HeaderItem{}
-			if headersRaw.Valid && headersRaw.String != "" {
-				_ = json.Unmarshal([]byte(headersRaw.String), &ep.Headers)
-			}
-			ep.DisabledModels = []string{}
-			if disabledRaw.Valid && disabledRaw.String != "" {
-				_ = json.Unmarshal([]byte(disabledRaw.String), &ep.DisabledModels)
-			}
-			ep.ProxyPool = []string{}
-			if proxyRaw.Valid && proxyRaw.String != "" {
-				_ = json.Unmarshal([]byte(proxyRaw.String), &ep.ProxyPool)
-			}
-			if s.endpointHasModel(ep, model) && !isModelDisabled(ep.DisabledModels, model) {
-					selected = ep
-					selectedModel, _ = s.resolveEndpointModel(ep, model)
-					found = true
-				}
-		}
-	}
-
-	if !found {
-		// Enabled is the administrator's routing decision; status is the latest verification result.
-		rows, err := db.QueryContext(ctx, `
-			SELECT id, name, base_url, api_key, headers, disabled_models, proxy_pool, auto_switch, status, enabled, models, model_mappings
-			FROM openai_endpoints WHERE enabled = 1`)
-		if err == nil {
-			defer rows.Close()
-			endpoints := []Endpoint{}
-			for rows.Next() {
-				var ep Endpoint
-				var headersRaw, modelsRaw, disabledRaw, proxyRaw, mappingsRaw sql.NullString
-				var enabledInt, autoSwitchInt int
-				if errScan := rows.Scan(&ep.ID, &ep.Name, &ep.BaseURL, &ep.APIKey, &headersRaw, &disabledRaw, &proxyRaw, &autoSwitchInt, &ep.Status, &enabledInt, &modelsRaw, &mappingsRaw); errScan == nil {
-					ep.APIKey = secure.SecureDecrypt(ep.APIKey)
-					ep.Enabled = enabledInt == 1
-					ep.AutoSwitch = autoSwitchInt == 1
-					if mappingsRaw.Valid && mappingsRaw.String != "" {
-						_ = json.Unmarshal([]byte(mappingsRaw.String), &ep.ModelMappings)
-					}
-					if modelsRaw.Valid {
-						_ = json.Unmarshal([]byte(modelsRaw.String), &ep.Models)
-					}
-					ep.Headers = []HeaderItem{}
-					if headersRaw.Valid && headersRaw.String != "" {
-						_ = json.Unmarshal([]byte(headersRaw.String), &ep.Headers)
-					}
-					ep.DisabledModels = []string{}
-					if disabledRaw.Valid && disabledRaw.String != "" {
-						_ = json.Unmarshal([]byte(disabledRaw.String), &ep.DisabledModels)
-					}
-					ep.ProxyPool = []string{}
-					if proxyRaw.Valid && proxyRaw.String != "" {
-						_ = json.Unmarshal([]byte(proxyRaw.String), &ep.ProxyPool)
-					}
-					endpoints = append(endpoints, ep)
-				}
-			}
-
-			eligible := []Endpoint{}
-			for _, ep := range endpoints {
-				real, _ := s.resolveEndpointModel(ep, model)
-				if s.endpointHasModel(ep, model) && !isModelDisabled(ep.DisabledModels, real) {
-					eligible = append(eligible, ep)
-				}
-			}
-
-			targets := eligible
-			if len(targets) == 0 {
-				// 兜底：模型列表尚未刷新时仍尝试已启用端点，但跳过已禁用该模型的端点。
-				for _, ep := range endpoints {
-					if s.endpointHasModel(ep, model) && !isModelDisabled(ep.DisabledModels, model) {
-						targets = append(targets, ep)
-					}
-				}
-			}
-
-			if len(targets) > 0 {
-				nBig, _ := rand.Int(rand.Reader, big.NewInt(int64(len(targets))))
-				selected = targets[nBig.Int64()]
-				selectedModel, _ = s.resolveEndpointModel(selected, model)
-				found = true
-			}
-		}
-	}
-
+	selected, selectedModel, found := s.selectEndpointForModel(ctx, db, model, targetEndpointID)
 	if !found {
 		s.RecordAnalytics(ctx, "chat.completions", "", model, http.StatusServiceUnavailable, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, "")
 		response.JSON(w, http.StatusServiceUnavailable, map[string]interface{}{
@@ -2162,11 +2479,9 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	isLocal := localURLRegex.MatchString(fullURL)
 
-	// 解析上游实际连接的 IP（带 DNS 缓存），同一个端点各代理尝试共享同一地址。
-	upstreamIP := ""
-	if parsedURL, err := url.Parse(fullURL); err == nil && parsedURL.Host != "" {
-		upstreamIP = resolveUpstreamIP(ctx, parsedURL.Host)
-	}
+	// 出口 IP：请求实际从哪个地址发往目标。走代理池时随循环内选中的代理更新，
+	// 直连时用网关本机出口 IP。该字段用于定位是哪个出口/代理承载了本次请求。
+	egressIP := s.egressOutbound()
 
 	if !isLocal {
 		if messages, ok := parsedBody["messages"].([]interface{}); ok {
@@ -2229,13 +2544,35 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 	var resp *http.Response
 	var lastErr error
 	var attempt int
+	// lastProxy 保存最终成功使用的代理（用于 TTFB 择优记录与日志）。
+	lastProxy := ""
+	// firstChunk 保存流式首字等待阶段读到的首个数据块；无切换机会时首字在循环内读取。
+	var firstChunk []byte
+	var ttfbMs int64
+	firstWritten := false
+
+	// attemptCancel 指向最近一次请求的取消函数，函数返回前统一调用（幂等），
+	// 保证所有 attempt context 均被释放。
+	var attemptCancel context.CancelFunc
+	defer func() {
+		if attemptCancel != nil {
+			attemptCancel()
+		}
+	}()
 
 	for attempt = 0; attempt < maxProxyAttempts; attempt++ {
+		attemptCtx, cancel := context.WithCancel(ctx)
+		attemptCancel = cancel
 		client, currentProxy := s.clientForEndpoint(selected.ID, selected.ProxyPool, attempt == 0)
+		if currentProxy != "" {
+			lastProxy = currentProxy
+			egressIP = proxyEndpointAddr(currentProxy)
+		}
 
-		httpReq, err := http.NewRequestWithContext(ctx, "POST", fullURL, bytes.NewReader(upstreamBodyBytes))
+		httpReq, err := http.NewRequestWithContext(attemptCtx, "POST", fullURL, bytes.NewReader(upstreamBodyBytes))
 		if err != nil {
-			s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, http.StatusInternalServerError, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, upstreamIP)
+			cancel()
+			s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, http.StatusInternalServerError, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, egressIP)
 			response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
@@ -2252,6 +2589,7 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 		if lastErr != nil {
 			// 连接失败（例如该代理不可用）：标记失败，若有池则切下一个继续。
 			s.markProxyFailed(selected.ID, currentProxy)
+			cancel()
 			if attempt+1 < maxProxyAttempts {
 				continue
 			}
@@ -2262,6 +2600,7 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 		if !stream && selected.AutoSwitch && attempt+1 < maxProxyAttempts {
 			bodyBytesRead, readErr := io.ReadAll(resp.Body)
 			resp.Body.Close()
+			cancel()
 			if readErr == nil && isRateLimitResponse(resp, bodyBytesRead) {
 				s.markProxyFailed(selected.ID, currentProxy)
 				continue
@@ -2274,14 +2613,79 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 		// 流式：仅按状态码判断，限流时切换代理重试一次。
 		if stream && selected.AutoSwitch && attempt+1 < maxProxyAttempts && isRateLimitResponse(resp, nil) {
 			resp.Body.Close()
+			cancel()
 			s.markProxyFailed(selected.ID, currentProxy)
 			continue
+		}
+
+		if stream {
+			// 首字等待：若还有可切换的代理，则带超时等待首个字节，
+			// 超时或上游提前断流时标记该代理失败并切换下一个。
+			waitForFirst := selected.AutoSwitch && attempt+1 < maxProxyAttempts
+			if waitForFirst {
+				type readRes struct {
+					n   int
+					err error
+				}
+				ch := make(chan readRes, 1)
+				tmp := make([]byte, 4096)
+				go func() {
+					n, err := resp.Body.Read(tmp)
+					ch <- readRes{n, err}
+				}()
+				var r readRes
+				select {
+				case r = <-ch:
+				case <-time.After(firstTokenTimeout):
+					cancel()
+					resp.Body.Close()
+					s.markProxyFailed(selected.ID, currentProxy)
+					if attempt+1 < maxProxyAttempts {
+						continue
+					}
+					lastErr = fmt.Errorf("上游首字超时（超过 %s）", firstTokenTimeout)
+					break
+				}
+				if r.n > 0 {
+					firstChunk = append([]byte(nil), tmp[:r.n]...)
+					firstWritten = true
+					ttfbMs = time.Since(startTime).Milliseconds()
+					break
+				}
+				cancel()
+				resp.Body.Close()
+				s.markProxyFailed(selected.ID, currentProxy)
+				if attempt+1 < maxProxyAttempts {
+					continue
+				}
+				lastErr = r.err
+				if lastErr == nil {
+					lastErr = io.EOF
+				}
+				break
+			}
+
+			// 无切换机会：直接阻塞读首块，读取结果留给下方流式循环继续消费。
+			tmp := make([]byte, 4096)
+			n, err := resp.Body.Read(tmp)
+			if n > 0 {
+				firstChunk = append([]byte(nil), tmp[:n]...)
+				firstWritten = true
+				ttfbMs = time.Since(startTime).Milliseconds()
+				break
+			}
+			cancel()
+			lastErr = err
+			if lastErr == nil {
+				lastErr = io.EOF
+			}
+			break
 		}
 		break
 	}
 
 	if lastErr != nil && resp == nil {
-		s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, http.StatusBadGateway, time.Since(startTime).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, upstreamIP)
+		s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, http.StatusBadGateway, time.Since(startTime).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, egressIP)
 		response.JSON(w, http.StatusBadGateway, map[string]interface{}{"error": map[string]string{"message": lastErr.Error(), "type": "proxy_error"}})
 		return
 	}
@@ -2299,20 +2703,23 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 		flusher, ok := w.(http.Flusher)
 		buf := make([]byte, 4096)
-		// 首字耗时：从发起请求到首个响应字节写回的时间。
-		var ttfbMs int64
-		firstWritten := false
 		// usage 信息总在最后一个 SSE chunk 里，只保留响应尾部即可，
 		// 避免长对话把整个流式响应累积在内存中。
 		const usageTailLimit = 64 * 1024
 		tail := make([]byte, 0, usageTailLimit)
+
+		// 首字等待阶段已读到的数据块，直接作为流式响应的首批内容写回。
+		if firstWritten && len(firstChunk) > 0 {
+			_, _ = w.Write(firstChunk)
+			tail = append(tail, firstChunk...)
+			if ok {
+				flusher.Flush()
+			}
+		}
+
 		for {
 			n, err := resp.Body.Read(buf)
 			if n > 0 {
-				if !firstWritten {
-					firstWritten = true
-					ttfbMs = time.Since(startTime).Milliseconds()
-				}
 				_, _ = w.Write(buf[:n])
 				tail = append(tail, buf[:n]...)
 				if len(tail) > usageTailLimit {
@@ -2349,16 +2756,17 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 			cachedTokens, _ = strconv.Atoi(matches[1])
 		}
 
-		s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, resp.StatusCode, latencyMs, ttfbMs, promptTokens, completionTokens, totalTokens, cachedTokens, boolToInt(stream), viaProxy, clientIP, upstreamIP)
+		s.recordProxyTTFB(selected.ID, lastProxy, ttfbMs)
+		s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, resp.StatusCode, latencyMs, ttfbMs, promptTokens, completionTokens, totalTokens, cachedTokens, boolToInt(stream), viaProxy, clientIP, egressIP)
 	} else {
 		respBodyBytes, _ := io.ReadAll(resp.Body)
 		latencyMs := time.Since(startTime).Milliseconds()
 
 		var usageInfo struct {
 			Usage struct {
-				PromptTokens     int `json:"prompt_tokens"`
-				CompletionTokens int `json:"completion_tokens"`
-				TotalTokens      int `json:"total_tokens"`
+				PromptTokens        int `json:"prompt_tokens"`
+				CompletionTokens    int `json:"completion_tokens"`
+				TotalTokens         int `json:"total_tokens"`
 				PromptTokensDetails struct {
 					CachedTokens int `json:"cached_tokens"`
 				} `json:"prompt_tokens_details"`
@@ -2366,7 +2774,270 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.Unmarshal(respBodyBytes, &usageInfo)
 
-		s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, resp.StatusCode, latencyMs, 0, usageInfo.Usage.PromptTokens, usageInfo.Usage.CompletionTokens, usageInfo.Usage.TotalTokens, usageInfo.Usage.PromptTokensDetails.CachedTokens, boolToInt(stream), viaProxy, clientIP, upstreamIP)
+		s.recordProxyTTFB(selected.ID, lastProxy, latencyMs)
+		s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, resp.StatusCode, latencyMs, 0, usageInfo.Usage.PromptTokens, usageInfo.Usage.CompletionTokens, usageInfo.Usage.TotalTokens, usageInfo.Usage.PromptTokensDetails.CachedTokens, boolToInt(stream), viaProxy, clientIP, egressIP)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(resp.StatusCode)
+		_, _ = w.Write(respBodyBytes)
+	}
+}
+
+// proxyResponses 代理 OpenAI Responses API（POST /v1/responses）。
+// 请求体按不透明 JSON 透传（Responses 的 input/instructions 结构与 chat 不同，
+// 网关不做改写），仅复用端点的模型路由、代理池与首字超时切换能力。
+func (s *Service) proxyResponses(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	requestStarted := time.Now()
+	clientIP := s.resolveClientIP(r)
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		s.RecordAnalytics(ctx, "responses", "", "", http.StatusBadRequest, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, "")
+		response.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	var parsedBody map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &parsedBody); err != nil {
+		s.RecordAnalytics(ctx, "responses", "", "", http.StatusBadRequest, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, "")
+		response.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	model, _ := parsedBody["model"].(string)
+	stream, _ := parsedBody["stream"].(bool)
+	targetEndpointID := r.Header.Get("x-endpoint-id")
+
+	db, err := s.open(ctx)
+	if err != nil {
+		s.RecordAnalytics(ctx, "responses", "", model, http.StatusInternalServerError, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, "")
+		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer db.Close()
+
+	selected, selectedModel, found := s.selectEndpointForModel(ctx, db, model, targetEndpointID)
+	if !found {
+		s.RecordAnalytics(ctx, "responses", "", model, http.StatusServiceUnavailable, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, "")
+		response.JSON(w, http.StatusServiceUnavailable, map[string]interface{}{
+			"error": map[string]string{
+				"message": "No valid OpenAI endpoints available",
+				"type":    "service_unavailable",
+			},
+		})
+		return
+	}
+
+	viaProxy := 0
+	if len(selected.ProxyPool) > 0 {
+		viaProxy = 1
+	}
+
+	// Responses API 的路径为 /responses。
+	fullURL := strings.TrimSuffix(selected.BaseURL, "/")
+	if !strings.HasSuffix(strings.ToLower(fullURL), "/v1") && !strings.Contains(strings.ToLower(fullURL), "/v1/") {
+		fullURL += "/v1"
+	}
+	fullURL += "/responses"
+
+	egressIP := s.egressOutbound()
+
+	// 若请求模型名是对外别名，转发到上游时还原为真实模型名。
+	if selectedModel != model && selectedModel != "" {
+		parsedBody["model"] = selectedModel
+	}
+	upstreamBodyBytes, _ := json.Marshal(parsedBody)
+
+	startTime := time.Now()
+
+	maxProxyAttempts := len(selected.ProxyPool)
+	if maxProxyAttempts == 0 {
+		maxProxyAttempts = 1
+	}
+	if !selected.AutoSwitch {
+		maxProxyAttempts = 1
+	}
+
+	var resp *http.Response
+	var lastErr error
+	var attempt int
+	lastProxy := ""
+	var firstChunk []byte
+	var ttfbMs int64
+	firstWritten := false
+
+	var attemptCancel context.CancelFunc
+	defer func() {
+		if attemptCancel != nil {
+			attemptCancel()
+		}
+	}()
+
+	for attempt = 0; attempt < maxProxyAttempts; attempt++ {
+		attemptCtx, cancel := context.WithCancel(ctx)
+		attemptCancel = cancel
+		client, currentProxy := s.clientForEndpoint(selected.ID, selected.ProxyPool, attempt == 0)
+		if currentProxy != "" {
+			lastProxy = currentProxy
+			egressIP = proxyEndpointAddr(currentProxy)
+		}
+
+		httpReq, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, fullURL, bytes.NewReader(upstreamBodyBytes))
+		if err != nil {
+			cancel()
+			s.RecordAnalytics(ctx, "responses", selected.ID, model, http.StatusInternalServerError, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, egressIP)
+			response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		httpReq.Header.Set("Authorization", "Bearer "+selected.APIKey)
+		httpReq.Header.Set("Content-Type", "application/json")
+		if stream {
+			httpReq.Header.Set("Accept", "text/event-stream")
+		} else {
+			httpReq.Header.Set("Accept", "application/json")
+		}
+		applyCustomHeaders(httpReq, selected.Headers)
+
+		resp, lastErr = client.Do(httpReq)
+		if lastErr != nil {
+			s.markProxyFailed(selected.ID, currentProxy)
+			cancel()
+			if attempt+1 < maxProxyAttempts {
+				continue
+			}
+			break
+		}
+
+		// 非流式：读取正文判断限流，失败时切换代理重试。
+		if !stream && selected.AutoSwitch && attempt+1 < maxProxyAttempts {
+			bodyBytesRead, readErr := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			cancel()
+			if readErr == nil && isRateLimitResponse(resp, bodyBytesRead) {
+				s.markProxyFailed(selected.ID, currentProxy)
+				continue
+			}
+			resp.Body = io.NopCloser(bytes.NewReader(bodyBytesRead))
+			break
+		}
+
+		// 流式：仅按状态码判断限流。
+		if stream && selected.AutoSwitch && attempt+1 < maxProxyAttempts && isRateLimitResponse(resp, nil) {
+			resp.Body.Close()
+			cancel()
+			s.markProxyFailed(selected.ID, currentProxy)
+			continue
+		}
+
+		if stream {
+			waitForFirst := selected.AutoSwitch && attempt+1 < maxProxyAttempts
+			if waitForFirst {
+				type readRes struct {
+					n   int
+					err error
+				}
+				ch := make(chan readRes, 1)
+				tmp := make([]byte, 4096)
+				go func() {
+					n, err := resp.Body.Read(tmp)
+					ch <- readRes{n, err}
+				}()
+				var r readRes
+				select {
+				case r = <-ch:
+				case <-time.After(firstTokenTimeout):
+					cancel()
+					resp.Body.Close()
+					s.markProxyFailed(selected.ID, currentProxy)
+					if attempt+1 < maxProxyAttempts {
+						continue
+					}
+					lastErr = fmt.Errorf("上游首字超时（超过 %s）", firstTokenTimeout)
+					break
+				}
+				if r.n > 0 {
+					firstChunk = append([]byte(nil), tmp[:r.n]...)
+					firstWritten = true
+					ttfbMs = time.Since(startTime).Milliseconds()
+					break
+				}
+				cancel()
+				resp.Body.Close()
+				s.markProxyFailed(selected.ID, currentProxy)
+				if attempt+1 < maxProxyAttempts {
+					continue
+				}
+				lastErr = r.err
+				if lastErr == nil {
+					lastErr = io.EOF
+				}
+				break
+			}
+
+			tmp := make([]byte, 4096)
+			n, err := resp.Body.Read(tmp)
+			if n > 0 {
+				firstChunk = append([]byte(nil), tmp[:n]...)
+				firstWritten = true
+				ttfbMs = time.Since(startTime).Milliseconds()
+				break
+			}
+			cancel()
+			lastErr = err
+			if lastErr == nil {
+				lastErr = io.EOF
+			}
+			break
+		}
+		break
+	}
+
+	if lastErr != nil && resp == nil {
+		s.RecordAnalytics(ctx, "responses", selected.ID, model, http.StatusBadGateway, time.Since(startTime).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, egressIP)
+		response.JSON(w, http.StatusBadGateway, map[string]interface{}{"error": map[string]string{"message": lastErr.Error(), "type": "proxy_error"}})
+		return
+	}
+	defer resp.Body.Close()
+
+	_, _ = db.ExecContext(ctx, "UPDATE openai_endpoints SET last_used = ? WHERE id = ?", time.Now().Format(time.RFC3339), selected.ID)
+
+	if stream {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+		w.WriteHeader(resp.StatusCode)
+
+		flusher, ok := w.(http.Flusher)
+		buf := make([]byte, 4096)
+		if firstWritten && len(firstChunk) > 0 {
+			_, _ = w.Write(firstChunk)
+			if ok {
+				flusher.Flush()
+			}
+		}
+		for {
+			n, err := resp.Body.Read(buf)
+			if n > 0 {
+				_, _ = w.Write(buf[:n])
+				if ok {
+					flusher.Flush()
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
+		latencyMs := time.Since(startTime).Milliseconds()
+
+		s.recordProxyTTFB(selected.ID, lastProxy, ttfbMs)
+		s.RecordAnalytics(ctx, "responses", selected.ID, model, resp.StatusCode, latencyMs, ttfbMs, 0, 0, 0, 0, boolToInt(stream), viaProxy, clientIP, egressIP)
+	} else {
+		respBodyBytes, _ := io.ReadAll(resp.Body)
+		latencyMs := time.Since(startTime).Milliseconds()
+
+		s.recordProxyTTFB(selected.ID, lastProxy, latencyMs)
+		s.RecordAnalytics(ctx, "responses", selected.ID, model, resp.StatusCode, latencyMs, 0, 0, 0, 0, 0, boolToInt(stream), viaProxy, clientIP, egressIP)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(resp.StatusCode)

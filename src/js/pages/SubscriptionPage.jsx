@@ -1938,9 +1938,7 @@ function SubscriptionPage() {
     return (
       <SectionCard
         title={`订阅管理 (${currentSubscriptions.length})`}
-        className="h-full min-h-0"
         bodyPadding="none"
-        bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
         actions={(
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
             <span className="hidden rounded border border-kumo-info/20 bg-kumo-info/10 px-1.5 py-0.5 text-[11px] font-semibold text-kumo-info sm:inline-flex">{visibleNodes.length} 个节点</span>
@@ -1949,7 +1947,7 @@ function SubscriptionPage() {
           </div>
         )}
       >
-        <div className="min-h-0 flex-1 overflow-x-auto overflow-y-visible overscroll-x-contain touch-pan-x scrollbar-thin">
+        <DataTableFrame variant="embedded">
           <AppTable tableId="subscriptions" columns={SUBSCRIPTION_COLUMNS}>
             <Table.Header sticky variant="compact">
               <Table.Row>
@@ -2028,14 +2026,14 @@ function SubscriptionPage() {
               )}
             </Table.Body>
           </AppTable>
-        </div>
+        </DataTableFrame>
       </SectionCard>
     );
   };
 
   const renderPlans = () => (
-    <SectionCard title={`套餐管理 (${plans.length})`} className="h-full min-h-0" bodyPadding="none" bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden" actions={<Button size="sm" variant="primary" onClick={openCreatePlan}><Plus className="h-3.5 w-3.5" />新建套餐</Button>}>
-      <div className="min-h-0 flex-1 overflow-x-auto overflow-y-visible overscroll-x-contain touch-pan-x scrollbar-thin">
+    <SectionCard title={`套餐管理 (${plans.length})`} bodyPadding="none" actions={<Button size="sm" variant="primary" onClick={openCreatePlan}><Plus className="h-3.5 w-3.5" />新建套餐</Button>}>
+      <DataTableFrame variant="embedded">
         <AppTable tableId="subscription-plans" columns={PLAN_COLUMNS}>
           <Table.Header sticky variant="compact"><Table.Row><Table.Head className="text-center">启用</Table.Head><Table.Head>套餐</Table.Head><Table.Head className="text-center">状态</Table.Head><Table.Head>单订阅额度</Table.Head><Table.Head className="text-center">重置</Table.Head><Table.Head>节点范围</Table.Head><Table.Head className="text-center">订阅</Table.Head><Table.Head className="app-table-action">操作</Table.Head></Table.Row></Table.Header>
           <Table.Body>
@@ -2055,7 +2053,7 @@ function SubscriptionPage() {
             {plans.length === 0 && <Table.Row><Table.Cell colSpan={8} className="p-8 text-center text-kumo-subtle">暂无套餐。套餐统一定义节点范围、额度和重置规则。</Table.Cell></Table.Row>}
           </Table.Body>
         </AppTable>
-      </div>
+      </DataTableFrame>
     </SectionCard>
   );
 
@@ -2224,12 +2222,10 @@ function SubscriptionPage() {
   const renderInstanceManagement = () => (
     <SectionCard
       title={`Linux 主机 (${servers.length})`}
-      className="min-h-0"
       bodyPadding="none"
-      bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
       actions={<Button size="sm" variant="primary" loading={saving} disabled={selectedRuntimeHosts.size === 0} onClick={() => deployProxyRuntime([...selectedRuntimeHosts])}><Plus className="h-3.5 w-3.5" />批量部署程序 ({selectedRuntimeHosts.size})</Button>}
     >
-      <DataTableFrame variant="embedded" className="min-h-[18rem] overflow-auto">
+      <DataTableFrame variant="embedded">
         <AppTable tableId="runtime-hosts" columns={RUNTIME_HOST_COLUMNS} className="text-xs [&_td]:border-kumo-interact/45 [&_th]:border-kumo-interact/50">
           <Table.Header sticky variant="compact">
             <Table.Row>

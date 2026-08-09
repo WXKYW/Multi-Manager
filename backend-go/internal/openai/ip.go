@@ -1,9 +1,9 @@
 package openai
 
 import (
-	"context"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -62,55 +62,54 @@ func isTrustedProxy(ip net.IP, entries []string) bool {
 	return false
 }
 
-type upstreamIPEntry struct {
+type egressEntry struct {
 	ip        string
 	expiresAt time.Time
 }
 
-var upstreamIPCache = struct {
+// egressIPCache 缓存本机出口 IP，1 分钟内不重复探测，避免热路径反复拨号。
+var egressIPCache = struct {
 	sync.Mutex
-	entries map[string]upstreamIPEntry
-}{entries: make(map[string]upstreamIPEntry)}
+	entry egressEntry
+}{}
 
-// resolveUpstreamIP 解析上游主机名对应的 IPv4 地址，带 10 秒本地缓存，
-// 避免每个代理请求都触发 DNS。
-func resolveUpstreamIP(ctx context.Context, rawHost string) string {
-	host := rawHost
-	if h, _, err := net.SplitHostPort(strings.TrimSpace(rawHost)); err == nil {
-		host = h
-	} else {
-		host = strings.Trim(strings.TrimSpace(rawHost), "[]")
+// egressOutboundIP 返回本机可用的出口 IP（用于直连场景下的出口标识）。
+// 通过无数据 UDP 拨号探测默认路由，探测一次本地缓存。
+func egressOutboundIP() string {
+	egressIPCache.Lock()
+	defer egressIPCache.Unlock()
+	now := time.Now()
+	if egressIPCache.entry.ip != "" && now.Before(egressIPCache.entry.expiresAt) {
+		return egressIPCache.entry.ip
 	}
-	host = strings.Trim(host, "[]")
-	if host == "" {
+	ip := ""
+	if conn, err := net.DialTimeout("udp", "8.8.8.8:80", 2*time.Second); err == nil {
+		if local, ok := conn.LocalAddr().(*net.UDPAddr); ok {
+			ip = local.IP.String()
+		}
+		conn.Close()
+	}
+	egressIPCache.entry = egressEntry{ip: ip, expiresAt: now.Add(60 * time.Second)}
+	return ip
+}
+
+// egressOutbound 返回本机出口 IP（Service 便捷封装）。
+func (s *Service) egressOutbound() string {
+	return egressOutboundIP()
+}
+
+// proxyEndpointAddr 从代理字符串中提取出外连接地址（host:port），用于在网关日志
+// 中标识"本次请求实际走了哪个代理出口"。兼容 socks://user:pass@host:port 形式。
+func proxyEndpointAddr(proxy string) string {
+	if proxy == "" {
 		return ""
 	}
-	if ip := net.ParseIP(host); ip != nil {
-		return ip.String()
+	u, err := url.Parse(proxy)
+	if err != nil {
+		return proxy
 	}
-
-	upstreamIPCache.Lock()
-	entry, ok := upstreamIPCache.entries[host]
-	upstreamIPCache.Unlock()
-	if ok && time.Now().Before(entry.expiresAt) {
-		return entry.ip
+	if u.Host == "" {
+		return proxy
 	}
-
-	resolveCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	addrs, err := net.DefaultResolver.LookupHost(resolveCtx, host)
-	ip := ""
-	if err == nil {
-		for _, a := range addrs {
-			if parsed := net.ParseIP(a); parsed != nil && parsed.To4() != nil {
-				ip = parsed.String()
-				break
-			}
-		}
-	}
-
-	upstreamIPCache.Lock()
-	upstreamIPCache.entries[host] = upstreamIPEntry{ip: ip, expiresAt: time.Now().Add(10 * time.Second)}
-	upstreamIPCache.Unlock()
-	return ip
+	return u.Host
 }

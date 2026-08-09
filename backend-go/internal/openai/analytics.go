@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/iwvw/api-monitor/backend-go/internal/applog"
@@ -212,6 +213,10 @@ func (s *Service) getAnalyticsCharts(w http.ResponseWriter, r *http.Request) {
 	for rowsModels.Next() {
 		var m ModelShare
 		if err := rowsModels.Scan(&m.Model, &m.Count, &m.Tokens); err == nil {
+			// 过滤空白模型名（错误/异常请求可能未解析出 model）。
+			if strings.TrimSpace(m.Model) == "" {
+				continue
+			}
 			modelShares = append(modelShares, m)
 		}
 	}
@@ -265,6 +270,9 @@ func (s *Service) getAnalyticsCharts(w http.ResponseWriter, r *http.Request) {
 	modelOrder := make(map[string]bool)
 	for _, bucket := range byModelCounts {
 		for name := range bucket {
+			if strings.TrimSpace(name) == "" {
+				continue
+			}
 			modelOrder[name] = true
 		}
 	}

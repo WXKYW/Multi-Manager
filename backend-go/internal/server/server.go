@@ -146,6 +146,8 @@ func newServer(cfg config.Config) (*Server, error) {
 		prompts:  promptsService,
 	}
 	systemService.SetAICaller(server.callAPIFromAI)
+	// 启动代理池预热：预建立各代理到上游的连接，缓解首次请求冷启动握手延迟。
+	server.openai.StartWarmup(context.Background())
 	return server, nil
 }
 
@@ -790,6 +792,12 @@ func (s *Server) serveV1Route(w http.ResponseWriter, r *http.Request) {
 
 	// 2. Completions endpoint
 	if method == http.MethodPost && path == "/v1/chat/completions" {
+		s.openai.ServeHTTP(w, r)
+		return
+	}
+
+	// 3. Responses endpoint（OpenAI Responses API，/v1/responses）
+	if method == http.MethodPost && path == "/v1/responses" {
 		s.openai.ServeHTTP(w, r)
 		return
 	}

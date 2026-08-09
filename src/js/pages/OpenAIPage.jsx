@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { CalendarDotsIcon } from '@phosphor-icons/react';
+import { ArrowDown, ArrowUp, CalendarDotsIcon } from '@phosphor-icons/react';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
 import { Button } from '@cloudflare/kumo/components/button';
@@ -98,10 +98,48 @@ import {
   Play,
   Clock,
   TrendingUp,
+  LogList,
+  Globe,
+  Sliders,
 } from '../components/Icons.jsx';
 
 function createHealthCheckProgress(total = 0, running = false) {
   return { running, total, completed: 0, healthy: 0, degraded: 0, failed: 0 };
+}
+
+// parseProxyEntry 解析代理 URL 为可读摘要与完整值：
+// 返回 { label, full, host, ip }。label 为友好名称（优先 # 后的节点名），
+// ip 为纯主机地址（不含端口与用户信息），host 为 host:port 或 user:pass@host:port。
+function parseProxyEntry(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return { label: '', full: value, host: '', ip: '' };
+  let label = value;
+  let host = '';
+  let ip = '';
+  try {
+    let rest = value;
+    let hash = '';
+    const hashIndex = rest.indexOf('#');
+    if (hashIndex !== -1) {
+      hash = rest.slice(hashIndex);
+      rest = rest.slice(0, hashIndex);
+    }
+    // 去掉 scheme://，兼容 socks/http/https 等自定义协议（new URL 对 socks 不解析 host）。
+    const schemeEnd = rest.indexOf('://');
+    if (schemeEnd !== -1) rest = rest.slice(schemeEnd + 3);
+    // 去掉 userinfo，得到 host:port。
+    const atIndex = rest.lastIndexOf('@');
+    const authority = atIndex !== -1 ? rest.slice(atIndex + 1) : rest;
+    host = authority;
+    // 去掉端口得到纯 IP/主机名。
+    ip = authority.replace(/:\d+$/, '');
+    // # 后的 fragment 通常是节点名。
+    const fallback = hash ? decodeURIComponent(hash.slice(1)) : '';
+    label = fallback || authority || value;
+  } catch {
+    // 解析失败时展示原文。
+  }
+  return { label, full: value, host, ip };
 }
 
 function normalizeStoredHiddenModels(value) {
@@ -440,6 +478,10 @@ function TrendBarChart({ labels, values, color, isDarkMode }) {
         axisPointer: { type: 'shadow' },
         backgroundColor: isDarkMode ? '#25252b' : '#ffffff',
         textStyle: { color: axisColor, fontSize: 11 },
+        valueFormatter: value => {
+          const num = Number(value);
+          return Number.isFinite(num) ? num.toFixed(1) : String(value);
+        },
       },
       xAxis: {
         type: 'category',
@@ -544,7 +586,7 @@ function ModelTrendChart({ labels, series, isDarkMode }) {
           type: 'line',
           name: item.model,
           data: item.values,
-          smooth: false,
+          smooth: true,
           connectNulls: false,
           showSymbol: true,
           symbolSize: 4,
@@ -572,7 +614,7 @@ function ModelTrendChart({ labels, series, isDarkMode }) {
 
   return (
     <div className="flex min-h-0 flex-col gap-2">
-      <div className="flex flex-wrap gap-x-4 gap-y-1 px-1">
+      <div className="flex flex-nowrap gap-x-4 overflow-x-auto overscroll-x-contain px-1 pb-1 touch-pan-x scrollbar-thin">
         {ordered.map(item => (
           <ChartLegend.LargeItem
             key={item.model}
@@ -595,17 +637,24 @@ const trendSeries = useMemo(() => {
     const build = (color, pick, name) => {
       const labels = buckets.map(point => point.day || '');
       const values = buckets.map(point => Number(pick(point)) || 0);
-      return { name, color, labels, values };
+      const series = { name, color, labels, values };
+      // withFmt 将数值保留一位小数展示（用于延迟/错误率等连续量）。
+      series.withFmt = () => {
+        const fmt = values.map(v => Number(v.toFixed(1)));
+        return { ...series, values: fmt };
+      };
+      return series;
     };
     return {
       requests: build(ChartPalette.categorical(0, isDarkMode), p => p.count, '请求数'),
       tokens: build(ChartPalette.categorical(1, isDarkMode), p => p.tokens, '词元'),
-      latency: build(ChartPalette.categorical(2, isDarkMode), p => p.avgLatency, '平均延迟 (ms)'),
+      latency: build(ChartPalette.categorical(2, isDarkMode), p => p.avgLatency, '平均延迟 (ms)')
+        .withFmt(),
       errorRate: build(
         ChartPalette.categorical(3, isDarkMode),
         p => (Number(p.count) > 0 ? ((Number(p.errors) || 0) / Number(p.count)) * 100 : 0),
         '错误率 (%)'
-      ),
+      ).withFmt(),
     };
   }, [analyticsCharts, isDarkMode]);
 
@@ -844,6 +893,12 @@ const trendSeries = useMemo(() => {
   const [proxyBatchOpen, setProxyBatchOpen] = useState(false);
   const [proxyBatchText, setProxyBatchText] = useState('');
   const [proxyImportLoading, setProxyImportLoading] = useState(false);
+  const [subscriptionUrlOpen, setSubscriptionUrlOpen] = useState(false);
+  const [subscriptionUrl, setSubscriptionUrl] = useState('');
+  // editingProxyIndex 标记当前正在编辑完整 URL 的代理条目索引；-1 表示无。
+  const [editingProxyIndex, setEditingProxyIndex] = useState(-1);
+  // proxyManagerOpen 控制「出口代理池」独立管理弹窗。
+  const [proxyManagerOpen, setProxyManagerOpen] = useState(false);
 
   const appendProxyPoolEntries = entries => {
     const cleaned = (Array.isArray(entries) ? entries : [])
@@ -871,30 +926,40 @@ const trendSeries = useMemo(() => {
     toast.success(`已批量添加 ${lines.length} 个代理`);
   };
 
-  const loadSubscriptionSocksProxies = async () => {
+  // resolveSubscriptionProxies 通过后端拉取并解析订阅链接中的 socks/http 节点。
+  const resolveSubscriptionProxies = async () => {
+    const url = subscriptionUrl.trim();
+    if (!url) {
+      toast.warning('请填写订阅链接');
+      return;
+    }
     if (proxyImportLoading) return;
     setProxyImportLoading(true);
     try {
-      const response = await fetch('/api/openai/proxies/subscription-nodes', {
-        headers: getAuthHeaders(),
+      const response = await fetch('/api/openai/proxies/resolve-subscription', {
+        method: 'POST',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
       const list = Array.isArray(data.proxies) ? data.proxies : [];
       if (list.length === 0) {
-        toast.info('订阅里暂无可用的 socks/http 节点');
+        toast.info(data.message || '订阅内容中没有找到 socks/http 节点');
         return;
       }
       const existing = new Set(endpointForm.proxyPool || []);
-      const added = list.filter(item => !existing.has(item.proxy)).length;
-      appendProxyPoolEntries(list.map(item => item.proxy));
+      const added = list.filter(item => !existing.has(item.proxy) && item.proxy).length;
+      appendProxyPoolEntries(list.map(item => item.proxy).filter(Boolean));
       if (added === 0) {
-        toast.info('订阅节点代理均已导入，无需重复添加');
+        toast.info('订阅链接中的代理均已导入，无需重复添加');
       } else {
-        toast.success(`已从订阅导入 ${added} 个代理`);
+        toast.success(`已从订阅链接解析并导入 ${added} 个代理`);
       }
+      setSubscriptionUrl('');
+      setSubscriptionUrlOpen(false);
     } catch (error) {
-      toast.error('导入订阅代理失败: ' + error.message);
+      toast.error('解析订阅链接失败: ' + error.message);
     } finally {
       setProxyImportLoading(false);
     }
@@ -2802,103 +2867,105 @@ const trendSeries = useMemo(() => {
         />
         <div className="flex min-w-0 items-center justify-end gap-2">
             {activeTab === 'analytics' && (
-              <>
-                <Select
-                  size="sm"
-                  aria-label="选择时间粒度"
-                  value={analyticsGranularity}
-                  onValueChange={val => setAnalyticsGranularity(val || 'day')}
-                  items={[
-                    { value: 'hour', label: '按小时' },
-                    { value: 'day', label: '按天' },
-                    { value: 'week', label: '按周' },
-                  ]}
-                  className="w-28 text-sm text-kumo-strong"
-                />
-                <Select
-                  size="sm"
-                  aria-label="选择分析范围"
-                  value={String(analyticsDays)}
-                  onValueChange={val => {
-                    setAnalyticsDays(Number(val));
-                    setAnalyticsPage(1);
-                  }}
-                  items={[
-                    { value: '1', label: '最近 24 小时' },
-                    { value: '7', label: '最近 7 天' },
-                    { value: '30', label: '最近 30 天' },
-                  ]}
-                  className="w-36 text-sm text-kumo-strong"
-                />
-                <Button
-                  size="sm"
-                  onClick={fetchAnalytics}
-                  disabled={analyticsLoading}
-                  className="flex items-center gap-1.5"
-                >
-                  <RefreshCw className={cx('w-3.5 h-3.5', analyticsLoading && 'animate-spin')} />
-                  <span>刷新</span>
-                </Button>
-              </>
+              <TabBarOverflowActions
+                items={[
+                  {
+                    key: 'granularity',
+                    type: 'select',
+                    label: '时间粒度',
+                    icon: <CalendarDotsIcon className="h-3.5 w-3.5" />,
+                    value: analyticsGranularity,
+                    onValueChange: val => setAnalyticsGranularity(val || 'day'),
+                    options: [
+                      { value: 'hour', label: '按小时' },
+                      { value: 'day', label: '按天' },
+                      { value: 'week', label: '按周' },
+                    ],
+                    selectClassName: 'w-28',
+                  },
+                  {
+                    key: 'range',
+                    type: 'select',
+                    label: '分析范围',
+                    icon: <CalendarDotsIcon className="h-3.5 w-3.5" />,
+                    value: String(analyticsDays),
+                    onValueChange: val => {
+                      setAnalyticsDays(Number(val));
+                      setAnalyticsPage(1);
+                    },
+                    options: [
+                      { value: '1', label: '最近 24 小时' },
+                      { value: '7', label: '最近 7 天' },
+                      { value: '30', label: '最近 30 天' },
+                    ],
+                    selectClassName: 'w-36',
+                  },
+                  {
+                    key: 'refresh',
+                    label: '刷新',
+                    icon: <RefreshCw className={cx('w-3.5 h-3.5', analyticsLoading && 'animate-spin')} />,
+                    onClick: fetchAnalytics,
+                    disabled: analyticsLoading,
+                  },
+                ]}
+              />
             )}
             {activeTab === 'keys' && (
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  onClick={loadGatewayKeys}
-                  disabled={gatewayKeysLoading}
-                  className="flex items-center gap-1.5"
-                >
-                  <RefreshCw className={cx(iconButtonIconClass, gatewayKeysLoading && 'animate-spin')} />
-                  <span>刷新</span>
-                </Button>
-                <Button
-                  size="sm"
-                  variant="primary"
-                  onClick={openAddGatewayKeyModal}
-                  className="flex items-center gap-1.5"
-                >
-                  <Plus className={iconButtonIconClass} />
-                  <span>新建密钥</span>
-                </Button>
-              </div>
+              <TabBarOverflowActions
+                items={[
+                  {
+                    key: 'refresh',
+                    label: '刷新',
+                    icon: <RefreshCw className={cx(iconButtonIconClass, gatewayKeysLoading && 'animate-spin')} />,
+                    onClick: loadGatewayKeys,
+                    disabled: gatewayKeysLoading,
+                  },
+                  {
+                    key: 'add',
+                    label: '新建密钥',
+                    icon: <Plus className={iconButtonIconClass} />,
+                    onClick: openAddGatewayKeyModal,
+                    variant: 'primary',
+                  },
+                ]}
+              />
             )}
             {activeTab === 'logs' && (
-              <>
-                <Select
-                  size="sm"
-                  aria-label="选择时间范围"
-                  value={String(analyticsDays)}
-                  onValueChange={val => {
-                    setAnalyticsDays(Number(val));
-                    setAnalyticsPage(1);
-                  }}
-                  items={[
-                    { value: '1', label: '最近 24 小时' },
-                    { value: '7', label: '最近 7 天' },
-                    { value: '30', label: '最近 30 天' },
-                  ]}
-                  className="w-36 text-sm text-kumo-strong"
-                />
-                <Button
-                  size="sm"
-                  onClick={fetchAnalytics}
-                  disabled={analyticsLoading}
-                  className="flex items-center gap-1.5"
-                >
-                  <RefreshCw className={cx('w-3.5 h-3.5', analyticsLoading && 'animate-spin')} />
-                  <span>刷新</span>
-                </Button>
-                <Button
-                  size="sm"
-                  variant="danger"
-                  onClick={clearGatewayLogs}
-                  className="flex items-center gap-1.5"
-                >
-                  <Trash className="h-3.5 w-3.5" />
-                  <span>清除数据</span>
-                </Button>
-              </>
+              <TabBarOverflowActions
+                items={[
+                  {
+                    key: 'range',
+                    type: 'select',
+                    label: '时间范围',
+                    icon: <CalendarDotsIcon className="h-3.5 w-3.5" />,
+                    value: String(analyticsDays),
+                    onValueChange: val => {
+                      setAnalyticsDays(Number(val));
+                      setAnalyticsPage(1);
+                    },
+                    options: [
+                      { value: '1', label: '最近 24 小时' },
+                      { value: '7', label: '最近 7 天' },
+                      { value: '30', label: '最近 30 天' },
+                    ],
+                    selectClassName: 'w-36',
+                  },
+                  {
+                    key: 'refresh',
+                    label: '刷新',
+                    icon: <RefreshCw className={cx('w-3.5 h-3.5', analyticsLoading && 'animate-spin')} />,
+                    onClick: fetchAnalytics,
+                    disabled: analyticsLoading,
+                  },
+                  {
+                    key: 'clear',
+                    label: '清除数据',
+                    icon: <Trash className="h-3.5 w-3.5" />,
+                    onClick: clearGatewayLogs,
+                    danger: true,
+                  },
+                ]}
+              />
             )}
             {activeTab === 'endpoints' && (
               <TabBarOverflowActions
@@ -3190,7 +3257,7 @@ const trendSeries = useMemo(() => {
                     </div>
 
                     <LayerCard className="min-w-0 p-0 shadow-none">
-                      <div className="scrollbar-thin">
+                      <div className="overflow-x-auto overscroll-x-contain touch-pan-x scrollbar-thin">
                         <Table layout="fixed" className="min-w-[820px] text-xs">
                           <colgroup>
                             <col style={{ width: 56 }} />
@@ -3656,7 +3723,10 @@ const trendSeries = useMemo(() => {
                   className="truncate font-mono text-[11px] text-kumo-subtle"
                   title="非缓存输入 = 输入（含缓存）− 缓存命中的词元"
                 >
-                  非缓存输入{' '}
+                  <ArrowDown
+                    className="inline h-3 w-3 align-[-1px]"
+                    aria-hidden="true"
+                  />{' '}
                   {Math.max(0, analyticsSummary.totalPromptTokens - analyticsSummary.totalCachedTokens).toLocaleString()}（
                   {analyticsSummary.totalPromptTokens > 0
                     ? `${(
@@ -3665,7 +3735,8 @@ const trendSeries = useMemo(() => {
                         100
                       ).toFixed(1)}%`
                     : '0.0%'}
-                  ） · 输出 {(analyticsSummary.totalCompletionTokens || 0).toLocaleString()}
+                  ） · <ArrowUp className="inline h-3 w-3 align-[-1px]" aria-hidden="true" />{' '}
+                  {(analyticsSummary.totalCompletionTokens || 0).toLocaleString()}
                 </span>
               </AppCard>
               <AppCard padding="md" className="flex min-h-0 min-w-0 flex-col justify-between gap-1.5">
@@ -3941,7 +4012,7 @@ const trendSeries = useMemo(() => {
           {/* Logs table and pagination */}
           <LayerCard className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden p-0 shadow-none">
             <div className="min-h-0 min-w-0 flex-1 overflow-auto scrollbar-thin">
-              <Table layout="fixed" className="min-w-[1480px] [&_td]:!px-2 [&_td]:!py-2 [&_th]:!px-2 [&_th]:!py-2">
+              <Table layout="fixed" className="min-w-[1520px] [&_td]:!px-2 [&_td]:!py-2 [&_th]:!px-2 [&_th]:!py-2">
                 <colgroup>
                   <col style={{ width: 146 }} />
                   <col style={{ width: 92 }} />
@@ -3953,8 +4024,8 @@ const trendSeries = useMemo(() => {
                   <col style={{ width: 84 }} />
                   <col style={{ width: 104 }} />
                   <col style={{ width: 120 }} />
-                  <col style={{ width: 120 }} />
-                  <col style={{ width: 180 }} />
+                  <col style={{ width: 140 }} />
+                  <col style={{ width: 150 }} />
                 </colgroup>
                 <Table.Header sticky variant="compact">
                   <Table.Row>
@@ -3963,8 +4034,8 @@ const trendSeries = useMemo(() => {
                     <Table.Head className="text-center">端点</Table.Head>
                     <Table.Head className="text-center">调用密钥</Table.Head>
                     <Table.Head className="text-center">模型</Table.Head>
-                    <Table.Head className="text-center">上游 IP</Table.Head>
-                    <Table.Head className="text-center">下游 IP</Table.Head>
+                    <Table.Head className="text-center">出口 IP</Table.Head>
+                    <Table.Head className="text-center">客户端 IP</Table.Head>
                     <Table.Head className="text-center">状态</Table.Head>
                     <Table.Head className="text-center">耗时/首字</Table.Head>
                     <Table.Head className="text-center">输入 / 输出</Table.Head>
@@ -3996,11 +4067,7 @@ const trendSeries = useMemo(() => {
                             className="truncate text-center font-mono text-kumo-subtle"
                             title={log.route}
                           >
-                            {log.route === 'chat.completions'
-                              ? '对话完成'
-                              : log.route === 'models'
-                                ? '模型列表'
-                                : log.route || '-'}
+                            {!log.route ? '-' : log.route.replace(/^chat\./, '')}
                           </Table.Cell>
                           <Table.Cell
                             className="truncate text-center font-semibold text-kumo-strong"
@@ -4022,7 +4089,7 @@ const trendSeries = useMemo(() => {
                           </Table.Cell>
                           <Table.Cell
                             className="text-center font-mono text-kumo-subtle"
-                            title={log.upstreamIp || '无上游 IP'}
+                            title={log.upstreamIp || '本机出口'}
                           >
                             <div className="inline-flex items-center justify-center gap-1">
                               <span className="truncate">{log.upstreamIp || '—'}</span>
@@ -4035,7 +4102,7 @@ const trendSeries = useMemo(() => {
                           </Table.Cell>
                           <Table.Cell
                             className="truncate text-center font-mono text-kumo-subtle"
-                            title={log.clientIp || '无下游 IP'}
+                            title={log.clientIp || '无客户端 IP'}
                           >
                             {log.clientIp || '—'}
                           </Table.Cell>
@@ -4060,7 +4127,7 @@ const trendSeries = useMemo(() => {
                                   log.completionTokens
                                 )} inline-flex items-center rounded-full px-2 py-0.5 font-mono text-[11px] font-semibold leading-none`}
                               >
-                                {log.ttfbMs > 0 ? (log.ttfbMs / 1000).toFixed(1) : '—'}
+                                {log.ttfbMs > 0 ? (log.ttfbMs / 1000).toFixed(1) + 's' : '—'}
                               </span>
                               <span
                                 className={
@@ -4075,12 +4142,12 @@ const trendSeries = useMemo(() => {
                             </div>
                           </Table.Cell>
                           <Table.Cell className="text-center font-mono">
-                            <div className="flex w-full items-baseline">
-                              <span className="min-w-0 flex-1 truncate text-right text-kumo-strong">
+                            <div className="flex w-full items-baseline justify-center whitespace-nowrap">
+                              <span className="text-right text-kumo-strong">
                                 {log.promptTokens}
                               </span>
                               <span className="shrink-0 px-0.5 text-kumo-subtle">/</span>
-                              <span className="min-w-0 flex-1 truncate text-left text-kumo-strong">
+                              <span className="text-left text-kumo-strong">
                                 {log.completionTokens}
                               </span>
                             </div>
@@ -4089,12 +4156,12 @@ const trendSeries = useMemo(() => {
                             className="text-center font-mono"
                             title="缓存命中 词元（占比 = 缓存 / 输入）"
                           >
-                            <div className="flex w-full items-baseline overflow-hidden">
-                              <span className="min-w-0 flex-1 truncate text-right text-kumo-strong">
+                            <div className="flex w-full items-baseline justify-center whitespace-nowrap">
+                              <span className="text-right text-kumo-strong">
                                 {log.cachedTokens}
                               </span>
                               <span className="shrink-0 px-0.5 text-kumo-subtle">（</span>
-                              <span className="min-w-0 flex-1 truncate text-left text-kumo-strong">
+                              <span className="text-left text-kumo-strong">
                                 {log.promptTokens > 0
                                   ? `${((log.cachedTokens / log.promptTokens) * 100).toFixed(1)}%）`
                                   : '0.0%）'}
@@ -4105,12 +4172,12 @@ const trendSeries = useMemo(() => {
                             className="text-center font-mono"
                             title="总消耗（实际消耗 = 总消耗 − 缓存）"
                           >
-                            <div className="flex w-full items-baseline">
-                              <span className="min-w-0 flex-1 truncate text-right font-semibold leading-none text-kumo-brand">
+                            <div className="flex w-full items-baseline justify-center whitespace-nowrap">
+                              <span className="text-right font-semibold leading-none text-kumo-brand">
                                 {log.totalTokens}
                               </span>
                               <span className="shrink-0 px-0.5 leading-none text-kumo-subtle">（</span>
-                              <span className="min-w-0 flex-1 truncate text-left font-mono leading-none text-kumo-subtle">
+                              <span className="text-left font-mono leading-none text-kumo-subtle">
                                 {Math.max(0, log.totalTokens - log.cachedTokens)}）
                               </span>
                             </div>
@@ -4138,7 +4205,7 @@ const trendSeries = useMemo(() => {
                   pageNumber: '页码',
                   pageSize: '每页数量',
                 }}
-                className="shrink-0 border-x-0 border-b-0 border-t border-kumo-line bg-kumo-base px-3 py-2 text-sm shadow-none"
+                className="shrink-0 flex-wrap gap-x-3 gap-y-1 border-x-0 border-b-0 border-t border-kumo-line bg-kumo-base px-3 py-2 text-sm shadow-none [&_[data-slot=pagination-controls]]:ml-auto [&_[data-slot=pagination-info]]:min-w-0 max-sm:[&_[data-slot=pagination-info]]:hidden max-sm:[&_[data-slot=pagination-page-size]]:hidden max-sm:[&_[data-slot=pagination-separator]]:hidden max-sm:[&_[data-slot=pagination-controls]]:m-auto"
               >
                 <Pagination.Info>
                   {({ pageShowingRange, totalCount }) => (
@@ -4281,102 +4348,40 @@ const trendSeries = useMemo(() => {
             </div>
 
             <div className="space-y-1.5">
-              <Label showOptional>出口代理池 (IP)</Label>
-              <div className="space-y-2">
-                {(endpointForm.proxyPool || []).map((proxy, index) => (
-                  <div
-                    key={index}
-                    className="grid grid-cols-[minmax(0,1fr)_2rem] items-center gap-2"
-                  >
-                    <Input
-                      size="sm"
-                      type="text"
-                      value={proxy}
-                      onChange={e => updateEndpointProxy(index, e.target.value)}
-                      placeholder="socks5://user:pass@host:port 或 http://host:port"
-                      spellCheck={false}
-                      autoComplete="off"
-                      data-1p-ignore
-                      className="w-full text-kumo-strong font-mono text-[0.85em]"
-                    />
-                    <Button
-                      shape="square"
-                      size="sm"
-                      variant="secondary-destructive"
-                      aria-label="删除代理"
-                      onClick={() => removeEndpointProxy(index)}
-                      title="删除代理"
-                      icon={<Trash className="h-3.5 w-3.5" />}
-                    />
-                  </div>
-                ))}
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex min-w-0 items-center justify-between gap-2">
+                <Label showOptional>出口代理池</Label>
                 <Button
                   size="xs"
                   variant="outline"
-                  onClick={addEndpointProxy}
-                  icon={<Plus className="h-3.5 w-3.5" />}
+                  onClick={() => setProxyManagerOpen(true)}
+                  icon={<Sliders className="h-3.5 w-3.5" />}
                 >
-                  添加代理
-                </Button>
-                <Button
-                  size="xs"
-                  variant="outline"
-                  onClick={() => setProxyBatchOpen(current => !current)}
-                  icon={<ClipboardText className="h-3.5 w-3.5" />}
-                >
-                  批量添加
-                </Button>
-                <Button
-                  size="xs"
-                  variant="outline"
-                  onClick={loadSubscriptionSocksProxies}
-                  disabled={proxyImportLoading}
-                  icon={
-                    proxyImportLoading ? (
-                      <Loader size="sm" />
-                    ) : (
-                      <Download className="h-3.5 w-3.5" />
-                    )
-                  }
-                >
-                  {proxyImportLoading ? '导入中...' : '从订阅节点导入'}
+                  管理代理池（{endpointForm.proxyPool?.length || 0}）
                 </Button>
               </div>
-              {proxyBatchOpen && (
-                <div className="space-y-2 rounded-md border border-kumo-line bg-kumo-recessed/25 p-3">
-                  <Textarea
-                    size="sm"
-                    value={proxyBatchText}
-                    onChange={e => setProxyBatchText(e.target.value)}
-                    placeholder={'每行一个代理地址，支持 socks5://、http(s):// 或 host:port\n如：\nsocks5://user:pass@1.2.3.4:1080\nhttp://5.6.7.8:8080'}
-                    spellCheck={false}
-                    rows={5}
-                    className="w-full font-mono text-[0.85em]"
-                  />
-                  <div className="flex items-center justify-end gap-2">
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      onClick={() => {
-                        setProxyBatchText('');
-                        setProxyBatchOpen(false);
-                      }}
-                    >
-                      取消
-                    </Button>
-                    <Button
-                      size="xs"
-                      variant="primary"
-                      onClick={saveProxyBatch}
-                      icon={<Check className="h-3.5 w-3.5" />}
-                    >
-                      确定添加
-                    </Button>
+              <div className="rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 py-2">
+                {endpointForm.proxyPool?.length > 0 ? (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {endpointForm.proxyPool.map((proxy, index) => {
+                      const entry = parseProxyEntry(proxy);
+                      return (
+                        <span
+                          key={index}
+                          className="inline-flex max-w-40 items-center gap-1 truncate rounded-full border border-kumo-line bg-kumo-base px-2 py-0.5 text-[11px] font-medium text-kumo-strong"
+                          title={entry.full}
+                        >
+                          <span className="truncate">{entry.label || entry.host || '空代理'}</span>
+                          {entry.ip && <span className="shrink-0 font-mono text-[10px] text-kumo-subtle">{entry.ip}</span>}
+                        </span>
+                      );
+                    })}
                   </div>
-                </div>
-              )}
+                ) : (
+                  <span className="text-xs text-kumo-subtle">
+                    未配置代理，请求将直连上游。
+                  </span>
+                )}
+              </div>
               <div className="flex min-h-8 items-center gap-2">
                 <Switch
                   size="sm"
@@ -4412,6 +4417,205 @@ const trendSeries = useMemo(() => {
                 {endpointSaving ? '保存中...' : '保存端点'}
               </Button>
             </div>
+        </Dialog>
+      </Dialog.Root>
+
+      {/* 1b. 出口代理池管理弹窗 */}
+      <Dialog.Root open={proxyManagerOpen} onOpenChange={setProxyManagerOpen}>
+        <Dialog className="flex max-h-[min(calc(100dvh-2rem),44rem)] !w-[min(38rem,calc(100vw-1rem))] !max-w-[min(38rem,calc(100vw-1rem))] flex-col overflow-hidden !p-0">
+          <div className="shrink-0 border-b border-kumo-line px-4 py-3 sm:px-5 sm:py-4">
+            <Dialog.Title className="text-sm font-semibold text-kumo-strong">
+              出口代理池（{endpointForm.proxyPool?.length || 0}）
+            </Dialog.Title>
+            <Dialog.Description className="mt-0.5 text-xs text-kumo-subtle">
+              请求按池轮换出口 IP。适合 IP 敏感的源；留空则直连。
+            </Dialog.Description>
+          </div>
+
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3 scrollbar-thin sm:px-5 sm:py-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={addEndpointProxy}
+                icon={<Plus className="h-3.5 w-3.5" />}
+              >
+                添加代理
+              </Button>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => setProxyBatchOpen(current => !current)}
+                icon={<LogList className="h-3.5 w-3.5" />}
+              >
+                批量添加
+              </Button>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => setSubscriptionUrlOpen(current => !current)}
+                icon={<Globe className="h-3.5 w-3.5" />}
+              >
+                订阅链接导入
+              </Button>
+            </div>
+
+            {proxyBatchOpen && (
+              <div className="space-y-2 rounded-md border border-kumo-line bg-kumo-recessed/25 p-3">
+                <Textarea
+                  size="sm"
+                  value={proxyBatchText}
+                  onChange={e => setProxyBatchText(e.target.value)}
+                  placeholder={'每行一个代理地址，支持 socks5://、http(s):// 或 host:port\n如：\nsocks5://user:pass@1.2.3.4:1080\nhttp://5.6.7.8:8080'}
+                  spellCheck={false}
+                  rows={5}
+                  className="w-full font-mono text-[0.85em]"
+                />
+                <div className="flex items-center justify-end gap-2">
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => {
+                      setProxyBatchText('');
+                      setProxyBatchOpen(false);
+                    }}
+                  >
+                    取消
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="primary"
+                    onClick={saveProxyBatch}
+                    icon={<Check className="h-3.5 w-3.5" />}
+                  >
+                    确定添加
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {subscriptionUrlOpen && (
+              <div className="space-y-2 rounded-md border border-kumo-line bg-kumo-recessed/25 p-3">
+                <Input
+                  size="sm"
+                  type="url"
+                  value={subscriptionUrl}
+                  onChange={e => setSubscriptionUrl(e.target.value)}
+                  placeholder="https://example.com/sub?token=xxx"
+                  spellCheck={false}
+                  autoComplete="off"
+                  data-1p-ignore
+                  className="w-full font-mono text-[0.85em]"
+                />
+                <p className="text-xs leading-snug text-kumo-subtle">
+                  后端将拉取订阅并解析其中的 socks/http 节点，导入为出口代理。仅本机/服务器能访问的节点可用。
+                </p>
+                <div className="flex items-center justify-end gap-2">
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => {
+                      setSubscriptionUrl('');
+                      setSubscriptionUrlOpen(false);
+                    }}
+                  >
+                    取消
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="primary"
+                    onClick={resolveSubscriptionProxies}
+                    disabled={proxyImportLoading}
+                    icon={proxyImportLoading ? <Loader size="sm" /> : <Globe className="h-3.5 w-3.5" />}
+                  >
+                    {proxyImportLoading ? '解析中...' : '解析并导入'}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              {(endpointForm.proxyPool || []).map((proxy, index) => {
+                const entry = parseProxyEntry(proxy);
+                const editing = editingProxyIndex === index;
+                return (
+                  <div key={index} className="flex min-w-0 items-center gap-2">
+                    {editing ? (
+                      <Input
+                        size="sm"
+                        type="text"
+                        value={proxy}
+                        onChange={e => updateEndpointProxy(index, e.target.value)}
+                        onBlur={() => setEditingProxyIndex(-1)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' || e.key === 'Escape') setEditingProxyIndex(-1);
+                        }}
+                        spellCheck={false}
+                        autoComplete="off"
+                        data-1p-ignore
+                        autoFocus
+                        className="min-w-0 flex-1 font-mono text-[0.85em] text-kumo-strong"
+                      />
+                    ) : (
+                      <div
+                        className="min-w-0 flex-1 cursor-pointer rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 py-2"
+                        onClick={() => setEditingProxyIndex(index)}
+                        title={`${entry.full}\n\n点击可编辑完整代理地址`}
+                      >
+                        {entry.label ? (
+                          <div className="flex min-w-0 items-baseline gap-1.5">
+                            <span className="truncate text-sm font-semibold text-kumo-strong">
+                              {entry.label}
+                            </span>
+                            {entry.host && entry.host !== entry.label && (
+                              <span className="shrink-0 font-mono text-[11px] text-kumo-subtle">
+                                {entry.host}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="truncate text-sm text-kumo-subtle">空代理（点击编辑）</div>
+                        )}
+                      </div>
+                    )}
+                    <Button
+                      shape="square"
+                      size="sm"
+                      variant={editing ? 'primary' : 'secondary'}
+                      aria-label="编辑代理"
+                      onClick={() => setEditingProxyIndex(editing ? -1 : index)}
+                      title={editing ? '完成编辑' : '编辑代理'}
+                      icon={editing ? <Check className="h-3.5 w-3.5" /> : <Edit className="h-3.5 w-3.5" />}
+                    />
+                    <Button
+                      shape="square"
+                      size="sm"
+                      variant="secondary-destructive"
+                      aria-label="删除代理"
+                      onClick={() => removeEndpointProxy(index)}
+                      title="删除代理"
+                      icon={<Trash className="h-3.5 w-3.5" />}
+                    />
+                  </div>
+                );
+              })}
+              {!endpointForm.proxyPool?.length && (
+                <div className="rounded-md border border-dashed border-kumo-line py-8 text-center text-xs text-kumo-subtle">
+                  暂无代理。点击上方「添加代理」或「订阅链接导入」开始配置。
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 border-t border-kumo-line bg-kumo-recessed/25 px-4 py-3 sm:px-5">
+            <Dialog.Close
+              render={props => (
+                <Button size="sm" {...props} variant="secondary">
+                  完成
+                </Button>
+              )}
+            />
+          </div>
         </Dialog>
       </Dialog.Root>
 
