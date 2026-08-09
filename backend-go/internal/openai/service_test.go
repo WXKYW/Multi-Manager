@@ -146,7 +146,7 @@ func TestRecordAnalyticsSurvivesCancelledRequestContext(t *testing.T) {
 	ctx = context.WithValue(ctx, gatewayKeyContextKey{}, gatewayKeyIdentity{ID: "key-1", Name: "client"})
 	cancel()
 
-	service.RecordAnalytics(ctx, "chat.completions", "endpoint-1", "model-1", http.StatusBadGateway, 42, 0, 0, 0)
+	service.RecordAnalytics(ctx, "chat.completions", "endpoint-1", "model-1", http.StatusBadGateway, 42, 0, 0, 0, 0, 0, 0, 0, "203.0.113.9", "198.51.100.7")
 
 	db, err := service.open(context.Background())
 	if err != nil {

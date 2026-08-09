@@ -719,6 +719,41 @@ func (s *Server) isTrustedProxy(ip net.IP) bool {
 	return false
 }
 
+func (s *Server) gatewayClientIP(r *http.Request) string {
+	direct := ""
+	if host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr)); err == nil {
+		direct = host
+	} else if r.RemoteAddr != "" {
+		direct = strings.Trim(strings.TrimSpace(r.RemoteAddr), "[]")
+	}
+	if direct == "" {
+		return ""
+	}
+	ip := net.ParseIP(direct)
+	trusted := false
+	if ip != nil {
+		if s.isTrustedProxy(ip) {
+			trusted = true
+		} else if !s.cfg.IsProduction() && ip.IsLoopback() {
+			trusted = true
+		}
+	}
+	if trusted {
+		if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); forwarded != "" {
+			candidate := strings.TrimSpace(strings.Split(forwarded, ",")[0])
+			if parsed := net.ParseIP(candidate); parsed != nil {
+				return parsed.String()
+			}
+		}
+		if candidate := strings.TrimSpace(r.Header.Get("X-Real-IP")); candidate != "" {
+			if parsed := net.ParseIP(candidate); parsed != nil {
+				return parsed.String()
+			}
+		}
+	}
+	return direct
+}
+
 func firstForwardedValue(value string) string {
 	if value == "" {
 		return ""
@@ -745,11 +780,11 @@ func (s *Server) serveV1Route(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	method := r.Method
 	startedAt := time.Now()
+	clientIP := s.gatewayClientIP(r)
 
 	// 1. Models endpoint
 	if method == http.MethodGet && (path == "/v1/models" || path == "/v1/model") {
-		statusCode := s.serveV1Models(w, r)
-		s.openai.RecordAnalytics(r.Context(), "models", "", "", statusCode, time.Since(startedAt).Milliseconds(), 0, 0, 0)
+		s.serveV1Models(w, r)
 		return
 	}
 
@@ -760,7 +795,7 @@ func (s *Server) serveV1Route(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.Error(w, http.StatusNotFound, "v1 endpoint not found")
-	s.openai.RecordAnalytics(r.Context(), strings.TrimPrefix(path, "/v1/"), "", "", http.StatusNotFound, time.Since(startedAt).Milliseconds(), 0, 0, 0)
+	s.openai.RecordAnalytics(r.Context(), strings.TrimPrefix(path, "/v1/"), "", "", http.StatusNotFound, time.Since(startedAt).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, "")
 }
 
 func (s *Server) serveV1Models(w http.ResponseWriter, r *http.Request) int {

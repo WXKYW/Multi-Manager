@@ -1522,7 +1522,12 @@ func TestOpenAIServerRouting(t *testing.T) {
 			Route string `json:"route"`
 		} `json:"records"`
 	}
-	if err := json.Unmarshal(res.Body.Bytes(), &analyticsPayload); err != nil || len(analyticsPayload.Records) == 0 || analyticsPayload.Records[0].Route != "models" {
-		t.Fatalf("models request was not recorded in analytics: %v body=%s", err, res.Body.String())
+	if err := json.Unmarshal(res.Body.Bytes(), &analyticsPayload); err != nil {
+		t.Fatalf("unmarshal analytics logs: %v body=%s", err, res.Body.String())
+	}
+	for _, record := range analyticsPayload.Records {
+		if record.Route == "models" {
+			t.Fatalf("models request should not pollute analytics logs: %+v", analyticsPayload.Records)
+		}
 	}
 }

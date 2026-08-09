@@ -10,12 +10,13 @@ import { Switch } from '@cloudflare/kumo/components/switch';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Autocomplete } from '@cloudflare/kumo/components/autocomplete';
 import {
+  ChartLegend,
   ClipboardText,
+  ChartPalette,
   DatePicker,
   Label,
   LayerCard,
   Loader,
-  Meter,
   Pagination,
   Popover,
   Table,
@@ -25,6 +26,25 @@ import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
 import { formatDateTime } from '../modules/utils.js';
 import { renderMarkdown } from '../modules/markdown.js';
+import useStore from '../store.js';
+import * as echarts from 'echarts/core';
+import { BarChart } from 'echarts/charts';
+import {
+  AriaComponent,
+  AxisPointerComponent,
+  GridComponent,
+  TooltipComponent,
+} from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
+
+echarts.use([
+  BarChart,
+  AxisPointerComponent,
+  GridComponent,
+  TooltipComponent,
+  AriaComponent,
+  CanvasRenderer,
+]);
 import {
   DEFAULT_MODEL_HEALTH_CONCURRENCY,
   MAX_BATCH_MODEL_HEALTH_TARGETS,
@@ -69,16 +89,67 @@ import {
   Check,
   Paperclip,
   Brain,
-  Sliders,
   Settings as SettingsIcon,
   Copy,
   AlertTriangle,
   Key,
   Reboot,
+  Eye,
+  Play,
+  Clock,
+  TrendingUp,
 } from '../components/Icons.jsx';
 
 function createHealthCheckProgress(total = 0, running = false) {
   return { running, total, completed: 0, healthy: 0, degraded: 0, failed: 0 };
+}
+
+function normalizeStoredHiddenModels(value) {
+  const map = {};
+  if (Array.isArray(value)) {
+    return map;
+  }
+  if (value && typeof value === 'object') {
+    for (const key of Object.keys(value)) {
+      map[key] = Array.isArray(value[key]) ? value[key].slice() : [];
+    }
+  }
+  return map;
+}
+
+function isModelHidden(hiddenMap, endpointId, modelId) {
+  const id = String(modelId || '').trim();
+  if (!id) return false;
+  return Array.isArray(hiddenMap?.[endpointId]) && hiddenMap[endpointId].includes(id);
+}
+
+function toggleModelHidden(hiddenMap, endpointId, modelId) {
+  const id = String(modelId || '').trim();
+  if (!id || !endpointId) return hiddenMap;
+  const list = [...(hiddenMap?.[endpointId] || [])];
+  const next = list.includes(id) ? list.filter(item => item !== id) : [...list, id];
+  return { ...hiddenMap, [endpointId]: next };
+}
+
+// 自绘 ECharts 柱状时间桶：每个桶(小时/天/周)一根柱，类目轴标签 = 桶名，避免时间轴重复标签。
+
+function activeModelIdsForEndpoint(endpoint) {
+  const disabled = Array.isArray(endpoint?.disabledModels) ? endpoint.disabledModels : [];
+  return Array.from(
+    new Set(
+      (Array.isArray(endpoint?.models) ? endpoint.models : [])
+        .map(model => (typeof model === 'string' ? model.trim() : (model?.id || '').trim()))
+        .filter(id => id && !disabled.includes(id))
+    )
+  );
+}
+
+// 按请求结果给 pill 上色：成功且有输出=绿，无输出=黄，失败=红。
+function resultToneClass(statusCode, completionTokens) {
+  const status = Number(statusCode) || 0;
+  if (status >= 400) return 'bg-kumo-danger/15 text-kumo-danger';
+  if (!(Number(completionTokens) > 0)) return 'bg-kumo-warning/15 text-kumo-warning';
+  return 'bg-kumo-success/15 text-kumo-success';
 }
 
 const GATEWAY_EXPIRY_HOURS = Array.from({ length: 24 }, (_, hour) => {
@@ -105,33 +176,9 @@ function parseLocalDateTime(value) {
   return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
-function GatewaySection({
-  title,
-  description,
-  icon,
-  actions,
-  className = '',
-  bodyClassName = '',
-  children,
-}) {
-  return (
-    <section className={cx('flex flex-col gap-3', className)}>
-      <header className="flex min-h-10 flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-          <h2 className="flex items-center gap-2 font-semibold text-kumo-strong">
-            {icon}
-            <span>{title}</span>
-          </h2>
-          {description && <p className="text-kumo-subtle">{description}</p>}
-        </div>
-        {actions && <div className="flex flex-wrap items-center justify-end gap-2">{actions}</div>}
-      </header>
-      <div className={bodyClassName}>{children}</div>
-    </section>
-  );
-}
-
 function OpenAIPage() {
+  const { theme } = useStore();
+  const isDarkMode = theme === 'dark';
   const gatewayOrigin = useMemo(() => {
     if (typeof window === 'undefined') return 'http://localhost:3000';
     const url = new URL(window.location.origin);
@@ -140,14 +187,22 @@ function OpenAIPage() {
   }, []);
 
   // Tab State
-  const [activeTab, setActiveTab] = useState('endpoints'); // 'endpoints' | 'keys' | 'analytics'
+  const [activeTab, setActiveTab] = useState('analytics'); // 'analytics' | 'endpoints' | 'keys' | 'logs'
 
   // Gateway Analytics States
   const [analyticsDays, setAnalyticsDays] = useState(7);
+  const [analyticsGranularity, setAnalyticsGranularity] = useState(() => {
+    const stored = localStorage.getItem('openai_analytics_granularity');
+    return ['hour', 'day', 'week'].includes(stored) ? stored : 'day';
+  });
   const [analyticsSummary, setAnalyticsSummary] = useState({
     totalRequests: 0,
     avgLatency: 0,
     totalTokens: 0,
+    totalCachedTokens: 0,
+    cachedRatio: 0,
+    totalPromptTokens: 0,
+    totalCompletionTokens: 0,
     errorRate: 0,
   });
   const [analyticsCharts, setAnalyticsCharts] = useState({
@@ -155,7 +210,10 @@ function OpenAIPage() {
   });
   const [analyticsLogs, setAnalyticsLogs] = useState([]);
   const [analyticsPage, setAnalyticsPage] = useState(1);
-  const [analyticsPageSize, setAnalyticsPageSize] = useState(20);
+  const [analyticsPageSize, setAnalyticsPageSize] = useState(() => {
+    const stored = Number(localStorage.getItem('openai_analytics_page_size'));
+    return [10, 20, 50, 100].includes(stored) ? stored : 20;
+  });
   const [analyticsTotal, setAnalyticsTotal] = useState(0);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const getAuthHeaders = useCallback(() => {
@@ -170,7 +228,7 @@ function OpenAIPage() {
       const headers = getAuthHeaders();
       const [sumRes, chartsRes, logsRes] = await Promise.all([
         fetch(`/api/openai/analytics/summary?days=${analyticsDays}`, { headers }),
-        fetch(`/api/openai/analytics/charts?days=${analyticsDays}`, { headers }),
+        fetch(`/api/openai/analytics/charts?days=${analyticsDays}&granularity=${analyticsGranularity}`, { headers }),
         fetch(
           `/api/openai/analytics/logs?days=${analyticsDays}&page=${analyticsPage}&pageSize=${analyticsPageSize}`,
           { headers }
@@ -196,13 +254,23 @@ function OpenAIPage() {
     } finally {
       setAnalyticsLoading(false);
     }
-  }, [analyticsDays, analyticsPage, analyticsPageSize, getAuthHeaders]);
+  }, [analyticsDays, analyticsGranularity, analyticsPage, analyticsPageSize, getAuthHeaders]);
 
   useEffect(() => {
-    if (activeTab === 'analytics') {
+    if (activeTab === 'analytics' || activeTab === 'logs') {
       fetchAnalytics();
     }
   }, [activeTab, fetchAnalytics]);
+
+  // 记住日志分页数量，下次进入自动沿用。
+  useEffect(() => {
+    localStorage.setItem('openai_analytics_page_size', String(analyticsPageSize));
+  }, [analyticsPageSize]);
+
+  // 记住数据看板的时间粒度（小时/天/周）。
+  useEffect(() => {
+    localStorage.setItem('openai_analytics_granularity', analyticsGranularity);
+  }, [analyticsGranularity]);
 
   const chatStorage = useMemo(() => {
     const personasKey = 'openai_chat_personas_v2';
@@ -342,6 +410,217 @@ function OpenAIPage() {
     [endpoints, selectedEndpointId]
   );
 
+  // 实际启用（未被禁用）的模型总数，跨启用端点去重。
+  const enabledModelCount = useMemo(() => {
+    const ids = new Set();
+    endpoints
+      .filter(endpoint => endpoint.enabled)
+      .forEach(endpoint => activeModelIdsForEndpoint(endpoint).forEach(id => ids.add(id)));
+    return ids.size;
+  }, [endpoints]);
+
+  // 时间序列（小时/天/周粒度）：为每根柱提供独立可对齐的类目轴。
+// 后端每个桶返回 day(bucket label) + count/tokens/avgLatency/errors，仅用于柱状展示。
+function TrendBarChart({ labels, values, color, isDarkMode }) {
+  const containerRef = useRef(null);
+  const chartRef = useRef(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || !labels || labels.length === 0) return;
+    const chart = echarts.init(el);
+    chartRef.current = chart;
+    const axisColor = isDarkMode ? '#8b8fa3' : '#52525b';
+    const gridColor = isDarkMode ? '#2b2b33' : '#e4e4e7';
+    chart.setOption({
+      animation: false,
+      grid: { left: 8, right: 12, top: 10, bottom: 0, containLabel: true },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        backgroundColor: isDarkMode ? '#25252b' : '#ffffff',
+        textStyle: { color: axisColor, fontSize: 11 },
+      },
+      xAxis: {
+        type: 'category',
+        data: labels,
+        boundaryGap: false,
+        axisLine: { lineStyle: { color: gridColor } },
+        axisTick: { show: false },
+        axisLabel: { color: axisColor, fontSize: 10, hideOverlap: true },
+      },
+      yAxis: {
+        type: 'value',
+        splitLine: { lineStyle: { color: gridColor } },
+        axisLabel: { color: axisColor, fontSize: 10 },
+      },
+      series: [
+        {
+          type: 'bar',
+          data: values,
+          barMaxWidth: 26,
+          itemStyle: { color, borderRadius: [2, 2, 0, 0] },
+        },
+      ],
+    });
+    const observer = new ResizeObserver(() => chart.resize());
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      chart.dispose();
+      chartRef.current = null;
+    };
+  }, [labels, values, color, isDarkMode]);
+
+  return <div ref={containerRef} className="h-[168px] w-full" />;
+}
+
+// 全宽「模型 × 时间」折线趋势：类别轴（每桶唯一刻度），稀疏段断线成 Trend；
+// 顶部图例按调用次数降序，颜色与折线同一份映射，点击隔离/恢复。
+function ModelTrendChart({ labels, series, isDarkMode }) {
+  const containerRef = useRef(null);
+  const chartRef = useRef(null);
+  const [hiddenSeries, setHiddenSeries] = useState({});
+
+  // 单一颜色来源：排序后每模型一个固定索引颜色，Legend 与折线共用同一数组。
+  const ordered = useMemo(() => {
+    const withMeta = (series || []).map((item, index) => ({
+      model: item.model,
+      color: ChartPalette.categorical(index, isDarkMode),
+      total: (item.data || []).reduce((sum, value) => sum + (Number(value) || 0), 0),
+      values: (item.data || []).map(value => Number(value) || 0),
+    }));
+    return withMeta.sort((a, b) => b.total - a.total);
+  }, [series, isDarkMode]);
+
+  const visibleSeries = useMemo(
+    () => ordered.filter(item => !hiddenSeries[item.model]),
+    [ordered, hiddenSeries]
+  );
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || !labels || labels.length === 0) return;
+    const chart = echarts.init(el);
+    chartRef.current = chart;
+    const observer = new ResizeObserver(() => chart.resize());
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      chart.dispose();
+      chartRef.current = null;
+    };
+  }, [labels]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !labels || labels.length === 0) return;
+    const axisColor = isDarkMode ? '#8b8fa3' : '#52525b';
+    const gridColor = isDarkMode ? '#2b2b33' : '#e4e4e7';
+    chart.setOption(
+      {
+        animation: false,
+        grid: { left: 8, right: 12, top: 8, bottom: 0, containLabel: true },
+        tooltip: {
+          trigger: 'axis',
+          traceHigh: true,
+          backgroundColor: isDarkMode ? '#25252b' : '#ffffff',
+          textStyle: { color: axisColor, fontSize: 11 },
+        },
+        xAxis: {
+          type: 'category',
+          data: labels,
+          boundaryGap: false,
+          axisLine: { lineStyle: { color: gridColor } },
+          axisTick: { show: false },
+          axisLabel: { color: axisColor, fontSize: 10, hideOverlap: true },
+        },
+        yAxis: {
+          type: 'value',
+          splitLine: { lineStyle: { color: gridColor } },
+          axisLabel: { color: axisColor, fontSize: 10 },
+        },
+        series: visibleSeries.map(item => ({
+          type: 'line',
+          name: item.model,
+          data: item.values,
+          smooth: false,
+          connectNulls: false,
+          showSymbol: true,
+          symbolSize: 4,
+          lineStyle: { width: 2, color: item.color },
+          itemStyle: { color: item.color },
+          areaStyle: { opacity: 0 },
+        })),
+      },
+      { notMerge: false }
+    );
+  }, [labels, visibleSeries, isDarkMode]);
+
+  const handleClick = name => {
+    setHiddenSeries(prev => {
+      const isIsolated = ordered.every(
+        item => (item.model === name ? !prev[item.model] : prev[item.model])
+      );
+      const next = {};
+      for (const item of ordered) {
+        next[item.model] = isIsolated ? false : item.model !== name;
+      }
+      return next;
+    });
+  };
+
+  return (
+    <div className="flex min-h-0 flex-col gap-2">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 px-1">
+        {ordered.map(item => (
+          <ChartLegend.LargeItem
+            key={item.model}
+            name={item.model}
+            color={item.color}
+            value={item.total.toLocaleString()}
+            unit="次"
+            inactive={hiddenSeries[item.model] ?? false}
+            onClick={() => handleClick(item.model)}
+          />
+        ))}
+      </div>
+      <div ref={containerRef} className="h-[280px] w-full" />
+    </div>
+  );
+}
+
+const trendSeries = useMemo(() => {
+    const buckets = Array.isArray(analyticsCharts.daily) ? analyticsCharts.daily : [];
+    const build = (color, pick, name) => {
+      const labels = buckets.map(point => point.day || '');
+      const values = buckets.map(point => Number(pick(point)) || 0);
+      return { name, color, labels, values };
+    };
+    return {
+      requests: build(ChartPalette.categorical(0, isDarkMode), p => p.count, '请求数'),
+      tokens: build(ChartPalette.categorical(1, isDarkMode), p => p.tokens, '词元'),
+      latency: build(ChartPalette.categorical(2, isDarkMode), p => p.avgLatency, '平均延迟 (ms)'),
+      errorRate: build(
+        ChartPalette.categorical(3, isDarkMode),
+        p => (Number(p.count) > 0 ? ((Number(p.errors) || 0) / Number(p.count)) * 100 : 0),
+        '错误率 (%)'
+      ),
+    };
+  }, [analyticsCharts, isDarkMode]);
+
+  // 全宽「模型调用趋势」数据：按后端 byModel / buckets 对齐。
+  const byModelTrend = useMemo(() => {
+    const daily = Array.isArray(analyticsCharts.daily) ? analyticsCharts.daily : [];
+    const labels =
+      Array.isArray(analyticsCharts.buckets) && analyticsCharts.buckets.length
+        ? analyticsCharts.buckets
+        : trendSeries.requests.labels;
+    const tsValues = daily.map(point => (Number(point.tsSec) || 0) * 1000);
+    const models = Array.isArray(analyticsCharts.byModel) ? analyticsCharts.byModel : [];
+    return { labels, tsValues, models };
+  }, [analyticsCharts, trendSeries]);
+
   const defaultGatewayKey = useMemo(
     () => gatewayKeys.find(key => key.isDefault) || gatewayKeys[0] || null,
     [gatewayKeys]
@@ -456,10 +735,29 @@ function OpenAIPage() {
   };
 
   const modelSwitchLoadingRef = useRef({});
-  const toggleModelEnabled = async (endpoint, modelId, enabled) => {
+  const toggleModelEnabled = async (endpoint, modelId, enabled, silent = false, skipReload = false) => {
     const key = `${endpoint.id}:${modelId}`;
     if (modelSwitchLoadingRef.current[key]) return;
     modelSwitchLoadingRef.current[key] = true;
+    const prevDisabled = Array.isArray(endpoint.disabledModels) ? endpoint.disabledModels : [];
+    // 乐观更新：立即切换开关状态，无需等待后端往返。
+    setEndpoints(prev =>
+      prev.map(e =>
+        e.id === endpoint.id
+          ? {
+              ...e,
+              disabledModels: enabled
+                ? (Array.isArray(e.disabledModels) ? e.disabledModels : []).filter(id => id !== modelId)
+                : [
+                    ...(Array.isArray(e.disabledModels) ? e.disabledModels : []).filter(
+                      id => id !== modelId
+                    ),
+                    modelId,
+                  ],
+            }
+          : e
+      )
+    );
     try {
       const response = await fetch(`/api/openai/endpoints/${endpoint.id}/models/toggle`, {
         method: 'POST',
@@ -475,9 +773,12 @@ function OpenAIPage() {
             : e
         )
       );
-      toast.success(enabled ? `${modelId} 已启用` : `${modelId} 已停用`);
-      await loadAllModels(true);
+      if (!silent) toast.success(enabled ? `${modelId} 已启用` : `${modelId} 已停用`);
+      if (!skipReload) await loadAllModels(true);
     } catch (error) {
+      setEndpoints(prev =>
+        prev.map(e => (e.id === endpoint.id ? { ...e, disabledModels: prevDisabled } : e))
+      );
       toast.error(`更新模型状态失败: ${error.message}`);
     } finally {
       modelSwitchLoadingRef.current[key] = false;
@@ -1093,9 +1394,9 @@ function OpenAIPage() {
   const [hiddenModels, setHiddenModels] = useState(() => {
     try {
       const saved = localStorage.getItem('openai_hidden_models');
-      return saved ? JSON.parse(saved) : [];
+      return saved ? normalizeStoredHiddenModels(JSON.parse(saved)) : {};
     } catch {
-      return [];
+      return {};
     }
   });
 
@@ -1145,7 +1446,6 @@ function OpenAIPage() {
   const [dropdownModelSearch, setDropdownModelSearch] = useState('');
   const [openaiModelSearch, setOpenaiModelSearch] = useState('');
   const [openaiSelectedEndpointId, setOpenaiSelectedEndpointId] = useState('');
-  const [openaiShowHiddenModels, setOpenaiShowHiddenModels] = useState(false);
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -1216,18 +1516,129 @@ function OpenAIPage() {
     });
   };
 
-  const toggleHideModel = modelId => {
-    if (!modelId) return;
+  const toggleHideModel = (endpointId, modelId) => {
+    if (!modelId || !endpointId) return;
     setHiddenModels(prev => {
-      let next;
-      if (prev.includes(modelId)) {
-        next = prev.filter(id => id !== modelId);
-      } else {
-        next = [...prev, modelId];
-      }
+      const next = toggleModelHidden(prev, endpointId, modelId);
       localStorage.setItem('openai_hidden_models', JSON.stringify(next));
       return next;
     });
+  };
+
+  const failedModelIdsForEndpoint = endpoint => {
+    if (!endpoint) return [];
+    return endpointModelIds(endpoint).filter(
+      modelId => openaiModelHealth[modelHealthKey(endpoint.id, modelId)]?.status === 'error'
+    );
+  };
+
+  const [modelBatchActionLoading, setModelBatchActionLoading] = useState(false);
+
+  // 模型映射（对外名称）行内编辑状态。
+  const [mappingEditKey, setMappingEditKey] = useState(null);
+  const [mappingDraft, setMappingDraft] = useState('');
+
+  const batchCloseFailedModels = async endpoint => {
+    if (modelBatchActionLoading) return;
+    const failed = failedModelIdsForEndpoint(endpoint);
+    if (failed.length === 0) {
+      toast.info('当前端点没有检测失败的模型');
+      return;
+    }
+    setModelBatchActionLoading(true);
+    try {
+      const targets = failed.filter(modelId => modelEnabledForEndpoint(endpoint, modelId));
+      // 同时（并发）关闭，而不是一个一个依次等待。
+      await Promise.all(
+        targets.map(modelId => toggleModelEnabled(endpoint, modelId, false, true, true))
+      );
+      if (targets.length > 0) await loadAllModels(true);
+      // 关闭的同时，在本端点隐藏这些失败的模型，使其从模型列表消失。
+      setHiddenModels(prev => {
+        const next = { ...prev };
+        const merged = Array.from(new Set([...(prev?.[endpoint.id] || []), ...failed]));
+        next[endpoint.id] = merged;
+        localStorage.setItem('openai_hidden_models', JSON.stringify(next));
+        return next;
+      });
+      toast.success(`已关闭并隐藏 ${failed.length} 个检测失败的模型`);
+    } finally {
+      setModelBatchActionLoading(false);
+    }
+  };
+
+  // 清空全部网关日志数据。
+  const clearGatewayLogs = async () => {
+    if (!(await dialog.confirm('确认清除全部网关日志记录？此操作不可恢复。'))) return;
+    try {
+      const response = await fetch('/api/openai/analytics/clear', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) throw new Error(data.error || '清除失败');
+      toast.success(`已清除 ${data.deleted ?? 0} 条网关日志`);
+      await fetchAnalytics();
+    } catch (error) {
+      toast.error('清除日志失败: ' + error.message);
+    }
+  };
+
+  // 保存模型映射：PUT /api/openai/endpoints/:id/model-mappings。
+  const saveEndpointMapping = async (endpoint, modelId, alias) => {
+    setMappingEditKey(null);
+    const clean = (alias || '').trim();
+    try {
+      const res = await fetch(`/api/openai/endpoints/${endpoint.id}/model-mappings`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          mappings: { ...(endpoint.modelMappings || {}), [modelId]: clean },
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || '保存失败');
+      toast.success(clean ? `已映射 ${modelId} → ${clean}` : `已清除 ${modelId} 的映射`);
+      setEndpoints(prev =>
+        prev.map(e => (e.id === endpoint.id ? { ...e, modelMappings: data.modelMappings } : e))
+      );
+      await loadAllModels(true);
+    } catch (error) {
+      toast.error('保存映射失败: ' + error.message);
+    }
+  };
+
+  // 批量开关切换：有被停用的模型时显示"启用"，否则显示"关闭失败"。
+  const batchToggleEnabledModels = async endpoint => {
+    if (modelBatchActionLoading) return;
+    const disabled = Array.isArray(endpoint.disabledModels) ? endpoint.disabledModels : [];
+    if (disabled.length === 0) {
+      await batchCloseFailedModels(endpoint);
+      return;
+    }
+    setModelBatchActionLoading(true);
+    try {
+      // 同时（并发）启用，而不是一个一个依次等待。
+      await Promise.all(
+        disabled.map(modelId => toggleModelEnabled(endpoint, modelId, true, true, true))
+      );
+      if (disabled.length > 0) await loadAllModels(true);
+      // 启用后一并取消隐藏本端点这些模型，使其回到列表。
+      setHiddenModels(prev => {
+        const next = { ...prev };
+        const keep = (prev?.[endpoint.id] || []).filter(id => !disabled.includes(id));
+        if (keep.length === 0) {
+          delete next[endpoint.id];
+        } else {
+          next[endpoint.id] = keep;
+        }
+        localStorage.setItem('openai_hidden_models', JSON.stringify(next));
+        return next;
+      });
+      toast.success(`已启用并恢复 ${disabled.length} 个被停用的模型`);
+    } finally {
+      setModelBatchActionLoading(false);
+    }
   };
 
   const handleSetDefaultModel = () => {
@@ -2278,7 +2689,7 @@ function OpenAIPage() {
       const matchesEndpoint =
         !openaiSelectedEndpointId ||
         m.owned_by === endpoints.find(e => e.id === openaiSelectedEndpointId)?.name;
-      const matchesHidden = openaiShowHiddenModels ? true : !hiddenModels.includes(m.id);
+      const matchesHidden = !isModelHidden(hiddenModels, openaiSelectedEndpointId || '', m.id);
       return matchesSearch && matchesEndpoint && matchesHidden;
     });
     return list;
@@ -2288,7 +2699,6 @@ function OpenAIPage() {
     openaiSelectedEndpointId,
     endpoints,
     hiddenModels,
-    openaiShowHiddenModels,
   ]);
 
   const chatDropdownFilteredModels = useMemo(() => {
@@ -2313,7 +2723,7 @@ function OpenAIPage() {
       // Filter by active endpoint
       const matchesEndpoint =
         !chatEndpoint || m.owned_by === endpoints.find(e => e.id === chatEndpoint)?.name;
-      const isHidden = hiddenModels.includes(m.id);
+      const isHidden = isModelHidden(hiddenModels, chatEndpoint || '', m.id);
       return matchesSearch && matchesEndpoint && !isHidden;
     });
   }, [allModels, endpoints, chatEndpoint, dropdownModelSearch, hiddenModels]);
@@ -2353,6 +2763,15 @@ function OpenAIPage() {
           onValueChange={setActiveTab}
           tabs={[
             {
+              value: 'analytics',
+              label: (
+                <span className="inline-flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5" />
+                  数据看板
+                </span>
+              ),
+            },
+            {
               value: 'endpoints',
               label: (
                 <span className="inline-flex items-center gap-1.5">
@@ -2371,41 +2790,144 @@ function OpenAIPage() {
               ),
             },
             {
-              value: 'analytics',
+              value: 'logs',
               label: (
                 <span className="inline-flex items-center gap-1.5">
-                  <Activity className="w-3.5 h-3.5" />
-                  网关分析
+                  <History className="w-3.5 h-3.5" />
+                  网关日志
                 </span>
               ),
             },
           ]}
         />
-        <TabBarOverflowActions
-          items={[
-            {
-              key: 'health',
-              label: '健康检测',
-              icon: <Activity className={cx(iconButtonIconClass, modelHealthBatchLoading && 'animate-pulse')} />,
-              onClick: () => setHealthCheckModal(true),
-              disabled: modelHealthBatchLoading,
-            },
-            {
-              key: 'refresh',
-              label: '刷新列表',
-              icon: <RefreshCw className={cx(iconButtonIconClass, endpointsRefreshing && 'animate-spin')} />,
-              onClick: refreshAllEndpoints,
-              disabled: endpointsRefreshing,
-            },
-            {
-              key: 'add',
-              label: '新增端点',
-              icon: <Plus className={iconButtonIconClass} />,
-              onClick: openAddEndpointModal,
-              variant: 'primary',
-            },
-          ]}
-        />
+        <div className="flex min-w-0 items-center justify-end gap-2">
+            {activeTab === 'analytics' && (
+              <>
+                <Select
+                  size="sm"
+                  aria-label="选择时间粒度"
+                  value={analyticsGranularity}
+                  onValueChange={val => setAnalyticsGranularity(val || 'day')}
+                  items={[
+                    { value: 'hour', label: '按小时' },
+                    { value: 'day', label: '按天' },
+                    { value: 'week', label: '按周' },
+                  ]}
+                  className="w-28 text-sm text-kumo-strong"
+                />
+                <Select
+                  size="sm"
+                  aria-label="选择分析范围"
+                  value={String(analyticsDays)}
+                  onValueChange={val => {
+                    setAnalyticsDays(Number(val));
+                    setAnalyticsPage(1);
+                  }}
+                  items={[
+                    { value: '1', label: '最近 24 小时' },
+                    { value: '7', label: '最近 7 天' },
+                    { value: '30', label: '最近 30 天' },
+                  ]}
+                  className="w-36 text-sm text-kumo-strong"
+                />
+                <Button
+                  size="sm"
+                  onClick={fetchAnalytics}
+                  disabled={analyticsLoading}
+                  className="flex items-center gap-1.5"
+                >
+                  <RefreshCw className={cx('w-3.5 h-3.5', analyticsLoading && 'animate-spin')} />
+                  <span>刷新</span>
+                </Button>
+              </>
+            )}
+            {activeTab === 'keys' && (
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  onClick={loadGatewayKeys}
+                  disabled={gatewayKeysLoading}
+                  className="flex items-center gap-1.5"
+                >
+                  <RefreshCw className={cx(iconButtonIconClass, gatewayKeysLoading && 'animate-spin')} />
+                  <span>刷新</span>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={openAddGatewayKeyModal}
+                  className="flex items-center gap-1.5"
+                >
+                  <Plus className={iconButtonIconClass} />
+                  <span>新建密钥</span>
+                </Button>
+              </div>
+            )}
+            {activeTab === 'logs' && (
+              <>
+                <Select
+                  size="sm"
+                  aria-label="选择时间范围"
+                  value={String(analyticsDays)}
+                  onValueChange={val => {
+                    setAnalyticsDays(Number(val));
+                    setAnalyticsPage(1);
+                  }}
+                  items={[
+                    { value: '1', label: '最近 24 小时' },
+                    { value: '7', label: '最近 7 天' },
+                    { value: '30', label: '最近 30 天' },
+                  ]}
+                  className="w-36 text-sm text-kumo-strong"
+                />
+                <Button
+                  size="sm"
+                  onClick={fetchAnalytics}
+                  disabled={analyticsLoading}
+                  className="flex items-center gap-1.5"
+                >
+                  <RefreshCw className={cx('w-3.5 h-3.5', analyticsLoading && 'animate-spin')} />
+                  <span>刷新</span>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  onClick={clearGatewayLogs}
+                  className="flex items-center gap-1.5"
+                >
+                  <Trash className="h-3.5 w-3.5" />
+                  <span>清除数据</span>
+                </Button>
+              </>
+            )}
+            {activeTab === 'endpoints' && (
+              <TabBarOverflowActions
+                items={[
+                  {
+                    key: 'health',
+                    label: '健康检测',
+                    icon: <Activity className={cx(iconButtonIconClass, modelHealthBatchLoading && 'animate-pulse')} />,
+                    onClick: () => setHealthCheckModal(true),
+                    disabled: modelHealthBatchLoading,
+                  },
+                  {
+                    key: 'refresh',
+                    label: '刷新列表',
+                    icon: <RefreshCw className={cx(iconButtonIconClass, endpointsRefreshing && 'animate-spin')} />,
+                    onClick: refreshAllEndpoints,
+                    disabled: endpointsRefreshing,
+                  },
+                  {
+                    key: 'add',
+                    label: '新增端点',
+                    icon: <Plus className={iconButtonIconClass} />,
+                    onClick: openAddEndpointModal,
+                    variant: 'primary',
+                  },
+                ]}
+              />
+            )}
+          </div>
       </div>
 
       {/* ==================== 1. API 端点 Tab ==================== */}
@@ -2439,18 +2961,7 @@ function OpenAIPage() {
                 {endpoints.filter(endpoint => endpoint.enabled).length} 个启用端点
               </InlineStatusPill>
               <InlineStatusPill tone="brand">
-                {
-                  Array.from(
-                    new Set(
-                      endpoints
-                        .filter(endpoint => endpoint.enabled)
-                        .flatMap(endpoint => endpoint.models || [])
-                        .map(model => (typeof model === 'string' ? model : model.id))
-                        .filter(Boolean)
-                    )
-                  ).length
-                }{' '}
-                个模型
+                {enabledModelCount} 个启用模型
               </InlineStatusPill>
             </div>
           </div>
@@ -2479,6 +2990,18 @@ function OpenAIPage() {
               const endpoint = selectedEndpoint;
               const validStatus = endpoint.status === 'valid';
               const invalidStatus = endpoint.status === 'invalid';
+              const failedModelCount = failedModelIdsForEndpoint(endpoint).length;
+              const disabledModelCount = Array.isArray(endpoint.disabledModels)
+                ? endpoint.disabledModels.length
+                : 0;
+              const hiddenModelCount = (endpoint.models || []).filter(model => {
+                const modelId = typeof model === 'string' ? model.trim() : (model?.id || '').trim();
+                return modelId && isModelHidden(hiddenModels, endpoint.id, modelId);
+              }).length;
+              const visibleEndpointModels = (endpoint.models || []).filter(model => {
+                const modelId = typeof model === 'string' ? model.trim() : (model?.id || '').trim();
+                return !isModelHidden(hiddenModels, endpoint.id, modelId);
+              });
 
               return (
                 <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]">
@@ -2530,7 +3053,7 @@ function OpenAIPage() {
                                   </div>
                                 </Table.Cell>
                                 <Table.Cell className="!px-2 !py-1.5 text-center font-mono text-kumo-strong">
-                                  {item.models?.length || 0}
+                                  {activeModelIdsForEndpoint(item).length}
                                 </Table.Cell>
                                 <Table.Cell className="!px-2 !py-1.5 text-center">
                                   <div
@@ -2602,6 +3125,36 @@ function OpenAIPage() {
                         <Button
                           shape="square"
                           size="sm"
+                          variant={disabledModelCount > 0 ? 'primary' : 'secondary'}
+                          aria-label={
+                            disabledModelCount > 0 ? '启用被停用的模型' : '批量关闭检测失败的模型'
+                          }
+                          onClick={() => batchToggleEnabledModels(endpoint)}
+                          disabled={
+                            modelBatchActionLoading ||
+                            modelHealthBatchLoading ||
+                            (disabledModelCount === 0 && failedModelCount === 0)
+                          }
+                          title={
+                            disabledModelCount > 0
+                              ? `启用 ${disabledModelCount} 个被停用的模型`
+                              : failedModelCount > 0
+                                ? `关闭 ${failedModelCount} 个检测失败的模型并隐藏`
+                                : '没有检测失败的模型'
+                          }
+                          icon={
+                            modelBatchActionLoading ? (
+                              <Loader size="sm" />
+                            ) : disabledModelCount > 0 ? (
+                              <Play className={actionIconClass} />
+                            ) : (
+                              <Reboot className={actionIconClass} />
+                            )
+                          }
+                        />
+                        <Button
+                          shape="square"
+                          size="sm"
                           variant="secondary"
                           aria-label="刷新模型列表"
                           onClick={() => refreshEndpointModels(endpoint)}
@@ -2638,33 +3191,37 @@ function OpenAIPage() {
 
                     <LayerCard className="min-w-0 p-0 shadow-none">
                       <div className="scrollbar-thin">
-                        <Table layout="fixed" className="min-w-[640px] text-xs">
+                        <Table layout="fixed" className="min-w-[820px] text-xs">
                           <colgroup>
                             <col style={{ width: 56 }} />
-                            <col />
+                            <col style={{ width: 240 }} />
+                            <col style={{ width: 140 }} />
                             <col style={{ width: 92 }} />
                             <col style={{ width: 96 }} />
                             <col style={{ width: 150 }} />
-                            <col style={{ width: 88 }} />
+                            <col style={{ width: 132 }} />
                           </colgroup>
                           <Table.Header sticky variant="compact">
                             <Table.Row className="h-8">
                               <Table.Head className="!px-2 !py-1.5 text-center">启用</Table.Head>
                               <Table.Head className="!px-2.5 !py-1.5">模型</Table.Head>
+                              <Table.Head className="!px-2 !py-1.5">模型映射</Table.Head>
                               <Table.Head className="!px-2 !py-1.5 text-center">健康</Table.Head>
-                              <Table.Head className="!px-2 !py-1.5 text-right">延迟</Table.Head>
-                              <Table.Head className="!px-2 !py-1.5">最近检测</Table.Head>
+                              <Table.Head className="!px-2 !py-1.5 text-center">延迟</Table.Head>
+                              <Table.Head className="!px-2 !py-1.5 text-center">最近检测</Table.Head>
                               <Table.Head className="app-table-action !px-2 !py-1.5">操作</Table.Head>
                             </Table.Row>
                           </Table.Header>
                           <Table.Body>
                             {endpoint.models && endpoint.models.length > 0 ? (
-                              endpoint.models.map(model => {
+                              visibleEndpointModels.length > 0 ? (
+                              visibleEndpointModels.map(model => {
                                 const modelId =
                                   typeof model === 'string'
                                     ? model.trim()
                                     : (model.id || '').trim();
                                 const healthKey = modelHealthKey(endpoint.id, modelId);
+                                const isHidden = isModelHidden(hiddenModels, endpoint.id, modelId);
                                 const health = openaiModelHealth[healthKey];
                                 const canStopHealthCheck =
                                   health?.loading &&
@@ -2717,19 +3274,67 @@ function OpenAIPage() {
                                         {modelId}
                                       </span>
                                     </Table.Cell>
+                                    <Table.Cell className="!px-2 !py-1.5">
+                                      {mappingEditKey === `${endpoint.id}:${modelId}` ? (
+                                        <input
+                                          autoFocus
+                                          value={mappingDraft}
+                                          onChange={event => setMappingDraft(event.target.value)}
+                                          onKeyDown={event => {
+                                            event.stopPropagation();
+                                            if (event.key === 'Enter') {
+                                              saveEndpointMapping(endpoint, modelId, mappingDraft);
+                                            } else if (event.key === 'Escape') {
+                                              setMappingEditKey(null);
+                                            }
+                                          }}
+                                          className="w-full rounded border border-kumo-brand/40 bg-kumo-base px-1.5 py-0.5 font-mono text-[10px] text-kumo-strong outline-none"
+                                          placeholder="对外名称"
+                                        />
+                                      ) : (
+                                        <span
+                                          className="block cursor-text truncate font-mono text-[10px]"
+                                          title="双击编辑对外映射名称"
+                                          onDoubleClick={event => {
+                                            event.stopPropagation();
+                                            setMappingDraft(endpoint.modelMappings?.[modelId] || '');
+                                            setMappingEditKey(`${endpoint.id}:${modelId}`);
+                                          }}
+                                        >
+                                          {endpoint.modelMappings?.[modelId] ? (
+                                            <span className="text-kumo-brand">
+                                              {endpoint.modelMappings[modelId]}
+                                            </span>
+                                          ) : (
+                                            <span className="text-kumo-subtle">双击设置</span>
+                                          )}
+                                        </span>
+                                      )}
+                                    </Table.Cell>
                                     <Table.Cell className="!px-2 !py-1.5 text-center">
                                       <InlineStatusPill tone={healthTone}>
                                         {healthLabel}
                                       </InlineStatusPill>
                                     </Table.Cell>
-                                    <Table.Cell className="!px-2 !py-1.5 text-right font-mono text-kumo-strong">
+                                    <Table.Cell className="!px-2 !py-1.5 text-center font-mono text-kumo-strong">
                                       {health?.latency != null ? `${health.latency} ms` : '-'}
                                     </Table.Cell>
-                                    <Table.Cell className="!px-2 !py-1.5 text-kumo-subtle">
+                                    <Table.Cell className="!px-2 !py-1.5 text-center text-kumo-subtle">
                                       {health?.checkedAt ? formatDateTime(health.checkedAt) : '-'}
                                     </Table.Cell>
                                     <Table.Cell className="!px-2 !py-1.5 text-center">
                                       <div className="inline-flex gap-1">
+                                        {isHidden && (
+                                          <Button
+                                            shape="square"
+                                            size="sm"
+                                            variant="secondary"
+                                            aria-label={`取消隐藏 ${modelId}`}
+                                            onClick={() => toggleHideModel(endpoint.id, modelId)}
+                                            title="取消隐藏"
+                                            icon={<Eye className="h-3.5 w-3.5" />}
+                                          />
+                                        )}
                                         <Button
                                           shape="square"
                                           size="sm"
@@ -2763,23 +3368,35 @@ function OpenAIPage() {
                                             )
                                           }
                                         />
-                                        <Button
-                                          shape="square"
-                                          size="sm"
-                                          variant="secondary"
-                                          aria-label={`复制 ${modelId}`}
-                                          onClick={() => {
-                                            navigator.clipboard.writeText(modelId);
-                                            toast.success('已复制模型名称');
-                                          }}
-                                          title="复制模型名称"
-                                          icon={<Copy className="h-3.5 w-3.5" />}
-                                        />
-                                      </div>
-                                    </Table.Cell>
-                                  </Table.Row>
+<Button
+                                            shape="square"
+                                            size="sm"
+                                            variant="secondary"
+                                            aria-label={`复制 ${modelId}`}
+                                            onClick={() => {
+                                              navigator.clipboard.writeText(modelId);
+                                              toast.success('已复制模型名称');
+                                            }}
+                                            title="复制模型名称"
+                                            icon={<Copy className="h-3.5 w-3.5" />}
+                                          />
+                                        </div>
+                                      </Table.Cell>
+                                    </Table.Row>
                                 );
                               })
+                            ) : (
+                              <Table.Row>
+                                <Table.Cell
+                                  colSpan={6}
+                                  className="py-10 text-center text-kumo-subtle"
+                                >
+                                  {(endpoint.models || []).length > 0 && hiddenModelCount > 0
+                                    ? '该端点所有模型均已隐藏'
+                                    : '暂无模型数据，可刷新端点获取'}
+                                </Table.Cell>
+                              </Table.Row>
+                            )
                             ) : (
                               <Table.Row>
                                 <Table.Cell
@@ -2804,39 +3421,9 @@ function OpenAIPage() {
 
       {/* ==================== 2. API 密钥 Tab ==================== */}
       {activeTab === 'keys' && (
-        <GatewaySection
-          className="min-h-0 flex-1"
-          title="API 密钥"
-          description="管理客户端密钥"
-          icon={<Key className="h-4 w-4 text-kumo-brand" />}
-          actions={
-            <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                onClick={loadGatewayKeys}
-                disabled={gatewayKeysLoading}
-                className="flex items-center gap-1.5"
-              >
-                <RefreshCw
-                  className={cx(iconButtonIconClass, gatewayKeysLoading && 'animate-spin')}
-                />
-                <span>刷新</span>
-              </Button>
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={openAddGatewayKeyModal}
-                className="flex items-center gap-1.5"
-              >
-                <Plus className={iconButtonIconClass} />
-                <span>新建密钥</span>
-              </Button>
-            </div>
-          }
-          bodyClassName="flex min-h-0 flex-1 flex-col gap-3"
-        >
-          <LayerCard className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden p-0 shadow-none">
-            <div className="min-h-0 min-w-0 flex-1 overflow-auto scrollbar-thin">
+        <div className="flex grow flex-col gap-3">
+          <LayerCard className="w-full min-w-0 overflow-hidden p-0 shadow-none">
+            <div className="min-w-0 overflow-x-auto scrollbar-thin">
               <Table layout="fixed" className="min-w-[1084px]">
                 <colgroup>
                   <col style={{ width: 180 }} />
@@ -2850,11 +3437,11 @@ function OpenAIPage() {
                 <Table.Header sticky variant="compact">
                   <Table.Row>
                     <Table.Head>名称</Table.Head>
-                    <Table.Head>密钥</Table.Head>
+                    <Table.Head className="text-center">密钥</Table.Head>
                     <Table.Head className="text-center">状态</Table.Head>
-                    <Table.Head>最近使用</Table.Head>
-                    <Table.Head>过期时间</Table.Head>
-                    <Table.Head className="text-right">请求数</Table.Head>
+                    <Table.Head className="text-center">最近使用</Table.Head>
+                    <Table.Head className="text-center">过期时间</Table.Head>
+                    <Table.Head className="text-center">请求数</Table.Head>
                     <Table.Head className="app-table-action">操作</Table.Head>
                   </Table.Row>
                 </Table.Header>
@@ -2907,7 +3494,7 @@ function OpenAIPage() {
                         >
                           {key.name || '未命名密钥'}
                         </Table.Cell>
-                        <Table.Cell>
+                        <Table.Cell className="text-center">
                           {key.apiKey ? (
                             <ClipboardText
                               size="sm"
@@ -2925,13 +3512,13 @@ function OpenAIPage() {
                             {key.enabled ? '已启用' : '已停用'}
                           </InlineStatusPill>
                         </Table.Cell>
-                        <Table.Cell className="truncate text-sm text-kumo-subtle">
+                        <Table.Cell className="truncate text-center text-sm text-kumo-subtle">
                           {key.lastUsed ? formatDateTime(key.lastUsed) : '从未使用'}
                         </Table.Cell>
-                        <Table.Cell className="truncate text-sm text-kumo-subtle">
+                        <Table.Cell className="truncate text-center text-sm text-kumo-subtle">
                           {key.expiresAt ? formatDateTime(key.expiresAt) : '永不过期'}
                         </Table.Cell>
-                        <Table.Cell className="text-right font-mono text-[0.9em] text-kumo-strong">
+                        <Table.Cell className="text-center font-mono text-[0.9em] text-kumo-strong">
                           {(key.requestCount || 0).toLocaleString()}
                         </Table.Cell>
                         <Table.Cell>
@@ -3007,103 +3594,229 @@ function OpenAIPage() {
               </Table>
             </div>
           </LayerCard>
-        </GatewaySection>
+        </div>
       )}
 
       {/* ==================== 3. 网关分析 Tab ==================== */}
       {activeTab === 'analytics' && (
-        <GatewaySection
-          className="min-h-0 flex-1"
-          title="网关分析"
-          description="可靠性、Token、调用方"
-          icon={<Activity className="h-4 w-4 text-kumo-brand" />}
-          actions={
-            <div className="flex items-center gap-3">
-              <Select
-                size="sm"
-                aria-label="选择分析范围"
-                value={String(analyticsDays)}
-                onValueChange={val => {
-                  setAnalyticsDays(Number(val));
-                  setAnalyticsPage(1);
-                }}
-                items={[
-                  { value: '1', label: '最近 24 小时' },
-                  { value: '7', label: '最近 7 天' },
-                  { value: '30', label: '最近 30 天' },
-                ]}
-                className="w-36 text-sm text-kumo-strong"
-              />
-              <Button
-                size="sm"
-                onClick={fetchAnalytics}
-                disabled={analyticsLoading}
-                className="flex items-center gap-1.5"
-              >
-                <RefreshCw className={cx('w-3.5 h-3.5', analyticsLoading && 'animate-spin')} />
-                <span>刷新</span>
-              </Button>
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+              <AppCard padding="md" className="flex min-h-0 min-w-0 flex-col justify-between gap-1 overflow-hidden">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-xs font-medium text-kumo-subtle">网关请求</span>
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-kumo-recessed text-kumo-brand">
+                    <Activity className="h-3.5 w-3.5" />
+                  </span>
+                </div>
+                {analyticsLoading ? (
+                  <SkeletonLine className="h-6 w-20" />
+                ) : (
+                  <span className="truncate font-mono text-2xl font-semibold leading-none text-kumo-strong">
+                    {analyticsSummary.totalRequests.toLocaleString()}
+                  </span>
+                )}
+                <span className="truncate text-[11px] text-kumo-subtle">最近 {analyticsDays} 天</span>
+              </AppCard>
+              <AppCard padding="md" className="flex min-h-0 min-w-0 flex-col justify-between gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-xs font-medium text-kumo-subtle">平均端到端延迟</span>
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-kumo-recessed text-kumo-warning">
+                    <Clock className="h-3.5 w-3.5" />
+                  </span>
+                </div>
+                <div className="flex min-w-0 items-baseline gap-1">
+                  {analyticsLoading ? (
+                    <SkeletonLine className="h-6 w-20" />
+                  ) : (
+                    <>
+                      <span className="truncate font-mono text-2xl font-semibold leading-none text-kumo-warning">
+                        {analyticsSummary.avgLatency.toFixed(0)}
+                      </span>
+                      <span className="shrink-0 text-xs font-medium text-kumo-subtle">ms</span>
+                    </>
+                  )}
+                </div>
+                <span className="truncate text-[11px] text-kumo-subtle">最近 {analyticsDays} 天</span>
+              </AppCard>
+              <AppCard padding="md" className="flex min-h-0 min-w-0 flex-col justify-between gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-xs font-medium text-kumo-subtle">词元用量（含缓存）</span>
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-kumo-recessed text-kumo-brand">
+                    <Brain className="h-3.5 w-3.5" />
+                  </span>
+                </div>
+                {analyticsLoading ? (
+                  <SkeletonLine className="h-6 w-24" />
+                ) : (
+                  <span className="truncate font-mono text-2xl font-semibold leading-none text-kumo-brand">
+                    {analyticsSummary.totalTokens.toLocaleString()}
+                  </span>
+                )}
+                <span
+                  className="truncate font-mono text-[11px] text-kumo-subtle"
+                  title="非缓存输入 = 输入（含缓存）− 缓存命中的词元"
+                >
+                  非缓存输入{' '}
+                  {Math.max(0, analyticsSummary.totalPromptTokens - analyticsSummary.totalCachedTokens).toLocaleString()}（
+                  {analyticsSummary.totalPromptTokens > 0
+                    ? `${(
+                        (Math.max(0, analyticsSummary.totalPromptTokens - analyticsSummary.totalCachedTokens) /
+                          analyticsSummary.totalPromptTokens) *
+                        100
+                      ).toFixed(1)}%`
+                    : '0.0%'}
+                  ） · 输出 {(analyticsSummary.totalCompletionTokens || 0).toLocaleString()}
+                </span>
+              </AppCard>
+              <AppCard padding="md" className="flex min-h-0 min-w-0 flex-col justify-between gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-xs font-medium text-kumo-subtle">平均 TPM</span>
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-kumo-recessed text-kumo-brand">
+                    <Brain className="h-3.5 w-3.5" />
+                  </span>
+                </div>
+                <div className="flex min-w-0 items-baseline gap-1">
+                  {analyticsLoading ? (
+                    <SkeletonLine className="h-6 w-20" />
+                  ) : (
+                    <>
+                      <span className="truncate font-mono text-2xl font-semibold leading-none text-kumo-brand">
+                        {((analyticsSummary.totalTokens || 0) / Math.max(1, analyticsDays * 24 * 60)).toFixed(1)}
+                      </span>
+                      <span className="shrink-0 text-xs font-medium text-kumo-subtle">/min</span>
+                    </>
+                  )}
+                </div>
+                <span className="truncate text-[11px] text-kumo-subtle">每分钟词元</span>
+              </AppCard>
+              <AppCard padding="md" className="flex min-h-0 min-w-0 flex-col justify-between gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-xs font-medium text-kumo-subtle">平均 RPM</span>
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-kumo-recessed text-kumo-brand">
+                    <TrendingUp className="h-3.5 w-3.5" />
+                  </span>
+                </div>
+                <div className="flex min-w-0 items-baseline gap-1">
+                  {analyticsLoading ? (
+                    <SkeletonLine className="h-6 w-20" />
+                  ) : (
+                    <>
+                      <span className="truncate font-mono text-2xl font-semibold leading-none text-kumo-brand">
+                        {((analyticsSummary.totalRequests || 0) / Math.max(1, analyticsDays * 24 * 60)).toFixed(1)}
+                      </span>
+                      <span className="shrink-0 text-xs font-medium text-kumo-subtle">/min</span>
+                    </>
+                  )}
+                </div>
+                <span className="truncate text-[11px] text-kumo-subtle">每分钟请求</span>
+              </AppCard>
+              <AppCard padding="md" className="flex min-h-0 min-w-0 flex-col justify-between gap-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-xs font-medium text-kumo-subtle">上游错误率</span>
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-kumo-recessed text-kumo-danger">
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                  </span>
+                </div>
+                <div className="flex min-w-0 items-baseline gap-1">
+                  {analyticsLoading ? (
+                    <SkeletonLine className="h-6 w-20" />
+                  ) : (
+                    <>
+                      <span className="truncate font-mono text-2xl font-semibold leading-none text-kumo-danger">
+                        {(analyticsSummary.errorRate * 100).toFixed(1)}
+                      </span>
+                      <span className="shrink-0 text-xs font-medium text-kumo-subtle">%</span>
+                    </>
+                  )}
+                </div>
+                <span className="truncate text-[11px] text-kumo-subtle">请求失败占比</span>
+              </AppCard>
             </div>
-          }
-          bodyClassName="flex min-h-0 flex-1 flex-col gap-3"
-        >
-          <div className="grid shrink-0 gap-3 xl:h-44 xl:grid-cols-[minmax(24rem,1.15fr)_minmax(18rem,0.85fr)_minmax(18rem,0.85fr)]">
-            <LayerCard className="grid overflow-hidden p-0 shadow-none sm:grid-cols-2">
-              <div className="flex min-w-0 items-center justify-between gap-3 border-b border-kumo-line px-4 py-3 sm:border-r">
-                <span className="text-sm font-medium text-kumo-subtle">网关请求</span>
-                <span className="font-mono text-lg font-semibold text-kumo-strong">
-                  {analyticsLoading ? (
-                    <SkeletonLine className="h-5 w-16" />
-                  ) : (
-                    analyticsSummary.totalRequests
-                  )}
-                </span>
-              </div>
-              <div className="flex min-w-0 items-center justify-between gap-3 border-b border-kumo-line px-4 py-3">
-                <span className="text-sm font-medium text-kumo-subtle">平均端到端延迟</span>
-                <span className="font-mono text-lg font-semibold text-kumo-warning">
-                  {analyticsLoading ? (
-                    <SkeletonLine className="h-5 w-16" />
-                  ) : (
-                    `${analyticsSummary.avgLatency.toFixed(0)} ms`
-                  )}
-                </span>
-              </div>
-              <div className="flex min-w-0 items-center justify-between gap-3 border-b border-kumo-line px-4 py-3 sm:border-b-0 sm:border-r">
-                <span className="text-sm font-medium text-kumo-subtle">Token 用量</span>
-                <span className="font-mono text-lg font-semibold text-kumo-brand">
-                  {analyticsLoading ? (
-                    <SkeletonLine className="h-5 w-20" />
-                  ) : (
-                    analyticsSummary.totalTokens.toLocaleString()
-                  )}
-                </span>
-              </div>
-              <div className="flex min-w-0 items-center justify-between gap-3 px-4 py-3">
-                <span className="text-sm font-medium text-kumo-subtle">上游错误率</span>
-                <span className="font-mono text-lg font-semibold text-kumo-danger">
-                  {analyticsLoading ? (
-                    <SkeletonLine className="h-5 w-16" />
-                  ) : (
-                    `${(analyticsSummary.errorRate * 100).toFixed(1)}%`
-                  )}
-                </span>
-              </div>
-            </LayerCard>
 
-            <AppCard padding="md" className="flex min-h-0 flex-col gap-3 xl:h-full">
-              <div className="flex items-center gap-1.5">
-                <PieChart className="w-4 h-4 text-kumo-brand" />
-                <h4 className="text-sm font-semibold text-kumo-strong">模型 Token 分布</h4>
-              </div>
-              <div className="max-h-44 min-h-0 flex-1 space-y-2.5 overflow-y-auto pr-1 scrollbar-thin xl:max-h-none">
+            <div className="grid gap-3 xl:grid-cols-2">
+            {[
+              {
+                key: 'requests',
+                icon: <Activity className="h-4 w-4 text-kumo-brand" />,
+                title: '请求量趋势',
+                series: trendSeries.requests,
+              },
+              {
+                key: 'tokens',
+                icon: <Brain className="h-4 w-4 text-kumo-brand" />,
+                title: '词元趋势',
+                series: trendSeries.tokens,
+              },
+              {
+                key: 'latency',
+                icon: <Clock className="h-4 w-4 text-kumo-warning" />,
+                title: '平均延迟趋势',
+                series: trendSeries.latency,
+              },
+              {
+                key: 'errors',
+                icon: <AlertTriangle className="h-4 w-4 text-kumo-danger" />,
+                title: '错误率趋势',
+                series: trendSeries.errorRate,
+              },
+            ].map(card => (
+              <LayerCard key={card.key} className="min-w-0 p-0">
+                <LayerCard.Secondary>{card.title}</LayerCard.Secondary>
+                <LayerCard.Primary className="flex min-h-0 flex-col gap-2 !p-3">
+                  <div className="min-h-0 w-full" style={{ height: 168 }}>
+                    {analyticsLoading && !analyticsCharts.daily?.length ? (
+                      <SkeletonLine className="h-full w-full" />
+                    ) : card.series.labels.length === 0 ? (
+                      <div className="flex h-full items-center justify-center text-sm text-kumo-subtle">
+                        暂无数据
+                      </div>
+                    ) : (
+                      <TrendBarChart
+                        labels={card.series.labels}
+                        values={card.series.values}
+                        color={card.series.color}
+                        isDarkMode={isDarkMode}
+                      />
+                    )}
+                  </div>
+                </LayerCard.Primary>
+              </LayerCard>
+            ))}
+          </div>
+
+            <div className="grid">
+            <LayerCard className="min-w-0 p-0">
+              <LayerCard.Secondary>模型调用趋势</LayerCard.Secondary>
+              <LayerCard.Primary className="!p-3">
+              {analyticsLoading && !analyticsCharts.daily?.length ? (
+                <SkeletonLine className="h-[280px] w-full" />
+              ) : !Array.isArray(byModelTrend.labels) || byModelTrend.labels.length === 0 ? (
+                <div className="flex h-[280px] items-center justify-center text-sm text-kumo-subtle">
+                  暂无数据
+                </div>
+              ) : (
+                <ModelTrendChart
+                  labels={byModelTrend.labels}
+                  series={byModelTrend.models}
+                  isDarkMode={isDarkMode}
+                />
+              )}
+              </LayerCard.Primary>
+            </LayerCard>
+          </div>
+
+            <div className="grid gap-3 xl:grid-cols-2">
+            <LayerCard className="min-w-0 p-0">
+              <LayerCard.Secondary>模型词元分布</LayerCard.Secondary>
+              <LayerCard.Primary className="!p-3">
+                <div className="min-h-0">
                 {analyticsLoading ? (
                   <div className="space-y-2">
                     <SkeletonLine className="w-full h-4" />
                     <SkeletonLine className="w-full h-4" />
                   </div>
                 ) : !analyticsCharts.models || analyticsCharts.models.length === 0 ? (
-                  <div className="text-center py-16 text-kumo-subtle text-sm">暂无模型数据</div>
+                  <div className="py-16 text-center text-sm text-kumo-subtle">暂无模型数据</div>
                 ) : (
                   (() => {
                     const totalTokens =
@@ -3111,35 +3824,55 @@ function OpenAIPage() {
                         (sum, model) => sum + (Number(model.tokens) || 0),
                         0
                       ) || 1;
-                    return [...analyticsCharts.models]
+                    const sorted = [...analyticsCharts.models]
                       .sort((a, b) => (Number(b.tokens) || 0) - (Number(a.tokens) || 0))
-                      .map(model => {
-                        const tokens = Number(model.tokens) || 0;
-                        const percent = (tokens / totalTokens) * 100;
-                        const pct = percent.toFixed(1);
-                        return (
-                          <div key={model.model} className="space-y-1 text-sm">
-                            <Meter
-                              label={model.model}
-                              value={percent}
-                              customValue={`${tokens.toLocaleString()} Token (${pct}%)`}
-                              trackClassName="h-2 bg-kumo-recessed"
-                              indicatorClassName="bg-kumo-brand"
-                            />
-                          </div>
-                        );
-                      });
+                      .slice(0, 20);
+                    return (
+                      <div className="flex flex-col gap-1.5">
+                        {sorted.map((model, index) => {
+                          const tokens = Number(model.tokens) || 0;
+                          const percent = (tokens / totalTokens) * 100;
+                          return (
+                            <div
+                              key={model.model}
+                              className="flex items-center gap-2 text-xs"
+                            >
+                              <span
+                                className="w-40 shrink-0 truncate font-medium text-kumo-strong"
+                                title={model.model}
+                              >
+                                {model.model}
+                              </span>
+                              <div className="h-3 min-w-0 flex-1 overflow-hidden rounded-full bg-kumo-recessed">
+                                <div
+                                  className="h-full rounded-full"
+                                  style={{
+                                    width: `${Math.max(2, Math.min(100, percent))}%`,
+                                    background: ChartPalette.categorical(index, isDarkMode),
+                                  }}
+                                />
+                              </div>
+                              <span className="w-14 shrink-0 text-right font-mono text-[11px] text-kumo-subtle">
+                                {tokens.toLocaleString()}
+                              </span>
+                              <span className="w-11 shrink-0 text-right font-mono text-[10px] text-kumo-subtle">
+                                {percent.toFixed(1)}%
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
                   })()
                 )}
               </div>
-            </AppCard>
+              </LayerCard.Primary>
+            </LayerCard>
 
-            <AppCard padding="md" className="flex min-h-0 flex-col gap-3 xl:h-full">
-              <div className="flex items-center gap-1.5">
-                <Activity className="h-4 w-4 text-kumo-brand" />
-                <h4 className="text-sm font-semibold text-kumo-strong">模型调用次数</h4>
-              </div>
-              <div className="max-h-44 min-h-0 flex-1 space-y-2.5 overflow-y-auto pr-1 scrollbar-thin xl:max-h-none">
+            <LayerCard className="min-w-0 p-0">
+              <LayerCard.Secondary>模型调用次数</LayerCard.Secondary>
+              <LayerCard.Primary className="!p-3">
+                <div className="min-h-0">
                 {analyticsLoading ? (
                   <div className="space-y-2">
                     <SkeletonLine className="h-4 w-full" />
@@ -3154,120 +3887,237 @@ function OpenAIPage() {
                         (sum, model) => sum + (Number(model.count) || 0),
                         0
                       ) || 1;
-                    return [...analyticsCharts.models]
+                    const sorted = [...analyticsCharts.models]
                       .sort((a, b) => (Number(b.count) || 0) - (Number(a.count) || 0))
-                      .map(model => {
-                        const count = Number(model.count) || 0;
-                        const percent = (count / totalCount) * 100;
-                        return (
-                          <div key={model.model} className="space-y-1 text-sm">
-                            <Meter
-                              label={model.model}
-                              value={percent}
-                              customValue={`${count.toLocaleString()} 次 (${percent.toFixed(1)}%)`}
-                              trackClassName="h-2 bg-kumo-recessed"
-                              indicatorClassName="bg-kumo-brand"
-                            />
-                          </div>
-                        );
-                      });
+                      .slice(0, 20);
+                    return (
+                      <div className="flex flex-col gap-1.5">
+                        {sorted.map((model, index) => {
+                          const count = Number(model.count) || 0;
+                          const percent = (count / totalCount) * 100;
+                          return (
+                            <div
+                              key={model.model}
+                              className="flex items-center gap-2 text-xs"
+                            >
+                              <span
+                                className="w-40 shrink-0 truncate font-medium text-kumo-strong"
+                                title={model.model}
+                              >
+                                {model.model}
+                              </span>
+                              <div className="h-3 min-w-0 flex-1 overflow-hidden rounded-full bg-kumo-recessed">
+                                <div
+                                  className="h-full rounded-full"
+                                  style={{
+                                    width: `${Math.max(2, Math.min(100, percent))}%`,
+                                    background: ChartPalette.categorical(index, isDarkMode),
+                                  }}
+                                />
+                              </div>
+                              <span className="w-14 shrink-0 text-right font-mono text-[11px] text-kumo-subtle">
+                                {count.toLocaleString()}
+                              </span>
+                              <span className="w-11 shrink-0 text-right font-mono text-[10px] text-kumo-subtle">
+                                {percent.toFixed(1)}%
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
                   })()
                 )}
               </div>
-            </AppCard>
+              </LayerCard.Primary>
+            </LayerCard>
           </div>
+        </div>
+      )}
 
+      {/* ==================== 4. 网关日志 Tab ==================== */}
+      {activeTab === 'logs' && (
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
           {/* Logs table and pagination */}
           <LayerCard className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden p-0 shadow-none">
             <div className="min-h-0 min-w-0 flex-1 overflow-auto scrollbar-thin">
-              <Table layout="fixed" className="min-w-[1128px]">
+              <Table layout="fixed" className="min-w-[1480px] [&_td]:!px-2 [&_td]:!py-2 [&_th]:!px-2 [&_th]:!py-2">
                 <colgroup>
-                  <col style={{ width: 156 }} />
-                  <col style={{ width: 112 }} />
-                  <col style={{ width: 136 }} />
-                  <col style={{ width: 132 }} />
-                  <col style={{ width: 220 }} />
+                  <col style={{ width: 146 }} />
+                  <col style={{ width: 92 }} />
+                  <col style={{ width: 120 }} />
+                  <col style={{ width: 116 }} />
+                  <col style={{ width: 168 }} />
+                  <col style={{ width: 120 }} />
+                  <col style={{ width: 120 }} />
                   <col style={{ width: 84 }} />
-                  <col style={{ width: 92 }} />
-                  <col style={{ width: 132 }} />
-                  <col style={{ width: 92 }} />
+                  <col style={{ width: 104 }} />
+                  <col style={{ width: 120 }} />
+                  <col style={{ width: 120 }} />
+                  <col style={{ width: 180 }} />
                 </colgroup>
                 <Table.Header sticky variant="compact">
                   <Table.Row>
-                    <Table.Head>时间</Table.Head>
-                    <Table.Head>路由</Table.Head>
-                    <Table.Head>端点</Table.Head>
-                    <Table.Head>调用密钥</Table.Head>
-                    <Table.Head>模型</Table.Head>
+                    <Table.Head className="text-center">时间</Table.Head>
+                    <Table.Head className="text-center">路由</Table.Head>
+                    <Table.Head className="text-center">端点</Table.Head>
+                    <Table.Head className="text-center">调用密钥</Table.Head>
+                    <Table.Head className="text-center">模型</Table.Head>
+                    <Table.Head className="text-center">上游 IP</Table.Head>
+                    <Table.Head className="text-center">下游 IP</Table.Head>
                     <Table.Head className="text-center">状态</Table.Head>
-                    <Table.Head className="text-right">延迟</Table.Head>
-                    <Table.Head className="text-right">Prompt / Completion</Table.Head>
-                    <Table.Head className="text-right">总消耗</Table.Head>
+                    <Table.Head className="text-center">耗时/首字</Table.Head>
+                    <Table.Head className="text-center">输入 / 输出</Table.Head>
+                    <Table.Head className="text-center">缓存</Table.Head>
+                    <Table.Head className="text-center">总消耗</Table.Head>
                   </Table.Row>
                 </Table.Header>
                 <Table.Body>
                   {analyticsLoading && analyticsLogs.length === 0 ? (
                     <Table.Row>
-                      <Table.Cell colSpan={9} className="text-center py-8">
+                      <Table.Cell colSpan={12} className="text-center py-8">
                         <RotateCw className="w-5 h-5 animate-spin mx-auto text-kumo-subtle" />
                       </Table.Cell>
                     </Table.Row>
                   ) : analyticsLogs.length === 0 ? (
                     <Table.Row>
-                      <Table.Cell colSpan={9} className="text-center py-8 text-kumo-subtle text-sm">
+                      <Table.Cell colSpan={12} className="text-center py-8 text-kumo-subtle text-sm">
                         暂无网关日志记录
                       </Table.Cell>
                     </Table.Row>
                   ) : (
-                    analyticsLogs.map(log => (
-                      <Table.Row key={log.id} className="text-sm">
-                        <Table.Cell className="truncate text-kumo-subtle font-mono">
-                          {formatDateTime(log.timestamp)}
-                        </Table.Cell>
-                        <Table.Cell
-                          className="truncate font-mono text-kumo-subtle"
-                          title={log.route}
-                        >
-                          {log.route === 'chat.completions'
-                            ? '对话完成'
-                            : log.route === 'models'
-                              ? '模型列表'
-                              : log.route || '-'}
-                        </Table.Cell>
-                        <Table.Cell
-                          className="truncate text-kumo-strong font-semibold"
-                          title={log.endpointName}
-                        >
-                          {log.endpointName}
-                        </Table.Cell>
-                        <Table.Cell
-                          className="truncate text-kumo-subtle"
-                          title={log.gatewayKeyName}
-                        >
-                          {log.gatewayKeyName || '未识别密钥'}
-                        </Table.Cell>
-                        <Table.Cell
-                          className="truncate text-kumo-strong font-mono font-medium"
-                          title={log.model}
-                        >
-                          {log.model}
-                        </Table.Cell>
-                        <Table.Cell className="text-center">
-                          <InlineStatusPill tone={log.statusCode < 400 ? 'success' : 'danger'}>
-                            {log.statusCode}
-                          </InlineStatusPill>
-                        </Table.Cell>
-                        <Table.Cell className="text-right text-kumo-strong font-mono font-semibold">
-                          {log.latencyMs} ms
-                        </Table.Cell>
-                        <Table.Cell className="text-right text-kumo-subtle font-mono">
-                          {log.promptTokens} / {log.completionTokens}
-                        </Table.Cell>
-                        <Table.Cell className="text-right text-kumo-brand font-mono font-semibold">
-                          {log.totalTokens}
-                        </Table.Cell>
-                      </Table.Row>
-                    ))
+                    analyticsLogs.map(log => {
+                      return (
+                        <Table.Row key={log.id} className="text-sm">
+                          <Table.Cell className="truncate text-center font-mono text-kumo-subtle">
+                            {formatDateTime(log.timestamp)}
+                          </Table.Cell>
+                          <Table.Cell
+                            className="truncate text-center font-mono text-kumo-subtle"
+                            title={log.route}
+                          >
+                            {log.route === 'chat.completions'
+                              ? '对话完成'
+                              : log.route === 'models'
+                                ? '模型列表'
+                                : log.route || '-'}
+                          </Table.Cell>
+                          <Table.Cell
+                            className="truncate text-center font-semibold text-kumo-strong"
+                            title={log.endpointName}
+                          >
+                            {log.endpointName}
+                          </Table.Cell>
+                          <Table.Cell
+                            className="truncate text-center text-kumo-subtle"
+                            title={log.gatewayKeyName}
+                          >
+                            {log.gatewayKeyName || '未识别密钥'}
+                          </Table.Cell>
+                          <Table.Cell
+                            className="truncate text-center font-mono font-medium text-kumo-strong"
+                            title={log.model}
+                          >
+                            {log.model}
+                          </Table.Cell>
+                          <Table.Cell
+                            className="text-center font-mono text-kumo-subtle"
+                            title={log.upstreamIp || '无上游 IP'}
+                          >
+                            <div className="inline-flex items-center justify-center gap-1">
+                              <span className="truncate">{log.upstreamIp || '—'}</span>
+                              {log.viaProxy && (
+                                <InlineStatusPill tone="info" title="经代理池出口">
+                                  代
+                                </InlineStatusPill>
+                              )}
+                            </div>
+                          </Table.Cell>
+                          <Table.Cell
+                            className="truncate text-center font-mono text-kumo-subtle"
+                            title={log.clientIp || '无下游 IP'}
+                          >
+                            {log.clientIp || '—'}
+                          </Table.Cell>
+                          <Table.Cell className="text-center">
+                            <InlineStatusPill tone={log.statusCode < 400 ? 'success' : 'danger'}>
+                              {log.statusCode}
+                            </InlineStatusPill>
+                          </Table.Cell>
+                          <Table.Cell className="text-center">
+                            <div className="inline-flex items-center gap-1">
+                              <span
+                                className={`${resultToneClass(
+                                  log.statusCode,
+                                  log.completionTokens
+                                )} inline-flex items-center rounded-full px-2 py-0.5 font-mono text-[11px] font-semibold leading-none`}
+                              >
+                                {(log.latencyMs / 1000).toFixed(1)}s
+                              </span>
+                              <span
+                                className={`${resultToneClass(
+                                  log.statusCode,
+                                  log.completionTokens
+                                )} inline-flex items-center rounded-full px-2 py-0.5 font-mono text-[11px] font-semibold leading-none`}
+                              >
+                                {log.ttfbMs > 0 ? (log.ttfbMs / 1000).toFixed(1) : '—'}
+                              </span>
+                              <span
+                                className={
+                                  log.stream
+                                    ? 'inline-flex items-center rounded-full bg-kumo-info/15 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-kumo-info'
+                                    : 'inline-flex items-center rounded-full bg-kumo-warning/15 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-kumo-warning'
+                                }
+                                title={log.stream ? '流式响应' : '非流式响应'}
+                              >
+                                {log.stream ? '流' : '非流'}
+                              </span>
+                            </div>
+                          </Table.Cell>
+                          <Table.Cell className="text-center font-mono">
+                            <div className="flex w-full items-baseline">
+                              <span className="min-w-0 flex-1 truncate text-right text-kumo-strong">
+                                {log.promptTokens}
+                              </span>
+                              <span className="shrink-0 px-0.5 text-kumo-subtle">/</span>
+                              <span className="min-w-0 flex-1 truncate text-left text-kumo-strong">
+                                {log.completionTokens}
+                              </span>
+                            </div>
+                          </Table.Cell>
+                          <Table.Cell
+                            className="text-center font-mono"
+                            title="缓存命中 词元（占比 = 缓存 / 输入）"
+                          >
+                            <div className="flex w-full items-baseline overflow-hidden">
+                              <span className="min-w-0 flex-1 truncate text-right text-kumo-strong">
+                                {log.cachedTokens}
+                              </span>
+                              <span className="shrink-0 px-0.5 text-kumo-subtle">（</span>
+                              <span className="min-w-0 flex-1 truncate text-left text-kumo-strong">
+                                {log.promptTokens > 0
+                                  ? `${((log.cachedTokens / log.promptTokens) * 100).toFixed(1)}%）`
+                                  : '0.0%）'}
+                              </span>
+                            </div>
+                          </Table.Cell>
+<Table.Cell
+                            className="text-center font-mono"
+                            title="总消耗（实际消耗 = 总消耗 − 缓存）"
+                          >
+                            <div className="flex w-full items-baseline">
+                              <span className="min-w-0 flex-1 truncate text-right font-semibold leading-none text-kumo-brand">
+                                {log.totalTokens}
+                              </span>
+                              <span className="shrink-0 px-0.5 leading-none text-kumo-subtle">（</span>
+                              <span className="min-w-0 flex-1 truncate text-left font-mono leading-none text-kumo-subtle">
+                                {Math.max(0, log.totalTokens - log.cachedTokens)}）
+                              </span>
+                            </div>
+                          </Table.Cell>
+                        </Table.Row>
+                      );
+                    })
                   )}
                 </Table.Body>
               </Table>
@@ -3311,22 +4161,24 @@ function OpenAIPage() {
               </Pagination>
             )}
           </LayerCard>
-        </GatewaySection>
+        </div>
       )}
 
       {/* ==================== dialogs & modals ==================== */}
 
       {/* 1. Endpoint Add/Edit Dialog */}
       <Dialog.Root open={endpointFormOpen} onOpenChange={setEndpointFormOpen}>
-        <Dialog className="!w-[min(32rem,calc(100vw-2rem))] !max-w-[min(32rem,calc(100vw-2rem))] p-6">
-          <Dialog.Title className="text-sm font-semibold text-kumo-strong mb-1">
-            {editingEndpoint ? '编辑端点' : '添加 API 端点'}
-          </Dialog.Title>
-          <Dialog.Description className="text-sm text-kumo-subtle mb-4">
-            配置 OpenAI 兼容的 API 端点以供中转或对话使用。
-          </Dialog.Description>
+        <Dialog className="flex max-h-[min(calc(100dvh-2rem),42rem)] !w-[min(32rem,calc(100vw-2rem))] !max-w-[min(32rem,calc(100vw-2rem))] flex-col overflow-hidden !p-0">
+          <div className="shrink-0 px-6 pt-5">
+            <Dialog.Title className="mb-1 text-sm font-semibold text-kumo-strong">
+              {editingEndpoint ? '编辑端点' : '添加 API 端点'}
+            </Dialog.Title>
+            <Dialog.Description className="mb-4 text-sm text-kumo-subtle">
+              配置 OpenAI 兼容的 API 端点以供中转或对话使用。
+            </Dialog.Description>
+          </div>
 
-          <div className="space-y-4">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-3 scrollbar-thin">
             <Input
               size="sm"
               label="名称"
@@ -3544,10 +4396,11 @@ function OpenAIPage() {
             </div>
 
             {endpointFormError && (
-              <p className="text-sm text-kumo-danger font-semibold">{endpointFormError}</p>
-            )}
+                <p className="text-sm text-kumo-danger font-semibold">{endpointFormError}</p>
+              )}
+            </div>
 
-            <div className="flex justify-end gap-3 pt-2">
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-3 border-t border-kumo-line bg-kumo-base px-6 py-4">
               <Dialog.Close
                 render={props => (
                   <Button size="sm" {...props} variant="secondary">
@@ -3559,7 +4412,6 @@ function OpenAIPage() {
                 {endpointSaving ? '保存中...' : '保存端点'}
               </Button>
             </div>
-          </div>
         </Dialog>
       </Dialog.Root>
 
