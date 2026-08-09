@@ -65,6 +65,10 @@ type Server struct {
 	sub      *subscription.Service
 	drawio   *drawiomodule.Service
 	prompts  *promptsmodule.Service
+
+	// warmupCancel 在 Shutdown 时取消代理池预热 goroutine，避免后台任务
+	// 在 Gate 结束后继续访问数据目录（测试 teardown 也会受影响）。
+	warmupCancel context.CancelFunc
 }
 
 func New(cfg config.Config) http.Handler {
@@ -147,11 +151,16 @@ func newServer(cfg config.Config) (*Server, error) {
 	}
 	systemService.SetAICaller(server.callAPIFromAI)
 	// 启动代理池预热：预建立各代理到上游的连接，缓解首次请求冷启动握手延迟。
-	server.openai.StartWarmup(context.Background())
+	warmupCtx, warmupCancel := context.WithCancel(context.Background())
+	server.warmupCancel = warmupCancel
+	server.openai.StartWarmup(warmupCtx)
 	return server, nil
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.warmupCancel != nil {
+		s.warmupCancel()
+	}
 	if s.server != nil {
 		s.server.Stop()
 	}
