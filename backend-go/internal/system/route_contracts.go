@@ -751,6 +751,27 @@ func init() {
 	routeRequestContracts["/api/openai/endpoints/{id}/toggle"] = obj([]string{"enabled"}, map[string]prop{
 		"enabled": {t: "boolean", req: true},
 	})
+	routeRequestContracts["/api/openai/endpoints/{id}/models/toggle"] = obj([]string{"model", "enabled"}, map[string]prop{
+		"model":   {t: "string", req: true, d: "模型名称"},
+		"enabled": {t: "boolean", req: true, d: "是否启用该模型"},
+	})
+	routeRequestContracts["/api/openai/endpoints/{id}/model-mappings"] = obj([]string{"mappings"}, map[string]prop{
+		"mappings": {t: "object", req: true, d: "模型对外映射名称，键为真实模型名，值为对外名称"},
+	})
+	routeRequestContracts["/api/openai/keys"] = obj([]string{"name"}, map[string]prop{
+		"name":      {t: "string", req: true, d: "密钥名称"},
+		"expiresAt": {t: "string", d: "过期时间，ISO 8601 字符串，留空表示不过期"},
+	})
+	routeRequestContracts["/api/openai/keys/{id}"] = routeRequestContracts["/api/openai/keys"]
+	routeRequestContracts["/api/openai/keys/{id}/toggle"] = obj([]string{"enabled"}, map[string]prop{
+		"enabled": {t: "boolean", req: true},
+	})
+	routeRequestContracts["/api/openai/keys/{id}/rotate"] = noBody
+	routeRequestContracts["/api/openai/keys/{id}/default"] = noBody
+	routeRequestContracts["/api/openai/proxies/resolve-subscription"] = obj([]string{"url"}, map[string]prop{
+		"url": {t: "string", req: true, d: "订阅链接，必须以 http:// 或 https:// 开头"},
+	})
+	routeRequestContracts["/api/openai/analytics/clear"] = noBody
 	routeRequestContracts["/api/openai/endpoints/{id}/verify"] = noBody
 	routeRequestContracts["/api/openai/endpoints/{id}/test"] = noBody
 	routeRequestContracts["/api/openai/endpoints/{id}/health-check"] = noBody

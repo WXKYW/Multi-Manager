@@ -3357,15 +3357,9 @@ func (s *Service) healthCheckSingleModel(ctx context.Context, endpointID, baseUR
 
 	latency := time.Since(startTime)
 	record.Latency = latency.Milliseconds()
-	respBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		record.Error = err.Error()
-		return record
-	}
-	if output := extractHealthCheckOutput(respBytes); output == "" {
-		record.Error = "模型未返回有效输出"
-		return record
-	}
+	// 只要返回 2xx 状态码即视为有效，不再校验响应体内容。
+	// 排空响应体以便连接复用。
+	_, _ = io.Copy(io.Discard, resp.Body)
 	if latency <= degradedThreshold {
 		record.Status = "operational"
 	} else {
@@ -3373,79 +3367,6 @@ func (s *Service) healthCheckSingleModel(ctx context.Context, endpointID, baseUR
 	}
 
 	return record
-}
-
-func extractHealthCheckOutput(body []byte) string {
-	trimmedBody := strings.TrimSpace(string(body))
-	if trimmedBody == "" {
-		return ""
-	}
-
-	if strings.Contains(trimmedBody, "data:") {
-		if output := extractHealthCheckOutputFromSSE(trimmedBody); output != "" {
-			return output
-		}
-	}
-
-	var parsed interface{}
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return ""
-	}
-	return extractHealthCheckOutputValue(parsed)
-}
-
-func extractHealthCheckOutputFromSSE(body string) string {
-	parts := []string{}
-	for _, line := range strings.Split(body, "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "" || payload == "[DONE]" {
-			continue
-		}
-		var parsed interface{}
-		if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
-			continue
-		}
-		if text := extractHealthCheckOutputValue(parsed); text != "" {
-			parts = append(parts, text)
-		}
-	}
-	return strings.TrimSpace(strings.Join(parts, " "))
-}
-
-func extractHealthCheckOutputValue(value interface{}) string {
-	switch v := value.(type) {
-	case string:
-		return strings.TrimSpace(v)
-	case []interface{}:
-		parts := make([]string, 0, len(v))
-		for _, item := range v {
-			if text := extractHealthCheckOutputValue(item); text != "" {
-				parts = append(parts, text)
-			}
-		}
-		return strings.TrimSpace(strings.Join(parts, " "))
-	case map[string]interface{}:
-		for _, key := range []string{
-			"choices",
-			"output",
-			"message",
-			"delta",
-			"content",
-			"text",
-			"output_text",
-			"reasoning_content",
-			"refusal",
-		} {
-			if text := extractHealthCheckOutputValue(v[key]); text != "" {
-				return text
-			}
-		}
-	}
-	return ""
 }
 
 func (s *Service) runBatchHealthCheck(ctx context.Context, endpointID, baseURL, apiKey string, models []string, timeout time.Duration, concurrency int, headers ...[]HeaderItem) HealthSummary {

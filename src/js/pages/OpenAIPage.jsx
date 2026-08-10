@@ -1637,6 +1637,27 @@ const trendSeries = useMemo(() => {
     });
   };
 
+  const restoreHiddenModels = endpoint => {
+    if (!endpoint) return;
+    const hidden = Array.isArray(endpoint.models) ? endpoint.models : [];
+    const hiddenIds = hidden
+      .map(model => (typeof model === 'string' ? model.trim() : (model?.id || '').trim()))
+      .filter(modelId => modelId && isModelHidden(hiddenModels, endpoint.id, modelId));
+    if (hiddenIds.length === 0) return;
+    setHiddenModels(prev => {
+      const next = { ...prev };
+      const keep = (prev?.[endpoint.id] || []).filter(id => !hiddenIds.includes(id));
+      if (keep.length === 0) {
+        delete next[endpoint.id];
+      } else {
+        next[endpoint.id] = keep;
+      }
+      localStorage.setItem('openai_hidden_models', JSON.stringify(next));
+      return next;
+    });
+    toast.success(`已恢复 ${hiddenIds.length} 个被隐藏的模型`);
+  };
+
   const failedModelIdsForEndpoint = endpoint => {
     if (!endpoint) return [];
     return endpointModelIds(endpoint).filter(
@@ -3280,6 +3301,17 @@ const trendSeries = useMemo(() => {
                             />
                           }
                         />
+                        {hiddenModelCount > 0 && (
+                          <Button
+                            shape="square"
+                            size="sm"
+                            variant="secondary"
+                            aria-label={`恢复 ${hiddenModelCount} 个被隐藏的模型`}
+                            onClick={() => restoreHiddenModels(endpoint)}
+                            title={`恢复 ${hiddenModelCount} 个被隐藏的模型`}
+                            icon={<Eye className={actionIconClass} />}
+                          />
+                        )}
                         <Button
                           shape="square"
                           size="sm"
@@ -3507,7 +3539,19 @@ const trendSeries = useMemo(() => {
                                   className="py-10 text-center text-kumo-subtle"
                                 >
                                   {(endpoint.models || []).length > 0 && hiddenModelCount > 0
-                                    ? '该端点所有模型均已隐藏'
+                                    ? (
+                                      <div className="flex flex-col items-center gap-2">
+                                        <span>该端点所有模型均已隐藏</span>
+                                        <Button
+                                          size="sm"
+                                          variant="secondary"
+                                          onClick={() => restoreHiddenModels(endpoint)}
+                                          icon={<Eye className="h-3.5 w-3.5" />}
+                                        >
+                                          恢复 {hiddenModelCount} 个被隐藏的模型
+                                        </Button>
+                                      </div>
+                                    )
                                     : '暂无模型数据，可刷新端点获取'}
                                 </Table.Cell>
                               </Table.Row>

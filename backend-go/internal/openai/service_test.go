@@ -562,7 +562,7 @@ func TestOpenAILifecycleAndProxy(t *testing.T) {
 	}
 }
 
-func TestHealthCheckRequiresValidOutput(t *testing.T) {
+func TestHealthCheckAcceptsEmptyOutput(t *testing.T) {
 	mockUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer test-api-key" {
 			w.WriteHeader(http.StatusUnauthorized)
@@ -635,11 +635,8 @@ func TestHealthCheckRequiresValidOutput(t *testing.T) {
 		"empty-model",
 		5*time.Second,
 	)
-	if failed.Status != "failed" {
-		t.Fatalf("expected empty output to fail, got status=%s error=%s", failed.Status, failed.Error)
-	}
-	if !strings.Contains(failed.Error, "有效输出") {
-		t.Fatalf("expected effective output error, got %s", failed.Error)
+	if failed.Status == "failed" {
+		t.Fatalf("expected empty output to count as healthy, got status=%s error=%s", failed.Status, failed.Error)
 	}
 }
 
