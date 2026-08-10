@@ -142,7 +142,7 @@ export default function PromptLibraryPage() {
         .catch(error => toast.error(`标题保存失败：${error.message}`));
     }, 700);
     return () => window.clearTimeout(timer);
-  }, [entry?.id, entry?.title]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [entry?.id, entry?.title]);  
 
   const createCollection = async () => {
     const name = await dialog.prompt({
@@ -328,7 +328,7 @@ export default function PromptLibraryPage() {
       />
     ),
     [collections, entries, search, selectedCollectionId, selectedEntryId, starredOnly]
-  ); // eslint-disable-line react-hooks/exhaustive-deps
+  );  
 
   const detailsPanel = entry ? (
     <PromptDetailsPanel

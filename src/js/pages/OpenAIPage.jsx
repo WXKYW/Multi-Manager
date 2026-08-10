@@ -103,8 +103,31 @@ import {
   Sliders,
 } from '../components/Icons.jsx';
 
-function createHealthCheckProgress(total = 0, running = false) {
-  return { running, total, completed: 0, healthy: 0, degraded: 0, failed: 0 };
+// 从 Kumo CSS 变量读取主题色，供 ECharts 等需要真实颜色值的场景使用。
+const kumoHex = name => {
+  try {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return value || undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+// 大数字压缩为「万 / 亿」单位；小数位默认 2 位。
+const formatCompact = (value, decimals = 2) => {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return String(value);
+  const abs = Math.abs(num);
+  if (abs >= 1e8) return `${(num / 1e8).toFixed(decimals)}亿`;
+  if (abs >= 1e4) return `${(num / 1e4).toFixed(decimals)}万`;
+  if (Number.isInteger(num)) return String(num);
+  return num.toFixed(decimals);
+};
+
+// 词元统一以百万（M）为单位，保留 2 位小数。
+const formatTokensM = value => `${(Number(value) / 1e6).toFixed(2)}M`;
+
+function createHealthCheckProgress(total = 0, running = false) {  return { running, total, completed: 0, healthy: 0, degraded: 0, failed: 0 };
 }
 
 // parseProxyEntry 解析代理 URL 为可读摘要与完整值：
@@ -254,6 +277,7 @@ function OpenAIPage() {
   });
   const [analyticsTotal, setAnalyticsTotal] = useState(0);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [logsAutoRefresh, setLogsAutoRefresh] = useState(true);
   const getAuthHeaders = useCallback(() => {
     return {
       'Content-Type': 'application/json',
@@ -299,6 +323,16 @@ function OpenAIPage() {
       fetchAnalytics();
     }
   }, [activeTab, fetchAnalytics]);
+
+  // 网关日志自动刷新（15 秒一次），页面隐藏或离开日志 Tab 时暂停。
+  useEffect(() => {
+    if (!logsAutoRefresh || activeTab !== 'logs') return undefined;
+    const timer = window.setInterval(() => {
+      if (document.hidden) return;
+      fetchAnalytics();
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, [logsAutoRefresh, activeTab, fetchAnalytics]);
 
   // 记住日志分页数量，下次进入自动沿用。
   useEffect(() => {
@@ -459,7 +493,14 @@ function OpenAIPage() {
 
   // 时间序列（小时/天/周粒度）：为每根柱提供独立可对齐的类目轴。
 // 后端每个桶返回 day(bucket label) + count/tokens/avgLatency/errors，仅用于柱状展示。
-function TrendBarChart({ labels, values, color, isDarkMode }) {
+function TrendBarChart({
+  labels,
+  values,
+  color,
+  isDarkMode,
+  formatValue = value => (Number.isFinite(Number(value)) ? String(Number(value)) : String(value)),
+  formatAxis = formatValue,
+}) {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
 
@@ -468,20 +509,17 @@ function TrendBarChart({ labels, values, color, isDarkMode }) {
     if (!el || !labels || labels.length === 0) return;
     const chart = echarts.init(el);
     chartRef.current = chart;
-    const axisColor = isDarkMode ? '#8b8fa3' : '#52525b';
-    const gridColor = isDarkMode ? '#2b2b33' : '#e4e4e7';
+    const axisColor = kumoHex('--color-kumo-contrast');
+    const gridColor = kumoHex('--color-kumo-line');
     chart.setOption({
       animation: false,
       grid: { left: 8, right: 12, top: 10, bottom: 0, containLabel: true },
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
-        backgroundColor: isDarkMode ? '#25252b' : '#ffffff',
+        backgroundColor: kumoHex('--color-kumo-base'),
         textStyle: { color: axisColor, fontSize: 11 },
-        valueFormatter: value => {
-          const num = Number(value);
-          return Number.isFinite(num) ? num.toFixed(1) : String(value);
-        },
+        valueFormatter: formatValue,
       },
       xAxis: {
         type: 'category',
@@ -494,7 +532,7 @@ function TrendBarChart({ labels, values, color, isDarkMode }) {
       yAxis: {
         type: 'value',
         splitLine: { lineStyle: { color: gridColor } },
-        axisLabel: { color: axisColor, fontSize: 10 },
+        axisLabel: { color: axisColor, fontSize: 10, formatter: formatAxis },
       },
       series: [
         {
@@ -557,8 +595,8 @@ function ModelTrendChart({ labels, series, isDarkMode }) {
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart || !labels || labels.length === 0) return;
-    const axisColor = isDarkMode ? '#8b8fa3' : '#52525b';
-    const gridColor = isDarkMode ? '#2b2b33' : '#e4e4e7';
+    const axisColor = kumoHex('--color-kumo-contrast');
+    const gridColor = kumoHex('--color-kumo-line');
     chart.setOption(
       {
         animation: false,
@@ -566,7 +604,7 @@ function ModelTrendChart({ labels, series, isDarkMode }) {
         tooltip: {
           trigger: 'axis',
           traceHigh: true,
-          backgroundColor: isDarkMode ? '#25252b' : '#ffffff',
+          backgroundColor: kumoHex('--color-kumo-base'),
           textStyle: { color: axisColor, fontSize: 11 },
         },
         xAxis: {
@@ -637,24 +675,33 @@ const trendSeries = useMemo(() => {
     const build = (color, pick, name) => {
       const labels = buckets.map(point => point.day || '');
       const values = buckets.map(point => Number(pick(point)) || 0);
-      const series = { name, color, labels, values };
-      // withFmt 将数值保留一位小数展示（用于延迟/错误率等连续量）。
-      series.withFmt = () => {
-        const fmt = values.map(v => Number(v.toFixed(1)));
-        return { ...series, values: fmt };
-      };
-      return series;
+      return { name, color, labels, values };
     };
     return {
-      requests: build(ChartPalette.categorical(0, isDarkMode), p => p.count, '请求数'),
-      tokens: build(ChartPalette.categorical(1, isDarkMode), p => p.tokens, '词元'),
-      latency: build(ChartPalette.categorical(2, isDarkMode), p => p.avgLatency, '平均延迟 (ms)')
-        .withFmt(),
-      errorRate: build(
-        ChartPalette.categorical(3, isDarkMode),
-        p => (Number(p.count) > 0 ? ((Number(p.errors) || 0) / Number(p.count)) * 100 : 0),
-        '错误率 (%)'
-      ).withFmt(),
+      requests: {
+        ...build(ChartPalette.categorical(0, isDarkMode), p => p.count, '请求数'),
+        formatValue: value => formatCompact(value, 0),
+        formatAxis: value => formatCompact(value, 0),
+      },
+      tokens: {
+        ...build(ChartPalette.categorical(1, isDarkMode), p => p.tokens, '词元 (M)'),
+        formatValue: formatTokensM,
+        formatAxis: value => `${Math.round(Number(value) / 1e6)}M`,
+      },
+      latency: {
+        ...build(ChartPalette.categorical(2, isDarkMode), p => p.avgLatency, '平均延迟 (s)'),
+        formatValue: value => `${(Number(value) / 1000).toFixed(2)} s`,
+        formatAxis: value => `${(Number(value) / 1000).toFixed(0)}`,
+      },
+      errorRate: {
+        ...build(
+          ChartPalette.categorical(3, isDarkMode),
+          p => (Number(p.count) > 0 ? ((Number(p.errors) || 0) / Number(p.count)) * 100 : 0),
+          '错误率 (%)'
+        ),
+        formatValue: value => `${Number(value).toFixed(2)}%`,
+        formatAxis: value => `${Number(value).toFixed(0)}%`,
+      },
     };
   }, [analyticsCharts, isDarkMode]);
 
@@ -2368,7 +2415,7 @@ const trendSeries = useMemo(() => {
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
-        persistSessions(prev => [session, ...prev]);
+        chatStorage.saveSessions([session, ...chatStorage.readSessions()]);
         activeSessionId = session.id;
         setCurrentSessionId(activeSessionId);
         chatStorage.saveSessionMessages(activeSessionId, []);
@@ -2461,7 +2508,7 @@ const trendSeries = useMemo(() => {
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      let assistantMsg = {
+      const assistantMsg = {
         role: 'assistant',
         content: '',
         reasoning: '',
@@ -2628,7 +2675,7 @@ const trendSeries = useMemo(() => {
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      let assistantMsg = {
+      const assistantMsg = {
         role: 'assistant',
         content: '',
         reasoning: '',
@@ -3343,8 +3390,9 @@ const trendSeries = useMemo(() => {
                                     </Table.Cell>
                                     <Table.Cell className="!px-2 !py-1.5">
                                       {mappingEditKey === `${endpoint.id}:${modelId}` ? (
-                                        <input
+                                        <Input
                                           autoFocus
+                                          size="sm"
                                           value={mappingDraft}
                                           onChange={event => setMappingDraft(event.target.value)}
                                           onKeyDown={event => {
@@ -3355,7 +3403,7 @@ const trendSeries = useMemo(() => {
                                               setMappingEditKey(null);
                                             }
                                           }}
-                                          className="w-full rounded border border-kumo-brand/40 bg-kumo-base px-1.5 py-0.5 font-mono text-[10px] text-kumo-strong outline-none"
+                                          className="w-full font-mono text-[10px]"
                                           placeholder="对外名称"
                                         />
                                       ) : (
@@ -3567,7 +3615,7 @@ const trendSeries = useMemo(() => {
                               size="sm"
                               text={key.apiKey}
                               className="min-w-0 w-full font-mono text-[0.9em]"
-                              tooltip={{ text: '复制 API Key', copiedText: 'API Key 已复制' }}
+                              tooltip={{ text: '复制 API Key', copiedText: 'API Key 已复制', side: 'bottom' }}
                               labels={{ copyAction: `复制 ${key.name} 的 API Key` }}
                             />
                           ) : (
@@ -3679,7 +3727,7 @@ const trendSeries = useMemo(() => {
                   <SkeletonLine className="h-6 w-20" />
                 ) : (
                   <span className="truncate font-mono text-2xl font-semibold leading-none text-kumo-strong">
-                    {analyticsSummary.totalRequests.toLocaleString()}
+                    {String(analyticsSummary.totalRequests)}
                   </span>
                 )}
                 <span className="truncate text-[11px] text-kumo-subtle">最近 {analyticsDays} 天</span>
@@ -3697,9 +3745,9 @@ const trendSeries = useMemo(() => {
                   ) : (
                     <>
                       <span className="truncate font-mono text-2xl font-semibold leading-none text-kumo-warning">
-                        {analyticsSummary.avgLatency.toFixed(0)}
+                        {(analyticsSummary.avgLatency / 1000).toFixed(2)}
                       </span>
-                      <span className="shrink-0 text-xs font-medium text-kumo-subtle">ms</span>
+                      <span className="shrink-0 text-xs font-medium text-kumo-subtle">s</span>
                     </>
                   )}
                 </div>
@@ -3716,7 +3764,7 @@ const trendSeries = useMemo(() => {
                   <SkeletonLine className="h-6 w-24" />
                 ) : (
                   <span className="truncate font-mono text-2xl font-semibold leading-none text-kumo-brand">
-                    {analyticsSummary.totalTokens.toLocaleString()}
+                    {formatTokensM(analyticsSummary.totalTokens)}
                   </span>
                 )}
                 <span
@@ -3727,7 +3775,7 @@ const trendSeries = useMemo(() => {
                     className="inline h-3 w-3 align-[-1px]"
                     aria-hidden="true"
                   />{' '}
-                  {Math.max(0, analyticsSummary.totalPromptTokens - analyticsSummary.totalCachedTokens).toLocaleString()}（
+                  {formatTokensM(Math.max(0, analyticsSummary.totalPromptTokens - analyticsSummary.totalCachedTokens))}（
                   {analyticsSummary.totalPromptTokens > 0
                     ? `${(
                         (Math.max(0, analyticsSummary.totalPromptTokens - analyticsSummary.totalCachedTokens) /
@@ -3736,7 +3784,7 @@ const trendSeries = useMemo(() => {
                       ).toFixed(1)}%`
                     : '0.0%'}
                   ） · <ArrowUp className="inline h-3 w-3 align-[-1px]" aria-hidden="true" />{' '}
-                  {(analyticsSummary.totalCompletionTokens || 0).toLocaleString()}
+                  {formatTokensM(analyticsSummary.totalCompletionTokens || 0)}
                 </span>
               </AppCard>
               <AppCard padding="md" className="flex min-h-0 min-w-0 flex-col justify-between gap-1.5">
@@ -3847,6 +3895,8 @@ const trendSeries = useMemo(() => {
                         values={card.series.values}
                         color={card.series.color}
                         isDarkMode={isDarkMode}
+                        formatValue={card.series.formatValue}
+                        formatAxis={card.series.formatAxis}
                       />
                     )}
                   </div>
@@ -3924,7 +3974,7 @@ const trendSeries = useMemo(() => {
                                 />
                               </div>
                               <span className="w-14 shrink-0 text-right font-mono text-[11px] text-kumo-subtle">
-                                {tokens.toLocaleString()}
+                                {formatTokensM(tokens)}
                               </span>
                               <span className="w-11 shrink-0 text-right font-mono text-[10px] text-kumo-subtle">
                                 {percent.toFixed(1)}%
@@ -3987,7 +4037,7 @@ const trendSeries = useMemo(() => {
                                 />
                               </div>
                               <span className="w-14 shrink-0 text-right font-mono text-[11px] text-kumo-subtle">
-                                {count.toLocaleString()}
+                                {formatCompact(count, 0)}
                               </span>
                               <span className="w-11 shrink-0 text-right font-mono text-[10px] text-kumo-subtle">
                                 {percent.toFixed(1)}%
@@ -4011,17 +4061,28 @@ const trendSeries = useMemo(() => {
         <div className="flex min-h-0 flex-1 flex-col gap-3">
           {/* Logs table and pagination */}
           <LayerCard className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden p-0 shadow-none">
+            <div className="flex shrink-0 items-center gap-3 border-b border-kumo-line px-3 py-2">
+              <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-kumo-strong">
+                <History className="h-3.5 w-3.5 text-kumo-brand" />
+                网关日志
+              </span>
+              <span className="ml-auto" />
+              <label className="flex h-8 shrink-0 items-center gap-2 text-xs text-kumo-subtle">
+                <Switch checked={logsAutoRefresh} onCheckedChange={setLogsAutoRefresh} />
+                自动刷新
+              </label>
+            </div>
             <div className="min-h-0 min-w-0 flex-1 overflow-auto scrollbar-thin">
-              <Table layout="fixed" className="min-w-[1520px] [&_td]:!px-2 [&_td]:!py-2 [&_th]:!px-2 [&_th]:!py-2">
+              <Table layout="fixed" className="min-w-[1380px] [&_td]:!px-2 [&_td]:!py-2 [&_th]:!px-2 [&_th]:!py-2">
                 <colgroup>
-                  <col style={{ width: 146 }} />
-                  <col style={{ width: 92 }} />
                   <col style={{ width: 120 }} />
-                  <col style={{ width: 116 }} />
+                  <col style={{ width: 80 }} />
+                  <col style={{ width: 88 }} />
+                  <col style={{ width: 68 }} />
                   <col style={{ width: 168 }} />
+                  <col style={{ width: 132 }} />
                   <col style={{ width: 120 }} />
-                  <col style={{ width: 120 }} />
-                  <col style={{ width: 84 }} />
+                  <col style={{ width: 48 }} />
                   <col style={{ width: 104 }} />
                   <col style={{ width: 120 }} />
                   <col style={{ width: 140 }} />

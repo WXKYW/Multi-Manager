@@ -655,6 +655,354 @@ func TestDatabaseMaintenanceActions(t *testing.T) {
 	}
 }
 
+func TestEnforceLogLimitsExtendedTables(t *testing.T) {
+	service := New(config.Config{
+		Version: "test",
+		Host:    "127.0.0.1",
+		Port:    0,
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	ctx := context.Background()
+	db, err := service.store.Open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.ExecContext(ctx, `
+		CREATE TABLE github_repository_snapshots (
+			id INTEGER PRIMARY KEY,
+			repository_id INTEGER,
+			collected_at DATETIME
+		);
+		CREATE TABLE ai_access_audit (
+			id INTEGER PRIMARY KEY,
+			agent_name TEXT,
+			created_at DATETIME
+		);
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	seedTimes := map[string][]string{
+		"github_repository_snapshots": {"2026-06-10T00:00:00Z", "2026-06-11T00:00:00Z", "2026-06-12T00:00:00Z"},
+		"ai_access_audit":             {"2026-06-10T00:00:00Z", "2026-06-11T00:00:00Z", "2026-06-12T00:00:00Z"},
+		"system_api_stats":            {"2026-06-10", "2026-06-11", "2026-06-12"},
+	}
+	for table, times := range seedTimes {
+		for _, at := range times {
+			var err error
+			switch table {
+			case "github_repository_snapshots":
+				_, err = db.ExecContext(ctx, `INSERT INTO github_repository_snapshots (repository_id, collected_at) VALUES (1, ?)`, at)
+			case "ai_access_audit":
+				_, err = db.ExecContext(ctx, `INSERT INTO ai_access_audit (agent_name, created_at) VALUES ('agent', ?)`, at)
+			case "system_api_stats":
+				_, err = db.ExecContext(ctx, `INSERT INTO system_api_stats (date, audit_count, ops_count, updated_at) VALUES (?, 0, 0, ?)`, at, at)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	tables, err := listLogTables(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"github_repository_snapshots", "ai_access_audit", "system_api_stats"} {
+		found := false
+		for _, got := range tables {
+			if got == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("listLogTables missing %q, got %v", want, tables)
+		}
+	}
+
+	for table, wantCol := range map[string]string{
+		"github_repository_snapshots": "collected_at",
+		"ai_access_audit":             "created_at",
+		"system_api_stats":            "date",
+	} {
+		col, err := logTimeColumn(ctx, db, table)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if col != wantCol {
+			t.Fatalf("logTimeColumn(%s) = %q, want %q", table, col, wantCol)
+		}
+	}
+
+	result, err := enforceLogTableLimits(ctx, db, service.store.DatabasePath(), 0, 2, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["deleted"].(int64) != 3 {
+		t.Fatalf("expected 3 deleted rows, got %d", result["deleted"].(int64))
+	}
+	for table := range seedTimes {
+		n, err := countTableRows(ctx, db, table)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != 2 {
+			t.Fatalf("table %s rows = %d, want 2", table, n)
+		}
+	}
+}
+
+func TestEnforceLogLimitsPreviewDoesNotDelete(t *testing.T) {
+	service := New(config.Config{
+		Version: "test",
+		Host:    "127.0.0.1",
+		Port:    0,
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	db, err := service.store.Open(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.ExecContext(context.Background(), `
+		CREATE TABLE api_logs (
+			id INTEGER PRIMARY KEY,
+			details TEXT,
+			user_agent TEXT,
+			created_at TEXT
+		);
+		INSERT INTO api_logs (id, details, user_agent, created_at) VALUES
+			(1, 'old', 'agent', '2026-06-10T00:00:00Z'),
+			(2, 'middle', 'agent', '2026-06-11T00:00:00Z'),
+			(3, 'new', 'agent', '2026-06-12T00:00:00Z');
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	previewRes := performSettingsRequest(service, http.MethodPost, "/api/settings/enforce-log-limits", `{"count":1,"preview":true}`)
+	if previewRes.Code != http.StatusOK {
+		t.Fatalf("preview enforce-log-limits status = %d body=%s", previewRes.Code, previewRes.Body.String())
+	}
+	var previewPayload struct {
+		Success      bool  `json:"success"`
+		Preview      bool  `json:"preview"`
+		TotalDeleted int64 `json:"totalDeleted"`
+		Tables       []struct {
+			Table   string `json:"table"`
+			Current int64  `json:"current"`
+			Kept    int64  `json:"kept"`
+			Deleted int64  `json:"deleted"`
+		} `json:"tables"`
+	}
+	mustDecodeSettings(t, previewRes, &previewPayload)
+	if !previewPayload.Success || !previewPayload.Preview || previewPayload.TotalDeleted != 2 {
+		t.Fatalf("unexpected preview payload: %#v", previewPayload)
+	}
+	if len(previewPayload.Tables) != 1 || previewPayload.Tables[0].Table != "api_logs" ||
+		previewPayload.Tables[0].Current != 3 || previewPayload.Tables[0].Kept != 1 || previewPayload.Tables[0].Deleted != 2 {
+		t.Fatalf("unexpected preview tables: %#v", previewPayload.Tables)
+	}
+
+	db, err = service.store.Open(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if countRowsForTest(t, db, "api_logs") != 3 {
+		t.Fatalf("preview must not delete rows, api_logs rows = %d", countRowsForTest(t, db, "api_logs"))
+	}
+}
+
+func TestEnforceLogLimitsEntityFloor(t *testing.T) {
+	service := New(config.Config{
+		Version: "test",
+		Host:    "127.0.0.1",
+		Port:    0,
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	ctx := context.Background()
+	db, err := service.store.Open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.ExecContext(ctx, `
+		CREATE TABLE github_repository_snapshots (
+			id INTEGER PRIMARY KEY,
+			repository_id INTEGER,
+			collected_at DATETIME
+		);
+		INSERT INTO github_repository_snapshots (repository_id, collected_at) VALUES
+			(1, '2026-06-10T00:00:00Z'), (1, '2026-06-11T00:00:00Z'), (1, '2026-06-12T00:00:00Z'),
+			(2, '2026-06-10T00:00:00Z'), (2, '2026-06-11T00:00:00Z'), (2, '2026-06-12T00:00:00Z');
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plans, err := planLogTableLimits(ctx, db, 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan *logTablePlan
+	for i := range plans {
+		if plans[i].Table == "github_repository_snapshots" {
+			plan = &plans[i]
+			break
+		}
+	}
+	if plan == nil {
+		t.Fatalf("plan missing github_repository_snapshots, got %#v", plans)
+	}
+	if plan.Current != 6 || plan.Kept != 2 || plan.Deleted != 4 || plan.Floor != 2 {
+		t.Fatalf("unexpected floor plan: %#v", plan)
+	}
+
+	result, err := enforceLogTableLimits(ctx, db, service.store.DatabasePath(), 0, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["deleted"].(int64) != 4 {
+		t.Fatalf("expected 4 deleted rows, got %d", result["deleted"].(int64))
+	}
+	for _, repoID := range []int64{1, 2} {
+		var remaining int64
+		err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM github_repository_snapshots WHERE repository_id = ?`, repoID).Scan(&remaining)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if remaining < 1 {
+			t.Fatalf("repository %d lost its newest snapshot", repoID)
+		}
+	}
+}
+
+func TestAutoCleanupOnce(t *testing.T) {
+	service := New(config.Config{
+		Version: "test",
+		Host:    "127.0.0.1",
+		Port:    0,
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	ctx := context.Background()
+	db, err := service.store.Open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.ExecContext(ctx, `
+		CREATE TABLE api_logs (
+			id INTEGER PRIMARY KEY,
+			details TEXT,
+			user_agent TEXT,
+			created_at TEXT
+		);
+		INSERT INTO api_logs (id, details, user_agent, created_at) VALUES
+			(1, 'old', 'agent', '2026-06-10T00:00:00Z'),
+			(2, 'middle', 'agent', '2026-06-11T00:00:00Z'),
+			(3, 'new', 'agent', '2026-06-12T00:00:00Z');
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range map[string]string{
+		"log_auto_cleanup":       "1",
+		"log_retention_days":     "0",
+		"log_max_count":          "1",
+		"log_max_db_size_mb":     "0",
+		"log_auto_cleanup_hours": "24",
+	} {
+		if err := setSystemConfig(ctx, db, key, value, "test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	service.autoCleanupOnce(context.Background())
+
+	db, err = service.store.Open(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if countRowsForTest(t, db, "api_logs") != 1 {
+		t.Fatalf("auto cleanup should keep 1 row, api_logs rows = %d", countRowsForTest(t, db, "api_logs"))
+	}
+}
+
+func TestBackgroundCleanupStartStop(t *testing.T) {
+	service := New(config.Config{
+		Version: "test",
+		Host:    "127.0.0.1",
+		Port:    0,
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+	service.StartBackgroundCleanup()
+	service.StartBackgroundCleanup()
+	service.Stop()
+	service.Stop()
+}
+
+func TestListLogTablesExcludesUserData(t *testing.T) {
+	service := New(config.Config{
+		Version: "test",
+		Host:    "127.0.0.1",
+		Port:    0,
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	ctx := context.Background()
+	db, err := service.store.Open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.ExecContext(ctx, `
+		CREATE TABLE server_snippets (id INTEGER PRIMARY KEY, name TEXT, created_at DATETIME);
+		CREATE TABLE prompt_entries (id INTEGER PRIMARY KEY, title TEXT, created_at DATETIME);
+		CREATE TABLE totp_accounts (id INTEGER PRIMARY KEY, name TEXT, created_at DATETIME);
+		CREATE TABLE settings_registry (domain TEXT, defaults_json TEXT);
+		CREATE TABLE subscription_profiles (id INTEGER PRIMARY KEY, name TEXT, created_at DATETIME);
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tables, err := listLogTables(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, table := range tables {
+		got[table] = true
+	}
+	for _, protected := range []string{"server_snippets", "prompt_entries", "totp_accounts", "settings_registry", "subscription_profiles"} {
+		if got[protected] {
+			t.Fatalf("listLogTables must not include user data table %q, got %v", protected, tables)
+		}
+	}
+}
+
 func TestDeprecatedTablePreviewAndCleanup(t *testing.T) {
 	service := New(config.Config{
 		Version: "test",

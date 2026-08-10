@@ -218,7 +218,7 @@ function TencentPage() {
 
   useEffect(() => {
     if (selectedAccountId && activeTab !== 'accounts') refreshData();
-  }, [activeTab, selectedAccountId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeTab, selectedAccountId]);  
 
   const saveAccount = async () => {
     if (!accountForm.name || !accountForm.secretId || (!editingAccount && !accountForm.secretKey)) {

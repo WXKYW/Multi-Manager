@@ -1173,7 +1173,7 @@ function PaasPage() {
           }
           return [{ timestamp: Date.now(), level: 'INFO', message: '暂无容器日志或系统事件。' }];
         } catch (e) {
-          throw new Error('加载日志失败: ' + e.message);
+          throw new Error('加载日志失败: ' + e.message, { cause: e });
         }
       }
     });

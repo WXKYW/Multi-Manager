@@ -5,6 +5,7 @@ import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
+import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { ClipboardText, Tabs } from '@cloudflare/kumo';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
@@ -296,10 +297,13 @@ function SettingsPage() {
     count: 0,
     dbSizeMB: 0,
     logFileSizeMB: 10,
+    autoCleanup: false,
+    autoCleanupHours: 24,
   });
   const [logFileInfo, setLogFileInfo] = useState(null);
   const [operationLogs, setOperationLogs] = useState([]);
   const [logsBusy, setLogsBusy] = useState(false);
+  const [logPreview, setLogPreview] = useState(null);
   const [logsLoaded, setLogsLoaded] = useState(false);
   const [twoFALoaded, setTwoFALoaded] = useState(false);
   const [loginSessions, setLoginSessions] = useState([]);
@@ -420,7 +424,7 @@ function SettingsPage() {
 
       const logSettingsResult = await logSettingsResponse.json();
       if (logSettingsResult.success) {
-        setLogSettings(logSettingsResult.data);
+        setLogSettings({ ...logSettingsResult.data, autoCleanup: !!logSettingsResult.data?.autoCleanup });
         setLogFileInfo(logSettingsResult.fileInfo || null);
       }
 
@@ -949,6 +953,35 @@ function SettingsPage() {
       setLogsBusy(false);
       setDatabaseBusy(false);
     }
+  };
+
+  const runEnforceLogLimits = async () => {
+    setLogsBusy(true);
+    try {
+      const previewResponse = await fetch('/api/settings/enforce-log-limits', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ preview: true }),
+      });
+      const previewResult = await previewResponse.json();
+      if (!previewResponse.ok || previewResult.success === false) {
+        throw new Error(previewResult.error || '获取清理预览失败');
+      }
+      if (previewResult.totalDeleted === 0 && !previewResult.sizeOverLimit) {
+        toast.info('当前无需清理');
+        return;
+      }
+      setLogPreview(previewResult);
+    } catch (error) {
+      toast.error(error.message || '获取清理预览失败');
+    } finally {
+      setLogsBusy(false);
+    }
+  };
+
+  const confirmEnforceLogLimits = async () => {
+    setLogPreview(null);
+    await postSettingsAction('/api/settings/enforce-log-limits', '日志限制已执行', fetchLogState);
   };
 
   const exportDatabase = () => {
@@ -1906,19 +1939,36 @@ function SettingsPage() {
             title="审计与保留"
             description="数据库审计与日志保留"
             icon={<FileText className="h-4 w-4 text-kumo-brand" />}
-            actions={
-                <>
-                  <Button size="sm" onClick={saveLogSettings} loading={logsBusy} icon={<Save className="h-4 w-4" />}>保存保留策略</Button>
-                  <Button size="sm" onClick={() => postSettingsAction('/api/settings/enforce-log-limits', '日志限制已执行', fetchLogState)} loading={logsBusy}>立即执行限制</Button>
-                </>
-            }
             bodyPadding="none"
           >
-            <div className="grid gap-4 p-5 md:grid-cols-4">
-              <Input size="sm" label="保留天数" type="number" min="0" value={logSettings.days} onChange={(e) => setLogSettings((prev) => ({ ...prev, days: Math.max(0, toInt(e.target.value, 0)) }))} />
-              <Input size="sm" label="单表最大条数" type="number" min="0" value={logSettings.count} onChange={(e) => setLogSettings((prev) => ({ ...prev, count: Math.max(0, toInt(e.target.value, 0)) }))} />
-              <Input size="sm" label="数据库最大 MB" type="number" min="0" value={logSettings.dbSizeMB} onChange={(e) => setLogSettings((prev) => ({ ...prev, dbSizeMB: Math.max(0, toInt(e.target.value, 0)) }))} />
-              <Input size="sm" label="app.log 最大 MB" type="number" min="1" value={logSettings.logFileSizeMB} onChange={(e) => setLogSettings((prev) => ({ ...prev, logFileSizeMB: Math.max(1, toInt(e.target.value, 10)) }))} />
+            <div className="p-5">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <Input size="sm" label="保留天数" type="number" min="0" value={logSettings.days} onChange={(e) => setLogSettings((prev) => ({ ...prev, days: Math.max(0, toInt(e.target.value, 0)) }))} />
+                <Input size="sm" label="单表最大条数" type="number" min="0" value={logSettings.count} onChange={(e) => setLogSettings((prev) => ({ ...prev, count: Math.max(0, toInt(e.target.value, 0)) }))} />
+                <Input size="sm" label="数据库最大 MB" type="number" min="0" value={logSettings.dbSizeMB} onChange={(e) => setLogSettings((prev) => ({ ...prev, dbSizeMB: Math.max(0, toInt(e.target.value, 0)) }))} />
+                <Input size="sm" label="app.log 最大 MB" type="number" min="1" value={logSettings.logFileSizeMB} onChange={(e) => setLogSettings((prev) => ({ ...prev, logFileSizeMB: Math.max(1, toInt(e.target.value, 10)) }))} />
+              </div>
+
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-4 border-t border-kumo-line pt-4">
+                <div className="flex flex-wrap items-center gap-4">
+                  <Switch
+                    label="自动执行保留限制"
+                    checked={logSettings.autoCleanup}
+                    onCheckedChange={(checked) => setLogSettings((prev) => ({ ...prev, autoCleanup: checked }))}
+                  />
+                  <div className="w-44">
+                    <Input size="sm" label="执行间隔（小时）" type="number" min="1" value={logSettings.autoCleanupHours} onChange={(e) => setLogSettings((prev) => ({ ...prev, autoCleanupHours: Math.max(1, toInt(e.target.value, 24)) }))} disabled={!logSettings.autoCleanup} />
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="secondary" onClick={saveLogSettings} loading={logsBusy} icon={<Save className="h-4 w-4" />}>保存策略</Button>
+                  <Button size="sm" onClick={runEnforceLogLimits} loading={logsBusy} icon={<Trash className="h-4 w-4" />}>执行保留限制</Button>
+                </div>
+              </div>
+
+              <p className="mt-3 text-xs text-kumo-subtle">
+                单表最大条数过低时，将按「每个实体的最新记录」自动保底（如每仓库、每监控、每台服务器至少保留一条最新数据），不会删除实体最新状态。
+              </p>
             </div>
           </SectionCard>
 
@@ -2082,6 +2132,62 @@ function SettingsPage() {
           </LayerCard> */}
         </div>
       )}
+
+      <Dialog.Root open={!!logPreview} onOpenChange={(open) => { if (!open) setLogPreview(null); }} role="alertdialog">
+        <Dialog className="p-6" size="xl">
+          <div className="flex items-center gap-3">
+            <Trash className="h-5 w-5 text-kumo-danger" />
+            <Dialog.Title>执行保留限制</Dialog.Title>
+          </div>
+          <Dialog.Description className="mt-3 text-kumo-subtle">
+            将按当前保留策略清理以下{logPreview?.tables?.length || 0}张日志/自动生成表，预计删除 {logPreview?.totalDeleted ?? 0} 条记录。此操作不可恢复。
+          </Dialog.Description>
+          {logPreview?.tables?.length > 0 && (
+            <div className="mt-4 max-h-64 overflow-auto rounded-lg border border-kumo-line">
+              <Table layout="fixed">
+                <colgroup>
+                  <col />
+                  <col className="w-[96px]" />
+                  <col className="w-[96px]" />
+                  <col className="w-[96px]" />
+                </colgroup>
+                <Table.Header>
+                  <Table.Row>
+                    <Table.Head>表</Table.Head>
+                    <Table.Head>当前行数</Table.Head>
+                    <Table.Head>保留</Table.Head>
+                    <Table.Head>删除</Table.Head>
+                  </Table.Row>
+                </Table.Header>
+                <Table.Body>
+                  {logPreview.tables.map((row) => (
+                    <Table.Row key={row.table}>
+                      <Table.Cell className="font-mono text-xs">{row.table}</Table.Cell>
+                      <Table.Cell>{row.current}</Table.Cell>
+                      <Table.Cell>{row.kept}</Table.Cell>
+                      <Table.Cell className="text-kumo-danger">{row.deleted}</Table.Cell>
+                    </Table.Row>
+                  ))}
+                </Table.Body>
+              </Table>
+            </div>
+          )}
+          {logPreview?.sizeOverLimit && (
+            <div className="mt-3 rounded-lg border border-kumo-warning/40 bg-kumo-warning/10 p-3 text-xs text-kumo-warning">
+              数据库当前大小超过 {logPreview.dbSizeMB} MB 上限（当前 {logPreview.currentSizeMB}），还将循环删除各表最旧数据直至达标。
+            </div>
+          )}
+          {logPreview?.tables?.some((row) => row.floor > 0) && (
+            <div className="mt-3 rounded-lg border border-kumo-line bg-kumo-recessed p-3 text-xs text-kumo-subtle">
+              已按「每个实体的最新记录」保底：单表条数低于实体数时，也不会删除各实体最新数据。
+            </div>
+          )}
+          <div className="mt-6 flex justify-end gap-2">
+            <Button size="sm" variant="secondary" onClick={() => setLogPreview(null)}>取消</Button>
+            <Button size="sm" variant="destructive" onClick={confirmEnforceLogLimits}>确认清理</Button>
+          </div>
+        </Dialog>
+      </Dialog.Root>
       </div>
     </div>
   );

@@ -63,6 +63,8 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@babel/eslint-parser": "^8.0.1",
+    "@babel/preset-react": "^8.0.1",
     "@eslint/js": "^10.0.1",
     "@fortawesome/fontawesome-free": "^7.1.0",
     "@tailwindcss/vite": "^4.3.0",
@@ -73,6 +75,7 @@
     "@xterm/xterm": "^5.5.0",
     "concurrently": "^9.1.0",
     "eslint": "^10.8.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "prettier": "^3.7.4",
     "rollup-plugin-visualizer": "^6.0.5",
     "vite": "^8.0.16",

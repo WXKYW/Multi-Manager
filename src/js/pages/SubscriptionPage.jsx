@@ -2049,7 +2049,7 @@ function SubscriptionPage() {
 				<Table.Cell><div className="text-xs font-semibold text-kumo-strong">内部 {internalCount} · 外部 {externalCount}</div></Table.Cell>
               <Table.Cell className="text-center">{plan.subscription_count || 0}</Table.Cell>
               <Table.Cell className="text-center"><div className="inline-flex justify-center gap-2"><Button size="sm" shape="square" variant="secondary" onClick={() => openEditPlan(plan)} icon={<Edit className="h-3.5 w-3.5" />} aria-label="编辑套餐" /><Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deletePlan(plan)} icon={<Trash className="h-3.5 w-3.5" />} aria-label="删除套餐" /></div></Table.Cell>
-			</Table.Row>})}
+			</Table.Row>;})}
             {plans.length === 0 && <Table.Row><Table.Cell colSpan={8} className="p-8 text-center text-kumo-subtle">暂无套餐。套餐统一定义节点范围、额度和重置规则。</Table.Cell></Table.Row>}
           </Table.Body>
         </AppTable>

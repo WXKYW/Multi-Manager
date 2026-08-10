@@ -6,10 +6,12 @@ import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
-import { ClipboardText, DatePicker, Label, Popover, Tabs } from '@cloudflare/kumo';
+import { ClipboardText, DatePicker, Label, LayerCard, Pagination, Popover, Switch, Table, Tabs } from '@cloudflare/kumo';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
-import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
+import { formatDateTime } from '../modules/utils.js';
+import { MODULE_GROUPS } from '../store.js';
+import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import {
   AppCard,
   EmptyState,
@@ -23,16 +25,23 @@ import {
 import {
   Activity,
   Bot,
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
   Copy,
   Download,
   Edit,
   Eye,
   EyeOff,
   FileText,
+  Folder,
+  FolderOpen,
+  History,
   Key,
   Plug,
   Plus,
   RefreshCw,
+  RotateCw,
   Search,
   Shield,
   Settings,
@@ -74,6 +83,109 @@ const RESPONSE_LABEL = {
   proxy: '代理',
 };
 
+const MODULE_LABELS = {
+  health: '健康检查',
+  migration: '迁移状态',
+  'auth-2fa-status': '2FA 状态',
+  'auth-login-options': '登录选项',
+  'auth-plugin-pairing': '插件配对',
+  'auth-github-config': 'GitHub 登录配置',
+  'auth-github-login': 'GitHub 登录',
+  'auth-2fa-management': '2FA 管理',
+  'auth-webauthn-management': 'WebAuthn 管理',
+  'auth-webauthn-login': 'WebAuthn 登录',
+  auth: '认证',
+  'settings-logs': '系统日志',
+  'settings-site-brand': '站点品牌',
+  'settings-database': '数据库维护',
+  settings: '系统设置',
+  'system-host-metrics': '主机指标',
+  'system-api-stats': 'API 统计',
+  'system-api-docs': 'API 文档',
+  'system-api-keys': 'API 密钥',
+  'system-ai-access': 'AI 接入',
+  'ai-access': 'AI 接入',
+  'system-logs': '系统日志',
+  totp: 'TOTP 动态码',
+  filebox: '文件柜',
+  uptime: '可用性监测',
+  notification: '通知',
+  scheduler: '工作流调度',
+  cron: '定时任务',
+  backup: '备份中心',
+  'cloudflare-accounts': '账号',
+  'cloudflare-templates': 'DNS 模板',
+  'cloudflare-pages': 'Pages',
+  'cloudflare-workers': 'Workers',
+  'cloudflare-r2': 'R2 存储',
+  'cloudflare-tunnels': 'Tunnels',
+  'cloudflare-dns': 'DNS',
+  'cloudflare-zone-resources': 'Zone 资源',
+  aliyun: '阿里云',
+  tencent: '腾讯云',
+  oracle: 'Oracle OCI',
+  'm365-public-register': 'M365 公开注册',
+  m365: 'Microsoft 365',
+  koyeb: 'Koyeb',
+  flyio: 'Fly.io',
+  'github-webhook': 'Webhook',
+  'github-events': '实时事件',
+  'github-public-pages': '公开页面',
+  github: 'GitHub',
+  'drawio-versions': '版本管理',
+  'drawio-thumbnails': '缩略图',
+  'drawio-export': '导出',
+  'drawio-drafts': '草稿',
+  'drawio-documents': '文档',
+  'drawio-import': '导入',
+  'drawio-render': '渲染任务',
+  'drawio-settings': '设置',
+  drawio: '绘图',
+  'prompts-public': '公开访问',
+  'prompts-versions': '版本管理',
+  'prompts-entries': '条目',
+  'prompts-drafts': '草稿',
+  'prompts-collections': '集合',
+  'prompts-settings': '设置',
+  prompts: '提示词库',
+  openai: 'OpenAI 网关',
+  subscription: '订阅分发',
+  'subscription-public': '公开订阅',
+  'openai-compatible': 'OpenAI 兼容',
+  'server-operations': '主机操作',
+  'server-agent': 'Agent',
+  'server-agent-proxy-legacy': '托管代理(旧)',
+  'server-agent-proxy': '托管代理',
+  'server-agent-tunnels': '托管隧道',
+  'server-agent-proxy-runtime': '代理运行时',
+  'server-remote-desktop': '远程桌面',
+  'server-monitor': '监控',
+  'server-docker': 'Docker',
+  'server-docker-v2': 'Docker v2',
+  'server-sftp': 'SFTP',
+  'server-tasks-v2': '任务 v2',
+  'server-tasks': '任务',
+  'server-accounts': '主机账号',
+  'server-api': '主机接口',
+  'server-status-pages': '状态页',
+  'server-credentials': '凭据',
+  'server-metrics': '指标',
+  'server-terminal': 'SSH 终端',
+  'server-terminal-agent': 'Agent 终端',
+  'server-websocket': 'WebSocket',
+  'server-snippets': '命令片段',
+};
+
+const moduleLabel = moduleName => {
+  if (!moduleName) return '其他';
+  if (MODULE_LABELS[moduleName]) return MODULE_LABELS[moduleName];
+  return moduleName
+    .split('-')
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+};
+
 const getAuthHeaders = () => ({
   'Content-Type': 'application/json',
 });
@@ -87,25 +199,6 @@ const routePrefixLiteral = (...segments) => `/${segments.join('/')}`;
 const apiDocsShellClass =
   'api-docs-workspace flex min-h-full w-full min-w-0 flex-col gap-3';
 const fixedPanelClass = 'min-h-0';
-
-const defaultMCPForm = {
-  name: '',
-  transport: 'stdio',
-  command: '',
-  url: '',
-  description: '',
-  enabled: true,
-  envJson: '',
-};
-
-const defaultSkillForm = {
-  name: '',
-  description: '',
-  entrypoint: '',
-  version: '1.0.0',
-  enabled: true,
-  permissionsText: 'read',
-};
 
 const createDefaultAPIKeyForm = () => {
   const expires = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
@@ -225,6 +318,10 @@ const getRouteKey = route => `${route.prefix}:${route.module}:${route.auth}`;
 
 const sortRoutes = routes =>
   [...routes].sort((a, b) => {
+    const sectionOrder = sectionOrderIndex(sectionOfGroup(a.group)) - sectionOrderIndex(sectionOfGroup(b.group));
+    if (sectionOrder !== 0) return sectionOrder;
+    const groupOrder = groupOrderIndex(a.group) - groupOrderIndex(b.group);
+    if (groupOrder !== 0) return groupOrder;
     const groupSort = String(a.group).localeCompare(String(b.group), 'zh-CN');
     if (groupSort !== 0) return groupSort;
     return String(a.prefix).localeCompare(String(b.prefix), 'en');
@@ -232,15 +329,23 @@ const sortRoutes = routes =>
 
 const routeGroup = route => {
   const prefix = route.prefix || '';
-  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'auth'))) return '认证';
-  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'settings'))) return '系统设置';
   if (
-    prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'system')) ||
-    prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'logs')) ||
-    prefix.startsWith(routePrefixLiteral('ws', 'logs'))
+    prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'openai')) ||
+    prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'chat')) ||
+    prefix.startsWith(routePrefixLiteral('v1'))
   )
-    return '系统';
+    return '模型网关';
+  if (
+    prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'subscription')) ||
+    prefix.startsWith(routePrefixLiteral('sub'))
+  )
+    return '订阅分发';
   if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'cloudflare'))) return 'Cloudflare';
+  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'aliyun'))) return '阿里云';
+  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'tencent'))) return '腾讯云';
+  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'oracle'))) return '甲骨文云';
+  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'm365'))) return 'Microsoft 365';
+  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'github'))) return 'GitHub';
   if (
     prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'server')) ||
     prefix.startsWith(routePrefixLiteral('ws', 'ssh')) ||
@@ -249,30 +354,150 @@ const routeGroup = route => {
   )
     return '主机实例';
   if (
-    prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'openai')) ||
-    prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'ai')) ||
-    prefix.startsWith(routePrefixLiteral('v1')) ||
-    prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'chat'))
-  )
-    return 'AI 接入';
-  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'aliyun'))) return '阿里云';
-  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'tencent'))) return '腾讯云';
-  if (
     prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'koyeb')) ||
     prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'flyio'))
   )
     return 'PaaS';
-  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'totp'))) return '双因子认证';
-  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'filebox'))) return '文件柜';
-  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'uptime'))) return '可用性监测';
-  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'notification'))) return '通知';
   if (
     prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'scheduler')) ||
     prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'cron'))
   )
     return '定时任务';
-  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'backup'))) return '备份';
+  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'uptime'))) return '可用性监测';
+  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'filebox'))) return '文件柜';
+  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'drawio'))) return '图编辑器';
+  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'prompts'))) return '提示词库';
+  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'totp'))) return '双因子认证';
+  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'notification'))) return '通知中心';
+  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'auth'))) return '认证';
+  if (
+    prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'system', 'logs')) ||
+    prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'logs')) ||
+    prefix.startsWith(routePrefixLiteral('ws', 'logs')) ||
+    prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'settings', 'sys-logs')) ||
+    prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'settings', 'app-log-file')) ||
+    prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'settings', 'log-settings')) ||
+    prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'settings', 'enforce-log-limits')) ||
+    prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'settings', 'clear-logs')) ||
+    prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'settings', 'clear-app-logs'))
+  )
+    return '系统日志';
+  if (
+    prefix === routePrefixLiteral(API_SEGMENT, 'system', 'api-docs') ||
+    prefix === routePrefixLiteral(API_SEGMENT, 'system', 'openapi.json') ||
+    prefix === routePrefixLiteral(API_SEGMENT, 'openapi.json') ||
+    prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'api-keys')) ||
+    prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'system', 'api-keys')) ||
+    prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'ai-access')) ||
+    prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'system', 'ai-access')) ||
+    prefix === routePrefixLiteral(API_SEGMENT, 'ai', 'manifest') ||
+    prefix === routePrefixLiteral(API_SEGMENT, 'ai', 'mcp')
+  )
+    return 'API 接口';
+  if (
+    prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'settings')) ||
+    prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'backup'))
+  )
+    return '系统设置';
+  if (
+    prefix === '/health' ||
+    prefix === routePrefixLiteral(API_SEGMENT, 'migration', 'status') ||
+    prefix === routePrefixLiteral(API_SEGMENT, 'system', 'host-metrics') ||
+    prefix === routePrefixLiteral(API_SEGMENT, 'system', 'api-stats')
+  )
+    return '仪表盘';
+  if (prefix.startsWith(routePrefixLiteral(API_SEGMENT, 'system'))) return '系统';
   return '基础';
+};
+
+// 与侧边栏模块顺序一致，用于接口目录的分组排序
+const GROUP_ORDER = [
+  '仪表盘',
+  'Cloudflare',
+  '阿里云',
+  '腾讯云',
+  '甲骨文云',
+  'Microsoft 365',
+  'GitHub',
+  '主机实例',
+  'PaaS',
+  '定时任务',
+  '可用性监测',
+  '文件柜',
+  '图编辑器',
+  '提示词库',
+  '双因子认证',
+  '模型网关',
+  '订阅分发',
+  '通知中心',
+  'API 接口',
+  '系统日志',
+  '系统设置',
+  '认证',
+  '系统',
+  '基础',
+];
+const groupOrderIndex = group => {
+  const index = GROUP_ORDER.indexOf(String(group || ''));
+  return index === -1 ? GROUP_ORDER.length : index;
+};
+
+// 顶层分区：按侧边栏 MODULE_GROUPS 推导（仪表盘 / 云服务 / 工具箱 / API 服务 / 系统）
+const SECTION_OF_GROUP = {};
+MODULE_GROUPS.forEach(section => {
+  (section.modules || []).forEach(moduleId => {
+    SECTION_OF_GROUP[moduleId] = section.name;
+  });
+  (section.subgroups || []).forEach(subgroup => {
+    (subgroup.modules || []).forEach(moduleId => {
+      SECTION_OF_GROUP[moduleId] = section.name;
+    });
+  });
+  (section.trailingModules || []).forEach(moduleId => {
+    SECTION_OF_GROUP[moduleId] = section.name;
+  });
+});
+
+// 后端 route.group 用的是模块展示名，先映射回模块 id 再查分区
+const GROUP_NAME_TO_MODULE_ID = {
+  仪表盘: 'dashboard',
+  模型网关: 'openai',
+  订阅分发: 'subscription',
+  Cloudflare: 'dns',
+  阿里云: 'aliyun',
+  腾讯云: 'tencent',
+  甲骨文云: 'oracle',
+  'Microsoft 365': 'm365',
+  GitHub: 'github',
+  主机实例: 'server',
+  PaaS: 'paas',
+  定时任务: 'scheduler',
+  可用性监测: 'uptime',
+  文件柜: 'filebox',
+  图编辑器: 'drawio',
+  提示词库: 'prompts',
+  双因子认证: 'totp',
+  通知中心: 'notification',
+  'API 接口': 'apidocs',
+  系统日志: 'systemlogs',
+  系统设置: 'settings',
+};
+
+const FALLBACK_SECTION = {
+  认证: '认证',
+  系统: '系统基础',
+  基础: '基础',
+};
+
+const SECTION_ORDER = ['仪表盘', '云服务', '工具箱', 'API 服务', '系统', '认证', '系统基础', '基础', '其他'];
+const sectionOfGroup = group => {
+  const moduleId = GROUP_NAME_TO_MODULE_ID[group];
+  if (moduleId && SECTION_OF_GROUP[moduleId]) return SECTION_OF_GROUP[moduleId];
+  return FALLBACK_SECTION[group] || '其他';
+};
+const sectionOrderIndex = section => {
+  const index = SECTION_ORDER.indexOf(section);
+  return index === -1 ? SECTION_ORDER.length : index;
 };
 
 const routeDescription = route => {
@@ -282,15 +507,17 @@ const routeDescription = route => {
   if (prefix === '/api/system/api-docs') return '读取系统自动生成的 API 文档清单';
   if (prefix === '/api/system/openapi.json') return '导出 OpenAPI 3.1 接口文档';
   if (prefix === '/api/openapi.json') return '导出 OpenAPI 3.1 接口文档';
-  if (prefix === '/api/ai-access') return '读取 AI 接入、Agent Key、MCP、Skill 和审计概览';
+  if (prefix === '/api/ai-access') return '读取 AI 接入、Agent Key 和审计概览';
   if (prefix === '/api/ai-access/key/rotate') return '轮换 AI Agent Key';
   if (prefix.startsWith('/api/ai-access/mcp-servers')) return '管理 AI 接入的 MCP 服务配置';
   if (prefix.startsWith('/api/ai-access/skills')) return '管理 AI 接入的 Skill 配置';
+  if (prefix === '/api/ai-access/audit') return '分页查询 AI 接入调用审计';
   if (prefix === '/api/ai-access/audit/clear') return '清空 AI 接入调用审计';
-  if (prefix === '/api/system/ai-access') return '读取 AI 接入、Agent Key、MCP、Skill 和审计概览';
+  if (prefix === '/api/system/ai-access') return '读取 AI 接入、Agent Key 和审计概览';
   if (prefix === '/api/system/ai-access/key/rotate') return '轮换 AI Agent Key';
   if (prefix.startsWith('/api/system/ai-access/mcp-servers')) return '管理 AI 接入的 MCP 服务配置';
   if (prefix.startsWith('/api/system/ai-access/skills')) return '管理 AI 接入的 Skill 配置';
+  if (prefix === '/api/system/ai-access/audit') return '分页查询 AI 接入调用审计';
   if (prefix === '/api/system/ai-access/audit/clear') return '清空 AI 接入调用审计';
   if (prefix === '/api/ai/manifest') return '供外部 AI 客户端读取系统接入能力清单';
   if (prefix === '/api/ai/mcp') return '供外部 AI 客户端通过 MCP 调用系统工具';
@@ -442,16 +669,6 @@ const normalizeDocsPayload = (payload = {}) => {
           description: 'OpenAI 兼容端点与模型',
         },
         {
-          id: 'mcp',
-          name: 'MCP 服务',
-          description: 'MCP 服务与工具',
-        },
-        {
-          id: 'skills',
-          name: 'Skill 管理',
-          description: 'Skill 与版本',
-        },
-        {
           id: 'permissions',
           name: '工具权限',
           description: '调用权限',
@@ -494,6 +711,16 @@ const formatJSON = value => {
   if (value == null) return '';
   if (typeof value === 'string') return value;
   return JSON.stringify(value, null, 2);
+};
+
+const formatAuditDetails = value => {
+  if (value == null || value === '') return '—';
+  if (typeof value !== 'string') return formatJSON(value);
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
 };
 
 function StatCard({ icon: Icon, label, value, tone = 'brand' }) {
@@ -553,11 +780,154 @@ function RouteMethodPills({ methods = [] }) {
   );
 }
 
-function RouteList({ routes, selectedRoute, onSelect }) {
+function RouteTree({ routes, selectedRoute, onSelect, revealAll }) {
+  const selectedKey = selectedRoute ? getRouteKey(selectedRoute) : '';
+
+  const tree = useMemo(() => {
+    const sectionMap = new Map();
+    routes.forEach(route => {
+      const groupName = route.group || '基础';
+      const sectionName = sectionOfGroup(groupName);
+      if (!sectionMap.has(sectionName)) sectionMap.set(sectionName, new Map());
+      const groupMap = sectionMap.get(sectionName);
+      if (!groupMap.has(groupName)) groupMap.set(groupName, new Map());
+      const moduleMap = groupMap.get(groupName);
+      const moduleName = route.module || '';
+      if (!moduleMap.has(moduleName)) moduleMap.set(moduleName, []);
+      moduleMap.get(moduleName).push(route);
+    });
+    return [...sectionMap.entries()].map(([section, groupMap]) => ({
+      section,
+      count: [...groupMap.values()].reduce(
+        (acc, moduleMap) => acc + [...moduleMap.values()].reduce((sum, list) => sum + list.length, 0),
+        0
+      ),
+      groups: [...groupMap.entries()].map(([group, moduleMap]) => ({
+        group,
+        count: [...moduleMap.values()].reduce((acc, list) => acc + list.length, 0),
+        modules: [...moduleMap.entries()].map(([module, list]) => ({
+          module,
+          label: moduleLabel(module),
+          count: list.length,
+          routes: list,
+        })),
+      })),
+    }));
+  }, [routes]);
+
+  const selectedSection = selectedRoute ? sectionOfGroup(selectedRoute.group) : '';
+  const selectedGroup = selectedRoute ? (selectedRoute.group || '基础') : '';
+  const selectedModule = selectedRoute ? (selectedRoute.module || '') : '';
+
+  const [collapsedSections, setCollapsedSections] = useState(() => {
+    const initial = new Set(tree.map(item => item.section));
+    if (selectedSection) initial.delete(selectedSection);
+    return initial;
+  });
+  const [collapsedGroups, setCollapsedGroups] = useState(() => {
+    const initial = new Set(tree.flatMap(item => item.groups.map(group => group.group)));
+    if (selectedGroup) initial.delete(selectedGroup);
+    return initial;
+  });
+  const [collapsedModules, setCollapsedModules] = useState(() => {
+    const initial = new Set(
+      tree.flatMap(item => item.groups.map(group => `${group.group}\u0000${group.module}`))
+    );
+    if (selectedGroup && selectedModule) {
+      initial.delete(`${selectedGroup}\u0000${selectedModule}`);
+    }
+    return initial;
+  });
+
+  useEffect(() => {
+    if (!selectedRoute) return;
+    const sectionName = sectionOfGroup(selectedRoute.group);
+    const groupName = selectedRoute.group || '基础';
+    const moduleName = selectedRoute.module || '';
+    setCollapsedSections(current => {
+      if (!current.has(sectionName)) return current;
+      const next = new Set(current);
+      next.delete(sectionName);
+      return next;
+    });
+    setCollapsedGroups(current => {
+      if (!current.has(groupName)) return current;
+      const next = new Set(current);
+      next.delete(groupName);
+      return next;
+    });
+    setCollapsedModules(current => {
+      const key = `${groupName}\u0000${moduleName}`;
+      if (!current.has(key)) return current;
+      const next = new Set(current);
+      next.delete(key);
+      return next;
+    });
+  }, [selectedRoute]);
+
+  const toggleSection = sectionName => {
+    setCollapsedSections(current => {
+      const next = new Set(current);
+      if (next.has(sectionName)) next.delete(sectionName);
+      else next.add(sectionName);
+      return next;
+    });
+  };
+
+  const toggleGroup = groupName => {
+    setCollapsedGroups(current => {
+      const next = new Set(current);
+      if (next.has(groupName)) next.delete(groupName);
+      else next.add(groupName);
+      return next;
+    });
+  };
+
+  const toggleModule = (groupName, moduleName) => {
+    const key = `${groupName}\u0000${moduleName}`;
+    setCollapsedModules(current => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const expandAll = () => {
+    setCollapsedSections(new Set());
+    setCollapsedGroups(new Set());
+    setCollapsedModules(new Set());
+  };
+
+  const collapseAll = () => {
+    setCollapsedSections(new Set(tree.map(item => item.section)));
+    setCollapsedGroups(new Set(tree.flatMap(item => item.groups.map(group => group.group))));
+    setCollapsedModules(
+      new Set(tree.flatMap(item => item.groups.map(group => `${group.group}\u0000${group.module}`)))
+    );
+  };
+
+  const sectionCollapsed = name => !revealAll && collapsedSections.has(name);
+  const groupCollapsed = name => !revealAll && collapsedGroups.has(name);
+  const moduleCollapsed = (groupName, moduleName) =>
+    !revealAll && collapsedModules.has(`${groupName}\u0000${moduleName}`);
+
   return (
     <SectionCard
-      title={`接口列表 (${routes.length})`}
+      title={`接口目录 (${routes.length})`}
       icon={<Search className="h-4 w-4 text-kumo-brand" />}
+      action={
+        <div className="flex items-center gap-1">
+          <Button size="sm" variant="ghost" onClick={expandAll} className="gap-1">
+            <ChevronDown className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">展开</span>
+          </Button>
+          <Button size="sm" variant="ghost" onClick={collapseAll} className="gap-1">
+            <ChevronUp className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">折叠</span>
+          </Button>
+        </div>
+      }
       className="min-h-0"
       bodyPadding="none"
       bodyClassName="flex min-w-0 flex-col"
@@ -574,43 +944,128 @@ function RouteList({ routes, selectedRoute, onSelect }) {
         </AppCard>
       ) : (
         <div className="divide-y divide-kumo-line/80">
-          {routes.map(route => {
-            const active = selectedRoute && getRouteKey(selectedRoute) === getRouteKey(route);
-            return (
+          {tree.map(sectionItem => (
+            <div key={sectionItem.section}>
               <Button
-                key={getRouteKey(route)}
                 type="button"
                 size="sm"
                 variant="ghost"
-                onClick={() => onSelect(route)}
-                className={cx(
-                  'h-auto w-full min-w-0 flex-col items-stretch gap-1.5 rounded-none px-3 py-2.5 text-left',
-                  active && 'bg-kumo-brand/10'
-                )}
+                onClick={() => toggleSection(sectionItem.section)}
+                className="h-auto w-full min-w-0 !justify-between gap-1.5 rounded-none px-3 py-2 text-left"
               >
-                <div className="flex min-w-0 items-center justify-between gap-2">
-                  <div className="min-w-0 truncate font-mono text-xs font-bold text-kumo-strong">
-                    {route.prefix}
-                  </div>
-                  <InlineStatusPill tone={STATUS_TONE[route.status]}>
-                    {STATUS_LABEL[route.status] || route.status}
-                  </InlineStatusPill>
-                </div>
-                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                  <RouteMethodPills methods={route.methods} />
-                  <InlineStatusPill tone={AUTH_TONE[route.auth]}>
-                    {AUTH_LABEL[route.auth] || route.auth}
-                  </InlineStatusPill>
-                  <span className="truncate text-[11px] font-semibold text-kumo-subtle">
-                    {route.group}
+                <span className="flex min-w-0 items-center gap-2">
+                  {sectionCollapsed(sectionItem.section) ? (
+                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-kumo-subtle" />
+                  ) : (
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-kumo-subtle" />
+                  )}
+                  {sectionCollapsed(sectionItem.section) ? (
+                    <Folder className="h-4 w-4 shrink-0 text-kumo-brand/80" />
+                  ) : (
+                    <FolderOpen className="h-4 w-4 shrink-0 text-kumo-brand" />
+                  )}
+                  <span className="truncate text-xs font-bold text-kumo-strong">
+                    {sectionItem.section}
                   </span>
-                </div>
-                <div className="line-clamp-2 text-xs leading-relaxed text-kumo-subtle">
-                  {route.description}
-                </div>
+                </span>
+                <InlineStatusPill tone="neutral">{sectionItem.count}</InlineStatusPill>
               </Button>
-            );
-          })}
+              {!sectionCollapsed(sectionItem.section) && (
+                <div className="border-t border-kumo-line/50">
+                  {sectionItem.groups.map(groupItem => (
+                    <div key={groupItem.group}>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        title={groupItem.group}
+                        onClick={() => toggleGroup(groupItem.group)}
+                        className="h-auto w-full min-w-0 !justify-between gap-1.5 rounded-none py-1.5 pl-7 pr-3 text-left"
+                      >
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          {groupCollapsed(groupItem.group) ? (
+                            <ChevronRight className="h-3 w-3 shrink-0 text-kumo-subtle" />
+                          ) : (
+                            <ChevronDown className="h-3 w-3 shrink-0 text-kumo-subtle" />
+                          )}
+                          <span className="truncate text-[11px] font-semibold text-kumo-subtle">
+                            {groupItem.group}
+                          </span>
+                        </span>
+                        <InlineStatusPill tone="neutral">{groupItem.count}</InlineStatusPill>
+                      </Button>
+                      {!groupCollapsed(groupItem.group) && (
+                        <div className="border-t border-kumo-line/40">
+                          {groupItem.modules.map(moduleItem => (
+                            <div key={moduleItem.module}>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                title={moduleItem.module}
+                                onClick={() => toggleModule(groupItem.group, moduleItem.module)}
+                                className="h-auto w-full min-w-0 !justify-between gap-1.5 rounded-none py-1.5 pl-11 pr-3 text-left"
+                              >
+                                <span className="flex min-w-0 items-center gap-1.5">
+                                  {moduleCollapsed(groupItem.group, moduleItem.module) ? (
+                                    <ChevronRight className="h-3 w-3 shrink-0 text-kumo-subtle" />
+                                  ) : (
+                                    <ChevronDown className="h-3 w-3 shrink-0 text-kumo-subtle" />
+                                  )}
+                                  <span className="truncate text-[11px] font-semibold text-kumo-subtle">
+                                    {moduleItem.label}
+                                  </span>
+                                </span>
+                                <InlineStatusPill tone="neutral">{moduleItem.count}</InlineStatusPill>
+                              </Button>
+                              {!moduleCollapsed(groupItem.group, moduleItem.module) && (
+                                <div className="border-t border-kumo-line/40">
+                                  {moduleItem.routes.map(route => {
+                                    const active = selectedKey === getRouteKey(route);
+                                    return (
+                                      <Button
+                                        key={getRouteKey(route)}
+                                        type="button"
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => onSelect(route)}
+                                        className={cx(
+                                          'h-auto w-full min-w-0 flex-col items-stretch gap-1 rounded-none py-2 pl-14 pr-3 text-left',
+                                          active && 'bg-kumo-brand/10'
+                                        )}
+                                      >
+<div className="flex min-w-0 items-center justify-between gap-2">
+                                          <div className="min-w-0 truncate font-mono text-xs font-bold text-kumo-strong">
+                                            {route.prefix}
+                                          </div>
+                                          <InlineStatusPill tone={STATUS_TONE[route.status]}>
+                                            {STATUS_LABEL[route.status] || route.status}
+                                          </InlineStatusPill>
+                                        </div>
+                                        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                          <RouteMethodPills methods={route.methods} />
+                                          <InlineStatusPill tone={AUTH_TONE[route.auth]}>
+                                            {AUTH_LABEL[route.auth] || route.auth}
+                                          </InlineStatusPill>
+                                        </div>
+                                        <div className="line-clamp-1 text-xs leading-relaxed text-kumo-subtle">
+                                          {route.description}
+                                        </div>
+                                      </Button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </SectionCard>
@@ -655,6 +1110,7 @@ const buildCurlExample = route => {
   const lines = [`curl -X ${method} "${window.location.origin}${route.prefix}"`];
 
   if (route.auth === 'session') {
+    // session 认证通过 Cookie 自动携带，无需额外请求头。
   } else if (route.auth === 'api_key') {
     lines.push('  -H "Authorization: Bearer sk-xxx"');
   } else if (route.auth === 'agent_key') {
@@ -859,23 +1315,9 @@ function AIAccessConsole({
   error,
   keyVisible,
   setKeyVisible,
-  mcpForm,
-  setMcpForm,
-  mcpEditingId,
-  skillForm,
-  setSkillForm,
-  skillEditingId,
   onRefresh,
   onRotateKey,
-  onSaveMCP,
-  onEditMCP,
-  onCancelMCP,
-  onDeleteMCP,
-  onSaveSkill,
-  onEditSkill,
-  onCancelSkill,
-  onDeleteSkill,
-  onClearAudit,
+  onToggleWrite,
   onCopy,
 }) {
   if (loading) {
@@ -904,25 +1346,14 @@ function AIAccessConsole({
 
   const agentKey = aiAccess?.agentKey || {};
   const endpoints = aiAccess?.endpoints || {};
-  const configs = aiAccess?.configs || {};
-  const tools = aiAccess?.tools || [];
+  const guide = aiAccess?.guide || '';
   const policy = aiAccess?.policy || {};
-  const mcpServers = aiAccess?.mcpServers || [];
-  const skills = aiAccess?.skills || [];
-  const audit = aiAccess?.audit || [];
 
   return (
     <div className="grid h-full min-h-0 min-w-0 gap-4 xl:grid-cols-[minmax(360px,0.82fr)_minmax(0,1.18fr)]">
       <div
         className={cx(fixedPanelClass, 'min-h-0 space-y-4 overflow-y-auto px-px pb-2 pr-1 pt-px')}
       >
-        <div className="grid gap-3 sm:grid-cols-2">
-          <StatCard icon={Settings} label="可用工具" value={tools.length} />
-          <StatCard icon={Plug} label="MCP 服务" value={mcpServers.length} tone="info" />
-          <StatCard icon={Bot} label="Skill" value={skills.length} tone="success" />
-          <StatCard icon={Activity} label="审计记录" value={audit.length} tone="warning" />
-        </div>
-
         <SectionCard title="Agent Key" icon={<Key className="h-4 w-4 text-kumo-brand" />}>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <div className="min-w-0 flex-1 truncate rounded-md border border-kumo-line bg-kumo-recessed/40 px-3 py-2 font-mono text-xs font-bold text-kumo-strong">
@@ -975,118 +1406,22 @@ function AIAccessConsole({
                 {policy.bodyLimitBytes ? `${Math.round(policy.bodyLimitBytes / 1024)} KB` : '-'}
               </span>
             </div>
+            <div className="flex items-center justify-between gap-2 rounded-md border border-kumo-line/80 bg-kumo-recessed/25 px-3 py-2">
+              <div className="flex items-center gap-2">
+                <span>允许写入</span>
+                <span className="hidden text-[10px] text-kumo-subtle sm:inline">
+                  开启后 Agent 才能执行 POST/PUT/PATCH/DELETE，全部写入都会审计
+                </span>
+              </div>
+              <Switch
+                checked={policy.writeEnabled === true}
+                onCheckedChange={checked => onToggleWrite(Boolean(checked))}
+                aria-label="允许 AI Agent 写入操作"
+              />
+            </div>
             <div className="rounded-md border border-kumo-line/80 bg-kumo-recessed/25 px-3 py-2 leading-relaxed">
               {policy.auth || 'Agent Key 调用会写入审计记录。'}
             </div>
-          </div>
-        </SectionCard>
-
-        <SectionCard
-          title="MCP 服务"
-          icon={<Plug className="h-4 w-4 text-kumo-brand" />}
-          bodyClassName="space-y-3"
-        >
-          <div className="grid gap-2">
-            <Input
-              size="sm"
-              value={mcpForm.name}
-              onChange={event => setMcpForm({ ...mcpForm, name: event.target.value })}
-              placeholder="服务名称"
-              className="text-xs"
-            />
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Select
-                size="sm"
-                aria-label="传输方式"
-                value={mcpForm.transport}
-                onValueChange={value => setMcpForm({ ...mcpForm, transport: value })}
-                items={[
-                  { value: 'stdio', label: 'stdio' },
-                  { value: 'http', label: 'HTTP' },
-                  { value: 'sse', label: 'SSE' },
-                ]}
-                className="text-xs"
-              />
-              <Select
-                size="sm"
-                aria-label="启用状态"
-                value={mcpForm.enabled ? 'true' : 'false'}
-                onValueChange={value => setMcpForm({ ...mcpForm, enabled: value === 'true' })}
-                items={[
-                  { value: 'true', label: '启用' },
-                  { value: 'false', label: '停用' },
-                ]}
-                className="text-xs"
-              />
-            </div>
-            <Input
-              size="sm"
-              value={mcpForm.command}
-              onChange={event => setMcpForm({ ...mcpForm, command: event.target.value })}
-              placeholder="启动命令"
-              className="text-xs"
-            />
-            <Input
-              size="sm"
-              value={mcpForm.url}
-              onChange={event => setMcpForm({ ...mcpForm, url: event.target.value })}
-              placeholder="远程地址"
-              className="text-xs"
-            />
-            <Textarea
-              value={mcpForm.description}
-              onChange={event => setMcpForm({ ...mcpForm, description: event.target.value })}
-              placeholder="说明"
-              className="min-h-20 text-xs"
-            />
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="primary" onClick={onSaveMCP} className="gap-1.5">
-                {mcpEditingId ? <Edit className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
-                <span>{mcpEditingId ? '保存 MCP' : '添加 MCP'}</span>
-              </Button>
-              {mcpEditingId && (
-                <Button size="sm" variant="secondary" onClick={onCancelMCP} className="gap-1.5">
-                  <X className="h-3.5 w-3.5" />
-                  <span>取消</span>
-                </Button>
-              )}
-            </div>
-          </div>
-          <div className="mt-3 space-y-2">
-            {mcpServers.length === 0 && (
-              <div className="rounded-md border border-kumo-line/80 bg-kumo-recessed/25 p-3 text-xs text-kumo-subtle">
-                暂无 MCP 服务
-              </div>
-            )}
-            {mcpServers.map(item => (
-              <div
-                key={item.id}
-                className={cx(
-                  'rounded-md border bg-kumo-recessed/25 p-3',
-                  item.id === mcpEditingId ? 'border-kumo-brand/70' : 'border-kumo-line/80'
-                )}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="truncate text-xs font-bold text-kumo-strong">{item.name}</div>
-                    <div className="mt-0.5 truncate font-mono text-[11px] text-kumo-subtle">
-                      {item.command || item.url || '-'}
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <InlineStatusPill tone={item.enabled ? 'success' : 'neutral'}>
-                      {item.enabled ? '启用' : '停用'}
-                    </InlineStatusPill>
-                    <Button size="sm" shape="square" variant="secondary" onClick={() => onEditMCP(item)} title="编辑" aria-label="编辑">
-                      <Edit className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => onDeleteMCP(item.id)} title="删除" aria-label="删除">
-                      <Trash className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            ))}
           </div>
         </SectionCard>
       </div>
@@ -1095,26 +1430,31 @@ function AIAccessConsole({
         className={cx(fixedPanelClass, 'min-h-0 space-y-4 overflow-y-auto px-px pb-2 pr-1 pt-px')}
       >
         <SectionCard
-          title="连接 AI"
+          title="AI 接入指南"
           icon={<Bot className="h-4 w-4 text-kumo-brand" />}
-          action={<InlineStatusPill tone="success">MCP 已就绪</InlineStatusPill>}
+          action={
+            <Button size="sm" variant="secondary" onClick={onRefresh}>
+              刷新
+            </Button>
+          }
+          bodyClassName="grid gap-3"
         >
-          <div className="grid gap-2 md:grid-cols-3">
+<div className="grid gap-2 md:grid-cols-3">
             {[
               {
                 step: '1',
-                title: '复制配置',
-                text: '复制 Codex MCP 或 Claude Desktop 配置。',
+                title: '复制密钥并注册',
+                text: '复制有效 Agent Key，在 AI 客户端按指南注册 manifest / MCP 地址并以 Bearer 鉴权连接。',
               },
               {
                 step: '2',
-                title: '粘贴启用',
-                text: '粘贴后保存并刷新客户端连接。',
+                title: '扫描目录',
+                text: '用 list_apis 按模块/分组过滤查看可用接口，不拉全量、省 token。',
               },
               {
                 step: '3',
-                title: '调用接口',
-                text: '连接后可直接调用系统接口。',
+                title: '按契约调用',
+                text: '先用 get_route 取接口请求体 schema 与示例，再 call_api 调用，减少试错；写入需开启「允许写入」。',
               },
             ].map(item => (
               <div
@@ -1131,208 +1471,240 @@ function AIAccessConsole({
               </div>
             ))}
           </div>
-        </SectionCard>
-
-        <SectionCard
-          title="一键配置"
-          icon={<Settings className="h-4 w-4 text-kumo-brand" />}
-          action={
-            <Button size="sm" variant="secondary" onClick={onRefresh}>
-              刷新
-            </Button>
-          }
-          bodyClassName="grid gap-3"
-        >
-          <SnippetBox label="Codex MCP" value={formatJSON(configs.codex)} onCopy={onCopy} />
-          <SnippetBox
-            label="Claude Desktop"
-            value={formatJSON(configs.claudeDesktop)}
-            onCopy={onCopy}
-          />
-          <SnippetBox label="cURL" value={configs.curl || ''} onCopy={onCopy} />
-        </SectionCard>
-
-        <SectionCard
-          title="Skill 管理"
-          icon={<Bot className="h-4 w-4 text-kumo-brand" />}
-          bodyClassName="space-y-3"
-        >
-          <div className="grid gap-2">
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Input
-                size="sm"
-                value={skillForm.name}
-                onChange={event => setSkillForm({ ...skillForm, name: event.target.value })}
-                placeholder="Skill 名称"
-                className="text-xs"
-              />
-              <Input
-                size="sm"
-                value={skillForm.version}
-                onChange={event => setSkillForm({ ...skillForm, version: event.target.value })}
-                placeholder="版本"
-                className="text-xs"
-              />
-            </div>
-            <Select
-              size="sm"
-              aria-label="Skill 启用状态"
-              value={skillForm.enabled ? 'true' : 'false'}
-              onValueChange={value => setSkillForm({ ...skillForm, enabled: value === 'true' })}
-              items={[
-                { value: 'true', label: '启用' },
-                { value: 'false', label: '停用' },
-              ]}
-              className="text-xs"
-            />
-            <Input
-              size="sm"
-              value={skillForm.entrypoint}
-              onChange={event => setSkillForm({ ...skillForm, entrypoint: event.target.value })}
-              placeholder="入口路径或命令"
-              className="text-xs"
-            />
-            <Input
-              size="sm"
-              value={skillForm.permissionsText}
-              onChange={event =>
-                setSkillForm({ ...skillForm, permissionsText: event.target.value })
-              }
-              placeholder="权限，逗号分隔"
-              className="text-xs"
-            />
-            <Textarea
-              value={skillForm.description}
-              onChange={event => setSkillForm({ ...skillForm, description: event.target.value })}
-              placeholder="说明"
-              className="min-h-20 text-xs"
-            />
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant="primary" onClick={onSaveSkill} className="gap-1.5">
-                {skillEditingId ? (
-                  <Edit className="h-3.5 w-3.5" />
-                ) : (
-                  <Plus className="h-3.5 w-3.5" />
-                )}
-                <span>{skillEditingId ? '保存 Skill' : '添加 Skill'}</span>
-              </Button>
-              {skillEditingId && (
-                <Button size="sm" variant="secondary" onClick={onCancelSkill} className="gap-1.5">
-                  <X className="h-3.5 w-3.5" />
-                  <span>取消</span>
-                </Button>
-              )}
-            </div>
-          </div>
-          <div className="mt-3 grid gap-2">
-            {skills.length === 0 && (
-              <div className="rounded-md border border-kumo-line/80 bg-kumo-recessed/25 p-3 text-xs text-kumo-subtle">
-                暂无 Skill
-              </div>
-            )}
-            {skills.map(item => (
-              <div
-                key={item.id}
-                className={cx(
-                  'rounded-md border bg-kumo-recessed/25 p-3',
-                  item.id === skillEditingId ? 'border-kumo-brand/70' : 'border-kumo-line/80'
-                )}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <div className="truncate text-xs font-bold text-kumo-strong">{item.name}</div>
-                      <InlineStatusPill tone="info">{item.version || '1.0.0'}</InlineStatusPill>
-                      <InlineStatusPill tone={item.enabled ? 'success' : 'neutral'}>
-                        {item.enabled ? '启用' : '停用'}
-                      </InlineStatusPill>
-                    </div>
-                    <div className="mt-1 line-clamp-2 text-xs text-kumo-subtle">
-                      {item.description || item.entrypoint || '-'}
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <Button size="sm" shape="square" variant="secondary" onClick={() => onEditSkill(item)} title="编辑" aria-label="编辑">
-                      <Edit className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => onDeleteSkill(item.id)} title="删除" aria-label="删除">
-                      <Trash className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-
-        <SectionCard
-          title="AI 工具"
-          icon={<Settings className="h-4 w-4 text-kumo-brand" />}
-          action={<InlineStatusPill tone="info">Agent 可调用</InlineStatusPill>}
-        >
-          <div className="grid gap-2">
-            {tools.map(tool => (
-              <div
-                key={tool.name}
-                className="rounded-md border border-kumo-line/80 bg-kumo-recessed/25 p-3"
-              >
-                <div className="flex min-w-0 items-center justify-between gap-2">
-                  <div className="truncate font-mono text-xs font-bold text-kumo-strong">
-                    {tool.name}
-                  </div>
-                  <InlineStatusPill tone={tool.name === 'call_api' ? 'success' : 'neutral'}>
-                    {tool.name === 'call_api' ? '内部调用' : '读取'}
-                  </InlineStatusPill>
-                </div>
-                <div className="mt-1 line-clamp-2 text-xs leading-relaxed text-kumo-subtle">
-                  {tool.description}
-                </div>
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-
-        <SectionCard
-          title="调用审计"
-          icon={<Activity className="h-4 w-4 text-kumo-brand" />}
-          action={
-            <Button size="sm" variant="secondary" onClick={onClearAudit}>
-              清空
-            </Button>
-          }
-        >
-          <div className="space-y-2">
-            {audit.length === 0 && (
-              <div className="rounded-md border border-kumo-line/80 bg-kumo-recessed/25 p-3 text-xs text-kumo-subtle">
-                暂无审计记录
-              </div>
-            )}
-            {audit.map(item => (
-              <div
-                key={item.id}
-                className="grid gap-2 rounded-md border border-kumo-line/80 bg-kumo-recessed/25 p-3 md:grid-cols-[1fr_auto]"
-              >
-                <div className="min-w-0">
-                  <div className="truncate text-xs font-bold text-kumo-strong">{item.action}</div>
-                  <div className="mt-1 truncate font-mono text-[11px] text-kumo-subtle">
-                    {item.target || item.details}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 md:justify-end">
-                  <InlineStatusPill tone={item.status === 'success' ? 'success' : 'danger'}>
-                    {item.status}
-                  </InlineStatusPill>
-                  <span className="font-mono text-[11px] text-kumo-subtle">{item.latencyMs}ms</span>
-                </div>
-              </div>
-            ))}
-          </div>
+          <SnippetBox label="复制指南" value={guide} onCopy={onCopy} />
         </SectionCard>
       </div>
     </div>
   );
 }
 
+function AIAuditConsole({
+  records,
+  total,
+  page,
+  pageSize,
+  loading,
+  error,
+  onPageChange,
+  onPageSizeChange,
+  onRefresh,
+}) {
+  const [selected, setSelected] = useState(null);
+  if (loading && records.length === 0) {
+    return (
+      <AppCard padding="lg">
+        <SkeletonLine className="h-5 w-36" />
+        <SkeletonLine className="mt-4 h-80 w-full" />
+      </AppCard>
+    );
+  }
+
+  if (error) {
+    return (
+      <EmptyState
+        icon={Activity}
+        title="调用审计暂不可用"
+        description={error}
+        action={
+          <Button size="sm" variant="secondary" onClick={onRefresh}>
+            重试
+          </Button>
+        }
+      />
+    );
+  }
+
+  return (
+    <>
+    <LayerCard className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden p-0 shadow-none">
+      <div className="min-h-0 min-w-0 flex-1 overflow-auto scrollbar-thin">
+        <Table layout="fixed" className="min-w-[1080px] [&_td]:!px-2 [&_td]:!py-2 [&_th]:!px-2 [&_th]:!py-2">
+          <colgroup>
+            <col style={{ width: 150 }} />
+            <col style={{ width: 110 }} />
+            <col style={{ width: 130 }} />
+            <col style={{ width: 190 }} />
+            <col style={{ width: 84 }} />
+            <col style={{ width: 92 }} />
+            <col style={{ width: 140 }} />
+            <col style={{ width: 240 }} />
+          </colgroup>
+          <Table.Header sticky variant="compact">
+            <Table.Row>
+              <Table.Head className="text-center">时间</Table.Head>
+              <Table.Head className="text-center">Agent</Table.Head>
+              <Table.Head className="text-center">动作</Table.Head>
+              <Table.Head className="text-center">目标</Table.Head>
+              <Table.Head className="text-center">状态</Table.Head>
+              <Table.Head className="text-center">耗时</Table.Head>
+              <Table.Head className="text-center">IP</Table.Head>
+              <Table.Head className="text-center">详情</Table.Head>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
+            {loading ? (
+              <Table.Row>
+                <Table.Cell colSpan={8} className="py-8 text-center">
+                  <RotateCw className="mx-auto h-5 w-5 animate-spin text-kumo-subtle" />
+                </Table.Cell>
+              </Table.Row>
+            ) : records.length === 0 ? (
+              <Table.Row>
+                <Table.Cell colSpan={8} className="py-8 text-center text-sm text-kumo-subtle">
+                  暂无审计记录
+                </Table.Cell>
+              </Table.Row>
+            ) : (
+              records.map(item => (
+                <Table.Row key={item.id} className="text-sm">
+                  <Table.Cell className="truncate text-center font-mono text-kumo-subtle">
+                    {formatDateTime(item.createdAt)}
+                  </Table.Cell>
+                  <Table.Cell
+                    className="truncate text-center font-mono text-kumo-subtle"
+                    title={item.agentName}
+                  >
+                    {item.agentName || '-'}
+                  </Table.Cell>
+                  <Table.Cell
+                    className="truncate text-center font-mono font-medium text-kumo-strong"
+                    title={item.action}
+                  >
+                    {item.action}
+                  </Table.Cell>
+                  <Table.Cell
+                    className="truncate text-center font-mono text-kumo-subtle"
+                    title={item.target || item.details}
+                  >
+                    {item.target || item.details || '-'}
+                  </Table.Cell>
+                  <Table.Cell className="text-center">
+                    <InlineStatusPill tone={item.status === 'success' ? 'success' : 'danger'}>
+                      {item.status}
+                    </InlineStatusPill>
+                  </Table.Cell>
+                  <Table.Cell className="text-center font-mono text-kumo-subtle">
+                    {item.latencyMs ? `${item.latencyMs}ms` : '-'}
+                  </Table.Cell>
+                  <Table.Cell
+                    className="truncate text-center font-mono text-kumo-subtle"
+                    title={item.ipAddress}
+                  >
+                    {item.ipAddress || '—'}
+                  </Table.Cell>
+                  <Table.Cell className="text-center">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setSelected(item)}
+                      title="查看完整详情"
+                      className="h-auto max-w-full gap-1 px-1.5 py-0.5 text-kumo-subtle hover:text-kumo-strong"
+                    >
+                      <span className="truncate">{item.details || '查看'}</span>
+                      <Eye className="h-3.5 w-3.5 shrink-0" />
+                    </Button>
+                  </Table.Cell>
+                </Table.Row>
+              ))
+            )}
+          </Table.Body>
+        </Table>
+      </div>
+
+      {total > 0 && (
+        <Pagination
+          page={page}
+          setPage={onPageChange}
+          perPage={pageSize}
+          totalCount={total}
+          labels={{
+            navigation: '调用审计分页',
+            firstPage: '第一页',
+            previousPage: '上一页',
+            nextPage: '下一页',
+            lastPage: '最后一页',
+            pageNumber: '页码',
+            pageSize: '每页数量',
+          }}
+          className="shrink-0 flex-wrap gap-x-3 gap-y-1 border-x-0 border-b-0 border-t border-kumo-line bg-kumo-base px-3 py-2 text-sm shadow-none [&_[data-slot=pagination-controls]]:ml-auto [&_[data-slot=pagination-info]]:min-w-0 max-sm:[&_[data-slot=pagination-info]]:hidden max-sm:[&_[data-slot=pagination-page-size]]:hidden max-sm:[&_[data-slot=pagination-separator]]:hidden max-sm:[&_[data-slot=pagination-controls]]:m-auto"
+        >
+          <Pagination.Info>
+            {({ pageShowingRange, totalCount }) => (
+              <span className="text-kumo-subtle">
+                显示 {pageShowingRange}，共 {totalCount} 条
+              </span>
+            )}
+          </Pagination.Info>
+          <Pagination.Separator />
+          <Pagination.PageSize
+            value={pageSize}
+            onChange={size => onPageSizeChange(size)}
+            options={[10, 20, 50, 100]}
+            label="每页"
+          />
+          <Pagination.Controls />
+        </Pagination>
+      )}
+
+      <Dialog.Root open={!!selected} onOpenChange={open => !open && setSelected(null)}>
+        <Dialog className="!w-[min(44rem,calc(100vw-2rem))] p-6">
+          <Dialog.Title className="mb-1 select-none text-base font-bold text-kumo-strong">
+            审计详情
+          </Dialog.Title>
+          <Dialog.Description className="mb-4 select-none text-xs text-kumo-subtle">
+            {selected ? `#${selected.id} · ${formatDateTime(selected.createdAt)}` : ''}
+          </Dialog.Description>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
+            {[
+              { label: 'Agent', value: selected?.agentName || '-' },
+              { label: '动作', value: selected?.action || '-' },
+              { label: '目标', value: selected?.target || '-' },
+              {
+                label: '状态',
+                value: selected?.status || '-',
+                pill: selected?.status === 'success' ? 'success' : 'danger',
+              },
+              { label: '耗时', value: selected?.latencyMs ? `${selected.latencyMs}ms` : '-' },
+              { label: 'IP', value: selected?.ipAddress || '—' },
+            ].map(field => (
+              <div key={field.label}>
+                <div className="mb-0.5 text-kumo-subtle">{field.label}</div>
+                <div className="break-all font-mono text-kumo-strong">
+                  {field.pill ? (
+                    <InlineStatusPill tone={field.pill}>{field.value}</InlineStatusPill>
+                  ) : (
+                    field.value
+                  )}
+                </div>
+              </div>
+            ))}
+            <div className="col-span-2">
+              <div className="mb-0.5 text-kumo-subtle">User-Agent</div>
+              <div className="break-all rounded-md border border-kumo-line bg-kumo-recessed/40 px-3 py-2 font-mono text-kumo-strong">
+                {selected?.userAgent || '—'}
+              </div>
+            </div>
+            <div className="col-span-2">
+              <div className="mb-0.5 text-kumo-subtle">详情</div>
+              <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-all rounded-md border border-kumo-line bg-kumo-recessed/40 p-3 font-mono leading-relaxed text-kumo-strong">
+                {selected ? formatAuditDetails(selected.details) : ''}
+              </pre>
+            </div>
+          </div>
+          <div className="mt-5 flex justify-end">
+            <Dialog.Close asChild>
+              <Button size="sm" variant="secondary" onClick={() => setSelected(null)}>
+                关闭
+              </Button>
+            </Dialog.Close>
+          </div>
+        </Dialog>
+      </Dialog.Root>
+    </LayerCard>
+    </>
+  );
+}
 function APIKeyConsole({
   overview,
   loading,
@@ -1741,10 +2113,13 @@ function ApiDocsPage() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
   const [keyVisible, setKeyVisible] = useState(false);
-  const [mcpForm, setMcpForm] = useState(defaultMCPForm);
-  const [mcpEditingId, setMcpEditingId] = useState('');
-  const [skillForm, setSkillForm] = useState(defaultSkillForm);
-  const [skillEditingId, setSkillEditingId] = useState('');
+  const [auditRecords, setAuditRecords] = useState([]);
+  const [auditTotal, setAuditTotal] = useState(0);
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditPageSize, setAuditPageSize] = useState(20);
+  const [auditDays, setAuditDays] = useState(7);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState('');
   const [apiKeyOverview, setApiKeyOverview] = useState(null);
   const [apiKeysLoading, setApiKeysLoading] = useState(false);
   const [apiKeysError, setApiKeysError] = useState('');
@@ -1815,6 +2190,29 @@ function ApiDocsPage() {
     }
   }, [activeView, aiAccess, aiError, aiLoading, loadAIAccess]);
 
+  const loadAIAudit = useCallback(async (silent = false) => {
+    if (!silent) setAuditLoading(true);
+    setAuditError('');
+    try {
+      const payload = await fetchJsonEnvelope(
+        `${AI_ACCESS_BASE}/audit?days=${auditDays}&page=${auditPage}&pageSize=${auditPageSize}`
+      );
+      setAuditRecords(payload.records || []);
+      setAuditTotal(payload.total || 0);
+    } catch (error) {
+      console.error('load ai audit failed:', error);
+      setAuditError(error.message || '调用审计加载失败');
+    } finally {
+      setAuditLoading(false);
+    }
+  }, [auditDays, auditPage, auditPageSize]);
+
+  useEffect(() => {
+    if (activeView === 'audit') {
+      loadAIAudit();
+    }
+  }, [activeView, loadAIAudit]);
+
   const loadAPIKeys = useCallback(async (silent = false) => {
     if (!silent) setApiKeysLoading(true);
     setApiKeysError('');
@@ -1836,11 +2234,19 @@ function ApiDocsPage() {
 
   const routes = docs?.routes || [];
   const summary = normalizeSummary(docs?.summary);
+  const aiRouteCount = routes.filter(
+    route =>
+      route.group === '模型网关' ||
+      route.prefix === '/api/ai/manifest' ||
+      route.prefix === '/api/ai/mcp' ||
+      route.prefix.startsWith('/api/ai-access')
+  ).length;
 
   const groupItems = useMemo(() => {
-    const groups = [...new Set(routes.map(route => route.group).filter(Boolean))].sort((a, b) =>
-      a.localeCompare(b, 'zh-CN')
-    );
+    const groups = [...new Set(routes.map(route => route.group).filter(Boolean))].sort((a, b) => {
+      const order = groupOrderIndex(a) - groupOrderIndex(b);
+      return order !== 0 ? order : a.localeCompare(b, 'zh-CN');
+    });
     return [
       { value: 'all', label: '全部分组' },
       ...groups.map(item => ({ value: item, label: item })),
@@ -1905,107 +2311,27 @@ function ApiDocsPage() {
     }
   };
 
-  const saveMCP = async () => {
+  const toggleAIWrite = async enabled => {
     try {
-      const url = mcpEditingId
-        ? `${AI_ACCESS_BASE}/mcp-servers/${mcpEditingId}`
-        : `${AI_ACCESS_BASE}/mcp-servers`;
-      const payload = await apiRequest(url, {
-        method: mcpEditingId ? 'PUT' : 'POST',
-        body: JSON.stringify(mcpForm),
+      const payload = await apiRequest(`${AI_ACCESS_BASE}/write`, {
+        method: 'PUT',
+        body: JSON.stringify({ writeEnabled: enabled }),
       });
       setAiAccess(payload);
-      setMcpForm(defaultMCPForm);
-      setMcpEditingId('');
-      toast.success('MCP 服务已保存');
+      toast.success(enabled ? '已开启 AI 写入，写操作将受到审计' : '已关闭 AI 写入，Agent 仅可读');
     } catch (error) {
-      toast.error(error.message || '保存失败');
-    }
-  };
-
-  const editMCP = item => {
-    setMcpEditingId(item.id);
-    setMcpForm({
-      name: item.name || '',
-      transport: item.transport || 'stdio',
-      command: item.command || '',
-      url: item.url || '',
-      description: item.description || '',
-      enabled: item.enabled !== false,
-      envJson: item.envJson || '',
-    });
-  };
-
-  const cancelMCP = () => {
-    setMcpEditingId('');
-    setMcpForm(defaultMCPForm);
-  };
-
-  const deleteMCP = async id => {
-    try {
-      const payload = await apiRequest(`${AI_ACCESS_BASE}/mcp-servers/${id}`, { method: 'DELETE' });
-      setAiAccess(payload);
-      if (mcpEditingId === id) cancelMCP();
-      toast.success('MCP 服务已删除');
-    } catch (error) {
-      toast.error(error.message || '删除失败');
-    }
-  };
-
-  const saveSkill = async () => {
-    try {
-      const permissions = skillForm.permissionsText
-        .split(',')
-        .map(item => item.trim())
-        .filter(Boolean);
-      const url = skillEditingId
-        ? `${AI_ACCESS_BASE}/skills/${skillEditingId}`
-        : `${AI_ACCESS_BASE}/skills`;
-      const payload = await apiRequest(url, {
-        method: skillEditingId ? 'PUT' : 'POST',
-        body: JSON.stringify({ ...skillForm, permissions }),
-      });
-      setAiAccess(payload);
-      setSkillForm(defaultSkillForm);
-      setSkillEditingId('');
-      toast.success('Skill 已保存');
-    } catch (error) {
-      toast.error(error.message || '保存失败');
-    }
-  };
-
-  const editSkill = item => {
-    setSkillEditingId(item.id);
-    setSkillForm({
-      name: item.name || '',
-      description: item.description || '',
-      entrypoint: item.entrypoint || '',
-      version: item.version || '1.0.0',
-      enabled: item.enabled !== false,
-      permissionsText: (item.permissions || []).join(', '),
-    });
-  };
-
-  const cancelSkill = () => {
-    setSkillEditingId('');
-    setSkillForm(defaultSkillForm);
-  };
-
-  const deleteSkill = async id => {
-    try {
-      const payload = await apiRequest(`${AI_ACCESS_BASE}/skills/${id}`, { method: 'DELETE' });
-      setAiAccess(payload);
-      if (skillEditingId === id) cancelSkill();
-      toast.success('Skill 已删除');
-    } catch (error) {
-      toast.error(error.message || '删除失败');
+      toast.error(error.message || '切换失败');
     }
   };
 
   const clearAIAudit = async () => {
     try {
-      const payload = await apiRequest(`${AI_ACCESS_BASE}/audit/clear`, { method: 'POST' });
-      setAiAccess(payload);
+      const confirmed = await dialog.confirm('确认清空全部调用审计记录？此操作不可恢复。');
+      if (!confirmed) return;
+      await apiRequest(`${AI_ACCESS_BASE}/audit/clear`, { method: 'POST' });
+      setAuditRecords([]);
+      setAuditTotal(0);
+      setAuditPage(1);
       toast.success('审计记录已清空');
     } catch (error) {
       toast.error(error.message || '清空失败');
@@ -2154,6 +2480,7 @@ function ApiDocsPage() {
           tabs={[
             { value: 'routes', label: '接口' },
             { value: 'ai', label: 'AI 接入' },
+            { value: 'audit', label: '调用审计' },
             { value: 'keys', label: '密钥管理' },
           ]}
         />
@@ -2174,6 +2501,38 @@ function ApiDocsPage() {
               onClick: exportOpenAPI,
               disabled: !summary.openapiRoute,
               variant: 'primary',
+            },
+          ]}
+        />
+        )}
+        {activeView === 'audit' && (
+        <TabBarOverflowActions
+          items={[
+            {
+              type: 'select',
+              key: 'days',
+              label: '时间范围',
+              value: String(auditDays),
+              onValueChange: value => setAuditDays(Number(value)),
+              options: [
+                { value: '7', label: '近 7 天' },
+                { value: '30', label: '近 30 天' },
+                { value: '90', label: '近 90 天' },
+              ],
+            },
+            {
+              key: 'refresh',
+              label: '刷新',
+              icon: <RefreshCw className={cx('h-3.5 w-3.5', auditLoading && 'animate-spin')} />,
+              onClick: () => loadAIAudit(true),
+              disabled: auditLoading,
+            },
+            {
+              key: 'clear',
+              label: '清空',
+              icon: <Trash className="h-3.5 w-3.5" />,
+              onClick: clearAIAudit,
+              variant: 'destructive',
             },
           ]}
         />
@@ -2200,7 +2559,7 @@ function ApiDocsPage() {
               <StatCard
                 icon={Bot}
                 label="AI 接口"
-                value={summary.byGroup['AI 接入'] || 0}
+                value={aiRouteCount}
                 tone="info"
               />
             </div>
@@ -2249,10 +2608,11 @@ function ApiDocsPage() {
           </div>
 
           <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(340px,0.9fr)_minmax(0,1.1fr)] 2xl:grid-cols-[minmax(360px,0.84fr)_minmax(0,1.16fr)]">
-            <RouteList
+            <RouteTree
               routes={filteredRoutes}
               selectedRoute={selectedRoute}
               onSelect={route => setSelectedKey(getRouteKey(route))}
+              revealAll={query.trim().length > 0}
             />
             <div className="min-w-0 xl:sticky xl:top-[70px] xl:max-h-[calc(100vh-82px)] xl:overflow-y-auto xl:overscroll-contain xl:self-start">
               <RouteDetail route={selectedRoute} openapiRoute={summary.openapiRoute} />
@@ -2269,24 +2629,26 @@ function ApiDocsPage() {
             error={aiError}
             keyVisible={keyVisible}
             setKeyVisible={setKeyVisible}
-            mcpForm={mcpForm}
-            setMcpForm={setMcpForm}
-            mcpEditingId={mcpEditingId}
-            skillForm={skillForm}
-            setSkillForm={setSkillForm}
-            skillEditingId={skillEditingId}
             onRefresh={refreshAIAccess}
             onRotateKey={rotateAIKey}
-            onSaveMCP={saveMCP}
-            onEditMCP={editMCP}
-            onCancelMCP={cancelMCP}
-            onDeleteMCP={deleteMCP}
-            onSaveSkill={saveSkill}
-            onEditSkill={editSkill}
-            onCancelSkill={cancelSkill}
-            onDeleteSkill={deleteSkill}
-            onClearAudit={clearAIAudit}
+            onToggleWrite={toggleAIWrite}
             onCopy={copyText}
+          />
+        </div>
+      )}
+
+      {activeView === 'audit' && (
+        <div className="min-h-0 flex-1">
+          <AIAuditConsole
+            records={auditRecords}
+            total={auditTotal}
+            page={auditPage}
+            pageSize={auditPageSize}
+            loading={auditLoading}
+            error={auditError}
+            onPageChange={setAuditPage}
+            onPageSizeChange={setAuditPageSize}
+            onRefresh={() => loadAIAudit(true)}
           />
         </div>
       )}

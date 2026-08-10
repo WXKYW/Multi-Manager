@@ -68,6 +68,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.updateAllImages(w, r, parts[1])
 	case len(parts) == 2 && parts[0] == "proxy" && parts[1] == "apps" && r.Method == http.MethodGet:
 		s.proxyApps(w, r)
+	case len(parts) == 1 && parts[0] == "apps" && r.Method == http.MethodGet:
+		s.proxyApps(w, r)
 	case len(parts) == 1 && parts[0] == "apps" && r.Method == http.MethodPost:
 		s.createApp(w, r)
 	case len(parts) == 2 && parts[0] == "apps" && r.Method == http.MethodDelete:
@@ -372,6 +374,10 @@ func (s *Service) updateAppImage(w http.ResponseWriter, r *http.Request, appName
 		return
 	}
 	result := s.updateMachinesImage(r.Context(), stringValue(account["api_token"], ""), appName, machines, image, stringValue(payload["leaseNonce"], ""))
+	message := ""
+	if result.failed == 0 && result.updated == 0 && result.unchanged > 0 {
+		message = "镜像已是最新，无需更新"
+	}
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"success":   result.failed == 0,
 		"updated":   result.updated,
@@ -379,6 +385,7 @@ func (s *Service) updateAppImage(w http.ResponseWriter, r *http.Request, appName
 		"failed":    result.failed,
 		"errors":    result.errors,
 		"details":   result.details,
+		"message":   message,
 	})
 }
 

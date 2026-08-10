@@ -58,7 +58,7 @@ export default function DocumentWorkspace({
     } else if (initialMarkdown !== state.markdownRef.current) {
       state.resetMarkdown(initialMarkdown);
     }
-  }, [initialMarkdown]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [initialMarkdown]);  
 
   const handleCreateAdapter = useCallback(({ root }) => {
     const adapter = createMilkdownAdapter({
@@ -69,7 +69,7 @@ export default function DocumentWorkspace({
       state.setMarkdown(markdown);
     });
     return adapter;
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);  
 
   const handleSave = useCallback(async () => {
     if (!onSave || state.saveState === 'saving') return;

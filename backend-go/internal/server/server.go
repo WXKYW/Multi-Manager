@@ -123,10 +123,12 @@ func newServer(cfg config.Config) (*Server, error) {
 	systemService.SetNotifier(notifyService)
 	backupService := backup.New(cfg)
 	backupService.SetNotifier(notifyService)
+	settingsService := settings.New(cfg)
+	settingsService.StartBackgroundCleanup()
 	server := &Server{
 		cfg:      cfg,
 		auth:     authService,
-		settings: settings.New(cfg),
+		settings: settingsService,
 		system:   systemService,
 		totp:     totp.New(cfg),
 		cron:     cronService,
@@ -163,6 +165,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	if s.server != nil {
 		s.server.Stop()
+	}
+	if s.settings != nil {
+		s.settings.Stop()
 	}
 	if s.uptime != nil {
 		s.uptime.Stop()
@@ -257,6 +262,8 @@ func (s *Server) serveSystemControlRoute(w http.ResponseWriter, r *http.Request)
 		strings.HasPrefix(path, "/api/system/api-keys") ||
 		path == "/api/ai-access" ||
 		path == "/api/ai-access/key/rotate" ||
+		path == "/api/ai-access/write" ||
+		path == "/api/ai-access/audit" ||
 		path == "/api/ai-access/audit/clear" ||
 		path == "/api/ai-access/mcp-servers" ||
 		path == "/api/ai-access/skills" ||
@@ -264,6 +271,8 @@ func (s *Server) serveSystemControlRoute(w http.ResponseWriter, r *http.Request)
 		strings.HasPrefix(path, "/api/ai-access/skills/") ||
 		path == "/api/system/ai-access" ||
 		path == "/api/system/ai-access/key/rotate" ||
+		path == "/api/system/ai-access/write" ||
+		path == "/api/system/ai-access/audit" ||
 		path == "/api/system/ai-access/audit/clear" ||
 		path == "/api/system/ai-access/mcp-servers" ||
 		path == "/api/system/ai-access/skills" ||
@@ -395,7 +404,7 @@ func (s *Server) serveGoRoute(w http.ResponseWriter, r *http.Request, route mani
 		})
 	case "/api/settings", "/api/settings/site-brand/icons", "/api/settings/site-brand/icons/{id}", "/api/settings/database-stats", "/api/settings/migration-self-check", "/api/settings/database-analysis", "/api/settings/deprecated-tables", "/api/settings/cleanup-deprecated-tables", "/api/settings/export-database", "/api/settings/database/import", "/api/settings/import-database", "/api/settings/operation-logs", "/api/settings/sys-logs", "/api/settings/app-log-file", "/api/settings/log-settings", "/api/settings/clear-app-logs", "/api/settings/vacuum-database", "/api/settings/clear-logs", "/api/settings/enforce-log-limits", "/api/settings/clear-chat-messages":
 		s.settings.ServeHTTP(w, r)
-	case "/api/system/host-metrics", "/api/system/api-stats", "/api/system/api-docs", "/api/system/openapi.json", "/api/api-keys", "/api/system/api-keys", "/api/system/ai-access/key/rotate", "/api/system/ai-access/mcp-servers/{id}", "/api/system/ai-access/mcp-servers", "/api/system/ai-access/skills/{id}", "/api/system/ai-access/skills", "/api/system/ai-access/audit/clear", "/api/system/ai-access", "/api/ai-access/key/rotate", "/api/ai-access/mcp-servers/{id}", "/api/ai-access/mcp-servers", "/api/ai-access/skills/{id}", "/api/ai-access/skills", "/api/ai-access/audit/clear", "/api/ai-access", "/api/ai/manifest", "/api/ai/mcp":
+	case "/api/system/host-metrics", "/api/system/api-stats", "/api/system/api-docs", "/api/system/openapi.json", "/api/api-keys", "/api/system/api-keys", "/api/system/ai-access/key/rotate", "/api/system/ai-access/write", "/api/system/ai-access/audit", "/api/system/ai-access/mcp-servers/{id}", "/api/system/ai-access/mcp-servers", "/api/system/ai-access/skills/{id}", "/api/system/ai-access/skills", "/api/system/ai-access/audit/clear", "/api/system/ai-access", "/api/ai-access/key/rotate", "/api/ai-access/write", "/api/ai-access/audit", "/api/ai-access/mcp-servers/{id}", "/api/ai-access/mcp-servers", "/api/ai-access/skills/{id}", "/api/ai-access/skills", "/api/ai-access/audit/clear", "/api/ai-access", "/api/ai/manifest", "/api/ai/mcp":
 		s.system.ServeHTTP(w, r)
 	case "/api/system/logs/stream", "/api/system/logs/download":
 		s.logs.ServeHTTP(w, r)

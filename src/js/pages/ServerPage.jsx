@@ -4800,7 +4800,7 @@ function ServerPage() {
 
     const sId = task.serverId || payload.serverId || payload.server_id;
     const serverMatch = (dockerOverviewServers || []).find(s => String(s.id) === String(sId))
-      || (servers || []).find(s => String(s.id) === String(sId));
+      || (serverList || []).find(s => String(s.id) === String(sId));
     const hostName = task.serverName || payload.serverName || serverMatch?.name;
 
     const hostPrefix = hostName ? `[${hostName}] ` : '';
@@ -4823,7 +4823,7 @@ function ServerPage() {
     const payload = task.payload || meta.payload || {};
     const sId = task.serverId || meta.serverId || payload.serverId || payload.server_id;
     const serverMatch = (dockerOverviewServers || []).find(s => String(s.id) === String(sId))
-      || (servers || []).find(s => String(s.id) === String(sId));
+      || (serverList || []).find(s => String(s.id) === String(sId));
     const serverName = task.serverName || meta.serverName || payload.serverName || serverMatch?.name;
 
     return normalizeDockerTaskResult({
@@ -8661,7 +8661,7 @@ function ServerPage() {
                                   <div className={getExpandedInfoGridClassName(isDenseViewport)}>
                                     <ExpandedSection title="系统概览" tone="success" className={getExpandedCardSpanClassName(0, 1)}>
                                       <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3 xl:grid-cols-4">
-                                        <ExpandedInfoChip label="系统" value={server.info?.platform || '-' || server.info?.platformVersion || server.info?.system?.Kernel || '-'} />
+                                        <ExpandedInfoChip label="系统" value={server.info?.platform || server.info?.platformVersion || server.info?.system?.Kernel || '-'} />
                                         {/* <ExpandedInfoChip label="版本" value={server.info?.platformVersion || server.info?.system?.Kernel || '-'} /> */}
                                         <ExpandedInfoChip label="CPU 型号" value={server.info?.cpu?.Model || server.metadata?.cpu_model || server.metadata?.cpu_name || server.metadata?.processor || '-'} />
                                         <ExpandedInfoChip label="核心" value={coreText} />

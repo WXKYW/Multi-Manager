@@ -100,7 +100,7 @@ export default function QuickCommandBar({
 
   useEffect(() => {
     loadSnippets();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [platform]);
 
   const commands = useMemo(() => {

@@ -203,7 +203,7 @@ function AliyunPage() {
 
   useEffect(() => {
     if (selectedAccountId && activeTab !== 'accounts') refreshData();
-  }, [activeTab, selectedAccountId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeTab, selectedAccountId]);  
 
   const saveAccount = async () => {
     if (!accountForm.name || !accountForm.accessKeyId || (!editingAccount && !accountForm.accessKeySecret)) {

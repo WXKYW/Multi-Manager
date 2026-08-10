@@ -169,6 +169,95 @@ func TestAIMCPCallAPIUsesInternalRoutes(t *testing.T) {
 	}
 }
 
+func TestAIMCPWriteGatingAndKeyRotationBlock(t *testing.T) {
+	handler := testServer(t)
+	cookie := loginServerForTest(t, handler)
+
+	getAgentKey := func() (string, bool) {
+		keyReq := httptest.NewRequest(http.MethodGet, "/api/system/ai-access", nil)
+		keyReq.AddCookie(cookie)
+		keyRes := httptest.NewRecorder()
+		handler.ServeHTTP(keyRes, keyReq)
+		if keyRes.Code != http.StatusOK {
+			t.Fatalf("ai access status = %d, body=%s", keyRes.Code, keyRes.Body.String())
+		}
+		var keyPayload map[string]interface{}
+		if err := json.Unmarshal(keyRes.Body.Bytes(), &keyPayload); err != nil {
+			t.Fatal(err)
+		}
+		overview := keyPayload["data"].(map[string]interface{})
+		policy := overview["policy"].(map[string]interface{})
+		writeEnabled := policy["writeEnabled"].(bool)
+		return overview["agentKey"].(map[string]interface{})["value"].(string), writeEnabled
+	}
+
+	agentKey, writeEnabled := getAgentKey()
+	if writeEnabled {
+		t.Fatal("expected write access to default to disabled")
+	}
+
+	callTools := func(name string, args map[string]interface{}) map[string]interface{} {
+		body := map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      1,
+			"method":  "tools/call",
+			"params":  map[string]interface{}{"name": name, "arguments": args},
+		}
+		encoded, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/api/ai/mcp", bytes.NewReader(encoded))
+		req.Header.Set("Authorization", "Bearer "+agentKey)
+		req.Header.Set("Content-Type", "application/json")
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		if res.Code != http.StatusOK {
+			t.Fatalf("mcp status = %d, body=%s", res.Code, res.Body.String())
+		}
+		var payload map[string]interface{}
+		if err := json.Unmarshal(res.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+
+	// 写入方法在未开启时被拒绝
+	payload := callTools("call_api", map[string]interface{}{"method": "POST", "path": "/api/backup/run"})
+	if payload["error"] == nil {
+		t.Fatalf("expected write call to be rejected, got %#v", payload)
+	}
+	if !strings.Contains(payload["error"].(map[string]interface{})["message"].(string), "写入") {
+		t.Fatalf("unexpected rejection message: %#v", payload["error"])
+	}
+
+	// 密钥轮换别名路径必须始终被屏蔽
+	payload = callTools("call_api", map[string]interface{}{"method": "POST", "path": "/api/ai-access/key/rotate"})
+	if payload["error"] == nil {
+		t.Fatalf("expected key rotate alias to be blocked, got %#v", payload)
+	}
+
+	// 开启写入后允许写操作
+	writeReq := httptest.NewRequest(http.MethodPut, "/api/system/ai-access/write", strings.NewReader(`{"writeEnabled":true}`))
+	writeReq.AddCookie(cookie)
+	writeReq.Header.Set("Content-Type", "application/json")
+	writeRes := httptest.NewRecorder()
+	handler.ServeHTTP(writeRes, writeReq)
+	if writeRes.Code != http.StatusOK {
+		t.Fatalf("enable write status = %d, body=%s", writeRes.Code, writeRes.Body.String())
+	}
+
+	if _, writeEnabled := getAgentKey(); !writeEnabled {
+		t.Fatal("expected write access to be enabled after toggle")
+	}
+
+	payload = callTools("call_api", map[string]interface{}{"method": "POST", "path": "/api/backup/run"})
+	if payload["error"] != nil {
+		t.Fatalf("expected write call to succeed after enabling, got %#v", payload)
+	}
+	result := payload["result"].(map[string]interface{})
+	if result["statusCode"].(float64) != 200 {
+		t.Fatalf("expected proxied status 200, got %#v", result)
+	}
+}
+
 func TestStaticSpaRouteServesDistIndex(t *testing.T) {
 	distDir := t.TempDir()
 	indexHTML := "<!doctype html><div id=\"root\"></div>"

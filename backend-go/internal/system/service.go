@@ -2,6 +2,7 @@ package system
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
@@ -362,6 +363,17 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		response.OK(w, payload)
+	case "/api/system/ai-access/write":
+		if r.Method != http.MethodPut {
+			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		payload, err := s.setAIAgentWriteEnabled(r)
+		if err != nil {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		response.OK(w, payload)
 	case "/api/system/ai-access/key/rotate":
 		if r.Method != http.MethodPost {
 			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -392,6 +404,17 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		payload, err := s.saveSkill(r, "")
 		if err != nil {
 			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		response.OK(w, payload)
+	case "/api/system/ai-access/audit":
+		if r.Method != http.MethodGet {
+			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		payload, err := s.listAIAuditPage(r)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		response.OK(w, payload)
@@ -433,6 +456,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if err != nil {
 			response.Error(w, status, err.Error())
+			return
+		}
+		if payload == nil && status == http.StatusAccepted {
+			w.WriteHeader(http.StatusAccepted)
 			return
 		}
 		response.JSON(w, status, payload)
@@ -492,24 +519,25 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type apiDocRoute struct {
-	Prefix       string                `json:"prefix"`
-	Module       string                `json:"module"`
-	Group        string                `json:"group"`
-	Owner        manifest.Owner        `json:"owner"`
-	Auth         manifest.AuthMode     `json:"auth"`
-	ResponseMode manifest.ResponseMode `json:"responseMode"`
-	Description  string                `json:"description"`
-	Detail       string                `json:"detail,omitempty"`
-	MatchMode    manifest.MatchMode    `json:"matchMode"`
-	Methods      []string              `json:"methods"`
-	Status       string                `json:"status"`
-	PathParams   []apiDocParameter     `json:"pathParams,omitempty"`
-	QueryParams  []apiDocParameter     `json:"queryParams,omitempty"`
-	Headers      []apiDocParameter     `json:"headers,omitempty"`
-	RequestType  string                `json:"requestContentType,omitempty"`
-	RequestBody  interface{}           `json:"requestExample,omitempty"`
-	ResponseBody interface{}           `json:"responseExample,omitempty"`
-	Notes        []string              `json:"notes,omitempty"`
+	Prefix        string                 `json:"prefix"`
+	Module        string                 `json:"module"`
+	Group         string                 `json:"group"`
+	Owner         manifest.Owner         `json:"owner"`
+	Auth          manifest.AuthMode      `json:"auth"`
+	ResponseMode  manifest.ResponseMode  `json:"responseMode"`
+	Description   string                 `json:"description"`
+	Detail        string                 `json:"detail,omitempty"`
+	MatchMode     manifest.MatchMode     `json:"matchMode"`
+	Methods       []string               `json:"methods"`
+	Status        string                 `json:"status"`
+	PathParams    []apiDocParameter      `json:"pathParams,omitempty"`
+	QueryParams   []apiDocParameter      `json:"queryParams,omitempty"`
+	Headers       []apiDocParameter      `json:"headers,omitempty"`
+	RequestType   string                 `json:"requestContentType,omitempty"`
+	RequestBody   interface{}            `json:"requestExample,omitempty"`
+	RequestSchema map[string]interface{} `json:"requestSchema,omitempty"`
+	ResponseBody  interface{}            `json:"responseExample,omitempty"`
+	Notes         []string               `json:"notes,omitempty"`
 }
 
 func (s *Service) apiDocs() map[string]interface{} {
@@ -528,25 +556,87 @@ func (s *Service) apiDocs() map[string]interface{} {
 		}
 		description := routeDescription(route)
 		docs := routeDocs(route)
+		if desc, ok := routeDescriptions[route.Prefix]; ok {
+			docs.Detail = desc
+		}
+		requestSchema := map[string]interface{}(nil)
+		requestBody := docs.RequestExample
+		if schema, contractExample, ok := requestContractFor(route.Prefix); ok {
+			requestSchema = schema
+			if requestBody == nil {
+				requestBody = contractExample
+			}
+		}
 		items = append(items, apiDocRoute{
-			Prefix:       route.Prefix,
-			Module:       route.Module,
-			Group:        routeGroup(route),
-			Owner:        route.Owner,
-			Auth:         route.Auth,
-			ResponseMode: route.ResponseMode,
-			Description:  description,
-			Detail:       docs.Detail,
-			MatchMode:    matchMode,
-			Methods:      docs.Methods,
-			Status:       routeStatus(route),
-			PathParams:   docs.PathParams,
-			QueryParams:  docs.QueryParams,
-			Headers:      docs.Headers,
-			RequestType:  docs.RequestContentType,
-			RequestBody:  docs.RequestExample,
-			ResponseBody: docs.ResponseExample,
-			Notes:        docs.Notes,
+			Prefix:        route.Prefix,
+			Module:        route.Module,
+			Group:         routeGroup(route),
+			Owner:         route.Owner,
+			Auth:          route.Auth,
+			ResponseMode:  route.ResponseMode,
+			Description:   description,
+			Detail:        docs.Detail,
+			MatchMode:     matchMode,
+			Methods:       docs.Methods,
+			Status:        routeStatus(route),
+			PathParams:    docs.PathParams,
+			QueryParams:   docs.QueryParams,
+			Headers:       docs.Headers,
+			RequestType:   docs.RequestContentType,
+			RequestBody:   requestBody,
+			RequestSchema: requestSchema,
+			ResponseBody:  docs.ResponseExample,
+			Notes:         docs.Notes,
+		})
+	}
+
+	// 补充：把已登记请求契约但尚未出现在清单中的具体子路由加入文档，
+	// 保证 get_route 能命中具体路由并返回契约，而不是只命中家族前缀聚合路由。
+	for prefix := range routeRequestContracts {
+		if seen[prefix] {
+			continue
+		}
+		seen[prefix] = true
+		route := manifest.Route{
+			Prefix:       prefix,
+			Module:       moduleFromPrefix(prefix),
+			Owner:        manifest.OwnerGo,
+			Auth:         manifest.AuthSession,
+			ResponseMode: manifest.ResponseJSON,
+			MatchMode:    manifest.MatchPattern,
+		}
+		docs := routeDocs(route)
+		if desc, ok := routeDescriptions[route.Prefix]; ok {
+			docs.Detail = desc
+		}
+		requestSchema := map[string]interface{}(nil)
+		requestBody := docs.RequestExample
+		if schema, contractExample, ok := requestContractFor(prefix); ok {
+			requestSchema = schema
+			if requestBody == nil {
+				requestBody = contractExample
+			}
+		}
+		items = append(items, apiDocRoute{
+			Prefix:        route.Prefix,
+			Module:        route.Module,
+			Group:         routeGroup(route),
+			Owner:         route.Owner,
+			Auth:          route.Auth,
+			ResponseMode:  route.ResponseMode,
+			Description:   routeDescription(route),
+			Detail:        docs.Detail,
+			MatchMode:     route.MatchMode,
+			Methods:       docs.Methods,
+			Status:        routeStatus(route),
+			PathParams:    docs.PathParams,
+			QueryParams:   docs.QueryParams,
+			Headers:       docs.Headers,
+			RequestType:   docs.RequestContentType,
+			RequestBody:   requestBody,
+			RequestSchema: requestSchema,
+			ResponseBody:  docs.ResponseExample,
+			Notes:         docs.Notes,
 		})
 	}
 
@@ -742,45 +832,106 @@ func countRoutesBy(routes []apiDocRoute, keyFn func(apiDocRoute) string) map[str
 	return counts
 }
 
+func moduleFromPrefix(prefix string) string {
+	trimmed := strings.Trim(prefix, "/")
+	parts := strings.Split(trimmed, "/")
+	if len(parts) >= 3 && parts[0] == "api" {
+		return parts[1]
+	}
+	if len(parts) >= 2 {
+		return parts[0]
+	}
+	return "api"
+}
+
 func routeGroup(route manifest.Route) string {
 	prefix := route.Prefix
 	switch {
-	case strings.HasPrefix(prefix, "/api/auth"):
-		return "认证"
-	case strings.HasPrefix(prefix, "/api/settings"):
-		return "系统设置"
-	case strings.HasPrefix(prefix, "/api/system"), strings.HasPrefix(prefix, "/api/logs"), strings.HasPrefix(prefix, "/ws/logs"):
-		return "系统"
+	// 模型网关
+	case strings.HasPrefix(prefix, "/api/openai"), strings.HasPrefix(prefix, "/api/chat"), strings.HasPrefix(prefix, "/v1"):
+		return "模型网关"
+	// 订阅分发
+	case strings.HasPrefix(prefix, "/api/subscription"), strings.HasPrefix(prefix, "/sub"):
+		return "订阅分发"
+	// Cloudflare
 	case strings.HasPrefix(prefix, "/api/cloudflare"):
 		return "Cloudflare"
-	case strings.HasPrefix(prefix, "/api/server"), strings.HasPrefix(prefix, "/ws/ssh"), strings.HasPrefix(prefix, "/ws/agent-terminal"), strings.HasPrefix(prefix, "/socket.io"):
-		return "主机实例"
-	case strings.HasPrefix(prefix, "/api/openai"), strings.HasPrefix(prefix, "/api/ai"), strings.HasPrefix(prefix, "/v1"), strings.HasPrefix(prefix, "/api/chat"):
-		return "AI 接入"
+	// 阿里云
 	case strings.HasPrefix(prefix, "/api/aliyun"):
 		return "阿里云"
+	// 腾讯云
 	case strings.HasPrefix(prefix, "/api/tencent"):
 		return "腾讯云"
+	// 甲骨文云
+	case strings.HasPrefix(prefix, "/api/oracle"):
+		return "甲骨文云"
+	// Microsoft 365
+	case strings.HasPrefix(prefix, "/api/m365"):
+		return "Microsoft 365"
+	// GitHub
+	case strings.HasPrefix(prefix, "/api/github"):
+		return "GitHub"
+	// 主机实例
+	case strings.HasPrefix(prefix, "/api/server"), strings.HasPrefix(prefix, "/ws/ssh"), strings.HasPrefix(prefix, "/ws/agent-terminal"), strings.HasPrefix(prefix, "/socket.io"):
+		return "主机实例"
+	// PaaS
 	case strings.HasPrefix(prefix, "/api/koyeb"), strings.HasPrefix(prefix, "/api/flyio"):
 		return "PaaS"
-	case strings.HasPrefix(prefix, "/api/totp"):
-		return "双因子认证"
-	case strings.HasPrefix(prefix, "/api/filebox"):
-		return "文件柜"
-	case strings.HasPrefix(prefix, "/api/uptime"):
-		return "可用性监测"
-	case strings.HasPrefix(prefix, "/api/notification"):
-		return "通知"
+	// 定时任务
 	case strings.HasPrefix(prefix, "/api/scheduler"), strings.HasPrefix(prefix, "/api/cron"):
 		return "定时任务"
-	case strings.HasPrefix(prefix, "/api/backup"):
-		return "备份"
+	// 可用性监测
+	case strings.HasPrefix(prefix, "/api/uptime"):
+		return "可用性监测"
+	// 文件柜
+	case strings.HasPrefix(prefix, "/api/filebox"):
+		return "文件柜"
+	// 图编辑器
+	case strings.HasPrefix(prefix, "/api/drawio"):
+		return "图编辑器"
+	// 提示词库
+	case strings.HasPrefix(prefix, "/api/prompts"):
+		return "提示词库"
+	// 双因子认证
+	case strings.HasPrefix(prefix, "/api/totp"):
+		return "双因子认证"
+	// 通知中心
+	case strings.HasPrefix(prefix, "/api/notification"):
+		return "通知中心"
+	// 认证
+	case strings.HasPrefix(prefix, "/api/auth"):
+		return "认证"
+	// 系统日志
+	case strings.HasPrefix(prefix, "/api/system/logs"), strings.HasPrefix(prefix, "/api/logs"), strings.HasPrefix(prefix, "/ws/logs"),
+		strings.HasPrefix(prefix, "/api/settings/sys-logs"), strings.HasPrefix(prefix, "/api/settings/app-log-file"),
+		strings.HasPrefix(prefix, "/api/settings/log-settings"), strings.HasPrefix(prefix, "/api/settings/enforce-log-limits"),
+		strings.HasPrefix(prefix, "/api/settings/clear-logs"), strings.HasPrefix(prefix, "/api/settings/clear-app-logs"):
+		return "系统日志"
+	// API 接口（文档、密钥、AI 接入）
+	case prefix == "/api/system/api-docs", prefix == "/api/system/openapi.json", prefix == "/api/openapi.json",
+		strings.HasPrefix(prefix, "/api/api-keys"), strings.HasPrefix(prefix, "/api/system/api-keys"),
+		strings.HasPrefix(prefix, "/api/ai-access"), strings.HasPrefix(prefix, "/api/system/ai-access"),
+		prefix == "/api/ai/manifest", prefix == "/api/ai/mcp":
+		return "API 接口"
+	// 系统设置（含备份）
+	case strings.HasPrefix(prefix, "/api/settings"), strings.HasPrefix(prefix, "/api/backup"):
+		return "系统设置"
+	// 仪表盘 / 系统内核
+	case prefix == "/health", prefix == "/api/migration/status",
+		prefix == "/api/system/host-metrics", prefix == "/api/system/api-stats":
+		return "仪表盘"
+	// 其余系统级接口
+	case strings.HasPrefix(prefix, "/api/system"):
+		return "系统"
 	default:
 		return "基础"
 	}
 }
 
 func routeDescription(route manifest.Route) string {
+	if desc, ok := routeDescriptions[route.Prefix]; ok {
+		return desc
+	}
 	prefix := route.Prefix
 	switch {
 	case prefix == "/health":
@@ -794,23 +945,27 @@ func routeDescription(route manifest.Route) string {
 	case prefix == "/api/openapi.json":
 		return "导出 OpenAPI 3.1 接口文档"
 	case prefix == "/api/ai-access":
-		return "读取 AI 接入、Agent Key、MCP、Skill 和审计概览"
+		return "读取 AI 接入、Agent Key 和审计概览"
 	case prefix == "/api/ai-access/key/rotate":
 		return "轮换 AI Agent Key"
 	case strings.HasPrefix(prefix, "/api/ai-access/mcp-servers"):
 		return "管理 AI 接入的 MCP 服务配置"
 	case strings.HasPrefix(prefix, "/api/ai-access/skills"):
 		return "管理 AI 接入的 Skill 配置"
+	case prefix == "/api/ai-access/audit":
+		return "分页查询 AI 接入调用审计"
 	case prefix == "/api/ai-access/audit/clear":
 		return "清空 AI 接入调用审计"
 	case prefix == "/api/system/ai-access":
-		return "读取 AI 接入、Agent Key、MCP、Skill 和审计概览"
+		return "读取 AI 接入、Agent Key 和审计概览"
 	case prefix == "/api/system/ai-access/key/rotate":
 		return "轮换 AI Agent Key"
 	case strings.HasPrefix(prefix, "/api/system/ai-access/mcp-servers"):
 		return "管理 AI 接入的 MCP 服务配置"
 	case strings.HasPrefix(prefix, "/api/system/ai-access/skills"):
 		return "管理 AI 接入的 Skill 配置"
+	case prefix == "/api/system/ai-access/audit":
+		return "分页查询 AI 接入调用审计"
 	case prefix == "/api/system/ai-access/audit/clear":
 		return "清空 AI 接入调用审计"
 	case prefix == "/api/ai/manifest":
@@ -985,14 +1140,70 @@ func (s *Service) apiStats() (map[string]interface{}, error) {
 	}
 	s.mu.Unlock()
 
+	// 汇总最近 7 天的词元用量（OpenAI 网关）与订阅实际用量（流量），并按天对齐趋势桶。
+	var totalTokens, totalTraffic int64
+	tokensByDay, trafficByDay := systemUsageDaily(ctx, db, now)
+	for _, item := range trend {
+		bucket := item["bucket"].(string)
+		tokens := tokensByDay[bucket]
+		traffic := trafficByDay[bucket]
+		item["tokens"] = tokens
+		item["traffic"] = traffic
+		totalTokens += tokens
+		totalTraffic += traffic
+	}
 	return map[string]interface{}{
 		"total": map[string]interface{}{
 			"audit": totalAudit,
 			"ops":   totalOps,
 			"all":   totalAudit + totalOps,
 		},
-		"trend": trend,
+		"trend":   trend,
+		"tokens":  totalTokens,
+		"traffic": totalTraffic,
 	}, nil
+}
+
+// systemUsageDaily 按天汇总最近 7 天的 OpenAI 网关词元消耗与订阅实际流量（上传+下载字节）。
+// 返回以 "2006-01-02" 为键的逐日用量表，缺失日期返回 0。
+func systemUsageDaily(ctx context.Context, db *sql.DB, now time.Time) (map[string]int64, map[string]int64) {
+	start := now.AddDate(0, 0, -6).Format("2006-01-02 15:04:05")
+	tokensByDay := make(map[string]int64)
+	if rows, err := db.QueryContext(ctx, `
+		SELECT strftime('%Y-%m-%d', timestamp) AS day, COALESCE(SUM(total_tokens), 0)
+		FROM openai_gateway_analytics
+		WHERE timestamp >= ? AND route != 'models'
+		GROUP BY day`, start); err != nil {
+		// 表可能尚未建好，返回空表即可。
+		tokensByDay = nil
+	} else {
+		for rows.Next() {
+			var day string
+			var tokens int64
+			if err := rows.Scan(&day, &tokens); err == nil {
+				tokensByDay[day] = tokens
+			}
+		}
+		rows.Close()
+	}
+	trafficByDay := make(map[string]int64)
+	if rows, err := db.QueryContext(ctx, `
+		SELECT strftime('%Y-%m-%d', reported_at) AS day, COALESCE(SUM(upload_bytes + download_bytes), 0)
+		FROM subscription_usage_reports
+		WHERE reported_at >= ?
+		GROUP BY day`, start); err != nil {
+		trafficByDay = nil
+	} else {
+		for rows.Next() {
+			var day string
+			var traffic int64
+			if err := rows.Scan(&day, &traffic); err == nil {
+				trafficByDay[day] = traffic
+			}
+		}
+		rows.Close()
+	}
+	return tokensByDay, trafficByDay
 }
 
 func (s *Service) Shutdown() {

@@ -95,6 +95,20 @@ module.exports = [
         auth: 'readonly',
         AbortController: 'readonly',
         WebAssembly: 'readonly',
+        // 常用浏览器/边缘 API（项目 JSX 中用到）
+        btoa: 'readonly',
+        atob: 'readonly',
+        File: 'readonly',
+        EventSource: 'readonly',
+        crypto: 'readonly',
+        RTCPeerConnection: 'readonly',
+        RTCIceCandidate: 'readonly',
+        MediaStream: 'readonly',
+        MediaStreamTrack: 'readonly',
+        OffscreenCanvas: 'readonly',
+        Node: 'readonly',
+        Element: 'readonly',
+        ClipboardItem: 'readonly',
       },
     },
     rules: {
@@ -135,9 +149,20 @@ module.exports = [
   },
   // 前端文件特定配置
   {
-    files: ['src/js/**/*.js'],
+    files: ['src/js/**/*.js', 'src/js/**/*.jsx'],
+    plugins: {
+      'react-hooks': require('eslint-plugin-react-hooks'),
+    },
     languageOptions: {
       sourceType: 'module', // 前端使用 ESM
+      parser: require('@babel/eslint-parser'),
+      parserOptions: {
+        requireConfigFile: false,
+        babelOptions: {
+          presets: ['@babel/preset-react'],
+        },
+        ecmaFeatures: { jsx: true },
+      },
     },
   },
   {

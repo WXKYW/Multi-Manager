@@ -1129,7 +1129,7 @@ function TotpPage() {
             if (devices && devices.length > 0) {
               await html5QrCode.start(devices[0].id, config, successCallback, () => {});
             } else {
-              throw new Error('未检测到任何摄像头设备');
+              throw new Error('未检测到任何摄像头设备', { cause: err2 });
             }
           }
         }

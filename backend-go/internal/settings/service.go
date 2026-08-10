@@ -31,6 +31,8 @@ type Service struct {
 	store          *database.Store
 	pendingImports map[string]pendingDatabaseImport
 	importsMu      sync.Mutex
+	cleanupCancel  context.CancelFunc
+	cleanupWG      sync.WaitGroup
 }
 
 type userSettingsRow struct {
@@ -96,6 +98,90 @@ func New(cfg config.Config) *Service {
 		cfg:            cfg,
 		store:          database.New(cfg),
 		pendingImports: map[string]pendingDatabaseImport{},
+	}
+}
+
+const (
+	defaultAutoCleanupHours = 24
+	initialAutoCleanupDelay = time.Minute
+	autoCleanupTimeout      = 2 * time.Minute
+)
+
+// StartBackgroundCleanup launches the periodic log-retention enforcement loop.
+// It is idempotent and safe to call once at server startup.
+func (s *Service) StartBackgroundCleanup() {
+	if s.cleanupCancel != nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.cleanupCancel = cancel
+	s.cleanupWG.Add(1)
+	go func() {
+		defer s.cleanupWG.Done()
+		s.runBackgroundCleanup(ctx)
+	}()
+}
+
+// Stop cancels the background cleanup loop and waits for it to exit.
+func (s *Service) Stop() {
+	if s.cleanupCancel == nil {
+		return
+	}
+	s.cleanupCancel()
+	s.cleanupWG.Wait()
+}
+
+func (s *Service) runBackgroundCleanup(ctx context.Context) {
+	timer := time.NewTimer(initialAutoCleanupDelay)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			s.autoCleanupOnce(ctx)
+			timer.Reset(time.Duration(s.autoCleanupInterval(ctx)) * time.Hour)
+		}
+	}
+}
+
+func (s *Service) autoCleanupInterval(ctx context.Context) int {
+	db, err := s.store.Open(ctx)
+	if err != nil {
+		return defaultAutoCleanupHours
+	}
+	defer db.Close()
+	hours := getConfigInt(ctx, db, "log_auto_cleanup_hours", defaultAutoCleanupHours)
+	if hours < 1 {
+		hours = defaultAutoCleanupHours
+	}
+	return hours
+}
+
+func (s *Service) autoCleanupOnce(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, autoCleanupTimeout)
+	defer cancel()
+	db, err := s.store.Open(ctx)
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	if getConfigInt(ctx, db, "log_auto_cleanup", 0) == 0 {
+		return
+	}
+	days := getConfigInt(ctx, db, "log_retention_days", 0)
+	count := getConfigInt(ctx, db, "log_max_count", 0)
+	dbSizeMB := getConfigInt(ctx, db, "log_max_db_size_mb", 0)
+	if days == 0 && count == 0 && dbSizeMB == 0 {
+		return
+	}
+	result, err := enforceLogTableLimits(ctx, db, s.store.DatabasePath(), days, count, dbSizeMB)
+	if err != nil {
+		applog.Error(ctx, "settings", fmt.Sprintf("auto log cleanup failed: %v", err))
+		return
+	}
+	if deleted, ok := result["deleted"].(int64); ok && deleted > 0 {
+		applog.Info(ctx, "settings", fmt.Sprintf("auto log cleanup removed %d records", deleted))
 	}
 }
 
@@ -722,6 +808,12 @@ func (s *Service) getLogSettings(w http.ResponseWriter, r *http.Request) {
 	days := getConfigInt(r.Context(), db, "log_retention_days", 0)
 	count := getConfigInt(r.Context(), db, "log_max_count", 0)
 	dbSizeMB := getConfigInt(r.Context(), db, "log_max_db_size_mb", 0)
+	// Auto-cleanup toggles default OFF so existing deployments do not change behavior silently.
+	autoCleanup := getConfigInt(r.Context(), db, "log_auto_cleanup", 0)
+	autoCleanupHours := getConfigInt(r.Context(), db, "log_auto_cleanup_hours", defaultAutoCleanupHours)
+	if autoCleanupHours < 1 {
+		autoCleanupHours = defaultAutoCleanupHours
+	}
 	logFileSizeMB := getConfigInt(r.Context(), db, "log_file_max_size_mb", 10)
 	if logFileSizeMB < 1 {
 		logFileSizeMB = 10
@@ -730,10 +822,12 @@ func (s *Service) getLogSettings(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"data": map[string]int{
-			"days":          days,
-			"count":         count,
-			"dbSizeMB":      dbSizeMB,
-			"logFileSizeMB": logFileSizeMB,
+			"days":             days,
+			"count":            count,
+			"dbSizeMB":         dbSizeMB,
+			"logFileSizeMB":    logFileSizeMB,
+			"autoCleanup":      autoCleanup,
+			"autoCleanupHours": autoCleanupHours,
 		},
 		"logConfig": map[string]int{
 			"maxFileSizeMB": logFileSizeMB,
@@ -762,6 +856,14 @@ func (s *Service) saveLogSettings(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		logFileSizeMB = 10
 	}
+	autoCleanup := 0
+	if value, ok := toBool(payload["autoCleanup"]); ok && value {
+		autoCleanup = 1
+	}
+	autoCleanupHours, _ := toInt(payload["autoCleanupHours"])
+	if autoCleanupHours < 1 {
+		autoCleanupHours = defaultAutoCleanupHours
+	}
 	if days < 0 {
 		days = 0
 	}
@@ -784,6 +886,8 @@ func (s *Service) saveLogSettings(w http.ResponseWriter, r *http.Request) {
 		{"log_max_count", count, "max log rows per table"},
 		{"log_max_db_size_mb", dbSizeMB, "max database size in MB"},
 		{"log_file_max_size_mb", logFileSizeMB, "max app.log size in MB"},
+		{"log_auto_cleanup", autoCleanup, "auto log cleanup enabled"},
+		{"log_auto_cleanup_hours", autoCleanupHours, "auto log cleanup interval hours"},
 	}
 	for _, item := range configs {
 		if err := setSystemConfig(r.Context(), db, item.key, strconv.Itoa(item.value), item.description); err != nil {
@@ -905,6 +1009,35 @@ func (s *Service) enforceLogLimits(w http.ResponseWriter, r *http.Request) {
 	}
 	if dbSizeMB < 0 {
 		dbSizeMB = 0
+	}
+
+	preview := false
+	if value, ok := toBool(payload["preview"]); ok {
+		preview = value
+	}
+	if preview {
+		plans, err := planLogTableLimits(r.Context(), db, days, count)
+		if err != nil {
+			response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": err.Error()})
+			return
+		}
+		var totalDeleted int64
+		for _, plan := range plans {
+			totalDeleted += plan.Deleted
+		}
+		currentSize, _ := fileSize(s.store.DatabasePath())
+		response.JSON(w, http.StatusOK, map[string]interface{}{
+			"success":       true,
+			"preview":       true,
+			"totalDeleted":  totalDeleted,
+			"tables":        plans,
+			"days":          days,
+			"count":         count,
+			"dbSizeMB":      dbSizeMB,
+			"sizeOverLimit": dbSizeMB > 0 && float64(currentSize)/1024/1024 > float64(dbSizeMB),
+			"currentSizeMB": sizeMBString(currentSize),
+		})
+		return
 	}
 
 	result, err := enforceLogTableLimits(r.Context(), db, s.store.DatabasePath(), days, count, dbSizeMB)
@@ -1795,7 +1928,13 @@ func listLogTables(ctx context.Context, db *sql.DB) ([]string, error) {
 		WHERE type = 'table' AND (
 			name LIKE '%_logs'
 			OR name LIKE '%_history'
-			OR name IN ('server_network_quality_samples', 'uptime_heartbeats')
+			OR name LIKE '%_audit'
+			OR name IN (
+				'server_network_quality_samples', 'uptime_heartbeats',
+				'github_repository_snapshots', 'github_traffic_samples', 'github_contributors',
+				'github_action_runs', 'github_events', 'github_webhook_deliveries',
+				'openai_gateway_analytics', 'system_api_stats', 'uptime_daily_stats'
+			)
 		)
 		ORDER BY name
 	`)
@@ -1880,6 +2019,12 @@ func enforceLogTableLimits(ctx context.Context, db *sql.DB, dbPath string, days,
 			totalDeleted += changes
 		}
 		if count > 0 {
+			effective := int64(count)
+			if value, ok, err := logTableCountFloor(ctx, db, table); err != nil {
+				return nil, err
+			} else if ok && value > effective {
+				effective = value
+			}
 			result, err := db.ExecContext(ctx, `
 				DELETE FROM `+quoteIdentifier(table)+`
 				WHERE rowid NOT IN (
@@ -1887,7 +2032,7 @@ func enforceLogTableLimits(ctx context.Context, db *sql.DB, dbPath string, days,
 					ORDER BY `+quoteIdentifier(timeColumn)+` DESC
 					LIMIT ?
 				)
-			`, count)
+			`, effective)
 			if err != nil {
 				return nil, fmt.Errorf("trim rows from %s: %w", table, err)
 			}
@@ -1955,12 +2100,123 @@ func enforceLogTableLimits(ctx context.Context, db *sql.DB, dbPath string, days,
 	}, nil
 }
 
+type logTablePlan struct {
+	Table   string `json:"table"`
+	Current int64  `json:"current"`
+	Kept    int64  `json:"kept"`
+	Deleted int64  `json:"deleted"`
+	Floor   int64  `json:"floor,omitempty"`
+}
+
+// logTableGroupColumns maps a cleanable table to the column identifying the
+// tracked entity, so count-based trimming always keeps at least the newest
+// record per entity (entity floor).
+var logTableGroupColumns = map[string]string{
+	"uptime_heartbeats":           "monitor_id",
+	"server_metrics_history":      "server_id",
+	"server_monitor_logs":         "server_id",
+	"openai_health_history":       "endpoint_id",
+	"openai_gateway_analytics":    "endpoint_id",
+	"github_repository_snapshots": "repository_id",
+	"github_traffic_samples":      "repository_id",
+	"github_contributors":         "repository_id",
+	"github_action_runs":          "repository_id",
+	"github_events":               "repository_id",
+	"github_webhook_deliveries":   "repository_id",
+	"github_operation_audit":      "repository_id",
+	"cron_logs":                   "task_id",
+	"subscription_access_logs":    "subscription_id",
+	"uptime_daily_stats":          "monitor_id",
+}
+
+// logTableMinRows is a fixed per-table floor for aggregate tables keyed by a
+// growing time bucket where a distinct-entity count would not be bounded.
+var logTableMinRows = map[string]int64{
+	"system_api_stats": 1,
+}
+
+func logTableCountFloor(ctx context.Context, db *sql.DB, table string) (int64, bool, error) {
+	if column, ok := logTableGroupColumns[table]; ok {
+		var floor int64
+		err := db.QueryRowContext(ctx, `SELECT COUNT(DISTINCT `+quoteIdentifier(column)+`) FROM `+quoteIdentifier(table)).Scan(&floor)
+		if err != nil {
+			return 0, false, fmt.Errorf("count distinct %s in %s: %w", column, table, err)
+		}
+		if floor < 1 {
+			floor = 1
+		}
+		return floor, true, nil
+	}
+	if minRows, ok := logTableMinRows[table]; ok {
+		return minRows, true, nil
+	}
+	return 0, false, nil
+}
+
+// planLogTableLimits dry-runs the days/count limits and reports per-table
+// deletion counts without modifying any data. The size-based cleanup is not
+// included here because it depends on runtime vacuum behavior; callers should
+// surface dbSizeMB separately (see sizeOverLimit).
+func planLogTableLimits(ctx context.Context, db *sql.DB, days, count int) ([]logTablePlan, error) {
+	tables, err := listLogTables(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	cutoff := ""
+	if days > 0 {
+		cutoff = time.Now().UTC().AddDate(0, 0, -days).Format(time.RFC3339)
+	}
+	plans := make([]logTablePlan, 0, len(tables))
+	for _, table := range tables {
+		timeColumn, err := logTimeColumn(ctx, db, table)
+		if err != nil {
+			return nil, err
+		}
+		if timeColumn == "" {
+			continue
+		}
+		total, err := countTableRows(ctx, db, table)
+		if err != nil {
+			return nil, err
+		}
+		if total == 0 {
+			continue
+		}
+		var daysDeleted int64
+		if cutoff != "" {
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+quoteIdentifier(table)+` WHERE `+quoteIdentifier(timeColumn)+` < ?`, cutoff).Scan(&daysDeleted); err != nil {
+				return nil, fmt.Errorf("count old rows in %s: %w", table, err)
+			}
+		}
+		remaining := total - daysDeleted
+		kept := remaining
+		var floor int64
+		if count > 0 {
+			effective := int64(count)
+			if value, ok, err := logTableCountFloor(ctx, db, table); err != nil {
+				return nil, err
+			} else if ok && value > effective {
+				effective = value
+			}
+			floor = effective
+			if remaining > effective {
+				kept = effective
+			}
+		}
+		deleted := daysDeleted + (remaining - kept)
+		if deleted > 0 {
+			plans = append(plans, logTablePlan{Table: table, Current: total, Kept: kept, Deleted: deleted, Floor: floor})
+		}
+	}
+	return plans, nil
+}
+
 func logTimeColumn(ctx context.Context, db *sql.DB, table string) (string, error) {
 	columns, err := tableColumns(ctx, db, table)
 	if err != nil {
 		return "", err
 	}
-	for _, column := range []string{"created_at", "checked_at", "timestamp", "recorded_at", "start_time"} {
+	for _, column := range []string{"created_at", "checked_at", "timestamp", "recorded_at", "start_time", "collected_at", "date"} {
 		if columns[column] {
 			return column, nil
 		}
