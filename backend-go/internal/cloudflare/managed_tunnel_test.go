@@ -1,6 +1,48 @@
 package cloudflare
 
-import "testing"
+import (
+	"errors"
+	"strings"
+	"testing"
+)
+
+func TestCfIsResourceMissingTreatsNotFoundVariantsAsIdempotent(t *testing.T) {
+	cases := map[string]bool{
+		"":                       false,
+		"some random API error":  false,
+		"DNS record not found":   true,
+		"Record does not exist.": true,
+		"delete Tunnel DNS record: Record does not exist.":     true,
+		"The Tunnel does not exist.":                           true,
+		"delete Cloudflare Tunnel: The Tunnel does not exist.": true,
+		"HTTP 404: Record does not exist.":                     true,
+	}
+	for message, want := range cases {
+		if got := cfIsResourceMissing(errors.New(message)); got != want {
+			t.Fatalf("cfIsResourceMissing(%q) = %v, want %v", message, got, want)
+		}
+	}
+	if cfIsResourceMissing(nil) {
+		t.Fatal("cfIsResourceMissing(nil) must be false")
+	}
+}
+
+func TestCfIsResourceMissingIsCaseInsensitive(t *testing.T) {
+	for _, message := range []string{"Record DOES NOT EXIST.", "Record Not Found"} {
+		if !cfIsResourceMissing(errors.New(message)) {
+			t.Fatalf("cfIsResourceMissing(%q) should be case-insensitive", message)
+		}
+	}
+}
+
+func TestCfIsResourceMissingDistinguishesDeletedFromOtherFailures(t *testing.T) {
+	if cfIsResourceMissing(errors.New("Record exists but update failed")) {
+		t.Fatal("must not treat non-missing failures as idempotent")
+	}
+	if !strings.Contains(errors.New("Record does not exist.").Error(), "does not exist") {
+		t.Fatal("sanity: Cloudflare uses 'does not exist' phrasing")
+	}
+}
 
 func TestManagedTunnelDNSOwnershipRejectsUnmanagedRecord(t *testing.T) {
 	record := map[string]interface{}{"id": "dns-one", "content": "other.example.com", "comment": "created by user"}

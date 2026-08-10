@@ -227,6 +227,14 @@ func (s *Service) ManagedTunnelConnections(ctx context.Context, accountID, tunne
 	return len(arrayValue(payload["result"])), nil
 }
 
+func cfIsResourceMissing(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "not found") || strings.Contains(message, "does not exist")
+}
+
 func (s *Service) DeleteManagedTunnelDNS(ctx context.Context, accountID, zoneID, recordID string) error {
 	if strings.TrimSpace(recordID) == "" {
 		return nil
@@ -236,7 +244,7 @@ func (s *Service) DeleteManagedTunnelDNS(ctx context.Context, accountID, zoneID,
 		return err
 	}
 	_, err = s.cfRequest(ctx, http.MethodDelete, "/zones/"+url.PathEscape(zoneID)+"/dns_records/"+url.PathEscape(recordID), auth, nil)
-	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "not found") {
+	if err != nil && !cfIsResourceMissing(err) {
 		return fmt.Errorf("delete Tunnel DNS record: %w", err)
 	}
 	return nil
@@ -251,7 +259,7 @@ func (s *Service) DeleteManagedTunnel(ctx context.Context, accountID, tunnelID s
 		return err
 	}
 	_, err = s.cfRequest(ctx, http.MethodDelete, "/accounts/"+url.PathEscape(cfAccountID)+"/cfd_tunnel/"+url.PathEscape(tunnelID)+"?cascade=true", auth, nil)
-	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "not found") {
+	if err != nil && !cfIsResourceMissing(err) {
 		return fmt.Errorf("delete Cloudflare Tunnel: %w", err)
 	}
 	return nil
