@@ -420,7 +420,7 @@ func TestAIProgressiveDisclosure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog := raw.(map[string]interface{})["result"].(map[string]interface{})
+	catalog := raw.(map[string]interface{})["result"].(map[string]interface{})["structuredContent"].(map[string]interface{})
 	routes := catalog["routes"].([]map[string]interface{})
 	if len(routes) == 0 {
 		t.Fatal("expected PaaS routes in compact catalog")
@@ -440,7 +440,7 @@ func TestAIProgressiveDisclosure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	contract := raw.(map[string]interface{})["result"].(map[string]interface{})
+	contract := raw.(map[string]interface{})["result"].(map[string]interface{})["structuredContent"].(map[string]interface{})
 	if contract["matchedPath"] != "/api/flyio/apps/apimnt/update-image" {
 		t.Fatalf("unexpected matchedPath: %#v", contract["matchedPath"])
 	}

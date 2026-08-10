@@ -408,9 +408,29 @@ func (s *Service) dispatchMCPTool(r *http.Request, req aiMCPRequest) (interface{
 		if err := json.Unmarshal(req.Params, &params); err != nil {
 			return nil, err
 		}
-		return s.callAITool(r, params.Name, params.Arguments)
+		toolResult, err := s.callAITool(r, params.Name, params.Arguments)
+		if err != nil {
+			return nil, err
+		}
+		// MCP 规范要求 tools/call 结果包含 content 数组，否则多数客户端
+		// （Claude、opencode 等）会把工具输出渲染为空。structuredContent
+		// 同时保留结构化数据，供支持该字段的客户端使用。
+		return mcpToolResult(toolResult), nil
 	default:
 		return nil, fmt.Errorf("unsupported MCP method: %s", req.Method)
+	}
+}
+
+func mcpToolResult(result interface{}) map[string]interface{} {
+	text := ""
+	if encoded, err := json.Marshal(result); err == nil {
+		text = string(encoded)
+	} else {
+		text = fmt.Sprint(result)
+	}
+	return map[string]interface{}{
+		"content":           []map[string]interface{}{{"type": "text", "text": text}},
+		"structuredContent": result,
 	}
 }
 

@@ -155,11 +155,10 @@ func TestAIMCPCallAPIUsesInternalRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := payload["result"].(map[string]interface{})
-	apiResponse := result["content"]
-	if apiResponse != nil {
-		t.Fatalf("unexpected MCP content wrapper: %#v", apiResponse)
+	if result["content"] == nil || len(result["content"].([]interface{})) == 0 {
+		t.Fatalf("expected MCP content block, got %#v", result)
 	}
-	callResult := result
+	callResult := result["structuredContent"].(map[string]interface{})
 	if callResult["statusCode"].(float64) != 200 {
 		t.Fatalf("expected proxied status 200, got %#v", callResult)
 	}
@@ -253,8 +252,9 @@ func TestAIMCPWriteGatingAndKeyRotationBlock(t *testing.T) {
 		t.Fatalf("expected write call to succeed after enabling, got %#v", payload)
 	}
 	result := payload["result"].(map[string]interface{})
-	if result["statusCode"].(float64) != 200 {
-		t.Fatalf("expected proxied status 200, got %#v", result)
+	callResult := result["structuredContent"].(map[string]interface{})
+	if callResult["statusCode"].(float64) != 200 {
+		t.Fatalf("expected proxied status 200, got %#v", callResult)
 	}
 }
 
