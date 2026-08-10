@@ -58,6 +58,9 @@ type Service struct {
 	lastNetworkQualityPersistMu   sync.Mutex
 	realtimePersistInterval       time.Duration
 	networkQualityPersistInterval time.Duration
+	tunnelHealthCheckInterval     time.Duration
+	tunnelHealthCheckAttempts     int
+	tunnelHealthCheckDelay        time.Duration
 	agentTaskWaiters              sync.Map
 	autoLocationRefreshes         sync.Map
 	lastAutoLocationRefresh       sync.Map
@@ -145,6 +148,9 @@ func New(cfg config.Config) *Service {
 		lastNetworkQualityPersist:     make(map[string]time.Time),
 		realtimePersistInterval:       resolveRealtimeMetricsPersistInterval(),
 		networkQualityPersistInterval: resolveNetworkQualityPersistInterval(),
+		tunnelHealthCheckInterval:     5 * time.Minute,
+		tunnelHealthCheckAttempts:     3,
+		tunnelHealthCheckDelay:        3 * time.Second,
 	}
 	engineIO.service = s
 	s.presence = newAgentPresenceManager(s)
@@ -509,7 +515,7 @@ func New(cfg config.Config) *Service {
 	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
 	s.backgroundCtx = backgroundCtx
 	s.backgroundCancel = backgroundCancel
-	s.backgroundWG.Add(3)
+	s.backgroundWG.Add(4)
 	go func() {
 		defer s.backgroundWG.Done()
 		s.startMetricsCollectorLoop(backgroundCtx)
@@ -521,6 +527,10 @@ func New(cfg config.Config) *Service {
 	go func() {
 		defer s.backgroundWG.Done()
 		s.startSubscriptionReconcileLoop(backgroundCtx)
+	}()
+	go func() {
+		defer s.backgroundWG.Done()
+		s.startManagedTunnelHealthLoop(backgroundCtx)
 	}()
 
 	return s

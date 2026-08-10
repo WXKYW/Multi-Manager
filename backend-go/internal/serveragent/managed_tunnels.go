@@ -354,7 +354,7 @@ func (s *Service) runManagedTunnelDeploy(taskID, serverID, serverName, accountID
 // disconnect. This loop reconciles that status against the authoritative
 // Cloudflare connector count so the panel stops showing a fake "已连接".
 func (s *Service) startManagedTunnelHealthLoop(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(s.tunnelHealthCheckInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -412,7 +412,7 @@ func (s *Service) reconcileManagedTunnelConnection(serverID string) {
 	}
 	connected := false
 	var checkErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 0; attempt < s.tunnelHealthCheckAttempts; attempt++ {
 		var count int
 		count, checkErr = s.cloudflare.ManagedTunnelConnections(ctx, accountID, tunnelID)
 		if checkErr == nil && count > 0 {
@@ -422,7 +422,7 @@ func (s *Service) reconcileManagedTunnelConnection(serverID string) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(3 * time.Second):
+		case <-time.After(s.tunnelHealthCheckDelay):
 		}
 	}
 	if connected {

@@ -70,6 +70,8 @@ func (f *fakeManagedTunnelAPI) setConnections(count int, err error) {
 
 func TestReconcileManagedTunnelConnectionReflectsRealConnectivity(t *testing.T) {
 	service, db := testService(t)
+	service.tunnelHealthCheckAttempts = 1
+	service.tunnelHealthCheckDelay = 0
 	fake := &fakeManagedTunnelAPI{}
 	service.SetCloudflareTunnelManager(fake)
 	if _, err := db.Exec(`INSERT INTO server_accounts(id,name,host,username,auth_type) VALUES('tunnel-host','隧道主机','192.0.2.10','root','password')`); err != nil {
@@ -114,6 +116,8 @@ func TestReconcileManagedTunnelConnectionReflectsRealConnectivity(t *testing.T) 
 
 func TestReconcileManagedTunnelConnectionKeepsStatusOnAPIError(t *testing.T) {
 	service, db := testService(t)
+	service.tunnelHealthCheckAttempts = 1
+	service.tunnelHealthCheckDelay = 0
 	fake := &fakeManagedTunnelAPI{}
 	service.SetCloudflareTunnelManager(fake)
 	if _, err := db.Exec(`INSERT INTO server_accounts(id,name,host,username,auth_type) VALUES('error-host','错误主机','192.0.2.11','root','password')`); err != nil {
