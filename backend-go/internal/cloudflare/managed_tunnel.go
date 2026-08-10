@@ -19,6 +19,7 @@ import (
 type ManagedTunnelAPI interface {
 	PreflightManagedTunnel(context.Context, string, string, string) (ManagedTunnelPreflight, error)
 	CreateManagedTunnel(context.Context, string, string) (ManagedTunnel, error)
+	ManagedTunnelExists(context.Context, string, string) (bool, error)
 	ConfigureManagedTunnel(context.Context, string, string, []ManagedTunnelIngress) error
 	EnsureManagedTunnelDNS(context.Context, string, string, string, string) (ManagedTunnelDNS, error)
 	ManagedTunnelToken(context.Context, string, string) (string, error)
@@ -190,13 +191,15 @@ func (s *Service) EnsureManagedTunnelDNS(ctx context.Context, accountID, zoneID,
 func validateManagedTunnelDNSOwnership(record map[string]interface{}, desiredContent string) error {
 	comment := strings.TrimSpace(stringValue(record["comment"], ""))
 	content := strings.TrimSpace(stringValue(record["content"], ""))
+	if strings.EqualFold(content, strings.TrimSpace(desiredContent)) {
+		// The CNAME already points at this managed Tunnel; adopt it even if a
+		// legacy record predates the ownership comment marker.
+		return nil
+	}
 	if comment != "Managed by API Monitor" {
 		return fmt.Errorf("DNS hostname is already used by a record not owned by API Monitor")
 	}
-	if !strings.EqualFold(content, strings.TrimSpace(desiredContent)) {
-		return fmt.Errorf("DNS hostname is owned by another API Monitor Tunnel")
-	}
-	return nil
+	return fmt.Errorf("DNS hostname is owned by another API Monitor Tunnel")
 }
 
 func (s *Service) ManagedTunnelToken(ctx context.Context, accountID, tunnelID string) (string, error) {
@@ -225,6 +228,24 @@ func (s *Service) ManagedTunnelConnections(ctx context.Context, accountID, tunne
 		return 0, err
 	}
 	return len(arrayValue(payload["result"])), nil
+}
+
+func (s *Service) ManagedTunnelExists(ctx context.Context, accountID, tunnelID string) (bool, error) {
+	if strings.TrimSpace(tunnelID) == "" {
+		return false, nil
+	}
+	auth, cfAccountID, err := s.managedTunnelAuth(ctx, accountID)
+	if err != nil {
+		return false, err
+	}
+	_, err = s.cfRequest(ctx, http.MethodGet, "/accounts/"+url.PathEscape(cfAccountID)+"/cfd_tunnel/"+url.PathEscape(tunnelID), auth, nil)
+	if err == nil {
+		return true, nil
+	}
+	if cfIsResourceMissing(err) {
+		return false, nil
+	}
+	return false, fmt.Errorf("read Cloudflare Tunnel: %w", err)
 }
 
 func cfIsResourceMissing(err error) bool {

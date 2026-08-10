@@ -57,3 +57,19 @@ func TestManagedTunnelDNSOwnershipAcceptsMatchingOwnedRecord(t *testing.T) {
 		t.Fatalf("owned DNS record rejected: %v", err)
 	}
 }
+
+func TestManagedTunnelDNSOwnershipAdoptsLegacyRecordPointingAtOwnTunnel(t *testing.T) {
+	// A CNAME already pointing at this managed Tunnel is adoptable even when a
+	// legacy record predates the ownership comment marker (e.g. ARM recovery).
+	record := map[string]interface{}{"id": "dns-one", "content": "tunnel-one.cfargotunnel.com", "comment": ""}
+	if err := validateManagedTunnelDNSOwnership(record, "tunnel-one.cfargotunnel.com"); err != nil {
+		t.Fatalf("legacy record pointing at own Tunnel rejected: %v", err)
+	}
+}
+
+func TestManagedTunnelDNSOwnershipRejectsMismatchedCommentAndContent(t *testing.T) {
+	record := map[string]interface{}{"id": "dns-one", "content": "tunnel-two.cfargotunnel.com", "comment": "Managed by API Monitor"}
+	if err := validateManagedTunnelDNSOwnership(record, "tunnel-one.cfargotunnel.com"); err == nil {
+		t.Fatal("expected record owned by another API Monitor Tunnel to be rejected")
+	}
+}
