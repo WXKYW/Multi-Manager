@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_MODEL_HEALTH_CONCURRENCY,
-  MAX_BATCH_MODEL_HEALTH_TARGETS,
+  DEFAULT_MODEL_HEALTH_TIMEOUT_SECONDS,
   countModelHealthResults,
   endpointModelIds,
-  limitModelHealthTargets,
   modelHealthKey,
   modelHealthTargets,
   normalizeModelHealthRecord,
@@ -56,16 +55,8 @@ describe('OpenAI model health helpers', () => {
     expect(resolveModelHealthConcurrency(99, 50)).toBe(DEFAULT_MODEL_HEALTH_CONCURRENCY);
   });
 
-  it('caps full-batch targets while preserving order', () => {
-    const targets = Array.from({ length: MAX_BATCH_MODEL_HEALTH_TARGETS + 5 }, (_, index) => ({
-      endpointId: `endpoint-${index}`,
-      modelId: `model-${index}`,
-    }));
-
-    expect(limitModelHealthTargets(targets)).toHaveLength(MAX_BATCH_MODEL_HEALTH_TARGETS);
-    expect(limitModelHealthTargets(targets).at(-1)).toEqual({
-      endpointId: `endpoint-${MAX_BATCH_MODEL_HEALTH_TARGETS - 1}`,
-      modelId: `model-${MAX_BATCH_MODEL_HEALTH_TARGETS - 1}`,
-    });
+  it('exposes a sane default health-check timeout', () => {
+    expect(DEFAULT_MODEL_HEALTH_TIMEOUT_SECONDS).toBeGreaterThan(0);
+    expect(DEFAULT_MODEL_HEALTH_TIMEOUT_SECONDS).toBeLessThanOrEqual(30);
   });
 });

@@ -47,10 +47,9 @@ echarts.use([
 ]);
 import {
   DEFAULT_MODEL_HEALTH_CONCURRENCY,
-  MAX_BATCH_MODEL_HEALTH_TARGETS,
+  DEFAULT_MODEL_HEALTH_TIMEOUT_SECONDS,
   countModelHealthResults,
   endpointModelIds,
-  limitModelHealthTargets,
   modelHealthKey,
   modelHealthTargets,
   normalizeModelHealthRecord,
@@ -94,7 +93,6 @@ import {
   AlertTriangle,
   Key,
   Reboot,
-  Eye,
   Play,
   Clock,
   TrendingUp,
@@ -163,33 +161,6 @@ function parseProxyEntry(raw) {
     // 解析失败时展示原文。
   }
   return { label, full: value, host, ip };
-}
-
-function normalizeStoredHiddenModels(value) {
-  const map = {};
-  if (Array.isArray(value)) {
-    return map;
-  }
-  if (value && typeof value === 'object') {
-    for (const key of Object.keys(value)) {
-      map[key] = Array.isArray(value[key]) ? value[key].slice() : [];
-    }
-  }
-  return map;
-}
-
-function isModelHidden(hiddenMap, endpointId, modelId) {
-  const id = String(modelId || '').trim();
-  if (!id) return false;
-  return Array.isArray(hiddenMap?.[endpointId]) && hiddenMap[endpointId].includes(id);
-}
-
-function toggleModelHidden(hiddenMap, endpointId, modelId) {
-  const id = String(modelId || '').trim();
-  if (!id || !endpointId) return hiddenMap;
-  const list = [...(hiddenMap?.[endpointId] || [])];
-  const next = list.includes(id) ? list.filter(item => item !== id) : [...list, id];
-  return { ...hiddenMap, [endpointId]: next };
 }
 
 // 自绘 ECharts 柱状时间桶：每个桶(小时/天/周)一根柱，类目轴标签 = 桶名，避免时间轴重复标签。
@@ -406,6 +377,8 @@ function OpenAIPage() {
   const [endpointsRefreshing, setEndpointsRefreshing] = useState(false);
   const [endpointToggleLoading, setEndpointToggleLoading] = useState({});
   const [selectedEndpointId, setSelectedEndpointId] = useState('');
+  const [draggedEndpointId, setDraggedEndpointId] = useState(null);
+  const [endpointReorderSaving, setEndpointReorderSaving] = useState(false);
   const [endpointFormOpen, setEndpointFormOpen] = useState(false);
   const [editingEndpoint, setEditingEndpoint] = useState(null);
   const [endpointForm, setEndpointForm] = useState({
@@ -416,6 +389,7 @@ function OpenAIPage() {
     headers: [],
     proxyPool: [],
     autoSwitch: false,
+    forceProxy: false,
   });
   const [endpointFormError, setEndpointFormError] = useState('');
   const [endpointSaving, setEndpointSaving] = useState(false);
@@ -830,11 +804,67 @@ const trendSeries = useMemo(() => {
     }
   };
 
+  // 端点列表拖拽排序：本地先更新顺序，再持久化到后端；失败时回滚。
+  const saveEndpointOrder = async nextEndpoints => {
+    const orderedIds = nextEndpoints.map(ep => ep.id);
+    setEndpointReorderSaving(true);
+    try {
+      const response = await fetch('/api/openai/endpoints/reorder', {
+        method: 'POST',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpointIds: orderedIds }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) throw new Error(data.error || '保存失败');
+      toast.success('端点顺序已保存');
+    } catch (error) {
+      toast.error('排序保存失败: ' + error.message);
+      await loadEndpoints(true);
+    } finally {
+      setEndpointReorderSaving(false);
+    }
+  };
+
+  const handleEndpointDragStart = (item, event) => {
+    setDraggedEndpointId(String(item.id));
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(item.id));
+  };
+
+  const handleEndpointDragOver = event => {
+    if (!draggedEndpointId) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleEndpointDrop = async (targetItem, event) => {
+    event.preventDefault();
+    const sourceId = draggedEndpointId || event.dataTransfer.getData('text/plain');
+    setDraggedEndpointId(null);
+    if (!sourceId || String(sourceId) === String(targetItem.id)) return;
+    const fromIndex = endpoints.findIndex(ep => String(ep.id) === String(sourceId));
+    const toIndex = endpoints.findIndex(ep => String(ep.id) === String(targetItem.id));
+    if (fromIndex < 0 || toIndex < 0) return;
+    const next = [...endpoints];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    setEndpoints(next);
+    await saveEndpointOrder(next);
+  };
+
+  const handleEndpointDragEnd = () => {
+    setDraggedEndpointId(null);
+  };
+
+  // 模型开关的进行中标记：ref 用于同步去重，state 用于驱动按钮禁用态渲染。
   const modelSwitchLoadingRef = useRef({});
+  const [modelSwitchLoading, setModelSwitchLoading] = useState({});
+
   const toggleModelEnabled = async (endpoint, modelId, enabled, silent = false, skipReload = false) => {
     const key = `${endpoint.id}:${modelId}`;
     if (modelSwitchLoadingRef.current[key]) return;
     modelSwitchLoadingRef.current[key] = true;
+    setModelSwitchLoading(prev => ({ ...prev, [key]: true }));
     const prevDisabled = Array.isArray(endpoint.disabledModels) ? endpoint.disabledModels : [];
     // 乐观更新：立即切换开关状态，无需等待后端往返。
     setEndpoints(prev =>
@@ -878,6 +908,7 @@ const trendSeries = useMemo(() => {
       toast.error(`更新模型状态失败: ${error.message}`);
     } finally {
       modelSwitchLoadingRef.current[key] = false;
+      setModelSwitchLoading(prev => ({ ...prev, [key]: false }));
     }
   };
 
@@ -896,6 +927,7 @@ const trendSeries = useMemo(() => {
       headers: [],
       proxyPool: [],
       autoSwitch: false,
+      forceProxy: false,
     });
     setEndpointFormError('');
     setEndpointFormOpen(true);
@@ -911,6 +943,7 @@ const trendSeries = useMemo(() => {
       headers: Array.isArray(endpoint.headers) ? endpoint.headers : [],
       proxyPool: Array.isArray(endpoint.proxyPool) ? endpoint.proxyPool : [],
       autoSwitch: Boolean(endpoint.autoSwitch),
+      forceProxy: Boolean(endpoint.forceProxy),
     });
     setEndpointFormError('');
     setEndpointFormOpen(true);
@@ -1067,10 +1100,18 @@ const trendSeries = useMemo(() => {
     }
   };
 
+  const [pendingDeleteEndpointId, setPendingDeleteEndpointId] = useState(null);
+  const DELETE_ENDPOINT_CONFIRM_MS = 3000;
+  const deleteEndpointConfirmActive = id =>
+    pendingDeleteEndpointId?.id === id && pendingDeleteEndpointId.expiresAt > Date.now();
+
   const deleteEndpoint = async endpoint => {
-    if (!(await dialog.deleteResource(`确定要删除端点 "${endpoint.name || endpoint.baseUrl}" 吗？`))) {
+    if (!deleteEndpointConfirmActive(endpoint.id)) {
+      setPendingDeleteEndpointId({ id: endpoint.id, expiresAt: Date.now() + DELETE_ENDPOINT_CONFIRM_MS });
+      toast.info(`删除端点 ${endpoint.name || endpoint.baseUrl}？请再次点击确认`);
       return;
     }
+    setPendingDeleteEndpointId(null);
     try {
       const response = await fetch(`/api/openai/endpoints/${endpoint.id}`, {
         method: 'DELETE',
@@ -1107,10 +1148,28 @@ const trendSeries = useMemo(() => {
   const [healthCheckProgress, setHealthCheckProgress] = useState(() => createHealthCheckProgress());
   const [healthCheckModal, setHealthCheckModal] = useState(false);
   const [healthCheckForm, setHealthCheckForm] = useState({
-    timeout: 30,
+    timeout: DEFAULT_MODEL_HEALTH_TIMEOUT_SECONDS,
     concurrency: DEFAULT_MODEL_HEALTH_CONCURRENCY,
   });
   const modelHealthAbortControllersRef = useRef(new Map());
+  // 批量检测进行中请求：切换端点时 abort，避免旧端点的检测状态带偏新端点。
+  const batchHealthAbortRef = useRef(null);
+
+  // 切换选中端点时立即终止该端点所有检测（单个 + 批量），并清理「检测中」状态。
+  useEffect(() => {
+    modelHealthAbortControllersRef.current.forEach(controller => controller.abort());
+    modelHealthAbortControllersRef.current.clear();
+    batchHealthAbortRef.current?.abort();
+    batchHealthAbortRef.current = null;
+    setModelHealthBatchLoading(false);
+    setOpenaiModelHealth(prev => {
+      const next = {};
+      for (const [key, record] of Object.entries(prev)) {
+        next[key] = record?.loading ? { ...record, loading: false } : record;
+      }
+      return next;
+    });
+  }, [selectedEndpointId]);
 
   const markModelsChecking = targets => {
     const checkedAt = Date.now();
@@ -1332,7 +1391,7 @@ const trendSeries = useMemo(() => {
           signal: controller.signal,
           body: JSON.stringify({
             model: modelId,
-            timeout: Math.max(1, Number(healthCheckForm.timeout) || 30) * 1000,
+            timeout: Math.max(1, Number(healthCheckForm.timeout) || DEFAULT_MODEL_HEALTH_TIMEOUT_SECONDS) * 1000,
           }),
         }
       );
@@ -1364,68 +1423,42 @@ const trendSeries = useMemo(() => {
     }
   };
 
-  const runModelHealthChecksWithPool = async targets => {
+  // 批量检测：前端并发逐模型发请求，每个完成立即回填状态（无需等全部完成）。
+  const runBatchHealthCheckRequest = async (targets, fallbackMessage) => {
     if (!Array.isArray(targets) || targets.length === 0) return [];
-
-    const results = new Array(targets.length);
     const concurrency = resolveModelHealthConcurrency(healthCheckForm.concurrency, targets.length);
+    markModelsChecking(targets);
+    const results = new Array(targets.length);
     let cursor = 0;
-
-    const commitProgress = result => {
-      const healthy = result?.status === 'healthy' ? 1 : 0;
-      const degraded = result?.status === 'degraded' ? 1 : 0;
-      const failed = healthy || degraded ? 0 : 1;
-      setHealthCheckProgress(prev => ({
-        ...prev,
-        completed: Math.min(prev.total, prev.completed + 1),
-        healthy: prev.healthy + healthy,
-        degraded: prev.degraded + degraded,
-        failed: prev.failed + failed,
-      }));
-    };
-
     const workers = Array.from({ length: concurrency }, async () => {
       while (true) {
         const index = cursor;
         cursor += 1;
         if (index >= targets.length) return;
-
         const target = targets[index];
-        const result = await testModelHealth({ id: target.modelId }, target.endpointId, true);
-        const normalizedResult =
+        // silentToast=true：每个模型的 toast 由批量结果统一汇总，避免刷屏。
+        const result = await testModelHealth(
+          { id: target.modelId },
+          target.endpointId,
+          true
+        );
+        results[index] =
           result ||
           normalizeModelHealthRecord(
-            {
-              status: 'failed',
-              error: '检测未返回结果',
-              checkedAt: Date.now(),
-            },
+            { status: 'failed', error: '检测未返回结果', checkedAt: Date.now() },
             '检测未返回结果'
           );
-
-        results[index] = normalizedResult;
-        commitProgress(normalizedResult);
       }
     });
-
     await Promise.all(workers);
     return results;
   };
-
-  const runEndpointHealthCheck = async endpoint =>
-    runModelHealthChecksWithPool(
-      endpointModelIds(endpoint).map(modelId => ({ endpointId: endpoint.id, modelId }))
-    );
-
-  const runAllEndpointHealthChecks = async targets => runModelHealthChecksWithPool(targets);
 
   const startBatchHealthCheck = async () => {
     const endpointTargets = endpoints.filter(
       endpoint => endpoint.enabled && endpointModelIds(endpoint).length > 0
     );
     const allTargets = modelHealthTargets(endpointTargets);
-    const targets = limitModelHealthTargets(allTargets);
-    const concurrency = resolveModelHealthConcurrency(healthCheckForm.concurrency, targets.length);
     if (allTargets.length === 0) {
       toast.warning('没有找到任何启用的端点或模型');
       return;
@@ -1433,29 +1466,28 @@ const trendSeries = useMemo(() => {
 
     setHealthCheckModal(false);
     setModelHealthBatchLoading(true);
-    setHealthCheckProgress(createHealthCheckProgress(targets.length, true));
-    toast.info(
-      allTargets.length > targets.length
-        ? `正在按 ${concurrency} 并发实时检测前 ${targets.length} 个模型（全部检测上限 ${MAX_BATCH_MODEL_HEALTH_TARGETS}）...`
-        : `正在按 ${concurrency} 并发实时检测 ${targets.length} 个模型...`
+    setHealthCheckProgress(createHealthCheckProgress(allTargets.length, true));
+    const concurrency = resolveModelHealthConcurrency(
+      healthCheckForm.concurrency,
+      allTargets.length
     );
+    toast.info(`正在按 ${concurrency} 并发批量检测 ${allTargets.length} 个模型...`);
 
     try {
-      const results = await runAllEndpointHealthChecks(targets);
+      const results = await runBatchHealthCheckRequest(allTargets, '批量检测失败');
       const counts = countModelHealthResults(results);
       setHealthCheckProgress({
         running: false,
-        total: targets.length,
+        total: allTargets.length,
         completed: results.length,
         ...counts,
       });
 
-      const message =
-        allTargets.length > targets.length
-          ? `检测完成：已检测前 ${targets.length} 个模型，可用 ${counts.healthy}，较慢 ${counts.degraded}，失败 ${counts.failed}`
-          : `检测完成：可用 ${counts.healthy}，较慢 ${counts.degraded}，失败 ${counts.failed}`;
+      const message = `检测完成：可用 ${counts.healthy}，较慢 ${counts.degraded}，失败 ${counts.failed}`;
       if (counts.failed > 0) toast.warning(message);
       else toast.success(message);
+    } catch {
+      // 错误已在单模型检测内提示，此处仅终止流程。
     } finally {
       setModelHealthBatchLoading(false);
     }
@@ -1464,7 +1496,6 @@ const trendSeries = useMemo(() => {
   const openHealthCheckForEndpoint = async endpointId => {
     const ep = endpoints.find(e => e.id === endpointId);
     const modelIds = endpointModelIds(ep);
-    const concurrency = resolveModelHealthConcurrency(healthCheckForm.concurrency, modelIds.length);
     if (!ep || modelIds.length === 0) {
       toast.warning('该端点无可用模型');
       return;
@@ -1472,12 +1503,14 @@ const trendSeries = useMemo(() => {
 
     setModelHealthBatchLoading(true);
     setHealthCheckProgress(createHealthCheckProgress(modelIds.length, true));
+    const concurrency = resolveModelHealthConcurrency(healthCheckForm.concurrency, modelIds.length);
     toast.info(
-      `正在按 ${concurrency} 并发实时检测 ${ep.name || '端点'} 的 ${modelIds.length} 个模型...`
+      `正在按 ${concurrency} 并发批量检测 ${ep.name || '端点'} 的 ${modelIds.length} 个模型...`
     );
 
     try {
-      const results = await runEndpointHealthCheck(ep);
+      const targets = modelIds.map(modelId => ({ endpointId, modelId }));
+      const results = await runBatchHealthCheckRequest(targets, '端点检测失败');
       const counts = countModelHealthResults(results);
       setHealthCheckProgress({
         running: false,
@@ -1488,6 +1521,8 @@ const trendSeries = useMemo(() => {
       const message = `${ep.name || '端点'}：可用 ${counts.healthy}，较慢 ${counts.degraded}，失败 ${counts.failed}`;
       if (counts.failed > 0) toast.warning(message);
       else toast.success(message);
+    } catch {
+      // 错误已在单模型检测内提示，此处仅终止流程。
     } finally {
       setModelHealthBatchLoading(false);
     }
@@ -1501,14 +1536,6 @@ const trendSeries = useMemo(() => {
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
-    }
-  });
-  const [hiddenModels, setHiddenModels] = useState(() => {
-    try {
-      const saved = localStorage.getItem('openai_hidden_models');
-      return saved ? normalizeStoredHiddenModels(JSON.parse(saved)) : {};
-    } catch {
-      return {};
     }
   });
 
@@ -1628,36 +1655,6 @@ const trendSeries = useMemo(() => {
     });
   };
 
-  const toggleHideModel = (endpointId, modelId) => {
-    if (!modelId || !endpointId) return;
-    setHiddenModels(prev => {
-      const next = toggleModelHidden(prev, endpointId, modelId);
-      localStorage.setItem('openai_hidden_models', JSON.stringify(next));
-      return next;
-    });
-  };
-
-  const restoreHiddenModels = endpoint => {
-    if (!endpoint) return;
-    const hidden = Array.isArray(endpoint.models) ? endpoint.models : [];
-    const hiddenIds = hidden
-      .map(model => (typeof model === 'string' ? model.trim() : (model?.id || '').trim()))
-      .filter(modelId => modelId && isModelHidden(hiddenModels, endpoint.id, modelId));
-    if (hiddenIds.length === 0) return;
-    setHiddenModels(prev => {
-      const next = { ...prev };
-      const keep = (prev?.[endpoint.id] || []).filter(id => !hiddenIds.includes(id));
-      if (keep.length === 0) {
-        delete next[endpoint.id];
-      } else {
-        next[endpoint.id] = keep;
-      }
-      localStorage.setItem('openai_hidden_models', JSON.stringify(next));
-      return next;
-    });
-    toast.success(`已恢复 ${hiddenIds.length} 个被隐藏的模型`);
-  };
-
   const failedModelIdsForEndpoint = endpoint => {
     if (!endpoint) return [];
     return endpointModelIds(endpoint).filter(
@@ -1671,30 +1668,117 @@ const trendSeries = useMemo(() => {
   const [mappingEditKey, setMappingEditKey] = useState(null);
   const [mappingDraft, setMappingDraft] = useState('');
 
+  // 批量切换端点模型的启用状态（原子接口，避免并发逐个 toggle 丢失）。
+  const batchToggleEndpointModels = async (endpoint, modelIds, enabled, successMessage) => {
+    if (modelBatchActionLoading) return;
+    const ids = Array.from(new Set((modelIds || []).filter(Boolean)));
+    if (ids.length === 0) return;
+    setModelBatchActionLoading(true);
+    try {
+      const response = await fetch(
+        `/api/openai/endpoints/${endpoint.id}/models/toggle-batch`,
+        {
+          method: 'POST',
+          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ models: ids, enabled }),
+        }
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) throw new Error(data.error || '更新失败');
+      setEndpoints(prev =>
+        prev.map(e =>
+          e.id === endpoint.id
+            ? { ...e, disabledModels: Array.isArray(data.disabledModels) ? data.disabledModels : [] }
+            : e
+        )
+      );
+      await loadAllModels(true);
+      toast.success(successMessage || `已${enabled ? '启用' : '关闭'} ${ids.length} 个模型`);
+      return true;
+    } catch (error) {
+      toast.error(`批量更新失败: ${error.message}`);
+      return false;
+    } finally {
+      setModelBatchActionLoading(false);
+    }
+  };
+
+  // 关闭端点上所有「非有效」模型（未检测/检测失败/较慢之外的），仅停用不隐藏。
+  // 检测为有效的模型（healthy/degraded）不在此列，由每行手动开关控制。
+  const batchCloseNonHealthyModels = async endpoint => {
+    if (modelBatchActionLoading) return;
+    const targets = endpointModelIds(endpoint).filter(modelId => {
+      if (!modelEnabledForEndpoint(endpoint, modelId)) return false;
+      const health = openaiModelHealth[modelHealthKey(endpoint.id, modelId)];
+      return health?.status !== 'healthy' && health?.status !== 'degraded';
+    });
+    if (targets.length === 0) {
+      toast.info('当前没有可批量关闭的模型（非有效模型均为空）');
+      return;
+    }
+    await batchToggleEndpointModels(endpoint, targets, false, `已关闭 ${targets.length} 个非有效模型`);
+  };
+
+  // 兼容旧调用：全局一键关闭失败的模型（保留，供顶栏使用）。
   const batchCloseFailedModels = async endpoint => {
     if (modelBatchActionLoading) return;
-    const failed = failedModelIdsForEndpoint(endpoint);
+    const failed = failedModelIdsForEndpoint(endpoint).filter(modelId =>
+      modelEnabledForEndpoint(endpoint, modelId)
+    );
     if (failed.length === 0) {
       toast.info('当前端点没有检测失败的模型');
       return;
     }
+    await batchToggleEndpointModels(endpoint, failed, false, `已关闭 ${failed.length} 个检测失败的模型`);
+  };
+
+  // 全局一键：跨全部启用端点，关闭所有检测失败的模型（仅停用，不隐藏）。
+  const batchCloseAllFailedModels = async () => {
+    if (modelBatchActionLoading) return;
+    const byEndpoint = {};
+    endpoints.forEach(endpoint => {
+      if (!endpoint.enabled) return;
+      failedModelIdsForEndpoint(endpoint).forEach(modelId => {
+        if (modelEnabledForEndpoint(endpoint, modelId)) {
+          byEndpoint[endpoint.id] = byEndpoint[endpoint.id] || { endpoint, models: [] };
+          byEndpoint[endpoint.id].models.push(modelId);
+        }
+      });
+    });
+    const entries = Object.values(byEndpoint);
+    const total = entries.reduce((sum, entry) => sum + entry.models.length, 0);
+    if (total === 0) {
+      toast.info('当前没有检测失败的模型');
+      return;
+    }
+    if (!(await dialog.confirm(`确认关闭全部 ${total} 个检测失败的模型吗？（仅停用对应模型）`))) {
+      return;
+    }
     setModelBatchActionLoading(true);
     try {
-      const targets = failed.filter(modelId => modelEnabledForEndpoint(endpoint, modelId));
-      // 同时（并发）关闭，而不是一个一个依次等待。
-      await Promise.all(
-        targets.map(modelId => toggleModelEnabled(endpoint, modelId, false, true, true))
-      );
-      if (targets.length > 0) await loadAllModels(true);
-      // 关闭的同时，在本端点隐藏这些失败的模型，使其从模型列表消失。
-      setHiddenModels(prev => {
-        const next = { ...prev };
-        const merged = Array.from(new Set([...(prev?.[endpoint.id] || []), ...failed]));
-        next[endpoint.id] = merged;
-        localStorage.setItem('openai_hidden_models', JSON.stringify(next));
-        return next;
-      });
-      toast.success(`已关闭并隐藏 ${failed.length} 个检测失败的模型`);
+      for (const entry of entries) {
+        const response = await fetch(
+          `/api/openai/endpoints/${entry.endpoint.id}/models/toggle-batch`,
+          {
+            method: 'POST',
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ models: entry.models, enabled: false }),
+          }
+        );
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.success) throw new Error(data.error || '更新失败');
+        setEndpoints(prev =>
+          prev.map(e =>
+            e.id === entry.endpoint.id
+              ? { ...e, disabledModels: Array.isArray(data.disabledModels) ? data.disabledModels : [] }
+              : e
+          )
+        );
+      }
+      await loadAllModels(true);
+      toast.success(`已关闭 ${total} 个检测失败的模型`);
+    } catch (error) {
+      toast.error(`批量更新失败: ${error.message}`);
     } finally {
       setModelBatchActionLoading(false);
     }
@@ -1741,37 +1825,12 @@ const trendSeries = useMemo(() => {
     }
   };
 
-  // 批量开关切换：有被停用的模型时显示"启用"，否则显示"关闭失败"。
-  const batchToggleEnabledModels = async endpoint => {
+  // 批量启用被停用的模型（与「关闭检测失败的模型」拆分为两个明确动作）。
+  const batchEnableDisabledModels = async endpoint => {
     if (modelBatchActionLoading) return;
     const disabled = Array.isArray(endpoint.disabledModels) ? endpoint.disabledModels : [];
-    if (disabled.length === 0) {
-      await batchCloseFailedModels(endpoint);
-      return;
-    }
-    setModelBatchActionLoading(true);
-    try {
-      // 同时（并发）启用，而不是一个一个依次等待。
-      await Promise.all(
-        disabled.map(modelId => toggleModelEnabled(endpoint, modelId, true, true, true))
-      );
-      if (disabled.length > 0) await loadAllModels(true);
-      // 启用后一并取消隐藏本端点这些模型，使其回到列表。
-      setHiddenModels(prev => {
-        const next = { ...prev };
-        const keep = (prev?.[endpoint.id] || []).filter(id => !disabled.includes(id));
-        if (keep.length === 0) {
-          delete next[endpoint.id];
-        } else {
-          next[endpoint.id] = keep;
-        }
-        localStorage.setItem('openai_hidden_models', JSON.stringify(next));
-        return next;
-      });
-      toast.success(`已启用并恢复 ${disabled.length} 个被停用的模型`);
-    } finally {
-      setModelBatchActionLoading(false);
-    }
+    if (disabled.length === 0) return;
+    await batchToggleEndpointModels(endpoint, disabled, true, `已启用 ${disabled.length} 个被停用的模型`);
   };
 
   const handleSetDefaultModel = () => {
@@ -2822,8 +2881,7 @@ const trendSeries = useMemo(() => {
       const matchesEndpoint =
         !openaiSelectedEndpointId ||
         m.owned_by === endpoints.find(e => e.id === openaiSelectedEndpointId)?.name;
-      const matchesHidden = !isModelHidden(hiddenModels, openaiSelectedEndpointId || '', m.id);
-      return matchesSearch && matchesEndpoint && matchesHidden;
+      return matchesSearch && matchesEndpoint;
     });
     return list;
   }, [
@@ -2831,7 +2889,6 @@ const trendSeries = useMemo(() => {
     openaiModelSearch,
     openaiSelectedEndpointId,
     endpoints,
-    hiddenModels,
   ]);
 
   const chatDropdownFilteredModels = useMemo(() => {
@@ -2856,10 +2913,9 @@ const trendSeries = useMemo(() => {
       // Filter by active endpoint
       const matchesEndpoint =
         !chatEndpoint || m.owned_by === endpoints.find(e => e.id === chatEndpoint)?.name;
-      const isHidden = isModelHidden(hiddenModels, chatEndpoint || '', m.id);
-      return matchesSearch && matchesEndpoint && !isHidden;
+      return matchesSearch && matchesEndpoint;
     });
-  }, [allModels, endpoints, chatEndpoint, dropdownModelSearch, hiddenModels]);
+  }, [allModels, endpoints, chatEndpoint, dropdownModelSearch]);
 
   const selectChatModel = modelId => {
     setChatModel(modelId);
@@ -3019,13 +3075,6 @@ const trendSeries = useMemo(() => {
                     selectClassName: 'w-36',
                   },
                   {
-                    key: 'refresh',
-                    label: '刷新',
-                    icon: <RefreshCw className={cx('w-3.5 h-3.5', analyticsLoading && 'animate-spin')} />,
-                    onClick: fetchAnalytics,
-                    disabled: analyticsLoading,
-                  },
-                  {
                     key: 'clear',
                     label: '清除数据',
                     icon: <Trash className="h-3.5 w-3.5" />,
@@ -3125,18 +3174,9 @@ const trendSeries = useMemo(() => {
               const endpoint = selectedEndpoint;
               const validStatus = endpoint.status === 'valid';
               const invalidStatus = endpoint.status === 'invalid';
-              const failedModelCount = failedModelIdsForEndpoint(endpoint).length;
               const disabledModelCount = Array.isArray(endpoint.disabledModels)
                 ? endpoint.disabledModels.length
                 : 0;
-              const hiddenModelCount = (endpoint.models || []).filter(model => {
-                const modelId = typeof model === 'string' ? model.trim() : (model?.id || '').trim();
-                return modelId && isModelHidden(hiddenModels, endpoint.id, modelId);
-              }).length;
-              const visibleEndpointModels = (endpoint.models || []).filter(model => {
-                const modelId = typeof model === 'string' ? model.trim() : (model?.id || '').trim();
-                return !isModelHidden(hiddenModels, endpoint.id, modelId);
-              });
 
               return (
                 <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(18rem,22rem)_minmax(0,1fr)]">
@@ -3168,7 +3208,12 @@ const trendSeries = useMemo(() => {
                               <Table.Row
                                 key={item.id}
                                 variant={item.id === endpoint.id ? 'selected' : 'default'}
-                                className="h-11 cursor-pointer"
+                                className={`h-11 cursor-pointer ${draggedEndpointId === String(item.id) ? 'opacity-40' : ''}`}
+                                draggable={!endpointReorderSaving}
+                                onDragStart={event => handleEndpointDragStart(item, event)}
+                                onDragOver={handleEndpointDragOver}
+                                onDrop={event => handleEndpointDrop(item, event)}
+                                onDragEnd={handleEndpointDragEnd}
                                 onClick={() => setSelectedEndpointId(item.id)}
                               >
                                 <Table.Cell className="!px-2.5 !py-1.5">
@@ -3260,36 +3305,6 @@ const trendSeries = useMemo(() => {
                         <Button
                           shape="square"
                           size="sm"
-                          variant={disabledModelCount > 0 ? 'primary' : 'secondary'}
-                          aria-label={
-                            disabledModelCount > 0 ? '启用被停用的模型' : '批量关闭检测失败的模型'
-                          }
-                          onClick={() => batchToggleEnabledModels(endpoint)}
-                          disabled={
-                            modelBatchActionLoading ||
-                            modelHealthBatchLoading ||
-                            (disabledModelCount === 0 && failedModelCount === 0)
-                          }
-                          title={
-                            disabledModelCount > 0
-                              ? `启用 ${disabledModelCount} 个被停用的模型`
-                              : failedModelCount > 0
-                                ? `关闭 ${failedModelCount} 个检测失败的模型并隐藏`
-                                : '没有检测失败的模型'
-                          }
-                          icon={
-                            modelBatchActionLoading ? (
-                              <Loader size="sm" />
-                            ) : disabledModelCount > 0 ? (
-                              <Play className={actionIconClass} />
-                            ) : (
-                              <Reboot className={actionIconClass} />
-                            )
-                          }
-                        />
-                        <Button
-                          shape="square"
-                          size="sm"
                           variant="secondary"
                           aria-label="刷新模型列表"
                           onClick={() => refreshEndpointModels(endpoint)}
@@ -3301,17 +3316,6 @@ const trendSeries = useMemo(() => {
                             />
                           }
                         />
-                        {hiddenModelCount > 0 && (
-                          <Button
-                            shape="square"
-                            size="sm"
-                            variant="secondary"
-                            aria-label={`恢复 ${hiddenModelCount} 个被隐藏的模型`}
-                            onClick={() => restoreHiddenModels(endpoint)}
-                            title={`恢复 ${hiddenModelCount} 个被隐藏的模型`}
-                            icon={<Eye className={actionIconClass} />}
-                          />
-                        )}
                         <Button
                           shape="square"
                           size="sm"
@@ -3325,10 +3329,22 @@ const trendSeries = useMemo(() => {
                         <Button
                           shape="square"
                           size="sm"
-                          variant="secondary-destructive"
-                          aria-label="删除端点"
+                          variant={
+                            deleteEndpointConfirmActive(endpoint.id)
+                              ? 'primary'
+                              : 'secondary-destructive'
+                          }
+                          aria-label={
+                            deleteEndpointConfirmActive(endpoint.id)
+                              ? `再次点击确认删除 ${endpoint.name || endpoint.baseUrl}`
+                              : `删除 ${endpoint.name || endpoint.baseUrl}`
+                          }
                           onClick={() => deleteEndpoint(endpoint)}
-                          title="删除端点"
+                          title={
+                            deleteEndpointConfirmActive(endpoint.id)
+                              ? '再次点击确认删除'
+                              : '删除端点'
+                          }
                         >
                           <Trash className={actionIconClass} />
                         </Button>
@@ -3340,34 +3356,60 @@ const trendSeries = useMemo(() => {
                         <Table layout="fixed" className="min-w-[820px] text-xs">
                           <colgroup>
                             <col style={{ width: 56 }} />
-                            <col style={{ width: 240 }} />
-                            <col style={{ width: 140 }} />
+                            <col style={{ width: 260 }} />
+                            <col style={{ width: 150 }} />
                             <col style={{ width: 92 }} />
                             <col style={{ width: 96 }} />
                             <col style={{ width: 150 }} />
-                            <col style={{ width: 132 }} />
                           </colgroup>
                           <Table.Header sticky variant="compact">
                             <Table.Row className="h-8">
-                              <Table.Head className="!px-2 !py-1.5 text-center">启用</Table.Head>
+                              <Table.Head className="!px-2 !py-1.5 text-center">
+                                <div
+                                  className="flex items-center justify-center"
+                                  onClick={event => event.stopPropagation()}
+                                  title={
+                                    disabledModelCount > 0
+                                      ? `启用 ${disabledModelCount} 个被停用的模型`
+                                      : '关闭所有非有效模型（检测有效的保留）'
+                                  }
+                                >
+                                  <Switch
+                                    size="sm"
+                                    aria-label={
+                                      disabledModelCount > 0
+                                        ? `启用 ${disabledModelCount} 个被停用的模型`
+                                        : '关闭所有非有效模型（检测有效的保留）'
+                                    }
+                                    checked={disabledModelCount === 0}
+                                    onCheckedChange={checked => {
+                                      if (checked) {
+                                        // 从关→开：启用全部被停用的模型
+                                        batchEnableDisabledModels(endpoint);
+                                      } else {
+                                        // 从开→关：关闭所有非有效模型
+                                        batchCloseNonHealthyModels(endpoint);
+                                      }
+                                    }}
+                                    disabled={modelBatchActionLoading || modelHealthBatchLoading}
+                                  />
+                                </div>
+                              </Table.Head>
                               <Table.Head className="!px-2.5 !py-1.5">模型</Table.Head>
                               <Table.Head className="!px-2 !py-1.5">模型映射</Table.Head>
                               <Table.Head className="!px-2 !py-1.5 text-center">健康</Table.Head>
                               <Table.Head className="!px-2 !py-1.5 text-center">延迟</Table.Head>
-                              <Table.Head className="!px-2 !py-1.5 text-center">最近检测</Table.Head>
                               <Table.Head className="app-table-action !px-2 !py-1.5">操作</Table.Head>
                             </Table.Row>
                           </Table.Header>
                           <Table.Body>
                             {endpoint.models && endpoint.models.length > 0 ? (
-                              visibleEndpointModels.length > 0 ? (
-                              visibleEndpointModels.map(model => {
+                              endpoint.models.map(model => {
                                 const modelId =
                                   typeof model === 'string'
                                     ? model.trim()
                                     : (model.id || '').trim();
                                 const healthKey = modelHealthKey(endpoint.id, modelId);
-                                const isHidden = isModelHidden(hiddenModels, endpoint.id, modelId);
                                 const health = openaiModelHealth[healthKey];
                                 const canStopHealthCheck =
                                   health?.loading &&
@@ -3395,7 +3437,7 @@ const trendSeries = useMemo(() => {
                                           : '未检测';
 
                                 return (
-                                  <Table.Row key={modelId} className="h-9">
+                                  <Table.Row key={`${endpoint.id}:${modelId}`} className="h-9">
                                     <Table.Cell className="!px-2 !py-1.5 text-center">
                                       <div
                                         className="flex justify-center"
@@ -3408,7 +3450,7 @@ const trendSeries = useMemo(() => {
                                           onCheckedChange={enabled =>
                                             toggleModelEnabled(endpoint, modelId, enabled)
                                           }
-                                          disabled={!!modelSwitchLoadingRef.current[`${endpoint.id}:${modelId}`]}
+                                          disabled={!!modelSwitchLoading[`${endpoint.id}:${modelId}`]}
                                         />
                                       </div>
                                     </Table.Cell>
@@ -3466,22 +3508,8 @@ const trendSeries = useMemo(() => {
                                     <Table.Cell className="!px-2 !py-1.5 text-center font-mono text-kumo-strong">
                                       {health?.latency != null ? `${health.latency} ms` : '-'}
                                     </Table.Cell>
-                                    <Table.Cell className="!px-2 !py-1.5 text-center text-kumo-subtle">
-                                      {health?.checkedAt ? formatDateTime(health.checkedAt) : '-'}
-                                    </Table.Cell>
                                     <Table.Cell className="!px-2 !py-1.5 text-center">
                                       <div className="inline-flex gap-1">
-                                        {isHidden && (
-                                          <Button
-                                            shape="square"
-                                            size="sm"
-                                            variant="secondary"
-                                            aria-label={`取消隐藏 ${modelId}`}
-                                            onClick={() => toggleHideModel(endpoint.id, modelId)}
-                                            title="取消隐藏"
-                                            icon={<Eye className="h-3.5 w-3.5" />}
-                                          />
-                                        )}
                                         <Button
                                           shape="square"
                                           size="sm"
@@ -3498,7 +3526,7 @@ const trendSeries = useMemo(() => {
                                           onClick={() =>
                                             testModelHealth({ id: modelId }, endpoint.id)
                                           }
-                                          disabled={!!health?.loading}
+                                          disabled={modelHealthBatchLoading}
                                           title={
                                             health?.error ||
                                             (canStopHealthCheck
@@ -3532,30 +3560,6 @@ const trendSeries = useMemo(() => {
                                     </Table.Row>
                                 );
                               })
-                            ) : (
-                              <Table.Row>
-                                <Table.Cell
-                                  colSpan={6}
-                                  className="py-10 text-center text-kumo-subtle"
-                                >
-                                  {(endpoint.models || []).length > 0 && hiddenModelCount > 0
-                                    ? (
-                                      <div className="flex flex-col items-center gap-2">
-                                        <span>该端点所有模型均已隐藏</span>
-                                        <Button
-                                          size="sm"
-                                          variant="secondary"
-                                          onClick={() => restoreHiddenModels(endpoint)}
-                                          icon={<Eye className="h-3.5 w-3.5" />}
-                                        >
-                                          恢复 {hiddenModelCount} 个被隐藏的模型
-                                        </Button>
-                                      </div>
-                                    )
-                                    : '暂无模型数据，可刷新端点获取'}
-                                </Table.Cell>
-                              </Table.Row>
-                            )
                             ) : (
                               <Table.Row>
                                 <Table.Cell
@@ -4105,17 +4109,6 @@ const trendSeries = useMemo(() => {
         <div className="flex min-h-0 flex-1 flex-col gap-3">
           {/* Logs table and pagination */}
           <LayerCard className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden p-0 shadow-none">
-            <div className="flex shrink-0 items-center gap-3 border-b border-kumo-line px-3 py-2">
-              <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-kumo-strong">
-                <History className="h-3.5 w-3.5 text-kumo-brand" />
-                网关日志
-              </span>
-              <span className="ml-auto" />
-              <label className="flex h-8 shrink-0 items-center gap-2 text-xs text-kumo-subtle">
-                <Switch checked={logsAutoRefresh} onCheckedChange={setLogsAutoRefresh} />
-                自动刷新
-              </label>
-            </div>
             <div className="min-h-0 min-w-0 flex-1 overflow-auto scrollbar-thin">
               <Table layout="fixed" className="min-w-[1380px] [&_td]:!px-2 [&_td]:!py-2 [&_th]:!px-2 [&_th]:!py-2">
                 <colgroup>
@@ -4340,7 +4333,7 @@ const trendSeries = useMemo(() => {
 
       {/* 1. Endpoint Add/Edit Dialog */}
       <Dialog.Root open={endpointFormOpen} onOpenChange={setEndpointFormOpen}>
-        <Dialog className="flex max-h-[min(calc(100dvh-2rem),42rem)] !w-[min(32rem,calc(100vw-2rem))] !max-w-[min(32rem,calc(100vw-2rem))] flex-col overflow-hidden !p-0">
+        <Dialog className="flex max-h-[min(calc(100dvh-2rem),42rem)] !w-[min(48rem,calc(100vw-2rem))] !max-w-[min(48rem,calc(100vw-2rem))] flex-col overflow-hidden !p-0">
           <div className="shrink-0 px-6 pt-5">
             <Dialog.Title className="mb-1 text-sm font-semibold text-kumo-strong">
               {editingEndpoint ? '编辑端点' : '添加 API 端点'}
@@ -4350,163 +4343,194 @@ const trendSeries = useMemo(() => {
             </Dialog.Description>
           </div>
 
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-3 scrollbar-thin">
-            <Input
-              size="sm"
-              label="名称"
-              type="text"
-              value={endpointForm.name}
-              onChange={e => setEndpointForm({ ...endpointForm, name: e.target.value })}
-              placeholder="如：DeepSeek 官方"
-              className="w-full text-kumo-strong text-sm font-sans"
-            />
-
-            <Input
-              size="sm"
-              label="Base URL"
-              type="text"
-              value={endpointForm.baseUrl}
-              onChange={e => setEndpointForm({ ...endpointForm, baseUrl: e.target.value })}
-              placeholder="https://api.openai.com/v1"
-              className="w-full text-kumo-strong text-[0.9em] font-mono"
-            />
-
-            <Input
-              size="sm"
-              label="API Key"
-              type="text"
-              value={endpointForm.apiKey}
-              onChange={e => setEndpointForm({ ...endpointForm, apiKey: e.target.value })}
-              placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-              autoComplete="off"
-              data-1p-ignore
-              data-lpignore="true"
-              data-bwignore="true"
-              data-form-type="other"
-              spellCheck={false}
-              className="w-full text-kumo-strong text-[0.9em] font-mono"
-            />
-
-            <Input
-              size="sm"
-              label="备注"
-              type="text"
-              value={endpointForm.notes}
-              onChange={e => setEndpointForm({ ...endpointForm, notes: e.target.value })}
-              placeholder="选填"
-              className="w-full text-kumo-strong text-sm font-sans"
-            />
-
-            <div className="space-y-1.5">
-              <Label showOptional>自定义请求头</Label>
-              <div className="space-y-2">
-                {(endpointForm.headers || []).map((header, index) => (
-                  <div
-                    key={index}
-                    className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1.8fr)_2rem] items-center gap-2"
-                  >
-                    <Input
-                      size="sm"
-                      type="text"
-                      value={header.name}
-                      onChange={e => updateEndpointHeader(index, 'name', e.target.value)}
-                      placeholder="Header 名称"
-                      spellCheck={false}
-                      autoComplete="off"
-                      data-1p-ignore
-                      className="w-full text-kumo-strong font-mono text-[0.85em]"
-                    />
-                    <Input
-                      size="sm"
-                      type="text"
-                      value={header.value}
-                      onChange={e => updateEndpointHeader(index, 'value', e.target.value)}
-                      placeholder="Header 值"
-                      spellCheck={false}
-                      autoComplete="off"
-                      data-1p-ignore
-                      className="w-full text-kumo-strong font-mono text-[0.85em]"
-                    />
-                    <Button
-                      shape="square"
-                      size="sm"
-                      variant="secondary-destructive"
-                      aria-label="删除请求头"
-                      onClick={() => removeEndpointHeader(index)}
-                      title="删除请求头"
-                      icon={<Trash className="h-3.5 w-3.5" />}
-                    />
-                  </div>
-                ))}
-              </div>
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={addEndpointHeader}
-                icon={<Plus className="h-3.5 w-3.5" />}
-              >
-                添加请求头
-              </Button>
-              <p className="text-xs leading-snug text-kumo-subtle">
-                随请求一并发送到上游，可用于传入鉴权、CF-Access 等身份头。Authorization 由网关自动设置。
-              </p>
-            </div>
-
-            <div className="space-y-1.5">
-              <div className="flex min-w-0 items-center justify-between gap-2">
-                <Label showOptional>出口代理池</Label>
-                <Button
-                  size="xs"
-                  variant="outline"
-                  onClick={() => setProxyManagerOpen(true)}
-                  icon={<Sliders className="h-3.5 w-3.5" />}
-                >
-                  管理代理池（{endpointForm.proxyPool?.length || 0}）
-                </Button>
-              </div>
-              <div className="rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 py-2">
-                {endpointForm.proxyPool?.length > 0 ? (
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {endpointForm.proxyPool.map((proxy, index) => {
-                      const entry = parseProxyEntry(proxy);
-                      return (
-                        <span
-                          key={index}
-                          className="inline-flex max-w-40 items-center gap-1 truncate rounded-full border border-kumo-line bg-kumo-base px-2 py-0.5 text-[11px] font-medium text-kumo-strong"
-                          title={entry.full}
-                        >
-                          <span className="truncate">{entry.label || entry.host || '空代理'}</span>
-                          {entry.ip && <span className="shrink-0 font-mono text-[10px] text-kumo-subtle">{entry.ip}</span>}
-                        </span>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <span className="text-xs text-kumo-subtle">
-                    未配置代理，请求将直连上游。
-                  </span>
-                )}
-              </div>
-              <div className="flex min-h-8 items-center gap-2">
-                <Switch
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-3 scrollbar-thin">
+            <div className="grid grid-cols-2 gap-x-5 gap-y-4">
+              {/* ====== 左列：基本信息 ====== */}
+              <div className="space-y-4">
+                <Input
                   size="sm"
-                  aria-label="限流自动切换代理"
-                  checked={!!endpointForm.autoSwitch}
-                  onCheckedChange={checked =>
-                    setEndpointForm(current => ({ ...current, autoSwitch: checked }))
-                  }
+                  label="名称"
+                  type="text"
+                  value={endpointForm.name}
+                  onChange={e => setEndpointForm({ ...endpointForm, name: e.target.value })}
+                  placeholder="如：DeepSeek 官方"
+                  className="w-full text-kumo-strong text-sm font-sans"
                 />
-                <span className="text-xs text-kumo-subtle">
-                  检测到限流（429/503 等）或连接失败时自动切换下一个代理
-                </span>
+
+                <Input
+                  size="sm"
+                  label="Base URL"
+                  type="text"
+                  value={endpointForm.baseUrl}
+                  onChange={e => setEndpointForm({ ...endpointForm, baseUrl: e.target.value })}
+                  placeholder="https://api.openai.com/v1"
+                  className="w-full text-kumo-strong text-[0.9em] font-mono"
+                />
+
+                <Input
+                  size="sm"
+                  label="API Key"
+                  type="text"
+                  value={endpointForm.apiKey}
+                  onChange={e => setEndpointForm({ ...endpointForm, apiKey: e.target.value })}
+                  placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+                  autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  spellCheck={false}
+                  className="w-full text-kumo-strong text-[0.9em] font-mono"
+                />
+
+                <Input
+                  size="sm"
+                  label="备注"
+                  type="text"
+                  value={endpointForm.notes}
+                  onChange={e => setEndpointForm({ ...endpointForm, notes: e.target.value })}
+                  placeholder="选填"
+                  className="w-full text-kumo-strong text-sm font-sans"
+                />
+
+                <div className="space-y-1.5">
+                  <Label showOptional>自定义请求头</Label>
+                  <div className="space-y-2">
+                    {(endpointForm.headers || []).map((header, index) => (
+                      <div
+                        key={index}
+                        className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1.8fr)_2rem] items-center gap-2"
+                      >
+                        <Input
+                          size="sm"
+                          type="text"
+                          value={header.name}
+                          onChange={e => updateEndpointHeader(index, 'name', e.target.value)}
+                          placeholder="Header 名称"
+                          spellCheck={false}
+                          autoComplete="off"
+                          data-1p-ignore
+                          className="w-full text-kumo-strong font-mono text-[0.85em]"
+                        />
+                        <Input
+                          size="sm"
+                          type="text"
+                          value={header.value}
+                          onChange={e => updateEndpointHeader(index, 'value', e.target.value)}
+                          placeholder="Header 值"
+                          spellCheck={false}
+                          autoComplete="off"
+                          data-1p-ignore
+                          className="w-full text-kumo-strong font-mono text-[0.85em]"
+                        />
+                        <Button
+                          shape="square"
+                          size="sm"
+                          variant="secondary-destructive"
+                          aria-label="删除请求头"
+                          onClick={() => removeEndpointHeader(index)}
+                          title="删除请求头"
+                          icon={<Trash className="h-3.5 w-3.5" />}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={addEndpointHeader}
+                    icon={<Plus className="h-3.5 w-3.5" />}
+                  >
+                    添加请求头
+                  </Button>
+                  <p className="text-xs leading-snug text-kumo-subtle">
+                    随请求发送到上游，Authorization 由网关自动设置。
+                  </p>
+                </div>
               </div>
-              <p className="text-xs leading-snug text-kumo-subtle">
-                每个条目为一个出口代理，请求按池轮换出口 IP。适合 IP 敏感的源；留空则直连。
-              </p>
+
+              {/* ====== 右列：代理相关 ====== */}
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <div className="flex min-w-0 items-center justify-between gap-2">
+                    <Label showOptional>出口代理池</Label>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() => setProxyManagerOpen(true)}
+                      icon={<Sliders className="h-3.5 w-3.5" />}
+                    >
+                      管理代理池（{endpointForm.proxyPool?.length || 0}）
+                    </Button>
+                  </div>
+                  <div className="rounded-md border border-kumo-line bg-kumo-recessed/25 px-3 py-2">
+                    {endpointForm.proxyPool?.length > 0 ? (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {endpointForm.proxyPool.map((proxy, index) => {
+                          const entry = parseProxyEntry(proxy);
+                          return (
+                            <span
+                              key={index}
+                              className="inline-flex max-w-40 items-center gap-1 truncate rounded-full border border-kumo-line bg-kumo-base px-2 py-0.5 text-[11px] font-medium text-kumo-strong"
+                              title={entry.full}
+                            >
+                              <span className="truncate">{entry.label || entry.host || '空代理'}</span>
+                              {entry.ip && <span className="shrink-0 font-mono text-[10px] text-kumo-subtle">{entry.ip}</span>}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-kumo-subtle">
+                        未配置代理，请求将直连上游。
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex min-h-8 items-center gap-2">
+                  <Switch
+                    size="sm"
+                    aria-label="代理开关"
+                    checked={!!endpointForm.proxyEnabled}
+                    onCheckedChange={checked =>
+                      setEndpointForm(current => ({ ...current, proxyEnabled: checked }))
+                    }
+                  />
+                  <span className="text-xs text-kumo-strong">代理开关</span>
+                </div>
+                <div className="flex min-h-8 items-center gap-2">
+                  <Switch
+                    size="sm"
+                    aria-label="限流自动切换代理"
+                    checked={!!endpointForm.autoSwitch}
+                    disabled={!endpointForm.proxyEnabled}
+                    onCheckedChange={checked =>
+                      setEndpointForm(current => ({ ...current, autoSwitch: checked }))
+                    }
+                  />
+                  <span className="text-xs text-kumo-subtle">限流或连接失败自动切换代理</span>
+                </div>
+                <div className="flex min-h-8 items-center gap-2">
+                  <Switch
+                    size="sm"
+                    aria-label="强制走代理池"
+                    checked={!!endpointForm.forceProxy}
+                    disabled={!endpointForm.proxyEnabled}
+                    onCheckedChange={checked =>
+                      setEndpointForm(current => ({ ...current, forceProxy: checked }))
+                    }
+                  />
+                  <span className="text-xs text-kumo-subtle">强制走代理，禁止直连</span>
+                </div>
+                <p className="text-xs leading-snug text-kumo-subtle">
+                  请求按池轮换出口 IP，适合 IP 敏感源。
+                </p>
+              </div>
             </div>
 
             {endpointFormError && (
-                <p className="text-sm text-kumo-danger font-semibold">{endpointFormError}</p>
+                <p className="mt-4 text-sm text-kumo-danger font-semibold">{endpointFormError}</p>
               )}
             </div>
 
@@ -4881,7 +4905,7 @@ const trendSeries = useMemo(() => {
 
             <div className="flex items-center justify-between text-sm">
               <span className="font-semibold text-kumo-strong">检测方式</span>
-              <InlineStatusPill tone="info">实时逐项回填</InlineStatusPill>
+              <InlineStatusPill tone="info">后端批量检测</InlineStatusPill>
             </div>
 
             <div className="flex items-center justify-between text-sm">
@@ -4926,8 +4950,8 @@ const trendSeries = useMemo(() => {
             </div>
 
             <p className="text-xs text-kumo-subtle">
-              默认 {DEFAULT_MODEL_HEALTH_CONCURRENCY}；点击“开始检测”时最多检测前{' '}
-              {MAX_BATCH_MODEL_HEALTH_TARGETS} 个模型，并按返回顺序实时显示结果。
+              默认并发 {DEFAULT_MODEL_HEALTH_CONCURRENCY}、超时{' '}
+              {DEFAULT_MODEL_HEALTH_TIMEOUT_SECONDS} 秒；批量检测全部启用端点上的模型，完成后统一回填结果。
             </p>
 
             <div className="flex justify-end gap-3 pt-2">
