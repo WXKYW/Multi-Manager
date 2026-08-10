@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -497,12 +498,20 @@ func (t *Task) closeSubscribers() {
 	t.subscribers = nil
 }
 
-// createTask 创建任务
+// createTask 创建任务并下发到 Agent 执行。
+// 兼容两类请求体：
+//   - 旧式字段：server_id / type / command
+//   - 结构化字段：serverId / params.command（AI 与自动化调用常用）
 func (s *Service) createTask(w http.ResponseWriter, r *http.Request, taskRegistry *TaskRegistry) {
 	var req struct {
 		ServerID string `json:"server_id"`
 		Type     string `json:"type"`
 		Command  string `json:"command"`
+		ServerId string `json:"serverId"`
+		Params   struct {
+			Command   string `json:"command"`
+			TimeoutMs int64  `json:"timeoutMs"`
+		} `json:"params"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -510,16 +519,48 @@ func (s *Service) createTask(w http.ResponseWriter, r *http.Request, taskRegistr
 		return
 	}
 
-	task := taskRegistry.Create(req.ServerID, req.Type, req.Command)
+	serverID := strings.TrimSpace(req.ServerID)
+	if serverID == "" {
+		serverID = strings.TrimSpace(req.ServerId)
+	}
+	command := strings.TrimSpace(req.Command)
+	if command == "" {
+		command = strings.TrimSpace(req.Params.Command)
+	}
+	if serverID == "" {
+		response.Error(w, http.StatusBadRequest, "server_id required")
+		return
+	}
+	if command == "" {
+		response.Error(w, http.StatusBadRequest, "command required")
+		return
+	}
 
-	// TODO: 发送任务到 Agent
-	// conn, exists := s.registry.Get(req.ServerID)
-	// if exists {
-	//     conn.SendEvent("task", map[string]interface{}{
-	//         "task_id": task.ID,
-	//         "command": req.Command,
-	//     })
-	// }
+	timeout := 60 * time.Second
+	if req.Params.TimeoutMs > 0 {
+		timeout = time.Duration(req.Params.TimeoutMs) * time.Millisecond
+	}
+	if timeout > 30*time.Minute {
+		timeout = 30 * time.Minute
+	}
+
+	conn, online := s.registry.Get(serverID)
+	if !online {
+		response.Error(w, http.StatusBadGateway, "agent offline: "+serverID)
+		return
+	}
+
+	task := taskRegistry.Create(serverID, "shell", command)
+	if err := conn.SendEvent("dashboard:task", map[string]interface{}{
+		"id":      task.ID,
+		"type":    1, // RUN_COMMAND
+		"data":    command,
+		"timeout": int(timeout.Seconds()),
+	}); err != nil {
+		taskRegistry.Fail(task.ID, err.Error())
+		response.Error(w, http.StatusBadGateway, "failed to send task to agent: "+err.Error())
+		return
+	}
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,

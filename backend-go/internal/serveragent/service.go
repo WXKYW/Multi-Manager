@@ -66,8 +66,9 @@ type Service struct {
 	notifier                      Notifier
 	cloudflare                    cloudflare.ManagedTunnelAPI
 	alertStates                   sync.Map // serverID -> *alertState
-	backgroundCancel              context.CancelFunc
-	backgroundWG                  sync.WaitGroup
+	backgroundCtx                  context.Context
+	backgroundCancel               context.CancelFunc
+	backgroundWG                   sync.WaitGroup
 	stopOnce                      sync.Once
 	startupErr                    error
 }
@@ -195,11 +196,18 @@ func New(cfg config.Config) *Service {
 				} else if s.presence != nil {
 					s.presence.recordConnect(serverID, transport)
 				}
-				go s.refreshAccountLocationFromAgentIfMissing(serverID)
-				go func(id string) {
-					time.Sleep(2 * time.Second)
-					s.reconcileManagedProxyFacts(id)
-				}(serverID)
+				if s.backgroundCtx == nil || s.backgroundCtx.Err() == nil {
+					s.backgroundWG.Add(2)
+					go func() {
+						defer s.backgroundWG.Done()
+						s.refreshAccountLocationFromAgentIfMissing(serverID)
+					}()
+					go func(id string) {
+						defer s.backgroundWG.Done()
+						time.Sleep(2 * time.Second)
+						s.reconcileManagedProxyFacts(id)
+					}(serverID)
+				}
 			}
 		},
 		// onMessage: 接收 Agent 消息
@@ -499,6 +507,7 @@ func New(cfg config.Config) *Service {
 		s.presence.start()
 	}
 	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
+	s.backgroundCtx = backgroundCtx
 	s.backgroundCancel = backgroundCancel
 	s.backgroundWG.Add(3)
 	go func() {
