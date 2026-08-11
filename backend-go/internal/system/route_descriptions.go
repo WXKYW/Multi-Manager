@@ -333,6 +333,7 @@ var routeDescriptions = map[string]string{
 	"/api/openai/analytics/charts":   "读取网关用量图表数据",
 	"/api/openai/analytics/logs":     "分页读取网关调用日志",
 	"/api/openai/analytics/clear":    "清空网关调用日志",
+	"/api/openai/relay-errors":       "读取最近推理转发失败明细（排障用）",
 	"/api/openai/keys":               "列出或新增网关 API Key",
 	"/api/openai/keys/{id}":          "更新或删除网关 API Key",
 	"/api/openai/keys/{id}/toggle":   "启用或停用网关 API Key",

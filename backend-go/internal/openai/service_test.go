@@ -1177,3 +1177,269 @@ func TestIsRetryableUpstreamResponse(t *testing.T) {
 		t.Fatalf("rate limit keyword in body should be retryable")
 	}
 }
+
+func TestRelayErrorsBufferAndHandler(t *testing.T) {
+	service := New(config.Config{DataDir: t.TempDir(), DBName: "data.db"})
+
+	// 记录三条失败事件，模拟最新的最后写入。
+	service.recordRelayError(RelayErrorRecord{Route: "chat.completions", Kind: "dial", Endpoint: "ep-a", Model: "m1", Proxy: "203.0.113.5:8080", Error: "dial tcp: i/o timeout"})
+	service.recordRelayError(RelayErrorRecord{Route: "chat.completions", Kind: "timeout", Endpoint: "ep-a", Model: "m1", Proxy: "203.0.113.6:8080", Error: "no first byte within 20s"})
+	service.recordRelayError(RelayErrorRecord{Route: "responses", Kind: "no_endpoint", Model: "m2", Error: "no enabled endpoint serves model"})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/openai/relay-errors", nil)
+	service.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("relay-errors status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+
+	var result struct {
+		Total   int `json:"total"`
+		Records []struct {
+			Route  string `json:"route"`
+			Kind   string `json:"kind"`
+			Proxy  string `json:"proxy"`
+			Error  string `json:"error"`
+			Client string `json:"clientIp"`
+		} `json:"records"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 3 || len(result.Records) != 3 {
+		t.Fatalf("unexpected records: total=%d len=%d body=%s", result.Total, len(result.Records), recorder.Body.String())
+	}
+	// 最新在前：no_endpoint 应在第一条。
+	if result.Records[0].Route != "responses" || result.Records[0].Kind != "no_endpoint" {
+		t.Fatalf("newest record should be first: %+v", result.Records[0])
+	}
+
+	// limit 参数生效。
+	recorder = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodGet, "/api/openai/relay-errors?limit=1", nil)
+	service.ServeHTTP(recorder, request)
+	var limited struct {
+		Total   int `json:"total"`
+		Records []struct {
+			Kind string `json:"kind"`
+		} `json:"records"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &limited); err != nil {
+		t.Fatal(err)
+	}
+	if limited.Total != 3 || len(limited.Records) != 1 || limited.Records[0].Kind != "no_endpoint" {
+		t.Fatalf("limit param not honored: %+v", limited)
+	}
+}
+
+func TestRelayErrorsBufferCap(t *testing.T) {
+	service := New(config.Config{DataDir: t.TempDir(), DBName: "data.db"})
+	for i := 0; i < relayErrorBufferSize+37; i++ {
+		service.recordRelayError(RelayErrorRecord{Route: "chat.completions", Kind: "dial", Error: "x"})
+	}
+
+	service.relayErrMu.Lock()
+	bufLen := len(service.relayErrors)
+	service.relayErrMu.Unlock()
+
+	if bufLen != relayErrorBufferSize {
+		t.Fatalf("buffer cap = %d, want %d", bufLen, relayErrorBufferSize)
+	}
+
+	// 接口返回的 total 受上限约束。
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/openai/relay-errors", nil)
+	service.ServeHTTP(recorder, request)
+	var result struct {
+		Total int `json:"total"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != relayErrorBufferSize {
+		t.Fatalf("handler total = %d, want %d", result.Total, relayErrorBufferSize)
+	}
+}
+
+// setupTwoProxyEndpoint 创建一个带两个 mock 代理的端点，返回 service 与端点 id。
+// proxyHandler 负责两个代理的响应行为；hitCounters 可选记录每个代理的命中次数。
+func setupTwoProxyEndpoint(t *testing.T, proxy1Handler, proxy2Handler http.HandlerFunc) (*Service, string) {
+	t.Helper()
+	var proxy1Hits, proxy2Hits int32
+	proxy1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&proxy1Hits, 1)
+		proxy1Handler(w, r)
+	}))
+	proxy2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&proxy2Hits, 1)
+		proxy2Handler(w, r)
+	}))
+	t.Cleanup(proxy1.Close)
+	t.Cleanup(proxy2.Close)
+
+	mockUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"data":[{"id":"gpt-4","object":"model"}]}`))
+	}))
+	t.Cleanup(mockUpstream.Close)
+
+	service := New(config.Config{DataDir: t.TempDir(), DBName: "data.db"})
+	createPayload := fmt.Sprintf(`{
+		"name": "Session Proxy Mock",
+		"baseUrl": "%s",
+		"apiKey": "test-api-key",
+		"skipVerify": true,
+		"proxyPool": ["%s", "%s"],
+		"proxyEnabled": true,
+		"autoSwitch": true
+	}`, mockUpstream.URL, proxy1.URL, proxy2.URL)
+
+	wCreate := httptest.NewRecorder()
+	rCreate, _ := http.NewRequest("POST", "/api/openai/endpoints", strings.NewReader(createPayload))
+	service.ServeHTTP(wCreate, rCreate)
+	if wCreate.Code != http.StatusOK {
+		t.Fatalf("create status = %d body=%s", wCreate.Code, wCreate.Body.String())
+	}
+	var createRes struct {
+		Success  bool     `json:"success"`
+		Endpoint Endpoint `json:"endpoint"`
+	}
+	mustDecode(t, wCreate.Body.String(), &createRes)
+
+	db, err := service.open(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`UPDATE openai_endpoints SET models = ? WHERE id = ?`, `["gpt-4"]`, createRes.Endpoint.ID)
+	db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service, createRes.Endpoint.ID
+}
+
+func chatRequest(t *testing.T, service *Service, endpointID string, stream bool, sessionID string) *httptest.ResponseRecorder {
+	t.Helper()
+	body := `{"model":"gpt-4","messages":[{"role":"user","content":"hello"}]}`
+	if stream {
+		body = `{"model":"gpt-4","stream":true,"messages":[{"role":"user","content":"hello"}]}`
+	}
+	w := httptest.NewRecorder()
+	r, _ := http.NewRequest("POST", "/v1/chat/completions", strings.NewReader(body))
+	r.Header.Set("x-endpoint-id", endpointID)
+	if sessionID != "" {
+		r.Header.Set("X-OpenCode-Session-ID", sessionID)
+	}
+	service.ServeHTTP(w, r)
+	return w
+}
+
+func okHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"}}],"usage":{"total_tokens":1}}`))
+}
+
+func TestSessionProxyRotatesAfterRequestLimit(t *testing.T) {
+	// 会话粘性 + 配额感知轮换：同一会话在 limit=2 时，前 2 个请求固定代理 A，
+	// 第 3 个请求主动轮换到代理 B（规避上游按出口 IP 限额）。
+	oldLimit := sessionProxyRequestLimit
+	sessionProxyRequestLimit = 2
+	defer func() { sessionProxyRequestLimit = oldLimit }()
+
+	service, endpointID := setupTwoProxyEndpoint(t, okHandler, okHandler)
+
+	for i := 0; i < 2; i++ {
+		w := chatRequest(t, service, endpointID, false, "sess-sticky")
+		if w.Code != http.StatusOK {
+			t.Fatalf("request %d failed: %d %s", i+1, w.Code, w.Body.String())
+		}
+	}
+
+	// 第三个请求：计数已达上限，应换到另一个代理（并重置绑定计数）。
+	w := chatRequest(t, service, endpointID, false, "sess-sticky")
+	if w.Code != http.StatusOK {
+		t.Fatalf("request 3 failed: %d %s", w.Code, w.Body.String())
+	}
+	service.proxyMu.Lock()
+	newBinding := service.proxyStateByEndpoint[endpointID].sessionBindings["sess-sticky"]
+	service.proxyMu.Unlock()
+	if newBinding == nil || newBinding.count != 1 {
+		t.Fatalf("expected re-bound with count=1 after limit, got %+v", newBinding)
+	}
+}
+
+func TestUpstream429DoesNotCoolProxy(t *testing.T) {
+	// 上游 429 是上游限额，不是代理故障：切换出口后不应惩罚代理（无冷却记录）。
+	service, endpointID := setupTwoProxyEndpoint(t,
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusTooManyRequests)
+			w.Write([]byte(`{"error":{"message":"rate limit"}}`))
+		},
+		okHandler,
+	)
+
+	w := chatRequest(t, service, endpointID, false, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("request failed: %d %s", w.Code, w.Body.String())
+	}
+
+	service.proxyMu.Lock()
+	state := service.proxyStateByEndpoint[endpointID]
+	cooldownCount := len(state.cooldown)
+	failureCount := len(state.failures)
+	service.proxyMu.Unlock()
+	if cooldownCount != 0 || failureCount != 0 {
+		t.Fatalf("429 must not penalize proxies: cooldown=%d failures=%d", cooldownCount, failureCount)
+	}
+}
+
+func TestMarkProxyFailedExponentialBackoff(t *testing.T) {
+	// 指数退避：1min << min(failures-1, 5)，封顶 30min。
+	service := New(config.Config{DataDir: t.TempDir(), DBName: "data.db"})
+	service.proxyMu.Lock()
+	service.proxyStateByEndpoint["ep-backoff"] = newEndpointProxyState()
+	service.proxyMu.Unlock()
+
+	base := time.Now().Add(proxyCooldown)
+	service.markProxyFailed("ep-backoff", "proxy-a")
+	service.proxyMu.Lock()
+	first := service.proxyStateByEndpoint["ep-backoff"].cooldown["proxy-a"]
+	service.proxyMu.Unlock()
+	if first.Before(base) || first.After(base.Add(5*time.Second)) {
+		t.Fatalf("first cooldown = %v, want ~%v", first, base)
+	}
+
+	service.markProxyFailed("ep-backoff", "proxy-a")
+	service.markProxyFailed("ep-backoff", "proxy-a")
+	service.proxyMu.Lock()
+	third := service.proxyStateByEndpoint["ep-backoff"].cooldown["proxy-a"]
+	service.proxyMu.Unlock()
+	// 第 3 次失败：1min << 2 = 4min。
+	expect := time.Now().Add(4 * proxyCooldown)
+	if third.Before(expect.Add(-5*time.Second)) || third.After(expect.Add(5*time.Second)) {
+		t.Fatalf("third cooldown = %v, want ~%v", third, expect)
+	}
+
+	for i := 0; i < 5; i++ {
+		service.markProxyFailed("ep-backoff", "proxy-a")
+	}
+	service.proxyMu.Lock()
+	capped := service.proxyStateByEndpoint["ep-backoff"].cooldown["proxy-a"]
+	service.proxyMu.Unlock()
+	if capped.Before(time.Now().Add(proxyCooldownMax - 5*time.Second)) {
+		t.Fatalf("cooldown should cap at 30min, got %v", capped)
+	}
+
+	// 成功恢复：清除冷却与失败计数。
+	service.markProxySuccess("ep-backoff", "proxy-a")
+	service.proxyMu.Lock()
+	state := service.proxyStateByEndpoint["ep-backoff"]
+	_, hasCooldown := state.cooldown["proxy-a"]
+	_, hasFailures := state.failures["proxy-a"]
+	service.proxyMu.Unlock()
+	if hasCooldown || hasFailures {
+		t.Fatalf("markProxySuccess should clear cooldown and failures")
+	}
+}

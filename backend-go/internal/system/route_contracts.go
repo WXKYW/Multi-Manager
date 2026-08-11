@@ -772,6 +772,7 @@ func init() {
 		"url": {t: "string", req: true, d: "订阅链接，必须以 http:// 或 https:// 开头"},
 	})
 	routeRequestContracts["/api/openai/analytics/clear"] = noBody
+	routeRequestContracts["/api/openai/relay-errors"] = noBody
 	routeRequestContracts["/api/openai/endpoints/{id}/verify"] = noBody
 	routeRequestContracts["/api/openai/endpoints/{id}/test"] = noBody
 	routeRequestContracts["/api/openai/endpoints/{id}/health-check"] = noBody

@@ -420,6 +420,7 @@ function OpenAIPage() {
     headers: [],
     proxyPool: [],
     autoSwitch: false,
+    proxyEnabled: false,
     forceProxy: false,
   });
   const [endpointFormError, setEndpointFormError] = useState('');
@@ -967,6 +968,7 @@ const trendSeries = useMemo(() => {
       headers: [],
       proxyPool: [],
       autoSwitch: false,
+      proxyEnabled: false,
       forceProxy: false,
     });
     setEndpointFormError('');
@@ -983,6 +985,7 @@ const trendSeries = useMemo(() => {
       headers: Array.isArray(endpoint.headers) ? endpoint.headers : [],
       proxyPool: Array.isArray(endpoint.proxyPool) ? endpoint.proxyPool : [],
       autoSwitch: Boolean(endpoint.autoSwitch),
+      proxyEnabled: Boolean(endpoint.proxyEnabled),
       forceProxy: Boolean(endpoint.forceProxy),
     });
     setEndpointFormError('');
@@ -4998,14 +5001,13 @@ const trendSeries = useMemo(() => {
                           className="inline-flex max-w-full items-center gap-1 truncate rounded-full border border-kumo-line bg-kumo-base px-2 py-0.5 font-mono text-[11px] font-medium text-kumo-strong"
                         >
                           <span className="truncate">{model}</span>
-                          <button
-                            type="button"
-                            className="shrink-0 text-kumo-subtle transition-colors hover:text-kumo-danger"
+                          <Button
+                            size="xs"
+                            variant="ghost"
                             aria-label={`移除 ${model}`}
                             onClick={() => removeGatewayKeyListItem('allowedModels', model)}
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
+                            icon={<X className="h-3 w-3" />}
+                          />
                         </span>
                       ))}
                       <Input
@@ -5033,14 +5035,13 @@ const trendSeries = useMemo(() => {
                           className="inline-flex max-w-full items-center gap-1 truncate rounded-full border border-kumo-line bg-kumo-base px-2 py-0.5 font-mono text-[11px] font-medium text-kumo-strong"
                         >
                           <span className="truncate">{endpointId}</span>
-                          <button
-                            type="button"
-                            className="shrink-0 text-kumo-subtle transition-colors hover:text-kumo-danger"
+                          <Button
+                            size="xs"
+                            variant="ghost"
                             aria-label={`移除 ${endpointId}`}
                             onClick={() => removeGatewayKeyListItem('allowedEndpoints', endpointId)}
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
+                            icon={<X className="h-3 w-3" />}
+                          />
                         </span>
                       ))}
                       <Input

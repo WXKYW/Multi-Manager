@@ -67,7 +67,7 @@ func (s *Service) RecordAnalytics(ctx context.Context, route, endpointID, model 
 	}
 	defer db.Close()
 
-	_, err = db.ExecContext(writeCtx, `
+	result, err := db.ExecContext(writeCtx, `
 		INSERT INTO openai_gateway_analytics (endpoint_id, gateway_key_id, route, model, status_code, latency_ms, ttfb_ms, prompt_tokens, completion_tokens, total_tokens, cached_tokens, stream, via_proxy, client_ip, upstream_ip)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, endpointID, gatewayKey.ID, route, model, statusCode, latencyMs, ttfbMs, promptTokens, completionTokens, totalTokens, cachedTokens, stream, viaProxy, clientIP, upstreamIP)
@@ -77,13 +77,31 @@ func (s *Service) RecordAnalytics(ctx context.Context, route, endpointID, model 
 	}
 
 	// 实时推送：网关出现请求即广播给日志页订阅者（SSE）。
+	// 字段与分页查询接口（getAnalyticsLogs）保持一致，保证实时插入顶部的行
+	// 各列（端点、调用密钥、出口 IP、首字等）都能即时显示。
+	recordID := int64(0)
+	if result != nil {
+		if id, idErr := result.LastInsertId(); idErr == nil {
+			recordID = id
+		}
+	}
+	endpointName := "unknown"
+	if endpointID != "" {
+		var name string
+		if err := db.QueryRowContext(writeCtx, `SELECT COALESCE(name, 'unknown') FROM openai_endpoints WHERE id = ?`, endpointID).Scan(&name); err == nil {
+			endpointName = name
+		}
+	}
 	s.publishAnalytics(map[string]interface{}{
-		"route":      route,
-		"endpointId": endpointID,
-		"model":      model,
-		"statusCode": statusCode,
-		"latencyMs":  latencyMs,
-		"ttfbMs":     ttfbMs,
+		"id":               recordID,
+		"route":            route,
+		"endpointId":       endpointID,
+		"endpointName":     endpointName,
+		"gatewayKeyName":   gatewayKey.Name,
+		"model":            model,
+		"statusCode":       statusCode,
+		"latencyMs":        latencyMs,
+		"ttfbMs":           ttfbMs,
 		"promptTokens":     promptTokens,
 		"completionTokens": completionTokens,
 		"totalTokens":      totalTokens,
@@ -92,7 +110,7 @@ func (s *Service) RecordAnalytics(ctx context.Context, route, endpointID, model 
 		"viaProxy":         viaProxy == 1,
 		"clientIp":         clientIP,
 		"upstreamIp":       upstreamIP,
-		"timestamp":        time.Now().UTC().Format("2006-01-02 15:04:05"),
+		"timestamp":        time.Now().UTC().Format(time.RFC3339),
 	})
 }
 
@@ -285,14 +303,14 @@ func (s *Service) getAnalyticsCharts(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type ChartPoint struct {
-		Day        string  `json:"day"`
-		TsSec      int64   `json:"tsSec"`
-		Count      int     `json:"count"`
-		AvgLatency float64 `json:"avgLatency"`
-		Tokens     int     `json:"tokens"`
-		Cached     int     `json:"cachedTokens"`
-		Errors     int     `json:"errors"`
-		Granularity string `json:"granularity"`
+		Day         string  `json:"day"`
+		TsSec       int64   `json:"tsSec"`
+		Count       int     `json:"count"`
+		AvgLatency  float64 `json:"avgLatency"`
+		Tokens      int     `json:"tokens"`
+		Cached      int     `json:"cachedTokens"`
+		Errors      int     `json:"errors"`
+		Granularity string  `json:"granularity"`
 	}
 
 	dailyPoints := []ChartPoint{}
