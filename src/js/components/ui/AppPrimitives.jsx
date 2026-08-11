@@ -581,21 +581,6 @@ export function getHttpStatusPillClass(code, options) {
   return getStatusPillClass('neutral', options);
 }
 
-export function InlineStatusPill({ tone = 'neutral', children, className = '', ...props }) {
-  return (
-    <span
-      {...props}
-      className={cx(
-        'inline-flex items-center rounded px-2 py-0.5 text-[10px] font-bold',
-        getStatusPillClass(tone),
-        className
-      )}
-    >
-      {children}
-    </span>
-  );
-}
-
 export function EmptyState({
   icon: Icon = Info,
   title,

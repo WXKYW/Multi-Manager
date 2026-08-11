@@ -1047,6 +1047,7 @@ function SchedulerPage() {
                 label: '刷新',
                 icon: <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />,
                 onClick: loadAll,
+                loading,
               },
               ...(activeTab === 'workflows'
                 ? [

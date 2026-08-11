@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button } from '@cloudflare/kumo/components/button';
+import { Badge } from '@cloudflare/kumo/components/badge';
 import { ChartPalette, TimeseriesChart } from '@cloudflare/kumo';
 import * as echarts from 'echarts/core';
 import { LineChart } from 'echarts/charts';
@@ -57,13 +58,6 @@ echarts.use([
   CanvasRenderer,
   AriaComponent,
 ]);
-
-const toneClass = {
-  success: 'border-kumo-success/55 bg-kumo-success/15 text-kumo-success',
-  danger: 'border-kumo-danger/55 bg-kumo-danger/15 text-kumo-danger',
-  warning: 'border-kumo-warning/55 bg-kumo-warning/15 text-kumo-warning',
-  neutral: 'border-kumo-interact/80 bg-kumo-recessed/45 text-kumo-subtle',
-};
 
 const statusPanelClass = {
   success: 'border-kumo-success/45 bg-kumo-base text-kumo-success',
@@ -480,16 +474,33 @@ function PublicStatusPage({ domainOnly = false, onDomainNotFound }) {
                           <div className="flex min-w-0 flex-wrap items-center justify-start gap-2 sm:justify-end">
                             <CompactHeartbeatStrip beats={heartbeats} />
                             <div className="flex min-w-0 items-center gap-1.5">
-                              <span className={`inline-flex h-7 w-[4.25rem] items-center justify-center rounded-full border px-2 text-[11px] font-semibold ${toneClass[meta.tone]}`}>
+                              <Badge
+                                variant={
+                                  meta.tone === 'danger'
+                                    ? 'error'
+                                    : meta.tone === 'warning'
+                                      ? 'warning'
+                                      : meta.tone === 'neutral'
+                                        ? 'secondary'
+                                        : 'success'
+                                }
+                                className="h-7 w-[4.25rem] justify-center !text-[11px] font-semibold"
+                              >
                                 {meta.label}
-                              </span>
-                              <span className="inline-flex h-7 w-[4.5rem] items-center justify-center gap-1 rounded-full border border-kumo-interact/75 bg-kumo-recessed/45 px-2 tabular-nums text-[11px] text-kumo-subtle">
+                              </Badge>
+                              <Badge
+                                variant="secondary"
+                                className="h-7 w-[4.5rem] justify-center gap-1 tabular-nums !text-[11px] font-semibold"
+                              >
                                 <Clock className="h-3 w-3" />
                                 {monitor.lastPing ? `${monitor.lastPing}ms` : '--'}
-                              </span>
-                              <span className="inline-flex h-7 w-[4.5rem] items-center justify-center rounded-full border border-kumo-interact/75 bg-kumo-recessed/45 px-2 tabular-nums text-[11px] text-kumo-subtle">
+                              </Badge>
+                              <Badge
+                                variant="secondary"
+                                className="h-7 w-[4.5rem] justify-center tabular-nums !text-[11px] font-semibold"
+                              >
                                 {formatUptimePercent(monitor.uptime24h)}%
-                              </span>
+                              </Badge>
                             </div>
                           </div>
                         </div>

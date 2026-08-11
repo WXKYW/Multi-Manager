@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
+import { Loader } from '@cloudflare/kumo/components/loader';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import PublicPageIconPicker from '../components/public/PublicPageIconPicker.jsx';
 import { useCloudflareSpotlight } from '../hooks/useCloudflareSpotlight.js';
@@ -1655,23 +1657,25 @@ function RepositoryCard({ item, now, config, detailLoading = false, onSelectRun 
               </div>
 
               <div className="flex shrink-0 items-center gap-1">
-                <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${item.private ? 'border-kumo-warning/35 bg-kumo-warning/10 text-kumo-warning' : 'border-kumo-success/35 bg-kumo-success/10 text-kumo-success'}`}>
+                <Badge variant={item.private ? 'warning' : 'success'}>
                   {item.private ? '私有' : '公开'}
-                </span>
-                <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
-                  actionTone === 'success'
-                    ? 'border-kumo-success/35 bg-kumo-success/10 text-kumo-success'
-                    : actionTone === 'error'
-                    ? 'border-kumo-danger/35 bg-kumo-danger/10 text-kumo-danger'
-                    : actionTone === 'warning'
-                    ? 'border-kumo-warning/35 bg-kumo-warning/10 text-kumo-warning'
-                    : 'border-kumo-interact/80 bg-kumo-recessed/45 text-kumo-subtle'
-                }`}>
+                </Badge>
+                <Badge
+                  variant={
+                    actionTone === 'success'
+                      ? 'success'
+                      : actionTone === 'error'
+                        ? 'error'
+                        : actionTone === 'warning'
+                          ? 'warning'
+                          : 'secondary'
+                  }
+                >
                   {statusLabel(actionStatus)}
-                </span>
-                <span className="rounded-full border border-kumo-interact/80 bg-kumo-recessed/45 px-2 py-0.5 text-[11px] text-kumo-subtle">
+                </Badge>
+                <Badge variant="secondary" className="font-medium">
                   {runDuration}
-                </span>
+                </Badge>
                 {canLinkRun && (
                   <Button
                     size="sm"
@@ -1762,7 +1766,7 @@ function RepositoryCard({ item, now, config, detailLoading = false, onSelectRun 
                       <span className="shrink-0 text-[9px] font-mono opacity-80">
                         {isPending ? (
                           <span className="inline-flex items-center gap-1 text-kumo-brand">
-                            <RefreshCw className="h-2.5 w-2.5 animate-spin" />
+                            <Loader size={12} />
                             切换中
                           </span>
                         ) : (
@@ -1795,7 +1799,7 @@ function RepositoryCard({ item, now, config, detailLoading = false, onSelectRun 
         {isSwitchingRun && (
           <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex items-center justify-between rounded-md border border-kumo-brand/30 bg-kumo-base/88 px-3 py-2 text-[11px] text-kumo-brand shadow-sm backdrop-blur-sm">
             <span className="inline-flex min-w-0 items-center gap-1.5">
-              <RefreshCw className="h-3 w-3 animate-spin" />
+              <Loader size={14} />
               <span className="truncate">正在切换到 {pendingRunName}</span>
             </span>
             <span className="font-mono text-[10px] text-kumo-subtle">加载最新 Job</span>

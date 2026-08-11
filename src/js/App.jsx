@@ -1,4 +1,5 @@
 import React, { lazy, Suspense, useEffect, useState } from 'react';
+import { Loader } from '@cloudflare/kumo';
 import useStore, { applyThemeMode, getPendingAuthProvider } from './store.js';
 import AuthPage from './pages/AuthPage.jsx';
 import { GitHubBrand, Shield } from './components/IconsCore.jsx';
@@ -82,7 +83,7 @@ function AuthTransitionScreen() {
             {isGitHub ? '正在验证 GitHub' : '正在登录'}
           </div>
         </div>
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-kumo-line border-t-kumo-brand" />
+        <Loader size={32} />
       </div>
     </main>
   );

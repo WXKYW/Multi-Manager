@@ -14,6 +14,7 @@ import {
   ClipboardText,
   ChartPalette,
   Collapsible,
+  Badge,
   DatePicker,
   Label,
   LayerCard,
@@ -60,7 +61,7 @@ import {
 import {
   PageStack,
   AppCard,
-  InlineStatusPill,
+  StatusBadge,
   EmptyState,
   stickyTabsBaseClass,
   TabBarOverflowActions,
@@ -179,11 +180,11 @@ function activeModelIdsForEndpoint(endpoint) {
 }
 
 // 按请求结果给 pill 上色：成功且有输出=绿，无输出=黄，失败=红。
-function resultToneClass(statusCode, completionTokens) {
+function resultTone(statusCode, completionTokens) {
   const status = Number(statusCode) || 0;
-  if (status >= 400) return 'bg-kumo-danger/15 text-kumo-danger';
-  if (!(Number(completionTokens) > 0)) return 'bg-kumo-warning/15 text-kumo-warning';
-  return 'bg-kumo-success/15 text-kumo-success';
+  if (status >= 400) return 'danger';
+  if (!(Number(completionTokens) > 0)) return 'warning';
+  return 'success';
 }
 
 const GATEWAY_EXPIRY_HOURS = Array.from({ length: 24 }, (_, hour) => {
@@ -3129,9 +3130,10 @@ const trendSeries = useMemo(() => {
                   {
                     key: 'refresh',
                     label: '刷新',
-                    icon: <RefreshCw className={cx('w-3.5 h-3.5', analyticsLoading && 'animate-spin')} />,
+                    icon: <RefreshCw className="w-3.5 h-3.5" />,
                     onClick: fetchAnalytics,
                     disabled: analyticsLoading,
+                    loading: analyticsLoading,
                   },
                 ]}
               />
@@ -3142,9 +3144,10 @@ const trendSeries = useMemo(() => {
                   {
                     key: 'refresh',
                     label: '刷新',
-                    icon: <RefreshCw className={cx(iconButtonIconClass, gatewayKeysLoading && 'animate-spin')} />,
+                    icon: <RefreshCw className={iconButtonIconClass} />,
                     onClick: loadGatewayKeys,
                     disabled: gatewayKeysLoading,
+                    loading: gatewayKeysLoading,
                   },
                   {
                     key: 'add',
@@ -3192,16 +3195,18 @@ const trendSeries = useMemo(() => {
                   {
                     key: 'health',
                     label: '健康检测',
-                    icon: <Activity className={cx(iconButtonIconClass, modelHealthBatchLoading && 'animate-pulse')} />,
+                    icon: <Activity className={iconButtonIconClass} />,
                     onClick: () => setHealthCheckModal(true),
                     disabled: modelHealthBatchLoading,
+                    loading: modelHealthBatchLoading,
                   },
                   {
                     key: 'refresh',
                     label: '刷新列表',
-                    icon: <RefreshCw className={cx(iconButtonIconClass, endpointsRefreshing && 'animate-spin')} />,
+                    icon: <RefreshCw className={iconButtonIconClass} />,
                     onClick: refreshAllEndpoints,
                     disabled: endpointsRefreshing,
+                    loading: endpointsRefreshing,
                   },
                   {
                     key: 'add',
@@ -3243,12 +3248,12 @@ const trendSeries = useMemo(() => {
               )}
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
-              <InlineStatusPill tone="neutral">
+              <StatusBadge tone="neutral">
                 {endpoints.filter(endpoint => endpoint.enabled).length} 个启用端点
-              </InlineStatusPill>
-              <InlineStatusPill tone="brand">
+              </StatusBadge>
+              <StatusBadge tone="brand">
                 {enabledModelCount} 个启用模型
-              </InlineStatusPill>
+              </StatusBadge>
             </div>
           </div>
           {endpointsLoading ? (
@@ -3365,20 +3370,20 @@ const trendSeries = useMemo(() => {
                         <span className="truncate font-medium text-kumo-strong">
                           {endpoint.name || '未命名端点'}
                         </span>
-                        <InlineStatusPill
+                        <StatusBadge
                           tone={validStatus ? 'success' : invalidStatus ? 'danger' : 'neutral'}
                         >
                           {validStatus ? '有效' : invalidStatus ? '无效' : '待检测'}
-                        </InlineStatusPill>
+                        </StatusBadge>
                         {Array.isArray(endpoint.headers) && endpoint.headers.length > 0 && (
-                          <InlineStatusPill
+                          <StatusBadge
                             tone="info"
                             title={(endpoint.headers || [])
                               .map(h => `${h.name}: ${h.value}`)
                               .join('\n')}
                           >
                             {endpoint.headers.length} 请求头
-                          </InlineStatusPill>
+                          </StatusBadge>
                         )}
                         <span
                           className="hidden truncate font-mono text-[10px] text-kumo-subtle sm:block"
@@ -3410,13 +3415,9 @@ const trendSeries = useMemo(() => {
                           variant="secondary"
                           aria-label="刷新模型列表"
                           onClick={() => refreshEndpointModels(endpoint)}
-                          disabled={endpoint.refreshing}
+                          loading={endpoint.refreshing}
                           title="刷新模型列表"
-                          icon={
-                            <RefreshCw
-                              className={cx(actionIconClass, endpoint.refreshing && 'animate-spin')}
-                            />
-                          }
+                          icon={<RefreshCw className={actionIconClass} />}
                         />
                         <Button
                           shape="square"
@@ -3603,9 +3604,9 @@ const trendSeries = useMemo(() => {
                                       )}
                                     </Table.Cell>
                                     <Table.Cell className="!px-2 !py-1.5 text-center">
-                                      <InlineStatusPill tone={healthTone}>
+                                      <StatusBadge tone={healthTone}>
                                         {healthLabel}
-                                      </InlineStatusPill>
+                                      </StatusBadge>
                                     </Table.Cell>
                                     <Table.Cell className="!px-2 !py-1.5 text-center font-mono text-kumo-strong">
                                       {health?.latency != null ? `${health.latency} ms` : '-'}
@@ -3774,9 +3775,9 @@ const trendSeries = useMemo(() => {
                           )}
                         </Table.Cell>
                         <Table.Cell className="text-center">
-                          <InlineStatusPill tone={key.enabled ? 'success' : 'neutral'}>
+                          <StatusBadge tone={key.enabled ? 'success' : 'neutral'}>
                             {key.enabled ? '已启用' : '已停用'}
-                          </InlineStatusPill>
+                          </StatusBadge>
                         </Table.Cell>
                         <Table.Cell className="truncate text-center text-sm text-kumo-subtle">
                           {key.lastUsed ? formatDateTime(key.lastUsed) : '从未使用'}
@@ -3818,17 +3819,9 @@ const trendSeries = useMemo(() => {
                               aria-label={key.enabled ? '停用密钥' : '启用密钥'}
                               onClick={() => toggleGatewayKey(key)}
                               title={key.enabled ? '停用密钥' : '启用密钥'}
-                              disabled={!!gatewayKeyToggleLoading[key.id]}
-                            >
-                              <span className="flex h-4 w-4 items-center justify-center">
-                                <Reboot
-                                  className={cx(
-                                    'h-3.5 w-3.5',
-                                    gatewayKeyToggleLoading[key.id] && 'animate-spin'
-                                  )}
-                                />
-                              </span>
-                            </Button>
+                              loading={!!gatewayKeyToggleLoading[key.id]}
+                              icon={<Reboot className="h-3.5 w-3.5" />}
+                            />
                             <Button
                               shape="square"
                               size="sm"
@@ -4274,7 +4267,7 @@ const trendSeries = useMemo(() => {
                   {analyticsLoading && analyticsLogs.length === 0 ? (
                     <Table.Row>
                       <Table.Cell colSpan={12} className="text-center py-8">
-                        <RotateCw className="w-5 h-5 animate-spin mx-auto text-kumo-subtle" />
+                        <Loader size={20} className="mx-auto text-kumo-subtle" />
                       </Table.Cell>
                     </Table.Row>
                   ) : analyticsLogs.length === 0 ? (
@@ -4318,13 +4311,12 @@ const trendSeries = useMemo(() => {
                             className="text-center font-mono text-kumo-subtle"
                             title={log.upstreamIp || '本机出口'}
                           >
-                            <div className="inline-flex items-center justify-center gap-1">
+                            <div
+                              className="inline-flex items-center justify-center gap-1"
+                              title="经代理池出口"
+                            >
                               <span className="truncate">{log.upstreamIp || '—'}</span>
-                              {log.viaProxy && (
-                                <InlineStatusPill tone="info" title="经代理池出口">
-                                  代
-                                </InlineStatusPill>
-                              )}
+                              {log.viaProxy && <StatusBadge tone="info">代</StatusBadge>}
                             </div>
                           </Table.Cell>
                           <Table.Cell
@@ -4334,38 +4326,27 @@ const trendSeries = useMemo(() => {
                             {log.clientIp || '—'}
                           </Table.Cell>
                           <Table.Cell className="text-center">
-                            <InlineStatusPill tone={log.statusCode < 400 ? 'success' : 'danger'}>
+                            <StatusBadge tone={log.statusCode < 400 ? 'success' : 'danger'}>
                               {log.statusCode}
-                            </InlineStatusPill>
+                            </StatusBadge>
                           </Table.Cell>
                           <Table.Cell className="text-center">
-                            <div className="inline-flex items-center gap-1">
-                              <span
-                                className={`${resultToneClass(
-                                  log.statusCode,
-                                  log.completionTokens
-                                )} inline-flex items-center rounded-full px-2 py-0.5 font-mono text-[11px] font-semibold leading-none`}
-                              >
+                            <div
+                              className="inline-flex items-center gap-1"
+                              title={log.stream ? '流式响应' : '非流式响应'}
+                            >
+                              <StatusBadge tone={resultTone(log.statusCode, log.completionTokens)}>
                                 {(log.latencyMs / 1000).toFixed(1)}s
-                              </span>
-                              <span
-                                className={`${resultToneClass(
-                                  log.statusCode,
-                                  log.completionTokens
-                                )} inline-flex items-center rounded-full px-2 py-0.5 font-mono text-[11px] font-semibold leading-none`}
-                              >
+                              </StatusBadge>
+                              <StatusBadge tone={resultTone(log.statusCode, log.completionTokens)}>
                                 {log.ttfbMs > 0 ? (log.ttfbMs / 1000).toFixed(1) + 's' : '—'}
-                              </span>
-                              <span
-                                className={
-                                  log.stream
-                                    ? 'inline-flex items-center rounded-full bg-kumo-info/15 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-kumo-info'
-                                    : 'inline-flex items-center rounded-full bg-kumo-warning/15 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-kumo-warning'
-                                }
-                                title={log.stream ? '流式响应' : '非流式响应'}
+                              </StatusBadge>
+                              <StatusBadge
+                                tone={log.stream ? 'info' : 'warning'}
+                                className="!px-1.5 !text-[10px]"
                               >
                                 {log.stream ? '流' : '非流'}
-                              </span>
+                              </StatusBadge>
                             </div>
                           </Table.Cell>
                           <Table.Cell className="text-center font-mono">
@@ -4600,11 +4581,16 @@ const trendSeries = useMemo(() => {
                           return (
                             <span
                               key={index}
-                              className="inline-flex max-w-40 items-center gap-1 truncate rounded-full border border-kumo-line bg-kumo-base px-2 py-0.5 text-[11px] font-medium text-kumo-strong"
+                              className="max-w-40"
                               title={entry.full}
                             >
-                              <span className="truncate">{entry.label || entry.host || '空代理'}</span>
-                              {entry.ip && <span className="shrink-0 font-mono text-[10px] text-kumo-subtle">{entry.ip}</span>}
+                              <Badge
+                                variant="outline"
+                                className="w-fit gap-1 font-mono !text-[11px] font-medium"
+                              >
+                                <span className="truncate">{entry.label || entry.host || '空代理'}</span>
+                                {entry.ip && <span className="shrink-0 font-mono text-[10px] text-kumo-subtle">{entry.ip}</span>}
+                              </Badge>
                             </span>
                           );
                         })}
@@ -4996,19 +4982,21 @@ const trendSeries = useMemo(() => {
                     <Label showOptional>允许的模型（白名单）</Label>
                     <div className="flex flex-wrap items-center gap-1.5">
                       {(gatewayKeyForm.allowedModels || []).map(model => (
-                        <span
+                        <Badge
                           key={model}
-                          className="inline-flex max-w-full items-center gap-1 truncate rounded-full border border-kumo-line bg-kumo-base px-2 py-0.5 font-mono text-[11px] font-medium text-kumo-strong"
+                          variant="outline"
+                          className="max-w-full gap-1 font-mono !text-[11px] font-medium"
                         >
                           <span className="truncate">{model}</span>
                           <Button
                             size="xs"
+                            shape="square"
                             variant="ghost"
                             aria-label={`移除 ${model}`}
                             onClick={() => removeGatewayKeyListItem('allowedModels', model)}
                             icon={<X className="h-3 w-3" />}
                           />
-                        </span>
+                        </Badge>
                       ))}
                       <Input
                         size="sm"
@@ -5030,19 +5018,21 @@ const trendSeries = useMemo(() => {
                     <Label showOptional>允许的端点（白名单）</Label>
                     <div className="flex flex-wrap items-center gap-1.5">
                       {(gatewayKeyForm.allowedEndpoints || []).map(endpointId => (
-                        <span
+                        <Badge
                           key={endpointId}
-                          className="inline-flex max-w-full items-center gap-1 truncate rounded-full border border-kumo-line bg-kumo-base px-2 py-0.5 font-mono text-[11px] font-medium text-kumo-strong"
+                          variant="outline"
+                          className="max-w-full gap-1 font-mono !text-[11px] font-medium"
                         >
                           <span className="truncate">{endpointId}</span>
                           <Button
                             size="xs"
+                            shape="square"
                             variant="ghost"
                             aria-label={`移除 ${endpointId}`}
                             onClick={() => removeGatewayKeyListItem('allowedEndpoints', endpointId)}
                             icon={<X className="h-3 w-3" />}
                           />
-                        </span>
+                        </Badge>
                       ))}
                       <Input
                         size="sm"
@@ -5155,7 +5145,7 @@ const trendSeries = useMemo(() => {
 
             <div className="flex items-center justify-between text-sm">
               <span className="font-semibold text-kumo-strong">检测方式</span>
-              <InlineStatusPill tone="info">后端批量检测</InlineStatusPill>
+              <StatusBadge tone="info">后端批量检测</StatusBadge>
             </div>
 
             <div className="flex items-center justify-between text-sm">

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Banner } from '@cloudflare/kumo/components/banner';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Input } from '@cloudflare/kumo/components/input';
+import { Loader } from '@cloudflare/kumo/components/loader';
 import useStore from '../store.js';
 import {
   clearExplicitLogoutMarker,
@@ -338,7 +339,7 @@ function AuthStatusNotice({ statusKey, message }) {
         <AuthErrorBanner message={message} />
       ) : status ? (
         <div className="flex w-full items-center gap-2.5 rounded-lg border border-kumo-brand/35 bg-kumo-brand/10 p-3 text-kumo-brand">
-          <RefreshCw className="size-4 shrink-0 animate-spin" />
+          <Loader size={16} className="shrink-0 text-kumo-brand" />
           <div className="text-xs font-bold leading-tight">{status}</div>
         </div>
       ) : null}

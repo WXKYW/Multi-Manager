@@ -12,7 +12,7 @@ import { toast } from '../modules/toast.js';
 import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
-import { AppTable, DataTableFrame, EmptyState, InlineStatusPill, PageStack, SectionCard, TabBarOverflowActions, getStatusPillClass, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
+import { AppTable, DataTableFrame, EmptyState, StatusBadge, PageStack, SectionCard, TabBarOverflowActions, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
 import { Cloud, Globe, Play, Plus, RefreshCw, RotateCw, Server, Settings, Square, Trash } from '../components/Icons.jsx';
 
 const emptyAccountForm = {
@@ -94,6 +94,7 @@ function CloudToolbar({ activeTab, setActiveTab, accounts, selectedAccountId, se
               icon: <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />,
               onClick: refreshData,
               disabled: refreshing || !selectedAccountId,
+              loading: refreshing,
             },
           ]}
         />
@@ -306,7 +307,7 @@ function AliyunPage() {
               <Table.Row key={domain.DomainId}>
                 <Table.Cell className="font-semibold text-kumo-strong">{domain.DomainName}</Table.Cell>
                 <Table.Cell className="tabular-nums">{domain.RecordCount || '-'}</Table.Cell>
-                <Table.Cell><InlineStatusPill tone="success">正常</InlineStatusPill></Table.Cell>
+                <Table.Cell><StatusBadge tone="success">正常</StatusBadge></Table.Cell>
                 <Table.Cell className="truncate text-kumo-subtle">{domain.Remark || '-'}</Table.Cell>
                 <Table.Cell><div className="flex w-full justify-end"><Button size="sm" variant="secondary">管理解析</Button></div></Table.Cell>
               </Table.Row>
@@ -348,7 +349,7 @@ function AliyunPage() {
                         <div className="truncate font-mono text-[11px] text-kumo-subtle">{item.InstanceId}</div>
                       </div>
                     </Table.Cell>
-                    <Table.Cell><span className={`inline-flex rounded px-2 py-0.5 text-[10px] font-bold ${getStatusPillClass(statusTone(status))}`}>{statusText(status)}</span></Table.Cell>
+                    <Table.Cell><StatusBadge tone={statusTone(status)}>{statusText(status)}</StatusBadge></Table.Cell>
                     <Table.Cell className="truncate">{item.RegionName || '-'}</Table.Cell>
                     <Table.Cell className="font-mono text-[11px]">{kind === 'ecs' ? instanceIP(item) : item.PublicIpAddress || '-'}</Table.Cell>
                     <Table.Cell className="truncate">{item.InstanceTypeFriendly || '-'}</Table.Cell>

@@ -2361,7 +2361,7 @@ function GitHubPage() {
 
                         <div className="flex items-center justify-end gap-1 border-t border-kumo-line pt-2">
                           {repo.html_url && <Button size="sm" shape="square" variant="secondary" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); window.open(repo.html_url, '_blank'); }} aria-label="打开 GitHub" title="打开 GitHub" />}
-                          <Button size="sm" shape="square" variant="secondary" icon={<RefreshCw className={`h-3.5 w-3.5 ${refreshingRepositoryId === String(repo.id) ? 'animate-spin' : ''}`} />} onClick={(event) => { event.stopPropagation(); refreshRepository(repo.id); }} disabled={refreshingRepositoryId === String(repo.id)} aria-label="刷新仓库" title="刷新仓库" />
+                          <Button size="sm" shape="square" variant="secondary" icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); refreshRepository(repo.id); }} loading={refreshingRepositoryId === String(repo.id)} aria-label="刷新仓库" title="刷新仓库" />
                           <Button size="sm" shape="square" variant={isArmed(`github-repo:${repo.id}`) ? 'destructive' : 'secondary-destructive'} icon={<Trash className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); deleteRepository(repo.id); }} aria-label="删除仓库" title="删除仓库" />
                         </div>
                       </LayerCard.Primary>
@@ -2399,7 +2399,7 @@ function GitHubPage() {
                   onValueChange={setSelectedRepoId}
                   items={repoOptions}
                 />
-                <Button size="sm" variant="secondary" icon={<RefreshCw className={`h-3.5 w-3.5 ${refreshingRepositoryId === String(selectedRepo.id) ? 'animate-spin' : ''}`} />} onClick={() => refreshRepository(selectedRepo.id)} disabled={refreshingRepositoryId === String(selectedRepo.id)}>刷新仓库</Button>
+                <Button size="sm" variant="secondary" icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={() => refreshRepository(selectedRepo.id)} loading={refreshingRepositoryId === String(selectedRepo.id)}>刷新仓库</Button>
               </div>
             </LayerCard.Secondary>
             <LayerCard.Primary className="p-4">

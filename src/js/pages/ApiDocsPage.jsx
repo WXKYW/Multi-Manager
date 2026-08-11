@@ -6,7 +6,7 @@ import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
-import { ClipboardText, DatePicker, Label, LayerCard, Pagination, Popover, Switch, Table, Tabs } from '@cloudflare/kumo';
+import { ClipboardText, DatePicker, Label, LayerCard, Loader, Pagination, Popover, Switch, Table, Tabs } from '@cloudflare/kumo';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
 import { formatDateTime } from '../modules/utils.js';
@@ -15,7 +15,7 @@ import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import {
   AppCard,
   EmptyState,
-  InlineStatusPill,
+  StatusBadge,
   PageStack,
   SectionCard,
   TabBarOverflowActions,
@@ -968,7 +968,7 @@ function RouteTree({ routes, selectedRoute, onSelect, revealAll }) {
                     {sectionItem.section}
                   </span>
                 </span>
-                <InlineStatusPill tone="neutral">{sectionItem.count}</InlineStatusPill>
+                <StatusBadge tone="neutral">{sectionItem.count}</StatusBadge>
               </Button>
               {!sectionCollapsed(sectionItem.section) && (
                 <div className="border-t border-kumo-line/50">
@@ -992,7 +992,7 @@ function RouteTree({ routes, selectedRoute, onSelect, revealAll }) {
                             {groupItem.group}
                           </span>
                         </span>
-                        <InlineStatusPill tone="neutral">{groupItem.count}</InlineStatusPill>
+                        <StatusBadge tone="neutral">{groupItem.count}</StatusBadge>
                       </Button>
                       {!groupCollapsed(groupItem.group) && (
                         <div className="border-t border-kumo-line/40">
@@ -1016,7 +1016,7 @@ function RouteTree({ routes, selectedRoute, onSelect, revealAll }) {
                                     {moduleItem.label}
                                   </span>
                                 </span>
-                                <InlineStatusPill tone="neutral">{moduleItem.count}</InlineStatusPill>
+                                <StatusBadge tone="neutral">{moduleItem.count}</StatusBadge>
                               </Button>
                               {!moduleCollapsed(groupItem.group, moduleItem.module) && (
                                 <div className="border-t border-kumo-line/40">
@@ -1038,15 +1038,15 @@ function RouteTree({ routes, selectedRoute, onSelect, revealAll }) {
                                           <div className="min-w-0 truncate font-mono text-xs font-bold text-kumo-strong">
                                             {route.prefix}
                                           </div>
-                                          <InlineStatusPill tone={STATUS_TONE[route.status]}>
+                                          <StatusBadge tone={STATUS_TONE[route.status]}>
                                             {STATUS_LABEL[route.status] || route.status}
-                                          </InlineStatusPill>
+                                          </StatusBadge>
                                         </div>
                                         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                                           <RouteMethodPills methods={route.methods} />
-                                          <InlineStatusPill tone={AUTH_TONE[route.auth]}>
+                                          <StatusBadge tone={AUTH_TONE[route.auth]}>
                                             {AUTH_LABEL[route.auth] || route.auth}
-                                          </InlineStatusPill>
+                                          </StatusBadge>
                                         </div>
                                         <div className="line-clamp-1 text-xs leading-relaxed text-kumo-subtle">
                                           {route.description}
@@ -1085,10 +1085,10 @@ function ParamTable({ title, items }) {
           >
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono text-xs font-bold text-kumo-strong">{item.name}</span>
-              <InlineStatusPill tone="neutral">{item.in}</InlineStatusPill>
-              <InlineStatusPill tone={item.required ? 'warning' : 'neutral'}>
+              <StatusBadge tone="neutral">{item.in}</StatusBadge>
+              <StatusBadge tone={item.required ? 'warning' : 'neutral'}>
                 {item.required ? '必填' : '可选'}
-              </InlineStatusPill>
+              </StatusBadge>
             </div>
             <div className="mt-1 text-xs leading-relaxed text-kumo-subtle">
               {item.description || '-'}
@@ -1163,15 +1163,15 @@ function RouteDetail({ route, openapiRoute }) {
       icon={<FileText className="h-4 w-4 text-kumo-brand" />}
       meta={
         <div className="flex flex-wrap items-center gap-2">
-          <InlineStatusPill tone={STATUS_TONE[route.status]}>
+          <StatusBadge tone={STATUS_TONE[route.status]}>
             {STATUS_LABEL[route.status] || route.status}
-          </InlineStatusPill>
-          <InlineStatusPill tone={AUTH_TONE[route.auth]}>
+          </StatusBadge>
+          <StatusBadge tone={AUTH_TONE[route.auth]}>
             {AUTH_LABEL[route.auth] || route.auth}
-          </InlineStatusPill>
-          <InlineStatusPill tone="neutral">
+          </StatusBadge>
+          <StatusBadge tone="neutral">
             {RESPONSE_LABEL[route.responseMode] || route.responseMode}
-          </InlineStatusPill>
+          </StatusBadge>
         </div>
       }
       actions={
@@ -1545,7 +1545,7 @@ function AIAuditConsole({
             {loading ? (
               <Table.Row>
                 <Table.Cell colSpan={8} className="py-8 text-center">
-                  <RotateCw className="mx-auto h-5 w-5 animate-spin text-kumo-subtle" />
+                  <Loader size={20} className="mx-auto text-kumo-subtle" />
                 </Table.Cell>
               </Table.Row>
             ) : records.length === 0 ? (
@@ -1579,9 +1579,9 @@ function AIAuditConsole({
                     {item.target || item.details || '-'}
                   </Table.Cell>
                   <Table.Cell className="text-center">
-                    <InlineStatusPill tone={item.status === 'success' ? 'success' : 'danger'}>
+                    <StatusBadge tone={item.status === 'success' ? 'success' : 'danger'}>
                       {item.status}
-                    </InlineStatusPill>
+                    </StatusBadge>
                   </Table.Cell>
                   <Table.Cell className="text-center font-mono text-kumo-subtle">
                     {item.latencyMs ? `${item.latencyMs}ms` : '-'}
@@ -1672,7 +1672,7 @@ function AIAuditConsole({
                 <div className="mb-0.5 text-kumo-subtle">{field.label}</div>
                 <div className="break-all font-mono text-kumo-strong">
                   {field.pill ? (
-                    <InlineStatusPill tone={field.pill}>{field.value}</InlineStatusPill>
+                    <StatusBadge tone={field.pill}>{field.value}</StatusBadge>
                   ) : (
                     field.value
                   )}
@@ -2005,8 +2005,8 @@ function APIKeyConsole({
         title="密钥与使用监控"
         icon={<Activity className="h-4 w-4 text-kumo-brand" />}
         action={
-          <Button size="sm" variant="secondary" onClick={onRefresh} disabled={loading}>
-            <RefreshCw className={cx('h-3.5 w-3.5', loading && 'animate-spin')} />
+          <Button size="sm" variant="secondary" onClick={onRefresh} loading={loading}>
+            <RefreshCw className="h-3.5 w-3.5" />
           </Button>
         }
         className="min-h-0"
@@ -2033,7 +2033,7 @@ function APIKeyConsole({
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 flex-wrap items-center gap-2">
                         <span className="truncate text-xs font-bold text-kumo-strong">{key.name}</span>
-                        <InlineStatusPill tone={status.tone}>{status.label}</InlineStatusPill>
+                        <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
                         <span className="rounded border border-kumo-line px-1.5 py-0.5 text-[10px] text-kumo-subtle">
                           {kind?.label || key.kind}
                         </span>
@@ -2490,9 +2490,10 @@ function ApiDocsPage() {
             {
               key: 'refresh',
               label: '刷新',
-              icon: <RefreshCw className={cx('h-3.5 w-3.5', refreshing && 'animate-spin')} />,
+              icon: <RefreshCw className="h-3.5 w-3.5" />,
               onClick: () => loadDocs(true),
               disabled: refreshing,
+              loading: refreshing,
             },
             {
               key: 'export',
@@ -2523,9 +2524,10 @@ function ApiDocsPage() {
             {
               key: 'refresh',
               label: '刷新',
-              icon: <RefreshCw className={cx('h-3.5 w-3.5', auditLoading && 'animate-spin')} />,
+              icon: <RefreshCw className="h-3.5 w-3.5" />,
               onClick: () => loadAIAudit(true),
               disabled: auditLoading,
+              loading: auditLoading,
             },
             {
               key: 'clear',

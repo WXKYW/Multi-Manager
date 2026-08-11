@@ -7,7 +7,7 @@ import { Select } from '@cloudflare/kumo/components/select';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
-import { Popover, Tabs } from '@cloudflare/kumo';
+import { Badge, Meter, Popover, Tabs } from '@cloudflare/kumo';
 import { dialog } from '../modules/dialog.js';
 import { toast } from '../modules/toast.js';
 import { useConfirmPress } from '../hooks/useConfirmPress.js';
@@ -123,8 +123,6 @@ const publicResourceCardClass =
   'flex h-full min-h-[15rem] flex-col overflow-hidden rounded-xl border border-kumo-line bg-kumo-base';
 const publicResourceCardHeaderClass =
   'flex items-center justify-between gap-3 border-b border-kumo-line bg-kumo-recessed/10 px-3.5 py-3';
-const publicResourceCardPillClass =
-  'inline-flex max-w-40 shrink-0 items-center rounded-full border border-kumo-line bg-kumo-recessed/35 px-2.5 py-1 text-[11px] font-medium text-kumo-strong';
 const publicResourceCardGridClass = 'grid flex-1 grid-cols-2 gap-2 p-3';
 const publicResourceCardFieldClass = 'rounded-lg border border-kumo-line bg-kumo-recessed/15 p-2.5';
 const publicResourceCardActionBarClass =
@@ -2005,9 +2003,8 @@ function M365Page() {
                       shape="square"
                       title="校验"
                       aria-label="校验"
-                      icon={
-                        <RefreshCw className={cx('h-3.5 w-3.5', verifying && 'animate-spin')} />
-                      }
+                      loading={verifying}
+                      icon={<RefreshCw className="h-3.5 w-3.5" />}
                       onClick={() => verifyAccount(account)}
                     />
                     <Button size="sm" variant="secondary" onClick={() => openEditAccount(account)}>
@@ -2170,11 +2167,13 @@ function M365Page() {
                               </div>
                             </div>
                             <div className="flex shrink-0 items-center gap-3">
-                              <span
-                                className={publicResourceCardPillClass}
-                                title={inviteCodeSummary}
-                              >
-                                <span className="truncate">{inviteCodeSummary}</span>
+                              <span title={inviteCodeSummary}>
+                                <Badge
+                                  variant="outline"
+                                  className="max-w-40 !px-2.5 !py-1 !text-[11px] font-medium !text-kumo-strong"
+                                >
+                                  <span className="truncate">{inviteCodeSummary}</span>
+                                </Badge>
                               </span>
                               <div
                                 className="flex items-center"
@@ -2320,8 +2319,13 @@ function M365Page() {
                                   </StatusBadge>
                                 </div>
                               </div>
-                              <span className={publicResourceCardPillClass} title={batchLabel}>
-                                <span className="truncate">{batchLabel}</span>
+                              <span title={batchLabel}>
+                                <Badge
+                                  variant="outline"
+                                  className="max-w-40 !px-2.5 !py-1 !text-[11px] font-medium !text-kumo-strong"
+                                >
+                                  <span className="truncate">{batchLabel}</span>
+                                </Badge>
                               </span>
                             </div>
 
@@ -2631,10 +2635,10 @@ function M365Page() {
                 totalUnits > 0 ? clampPercent((consumedUnits / totalUnits) * 100) : 0;
               const progressTone =
                 usagePct >= 90
-                  ? 'bg-kumo-danger'
+                  ? '!bg-kumo-danger'
                   : usagePct >= 70
-                    ? 'bg-kumo-warning'
-                    : 'bg-kumo-brand';
+                    ? '!bg-kumo-warning'
+                    : '!bg-kumo-brand';
               const lifecycleText = getSkuLifecycleText(sku);
               return (
                 <div
@@ -2665,12 +2669,12 @@ function M365Page() {
                     </div>
                     <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
                       {lifecycleText ? (
-                        <span
-                          className="rounded-full border border-kumo-line/70 bg-kumo-recessed/30 px-2 py-0.5 text-[11px] font-medium leading-5 text-kumo-subtle"
-                          title={lifecycleText}
+                        <Badge
+                          variant="outline"
+                          className="border-kumo-line/70 bg-kumo-recessed/30 !px-2 !py-0.5 !text-[11px] font-medium leading-5 !text-kumo-subtle"
                         >
                           {lifecycleText}
-                        </span>
+                        </Badge>
                       ) : null}
                       <StatusBadge
                         tone={usagePct >= 90 ? 'danger' : usagePct >= 70 ? 'warning' : 'success'}
@@ -2680,15 +2684,15 @@ function M365Page() {
                     </div>
                   </div>
 
-                  <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-kumo-recessed/80">
-                    <div
-                      className={cx(
-                        'h-full rounded-full transition-[width] duration-300',
-                        progressTone
-                      )}
-                      style={{ width: `${usagePct}%` }}
-                    />
-                  </div>
+                  <Meter
+                    label=""
+                    value={usagePct}
+                    max={100}
+                    showValue={false}
+                    className="mt-2.5"
+                    trackClassName="!h-1.5 bg-kumo-recessed/80"
+                    indicatorClassName={progressTone}
+                  />
                 </div>
               );
             })}
@@ -2822,9 +2826,12 @@ function M365Page() {
                         >
                           <span className="min-w-0 flex-1 truncate">{assignedSkuSummary}</span>
                           {assignedSkuLabels.length > 1 ? (
-                            <span className="shrink-0 rounded-full border border-kumo-line/70 bg-kumo-recessed/20 px-2 py-0.5 text-[10px] text-kumo-subtle">
-                              {assignedSkuLabels.length} 项
-                            </span>
+                          <Badge
+                            variant="outline"
+                            className="shrink-0 border-kumo-line/70 bg-kumo-recessed/20 !px-2 !py-0.5 !text-[10px] !text-kumo-subtle"
+                          >
+                            {assignedSkuLabels.length} 项
+                          </Badge>
                           ) : null}
                         </div>
                       </Table.Cell>

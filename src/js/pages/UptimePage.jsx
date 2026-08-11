@@ -20,7 +20,7 @@ import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
-import { ChartPalette, ClipboardText, Tabs, TimeseriesChart } from '@cloudflare/kumo';
+import { ChartPalette, ClipboardText, Loader, Tabs, TimeseriesChart } from '@cloudflare/kumo';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { AnimatedCollapse, DeferredRender } from '../components/AnimatedCollapse.jsx';
 import { AppCard, ChartCard, ChartWarmupSkeleton, DataTableFrame, EmptyState, ResponsiveSearchInput, SectionCard, StatusBadge, TabBarOverflowActions, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
@@ -1454,7 +1454,7 @@ function UptimePage() {
 
           {uptimeLoading && uptimeMonitors.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-kumo-subtle">
-              <RotateCw className="w-8 h-8 animate-spin text-kumo-brand mb-4" />
+              <Loader size={32} className="text-kumo-brand mb-4" />
               <span>载入监控目标中...</span>
             </div>
           ) : filteredMonitors.length === 0 ? (

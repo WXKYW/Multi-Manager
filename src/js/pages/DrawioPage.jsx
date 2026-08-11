@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Badge, Empty, LayerCard, Popover, Tabs } from '@cloudflare/kumo';
-import { Button } from '@cloudflare/kumo/components/button';
+import { Badge, Button, Empty, LayerCard, Popover, Tabs } from '@cloudflare/kumo';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input } from '@cloudflare/kumo/components/input';
 import DrawioFrame from '../components/drawio/DrawioFrame.jsx';
@@ -474,9 +473,10 @@ export default function DrawioPage() {
           />
         )}
         <div className="hidden min-h-0 flex-col border-l border-kumo-line lg:flex">
-          <button
+          <Button
             type="button"
-            className="flex h-[30.5px] shrink-0 items-center justify-between gap-2 border-b border-kumo-line px-3 text-left transition hover:bg-kumo-recessed/20"
+            variant="ghost"
+            className="flex h-[30.5px] shrink-0 items-center justify-between gap-2 rounded-none border-b border-kumo-line px-3 text-left transition hover:bg-kumo-recessed/20"
             onClick={() => setXmlOpen(value => !value)}
             aria-label={xmlOpen ? '收起 XML 编辑区' : '展开 XML 编辑区'}
           >
@@ -494,7 +494,7 @@ export default function DrawioPage() {
                 <ChevronDown className="h-3.5 w-3.5 shrink-0" />
               )}
             </span>
-          </button>
+          </Button>
           {xmlOpen && (
             <div className="h-48 min-h-0 shrink-0 overflow-hidden border-b border-kumo-line bg-kumo-base">
               <CodeEditor

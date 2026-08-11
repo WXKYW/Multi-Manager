@@ -12,7 +12,7 @@ import { Select } from '@cloudflare/kumo/components/select';
 import { Checkbox } from '@cloudflare/kumo/components/checkbox';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Popover } from '@cloudflare/kumo/components/popover';
-import { ChartLegend, ChartPalette, ClipboardText, Collapsible, LayerCard, Meter, Tabs, TimeseriesChart } from '@cloudflare/kumo';
+import { ChartLegend, ChartPalette, ClipboardText, Collapsible, LayerCard, Loader, Meter, Tabs, TimeseriesChart } from '@cloudflare/kumo';
 import { Table } from '@cloudflare/kumo/components/table';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { AnimatedCollapse, DeferredRender } from '../components/AnimatedCollapse.jsx';
@@ -7953,7 +7953,7 @@ function ServerPage() {
             />
           ) : serverLoading && serverList.length === 0 ? (
             <AppCard padding="none" className="flex flex-col items-center justify-center gap-2 p-12 text-kumo-subtle">
-              <div className="w-6 h-6 border-2 border-kumo-brand border-t-transparent rounded-full animate-spin"></div>
+              <Loader size={24} />
               <p className="text-xs">正在连接并加载主机结构中...</p>
             </AppCard>
           ) : filteredServers.length === 0 ? (

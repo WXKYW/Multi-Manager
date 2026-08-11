@@ -8,7 +8,7 @@ import useStore, {
 import { Sidebar, useSidebar } from '@cloudflare/kumo/components/sidebar';
 import { Tooltip } from '@cloudflare/kumo/components/tooltip';
 import { Button } from '@cloudflare/kumo/components/button';
-import { Tabs } from '@cloudflare/kumo';
+import { Loader, Tabs } from '@cloudflare/kumo';
 import { TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { APP_VERSION } from '../modules/appVersion.js';
 import AppPageHeader, { AppBreadcrumbs } from './AppPageHeader.jsx';
@@ -55,11 +55,7 @@ const PromptLibraryPage = lazy(() => import('../pages/PromptLibraryPage.jsx'));
 
 const PageLoadingFallback = () => (
   <div className="flex min-h-[240px] items-center justify-center">
-    <div
-      className="h-8 w-8 animate-spin rounded-full border-2 border-kumo-line border-t-kumo-brand"
-      aria-label="Loading"
-      role="status"
-    />
+    <Loader size={32} />
   </div>
 );
 

@@ -8,7 +8,7 @@ import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Table } from '@cloudflare/kumo/components/table';
 import { Checkbox } from '@cloudflare/kumo/components/checkbox';
-import { Badge, ClipboardText, Empty, Grid as KumoGrid, LayerCard, Link, Tabs, Text } from '@cloudflare/kumo';
+import { Badge, ClipboardText, Empty, Grid as KumoGrid, LayerCard, Link, Loader, Tabs, Text } from '@cloudflare/kumo';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
 import useStore from '../store.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
@@ -1698,9 +1698,10 @@ function PaasPage() {
                   {
                     key: 'refresh',
                     label: '刷新',
-                    icon: <RefreshCw className={`w-3.5 h-3.5 ${(activeTab === 'koyeb' ? koyebRefreshing : flyRefreshing) ? 'animate-spin' : ''}`} />,
+                    icon: <RefreshCw className="w-3.5 h-3.5" />,
                     onClick: () => (activeTab === 'koyeb' ? loadKoyebData(true) : loadFlyData(true)),
                     disabled: activeTab === 'koyeb' ? koyebRefreshing : flyRefreshing,
+                    loading: activeTab === 'koyeb' ? koyebRefreshing : flyRefreshing,
                   },
                 ]
               : []
@@ -1716,7 +1717,7 @@ function PaasPage() {
           {koyebLoading && koyebAccounts.length === 0 ? (
             <Empty
               size="base"
-              icon={<RefreshCw className="h-8 w-8 animate-spin text-kumo-info" />}
+              icon={<Loader size={32} className="text-kumo-info" />}
               title="正在加载 Koyeb"
               description="同步应用和域名状态"
             />
@@ -1969,7 +1970,7 @@ function PaasPage() {
                                           <div className="flex flex-wrap justify-end gap-1">
                                             <Button shape="square" size="sm" variant="secondary" aria-label="重启服务" onClick={() => restartKoyebService(account, app, service)} title={service.status === 'SUSPENDED' ? '启动服务' : '重启服务'} icon={<RefreshCw className="h-3.5 w-3.5" />} />
                                             <Button shape="square" size="sm" variant="secondary" aria-label="重新部署服务" onClick={() => redeployKoyebService(account, app, service)} title="重新部署" icon={<Rocket className="h-3.5 w-3.5" />} />
-                                            <Button shape="square" size="sm" variant="secondary" aria-label="查看服务实例" onClick={() => fetchKoyebServiceInstances(account, service)} title="查看实例" icon={<Server className={`h-3.5 w-3.5 ${service.loadingInstances ? 'animate-spin' : ''}`} />} />
+                                            <Button shape="square" size="sm" variant="secondary" aria-label="查看服务实例" onClick={() => fetchKoyebServiceInstances(account, service)} title="查看实例" loading={service.loadingInstances} icon={<Server className="h-3.5 w-3.5" />} />
                                             <Button shape="square" size="sm" variant="secondary" aria-label="查看服务日志" onClick={() => showKoyebServiceLogs(account, app, service)} title="查看日志" icon={<FileText className="h-3.5 w-3.5" />} />
                                           </div>
                                         </div>
@@ -1997,7 +1998,7 @@ function PaasPage() {
           {flyLoading && flyAccounts.length === 0 ? (
             <Empty
               size="base"
-              icon={<RefreshCw className="h-8 w-8 animate-spin text-kumo-brand" />}
+              icon={<Loader size={32} className="text-kumo-brand" />}
               title="正在加载 Fly.io"
               description="同步应用和域名状态"
             />
@@ -2196,7 +2197,7 @@ function PaasPage() {
                                     <Button shape="square" size="sm" variant="secondary" aria-label="重启应用" onClick={() => redeployFlyApp(account, app)} title="重启应用" icon={<RefreshCw className="h-3.5 w-3.5" />} />
                                     <Button shape="square" size="sm" variant="secondary" aria-label="更新容器镜像" onClick={() => updateFlyAppImage(account, app)} title="更新容器镜像" icon={<Rocket className="h-3.5 w-3.5" />} />
                                     <Button shape="square" size="sm" variant="secondary" aria-label="创建机器" onClick={() => createFlyMachine(account, app)} title="创建机器" icon={<Plus className="h-3.5 w-3.5" />} />
-                                    <Button shape="square" size="sm" variant="secondary" aria-label="查看机器实例" onClick={() => fetchFlyMachines(account, app)} title="查看机器/实例" icon={<Server className={`h-3.5 w-3.5 ${app.loadingMachines ? 'animate-spin' : ''}`} />} />
+                                    <Button shape="square" size="sm" variant="secondary" aria-label="查看机器实例" onClick={() => fetchFlyMachines(account, app)} title="查看机器/实例" loading={app.loadingMachines} icon={<Server className="h-3.5 w-3.5" />} />
                                     <Button shape="square" size="sm" variant="secondary" aria-label="查看运行日志" onClick={() => showFlyAppLogs(account, app)} title="查看运行日志" icon={<FileText className="h-3.5 w-3.5" />} />
                                     <Button shape="square" size="sm" variant="secondary" aria-label="查看应用配置" onClick={() => viewFlyConfig(account, app)} title="查看应用配置" icon={<Terminal className="h-3.5 w-3.5" />} />
                                     <Button shape="square" size="sm" variant={isArmed(`fly-app:${app.id}`) ? 'destructive' : 'secondary-destructive'} aria-label="删除 Fly 应用" onClick={() => deleteFlyApp(account, app)} title="删除应用" icon={<Trash className="h-3.5 w-3.5" />} />
@@ -2561,7 +2562,7 @@ function PaasPage() {
           >
             {logLoading ? (
               <div className="h-full flex items-center justify-center text-kumo-subtle gap-2">
-                <RefreshCw className="w-4 h-4 animate-spin" />
+                <Loader size={16} />
                 <span>正在获取日志流中...</span>
               </div>
             ) : filteredLogs.length === 0 ? (

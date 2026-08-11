@@ -10,7 +10,7 @@ import { Select } from '@cloudflare/kumo/components/select';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
-import { LayerCard, SensitiveInput, Tabs } from '@cloudflare/kumo';
+import { LayerCard, Meter, SensitiveInput, Tabs } from '@cloudflare/kumo';
 import useStore, { DEFAULT_TOTP_SETTINGS } from '../store.js';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
@@ -1713,16 +1713,19 @@ function TotpPage() {
                             </Button>
                           </div>
                         ) : (
-                          <div className="grid grid-cols-[minmax(0,1fr)_1.75rem] items-center gap-1.5 sm:grid-cols-[minmax(0,1fr)_2rem] sm:gap-2">
-                            <div className="h-1.5 overflow-hidden rounded-full bg-kumo-recessed">
-                              <div
-                                className={`h-full rounded-full ${remaining === period ? '' : 'transition-all duration-1000 ease-linear'}`}
-                                style={{
-                                  width: `${ratio}%`,
-                                  background: issuerColor,
-                                }}
-                              />
-                            </div>
+                          <div
+                            className="grid grid-cols-[minmax(0,1fr)_1.75rem] items-center gap-1.5 sm:grid-cols-[minmax(0,1fr)_2rem] sm:gap-2"
+                            style={{ '--issuer-color': issuerColor }}
+                          >
+                            <Meter
+                              label=""
+                              value={ratio}
+                              max={100}
+                              showValue={false}
+                              className="min-w-0"
+                              trackClassName="!h-1.5 bg-kumo-recessed"
+                              indicatorClassName="[background:var(--issuer-color)]"
+                            />
                             <span className="select-none text-right text-[10px]">{remaining}s</span>
                           </div>
                         )}
@@ -2190,7 +2193,7 @@ function TotpPage() {
                     >
                       {qrParsing ? (
                         <span className="flex items-center gap-2">
-                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <Loader size={16} />
                           <span>解析中...</span>
                         </span>
                       ) : (

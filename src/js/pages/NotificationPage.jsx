@@ -925,13 +925,13 @@ function NotificationPage() {
 
             <Button
               onClick={loadNotificationRules}
-              disabled={notificationLoading}
+              loading={notificationLoading}
               variant="secondary" size="sm"
               shape="square"
               aria-label="刷新告警规则"
               className="text-kumo-subtle hover:text-kumo-strong"
               title="刷新"
-              icon={<RotateCw className={`w-3.5 h-3.5 ${notificationLoading ? 'animate-spin' : ''}`} />}
+              icon={<RotateCw className="w-3.5 h-3.5" />}
             />
           </div>
 
@@ -1140,13 +1140,13 @@ function NotificationPage() {
 
               <Button
                 onClick={loadNotificationHistory}
-                disabled={notificationLoading}
+                loading={notificationLoading}
               variant="secondary" size="sm"
               shape="square"
               aria-label="刷新通知历史"
               className="text-kumo-subtle hover:text-kumo-strong"
               title="刷新"
-                icon={<RotateCw className={`w-3.5 h-3.5 ${notificationLoading ? 'animate-spin' : ''}`} />}
+                icon={<RotateCw className="w-3.5 h-3.5" />}
               />
             </div>
 

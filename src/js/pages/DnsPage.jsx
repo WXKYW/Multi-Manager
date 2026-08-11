@@ -1845,8 +1845,9 @@ function DnsPage() {
             {
               key: 'refresh',
               label: '刷新',
-              icon: <RefreshCw className={`h-4 w-4 ${Object.values(loading).some(Boolean) ? 'animate-spin' : ''}`} />,
+              icon: <RefreshCw className="h-4 w-4" />,
               onClick: refreshCurrentTab,
+              loading: Object.values(loading).some(Boolean),
             },
           ]}
         />
