@@ -6,7 +6,7 @@ import { Input, Textarea } from '@cloudflare/kumo/components/input';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { toast } from '../../modules/toast.js';
-import { dialog } from '../../modules/dialog.js';
+import { useConfirmPress } from '../../hooks/useConfirmPress.js';
 import { invalidateDashboardStats } from '../../modules/dashboardInvalidation.js';
 import useStore from '../../store.js';
 import { SectionCard } from '../ui/AppPrimitives.jsx';
@@ -67,6 +67,7 @@ const getGitHubPublicDomainUrl = (pageOrForm) => {
 };
 
 function GitHubPublicPagesPanel({ repositories = [] }) {
+  const { isArmed, confirmPress } = useConfirmPress();
   const [pages, setPages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -192,7 +193,7 @@ function GitHubPublicPagesPanel({ repositories = [] }) {
   };
 
   const deletePage = async (page) => {
-    if (!(await dialog.deleteResource({ resourceType: 'GitHub 公开页', resourceName: page?.title || page?.slug || String(page?.id) }))) return;
+    if (!confirmPress(`github-public-page:${page.id}`, `删除公开页「${page?.title || page?.slug || String(page?.id)}」`)) return;
     try {
       await api(`/api/github/public-pages/${page.id}`, { method: 'DELETE' });
       invalidateDashboardStats('github-public-pages:delete');
@@ -208,7 +209,6 @@ function GitHubPublicPagesPanel({ repositories = [] }) {
     <div className="grid items-start gap-4 xl:grid-cols-[minmax(24rem,0.92fr)_minmax(0,1.08fr)]">
       <SectionCard
         title={form.id ? '编辑 GitHub 公开页' : '新建 GitHub 公开页'}
-        description="公开仓库与 Actions 页面"
         icon={<Globe className="h-4 w-4 text-kumo-brand" />}
         action={form.id ? (
           <Button size="sm" variant="secondary" shape="square" icon={<X className="h-3.5 w-3.5" />} onClick={resetForm} aria-label="取消编辑" />
@@ -334,7 +334,6 @@ function GitHubPublicPagesPanel({ repositories = [] }) {
 
       <SectionCard
         title="已发布公开页"
-        description="已创建的 GitHub 公开页"
         icon={<Globe className="h-4 w-4 text-kumo-brand" />}
         className="self-start"
         actions={(
@@ -386,7 +385,7 @@ function GitHubPublicPagesPanel({ repositories = [] }) {
                       <Button size="sm" variant="secondary" shape="square" icon={<Edit className="h-3.5 w-3.5" />} onClick={() => editPage(page)} aria-label="编辑公开页" />
                       <Button size="sm" variant="secondary" shape="square" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={() => window.open(publicUrl, '_blank', 'noopener,noreferrer')} aria-label="打开公开页" />
                       <Button size="sm" variant="secondary" shape="square" icon={<Copy className="h-3.5 w-3.5" />} onClick={() => navigator.clipboard.writeText(publicUrl).then(() => toast.success('公开地址已复制')).catch(() => toast.error('复制公开地址失败'))} aria-label="复制公开页地址" />
-                      <Button size="sm" variant="destructive" shape="square" icon={<Trash className="h-3.5 w-3.5" />} onClick={() => deletePage(page)} aria-label="删除公开页" />
+                      <Button size="sm" variant={isArmed(`github-public-page:${page.id}`) ? 'destructive' : 'secondary-destructive'} shape="square" icon={<Trash className="h-3.5 w-3.5" />} onClick={() => deletePage(page)} aria-label="删除公开页" />
                     </div>
                   </div>
                   <div className="mt-3 grid gap-2 text-xs">

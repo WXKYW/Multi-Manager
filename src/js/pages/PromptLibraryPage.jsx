@@ -15,6 +15,7 @@ import useStore from '../store.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { dialog } from '../modules/dialog.js';
 import { toast } from '../modules/toast.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { CheckDouble, FileText, Plus, Star } from '../components/Icons.jsx';
 import { AlertTriangle } from '../components/IconsCore.jsx';
 import { iconButtonIconClass } from '../components/ui/AppPrimitives.jsx';
@@ -43,6 +44,7 @@ async function apiFetch(path, options = {}) {
 }
 
 export default function PromptLibraryPage() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const [activeTab, setActiveTab] = useState('workspace');
   const [collections, setCollections] = useState([]);
   const [entries, setEntries] = useState([]);
@@ -175,11 +177,7 @@ export default function PromptLibraryPage() {
   };
 
   const deleteCollection = async collection => {
-    const confirmed = await dialog.deleteResource({
-      resourceType: '集合',
-      resourceName: collection.name,
-    });
-    if (!confirmed) return;
+    if (!confirmPress(`collection-${collection.id}`, `删除集合「${collection.name}」`)) return;
     try {
       await apiFetch(`/collections/${collection.id}`, { method: 'DELETE' });
       if (selectedCollectionId === collection.id) setSelectedCollectionId(null);
@@ -279,11 +277,7 @@ export default function PromptLibraryPage() {
   };
 
   const deleteEntry = async target => {
-    const confirmed = await dialog.deleteResource({
-      resourceType: '提示词',
-      resourceName: target.title,
-    });
-    if (!confirmed) return;
+    if (!confirmPress(`entry-${target.id}`, `删除提示词「${target.title}」`)) return;
     try {
       await apiFetch(`/entries/${target.id}`, { method: 'DELETE' });
       if (selectedEntryId === target.id) {
@@ -448,6 +442,7 @@ export default function PromptLibraryPage() {
             onCreate={createCollection}
             onRename={renameCollection}
             onDelete={deleteCollection}
+            deleteIsArmed={id => isArmed(`collection-${id}`)}
             onOpenCollection={collectionId => {
               setSelectedCollectionId(collectionId);
               setActiveTab('workspace');
@@ -462,6 +457,7 @@ export default function PromptLibraryPage() {
               setActiveTab('workspace');
             }}
             onDelete={deleteEntry}
+            deleteIsArmed={id => isArmed(`entry-${id}`)}
           />
         )}
         {activeTab === 'settings' && (

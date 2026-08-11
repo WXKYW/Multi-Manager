@@ -29,6 +29,7 @@ import CodeEditor from '../components/ui/CodeEditor.jsx';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import {
   ArrowLeft,
   Box,
@@ -328,6 +329,7 @@ function parseJsonInput(input, fallbackKey) {
 }
 
 function DnsPage() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const { theme } = useStore();
   const isDarkMode = theme === 'dark';
   const [activeTab, setActiveTab] = useState('dns');
@@ -812,7 +814,7 @@ function DnsPage() {
   };
 
   const deleteAccount = async (account) => {
-    if (!(await dialog.deleteResource(`确定要删除 Cloudflare 账号“${account.name}”吗？`))) return;
+    if (!confirmPress(`account:${account.id}`, `删除 Cloudflare 账号「${account.name}」`)) return;
     try {
       await cfApi(`/accounts/${account.id}`, { method: 'DELETE' });
       toast.success('账号已删除');
@@ -937,7 +939,7 @@ function DnsPage() {
 
   const deleteZone = async (zone = selectedZone) => {
     if (!zone || !selectedAccountId) return;
-    if (!(await dialog.deleteResource(`确定要从 Cloudflare 删除域名“${zone.name}”吗？此操作不可恢复。`))) return;
+    if (!confirmPress(`zone:${zone.id}`, `删除域名「${zone.name}」`)) return;
     try {
       await cfApi(`/accounts/${selectedAccountId}/zones/${zone.id}`, { method: 'DELETE' });
       toast.success('域名已删除');
@@ -954,7 +956,7 @@ function DnsPage() {
       toast.warning('请先选择域名');
       return;
     }
-    if (!(await dialog.deleteResource({ message: `确定要清除“${selectedZone?.name}”的全部 CDN 缓存吗？`, confirmText: '清除' }))) return;
+    if (!confirmPress(`zone-cache:${selectedZoneId}`, `清除「${selectedZone?.name}」的 CDN 缓存`)) return;
     setLoadingKey('purge', true);
     try {
       await cfApi(`/accounts/${selectedAccountId}/zones/${selectedZoneId}/purge`, {
@@ -1037,7 +1039,7 @@ function DnsPage() {
   };
 
   const deleteRecord = async (record) => {
-    if (!(await dialog.deleteResource(`确定要删除记录“${record.name}”吗？`))) return;
+    if (!confirmPress(`record:${record.id}`, `删除记录「${record.name}」`)) return;
     try {
       await cfApi(`/accounts/${selectedAccountId}/zones/${selectedZoneId}/records/${record.id}`, {
         method: 'DELETE',
@@ -1051,7 +1053,7 @@ function DnsPage() {
 
   const batchDeleteRecords = async () => {
     if (selectedRecordIds.length === 0) return;
-    if (!(await dialog.deleteResource(`确定要删除选中的 ${selectedRecordIds.length} 条 DNS 记录吗？`))) return;
+    if (!confirmPress('batch-records', `删除选中的 ${selectedRecordIds.length} 条 DNS 记录`)) return;
     setLoadingKey('batchDeleteRecords', true);
     try {
       await Promise.all(selectedRecords.map((record) => cfApi(
@@ -1141,7 +1143,7 @@ function DnsPage() {
   };
 
   const deleteTemplate = async (template) => {
-    if (!(await dialog.deleteResource(`确定要删除模板“${template.name}”吗？`))) return;
+    if (!confirmPress(`template:${template.id}`, `删除模板「${template.name}」`)) return;
     try {
       await cfApi(`/templates/${template.id}`, { method: 'DELETE' });
       toast.success('模板已删除');
@@ -1213,7 +1215,7 @@ function DnsPage() {
   };
 
   const deleteWorker = async (worker) => {
-    if (!(await dialog.deleteResource(`确定要删除 Worker“${worker.name}”吗？`))) return;
+    if (!confirmPress(`worker:${worker.id}`, `删除 Worker「${worker.name}」`)) return;
     try {
       await cfApi(`/accounts/${selectedAccountId}/workers/${encodeURIComponent(worker.name)}`, {
         method: 'DELETE',
@@ -1285,7 +1287,7 @@ function DnsPage() {
   };
 
   const deleteWorkerRoute = async (route) => {
-    if (!(await dialog.deleteResource(`确定要删除路由“${route.pattern}”吗？`))) return;
+    if (!confirmPress(`worker-route:${route.id}`, `删除路由「${route.pattern}」`)) return;
     try {
       await cfApi(`/accounts/${selectedAccountId}/zones/${selectedZoneId}/workers/routes/${route.id}`, {
         method: 'DELETE',
@@ -1335,7 +1337,7 @@ function DnsPage() {
   };
 
   const deleteWorkerDomain = async (domain) => {
-    if (!(await dialog.deleteResource(`确定要删除 Worker 域名“${domain.hostname}”吗？`))) return;
+    if (!confirmPress(`worker-domain:${domain.id}`, `删除 Worker 域名「${domain.hostname}」`)) return;
     try {
       await cfApi(
         `/accounts/${selectedAccountId}/workers/${encodeURIComponent(workerDomainState.worker.name)}/domains/${domain.id}`,
@@ -1363,7 +1365,7 @@ function DnsPage() {
   };
 
   const deletePagesProject = async (project) => {
-    if (!(await dialog.deleteResource(`确定要删除 Pages 项目“${project.name}”吗？`))) return;
+    if (!confirmPress(`pages-project:${project.id}`, `删除 Pages 项目「${project.name}」`)) return;
     try {
       await cfApi(`/accounts/${selectedAccountId}/pages/${encodeURIComponent(project.name)}`, {
         method: 'DELETE',
@@ -1390,7 +1392,7 @@ function DnsPage() {
   };
 
   const deletePagesDeployment = async (deployment) => {
-    if (!(await dialog.deleteResource(`确定要删除该 Pages 部署吗？`))) return;
+    if (!confirmPress(`pages-deployment:${deployment.id}`, '删除该 Pages 部署')) return;
     try {
       await cfApi(
         `/accounts/${selectedAccountId}/pages/${encodeURIComponent(pagesDeployState.project.name)}/deployments/${deployment.id}`,
@@ -1438,7 +1440,7 @@ function DnsPage() {
   };
 
   const deletePagesDomain = async (domain) => {
-    if (!(await dialog.deleteResource(`确定要删除 Pages 域名“${domain.name}”吗？`))) return;
+    if (!confirmPress(`pages-domain:${domain.id}`, `删除 Pages 域名「${domain.name}」`)) return;
     try {
       await cfApi(
         `/accounts/${selectedAccountId}/pages/${encodeURIComponent(pagesDomainState.project.name)}/domains/${encodeURIComponent(domain.name)}`,
@@ -1474,7 +1476,7 @@ function DnsPage() {
   };
 
   const deleteR2Bucket = async (bucket) => {
-    if (!(await dialog.deleteResource(`确定要删除 R2 存储桶“${bucket.name}”吗？`))) return;
+    if (!confirmPress(`r2-bucket:${bucket.name}`, `删除 R2 存储桶「${bucket.name}」`)) return;
     try {
       await cfApi(`/accounts/${selectedAccountId}/r2/buckets/${encodeURIComponent(bucket.name)}`, {
         method: 'DELETE',
@@ -1559,7 +1561,7 @@ function DnsPage() {
   };
 
   const deleteR2Object = async (objectKey) => {
-    if (!(await dialog.deleteResource(`确定要删除对象“${objectKey}”吗？`))) return;
+    if (!confirmPress(`r2-object:${objectKey}`, `删除对象「${objectKey}」`)) return;
     try {
       await cfApi(
         `/accounts/${selectedAccountId}/r2/buckets/${encodeURIComponent(r2SelectedBucket.name)}/objects/${encodeURIComponent(objectKey)}`,
@@ -1574,7 +1576,7 @@ function DnsPage() {
 
   const batchDeleteR2Objects = async () => {
     if (selectedR2Objects.length === 0) return;
-    if (!(await dialog.deleteResource(`确定要删除选中的 ${selectedR2Objects.length} 个 R2 对象吗？`))) return;
+    if (!confirmPress('batch-r2-objects', `删除选中的 ${selectedR2Objects.length} 个 R2 对象`)) return;
     setLoadingKey('batchDeleteR2', true);
     try {
       await Promise.all(selectedR2Objects.map((objectKey) => cfApi(
@@ -1651,7 +1653,7 @@ function DnsPage() {
   };
 
   const deleteTunnel = async (tunnel) => {
-    if (!(await dialog.deleteResource(`确定要删除 Tunnel“${tunnel.name}”吗？`))) return;
+    if (!confirmPress(`tunnel:${tunnel.id}`, `删除 Tunnel「${tunnel.name}」`)) return;
     try {
       await cfApi(`/accounts/${selectedAccountId}/tunnels/${tunnel.id}`, { method: 'DELETE' });
       toast.success('Tunnel 已删除');
@@ -1854,7 +1856,6 @@ function DnsPage() {
         {!selectedAccountId && !['accounts', 'templates'].includes(activeTab) ? (
           <SectionCard
             title="Cloudflare 账号"
-            description="管理 DNS、Workers、Pages、R2、Tunnel"
             icon={<Cloud className="h-4 w-4 text-kumo-brand" />}
             bodyPadding="xl"
           >
@@ -1878,10 +1879,10 @@ function DnsPage() {
                   </Button>
                   {selectedZone && (
                     <>
-                      <Button size="sm" variant="secondary" onClick={purgeZoneCache} disabled={loading.purge} icon={<Shield className="h-4 w-4" />} className="w-full justify-center sm:w-auto">
+                      <Button size="sm" variant={isArmed(`zone-cache:${selectedZoneId}`) ? 'destructive' : 'secondary-destructive'} onClick={purgeZoneCache} disabled={loading.purge} icon={<Shield className="h-4 w-4" />} className="w-full justify-center sm:w-auto">
                         清除缓存
                       </Button>
-                      <Button size="sm" variant="secondary-destructive" onClick={() => deleteZone(selectedZone)} icon={<Trash className="h-4 w-4" />} className="w-full justify-center sm:w-auto">
+                      <Button size="sm" variant={isArmed(`zone:${selectedZone.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteZone(selectedZone)} icon={<Trash className="h-4 w-4" />} className="w-full justify-center sm:w-auto">
                         删除域名
                       </Button>
                     </>
@@ -2031,7 +2032,7 @@ function DnsPage() {
                             }} aria-label={zone.id === selectedZoneId ? `已选择 ${zone.name}` : `管理 ${zone.name}`} title={zone.id === selectedZoneId ? '已选择' : '管理'}>
                               {zone.id === selectedZoneId ? <Check className="h-3.5 w-3.5" /> : <Search className="h-3.5 w-3.5" />}
                             </Button>
-                            <Button size="sm" shape="square" variant="secondary-destructive" onClick={(event) => {
+                            <Button size="sm" shape="square" variant={isArmed(`zone:${zone.id}`) ? 'destructive' : 'secondary-destructive'} onClick={(event) => {
                               event.stopPropagation();
                               deleteZone(zone);
                             }} aria-label={`删除 ${zone.name}`} title="删除">
@@ -2187,7 +2188,7 @@ function DnsPage() {
                         {/* 导入 */}
                       </Button>
                       {selectedRecordIds.length > 0 && (
-                        <Button size="sm" variant="secondary-destructive" onClick={batchDeleteRecords} icon={<Trash className="h-4 w-4" />}>
+                        <Button size="sm" variant={isArmed('batch-records') ? 'destructive' : 'secondary-destructive'} onClick={batchDeleteRecords} icon={<Trash className="h-4 w-4" />}>
                           删除 {selectedRecordIds.length}
                         </Button>
                       )}
@@ -2228,7 +2229,7 @@ function DnsPage() {
                           </div>
                           <div className="flex shrink-0 items-center gap-1">
                             <Button size="sm" shape="square" variant="secondary" onClick={() => openRecordModal(record)} aria-label={`编辑 ${record.name}`} title="编辑" icon={<Edit className="h-3.5 w-3.5" />} />
-                            <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteRecord(record)} aria-label={`删除 ${record.name}`} title="删除" icon={<Trash className="h-3.5 w-3.5" />} />
+                            <Button size="sm" shape="square" variant={isArmed(`record:${record.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteRecord(record)} aria-label={`删除 ${record.name}`} title="删除" icon={<Trash className="h-3.5 w-3.5" />} />
                           </div>
                         </div>
                       </LayerCard>
@@ -2305,7 +2306,7 @@ function DnsPage() {
                             <Table.Cell className="!px-2 !py-1.5 text-center">
                               <div className="inline-flex gap-1">
                                 <Button size="sm" shape="square" variant="secondary" onClick={() => openRecordModal(record)} aria-label={`编辑 ${record.name}`} title="编辑" icon={<Edit className="h-3.5 w-3.5" />} />
-                                <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteRecord(record)} aria-label={`删除 ${record.name}`} title="删除" icon={<Trash className="h-3.5 w-3.5" />} />
+                                <Button size="sm" shape="square" variant={isArmed(`record:${record.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteRecord(record)} aria-label={`删除 ${record.name}`} title="删除" icon={<Trash className="h-3.5 w-3.5" />} />
                               </div>
                             </Table.Cell>
                           </Table.Row>
@@ -2372,7 +2373,7 @@ function DnsPage() {
                           <Button size="sm" variant="secondary" onClick={() => openWorkerDomainsModal(worker)}>域名</Button>
                           <Button size="sm" variant="secondary" onClick={() => openWorkerAnalyticsModal(worker)}>统计</Button>
                           <Button size="sm" variant="secondary" onClick={() => toggleWorkerSubdomain(worker, true)}>启用</Button>
-                          <Button size="sm" variant="secondary-destructive" onClick={() => deleteWorker(worker)} aria-label={`删除 ${worker.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                          <Button size="sm" variant={isArmed(`worker:${worker.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteWorker(worker)} aria-label={`删除 ${worker.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
                         </div>
                       </Table.Cell>
                     </Table.Row>
@@ -2425,7 +2426,7 @@ function DnsPage() {
                         <div className="inline-flex flex-wrap justify-end gap-2">
                           <Button size="sm" variant="secondary" onClick={() => openPagesDeploymentsModal(project)}>部署</Button>
                           <Button size="sm" variant="secondary" onClick={() => openPagesDomainsModal(project)}>域名</Button>
-                          <Button size="sm" variant="secondary-destructive" onClick={() => deletePagesProject(project)} aria-label={`删除 ${project.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                          <Button size="sm" variant={isArmed(`pages-project:${project.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deletePagesProject(project)} aria-label={`删除 ${project.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
                         </div>
                       </Table.Cell>
                     </Table.Row>
@@ -2496,7 +2497,7 @@ function DnsPage() {
                           <Badge variant={bucket.public_url_base ? 'success' : 'outline'} className="text-[10px] leading-4">
                             {bucket.public_url_base ? '公开访问' : '私有'}
                           </Badge>
-                          <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteR2Bucket(bucket)} aria-label={`删除 ${bucket.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                          <Button size="sm" shape="square" variant={isArmed(`r2-bucket:${bucket.name}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteR2Bucket(bucket)} aria-label={`删除 ${bucket.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
                         </div>
                       </div>
                     );
@@ -2587,7 +2588,7 @@ function DnsPage() {
                           )}
                           <Button size="sm" shape="square" variant="secondary" onClick={() => loadR2Objects(r2SelectedBucket.name, r2CurrentPrefix)} aria-label="刷新对象" title="刷新" icon={<RefreshCw className="h-4 w-4" />} />
                           {selectedR2Objects.length > 0 && (
-                            <Button size="sm" variant="secondary-destructive" onClick={batchDeleteR2Objects} disabled={loading.batchDeleteR2} icon={<Trash className="h-4 w-4" />}>
+                            <Button size="sm" variant={isArmed('batch-r2-objects') ? 'destructive' : 'secondary-destructive'} onClick={batchDeleteR2Objects} disabled={loading.batchDeleteR2} icon={<Trash className="h-4 w-4" />}>
                               删除 {selectedR2Objects.length}
                             </Button>
                           )}
@@ -2679,7 +2680,7 @@ function DnsPage() {
                                     <div className="inline-flex gap-2" onClick={(event) => event.stopPropagation()}>
                                       <Button size="sm" shape="square" variant="secondary" onClick={() => previewR2Object(row.key)} aria-label={`预览 ${row.key}`} title="预览" icon={<Eye className="h-4 w-4" />} />
                                       <Button size="sm" shape="square" variant="secondary" onClick={() => downloadR2Object(row.key)} aria-label={`下载 ${row.key}`} title="下载" icon={<Download className="h-4 w-4" />} />
-                                      <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteR2Object(row.key)} aria-label={`删除 ${row.key}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                                      <Button size="sm" shape="square" variant={isArmed(`r2-object:${row.key}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteR2Object(row.key)} aria-label={`删除 ${row.key}`} title="删除" icon={<Trash className="h-4 w-4" />} />
                                     </div>
                                   )}
                                 </Table.Cell>
@@ -2739,7 +2740,7 @@ function DnsPage() {
                           <Button size="sm" variant="secondary" onClick={() => openTunnelConfigModal(tunnel)}>配置</Button>
                           <Button size="sm" variant="secondary" onClick={() => openTunnelConnectionsModal(tunnel)}>连接</Button>
                           <Button size="sm" shape="square" variant="secondary" onClick={() => renameTunnel(tunnel)} aria-label={`重命名 ${tunnel.name}`} title="重命名" icon={<Edit className="h-4 w-4" />} />
-                          <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteTunnel(tunnel)} aria-label={`删除 ${tunnel.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                          <Button size="sm" shape="square" variant={isArmed(`tunnel:${tunnel.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteTunnel(tunnel)} aria-label={`删除 ${tunnel.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
                         </div>
                       </Table.Cell>
                     </Table.Row>
@@ -2792,7 +2793,7 @@ function DnsPage() {
                         <div className="inline-flex gap-2">
                           <Button size="sm" variant="secondary" onClick={() => applyTemplate(template)}>应用</Button>
                           <Button size="sm" shape="square" variant="secondary" onClick={() => openTemplateModal(template)} aria-label={`编辑 ${template.name}`} title="编辑" icon={<Edit className="h-4 w-4" />} />
-                          <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteTemplate(template)} aria-label={`删除 ${template.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                          <Button size="sm" shape="square" variant={isArmed(`template:${template.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteTemplate(template)} aria-label={`删除 ${template.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
                         </div>
                       </Table.Cell>
                     </Table.Row>
@@ -2856,7 +2857,7 @@ function DnsPage() {
                           <div className="inline-flex gap-2">
                             <Button size="sm" shape="square" variant="secondary" onClick={() => verifyAccount(account)} aria-label={`验证 ${account.name}`} title="验证" icon={<Shield className="h-4 w-4" />} />
                             <Button size="sm" shape="square" variant="secondary" onClick={() => openAccountModal(account)} aria-label={`编辑 ${account.name}`} title="编辑" icon={<Edit className="h-4 w-4" />} />
-                            <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteAccount(account)} aria-label={`删除 ${account.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                            <Button size="sm" shape="square" variant={isArmed(`account:${account.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteAccount(account)} aria-label={`删除 ${account.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
                           </div>
                         </Table.Cell>
                       </Table.Row>
@@ -3080,7 +3081,7 @@ function DnsPage() {
                         <Table.Cell className="text-right">
                           <div className="inline-flex gap-2">
                             <Button size="sm" shape="square" variant="secondary" onClick={() => setWorkerRouteState((prev) => ({ ...prev, form: { id: route.id, pattern: route.pattern, script: route.script || workerRouteState.worker?.name || '' } }))} aria-label="编辑 Worker 路由" title="编辑" icon={<Edit className="h-4 w-4" />} />
-                            <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteWorkerRoute(route)} aria-label="删除 Worker 路由" title="删除" icon={<Trash className="h-4 w-4" />} />
+                            <Button size="sm" shape="square" variant={isArmed(`worker-route:${route.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteWorkerRoute(route)} aria-label="删除 Worker 路由" title="删除" icon={<Trash className="h-4 w-4" />} />
                           </div>
                         </Table.Cell>
                       </Table.Row>
@@ -3112,7 +3113,7 @@ function DnsPage() {
                         <Table.Cell>{domain.hostname}</Table.Cell>
                         <Table.Cell>{domain.environment || '-'}</Table.Cell>
                         <Table.Cell>{domain.zoneName || domain.zoneId || '-'}</Table.Cell>
-                        <Table.Cell className="text-right"><Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteWorkerDomain(domain)} aria-label={`删除 ${domain.hostname}`} title="删除" icon={<Trash className="h-4 w-4" />} /></Table.Cell>
+                        <Table.Cell className="text-right"><Button size="sm" shape="square" variant={isArmed(`worker-domain:${domain.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteWorkerDomain(domain)} aria-label={`删除 ${domain.hostname}`} title="删除" icon={<Trash className="h-4 w-4" />} /></Table.Cell>
                       </Table.Row>
                     ))}
                   </Table.Body>
@@ -3153,7 +3154,7 @@ function DnsPage() {
                         <Table.Cell className="text-right">
                           <div className="inline-flex gap-2">
                             {deployment.url && <LinkButton size="sm" shape="square" variant="secondary" href={deployment.url} external aria-label="打开部署地址" title="打开" icon={<ExternalLink className="h-4 w-4" />} />}
-                            <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deletePagesDeployment(deployment)} aria-label="删除部署" title="删除" icon={<Trash className="h-4 w-4" />} />
+                            <Button size="sm" shape="square" variant={isArmed(`pages-deployment:${deployment.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deletePagesDeployment(deployment)} aria-label="删除部署" title="删除" icon={<Trash className="h-4 w-4" />} />
                           </div>
                         </Table.Cell>
                       </Table.Row>
@@ -3185,7 +3186,7 @@ function DnsPage() {
                         <Table.Cell><Badge variant={statusVariant(domain.status)}>{domain.status || '未知'}</Badge></Table.Cell>
                         <Table.Cell>{domain.validationStatus || '-'}</Table.Cell>
                         <Table.Cell>{formatDate(domain.createdOn)}</Table.Cell>
-                        <Table.Cell className="text-right"><Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deletePagesDomain(domain)} aria-label={`删除 ${domain.name}`} title="删除" icon={<Trash className="h-4 w-4" />} /></Table.Cell>
+                        <Table.Cell className="text-right"><Button size="sm" shape="square" variant={isArmed(`pages-domain:${domain.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deletePagesDomain(domain)} aria-label={`删除 ${domain.name}`} title="删除" icon={<Trash className="h-4 w-4" />} /></Table.Cell>
                       </Table.Row>
                     ))}
                   </Table.Body>

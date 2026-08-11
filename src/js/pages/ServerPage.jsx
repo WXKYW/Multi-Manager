@@ -2,6 +2,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallba
 import useStore from '../store.js';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { Button, LinkButton } from '@cloudflare/kumo/components/button';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { ContextMenu } from '@cloudflare/kumo/primitives/context-menu';
@@ -2467,6 +2468,7 @@ function ServerPage() {
     serverIpDisplayMode: storedServerIpDisplayMode,
     agentDownloadUrl: storedAgentDownloadUrl,
   } = useStore();
+  const { isArmed, confirmPress } = useConfirmPress();
   const isCompactViewport = useMediaQuery('(max-width: 640px)');
   const isDenseViewport = useMediaQuery('(max-width: 1120px)');
   const expandedMainChartHeight = isCompactViewport ? 88 : isDenseViewport ? 100 : 112;
@@ -3200,7 +3202,7 @@ function ServerPage() {
   };
 
   const deleteServerStatusPage = async (page) => {
-    if (!(await dialog.deleteResource({ resourceType: '主机状态页', resourceName: page.title || page.slug }))) return;
+    if (!confirmPress(`status-page.delete::${page.id}`, `删除主机状态页「${page.title || page.slug}」`)) return;
     setServerStatusPagesLoading(true);
     try {
       const response = await fetch(`/api/server/status-pages/${page.id}`, { method: 'DELETE' });
@@ -3269,7 +3271,7 @@ function ServerPage() {
   };
 
   const deleteNetworkTarget = async (id) => {
-    if (!await dialog.deleteResource({ title: '确认删除', message: '确认要删除此网络拨测目标吗？' })) {
+    if (!confirmPress(`network-target.delete::${id}`, '删除网络拨测目标')) {
       return;
     }
     try {
@@ -4476,10 +4478,7 @@ function ServerPage() {
 
   const deleteServer = async (serverId) => {
     const server = serverList.find(item => item.id === serverId);
-    if (!(await dialog.deleteResource({
-      resourceType: '主机',
-      resourceName: server?.name || server?.host || `#${serverId}`,
-    }))) return;
+    if (!confirmPress(`server.delete::${serverId}`, `删除主机「${server?.name || server?.host || `#${serverId}`}」`)) return;
     try {
       let response = await fetch(`/api/server/accounts/${serverId}`, { method: 'DELETE' });
       let data = await response.json();
@@ -5444,10 +5443,7 @@ function ServerPage() {
 
   const deleteCredential = async (id) => {
     const credential = serverCredentials.find(item => item.id === id);
-    if (!(await dialog.deleteResource({
-      resourceType: '主机凭据',
-      resourceName: credential?.name || credential?.username || `#${id}`,
-    }))) return;
+    if (!confirmPress(`credential.delete::${id}`, `删除主机凭据「${credential?.name || credential?.username || `#${id}`}」`)) return;
     try {
       const response = await fetch(`/api/server/credentials/${id}`, { method: 'DELETE' });
       const data = await response.json();
@@ -7875,7 +7871,7 @@ function ServerPage() {
                           <Button size="sm" variant="secondary" shape="square" icon={<Edit className="h-3.5 w-3.5" />} onClick={() => editServerStatusPage(page)} aria-label="编辑主机状态页" />
                           <Button size="sm" variant="secondary" shape="square" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={() => window.open(statusUrl, '_blank', 'noopener,noreferrer')} aria-label="打开主机状态页" />
                           <Button size="sm" variant="secondary" shape="square" icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copyServerStatusUrl(statusUrl)} aria-label="复制主机状态页地址" />
-                          <Button size="sm" variant="destructive" shape="square" icon={<Trash className="h-3.5 w-3.5" />} onClick={() => deleteServerStatusPage(page)} aria-label="删除主机状态页" />
+                          <Button size="sm" variant={isArmed(`status-page.delete::${page.id}`) ? 'destructive' : 'secondary-destructive'} shape="square" icon={<Trash className="h-3.5 w-3.5" />} onClick={() => deleteServerStatusPage(page)} aria-label="删除主机状态页" />
                         </div>
                       </div>
                       <div className="mt-3 grid gap-2">
@@ -9784,10 +9780,13 @@ function ServerPage() {
                                             <Button
                                               shape="square"
                                               size="sm"
-                                              variant="ghost"
+                                              variant={isArmed(`docker.image.remove::${server.id}::${imageRef}`) ? 'destructive' : 'secondary-destructive'}
                                               aria-label={`删除 ${repository || '镜像'}`}
                                               disabled={removePending}
-                                              onClick={() => submitDockerTask('image.remove', removePayload)}
+                                              onClick={() => {
+                                                if (!confirmPress(`docker.image.remove::${server.id}::${imageRef}`, `删除镜像「${repository || '镜像'}」`)) return;
+                                                submitDockerTask('image.remove', removePayload, { skipConfirm: true });
+                                              }}
                                               className="text-kumo-danger"
                                               title="删除镜像"
                                             >
@@ -9927,10 +9926,13 @@ function ServerPage() {
                                             <Button
                                               shape="square"
                                               size="sm"
-                                              variant="ghost"
+                                              variant={isArmed(`docker.network.remove::${server.id}::${networkName}`) ? 'destructive' : 'secondary-destructive'}
                                               aria-label={`删除 ${networkName || '网络'}`}
                                               disabled={isBuiltinNetwork || removePending}
-                                              onClick={() => submitDockerTask('network.remove', removePayload)}
+                                              onClick={() => {
+                                                if (!confirmPress(`docker.network.remove::${server.id}::${networkName}`, `删除网络「${networkName || '网络'}」`)) return;
+                                                submitDockerTask('network.remove', removePayload, { skipConfirm: true });
+                                              }}
                                               className="text-kumo-danger disabled:opacity-40"
                                               title={isBuiltinNetwork ? '内置网络不可删除' : '删除网络'}
                                             >
@@ -10052,10 +10054,13 @@ function ServerPage() {
                                             <Button
                                               shape="square"
                                               size="sm"
-                                              variant="ghost"
+                                              variant={isArmed(`docker.volume.remove::${server.id}::${volumeName}`) ? 'destructive' : 'secondary-destructive'}
                                               aria-label={`删除 ${volumeName || '存储卷'}`}
                                               disabled={removePending}
-                                              onClick={() => submitDockerTask('volume.remove', removePayload)}
+                                              onClick={() => {
+                                                if (!confirmPress(`docker.volume.remove::${server.id}::${volumeName}`, `删除存储卷「${volumeName || '存储卷'}」`)) return;
+                                                submitDockerTask('volume.remove', removePayload, { skipConfirm: true });
+                                              }}
                                               className="text-kumo-danger"
                                               title="删除存储卷"
                                             >
@@ -10249,7 +10254,6 @@ function ServerPage() {
         <div className="flex flex-col gap-4">
             <SectionCard
               title="主机偏好"
-              description="列表与 Agent 下载配置"
               icon={<Settings className={MANAGEMENT_CARD_ICON_CLASS} />}
               actions={(
                 <Button
@@ -10306,7 +10310,6 @@ function ServerPage() {
               <div className="flex min-w-0 flex-col gap-4">
             <SectionCard
               title="批量录入"
-              description="CSV 批量添加主机"
               icon={<FolderOpen className={MANAGEMENT_CARD_ICON_CLASS} />}
               meta={<span className="text-xs font-semibold text-kumo-subtle">CSV</span>}
               bodyPadding="sm"
@@ -10338,7 +10341,6 @@ function ServerPage() {
 
             <SectionCard
               title="配置迁移"
-              description="导入或导出主机配置"
               icon={<Database className={MANAGEMENT_CARD_ICON_CLASS} />}
               meta={<span className="text-xs font-semibold text-kumo-subtle">JSON</span>}
               bodyPadding="sm"
@@ -10380,7 +10382,6 @@ function ServerPage() {
               <div className="flex min-w-0 flex-col gap-4">
             <SectionCard
               title="SSH 凭据库"
-              description="复用登录凭据"
               icon={<Key className={MANAGEMENT_CARD_ICON_CLASS} />}
               actions={(
                 <Button
@@ -10441,7 +10442,7 @@ function ServerPage() {
                                 <Button
                                   shape="square"
                                   size="sm"
-                                  variant="secondary-destructive"
+                                  variant={isArmed(`credential.delete::${cred.id}`) ? 'destructive' : 'secondary-destructive'}
                                   aria-label="删除凭据"
                                   onClick={() => deleteCredential(cred.id)}
                                   icon={<Trash className="h-3.5 w-3.5" />}
@@ -10459,7 +10460,6 @@ function ServerPage() {
 
             <SectionCard
               title="网络拨测目标"
-              description="配置 TCP / HTTP 拨测"
               icon={<Globe className={MANAGEMENT_CARD_ICON_CLASS} />}
               actions={(
                 <Button
@@ -10550,7 +10550,7 @@ function ServerPage() {
                                 <Button
                                   shape="square"
                                   size="sm"
-                                  variant="secondary-destructive"
+                                  variant={isArmed(`network-target.delete::${target.id}`) ? 'destructive' : 'secondary-destructive'}
                                   aria-label="删除目标"
                                   onClick={() => deleteNetworkTarget(target.id)}
                                   icon={<Trash className="h-3.5 w-3.5" />}

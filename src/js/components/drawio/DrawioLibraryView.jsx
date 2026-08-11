@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React from 'react';
 import { Badge, Empty } from '@cloudflare/kumo';
 import { Button } from '@cloudflare/kumo/components/button';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Clock, Copy, Image, Plus, Trash, Upload } from '../Icons.jsx';
 import { AppCard, iconButtonIconClass } from '../ui/AppPrimitives.jsx';
+import { useConfirmPress } from '../../hooks/useConfirmPress.js';
 
 function thumbnailStatus(document) {
   if (document.thumbnail_status === 'ready') return { label: '预览就绪', variant: 'success' };
@@ -24,22 +25,7 @@ export default function DrawioLibraryView({
   onRebuildThumbnail,
   copyingDocumentId,
 }) {
-  const [confirmingDeleteId, setConfirmingDeleteId] = useState(null);
-  const deleteConfirmTimerRef = useRef(null);
-
-  useEffect(() => () => window.clearTimeout(deleteConfirmTimerRef.current), []);
-
-  const requestDelete = async document => {
-    if (confirmingDeleteId === document.id) {
-      window.clearTimeout(deleteConfirmTimerRef.current);
-      setConfirmingDeleteId(null);
-      await onDelete(document);
-      return;
-    }
-    window.clearTimeout(deleteConfirmTimerRef.current);
-    setConfirmingDeleteId(document.id);
-    deleteConfirmTimerRef.current = window.setTimeout(() => setConfirmingDeleteId(null), 3000);
-  };
+  const { isArmed, confirmPress } = useConfirmPress();
 
   return (
     <div className="min-h-0 w-full min-w-0 flex-1 overflow-y-auto pr-1 scrollbar-thin">
@@ -150,21 +136,17 @@ export default function DrawioLibraryView({
                     />
                     <Button
                       size="sm"
-                      variant={
-                        confirmingDeleteId === document.id ? 'destructive' : 'secondary-destructive'
-                      }
-                      shape={confirmingDeleteId === document.id ? undefined : 'square'}
-                      aria-label={
-                        confirmingDeleteId === document.id
-                          ? `再次确认删除 ${document.title}`
-                          : `删除图表 ${document.title}`
-                      }
-                      title={confirmingDeleteId === document.id ? '再次点击确认删除' : '删除图表'}
+                      variant={isArmed(`library-${document.id}`) ? 'destructive' : 'secondary-destructive'}
+                      shape="square"
+                      aria-label={`删除图表 ${document.title}`}
+                      title="删除图表"
                       icon={<Trash className={iconButtonIconClass} />}
-                      onClick={() => requestDelete(document)}
-                    >
-                      {confirmingDeleteId === document.id ? '再次确认' : null}
-                    </Button>
+                      onClick={async () => {
+                        if (confirmPress(`library-${document.id}`, `删除图表「${document.title}」`)) {
+                          await onDelete(document);
+                        }
+                      }}
+                    />
                   </div>
                 </div>
               </AppCard>

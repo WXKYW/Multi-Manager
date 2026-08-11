@@ -11,6 +11,7 @@ import { ClipboardText, Meter, Tabs } from '@cloudflare/kumo';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { fileboxDirectURL, fileboxShareURL } from '../modules/fileboxLinks.js';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { formatDateTime, formatFileSize } from '../modules/utils.js';
@@ -129,6 +130,7 @@ function EntryName({ entry }) {
 }
 
 function FileboxPage() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const [activeTab, setActiveTab] = useState('share');
   const [shareType, setShareType] = useState('file');
   const [shareText, setShareText] = useState('');
@@ -319,7 +321,7 @@ function FileboxPage() {
   };
 
   const deleteEntry = async (code) => {
-    if (!(await dialog.deleteResource(`确定删除分享 ${code}？`))) return;
+    if (!confirmPress(`share:${code}`, `删除分享「${code}」`)) return;
     try {
       await axios.delete(`/api/filebox/${code}`, { headers: authHeaders() });
       toast.success('分享已删除');
@@ -333,7 +335,7 @@ function FileboxPage() {
   };
 
   const runCleanup = async () => {
-    if (!(await dialog.deleteResource('清理所有过期分享？'))) return;
+    if (!confirmPress('clear-expired-shares', '清理所有过期分享')) return;
     setHistoryLoading(true);
     try {
       const res = await axios.post('/api/filebox/jobs/cleanup', {}, { headers: authHeaders() });
@@ -605,7 +607,7 @@ function FileboxPage() {
                 <Button size="sm" variant="secondary" onClick={loadServerHistory} loading={historyLoading} icon={<RefreshCw className="h-4 w-4" />}>
                   刷新
                 </Button>
-                <Button size="sm" variant="secondary" onClick={runCleanup} icon={<Clock className="h-4 w-4" />}>
+                <Button size="sm" variant={isArmed('clear-expired-shares') ? 'destructive' : 'secondary-destructive'} onClick={runCleanup} icon={<Clock className="h-4 w-4" />}>
                   清理过期
                 </Button>
               </>
@@ -662,7 +664,7 @@ function FileboxPage() {
                           <Button size="sm" variant="secondary" onClick={() => copyLink(entry.code)}>
                             复制
                           </Button>
-                          <Button size="sm" variant="secondary-destructive" onClick={() => deleteEntry(entry.code)}>
+                          <Button size="sm" variant={isArmed(`share:${entry.code}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteEntry(entry.code)}>
                             <Trash className="h-3.5 w-3.5" />
                           </Button>
                         </div>

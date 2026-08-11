@@ -713,7 +713,7 @@ func TestEnforceLogLimitsExtendedTables(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"github_repository_snapshots", "ai_access_audit", "system_api_stats"} {
+	for _, want := range []string{"ai_access_audit"} {
 		found := false
 		for _, got := range tables {
 			if got == want {
@@ -723,6 +723,14 @@ func TestEnforceLogLimitsExtendedTables(t *testing.T) {
 		}
 		if !found {
 			t.Fatalf("listLogTables missing %q, got %v", want, tables)
+		}
+	}
+	// 统计/趋势表不参与日志清理（独立长保留）。
+	for _, want := range []string{"github_repository_snapshots", "system_api_stats"} {
+		for _, got := range tables {
+			if got == want {
+				t.Fatalf("listLogTables should not include statistics table %q, got %v", want, tables)
+			}
 		}
 	}
 
@@ -740,20 +748,24 @@ func TestEnforceLogLimitsExtendedTables(t *testing.T) {
 		}
 	}
 
-	result, err := enforceLogTableLimits(ctx, db, service.store.DatabasePath(), 0, 2, 0)
+	result, err := enforceLogTableLimits(ctx, db, service.store.DatabasePath(), 0, 2, 0, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result["deleted"].(int64) != 3 {
-		t.Fatalf("expected 3 deleted rows, got %d", result["deleted"].(int64))
+	// 仅 ai_access_audit（日志表）受 count 限制；统计表（snapshots/system_api_stats）保留。
+	if result["deleted"].(int64) != 1 {
+		t.Fatalf("expected 1 deleted row, got %d", result["deleted"].(int64))
 	}
-	for table := range seedTimes {
+	if n, _ := countTableRows(ctx, db, "ai_access_audit"); n != 2 {
+		t.Fatalf("ai_access_audit rows = %d, want 2", n)
+	}
+	for _, table := range []string{"github_repository_snapshots", "system_api_stats"} {
 		n, err := countTableRows(ctx, db, table)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if n != 2 {
-			t.Fatalf("table %s rows = %d, want 2", table, n)
+		if n != 3 {
+			t.Fatalf("statistics table %s rows = %d, want 3 (preserved)", table, n)
 		}
 	}
 }
@@ -841,12 +853,12 @@ func TestEnforceLogLimitsEntityFloor(t *testing.T) {
 	defer db.Close()
 
 	_, err = db.ExecContext(ctx, `
-		CREATE TABLE github_repository_snapshots (
+		CREATE TABLE github_action_runs (
 			id INTEGER PRIMARY KEY,
 			repository_id INTEGER,
-			collected_at DATETIME
+			created_at DATETIME
 		);
-		INSERT INTO github_repository_snapshots (repository_id, collected_at) VALUES
+		INSERT INTO github_action_runs (repository_id, created_at) VALUES
 			(1, '2026-06-10T00:00:00Z'), (1, '2026-06-11T00:00:00Z'), (1, '2026-06-12T00:00:00Z'),
 			(2, '2026-06-10T00:00:00Z'), (2, '2026-06-11T00:00:00Z'), (2, '2026-06-12T00:00:00Z');
 	`)
@@ -860,19 +872,19 @@ func TestEnforceLogLimitsEntityFloor(t *testing.T) {
 	}
 	var plan *logTablePlan
 	for i := range plans {
-		if plans[i].Table == "github_repository_snapshots" {
+		if plans[i].Table == "github_action_runs" {
 			plan = &plans[i]
 			break
 		}
 	}
 	if plan == nil {
-		t.Fatalf("plan missing github_repository_snapshots, got %#v", plans)
+		t.Fatalf("plan missing github_action_runs, got %#v", plans)
 	}
 	if plan.Current != 6 || plan.Kept != 2 || plan.Deleted != 4 || plan.Floor != 2 {
 		t.Fatalf("unexpected floor plan: %#v", plan)
 	}
 
-	result, err := enforceLogTableLimits(ctx, db, service.store.DatabasePath(), 0, 1, 0)
+	result, err := enforceLogTableLimits(ctx, db, service.store.DatabasePath(), 0, 1, 0, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -881,12 +893,12 @@ func TestEnforceLogLimitsEntityFloor(t *testing.T) {
 	}
 	for _, repoID := range []int64{1, 2} {
 		var remaining int64
-		err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM github_repository_snapshots WHERE repository_id = ?`, repoID).Scan(&remaining)
+		err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM github_action_runs WHERE repository_id = ?`, repoID).Scan(&remaining)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if remaining < 1 {
-			t.Fatalf("repository %d lost its newest snapshot", repoID)
+			t.Fatalf("repository %d lost its newest run", repoID)
 		}
 	}
 }

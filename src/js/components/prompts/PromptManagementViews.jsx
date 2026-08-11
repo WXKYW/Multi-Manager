@@ -16,6 +16,7 @@ export function PromptCollectionsView({
   onRename,
   onDelete,
   onOpenCollection,
+  deleteIsArmed = () => false,
 }) {
   const countByCollection = entries.reduce((counts, entry) => {
     const key = entry.collection_id || 'unfiled';
@@ -94,7 +95,9 @@ export function PromptCollectionsView({
                 </Button>
                 <Button
                   size="sm"
-                  variant="ghost"
+                  variant={
+                    deleteIsArmed(collection.id) ? 'destructive' : 'secondary-destructive'
+                  }
                   shape="square"
                   aria-label={`删除集合 ${collection.name}`}
                   icon={<Trash className={iconButtonIconClass} />}
@@ -109,7 +112,7 @@ export function PromptCollectionsView({
   );
 }
 
-export function PromptPublishedView({ entries, onOpen, onDelete }) {
+export function PromptPublishedView({ entries, onOpen, onDelete, deleteIsArmed = () => false }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto pr-1 scrollbar-thin">
       <div className="mb-4">
@@ -165,7 +168,9 @@ export function PromptPublishedView({ entries, onOpen, onDelete }) {
                     </Button>
                     <Button
                       size="sm"
-                      variant="ghost"
+                      variant={
+                        deleteIsArmed(item.id) ? 'destructive' : 'secondary-destructive'
+                      }
                       shape="square"
                       aria-label={`删除提示词 ${item.title}`}
                       icon={<Trash className={iconButtonIconClass} />}

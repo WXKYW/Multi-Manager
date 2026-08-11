@@ -1066,3 +1066,114 @@ func TestWeightedProxyPick(t *testing.T) {
 		t.Fatalf("single candidate should be picked directly")
 	}
 }
+
+func TestProxyPoolAutoSwitchOn5xx(t *testing.T) {
+	// 第一个代理返回 502（上游故障），第二个代理正常。网关应切到第二个并成功返回 200。
+	var proxy1Hits, proxy2Hits int32
+
+	proxy1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&proxy1Hits, 1)
+		w.WriteHeader(http.StatusBadGateway)
+		w.Write([]byte(`{"error":{"message":"upstream exploded"}}`))
+	}))
+	defer proxy1.Close()
+
+	proxy2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&proxy2Hits, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`))
+	}))
+	defer proxy2.Close()
+
+	mockUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"data":[{"id":"gpt-4","object":"model"}]}`))
+	}))
+	defer mockUpstream.Close()
+
+	service := New(config.Config{
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	createPayload := fmt.Sprintf(`{
+		"name": "Proxy 5xx Switch Mock",
+		"baseUrl": "%s",
+		"apiKey": "test-api-key",
+		"skipVerify": true,
+		"proxyPool": ["%s", "%s"],
+		"proxyEnabled": true,
+		"autoSwitch": true
+	}`, mockUpstream.URL, proxy1.URL, proxy2.URL)
+
+	wCreate := httptest.NewRecorder()
+	rCreate, _ := http.NewRequest("POST", "/api/openai/endpoints", strings.NewReader(createPayload))
+	service.ServeHTTP(wCreate, rCreate)
+	if wCreate.Code != http.StatusOK {
+		t.Fatalf("create status = %d body=%s", wCreate.Code, wCreate.Body.String())
+	}
+	var createRes struct {
+		Success  bool     `json:"success"`
+		Endpoint Endpoint `json:"endpoint"`
+	}
+	mustDecode(t, wCreate.Body.String(), &createRes)
+
+	db, err := service.open(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`UPDATE openai_endpoints SET models = ? WHERE id = ?`, `["gpt-4"]`, createRes.Endpoint.ID)
+	db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wChat := httptest.NewRecorder()
+	rChat, _ := http.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{
+		"model": "gpt-4",
+		"messages": [{"role":"user","content":"hello"}]
+	}`))
+	rChat.Header.Set("x-endpoint-id", createRes.Endpoint.ID)
+	service.ServeHTTP(wChat, rChat)
+
+	if wChat.Code != http.StatusOK {
+		t.Fatalf("chat via proxy pool failed: code=%d body=%s", wChat.Code, wChat.Body.String())
+	}
+	if atomic.LoadInt32(&proxy1Hits) < 1 {
+		t.Fatalf("proxy1 was never used, expected first attempt to hit it")
+	}
+	if atomic.LoadInt32(&proxy2Hits) < 1 {
+		t.Fatalf("proxy2 was never used, expected 5xx retry to hit it")
+	}
+}
+
+func TestIsRetryableUpstreamResponse(t *testing.T) {
+	// 限流类：应重试。
+	for _, code := range []int{429, 439, 503, 529} {
+		resp := &http.Response{StatusCode: code}
+		if !isRetryableUpstreamResponse(resp, nil) {
+			t.Fatalf("status %d should be retryable", code)
+		}
+	}
+	// 常见 5xx：应重试。
+	for _, code := range []int{500, 502, 504, 599} {
+		resp := &http.Response{StatusCode: code}
+		if !isRetryableUpstreamResponse(resp, nil) {
+			t.Fatalf("status %d should be retryable", code)
+		}
+	}
+	// 语义错误/成功：不重试。
+	for _, code := range []int{200, 400, 401, 403, 404, 501, 505} {
+		resp := &http.Response{StatusCode: code}
+		if isRetryableUpstreamResponse(resp, nil) {
+			t.Fatalf("status %d should not be retryable", code)
+		}
+	}
+	// 限流关键词兜底：正文命中关键词时重试。
+	bodyResp := &http.Response{StatusCode: 200}
+	if !isRetryableUpstreamResponse(bodyResp, []byte(`{"error":"rate_limit exceeded"}`)) {
+		t.Fatalf("rate limit keyword in body should be retryable")
+	}
+}

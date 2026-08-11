@@ -10,6 +10,7 @@ import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { Popover, Tabs } from '@cloudflare/kumo';
 import { dialog } from '../modules/dialog.js';
 import { toast } from '../modules/toast.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import {
   AppCard,
@@ -566,6 +567,7 @@ function getRegistrationResultText(record) {
 }
 
 function M365Page() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const accountImportInputRef = useRef(null);
   const [activeTab, setActiveTab] = useState('tenants');
   const [showPermissionDialog, setShowPermissionDialog] = useState(false);
@@ -1248,12 +1250,7 @@ function M365Page() {
   };
 
   const deleteAccount = async account => {
-    const confirmed = await dialog.deleteResource({
-      resourceType: '租户',
-      resourceName: account.name,
-      message: `删除租户“${account.name}”后，其本地缓存与配置将一并移除。`,
-    });
-    if (!confirmed) return;
+    if (!confirmPress(`m365-account-delete:${account.id}`, `删除租户「${account.name}」`)) return;
     try {
       await requestJSON(`/api/m365/accounts/${account.id}`, { method: 'DELETE' });
       toast.success('租户已删除');
@@ -1660,13 +1657,7 @@ function M365Page() {
   };
 
   const removeGroupMember = async member => {
-    const confirmed = await dialog.deleteResource({
-      resourceType: '组成员',
-      resourceName: member.userPrincipalName || member.displayName,
-      message: `确定将成员“${member.displayName || member.userPrincipalName}”从组中移除吗？`,
-      confirmText: '移除',
-    });
-    if (!confirmed) return;
+    if (!confirmPress(`m365-group-member-remove:${member.id}`, `移除组成员「${member.displayName || member.userPrincipalName}」`)) return;
     try {
       await requestJSON(
         `/api/m365/accounts/${selectedAccountId}/groups/${selectedGroupId}/members/${member.id}`,
@@ -1805,12 +1796,7 @@ function M365Page() {
   };
 
   const deletePublicPage = async page => {
-    const confirmed = await dialog.deleteResource({
-      resourceType: '公开页',
-      resourceName: page.name,
-      message: `删除公开页“${page.name}”后，关联邀请码将立即失效。`,
-    });
-    if (!confirmed) return;
+    if (!confirmPress(`m365-public-page-delete:${page.id}`, `删除公开页「${page.name}」`)) return;
     try {
       await requestJSON(`/api/m365/public-pages/${page.id}`, { method: 'DELETE' });
       toast.success('公开页配置已删除');
@@ -1886,7 +1872,6 @@ function M365Page() {
       className="flex min-h-0 flex-1 flex-col"
       bodyClassName={panelBodyClass}
       title="租户管理"
-      description="管理租户凭据与连通性"
       icon={<Cloud className="h-4 w-4" />}
       action={
         <div className="flex items-center gap-2">
@@ -2030,7 +2015,7 @@ function M365Page() {
                     </Button>
                     <Button
                       size="sm"
-                      variant="destructive"
+                      variant={isArmed(`m365-account-delete:${account.id}`) ? 'destructive' : 'secondary-destructive'}
                       shape="square"
                       title="删除"
                       aria-label="删除"
@@ -2073,7 +2058,6 @@ function M365Page() {
         className="flex min-h-0 flex-1 flex-col"
         bodyClassName={panelBodyClass}
         title="公开页"
-        description="管理公开页与邀请码"
         icon={<Globe className="h-4 w-4" />}
         action={
           <div className="flex items-center gap-2">
@@ -2271,7 +2255,7 @@ function M365Page() {
                             </Button>
                             <Button
                               size="sm"
-                              variant="destructive"
+                              variant={isArmed(`m365-public-page-delete:${page.id}`) ? 'destructive' : 'secondary-destructive'}
                               className="basis-0 !justify-center text-center"
                               style={{ flex: 1 }}
                               onClick={() => deletePublicPage(page)}
@@ -2611,7 +2595,6 @@ function M365Page() {
         className="shrink-0"
         bodyClassName={panelBodyClass}
         title="SKU 库存"
-        description="查看许可证库存"
         icon={<Database className="h-4 w-4" />}
         action={
           <Button
@@ -2715,7 +2698,6 @@ function M365Page() {
 
       <SectionCard
         title="用户与许可证"
-        description="管理用户和许可证"
         icon={<Users className="h-4 w-4" />}
         bodyPadding="none"
         action={
@@ -2894,7 +2876,6 @@ function M365Page() {
         className="flex min-h-0 flex-1 flex-col"
         bodyClassName={panelBodyClass}
         title="组管理"
-        description="管理组与许可证"
         icon={<Folder className="h-4 w-4" />}
         action={
           <div className="flex items-center gap-2">
@@ -3048,7 +3029,7 @@ function M365Page() {
                                 <div className="flex justify-end">
                                   <Button
                                     size="sm"
-                                    variant="destructive"
+                                    variant={isArmed(`m365-group-member-remove:${member.id}`) ? 'destructive' : 'secondary-destructive'}
                                     onClick={() => removeGroupMember(member)}
                                   >
                                     移除

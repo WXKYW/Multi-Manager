@@ -13,6 +13,7 @@ import {
   ChartLegend,
   ClipboardText,
   ChartPalette,
+  Collapsible,
   DatePicker,
   Label,
   LayerCard,
@@ -26,6 +27,7 @@ import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
 import { formatDateTime } from '../modules/utils.js';
 import { renderMarkdown } from '../modules/markdown.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import useStore from '../store.js';
 import * as echarts from 'echarts/core';
 import { BarChart } from 'echarts/charts';
@@ -209,6 +211,7 @@ function parseLocalDateTime(value) {
 }
 
 function OpenAIPage() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const { theme } = useStore();
   const isDarkMode = theme === 'dark';
   const gatewayOrigin = useMemo(() => {
@@ -305,6 +308,34 @@ function OpenAIPage() {
     return () => window.clearInterval(timer);
   }, [logsAutoRefresh, activeTab, fetchAnalytics]);
 
+  // 网关日志实时推送（SSE）：后端出现请求立即插入日志列表顶部。
+  useEffect(() => {
+    if (activeTab !== 'logs') return undefined;
+    let source = null;
+    try {
+      source = new EventSource('/api/openai/analytics/stream');
+      source.addEventListener('log', event => {
+        try {
+          const log = JSON.parse(event.data);
+          setAnalyticsLogs(prev => {
+            if (!prev || prev.length === 0) return [log, ...prev];
+            const existing = new Set(prev.map(item => `${item.timestamp}:${item.model}:${item.clientIp ?? ''}:${item.latencyMs ?? ''}`));
+            const key = `${log.timestamp}:${log.model ?? ''}:${log.clientIp ?? ''}:${log.latencyMs ?? ''}`;
+            if (existing.has(key)) return prev;
+            return [log, ...prev].slice(0, Math.max(analyticsPageSize, 50));
+          });
+        } catch {
+          // 忽略无法解析的事件
+        }
+      });
+    } catch {
+      source = null;
+    }
+    return () => {
+      if (source) source.close();
+    };
+  }, [activeTab, analyticsPageSize]);
+
   // 记住日志分页数量，下次进入自动沿用。
   useEffect(() => {
     localStorage.setItem('openai_analytics_page_size', String(analyticsPageSize));
@@ -398,7 +429,16 @@ function OpenAIPage() {
   const [gatewayKeyToggleLoading, setGatewayKeyToggleLoading] = useState({});
   const [gatewayKeyDialogOpen, setGatewayKeyDialogOpen] = useState(false);
   const [editingGatewayKey, setEditingGatewayKey] = useState(null);
-  const [gatewayKeyForm, setGatewayKeyForm] = useState({ name: '', expiresAt: '' });
+  const [gatewayKeyForm, setGatewayKeyForm] = useState({
+    name: '',
+    expiresAt: '',
+    allowedModels: [],
+    allowedEndpoints: [],
+    maxTokensQuota: '',
+  });
+  const [gatewayKeyModelInput, setGatewayKeyModelInput] = useState('');
+  const [gatewayKeyEndpointInput, setGatewayKeyEndpointInput] = useState('');
+  const [gatewayKeyAdvancedOpen, setGatewayKeyAdvancedOpen] = useState(false);
   const [gatewayKeyFormError, setGatewayKeyFormError] = useState('');
   const [gatewayKeySaving, setGatewayKeySaving] = useState(false);
   const [newGatewayKey, setNewGatewayKey] = useState(null);
@@ -1189,7 +1229,15 @@ const trendSeries = useMemo(() => {
 
   const openAddGatewayKeyModal = () => {
     setEditingGatewayKey(null);
-    setGatewayKeyForm({ name: '', expiresAt: '' });
+    setGatewayKeyForm({
+      name: '',
+      expiresAt: '',
+      allowedModels: [],
+      allowedEndpoints: [],
+      maxTokensQuota: '',
+    });
+    setGatewayKeyModelInput('');
+    setGatewayKeyEndpointInput('');
     setGatewayKeyFormError('');
     setGatewayKeyDialogOpen(true);
   };
@@ -1199,7 +1247,12 @@ const trendSeries = useMemo(() => {
     setGatewayKeyForm({
       name: key.name || '',
       expiresAt: key.expiresAt ? toLocalDateTimeValue(new Date(key.expiresAt)) : '',
+      allowedModels: Array.isArray(key.allowedModels) ? key.allowedModels : [],
+      allowedEndpoints: Array.isArray(key.allowedEndpoints) ? key.allowedEndpoints : [],
+      maxTokensQuota: key.maxTokensQuota ? String(key.maxTokensQuota) : '',
     });
+    setGatewayKeyModelInput('');
+    setGatewayKeyEndpointInput('');
     setGatewayKeyFormError('');
     setGatewayKeyDialogOpen(true);
   };
@@ -1207,7 +1260,53 @@ const trendSeries = useMemo(() => {
   const normalizeGatewayKeyForm = () => ({
     name: gatewayKeyForm.name.trim(),
     expiresAt: gatewayKeyForm.expiresAt ? new Date(gatewayKeyForm.expiresAt).toISOString() : '',
+    allowedModels: Array.isArray(gatewayKeyForm.allowedModels)
+      ? gatewayKeyForm.allowedModels
+      : [],
+    allowedEndpoints: Array.isArray(gatewayKeyForm.allowedEndpoints)
+      ? gatewayKeyForm.allowedEndpoints
+      : [],
+    maxTokensQuota: gatewayKeyForm.maxTokensQuota
+      ? Number(gatewayKeyForm.maxTokensQuota)
+      : 0,
   });
+
+  // 白名单列表项添加/删除（模型与端点共用）。
+  const addGatewayKeyListItem = (field, value) => {
+    const trimmed = (value || '').trim();
+    if (!trimmed) return;
+    setGatewayKeyForm(current => {
+      const list = Array.isArray(current[field]) ? current[field] : [];
+      if (list.includes(trimmed)) return current;
+      return { ...current, [field]: [...list, trimmed] };
+    });
+    if (field === 'allowedModels') setGatewayKeyModelInput('');
+    if (field === 'allowedEndpoints') setGatewayKeyEndpointInput('');
+  };
+
+  const removeGatewayKeyListItem = (field, value) => {
+    setGatewayKeyForm(current => ({
+      ...current,
+      [field]: (Array.isArray(current[field]) ? current[field] : []).filter(item => item !== value),
+    }));
+  };
+
+  // 过期时间预设：相对当前时间 +N 天，保留当天剩余时刻（23:59 或当前时分）。
+  const applyGatewayKeyExpiryPreset = days => {
+    setGatewayKeyForm(current => {
+      if (!days) {
+        return { ...current, expiresAt: '' };
+      }
+      const existing = parseLocalDateTime(current.expiresAt);
+      const next = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+      if (existing) {
+        next.setHours(existing.getHours(), existing.getMinutes(), 0, 0);
+      } else {
+        next.setHours(23, 59, 0, 0);
+      }
+      return { ...current, expiresAt: toLocalDateTimeValue(next) };
+    });
+  };
 
   const updateGatewayKeyExpiryDate = date => {
     if (!date) return;
@@ -1318,7 +1417,7 @@ const trendSeries = useMemo(() => {
   };
 
   const deleteGatewayKey = async key => {
-    if (!(await dialog.deleteResource(`确定删除网关密钥 "${key.name}" 吗？`))) return;
+    if (!confirmPress(`gateway-key-${key.id}`, `删除网关密钥「${key.name}」`)) return;
     try {
       const response = await fetch(`/api/openai/keys/${key.id}`, {
         method: 'DELETE',
@@ -1985,7 +2084,7 @@ const trendSeries = useMemo(() => {
   };
 
   const deletePersona = async personaId => {
-    if (!(await dialog.deleteResource('确定要删除这个 AI 人设吗？'))) {
+    if (!confirmPress(`persona-${personaId}`, '删除这个 AI 人设')) {
       return;
     }
     try {
@@ -2216,7 +2315,7 @@ const trendSeries = useMemo(() => {
 
   const deleteSession = async (sessionId, e) => {
     if (e) e.stopPropagation();
-    if (!(await dialog.deleteResource('确定要删除这个对话吗？此操作不可撤销。'))) return;
+    if (!confirmPress(`session-${sessionId}`, '删除这个对话')) return;
     try {
       const response = await fetch(`/api/openai/sessions/${sessionId}`, {
         method: 'DELETE',
@@ -2236,7 +2335,7 @@ const trendSeries = useMemo(() => {
 
   const deleteSelectedSessions = async () => {
     if (selectedSessionIds.length === 0) return;
-    if (!(await dialog.deleteResource(`确定要删除选中的 ${selectedSessionIds.length} 个对话吗？`))) return;
+    if (!confirmPress('batch-sessions', `删除选中的 ${selectedSessionIds.length} 个对话`)) return;
     try {
       for (const id of selectedSessionIds) {
         await fetch(`/api/openai/sessions/${id}`, {
@@ -2258,7 +2357,7 @@ const trendSeries = useMemo(() => {
 
   const clearAllSessions = async () => {
     if (sessions.length === 0) return;
-    if (!(await dialog.deleteResource('确定要清空所有会话历史吗？此操作不可撤销。'))) return;
+    if (!confirmPress('clear-sessions', '清空所有会话历史')) return;
     try {
       const response = await fetch('/api/openai/sessions', {
         method: 'DELETE',
@@ -3605,6 +3704,7 @@ const trendSeries = useMemo(() => {
                     <Table.Head className="text-center">最近使用</Table.Head>
                     <Table.Head className="text-center">过期时间</Table.Head>
                     <Table.Head className="text-center">请求数</Table.Head>
+                    <Table.Head className="text-center">Token 用量</Table.Head>
                     <Table.Head className="app-table-action">操作</Table.Head>
                   </Table.Row>
                 </Table.Header>
@@ -3684,6 +3784,28 @@ const trendSeries = useMemo(() => {
                         <Table.Cell className="text-center font-mono text-[0.9em] text-kumo-strong">
                           {(key.requestCount || 0).toLocaleString()}
                         </Table.Cell>
+                        <Table.Cell className="text-center font-mono text-[0.9em]">
+                          {key.maxTokensQuota > 0 ? (
+                            <span className="inline-flex items-center gap-1">
+                              <span
+                                className={
+                                  (key.totalTokensUsed || 0) >= key.maxTokensQuota
+                                    ? 'text-kumo-danger'
+                                    : 'text-kumo-strong'
+                                }
+                              >
+                                {(key.totalTokensUsed || 0).toLocaleString()}
+                              </span>
+                              <span className="text-kumo-subtle">
+                                / {key.maxTokensQuota.toLocaleString()}
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="text-kumo-subtle">
+                              {(key.totalTokensUsed || 0).toLocaleString()}
+                            </span>
+                          )}
+                        </Table.Cell>
                         <Table.Cell>
                           <div className="flex justify-center gap-1.5">
                             <Button
@@ -3741,10 +3863,14 @@ const trendSeries = useMemo(() => {
                             <Button
                               shape="square"
                               size="sm"
-                              variant="secondary-destructive"
+                              variant={
+                                isArmed(`gateway-key-${key.id}`)
+                                  ? 'destructive'
+                                  : 'secondary-destructive'
+                              }
                               aria-label="删除密钥"
                               onClick={() => deleteGatewayKey(key)}
-                              title="删除密钥"
+                              title={isArmed(`gateway-key-${key.id}`) ? '再次点击确认删除' : '删除密钥'}
                             >
                               <Trash className="w-3.5 h-3.5" />
                             </Button>
@@ -4750,13 +4876,10 @@ const trendSeries = useMemo(() => {
 
       {/* 2. Gateway Key Dialogs */}
       <Dialog.Root open={gatewayKeyDialogOpen} onOpenChange={setGatewayKeyDialogOpen}>
-        <Dialog className="!w-[min(30rem,calc(100vw-2rem))] !max-w-[min(30rem,calc(100vw-2rem))] p-6">
+        <Dialog className="!w-[min(34rem,calc(100vw-2rem))] !max-w-[min(34rem,calc(100vw-2rem))] p-6">
           <Dialog.Title className="mb-1 text-sm font-semibold text-kumo-strong">
             {editingGatewayKey ? '编辑 API 密钥' : '新建 API 密钥'}
           </Dialog.Title>
-          <Dialog.Description className="mb-4 text-sm text-kumo-subtle">
-            此密钥用于客户端调用 /v1 兼容接口，不会暴露上游供应商 API Key。
-          </Dialog.Description>
 
           <div className="space-y-4">
             <Input
@@ -4767,9 +4890,37 @@ const trendSeries = useMemo(() => {
               placeholder="如：生产环境、Open WebUI"
               className="w-full text-sm text-kumo-strong"
             />
+
             <div className="space-y-1.5">
               <Label showOptional>过期时间</Label>
-              <div className="grid grid-cols-[minmax(0,1fr)_4.5rem_0.75rem_4.5rem] items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[
+                  { label: '1 天', days: 1 },
+                  { label: '14 天', days: 14 },
+                  { label: '30 天', days: 30 },
+                  { label: '永久', days: 0 },
+                ].map(preset => (
+                  <Button
+                    key={preset.label}
+                    size="xs"
+                    variant={
+                      (preset.days === 0 && !gatewayKeyForm.expiresAt) ||
+                      (preset.days > 0 &&
+                        gatewayKeyForm.expiresAt &&
+                        Math.abs(
+                          new Date(gatewayKeyForm.expiresAt).getTime() -
+                            (Date.now() + preset.days * 24 * 60 * 60 * 1000)
+                        ) < 60 * 1000)
+                        ? 'primary'
+                        : 'outline'
+                    }
+                    onClick={() => applyGatewayKeyExpiryPreset(preset.days)}
+                  >
+                    {preset.label}
+                  </Button>
+                ))}
+              </div>
+              <div className="flex items-center gap-1.5">
                 <Popover>
                   <Popover.Trigger
                     render={
@@ -4777,7 +4928,7 @@ const trendSeries = useMemo(() => {
                         size="sm"
                         variant="outline"
                         icon={CalendarDotsIcon}
-                        className="min-w-0 justify-start font-normal"
+                        className="min-w-0 flex-1 justify-start font-normal"
                       />
                     }
                   >
@@ -4816,8 +4967,9 @@ const trendSeries = useMemo(() => {
                   value={gatewayKeyForm.expiresAt.slice(11, 13)}
                   onValueChange={value => updateGatewayKeyExpiryTime('hour', value)}
                   items={GATEWAY_EXPIRY_HOURS}
+                  className="w-[3.25rem] shrink-0"
                 />
-                <span className="text-center text-sm text-kumo-subtle">:</span>
+                <span className="shrink-0 text-sm text-kumo-subtle">:</span>
                 <Select
                   size="sm"
                   aria-label="过期分钟"
@@ -4825,9 +4977,106 @@ const trendSeries = useMemo(() => {
                   value={gatewayKeyForm.expiresAt.slice(14, 16)}
                   onValueChange={value => updateGatewayKeyExpiryTime('minute', value)}
                   items={GATEWAY_EXPIRY_MINUTES}
+                  className="w-[3.25rem] shrink-0"
                 />
               </div>
             </div>
+
+            <Collapsible.Root
+              open={gatewayKeyAdvancedOpen}
+              onOpenChange={setGatewayKeyAdvancedOpen}
+            >
+              <Collapsible.DefaultTrigger>高级过滤</Collapsible.DefaultTrigger>
+              <Collapsible.DefaultPanel className="mt-2">
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label showOptional>允许的模型（白名单）</Label>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {(gatewayKeyForm.allowedModels || []).map(model => (
+                        <span
+                          key={model}
+                          className="inline-flex max-w-full items-center gap-1 truncate rounded-full border border-kumo-line bg-kumo-base px-2 py-0.5 font-mono text-[11px] font-medium text-kumo-strong"
+                        >
+                          <span className="truncate">{model}</span>
+                          <button
+                            type="button"
+                            className="shrink-0 text-kumo-subtle transition-colors hover:text-kumo-danger"
+                            aria-label={`移除 ${model}`}
+                            onClick={() => removeGatewayKeyListItem('allowedModels', model)}
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      ))}
+                      <Input
+                        size="sm"
+                        type="text"
+                        value={gatewayKeyModelInput}
+                        onChange={e => setGatewayKeyModelInput(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            addGatewayKeyListItem('allowedModels', gatewayKeyModelInput);
+                          }
+                        }}
+                        placeholder="输入模型名后回车"
+                        className="w-full font-mono text-[0.85em] text-kumo-strong"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label showOptional>允许的端点（白名单）</Label>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {(gatewayKeyForm.allowedEndpoints || []).map(endpointId => (
+                        <span
+                          key={endpointId}
+                          className="inline-flex max-w-full items-center gap-1 truncate rounded-full border border-kumo-line bg-kumo-base px-2 py-0.5 font-mono text-[11px] font-medium text-kumo-strong"
+                        >
+                          <span className="truncate">{endpointId}</span>
+                          <button
+                            type="button"
+                            className="shrink-0 text-kumo-subtle transition-colors hover:text-kumo-danger"
+                            aria-label={`移除 ${endpointId}`}
+                            onClick={() => removeGatewayKeyListItem('allowedEndpoints', endpointId)}
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      ))}
+                      <Input
+                        size="sm"
+                        type="text"
+                        value={gatewayKeyEndpointInput}
+                        onChange={e => setGatewayKeyEndpointInput(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            addGatewayKeyListItem('allowedEndpoints', gatewayKeyEndpointInput);
+                          }
+                        }}
+                        placeholder="输入端点 ID 后回车"
+                        className="w-full font-mono text-[0.85em] text-kumo-strong"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label showOptional>Token 配额</Label>
+                    <Input
+                      size="sm"
+                      type="number"
+                      min="0"
+                      value={gatewayKeyForm.maxTokensQuota}
+                      onChange={e =>
+                        setGatewayKeyForm({ ...gatewayKeyForm, maxTokensQuota: e.target.value })
+                      }
+                      placeholder="0 = 不限制"
+                      className="w-full font-mono text-[0.85em] text-kumo-strong"
+                    />
+                  </div>
+                </div>
+              </Collapsible.DefaultPanel>
+            </Collapsible.Root>
+
             {gatewayKeyFormError && (
               <p className="text-sm font-semibold text-kumo-danger">{gatewayKeyFormError}</p>
             )}

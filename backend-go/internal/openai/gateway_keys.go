@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -22,23 +23,31 @@ import (
 type gatewayKeyContextKey struct{}
 
 type GatewayKey struct {
-	ID           string  `json:"id"`
-	Name         string  `json:"name"`
-	KeyPrefix    string  `json:"keyPrefix"`
-	KeySuffix    string  `json:"keySuffix"`
-	MaskedKey    string  `json:"maskedKey"`
-	APIKey       string  `json:"apiKey,omitempty"`
-	Enabled      bool    `json:"enabled"`
-	IsDefault    bool    `json:"isDefault"`
-	CreatedAt    string  `json:"createdAt"`
-	LastUsed     *string `json:"lastUsed"`
-	ExpiresAt    *string `json:"expiresAt"`
-	RequestCount int64   `json:"requestCount"`
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	KeyPrefix        string   `json:"keyPrefix"`
+	KeySuffix        string   `json:"keySuffix"`
+	MaskedKey        string   `json:"maskedKey"`
+	APIKey           string   `json:"apiKey,omitempty"`
+	Enabled          bool     `json:"enabled"`
+	IsDefault        bool     `json:"isDefault"`
+	CreatedAt        string   `json:"createdAt"`
+	LastUsed         *string  `json:"lastUsed"`
+	ExpiresAt        *string  `json:"expiresAt"`
+	RequestCount     int64    `json:"requestCount"`
+	AllowedModels    []string `json:"allowedModels,omitempty"`
+	AllowedEndpoints []string `json:"allowedEndpoints,omitempty"`
+	MaxTokensQuota   int64    `json:"maxTokensQuota"`
+	TotalTokensUsed  int64    `json:"totalTokensUsed"`
 }
 
 type gatewayKeyIdentity struct {
-	ID   string
-	Name string
+	ID               string
+	Name             string
+	AllowedModels    []string
+	AllowedEndpoints []string
+	MaxTokensQuota   int64
+	TotalTokensUsed  int64
 }
 
 var (
@@ -84,12 +93,14 @@ func (s *Service) AuthorizeGatewayRequest(r *http.Request) (*http.Request, error
 	var identity gatewayKeyIdentity
 	var enabledInt int
 	var expiresAt sql.NullString
+	var allowedModelsRaw, allowedEndpointsRaw sql.NullString
+	var maxQuota, usedTokens int64
 	err = db.QueryRowContext(ctx, `
-		SELECT id, name, enabled, expires_at
+		SELECT id, name, enabled, expires_at, COALESCE(allowed_models, ''), COALESCE(allowed_endpoints, ''), COALESCE(max_tokens_quota, 0), COALESCE(total_tokens_used, 0)
 		FROM openai_gateway_keys
 		WHERE key_hash = ?
 		LIMIT 1`, hashGatewayKey(rawKey)).
-		Scan(&identity.ID, &identity.Name, &enabledInt, &expiresAt)
+		Scan(&identity.ID, &identity.Name, &enabledInt, &expiresAt, &allowedModelsRaw, &allowedEndpointsRaw, &maxQuota, &usedTokens)
 	if errors.Is(err, sql.ErrNoRows) || enabledInt != 1 {
 		return r, errGatewayKeyInvalid
 	}
@@ -102,6 +113,14 @@ func (s *Service) AuthorizeGatewayRequest(r *http.Request) (*http.Request, error
 			return r, errGatewayKeyExpired
 		}
 	}
+	if allowedModelsRaw.String != "" {
+		_ = json.Unmarshal([]byte(allowedModelsRaw.String), &identity.AllowedModels)
+	}
+	if allowedEndpointsRaw.String != "" {
+		_ = json.Unmarshal([]byte(allowedEndpointsRaw.String), &identity.AllowedEndpoints)
+	}
+	identity.MaxTokensQuota = maxQuota
+	identity.TotalTokensUsed = usedTokens
 
 	now := time.Now().Format(time.RFC3339)
 	_, _ = db.ExecContext(ctx, `
@@ -122,7 +141,8 @@ func (s *Service) listGatewayKeys(w http.ResponseWriter, r *http.Request) {
 	defer db.Close()
 
 	rows, err := db.QueryContext(ctx, `
-		SELECT id, name, key_cipher, key_prefix, key_suffix, enabled, is_default, created_at, last_used, expires_at, request_count
+		SELECT id, name, key_cipher, key_prefix, key_suffix, enabled, is_default, created_at, last_used, expires_at, request_count,
+			COALESCE(allowed_models, ''), COALESCE(allowed_endpoints, ''), COALESCE(max_tokens_quota, 0), COALESCE(total_tokens_used, 0)
 		FROM openai_gateway_keys
 		ORDER BY is_default DESC, created_at DESC`)
 	if err != nil {
@@ -145,8 +165,11 @@ func (s *Service) listGatewayKeys(w http.ResponseWriter, r *http.Request) {
 
 func (s *Service) createGatewayKey(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name      string `json:"name"`
-		ExpiresAt string `json:"expiresAt"`
+		Name             string   `json:"name"`
+		ExpiresAt        string   `json:"expiresAt"`
+		AllowedModels    []string `json:"allowedModels"`
+		AllowedEndpoints []string `json:"allowedEndpoints"`
+		MaxTokensQuota   int64    `json:"maxTokensQuota"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -176,14 +199,18 @@ func (s *Service) createGatewayKey(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
+	allowedModelsJSON, _ := json.Marshal(cleanStringList(req.AllowedModels))
+	allowedEndpointsJSON, _ := json.Marshal(cleanStringList(req.AllowedEndpoints))
+
 	id := "gk_" + uuid.NewString()
 	createdAt := time.Now().Format(time.RFC3339)
 	prefix, suffix := gatewayKeyParts(rawKey)
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO openai_gateway_keys
-			(id, name, key_hash, key_cipher, key_prefix, key_suffix, enabled, created_at, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`,
-		id, req.Name, hashGatewayKey(rawKey), rawKey, prefix, suffix, createdAt, expiresAt)
+			(id, name, key_hash, key_cipher, key_prefix, key_suffix, enabled, created_at, expires_at, allowed_models, allowed_endpoints, max_tokens_quota)
+		VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
+		id, req.Name, hashGatewayKey(rawKey), rawKey, prefix, suffix, createdAt, expiresAt,
+		string(allowedModelsJSON), string(allowedEndpointsJSON), maxInt64(req.MaxTokensQuota, 0))
 	if err != nil {
 		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -193,22 +220,28 @@ func (s *Service) createGatewayKey(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"apiKey":  rawKey,
 		"key": GatewayKey{
-			ID:        id,
-			Name:      req.Name,
-			KeyPrefix: prefix,
-			KeySuffix: suffix,
-			MaskedKey: maskGatewayKey(prefix, suffix),
-			Enabled:   true,
-			CreatedAt: createdAt,
-			ExpiresAt: nullableStringPointer(expiresAt),
+			ID:               id,
+			Name:             req.Name,
+			KeyPrefix:        prefix,
+			KeySuffix:        suffix,
+			MaskedKey:        maskGatewayKey(prefix, suffix),
+			Enabled:          true,
+			CreatedAt:        createdAt,
+			ExpiresAt:        nullableStringPointer(expiresAt),
+			AllowedModels:    cleanStringList(req.AllowedModels),
+			AllowedEndpoints: cleanStringList(req.AllowedEndpoints),
+			MaxTokensQuota:   maxInt64(req.MaxTokensQuota, 0),
 		},
 	})
 }
 
 func (s *Service) updateGatewayKey(w http.ResponseWriter, r *http.Request, id string) {
 	var req struct {
-		Name      string `json:"name"`
-		ExpiresAt string `json:"expiresAt"`
+		Name             string   `json:"name"`
+		ExpiresAt        string   `json:"expiresAt"`
+		AllowedModels    []string `json:"allowedModels"`
+		AllowedEndpoints []string `json:"allowedEndpoints"`
+		MaxTokensQuota   *int64   `json:"maxTokensQuota"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -225,6 +258,13 @@ func (s *Service) updateGatewayKey(w http.ResponseWriter, r *http.Request, id st
 		return
 	}
 
+	allowedModelsJSON, _ := json.Marshal(cleanStringList(req.AllowedModels))
+	allowedEndpointsJSON, _ := json.Marshal(cleanStringList(req.AllowedEndpoints))
+	quota := int64(0)
+	if req.MaxTokensQuota != nil && *req.MaxTokensQuota > 0 {
+		quota = *req.MaxTokensQuota
+	}
+
 	db, err := s.open(r.Context())
 	if err != nil {
 		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -232,8 +272,10 @@ func (s *Service) updateGatewayKey(w http.ResponseWriter, r *http.Request, id st
 	}
 	defer db.Close()
 	result, err := db.ExecContext(r.Context(), `
-		UPDATE openai_gateway_keys SET name = ?, expires_at = ? WHERE id = ?`,
-		req.Name, expiresAt, id)
+		UPDATE openai_gateway_keys
+		SET name = ?, expires_at = ?, allowed_models = ?, allowed_endpoints = ?, max_tokens_quota = ?
+		WHERE id = ?`,
+		req.Name, expiresAt, string(allowedModelsJSON), string(allowedEndpointsJSON), quota, id)
 	if err != nil {
 		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -361,6 +403,7 @@ func scanGatewayKey(scanner interface {
 	var enabled int
 	var isDefault int
 	var keyCipher, lastUsed, expiresAt sql.NullString
+	var allowedModelsRaw, allowedEndpointsRaw string
 	err := scanner.Scan(
 		&key.ID,
 		&key.Name,
@@ -373,6 +416,10 @@ func scanGatewayKey(scanner interface {
 		&lastUsed,
 		&expiresAt,
 		&key.RequestCount,
+		&allowedModelsRaw,
+		&allowedEndpointsRaw,
+		&key.MaxTokensQuota,
+		&key.TotalTokensUsed,
 	)
 	if err != nil {
 		return key, err
@@ -392,6 +439,12 @@ func scanGatewayKey(scanner interface {
 	}
 	if expiresAt.Valid {
 		key.ExpiresAt = &expiresAt.String
+	}
+	if allowedModelsRaw != "" {
+		_ = json.Unmarshal([]byte(allowedModelsRaw), &key.AllowedModels)
+	}
+	if allowedEndpointsRaw != "" {
+		_ = json.Unmarshal([]byte(allowedEndpointsRaw), &key.AllowedEndpoints)
 	}
 	return key, nil
 }
@@ -450,4 +503,89 @@ func nullableStringPointer(value interface{}) *string {
 		return nil
 	}
 	return &text
+}
+
+// cleanStringList 去重并剔除空字符串，返回有序列表。
+func cleanStringList(items []string) []string {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, item := range items {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" || seen[trimmed] {
+			continue
+		}
+		seen[trimmed] = true
+		out = append(out, trimmed)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func maxInt64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// enforceGatewayKeyLimits 校验网关密钥的模型/端点白名单与 token 配额。
+// 返回错误消息（空表示通过）。
+func (s *Service) enforceGatewayKeyLimits(ctx context.Context, identity gatewayKeyIdentity, model string, endpointID string) string {
+	if len(identity.AllowedModels) > 0 {
+		allowed := map[string]bool{}
+		for _, m := range identity.AllowedModels {
+			allowed[m] = true
+		}
+		if !allowed[model] {
+			return "模型不在该密钥的允许列表中"
+		}
+	}
+	if len(identity.AllowedEndpoints) > 0 {
+		allowed := map[string]bool{}
+		for _, id := range identity.AllowedEndpoints {
+			allowed[id] = true
+		}
+		if !allowed[endpointID] {
+			return "端点不在该密钥的允许列表中"
+		}
+	}
+	if identity.MaxTokensQuota > 0 && identity.TotalTokensUsed >= identity.MaxTokensQuota {
+		return "该密钥的 Token 配额已用尽"
+	}
+	return ""
+}
+
+// consumeGatewayKeyTokens 在请求完成后累加该密钥的 token 用量。
+func (s *Service) consumeGatewayKeyTokens(ctx context.Context, identity gatewayKeyIdentity, tokens int64) {
+	if identity.ID == "" || tokens <= 0 {
+		return
+	}
+	db, err := s.open(ctx)
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	_, _ = db.ExecContext(ctx, `
+		UPDATE openai_gateway_keys
+		SET total_tokens_used = total_tokens_used + ?
+		WHERE id = ?`, tokens, identity.ID)
+}
+
+// filterModelsByKey 按密钥白名单过滤模型列表；白名单为空时返回原列表。
+func filterModelsByKey(identity gatewayKeyIdentity, models []map[string]interface{}) []map[string]interface{} {
+	if len(identity.AllowedModels) == 0 {
+		return models
+	}
+	allowed := map[string]bool{}
+	for _, m := range identity.AllowedModels {
+		allowed[m] = true
+	}
+	out := []map[string]interface{}{}
+	for _, m := range models {
+		id, _ := m["id"].(string)
+		if allowed[id] {
+			out = append(out, m)
+		}
+	}
+	return out
 }

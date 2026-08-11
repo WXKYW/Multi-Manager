@@ -9,6 +9,7 @@ import { DropdownMenu, Tabs } from '@cloudflare/kumo';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { AppTable, DataTableFrame, EmptyState, InsetPanel, KeyValueGrid, PageStack, ResponsiveSearchInput, SectionCard, StatusBadge, TabBarOverflowActions, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
 import CodeEditor from '../components/ui/CodeEditor.jsx';
@@ -195,6 +196,7 @@ function formatBaselineLabel(value) {
 }
 
 function OraclePage() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const [activeTab, setActiveTab] = useState('instances');
   const [accounts, setAccounts] = useState([]);
   const [selectedAccountId, setSelectedAccountId] = useState('');
@@ -712,7 +714,7 @@ function OraclePage() {
   };
 
   const deleteAccount = async (accountId) => {
-    if (!(await dialog.deleteResource('确定要删除此 Oracle 账号吗？私钥不会被恢复。'))) return;
+    if (!confirmPress(`account:${accountId}`, '删除 Oracle 账号')) return;
     try {
       const response = await fetch(`/api/oracle/accounts/${accountId}`, { method: 'DELETE', headers: getAuthHeaders() });
       const result = await response.json();
@@ -881,7 +883,7 @@ function OraclePage() {
 
   const deleteConsoleConnection = async (connectionId) => {
     if (!selectedInstance || !connectionId) return;
-    if (!(await dialog.deleteResource('确定要删除这个控制台连接吗？删除后可重新创建。'))) return;
+    if (!confirmPress(`console:${connectionId}`, '删除控制台连接')) return;
     setDeletingConsoleId(connectionId);
     try {
       const response = await fetch(`/api/oracle/accounts/${selectedAccountId}/console-connections/${encodeURIComponent(connectionId)}`, {
@@ -1167,7 +1169,7 @@ function OraclePage() {
                     type="button"
                     size="sm"
                     shape="square"
-                    variant="secondary-destructive"
+                    variant={isArmed(`console:${item.id}`) ? 'destructive' : 'secondary-destructive'}
                     disabled={deletingConsoleId === item.id}
                     onClick={() => deleteConsoleConnection(item.id)}
                     aria-label="删除控制台连接"
@@ -1250,7 +1252,7 @@ function OraclePage() {
                       <div className="inline-flex gap-2">
                         <Button type="button" size="sm" shape="square" variant="secondary" onClick={() => verifyAccount(account.id)} aria-label={`验证 ${account.name}`} title="验证" icon={<Shield className="h-4 w-4" />} />
                         <Button type="button" size="sm" shape="square" variant="secondary" onClick={() => openAccountDialog(account)} aria-label={`编辑 ${account.name}`} title="编辑" icon={<Edit className="h-4 w-4" />} />
-                        <Button type="button" size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteAccount(account.id)} aria-label={`删除 ${account.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
+                        <Button type="button" size="sm" shape="square" variant={isArmed(`account:${account.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteAccount(account.id)} aria-label={`删除 ${account.name}`} title="删除" icon={<Trash className="h-4 w-4" />} />
                       </div>
                     </Table.Cell>
                   </Table.Row>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input, Textarea } from '@cloudflare/kumo/components/input';
@@ -85,6 +86,7 @@ const normalizeFlyImageForInput = (image) => {
 
 function PaasPage() {
   const { theme } = useStore();
+  const { isArmed, confirmPress } = useConfirmPress();
   const [activeTab, setActiveTab] = useState('fly'); // 'fly' | 'koyeb' | 'config'
   const didInitialLoadRef = useRef(false);
 
@@ -1067,7 +1069,7 @@ function PaasPage() {
   };
 
   const deleteFlyMachine = async (account, app, machine) => {
-    if (!(await dialog.deleteResource(`确定要删除 Fly.io 机器 "${machine.id}" 吗？`))) return;
+    if (!confirmPress(`fly-machine:${machine.id}`, `删除 Fly.io 机器「${machine.id}」`)) return;
     try {
       await callFlyMachineEndpoint(account, app, machine, '', { method: 'DELETE', body: { force: true } });
       toast.success('机器已删除');
@@ -1287,7 +1289,7 @@ function PaasPage() {
   };
 
   const deleteFlyApp = async (account, app) => {
-    if (!(await dialog.deleteResource(`确定要永久删除 Fly.io 应用 "${app.name}" 吗？此操作会销毁所有底层机器且不可逆！`))) return;
+    if (!confirmPress(`fly-app:${app.id}`, `永久删除应用「${app.name}」`)) return;
     try {
       const response = await fetch(`/api/flyio/apps/${app.name}`, {
         method: 'DELETE',
@@ -1423,7 +1425,7 @@ function PaasPage() {
   };
 
   const removeKoyebAccount = async (id) => {
-    if (!(await dialog.deleteResource('确认删除此 Koyeb 账号吗？'))) return;
+    if (!confirmPress(`koyeb-account:${id}`, '删除 Koyeb 账号')) return;
     try {
       const response = await fetch(`/api/koyeb/accounts/${id}`, {
         method: 'DELETE',
@@ -1478,7 +1480,7 @@ function PaasPage() {
   };
 
   const removeFlyAccount = async (id, name) => {
-    if (!(await dialog.deleteResource(`确认删除 Fly.io 账号 "${name}" 吗？`))) return;
+    if (!confirmPress(`fly-account:${id}`, `删除 Fly.io 账号「${name}」`)) return;
     try {
       const response = await fetch(`/api/flyio/accounts/${id}`, {
         method: 'DELETE',
@@ -2182,7 +2184,7 @@ function PaasPage() {
                                             <Button shape="square" size="xs" variant="secondary" aria-label="恢复调度" title="Uncordon" onClick={() => runFlyMachineAction(account, app, m, 'uncordon', '机器已 uncordon')} icon={<ExternalLink className="h-3 w-3" />} />
                                             <Button shape="square" size="xs" variant="secondary" aria-label="获取 lease" title="获取 lease" onClick={() => acquireFlyMachineLease(account, app, m)} icon={<Lock className="h-3 w-3" />} />
                                             <Button shape="square" size="xs" variant="secondary" aria-label="设置 metadata" title="设置 metadata" onClick={() => setFlyMachineMetadata(account, app, m)} icon={<Settings className="h-3 w-3" />} />
-                                            <Button shape="square" size="xs" variant="secondary-destructive" aria-label="删除机器" title="删除机器" onClick={() => deleteFlyMachine(account, app, m)} icon={<Trash className="h-3 w-3" />} />
+                                            <Button shape="square" size="xs" variant={isArmed(`fly-machine:${m.id}`) ? 'destructive' : 'secondary-destructive'} aria-label="删除机器" title="删除机器" onClick={() => deleteFlyMachine(account, app, m)} icon={<Trash className="h-3 w-3" />} />
                                           </div>
                                       </div>
                                     ))}
@@ -2197,7 +2199,7 @@ function PaasPage() {
                                     <Button shape="square" size="sm" variant="secondary" aria-label="查看机器实例" onClick={() => fetchFlyMachines(account, app)} title="查看机器/实例" icon={<Server className={`h-3.5 w-3.5 ${app.loadingMachines ? 'animate-spin' : ''}`} />} />
                                     <Button shape="square" size="sm" variant="secondary" aria-label="查看运行日志" onClick={() => showFlyAppLogs(account, app)} title="查看运行日志" icon={<FileText className="h-3.5 w-3.5" />} />
                                     <Button shape="square" size="sm" variant="secondary" aria-label="查看应用配置" onClick={() => viewFlyConfig(account, app)} title="查看应用配置" icon={<Terminal className="h-3.5 w-3.5" />} />
-                                    <Button shape="square" size="sm" variant="secondary-destructive" aria-label="删除 Fly 应用" onClick={() => deleteFlyApp(account, app)} title="删除应用" icon={<Trash className="h-3.5 w-3.5" />} />
+                                    <Button shape="square" size="sm" variant={isArmed(`fly-app:${app.id}`) ? 'destructive' : 'secondary-destructive'} aria-label="删除 Fly 应用" onClick={() => deleteFlyApp(account, app)} title="删除应用" icon={<Trash className="h-3.5 w-3.5" />} />
                                 </div>
                               </LayerCard.Primary>
                             </LayerCard>
@@ -2316,7 +2318,7 @@ function PaasPage() {
                           <Table.Cell className="truncate font-mono text-xs text-kumo-subtle">{account.email || '-'}</Table.Cell>
                           <Table.Cell className="text-right font-mono text-xs text-kumo-info">${(account.balance || 0).toFixed(2)}</Table.Cell>
                           <Table.Cell className="text-right">
-                            <Button shape="square" size="sm" variant="ghost" aria-label="删除 Koyeb 账号" title="删除" onClick={() => removeKoyebAccount(account.id)} icon={<Trash className="h-4 w-4" />} />
+                            <Button shape="square" size="sm" variant={isArmed(`koyeb-account:${account.id}`) ? 'destructive' : 'secondary-destructive'} aria-label="删除 Koyeb 账号" title="删除" onClick={() => removeKoyebAccount(account.id)} icon={<Trash className="h-4 w-4" />} />
                           </Table.Cell>
                         </Table.Row>
                       ))}
@@ -2332,7 +2334,7 @@ function PaasPage() {
                           <Table.Cell className="truncate font-mono text-xs text-kumo-subtle">{account.email || '-'}</Table.Cell>
                           <Table.Cell className="text-right font-mono text-xs text-kumo-subtle">-</Table.Cell>
                           <Table.Cell className="text-right">
-                            <Button shape="square" size="sm" variant="ghost" aria-label="删除 Fly.io 账号" title="删除" onClick={() => removeFlyAccount(account.id, account.name)} icon={<Trash className="h-4 w-4" />} />
+                            <Button shape="square" size="sm" variant={isArmed(`fly-account:${account.id}`) ? 'destructive' : 'secondary-destructive'} aria-label="删除 Fly.io 账号" title="删除" onClick={() => removeFlyAccount(account.id, account.name)} icon={<Trash className="h-4 w-4" />} />
                           </Table.Cell>
                         </Table.Row>
                       ))}

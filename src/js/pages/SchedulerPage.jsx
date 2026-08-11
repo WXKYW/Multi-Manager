@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from '../modules/toast.js';
-import { dialog } from '../modules/dialog.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { Input } from '@cloudflare/kumo/components/input';
@@ -503,6 +503,7 @@ function WorkflowCanvas({ workflow, runs = [], selectedNodeId = '', onSelectNode
 }
 
 function SchedulerPage() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const [activeTab, setActiveTab] = useState('tasks');
   const [tasks, setTasks] = useState([]);
   const [workflows, setWorkflows] = useState([]);
@@ -705,7 +706,7 @@ function SchedulerPage() {
   };
 
   const deleteTask = async (task) => {
-    if (!(await dialog.deleteResource(`确定删除任务“${task.name}”吗？`))) return;
+    if (!confirmPress(`task:${task.id}`, `删除任务「${task.name}」`)) return;
     try {
       const res = await fetch(`/api/scheduler/tasks/${task.id}`, { method: 'DELETE', headers: authHeaders() });
       const data = await res.json();
@@ -846,7 +847,7 @@ function SchedulerPage() {
   };
 
   const deleteWorkflow = async (workflow) => {
-    if (!(await dialog.deleteResource(`确定删除工作流“${workflow.name}”吗？`))) return;
+    if (!confirmPress(`workflow:${workflow.id}`, `删除工作流「${workflow.name}」`)) return;
     try {
       const res = await fetch(`/api/scheduler/workflows/${workflow.id}`, { method: 'DELETE', headers: authHeaders() });
       const data = await res.json();
@@ -928,7 +929,7 @@ function SchedulerPage() {
   };
 
   const clearOldRuns = async () => {
-    if (!(await dialog.deleteResource('确定清理 30 天前的工作流运行记录吗？'))) return;
+    if (!confirmPress('runs:clear-old', '清理 30 天前运行记录')) return;
     try {
       const res = await fetch('/api/scheduler/runs?days=30', { method: 'DELETE', headers: authHeaders() });
       const data = await res.json();
@@ -941,7 +942,7 @@ function SchedulerPage() {
   };
 
   const clearAllRuns = async () => {
-    if (!(await dialog.deleteResource('确定清空全部工作流运行记录吗？此操作不可恢复。'))) return;
+    if (!confirmPress('runs:clear-all', '清空全部运行记录')) return;
     try {
       const res = await fetch('/api/scheduler/runs?all=true', { method: 'DELETE', headers: authHeaders() });
       const data = await res.json();
@@ -1090,7 +1091,6 @@ function SchedulerPage() {
         {activeTab === 'tasks' && (
           <SectionCard
             title="任务列表"
-            description="统一调度任务"
             icon={<Clock className="h-4 w-4 text-kumo-brand" />}
             bodyPadding="none"
           >
@@ -1117,7 +1117,7 @@ function SchedulerPage() {
                             <IconButton label="立即运行" onClick={() => runTask(task)} icon={<Play className="h-3.5 w-3.5" />} />
                             <IconButton label={task.enabled ? '停用' : '启用'} onClick={() => toggleTask(task)} icon={task.enabled ? <Pause className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />} />
                             <IconButton label="编辑" onClick={() => openEditTask(task)} icon={<Edit className="h-3.5 w-3.5" />} />
-                            <IconButton label="删除" variant="secondary-destructive" onClick={() => deleteTask(task)} icon={<Trash className="h-3.5 w-3.5" />} />
+                            <IconButton label="删除" variant={isArmed(`task:${task.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteTask(task)} icon={<Trash className="h-3.5 w-3.5" />} />
                           </div>
                         </Table.Cell>
                       </Table.Row>
@@ -1132,7 +1132,6 @@ function SchedulerPage() {
         {activeTab === 'workflows' && (
           <SectionCard
             title="工作流编排"
-            description="按 DAG 编排任务"
             icon={<GitBranch className="h-4 w-4 text-kumo-brand" />}
             bodyClassName={workflows.length === 0 ? '' : 'space-y-3'}
             bodyPadding={workflows.length === 0 ? 'none' : 'md'}
@@ -1156,7 +1155,7 @@ function SchedulerPage() {
                           <div className="flex shrink-0 gap-1">
                             <IconButton label="运行工作流" onClick={() => runWorkflow(workflow)} icon={<Play className="h-3.5 w-3.5" />} />
                             <IconButton label="编辑工作流" onClick={() => openEditWorkflow(workflow)} icon={<Edit className="h-3.5 w-3.5" />} />
-                            <IconButton label="删除工作流" variant="secondary-destructive" onClick={() => deleteWorkflow(workflow)} icon={<Trash className="h-3.5 w-3.5" />} />
+                            <IconButton label="删除工作流" variant={isArmed(`workflow:${workflow.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteWorkflow(workflow)} icon={<Trash className="h-3.5 w-3.5" />} />
                           </div>
                         </div>
                         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
@@ -1185,12 +1184,11 @@ function SchedulerPage() {
         {activeTab === 'runs' && (
           <SectionCard
             title="运行记录"
-            description="查看状态、耗时和输出摘要"
             icon={<Activity className="h-4 w-4 text-kumo-brand" />}
             actions={(
               <>
-                <Button size="sm" variant="secondary" onClick={clearOldRuns}><Trash className="h-3.5 w-3.5" />清理 30 天前</Button>
-                <Button size="sm" variant="secondary-destructive" onClick={clearAllRuns}><Trash className="h-3.5 w-3.5" />清空全部</Button>
+                <Button size="sm" variant={isArmed('runs:clear-old') ? 'destructive' : 'secondary-destructive'} onClick={clearOldRuns}><Trash className="h-3.5 w-3.5" />清理 30 天前</Button>
+                <Button size="sm" variant={isArmed('runs:clear-all') ? 'destructive' : 'secondary-destructive'} onClick={clearAllRuns}><Trash className="h-3.5 w-3.5" />清空全部</Button>
               </>
             )}
             bodyPadding="none"
@@ -1227,7 +1225,6 @@ function SchedulerPage() {
         {activeTab === 'nodes' && (
           <SectionCard
             title="执行节点"
-            description="查看节点状态与并发"
             icon={<Server className="h-4 w-4 text-kumo-brand" />}
             bodyPadding="none"
           >

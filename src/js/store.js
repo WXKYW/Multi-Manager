@@ -7,6 +7,7 @@ import { create } from 'zustand';
 import { dialog } from './modules/dialog.js';
 import toastManager from './modules/toast.js';
 import { triggerHapticFeedback } from './modules/haptics.js';
+import { setDisplayTimeZone } from './modules/utils.js';
 
 // ==================== 模块元数据配置 ====================
 export const MODULE_CONFIG = {
@@ -728,6 +729,7 @@ const useStore = create((set, get) => ({
 
   applyUserSettings: (settings) => {
     const normalized = normalizeUserSettings(settings);
+    setDisplayTimeZone(normalized.timezone);
     applyCustomCss(normalized.customCss);
     applyThemeMode(normalized.themeMode);
     try {

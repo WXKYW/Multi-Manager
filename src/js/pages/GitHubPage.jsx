@@ -23,6 +23,7 @@ import { AriaComponent, GridComponent, TooltipComponent } from 'echarts/componen
 import { CanvasRenderer } from 'echarts/renderers';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { formatGitHubRepositoryDescription } from '../modules/githubEmoji.js';
 import { normalizeWorkflowJobName, workflowJobMatchesDefinition } from '../modules/githubWorkflowJobs.js';
 import { useNowTick } from '../modules/usePageVisibility.js';
@@ -1664,6 +1665,7 @@ function PermissionChecks({ token }) {
 
 function GitHubPage() {
   const { theme } = useStore();
+  const { isArmed, confirmPress } = useConfirmPress();
   const isDarkMode = theme === 'dark';
   const getAuthHeaders = useCallback(() => ({
     'Content-Type': 'application/json',
@@ -1904,7 +1906,7 @@ function GitHubPage() {
   };
 
   const deleteToken = async (token) => {
-    if (!(await dialog.deleteResource({ resourceType: 'GitHub Token', resourceName: token.name }))) return;
+    if (!confirmPress(`github-token:${token.id}`, `删除 Token「${token.name}」`)) return;
     try {
       await api(`/api/github/tokens/${token.id}`, { method: 'DELETE' });
       toast.success('Token 已删除');
@@ -2041,7 +2043,7 @@ function GitHubPage() {
 
   const deleteRepository = async (id) => {
     const repo = repositories.find((item) => item.id === id);
-    if (!(await dialog.deleteResource({ resourceType: 'GitHub 仓库', resourceName: repo?.full_name || String(id) }))) return;
+    if (!confirmPress(`github-repo:${id}`, `删除仓库「${repo?.full_name || String(id)}」`)) return;
     try {
       await api(`/api/github/repositories/${id}?clean=false`, { method: 'DELETE' });
       toast.success('仓库已删除');
@@ -2360,7 +2362,7 @@ function GitHubPage() {
                         <div className="flex items-center justify-end gap-1 border-t border-kumo-line pt-2">
                           {repo.html_url && <Button size="sm" shape="square" variant="secondary" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); window.open(repo.html_url, '_blank'); }} aria-label="打开 GitHub" title="打开 GitHub" />}
                           <Button size="sm" shape="square" variant="secondary" icon={<RefreshCw className={`h-3.5 w-3.5 ${refreshingRepositoryId === String(repo.id) ? 'animate-spin' : ''}`} />} onClick={(event) => { event.stopPropagation(); refreshRepository(repo.id); }} disabled={refreshingRepositoryId === String(repo.id)} aria-label="刷新仓库" title="刷新仓库" />
-                          <Button size="sm" shape="square" variant="secondary-destructive" icon={<Trash className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); deleteRepository(repo.id); }} aria-label="删除仓库" title="删除仓库" />
+                          <Button size="sm" shape="square" variant={isArmed(`github-repo:${repo.id}`) ? 'destructive' : 'secondary-destructive'} icon={<Trash className="h-3.5 w-3.5" />} onClick={(event) => { event.stopPropagation(); deleteRepository(repo.id); }} aria-label="删除仓库" title="删除仓库" />
                         </div>
                       </LayerCard.Primary>
                     </LayerCard>
@@ -2663,7 +2665,7 @@ function GitHubPage() {
                           <Button size="sm" variant="secondary" onClick={() => testToken(token.id)} loading={testingTokenId === String(token.id)}>
                             {selectedRepo ? '检测并用于当前仓库' : '检测权限'}
                           </Button>
-                          <Button size="sm" shape="square" variant="secondary-destructive" icon={<Trash className="h-3.5 w-3.5" />} onClick={() => deleteToken(token)} aria-label="删除 Token" title="删除 Token" />
+                          <Button size="sm" shape="square" variant={isArmed(`github-token:${token.id}`) ? 'destructive' : 'secondary-destructive'} icon={<Trash className="h-3.5 w-3.5" />} onClick={() => deleteToken(token)} aria-label="删除 Token" title="删除 Token" />
                         </div>
                       </LayerCard.Primary>
                     </LayerCard>

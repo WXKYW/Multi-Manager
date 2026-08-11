@@ -17,6 +17,7 @@ import {
 } from '../../modules/server-commands.js';
 import { Clock, Copy, Edit, Plus, Save, Send, Star, Trash } from '../Icons.jsx';
 import CodeEditor from '../ui/CodeEditor.jsx';
+import { useConfirmPress } from '../../hooks/useConfirmPress.js';
 
 const DEFAULT_LINUX_COMMANDS = [
   { title: '当前目录', content: 'pwd', category: '默认', platform: 'linux' },
@@ -62,6 +63,7 @@ export default function QuickCommandBar({
   syncEnabled = false,
   onRunCommand,
 }) {
+  const { isArmed, confirmPress } = useConfirmPress();
   const [snippets, setSnippets] = useState([]);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState('');
@@ -248,11 +250,7 @@ export default function QuickCommandBar({
   };
 
   const removeSnippet = async (snippet) => {
-    const ok = await dialog.deleteResource({
-      resourceType: '命令片段',
-      resourceName: snippet.title,
-    });
-    if (!ok) return;
+    if (!confirmPress('snippet-remove', '删除命令片段')) return;
     try {
       await deleteCommandSnippet(snippet.id);
       toast.success('命令片段已删除');
@@ -453,7 +451,7 @@ export default function QuickCommandBar({
             </Button>
           </div>
           <div className="flex justify-end gap-2 border-t border-kumo-line px-4 py-3">
-            {editing?.id ? <Button size="sm" variant="destructive" icon={<Trash className="h-3.5 w-3.5" />} onClick={() => removeSnippet(editing)}>删除</Button> : null}
+            {editing?.id ? <Button size="sm" variant={isArmed('snippet-remove') ? 'destructive' : 'secondary-destructive'} icon={<Trash className="h-3.5 w-3.5" />} onClick={() => removeSnippet(editing)}>删除</Button> : null}
             <Button size="sm" variant="secondary" onClick={() => setManagerOpen(false)}>取消</Button>
             <Button size="sm" variant="primary" icon={<Save className="h-3.5 w-3.5" />} onClick={saveSnippet}>保存</Button>
           </div>

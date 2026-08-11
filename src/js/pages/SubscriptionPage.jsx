@@ -16,6 +16,7 @@ import { getOSIconClass, getServerPlatformLabel } from '../modules/osPlatform.js
 import useStore from '../store.js';
 import { dialog } from '../modules/dialog.js';
 import { toast } from '../modules/toast.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import CountryFlag from '../components/CountryFlag.jsx';
 import { Copy, Download, Edit, Plus, RefreshCw, Save, Star, Trash, X } from '../components/Icons.jsx';
 
@@ -28,7 +29,6 @@ const SERVER_INVENTORY_API = '/api/server/s';
 const DEFAULT_EXTERNAL_POOL_ID = 'sub_default_nodes';
 const LOAD_TIMEOUT_MS = 8000;
 const INITIAL_SKELETON_MS = 900;
-const DESTRUCTIVE_CONFIRM_MS = 8000;
 
 const SUBSCRIPTION_LOG_COLUMNS = [
   { id: 'createdAt', role: 'datetime' },
@@ -849,6 +849,7 @@ function MasonryGrid({ children, className = '' }) {
 }
 
 function SubscriptionPage() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const publicApiUrl = useStore((state) => state.publicApiUrl);
   const [activeTab, setActiveTab] = useState('instances');
   const [loading, setLoading] = useState(false);
@@ -878,7 +879,6 @@ function SubscriptionPage() {
   const [internalNodeActions, setInternalNodeActions] = useState({});
   const [externalNodeActions, setExternalNodeActions] = useState({});
   const [uninstallingServerId, setUninstallingServerId] = useState('');
-  const [destructiveConfirm, setDestructiveConfirm] = useState({ key: '', expiresAt: 0 });
   const [templates, setTemplates] = useState([]);
   const [logs, setLogs] = useState([]);
   const [servers, setServers] = useState([]);
@@ -909,7 +909,6 @@ function SubscriptionPage() {
   const [templateSubscriptionId, setTemplateSubscriptionId] = useState('');
   const [templateBindingId, setTemplateBindingId] = useState('');
   const loadGenerationRef = useRef(0);
-	const destructiveConfirmTimerRef = useRef(null);
 	const terminalTaskIDsRef = useRef(new Set());
 
   const publicBase = useMemo(
@@ -972,9 +971,6 @@ function SubscriptionPage() {
 
   useEffect(() => {
     loadAll();
-    return () => {
-      if (destructiveConfirmTimerRef.current) window.clearTimeout(destructiveConfirmTimerRef.current);
-    };
   }, []);
 
 	const runtimeLifecycleServers = useMemo(() => servers.filter((server) => server.status === 'online' && server.agent_capabilities?.proxy_runtime_lifecycle_v2 === true), [servers]);
@@ -1094,7 +1090,7 @@ function SubscriptionPage() {
 	};
 
 	const uninstallProxyRuntime = async (server) => {
-		if (!confirmDestructivePress(`runtime-uninstall:${server.id}`, `卸载 ${server.name} 的 sing-box`)) return;
+		if (!confirmPress(`runtime-uninstall:${server.id}`, `卸载 ${server.name} 的 sing-box`)) return;
 		try {
 			const response = await fetch(`${RUNTIME_API}/${server.id}/uninstall`, { method: 'POST', headers: getAuthHeaders() });
 			const payload = await response.json();
@@ -1134,7 +1130,7 @@ function SubscriptionPage() {
 	};
 
 	const deletePreferredAddress = async (item) => {
-		if (!confirmDestructivePress(`preferred-address:${item.id}`, `删除优选地址 ${item.name}`)) return;
+		if (!confirmPress(`preferred-address:${item.id}`, `删除优选地址 ${item.name}`)) return;
 		try {
 			const response = await fetch(`${PREFERRED_API}/${item.id}`, { method: 'DELETE', headers: getAuthHeaders() });
 			const payload = await response.json();
@@ -1148,7 +1144,7 @@ function SubscriptionPage() {
     const entry = managedTunnels.find((item) => item.server_id === server.id);
     if (!entry) return toast.warning('该主机没有 Managed Tunnel');
 		const affectedNodes = Number(entry.node_count ?? internalNodes.filter((node) => node.server_id === server.id && node.access_mode === 'cloudflare_tunnel').length);
-    if (!confirmDestructivePress(`managed-tunnel-delete:${server.id}`, `卸载 ${server.name} 的 Tunnel、DNS、cloudflared 以及 ${affectedNodes} 个关联节点`)) return;
+    if (!confirmPress(`managed-tunnel-delete:${server.id}`, `卸载 ${server.name} 的 Tunnel、DNS、cloudflared 以及 ${affectedNodes} 个关联节点`)) return;
     try {
       const response = await fetch(`${TUNNEL_API}/${server.id}?cascade=1`, { method: 'DELETE', headers: getAuthHeaders() });
       const payload = await response.json();
@@ -1157,29 +1153,6 @@ function SubscriptionPage() {
       if (taskID) setTunnelTasks((current) => ({ ...current, [taskID]: { progress: 0, data: { message: '卸载任务已提交' } } }));
       toast.info('Tunnel 卸载任务已提交', { isManual: true });
     } catch (error) { toast.error(error.message || 'Tunnel 卸载失败'); }
-  };
-
-  const isDestructiveConfirmActive = (key) => (
-    destructiveConfirm.key === key && destructiveConfirm.expiresAt > Date.now()
-  );
-
-  const confirmDestructivePress = (key, label) => {
-    if (isDestructiveConfirmActive(key)) {
-      if (destructiveConfirmTimerRef.current) window.clearTimeout(destructiveConfirmTimerRef.current);
-      destructiveConfirmTimerRef.current = null;
-      setDestructiveConfirm({ key: '', expiresAt: 0 });
-      return true;
-    }
-
-    if (destructiveConfirmTimerRef.current) window.clearTimeout(destructiveConfirmTimerRef.current);
-    const expiresAt = Date.now() + DESTRUCTIVE_CONFIRM_MS;
-    setDestructiveConfirm({ key, expiresAt });
-    destructiveConfirmTimerRef.current = window.setTimeout(() => {
-      setDestructiveConfirm((current) => current.key === key ? { key: '', expiresAt: 0 } : current);
-      destructiveConfirmTimerRef.current = null;
-    }, DESTRUCTIVE_CONFIRM_MS);
-    toast.warning(`${label}，再点一次确认`);
-    return false;
   };
 
 	const waitForTaskTerminal = async (taskID, timeoutMs = 240000) => {
@@ -1281,7 +1254,7 @@ function SubscriptionPage() {
   };
 
   const deleteInternalNode = async (node) => {
-    if (!confirmDestructivePress(`internal-node-delete:${node.id}`, `卸载节点 ${node.name}`)) return;
+    if (!confirmPress(`internal-node-delete:${node.id}`, `卸载节点 ${node.name}`)) return;
     await withInternalNodeAction(node.id, 'delete', async () => {
       try {
 		const requestDelete = async (force = false) => {
@@ -1339,7 +1312,7 @@ function SubscriptionPage() {
   };
 
   const uninstallInternalNodes = async (server, managed) => {
-    if (!confirmDestructivePress(`instance-proxy-uninstall:${server.id}`, `卸载 ${server.name} 的 ${managed.length} 个节点`)) return;
+    if (!confirmPress(`instance-proxy-uninstall:${server.id}`, `卸载 ${server.name} 的 ${managed.length} 个节点`)) return;
     setUninstallingServerId(server.id);
     setSaving(true);
     try {
@@ -1572,7 +1545,7 @@ function SubscriptionPage() {
   };
 
   const deletePlan = async (plan) => {
-    if (!(await dialog.deleteResource({ resourceType: '套餐', resourceName: plan.name }))) return;
+    if (!confirmPress(`plan-delete:${plan.id}`, `删除套餐「${plan.name}」`)) return;
     const res = await fetch(`${API}/plans/${plan.id}`, { method: 'DELETE', headers: getAuthHeaders() });
     const data = await res.json();
     if (!res.ok || data.success === false) return toast.error(data.error || '删除失败');
@@ -1631,7 +1604,7 @@ function SubscriptionPage() {
   };
 
   const deleteSubscription = async (sub) => {
-    if (!(await dialog.deleteResource({ resourceType: '订阅链接', resourceName: sub.name }))) return;
+    if (!confirmPress(`subscription-delete:${sub.id}`, `删除订阅链接「${sub.name}」`)) return;
     const res = await fetch(`${API}/subscriptions/${sub.id}`, { method: 'DELETE', headers: getAuthHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.success === false) {
@@ -1785,7 +1758,7 @@ function SubscriptionPage() {
   };
 
   const deleteNode = async (node) => {
-    if (!confirmDestructivePress(`external-node-delete:${node.id}`, `删除节点 ${node.name}`)) return;
+    if (!confirmPress(`external-node-delete:${node.id}`, `删除节点 ${node.name}`)) return;
     const actionKey = `${node.id}:delete`;
     if (externalNodeActions[actionKey]) return;
     setExternalNodeActions((current) => ({ ...current, [actionKey]: true }));
@@ -1865,7 +1838,7 @@ function SubscriptionPage() {
       toast.warning('内置模板不能删除');
       return;
     }
-    if (!(await dialog.deleteResource({ resourceType: '模板', resourceName: tpl.name }))) return;
+    if (!confirmPress(`template-delete:${tpl.id}`, `删除模板「${tpl.name}」`)) return;
     const res = await fetch(`${API}/templates/${tpl.id}`, { method: 'DELETE', headers: getAuthHeaders() });
     const data = await res.json();
     if (!res.ok || data.success === false) {
@@ -2015,7 +1988,7 @@ function SubscriptionPage() {
                         </DropdownMenu>
                         <Button size="sm" shape="square" variant="secondary" aria-label="编辑订阅链接" title="编辑订阅链接" onClick={() => openEditSubscription(sub)} icon={<Edit className="h-3.5 w-3.5" />} />
                         <Button size="sm" shape="square" variant="secondary" aria-label="重置连接凭据" title="重置连接凭据" onClick={() => resetToken(sub)} icon={<RefreshCw className="h-3.5 w-3.5" />} />
-                        <Button size="sm" shape="square" variant="secondary-destructive" aria-label="删除订阅链接" title="删除订阅链接" onClick={() => deleteSubscription(sub)} icon={<Trash className="h-3.5 w-3.5" />} />
+                        <Button size="sm" shape="square" variant={isArmed(`subscription-delete:${sub.id}`) ? 'destructive' : 'secondary-destructive'} aria-label="删除订阅链接" title="删除订阅链接" onClick={() => deleteSubscription(sub)} icon={<Trash className="h-3.5 w-3.5" />} />
                       </div>
                     </Table.Cell>
                   </Table.Row>
@@ -2048,7 +2021,7 @@ function SubscriptionPage() {
               <Table.Cell className="text-center">{plan.cycle_type === 'monthly' ? `每月 ${plan.cycle_day} 日` : plan.cycle_type === 'custom' ? '自定义' : '不重置'}</Table.Cell>
 				<Table.Cell><div className="text-xs font-semibold text-kumo-strong">内部 {internalCount} · 外部 {externalCount}</div></Table.Cell>
               <Table.Cell className="text-center">{plan.subscription_count || 0}</Table.Cell>
-              <Table.Cell className="text-center"><div className="inline-flex justify-center gap-2"><Button size="sm" shape="square" variant="secondary" onClick={() => openEditPlan(plan)} icon={<Edit className="h-3.5 w-3.5" />} aria-label="编辑套餐" /><Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deletePlan(plan)} icon={<Trash className="h-3.5 w-3.5" />} aria-label="删除套餐" /></div></Table.Cell>
+              <Table.Cell className="text-center"><div className="inline-flex justify-center gap-2"><Button size="sm" shape="square" variant="secondary" onClick={() => openEditPlan(plan)} icon={<Edit className="h-3.5 w-3.5" />} aria-label="编辑套餐" /><Button size="sm" shape="square" variant={isArmed(`plan-delete:${plan.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deletePlan(plan)} icon={<Trash className="h-3.5 w-3.5" />} aria-label="删除套餐" /></div></Table.Cell>
 			</Table.Row>;})}
             {plans.length === 0 && <Table.Row><Table.Cell colSpan={8} className="p-8 text-center text-kumo-subtle">暂无套餐。套餐统一定义节点范围、额度和重置规则。</Table.Cell></Table.Row>}
           </Table.Body>
@@ -2088,7 +2061,7 @@ function SubscriptionPage() {
               const reconciling = !!internalNodeActions[`${node.id}:reconcile`];
               const deleting = !!internalNodeActions[`${node.id}:delete`];
               const deleteConfirmKey = `internal-node-delete:${node.id}`;
-              const confirmingDelete = isDestructiveConfirmActive(deleteConfirmKey);
+              const confirmingDelete = isArmed(deleteConfirmKey);
               return <Table.Row key={node.id} onDoubleClick={() => openEditInternalNode(node)} className="cursor-pointer">
                 <Table.Cell className="text-center"><Switch size="sm" aria-label={node.enabled ? '停用内部节点' : '启用内部节点'} checked={!!node.enabled} onCheckedChange={(checked) => toggleInternalNodeEnabled(node, checked)} /></Table.Cell>
                 <Table.Cell><div className="flex min-w-0 items-center gap-1.5 truncate text-sm font-bold text-kumo-strong">{node.stable && <Star className="h-3.5 w-3.5 shrink-0 text-kumo-warning" />}{node.name}{node.stable && <Badge variant="success">稳定</Badge>}</div>{!node.publishable && (() => { const [stateLabel, stateVariant] = managedNodeState(node); return <div className="mt-1"><Badge variant={stateVariant}>{stateLabel}</Badge></div>; })()}</Table.Cell>
@@ -2149,7 +2122,7 @@ function SubscriptionPage() {
               const networkTags = nodeNetworkTags(node);
               const deleting = !!externalNodeActions[`${node.id}:delete`];
               const deleteConfirmKey = `external-node-delete:${node.id}`;
-              const confirmingDelete = isDestructiveConfirmActive(deleteConfirmKey);
+              const confirmingDelete = isArmed(deleteConfirmKey);
               return (
                 <Table.Row key={node.id} onDoubleClick={() => openEditNode(node)} className="cursor-pointer">
                   <Table.Cell className="text-center">
@@ -2258,7 +2231,7 @@ function SubscriptionPage() {
                   <Table.Cell className="text-center"><span className="font-mono text-xs">{server.agent_version && server.agent_version !== '<nil>' ? server.agent_version : '未报告'}</span></Table.Cell>
 					<Table.Cell className="text-center"><div className="flex min-w-0 flex-nowrap items-center justify-center gap-2 px-2">{runtime ? <Badge className="shrink-0" variant={runtime.apply_status === 'running' ? 'success' : ['failed', 'drifted'].includes(runtime.apply_status) ? 'error' : 'warning'}>{runtime.apply_status === 'running' ? `sing-box${runtime.version ? ` ${runtime.version}` : ''}` : runtime.apply_status === 'failed' ? '部署失败' : runtime.apply_status === 'drifted' ? '状态漂移' : '部署中'}</Badge> : <Badge variant="neutral" className="shrink-0">未安装</Badge>}{server.status === 'online' && !supportsRuntimeLifecycle && <Badge variant="warning" className="shrink-0">需升级 Agent</Badge>}{tunnel && <Badge className="shrink-0" variant={tunnel.apply_status === 'running' ? 'success' : tunnel.apply_status === 'failed' ? 'error' : 'warning'} title={tunnel.apply_status === 'disconnected' && tunnel.last_error ? tunnel.last_error : undefined}>Tunnel {tunnel.apply_status === 'running' ? '已连接' : tunnel.apply_status === 'disconnected' ? '已断开' : tunnel.apply_status}</Badge>}</div></Table.Cell>
 					<Table.Cell className="text-center"><div className="flex flex-nowrap justify-center gap-1">{managed.map((node) => <Badge key={node.id} variant={nodeTypeBadgeVariant(node.protocol)}>{node.protocol === 'hysteria2' ? 'HY2' : node.protocol === 'socks' ? 'SOCKS5' : node.protocol === 'http' ? 'HTTP' : 'VLESS'}</Badge>)}{managed.length === 0 && <span className="text-xs text-kumo-subtle">—</span>}</div></Table.Cell>
-                  <Table.Cell className="text-center"><div className="flex w-full flex-nowrap items-center justify-center gap-1">{runtime?.apply_status === 'running' ? <><Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>升级 / 重装</Button><Button size="sm" variant={isDestructiveConfirmActive(`runtime-uninstall:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallProxyRuntime(server)} disabled={saving || managed.length > 0 || !supportsRuntimeLifecycle} title={managed.length > 0 ? '请先在节点管理中卸载该实例的全部节点' : !supportsRuntimeLifecycle ? '请先升级 Agent' : '卸载 sing-box'}>{isDestructiveConfirmActive(`runtime-uninstall:${server.id}`) ? '再次确认' : '卸载程序'}</Button></> : <Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>安装代理</Button>}{tunnel ? <Button size="sm" variant={isDestructiveConfirmActive(`managed-tunnel-delete:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallTunnel(server)}>{isDestructiveConfirmActive(`managed-tunnel-delete:${server.id}`) ? '再次确认' : '卸载 Tunnel'}</Button> : <Button size="sm" variant="secondary" onClick={() => openTunnelDeployment(server)} disabled={server.status !== 'online'}>部署 Tunnel</Button>}</div></Table.Cell>
+                  <Table.Cell className="text-center"><div className="flex w-full flex-nowrap items-center justify-center gap-1">{runtime?.apply_status === 'running' ? <><Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>升级 / 重装</Button><Button size="sm" variant={isArmed(`runtime-uninstall:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallProxyRuntime(server)} disabled={saving || managed.length > 0 || !supportsRuntimeLifecycle} title={managed.length > 0 ? '请先在节点管理中卸载该实例的全部节点' : !supportsRuntimeLifecycle ? '请先升级 Agent' : '卸载 sing-box'}>{isArmed(`runtime-uninstall:${server.id}`) ? '再次确认' : '卸载程序'}</Button></> : <Button size="sm" variant="secondary" onClick={() => deployProxyRuntime(server.id)} disabled={!supportsRuntimeLifecycle || saving} title={!supportsRuntimeLifecycle ? '请先升级 Agent' : undefined}>安装代理</Button>}{tunnel ? <Button size="sm" variant={isArmed(`managed-tunnel-delete:${server.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => uninstallTunnel(server)}>{isArmed(`managed-tunnel-delete:${server.id}`) ? '再次确认' : '卸载 Tunnel'}</Button> : <Button size="sm" variant="secondary" onClick={() => openTunnelDeployment(server)} disabled={server.status !== 'online'}>部署 Tunnel</Button>}</div></Table.Cell>
                 </Table.Row>
               );
             })}
@@ -2393,7 +2366,7 @@ function SubscriptionPage() {
                 <Button size="sm" variant="secondary" onClick={() => setDefaultTemplate(tpl)} disabled={tpl.valid === false}>默认</Button>
                 <Button size="sm" shape="square" variant="secondary" onClick={() => openCloneTemplate(tpl)} aria-label="复制模板" title="复制模板" icon={<Copy className="h-3.5 w-3.5" />} />
                 <Button size="sm" shape="square" variant="secondary" onClick={() => openEditTemplate(tpl)} aria-label="编辑模板" title="编辑模板" icon={<Edit className="h-3.5 w-3.5" />} />
-                <Button size="sm" variant="secondary-destructive" onClick={() => deleteTemplate(tpl)} disabled={tpl.builtin}><Trash className="h-3.5 w-3.5" /></Button>
+                <Button size="sm" variant={isArmed(`template-delete:${tpl.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteTemplate(tpl)} disabled={tpl.builtin}><Trash className="h-3.5 w-3.5" /></Button>
               </div>
             </LayerCard.Secondary>
             <LayerCard.Primary>

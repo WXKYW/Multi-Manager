@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { collapseNotificationHistory, parseLifecycleHistoryMeta } from '../modules/notificationHistory.js';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Button } from '@cloudflare/kumo/components/button';
@@ -162,6 +163,7 @@ const parseNotificationPreviewLine = (line = '') => {
 };
 
 function NotificationPage() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const [notificationCurrentTab, setNotificationCurrentTab] = useState('channels'); // 'channels' | 'rules' | 'history' | 'settings'
   const [notificationChannels, setNotificationChannels] = useState([]);
   const [notificationRules, setNotificationRules] = useState([]);
@@ -440,10 +442,7 @@ function NotificationPage() {
 
   const handleDeleteChannel = async (id) => {
     const channel = notificationChannels.find(item => item.id === id);
-    if (!(await dialog.deleteResource({
-      resourceType: '通知渠道',
-      resourceName: channel?.name || `#${id}`,
-    }))) return;
+    if (!confirmPress(`channel:${id}`, `删除通知渠道「${channel?.name || '#' + id}」`)) return;
     try {
       const res = await fetch(`/api/notification/channels/${id}`, {
         method: 'DELETE',
@@ -600,10 +599,7 @@ function NotificationPage() {
 
   const handleDeleteRule = async (id) => {
     const rule = notificationRules.find(item => item.id === id);
-    if (!(await dialog.deleteResource({
-      resourceType: '告警规则',
-      resourceName: rule?.name || `#${id}`,
-    }))) return;
+    if (!confirmPress(`rule:${id}`, `删除告警规则「${rule?.name || '#' + id}」`)) return;
     try {
       const res = await fetch(`/api/notification/rules/${id}`, {
         method: 'DELETE',
@@ -890,7 +886,7 @@ function NotificationPage() {
                       />
                       <Button
                         onClick={() => handleDeleteChannel(channel.id)}
-                        variant="secondary-destructive" size="sm"
+                        variant={isArmed(`channel:${channel.id}`) ? 'destructive' : 'secondary-destructive'} size="sm"
                         shape="square"
                         aria-label="删除通知渠道"
                         title="删除"
@@ -1029,7 +1025,7 @@ function NotificationPage() {
                       />
                       <Button
                         onClick={() => handleDeleteRule(rule.id)}
-                        variant="secondary-destructive" size="sm"
+                        variant={isArmed(`rule:${rule.id}`) ? 'destructive' : 'secondary-destructive'} size="sm"
                         shape="square"
                         aria-label="删除告警规则"
                         title="删除"
@@ -1316,7 +1312,6 @@ function NotificationPage() {
       {notificationCurrentTab === 'settings' && (
         <SectionCard
           title="全局配置选项"
-          description="聚合、限频与看板链接"
           icon={<Settings className="w-4 h-4 text-kumo-brand" />}
           bodyPadding="sm"
           bodyClassName="space-y-4"

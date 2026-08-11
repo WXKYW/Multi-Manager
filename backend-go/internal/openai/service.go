@@ -120,6 +120,11 @@ type Service struct {
 	endpointLatency   map[string]int64
 	endpointLatencyOK map[string]bool
 
+	// analyticsStreams 是网关日志实时推送的订阅者集合（SSE）。
+	analyticsStreamMu      sync.Mutex
+	analyticsStreams       map[int]chan map[string]interface{}
+	analyticsStreamNext    int
+
 	// warmupMu 保护预热 goroutine 只启动一次。
 	warmupOnce sync.Once
 }
@@ -156,6 +161,7 @@ func New(cfg config.Config) *Service {
 		proxyStateByEndpoint: make(map[string]*endpointProxyState),
 		endpointLatency:      make(map[string]int64),
 		endpointLatencyOK:    make(map[string]bool),
+		analyticsStreams:     make(map[int]chan map[string]interface{}),
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -364,7 +370,11 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			last_used DATETIME,
 			expires_at DATETIME,
-			request_count INTEGER DEFAULT 0
+			request_count INTEGER DEFAULT 0,
+			allowed_models TEXT,
+			allowed_endpoints TEXT,
+			max_tokens_quota INTEGER DEFAULT 0,
+			total_tokens_used INTEGER DEFAULT 0
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_openai_analytics_timestamp ON openai_gateway_analytics(timestamp)`,
 		`CREATE INDEX IF NOT EXISTS idx_openai_gateway_keys_hash ON openai_gateway_keys(key_hash)`,
@@ -404,6 +414,18 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 	if err := ensureSQLiteColumn(ctx, db, "openai_gateway_keys", "is_default", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureSQLiteColumn(ctx, db, "openai_gateway_keys", "allowed_models", "TEXT"); err != nil {
+		return err
+	}
+	if err := ensureSQLiteColumn(ctx, db, "openai_gateway_keys", "allowed_endpoints", "TEXT"); err != nil {
+		return err
+	}
+	if err := ensureSQLiteColumn(ctx, db, "openai_gateway_keys", "max_tokens_quota", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureSQLiteColumn(ctx, db, "openai_gateway_keys", "total_tokens_used", "INTEGER DEFAULT 0"); err != nil {
 		return err
 	}
 	if err := ensureSQLiteColumn(ctx, db, "openai_endpoints", "headers", "TEXT"); err != nil {
@@ -551,6 +573,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.getAnalyticsCharts(w, r)
 	case len(parts) == 2 && parts[0] == "analytics" && parts[1] == "logs" && method == http.MethodGet:
 		s.getAnalyticsLogs(w, r)
+	case len(parts) == 2 && parts[0] == "analytics" && parts[1] == "stream" && method == http.MethodGet:
+		s.analyticsEventStream(w, r)
 	case len(parts) == 2 && parts[0] == "analytics" && parts[1] == "clear" && method == http.MethodPost:
 		s.clearAnalyticsLogs(w, r)
 	case len(parts) == 1 && parts[0] == "personas" && method == http.MethodGet:
@@ -1339,6 +1363,20 @@ func isRateLimitResponse(resp *http.Response, body []byte) bool {
 				return true
 			}
 		}
+	}
+	return false
+}
+
+// isRetryableUpstreamResponse 判断上游响应是否值得切换到下一个代理重试：
+// 限流（429/439/503/529 或限流关键词）与常见 5xx 服务器错误（500/502/504/599）。
+// 501/505 等表示请求本身语义问题，重试无意义，不纳入。
+func isRetryableUpstreamResponse(resp *http.Response, body []byte) bool {
+	if isRateLimitResponse(resp, body) {
+		return true
+	}
+	switch resp.StatusCode {
+	case http.StatusInternalServerError, http.StatusBadGateway, http.StatusGatewayTimeout, 599:
+		return true
 	}
 	return false
 }
@@ -2826,8 +2864,10 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 	clientIP := s.resolveClientIP(r)
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		s.RecordAnalytics(ctx, "chat.completions", "", "", http.StatusBadRequest, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, "")
-		response.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		// 请求体读取失败（如客户端上传超时中断）：这是网关侧问题，用 502 表达，
+		// 避免与「请求体格式错误」的 400 语义混淆。
+		s.RecordAnalytics(ctx, "chat.completions", "", "", http.StatusBadGateway, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, "")
+		response.JSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -2845,7 +2885,7 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	db, err := s.open(ctx)
 	if err != nil {
-		s.RecordAnalytics(ctx, "chat.completions", "", model, http.StatusInternalServerError, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, "")
+		s.RecordAnalytics(ctx, "chat.completions", "", model, http.StatusInternalServerError, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, boolToInt(stream), 0, clientIP, "")
 		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -2853,7 +2893,7 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	selected, selectedModel, found := s.selectEndpointForModel(ctx, db, model, targetEndpointID)
 	if !found {
-		s.RecordAnalytics(ctx, "chat.completions", "", model, http.StatusServiceUnavailable, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, "")
+		s.RecordAnalytics(ctx, "chat.completions", "", model, http.StatusServiceUnavailable, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, boolToInt(stream), 0, clientIP, "")
 		response.JSON(w, http.StatusServiceUnavailable, map[string]interface{}{
 			"error": map[string]string{
 				"message": "No valid OpenAI endpoints available",
@@ -2863,10 +2903,25 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 记录是否经由本端点配置的代理池出网。
+	// 记录是否经由本端点配置的代理池出网。先于网关密钥限制等分支计算，
+	// 使这些早退路径的调用日志也能正确标注代理。
 	viaProxy := 0
 	if len(selected.ProxyPool) > 0 {
 		viaProxy = 1
+	}
+
+	// 网关密钥限制：模型白名单 / 端点白名单 / token 配额。
+	if keyIdentity := gatewayKeyFromContext(ctx); keyIdentity.ID != "" {
+		if limitErr := s.enforceGatewayKeyLimits(ctx, keyIdentity, model, selected.ID); limitErr != "" {
+			s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, http.StatusForbidden, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, boolToInt(stream), viaProxy, clientIP, "")
+			response.JSON(w, http.StatusForbidden, map[string]interface{}{
+				"error": map[string]string{
+					"message": limitErr,
+					"type":    "forbidden",
+				},
+			})
+			return
+		}
 	}
 
 	// Format base url
@@ -2976,7 +3031,7 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 		httpReq, err := http.NewRequestWithContext(attemptCtx, "POST", fullURL, bytes.NewReader(upstreamBodyBytes))
 		if err != nil {
 			cancel()
-			s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, http.StatusInternalServerError, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, egressIP)
+			s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, http.StatusInternalServerError, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, boolToInt(stream), viaProxy, clientIP, egressIP)
 			response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
@@ -3000,12 +3055,12 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		// 非流式：读取正文判断限流，失败时在循环内重试。
+		// 非流式：读取正文判断限流或 5xx，失败时在循环内重试。
 		if !stream && selected.AutoSwitch && attempt+1 < maxProxyAttempts {
 			bodyBytesRead, readErr := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			cancel()
-			if readErr == nil && isRateLimitResponse(resp, bodyBytesRead) {
+			if readErr != nil || isRetryableUpstreamResponse(resp, bodyBytesRead) {
 				s.markProxyFailed(selected.ID, currentProxy)
 				continue
 			}
@@ -3014,8 +3069,8 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		// 流式：仅按状态码判断，限流时切换代理重试一次。
-		if stream && selected.AutoSwitch && attempt+1 < maxProxyAttempts && isRateLimitResponse(resp, nil) {
+		// 流式：仅按状态码判断，限流或 5xx 时切换代理重试一次。
+		if stream && selected.AutoSwitch && attempt+1 < maxProxyAttempts && isRetryableUpstreamResponse(resp, nil) {
 			resp.Body.Close()
 			cancel()
 			s.markProxyFailed(selected.ID, currentProxy)
@@ -3089,7 +3144,7 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if lastErr != nil && resp == nil {
-		s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, http.StatusBadGateway, time.Since(startTime).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, egressIP)
+		s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, http.StatusBadGateway, time.Since(startTime).Milliseconds(), 0, 0, 0, 0, 0, boolToInt(stream), viaProxy, clientIP, egressIP)
 		response.JSON(w, http.StatusBadGateway, map[string]interface{}{"error": map[string]string{"message": lastErr.Error(), "type": "proxy_error"}})
 		return
 	}
@@ -3170,6 +3225,9 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 		s.recordProxyTTFB(selected.ID, lastProxy, ttfbMs)
 		s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, resp.StatusCode, latencyMs, ttfbMs, promptTokens, completionTokens, totalTokens, cachedTokens, boolToInt(stream), viaProxy, clientIP, egressIP)
 		s.recordEndpointLatency(selected.ID, latencyMs)
+		if keyIdentity := gatewayKeyFromContext(ctx); keyIdentity.ID != "" {
+			s.consumeGatewayKeyTokens(ctx, keyIdentity, int64(totalTokens))
+		}
 	} else {
 		respBodyBytes, _ := io.ReadAll(resp.Body)
 		latencyMs := time.Since(startTime).Milliseconds()
@@ -3189,6 +3247,9 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 		s.recordProxyTTFB(selected.ID, lastProxy, latencyMs)
 		s.RecordAnalytics(ctx, "chat.completions", selected.ID, model, resp.StatusCode, latencyMs, 0, usageInfo.Usage.PromptTokens, usageInfo.Usage.CompletionTokens, usageInfo.Usage.TotalTokens, usageInfo.Usage.PromptTokensDetails.CachedTokens, boolToInt(stream), viaProxy, clientIP, egressIP)
 		s.recordEndpointLatency(selected.ID, latencyMs)
+		if keyIdentity := gatewayKeyFromContext(ctx); keyIdentity.ID != "" {
+			s.consumeGatewayKeyTokens(ctx, keyIdentity, int64(usageInfo.Usage.TotalTokens))
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(resp.StatusCode)
@@ -3205,8 +3266,10 @@ func (s *Service) proxyResponses(w http.ResponseWriter, r *http.Request) {
 	clientIP := s.resolveClientIP(r)
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		s.RecordAnalytics(ctx, "responses", "", "", http.StatusBadRequest, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, "")
-		response.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		// 请求体读取失败（如客户端上传超时中断）：这是网关侧问题，用 502 表达，
+		// 避免与「请求体格式错误」的 400 语义混淆。
+		s.RecordAnalytics(ctx, "responses", "", "", http.StatusBadGateway, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, "")
+		response.JSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -3223,7 +3286,7 @@ func (s *Service) proxyResponses(w http.ResponseWriter, r *http.Request) {
 
 	db, err := s.open(ctx)
 	if err != nil {
-		s.RecordAnalytics(ctx, "responses", "", model, http.StatusInternalServerError, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, "")
+		s.RecordAnalytics(ctx, "responses", "", model, http.StatusInternalServerError, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, boolToInt(stream), 0, clientIP, "")
 		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -3231,7 +3294,7 @@ func (s *Service) proxyResponses(w http.ResponseWriter, r *http.Request) {
 
 	selected, selectedModel, found := s.selectEndpointForModel(ctx, db, model, targetEndpointID)
 	if !found {
-		s.RecordAnalytics(ctx, "responses", "", model, http.StatusServiceUnavailable, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, "")
+		s.RecordAnalytics(ctx, "responses", "", model, http.StatusServiceUnavailable, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, boolToInt(stream), 0, clientIP, "")
 		response.JSON(w, http.StatusServiceUnavailable, map[string]interface{}{
 			"error": map[string]string{
 				"message": "No valid OpenAI endpoints available",
@@ -3241,9 +3304,25 @@ func (s *Service) proxyResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 记录是否经由本端点配置的代理池出网。先于网关密钥限制等分支计算，
+	// 使这些早退路径的调用日志也能正确标注代理。
 	viaProxy := 0
 	if len(selected.ProxyPool) > 0 {
 		viaProxy = 1
+	}
+
+	// 网关密钥限制：模型白名单 / 端点白名单 / token 配额。
+	if keyIdentity := gatewayKeyFromContext(ctx); keyIdentity.ID != "" {
+		if limitErr := s.enforceGatewayKeyLimits(ctx, keyIdentity, model, selected.ID); limitErr != "" {
+			s.RecordAnalytics(ctx, "responses", selected.ID, model, http.StatusForbidden, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, boolToInt(stream), viaProxy, clientIP, "")
+			response.JSON(w, http.StatusForbidden, map[string]interface{}{
+				"error": map[string]string{
+					"message": limitErr,
+					"type":    "forbidden",
+				},
+			})
+			return
+		}
 	}
 
 	// Responses API 的路径为 /responses。
@@ -3303,7 +3382,7 @@ func (s *Service) proxyResponses(w http.ResponseWriter, r *http.Request) {
 		httpReq, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, fullURL, bytes.NewReader(upstreamBodyBytes))
 		if err != nil {
 			cancel()
-			s.RecordAnalytics(ctx, "responses", selected.ID, model, http.StatusInternalServerError, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, egressIP)
+			s.RecordAnalytics(ctx, "responses", selected.ID, model, http.StatusInternalServerError, time.Since(requestStarted).Milliseconds(), 0, 0, 0, 0, 0, boolToInt(stream), viaProxy, clientIP, egressIP)
 			response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
@@ -3326,12 +3405,12 @@ func (s *Service) proxyResponses(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		// 非流式：读取正文判断限流，失败时切换代理重试。
+		// 非流式：读取正文判断限流或 5xx，失败时切换代理重试。
 		if !stream && selected.AutoSwitch && attempt+1 < maxProxyAttempts {
 			bodyBytesRead, readErr := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			cancel()
-			if readErr == nil && isRateLimitResponse(resp, bodyBytesRead) {
+			if readErr != nil || isRetryableUpstreamResponse(resp, bodyBytesRead) {
 				s.markProxyFailed(selected.ID, currentProxy)
 				continue
 			}
@@ -3339,8 +3418,8 @@ func (s *Service) proxyResponses(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		// 流式：仅按状态码判断限流。
-		if stream && selected.AutoSwitch && attempt+1 < maxProxyAttempts && isRateLimitResponse(resp, nil) {
+		// 流式：仅按状态码判断，限流或 5xx 时切换代理重试。
+		if stream && selected.AutoSwitch && attempt+1 < maxProxyAttempts && isRetryableUpstreamResponse(resp, nil) {
 			resp.Body.Close()
 			cancel()
 			s.markProxyFailed(selected.ID, currentProxy)
@@ -3411,7 +3490,7 @@ func (s *Service) proxyResponses(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if lastErr != nil && resp == nil {
-		s.RecordAnalytics(ctx, "responses", selected.ID, model, http.StatusBadGateway, time.Since(startTime).Milliseconds(), 0, 0, 0, 0, 0, 0, 0, clientIP, egressIP)
+		s.RecordAnalytics(ctx, "responses", selected.ID, model, http.StatusBadGateway, time.Since(startTime).Milliseconds(), 0, 0, 0, 0, 0, boolToInt(stream), viaProxy, clientIP, egressIP)
 		response.JSON(w, http.StatusBadGateway, map[string]interface{}{"error": map[string]string{"message": lastErr.Error(), "type": "proxy_error"}})
 		return
 	}
@@ -3534,6 +3613,11 @@ func (s *Service) proxyModels(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+
+	// 网关密钥白名单：不在白名单里的模型不暴露给该密钥。
+	if keyIdentity := gatewayKeyFromContext(r.Context()); keyIdentity.ID != "" {
+		modelList = filterModelsByKey(keyIdentity, modelList)
 	}
 
 	sort.Slice(modelList, func(i, j int) bool {

@@ -13,6 +13,7 @@ import {
 import { CanvasRenderer } from 'echarts/renderers';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { Button } from '@cloudflare/kumo/components/button';
 import { Checkbox } from '@cloudflare/kumo/components/checkbox';
 import { Input, Textarea } from '@cloudflare/kumo/components/input';
@@ -406,6 +407,7 @@ function UptimeMonitorDetails({
   onDelete,
   expanded = true,
 }) {
+  const { isArmed, confirmPress } = useConfirmPress();
   const chartData = useMemo(() => {
     return [{
       name: '响应时间',
@@ -446,7 +448,7 @@ function UptimeMonitorDetails({
             编辑
           </Button>
           <Button size="sm"
-            variant="destructive"
+            variant={isArmed(`monitor:${monitor.id}`) ? 'destructive' : 'secondary-destructive'}
             onClick={(e) => {
               e.stopPropagation();
               onDelete(monitor.id);
@@ -508,6 +510,7 @@ function UptimeMonitorDetails({
 
 // ==================== 主 UptimePage 组件 ====================
 function UptimePage() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const theme = useStore((state) => state.theme);
   const isDarkMode = theme === 'dark';
   const [uptimeCurrentTab, setUptimeCurrentTab] = useState('list'); // 'list' | 'add' | 'stats'
@@ -827,10 +830,7 @@ function UptimePage() {
   };
 
   const deleteStatusPage = async (page) => {
-    if (!(await dialog.deleteResource({
-      resourceType: '状态页',
-      resourceName: page.title || page.slug,
-    }))) return;
+    if (!confirmPress(`status-page:${page.id}`, `删除状态页「${page.title || page.slug}」`)) return;
     setUptimeMetaLoading(true);
     try {
       const response = await fetch(`/api/uptime/status-pages/${page.id}`, {
@@ -1143,10 +1143,7 @@ function UptimePage() {
 
   const handleDeleteMonitor = async (id) => {
     const monitor = uptimeMonitors.find(item => item.id === id);
-    if (!(await dialog.deleteResource({
-      resourceType: '监测目标',
-      resourceName: monitor?.name || `#${id}`,
-    }))) return;
+    if (!confirmPress(`monitor:${id}`, `删除监测目标「${monitor?.name || '#' + id}」`)) return;
     try {
       const res = await fetch(`/api/uptime/monitors/${id}`, {
         method: 'DELETE',
@@ -1190,11 +1187,7 @@ function UptimePage() {
 
   const handleBatchDelete = async () => {
     if (selectedMonitorIds.length === 0) return;
-    if (!(await dialog.deleteResource({
-      resourceType: '监测目标',
-      resourceName: `选中的 ${selectedMonitorIds.length} 个监测目标`,
-      confirmText: '批量删除',
-    }))) return;
+    if (!confirmPress('batch-delete-monitors', `批量删除选中的 ${selectedMonitorIds.length} 个监测目标`)) return;
 
     try {
       const res = await fetch('/api/uptime/monitors/batch-delete', {
@@ -1488,7 +1481,7 @@ function UptimePage() {
                   />
                   {selectedMonitorIds.length > 0 && (
                     <Button
-                      variant="destructive" size="sm"
+                      variant={isArmed('batch-delete-monitors') ? 'destructive' : 'secondary-destructive'} size="sm"
                       onClick={handleBatchDelete}
                       icon={<Trash className="w-3 h-3" />}
                     >
@@ -1668,7 +1661,6 @@ function UptimePage() {
         <div className="grid items-start gap-4 xl:grid-cols-[minmax(24rem,0.9fr)_minmax(0,1.1fr)]">
           <SectionCard
             title={statusPageForm.id ? '编辑状态页' : '新建状态页'}
-            description="公开状态页，可绑定域名"
             icon={<Globe className="h-4 w-4 text-kumo-brand" />}
             action={statusPageForm.id ? (
               <Button size="sm" variant="secondary" shape="square" icon={<X className="h-3.5 w-3.5" />} onClick={resetStatusPageForm} aria-label="取消编辑" />
@@ -1807,7 +1799,6 @@ function UptimePage() {
 
           <SectionCard
             title="已发布状态页"
-            description="已创建的状态页"
             icon={<Globe className="h-4 w-4 text-kumo-brand" />}
             className="self-start"
             actions={(
@@ -1853,7 +1844,7 @@ function UptimePage() {
                           <Button size="sm" variant="secondary" shape="square" icon={<Edit className="h-3.5 w-3.5" />} onClick={() => editStatusPage(page)} aria-label="编辑状态页" />
                           <Button size="sm" variant="secondary" shape="square" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={() => window.open(statusUrl, '_blank', 'noopener,noreferrer')} aria-label="打开状态页" />
                           <Button size="sm" variant="secondary" shape="square" icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copyStatusUrl(statusUrl)} aria-label="复制状态页地址" />
-                          <Button size="sm" variant="destructive" shape="square" icon={<Trash className="h-3.5 w-3.5" />} onClick={() => deleteStatusPage(page)} aria-label="删除状态页" />
+                          <Button size="sm" variant={isArmed(`status-page:${page.id}`) ? 'destructive' : 'secondary-destructive'} shape="square" icon={<Trash className="h-3.5 w-3.5" />} onClick={() => deleteStatusPage(page)} aria-label="删除状态页" />
                         </div>
                       </div>
                       <div className="mt-3 grid gap-2 text-xs">
@@ -2279,7 +2270,6 @@ function UptimePage() {
         <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
           <SectionCard
             title="配置导入预览"
-            description="导出配置，或预览导入内容"
             icon={<Upload className="h-4 w-4 text-kumo-brand" />}
             actions={(
               <>

@@ -2,6 +2,9 @@ package openai
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,6 +13,44 @@ import (
 	"github.com/iwvw/api-monitor/backend-go/internal/applog"
 	"github.com/iwvw/api-monitor/backend-go/internal/response"
 )
+
+// settingsLocationFromDB 读取用户设置中的系统时区；
+// 'system'/空/无效时回退 UTC（保持历史行为，与存储的 UTC 时间字符串一致）。
+func settingsLocationFromDB(ctx context.Context, db *sql.DB) *time.Location {
+	var zone sql.NullString
+	if err := db.QueryRowContext(ctx, `SELECT time_zone FROM user_settings WHERE id = 1`).Scan(&zone); err != nil || !zone.Valid {
+		return time.UTC
+	}
+	name := strings.TrimSpace(zone.String)
+	if name == "" || name == "system" {
+		return time.UTC
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return time.UTC
+	}
+	return loc
+}
+
+// analyticsTimeWindow 按展示时区计算「近 N 天」过滤起点（转回 UTC 字符串用于与存储的 UTC 时间比较）。
+func analyticsTimeWindow(ctx context.Context, db *sql.DB, days int) (string, *time.Location) {
+	loc := settingsLocationFromDB(ctx, db)
+	start := time.Now().In(loc).AddDate(0, 0, -days).UTC().Format("2006-01-02 15:04:05")
+	return start, loc
+}
+
+// sqliteStrftimeOffset 生成 SQLite strftime 偏移 modifier（如 "+08:00"）与时区秒偏移，
+// 用于按展示时区分桶/贴标签。DST 时区以当前时刻偏移为准，切换期桶边界可能偏移一小时。
+func sqliteStrftimeOffset(loc *time.Location) (modifier string, offsetSec int) {
+	_, offsetSec = time.Now().In(loc).Zone()
+	sign := "+"
+	if offsetSec < 0 {
+		sign = "-"
+		offsetSec = -offsetSec
+	}
+	modifier = fmt.Sprintf("%s%02d:%02d", sign, offsetSec/3600, (offsetSec%3600)/60)
+	return modifier, offsetSec
+}
 
 // RecordAnalytics saves a gateway proxy metric to the SQLite database
 func (s *Service) RecordAnalytics(ctx context.Context, route, endpointID, model string, statusCode int, latencyMs int64, ttfbMs int64, promptTokens, completionTokens, totalTokens, cachedTokens int, stream, viaProxy int, clientIP, upstreamIP string) {
@@ -34,6 +75,85 @@ func (s *Service) RecordAnalytics(ctx context.Context, route, endpointID, model 
 	if err != nil {
 		applog.Error(writeCtx, "openai", "Failed to insert gateway analytics", "error", err.Error())
 	}
+
+	// 实时推送：网关出现请求即广播给日志页订阅者（SSE）。
+	s.publishAnalytics(map[string]interface{}{
+		"route":      route,
+		"endpointId": endpointID,
+		"model":      model,
+		"statusCode": statusCode,
+		"latencyMs":  latencyMs,
+		"ttfbMs":     ttfbMs,
+		"promptTokens":     promptTokens,
+		"completionTokens": completionTokens,
+		"totalTokens":      totalTokens,
+		"cachedTokens":     cachedTokens,
+		"stream":           stream == 1,
+		"viaProxy":         viaProxy == 1,
+		"clientIp":         clientIP,
+		"upstreamIp":       upstreamIP,
+		"timestamp":        time.Now().UTC().Format("2006-01-02 15:04:05"),
+	})
+}
+
+// subscribeAnalytics 注册一个网关日志实时订阅者，返回事件 channel 与取消函数。
+func (s *Service) subscribeAnalytics() (<-chan map[string]interface{}, func()) {
+	s.analyticsStreamMu.Lock()
+	defer s.analyticsStreamMu.Unlock()
+	s.analyticsStreamNext++
+	id := s.analyticsStreamNext
+	ch := make(chan map[string]interface{}, 64)
+	s.analyticsStreams[id] = ch
+	return ch, func() {
+		s.analyticsStreamMu.Lock()
+		defer s.analyticsStreamMu.Unlock()
+		if existing, ok := s.analyticsStreams[id]; ok {
+			delete(s.analyticsStreams, id)
+			close(existing)
+		}
+	}
+}
+
+// publishAnalytics 向所有日志订阅者广播一条网关事件（带缓冲防阻塞）。
+func (s *Service) publishAnalytics(event map[string]interface{}) {
+	s.analyticsStreamMu.Lock()
+	defer s.analyticsStreamMu.Unlock()
+	for _, ch := range s.analyticsStreams {
+		select {
+		case ch <- event:
+		default:
+		}
+	}
+}
+
+// analyticsEventStream 以 SSE 推送网关实时日志：后端出现请求立即推送给前端。
+func (s *Service) analyticsEventStream(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": "streaming unsupported"})
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	ch, cancel := s.subscribeAnalytics()
+	defer cancel()
+	hello, _ := json.Marshal(map[string]interface{}{"connected": true})
+	fmt.Fprintf(w, "event: hello\ndata: %s\n\n", hello)
+	flusher.Flush()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case event := <-ch:
+			payload, err := json.Marshal(event)
+			if err != nil {
+				continue
+			}
+			fmt.Fprintf(w, "event: log\ndata: %s\n\n", payload)
+			flusher.Flush()
+		}
+	}
 }
 
 // getAnalyticsSummary returns aggregation metrics (requests, avg latency, error rate, tokens)
@@ -54,7 +174,7 @@ func (s *Service) getAnalyticsSummary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	timeFilter := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02 15:04:05")
+	timeFilter, _ := analyticsTimeWindow(ctx, db, days)
 
 	var totalRequests int
 	var avgLatency float64
@@ -122,23 +242,24 @@ func (s *Service) getAnalyticsCharts(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	timeFilter := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02 15:04:05")
+	timeFilter, loc := analyticsTimeWindow(ctx, db, days)
 
-	// 时间粒度：hour / day / week
+	// 时间粒度：hour / day / week（桶边界与标签按系统时区，非 UTC）
 	granularity := r.URL.Query().Get("granularity")
+	offsetModifier, offsetSec := sqliteStrftimeOffset(loc)
 	var timeGroup string
 	var tsExpr string
 	switch granularity {
 	case "hour":
-		timeGroup = "strftime('%m-%d %H:00', timestamp)"
-		tsExpr = "CAST(strftime('%s', timestamp) AS INTEGER) / 3600 * 3600"
+		timeGroup = "strftime('%m-%d %H:00', timestamp, '" + offsetModifier + "')"
+		tsExpr = fmt.Sprintf("(CAST(strftime('%%s', timestamp) AS INTEGER) + %d) / 3600 * 3600 - %d", offsetSec, offsetSec)
 	case "week":
-		timeGroup = "strftime('%Y-W%W', timestamp)"
-		tsExpr = "CAST(strftime('%s', timestamp) AS INTEGER) / 604800 * 604800"
+		timeGroup = "strftime('%Y-W%W', timestamp, '" + offsetModifier + "')"
+		tsExpr = fmt.Sprintf("(CAST(strftime('%%s', timestamp) AS INTEGER) + %d) / 604800 * 604800 - %d", offsetSec, offsetSec)
 	default:
 		granularity = "day"
-		timeGroup = "strftime('%m-%d', timestamp)"
-		tsExpr = "CAST(strftime('%s', timestamp) AS INTEGER) / 86400 * 86400"
+		timeGroup = "strftime('%m-%d', timestamp, '" + offsetModifier + "')"
+		tsExpr = fmt.Sprintf("(CAST(strftime('%%s', timestamp) AS INTEGER) + %d) / 86400 * 86400 - %d", offsetSec, offsetSec)
 	}
 
 	// 1. Trend buckets（小时 / 天 / 周聚合，多指标）
@@ -348,7 +469,7 @@ func (s *Service) getAnalyticsLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	offset := (page - 1) * pageSize
-	timeFilter := time.Now().UTC().AddDate(0, 0, -days).Format("2006-01-02 15:04:05")
+	timeFilter, _ := analyticsTimeWindow(ctx, db, days)
 
 	// Get total count
 	var total int

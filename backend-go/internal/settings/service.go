@@ -175,7 +175,7 @@ func (s *Service) autoCleanupOnce(ctx context.Context) {
 	if days == 0 && count == 0 && dbSizeMB == 0 {
 		return
 	}
-	result, err := enforceLogTableLimits(ctx, db, s.store.DatabasePath(), days, count, dbSizeMB)
+	result, err := enforceLogTableLimits(ctx, db, s.store.DatabasePath(), days, count, dbSizeMB, false)
 	if err != nil {
 		applog.Error(ctx, "settings", fmt.Sprintf("auto log cleanup failed: %v", err))
 		return
@@ -934,13 +934,13 @@ func (s *Service) vacuumDatabase(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
-	_, _ = db.ExecContext(r.Context(), `PRAGMA wal_checkpoint(TRUNCATE)`)
+	_, _ = db.ExecContext(r.Context(), `PRAGMA wal_checkpoint(PASSIVE)`)
 	beforeStorage := databaseStorageStats(r.Context(), db, s.store.DatabasePath())
 	if _, err := db.ExecContext(r.Context(), `VACUUM`); err != nil {
 		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": "database vacuum failed: " + err.Error()})
 		return
 	}
-	_, _ = db.ExecContext(r.Context(), `PRAGMA wal_checkpoint(TRUNCATE)`)
+	_, _ = db.ExecContext(r.Context(), `PRAGMA wal_checkpoint(PASSIVE)`)
 	afterStorage := databaseStorageStats(r.Context(), db, s.store.DatabasePath())
 	savedBytes := beforeStorage.TotalSizeBytes - afterStorage.TotalSizeBytes
 
@@ -976,7 +976,7 @@ func (s *Service) clearLogs(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	_, _ = db.ExecContext(r.Context(), `PRAGMA wal_checkpoint(TRUNCATE)`)
+	_, _ = db.ExecContext(r.Context(), `PRAGMA wal_checkpoint(PASSIVE)`)
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
@@ -1040,12 +1040,12 @@ func (s *Service) enforceLogLimits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := enforceLogTableLimits(r.Context(), db, s.store.DatabasePath(), days, count, dbSizeMB)
+	result, err := enforceLogTableLimits(r.Context(), db, s.store.DatabasePath(), days, count, dbSizeMB, true)
 	if err != nil {
 		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": err.Error()})
 		return
 	}
-	_, _ = db.ExecContext(r.Context(), `PRAGMA wal_checkpoint(TRUNCATE)`)
+	_, _ = db.ExecContext(r.Context(), `PRAGMA wal_checkpoint(PASSIVE)`)
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
@@ -1597,6 +1597,48 @@ func countTableRows(ctx context.Context, db *sql.DB, table string) (int64, error
 	return count, nil
 }
 
+// freelistPageCount 返回数据库 freelist 上空闲页数量。
+// 空闲页是可回收空间；为 0 说明无需再做空间回收。
+func freelistPageCount(ctx context.Context, db *sql.DB) (int64, error) {
+	var count int64
+	err := db.QueryRowContext(ctx, `PRAGMA freelist_count`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("read freelist count: %w", err)
+	}
+	return count, nil
+}
+
+// autoVacuumMode 返回数据库 auto_vacuum 模式：0=NONE 1=FULL 2=INCREMENTAL。
+func autoVacuumMode(ctx context.Context, db *sql.DB) (int, error) {
+	var mode int
+	err := db.QueryRowContext(ctx, `PRAGMA auto_vacuum`).Scan(&mode)
+	if err != nil {
+		return 0, fmt.Errorf("read auto_vacuum: %w", err)
+	}
+	return mode, nil
+}
+
+// migrateAutoVacuumIncremental 将数据库迁移到 auto_vacuum=INCREMENTAL：
+// 一次性全量 VACUUM 建立 pointer-map，此后 incremental_vacuum 可长期无痛回收空间。
+// 仅在模式为 NONE 时执行（FULL 已自动截断，无需迁移）。
+// 注意：全量 VACUUM 需要独占锁，应在低峰期/维护窗口执行一次。
+func migrateAutoVacuumIncremental(ctx context.Context, db *sql.DB) error {
+	mode, err := autoVacuumMode(ctx, db)
+	if err != nil {
+		return err
+	}
+	if mode != 0 {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, `PRAGMA auto_vacuum = INCREMENTAL`); err != nil {
+		return fmt.Errorf("enable auto_vacuum incremental: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `VACUUM`); err != nil {
+		return fmt.Errorf("vacuum for auto_vacuum migration: %w", err)
+	}
+	return nil
+}
+
 func analyzeTable(ctx context.Context, db *sql.DB, table string) (tableAnalysis, error) {
 	count, err := countTableRows(ctx, db, table)
 	if err != nil {
@@ -1921,6 +1963,18 @@ func intFromPayloadOrConfig(ctx context.Context, db *sql.DB, payload map[string]
 	return getConfigInt(ctx, db, configKey, fallback)
 }
 
+// statisticsTables 是统计/趋势类表：记录使用量、趋势与聚合指标。
+// 这些数据是仪表盘与报表的数据源，删除会丢失全部历史统计，
+// 因此不参与日志清理（只按独立长保留策略清理，见 enforceLogTableLimits）。
+var statisticsTables = map[string]bool{
+	"openai_gateway_analytics":    true,
+	"system_api_stats":            true,
+	"uptime_daily_stats":          true,
+	"github_repository_snapshots": true,
+	"github_traffic_samples":      true,
+	"github_contributors":         true,
+}
+
 func listLogTables(ctx context.Context, db *sql.DB) ([]string, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT name
@@ -1930,10 +1984,8 @@ func listLogTables(ctx context.Context, db *sql.DB) ([]string, error) {
 			OR name LIKE '%_history'
 			OR name LIKE '%_audit'
 			OR name IN (
-				'server_network_quality_samples', 'uptime_heartbeats',
-				'github_repository_snapshots', 'github_traffic_samples', 'github_contributors',
-				'github_action_runs', 'github_events', 'github_webhook_deliveries',
-				'openai_gateway_analytics', 'system_api_stats', 'uptime_daily_stats'
+				'uptime_heartbeats', 'server_network_quality_samples',
+				'github_action_runs', 'github_events', 'github_webhook_deliveries'
 			)
 		)
 		ORDER BY name
@@ -1948,6 +2000,9 @@ func listLogTables(ctx context.Context, db *sql.DB) ([]string, error) {
 		var name string
 		if err := rows.Scan(&name); err != nil {
 			return nil, fmt.Errorf("scan log table: %w", err)
+		}
+		if statisticsTables[name] {
+			continue
 		}
 		tables = append(tables, name)
 	}
@@ -1966,28 +2021,44 @@ func clearLogTables(ctx context.Context, db *sql.DB) (int64, error) {
 		return 0, nil
 	}
 
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, fmt.Errorf("begin log cleanup: %w", err)
-	}
-	defer tx.Rollback()
-
 	var deleted int64
 	for _, table := range tables {
-		result, err := tx.ExecContext(ctx, "DELETE FROM "+quoteIdentifier(table))
-		if err != nil {
-			return 0, fmt.Errorf("clear %s: %w", table, err)
+		if ctx.Err() != nil {
+			break
 		}
-		changes, _ := result.RowsAffected()
-		deleted += changes
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("commit log cleanup: %w", err)
+		quotedTable := quoteIdentifier(table)
+		// 分批清空：每次只删 cleanupBatchSize 行并自动提交，
+		// 避免单条大 DELETE 长时间持有写锁导致系统卡死。
+		for ctx.Err() == nil {
+			result, err := db.ExecContext(ctx, `
+				DELETE FROM `+quotedTable+`
+				WHERE rowid IN (
+					SELECT rowid FROM `+quotedTable+` LIMIT ?
+				)
+			`, cleanupBatchSize)
+			if err != nil {
+				return 0, fmt.Errorf("clear %s: %w", table, err)
+			}
+			changes, _ := result.RowsAffected()
+			deleted += changes
+			if changes < cleanupBatchSize {
+				break
+			}
+		}
 	}
 	return deleted, nil
 }
 
-func enforceLogTableLimits(ctx context.Context, db *sql.DB, dbPath string, days, count, dbSizeMB int) (map[string]interface{}, error) {
+// cleanupBatchSize 是日志清理单批删除的行数上限。
+// 分批删除避免单条大 DELETE 长时间持有写锁导致系统卡死。
+const cleanupBatchSize = 1000
+
+// statisticsRetentionDays 是统计/趋势表的独立长保留天数。
+// 统计表不参与日志清理（避免丢失历史统计），但为避免无限增长，
+// 仍按此较长窗口清理明细——默认 180 天，足够仪表盘完整展示历史趋势。
+const statisticsRetentionDays = 180
+
+func enforceLogTableLimits(ctx context.Context, db *sql.DB, dbPath string, days, count, dbSizeMB int, allowVacuum bool) (map[string]interface{}, error) {
 	if days == 0 && count == 0 && dbSizeMB == 0 {
 		return map[string]interface{}{"deleted": int64(0), "reason": "no_limits"}, nil
 	}
@@ -1996,12 +2067,14 @@ func enforceLogTableLimits(ctx context.Context, db *sql.DB, dbPath string, days,
 	if err != nil {
 		return nil, err
 	}
-	if len(tables) == 0 {
-		return map[string]interface{}{"deleted": int64(0)}, nil
-	}
 
 	var totalDeleted int64
-	for _, table := range tables {
+
+	// 统计表独立长保留：仅按天数清理超期明细，保持历史统计可用。
+	for table := range statisticsTables {
+		if ctx.Err() != nil {
+			break
+		}
 		timeColumn, err := logTimeColumn(ctx, db, table)
 		if err != nil {
 			return nil, err
@@ -2009,14 +2082,68 @@ func enforceLogTableLimits(ctx context.Context, db *sql.DB, dbPath string, days,
 		if timeColumn == "" {
 			continue
 		}
-		if days > 0 {
-			cutoff := time.Now().UTC().AddDate(0, 0, -days).Format(time.RFC3339)
-			result, err := db.ExecContext(ctx, "DELETE FROM "+quoteIdentifier(table)+" WHERE "+quoteIdentifier(timeColumn)+" < ?", cutoff)
+		quotedTable := quoteIdentifier(table)
+		quotedTime := quoteIdentifier(timeColumn)
+		cutoff := time.Now().UTC().AddDate(0, 0, -statisticsRetentionDays).Format(time.RFC3339)
+		for ctx.Err() == nil {
+			result, err := db.ExecContext(ctx, `
+				DELETE FROM `+quotedTable+`
+				WHERE `+quotedTime+` < ?
+				AND rowid IN (
+					SELECT rowid FROM `+quotedTable+`
+					WHERE `+quotedTime+` < ?
+					LIMIT ?)
+			`, cutoff, cutoff, cleanupBatchSize)
 			if err != nil {
-				return nil, fmt.Errorf("delete old rows from %s: %w", table, err)
+				return nil, fmt.Errorf("delete old stats from %s: %w", table, err)
 			}
 			changes, _ := result.RowsAffected()
 			totalDeleted += changes
+			if changes < cleanupBatchSize {
+				break
+			}
+		}
+	}
+
+	if len(tables) == 0 {
+		return map[string]interface{}{"deleted": totalDeleted}, nil
+	}
+
+	for _, table := range tables {
+		if ctx.Err() != nil {
+			break
+		}
+		timeColumn, err := logTimeColumn(ctx, db, table)
+		if err != nil {
+			return nil, err
+		}
+		if timeColumn == "" {
+			continue
+		}
+		quotedTable := quoteIdentifier(table)
+		quotedTime := quoteIdentifier(timeColumn)
+
+		if days > 0 {
+			cutoff := time.Now().UTC().AddDate(0, 0, -days).Format(time.RFC3339)
+			// 分批删除旧数据：每次只删 cleanupBatchSize 行，避免长事务锁库。
+			for ctx.Err() == nil {
+				result, err := db.ExecContext(ctx, `
+					DELETE FROM `+quotedTable+`
+					WHERE `+quotedTime+` < ?
+					AND rowid IN (
+						SELECT rowid FROM `+quotedTable+`
+						WHERE `+quotedTime+` < ?
+						LIMIT ?)
+				`, cutoff, cutoff, cleanupBatchSize)
+				if err != nil {
+					return nil, fmt.Errorf("delete old rows from %s: %w", table, err)
+				}
+				changes, _ := result.RowsAffected()
+				totalDeleted += changes
+				if changes < cleanupBatchSize {
+					break
+				}
+			}
 		}
 		if count > 0 {
 			effective := int64(count)
@@ -2025,25 +2152,51 @@ func enforceLogTableLimits(ctx context.Context, db *sql.DB, dbPath string, days,
 			} else if ok && value > effective {
 				effective = value
 			}
-			result, err := db.ExecContext(ctx, `
-				DELETE FROM `+quoteIdentifier(table)+`
-				WHERE rowid NOT IN (
-					SELECT rowid FROM `+quoteIdentifier(table)+`
-					ORDER BY `+quoteIdentifier(timeColumn)+` DESC
-					LIMIT ?
-				)
-			`, effective)
-			if err != nil {
-				return nil, fmt.Errorf("trim rows from %s: %w", table, err)
+			// 分批删除最旧行直到表行数 ≤ effective：
+			// 每次只删 cleanupBatchSize 行（利用时间索引走 rowid IN），避免全表 NOT IN 扫描。
+			for ctx.Err() == nil {
+				rowCount, err := countTableRows(ctx, db, table)
+				if err != nil {
+					return nil, err
+				}
+				if rowCount <= effective {
+					break
+				}
+				batch := int64(cleanupBatchSize)
+				if rowCount-effective < batch {
+					batch = rowCount - effective
+				}
+				result, err := db.ExecContext(ctx, `
+					DELETE FROM `+quotedTable+`
+					WHERE rowid IN (
+						SELECT rowid FROM `+quotedTable+`
+						ORDER BY `+quotedTime+` ASC
+						LIMIT ?)
+				`, batch)
+				if err != nil {
+					return nil, fmt.Errorf("trim rows from %s: %w", table, err)
+				}
+				changes, _ := result.RowsAffected()
+				totalDeleted += changes
+				if changes == 0 {
+					break
+				}
 			}
-			changes, _ := result.RowsAffected()
-			totalDeleted += changes
 		}
 	}
 
 	cleanupRounds := 0
-	if dbSizeMB > 0 {
-		for cleanupRounds < 10 {
+	if dbSizeMB > 0 && ctx.Err() == nil {
+		// 空间回收：优先用有界的 incremental_vacuum 分批回收（不阻塞读写）。
+		// 数据库未启用 auto_vacuum 时 incremental_vacuum 是 no-op（安全无副作用）。
+		// 全量 VACUUM（含迁移到 INCREMENTAL）仅在手动执行时允许（allowVacuum），
+		// 自动清理绝不触发全量 VACUUM——它在生产大库上会独占锁导致系统卡死。
+		if allowVacuum {
+			if err := migrateAutoVacuumIncremental(ctx, db); err != nil {
+				applog.Warn(ctx, "settings", "auto_vacuum migration skipped", "error", err.Error())
+			}
+		}
+		for cleanupRounds < 3 {
 			currentSize, err := fileSize(dbPath)
 			if err != nil {
 				return nil, err
@@ -2052,45 +2205,16 @@ func enforceLogTableLimits(ctx context.Context, db *sql.DB, dbPath string, days,
 				break
 			}
 			cleanupRounds++
-			var roundDeleted int64
-			for _, table := range tables {
-				timeColumn, err := logTimeColumn(ctx, db, table)
-				if err != nil {
-					return nil, err
-				}
-				if timeColumn == "" {
-					continue
-				}
-				tableCount, err := countTableRows(ctx, db, table)
-				if err != nil {
-					return nil, err
-				}
-				if tableCount <= 10 {
-					continue
-				}
-				deleteCount := tableCount / 5
-				if deleteCount < 1 {
-					deleteCount = 1
-				}
-				result, err := db.ExecContext(ctx, `
-					DELETE FROM `+quoteIdentifier(table)+`
-					WHERE rowid IN (
-						SELECT rowid FROM `+quoteIdentifier(table)+`
-						ORDER BY `+quoteIdentifier(timeColumn)+` ASC
-						LIMIT ?
-					)
-				`, deleteCount)
-				if err != nil {
-					return nil, fmt.Errorf("delete oldest rows from %s: %w", table, err)
-				}
-				changes, _ := result.RowsAffected()
-				roundDeleted += changes
-				totalDeleted += changes
-			}
-			if roundDeleted == 0 {
+			if ctx.Err() != nil {
 				break
 			}
-			_, _ = db.ExecContext(ctx, `VACUUM`)
+			// 有界回收：每次最多回收 4096 页（约 16MB @4KB 页），
+			// 避免一次性回收整个 freelist 长时间持有写锁。
+			_, _ = db.ExecContext(ctx, `PRAGMA incremental_vacuum(4096)`)
+			freePages, _ := freelistPageCount(ctx, db)
+			if freePages == 0 {
+				break
+			}
 		}
 	}
 
@@ -2451,7 +2575,7 @@ func (s *Service) backupCurrentDatabase(ctx context.Context, backupPath string) 
 		return err
 	}
 	defer db.Close()
-	_, _ = db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`)
+	_, _ = db.ExecContext(ctx, `PRAGMA wal_checkpoint(PASSIVE)`)
 	if err := os.MkdirAll(filepath.Dir(backupPath), 0o755); err != nil {
 		return err
 	}

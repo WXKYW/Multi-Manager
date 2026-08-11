@@ -10,11 +10,12 @@ import { Select } from '@cloudflare/kumo/components/select';
 import { Switch } from '@cloudflare/kumo/components/switch';
 import { Table } from '@cloudflare/kumo/components/table';
 import { SkeletonLine } from '@cloudflare/kumo/components/loader';
-import { DeleteResource, LayerCard, SensitiveInput, Tabs } from '@cloudflare/kumo';
+import { LayerCard, SensitiveInput, Tabs } from '@cloudflare/kumo';
 import useStore, { DEFAULT_TOTP_SETTINGS } from '../store.js';
 import { MODULE_TABS_PROPS, TOOL_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
 import { buildTotpAccountPayload } from '../modules/totpPayload.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { AnimatedCollapse } from '../components/AnimatedCollapse.jsx';
 import BrandIcon, { BRAND_COLOR_FALLBACK, getIssuerColor } from '../components/ui/BrandIcon.jsx';
 import { AppCard, ResponsiveSearchInput, SectionCard, TabBarOverflowActions, cx, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
@@ -195,6 +196,7 @@ const mergeBrandStyleOptions = (...groups) => {
 
 // ==================== TotpPage 组件 ====================
 function TotpPage() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const triggerHaptic = useStore(state => state.triggerHaptic);
   const [totpCurrentTab, setTotpCurrentTab] = useState('accounts');
   const [totpAccounts, setTotpAccounts] = useState([]);
@@ -238,8 +240,6 @@ function TotpPage() {
   const [customBrandIconsLoading, setCustomBrandIconsLoading] = useState(false);
   const [customBrandIconUploading, setCustomBrandIconUploading] = useState(false);
   const [deletingCustomBrandIconId, setDeletingCustomBrandIconId] = useState('');
-  const [pendingDeleteBrandIcon, setPendingDeleteBrandIcon] = useState(null);
-  const [deleteCustomBrandIconError, setDeleteCustomBrandIconError] = useState('');
   const [accountAddTab, setAccountAddTab] = useState('scan');
 
   // QR 扫码状态
@@ -878,17 +878,10 @@ function TotpPage() {
     toast.success(`已选择${option.label}`);
   };
 
-  const requestDeleteCustomBrandIcon = option => {
+  const deleteCustomBrandIcon = async option => {
     if (!option?.customId) return;
-    setDeleteCustomBrandIconError('');
-    setPendingDeleteBrandIcon(option);
-  };
-
-  const deleteCustomBrandIcon = async () => {
-    const option = pendingDeleteBrandIcon;
-    if (!option?.customId) return;
+    if (!confirmPress(`custom-icon-${option.customId}`, `删除自定义图标「${option.label}」`)) return;
     setDeletingCustomBrandIconId(option.customId);
-    setDeleteCustomBrandIconError('');
     try {
       const res = await fetch(`/api/totp/icons/library/${encodeURIComponent(option.customId)}`, {
         method: 'DELETE',
@@ -904,12 +897,9 @@ function TotpPage() {
         prev.map(account => (account.icon === option.icon ? { ...account, icon: '' } : account))
       );
       setAccountForm(prev => (prev.icon === option.icon ? { ...prev, icon: '' } : prev));
-      setPendingDeleteBrandIcon(null);
       toast.success('自定义图标已删除');
     } catch (error) {
-      const message = error.message || '删除图标失败';
-      setDeleteCustomBrandIconError(message);
-      throw error;
+      toast.error(error.message || '删除图标失败');
     } finally {
       setDeletingCustomBrandIconId('');
     }
@@ -961,7 +951,7 @@ function TotpPage() {
   };
 
   const handleDeleteAccount = async account => {
-    if (!(await dialog.deleteResource(`确定要删除 "${account.issuer}" 的账号吗？`))) {
+    if (!confirmPress(`totp-account-${account.id}`, `删除「${account.issuer}」的账号`)) {
       return;
     }
 
@@ -1315,7 +1305,7 @@ function TotpPage() {
   };
 
   const handleDeleteGroup = async group => {
-    if (!(await dialog.deleteResource(`确定要删除分组 "${group.name}" 吗？分组内的账号不会被删除。`))) {
+    if (!confirmPress(`totp-group-${group.id}`, `删除分组「${group.name}」`)) {
       return;
     }
 
@@ -1668,14 +1658,22 @@ function TotpPage() {
                           <Button
                             shape="square"
                             size="sm"
-                            variant="secondary-destructive"
+                            variant={
+                              isArmed(`totp-account-${account.id}`)
+                                ? 'destructive'
+                                : 'secondary-destructive'
+                            }
                             aria-label="删除账号"
                             onClick={e => {
                               e.stopPropagation();
                               handleDeleteAccount(account);
                             }}
                             className="!size-5 !p-0 sm:!size-6"
-                            title="删除"
+                            title={
+                              isArmed(`totp-account-${account.id}`)
+                                ? '再次点击确认删除'
+                                : '删除'
+                            }
                           >
                             <Trash className="h-3 w-3" />
                           </Button>
@@ -1802,10 +1800,18 @@ function TotpPage() {
                           <Button
                             shape="square"
                             size="sm"
-                            variant="secondary-destructive"
+                            variant={
+                              isArmed(`totp-group-${group.id}`)
+                                ? 'destructive'
+                                : 'secondary-destructive'
+                            }
                             aria-label="删除分组"
                             onClick={() => handleDeleteGroup(group)}
-                            title="删除"
+                            title={
+                              isArmed(`totp-group-${group.id}`)
+                                ? '再次点击确认删除'
+                                : '删除'
+                            }
                             icon={<Trash className="w-3.5 h-3.5" />}
                           />
                         </div>
@@ -2629,13 +2635,21 @@ function TotpPage() {
                         type="button"
                         size="sm"
                         shape="square"
-                        variant="secondary-destructive"
+                        variant={
+                          isArmed(`custom-icon-${option.customId}`)
+                            ? 'destructive'
+                            : 'secondary-destructive'
+                        }
                         icon={<Trash className="size-4" />}
                         aria-label={`删除 ${option.label}`}
-                        title={`删除 ${option.label}`}
+                        title={
+                          isArmed(`custom-icon-${option.customId}`)
+                            ? '再次点击确认删除'
+                            : `删除 ${option.label}`
+                        }
                         loading={deletingCustomBrandIconId === option.customId}
                         disabled={Boolean(deletingCustomBrandIconId)}
-                        onClick={() => requestDeleteCustomBrandIcon(option)}
+                        onClick={() => deleteCustomBrandIcon(option)}
                       />
                     )}
                   </LayerCard>
@@ -2655,23 +2669,6 @@ function TotpPage() {
           </div>
         </Dialog>
       </Dialog.Root>
-
-      <DeleteResource
-        open={Boolean(pendingDeleteBrandIcon)}
-        onOpenChange={open => {
-          if (!open && !deletingCustomBrandIconId) {
-            setPendingDeleteBrandIcon(null);
-            setDeleteCustomBrandIconError('');
-          }
-        }}
-        resourceType="自定义图标"
-        resourceName={pendingDeleteBrandIcon?.label || ''}
-        onDelete={deleteCustomBrandIcon}
-        isDeleting={Boolean(deletingCustomBrandIconId)}
-        deleteButtonText="删除图标"
-        size="sm"
-        errorMessage={deleteCustomBrandIconError}
-      />
 
       {/* ==================== 模态框 2: 新建/编辑分组 ==================== */}
       <Dialog.Root open={showGroupModal} onOpenChange={setShowGroupModal}>

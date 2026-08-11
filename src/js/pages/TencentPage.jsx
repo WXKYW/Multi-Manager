@@ -9,6 +9,7 @@ import { SkeletonLine } from '@cloudflare/kumo/components/loader';
 import useTableResize from '../composables/useTableResize.js';
 import { dialog } from '../modules/dialog.js';
 import { toast } from '../modules/toast.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import { MODULE_TABS_PROPS } from '../modules/kumoTabs.js';
 import { handleEditableRowDoubleClick } from '../modules/tableInteractions.js';
 import { AppTable, DataTableFrame, EmptyState, InlineStatusPill, PageStack, SectionCard, TabBarOverflowActions, getStatusPillClass, stickyTabsBaseClass } from '../components/ui/AppPrimitives.jsx';
@@ -127,6 +128,7 @@ function InstanceActions({ disabled, onAction }) {
 }
 
 function TencentPage() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const [activeTab, setActiveTab] = useState('dns');
   const [accounts, setAccounts] = useState([]);
   const [selectedAccountId, setSelectedAccountId] = useState('');
@@ -248,7 +250,7 @@ function TencentPage() {
   };
 
   const deleteAccount = async (account) => {
-    if (!(await dialog.deleteResource(`确定要删除腾讯云账号“${account.name}”吗？`))) return;
+    if (!confirmPress(`account:${account.id}`, `删除腾讯云账号「${account.name}」`)) return;
     try {
       const response = await fetch(`/api/tencent/accounts/${account.id}`, { method: 'DELETE', headers: getAuthHeaders() });
       const result = await response.json();
@@ -299,7 +301,7 @@ function TencentPage() {
   };
 
   const renderDns = () => (
-    <SectionCard title="DNS 域名" description="域名与解析记录" icon={<Globe className="h-4 w-4 text-kumo-brand" />} bodyPadding="none">
+    <SectionCard title="DNS 域名" icon={<Globe className="h-4 w-4 text-kumo-brand" />} bodyPadding="none">
       <DataTableFrame variant="embedded" density="compact">
         <AppTable layout="fixed" widths={dnsColWidths}>
           <colgroup>{dnsColWidths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup>
@@ -334,7 +336,7 @@ function TencentPage() {
     const items = kind === 'cvm' ? cvmInstances : lighthouseInstances;
     const title = kind === 'cvm' ? 'CVM 实例' : '轻量应用服务器';
     return (
-      <SectionCard title={title} description="按状态和地域查看资源" icon={<Server className="h-4 w-4 text-kumo-brand" />} bodyPadding="none">
+      <SectionCard title={title} icon={<Server className="h-4 w-4 text-kumo-brand" />} bodyPadding="none">
         <DataTableFrame variant="embedded" density="compact">
           <AppTable tableId={`tencent-${kind}-instances`} columns={TENCENT_INSTANCE_COLUMNS}>
             <Table.Header sticky variant="compact">
@@ -416,7 +418,7 @@ function TencentPage() {
                 <Table.Cell className="text-right">
                   <div className="flex w-full justify-end gap-1">
                     <Button size="sm" shape="square" variant="secondary" onClick={() => openEditModal(account)} aria-label="编辑账号" title="编辑账号" icon={<Settings className="h-3.5 w-3.5" />} />
-                    <Button size="sm" shape="square" variant="secondary-destructive" onClick={() => deleteAccount(account)} aria-label="删除账号" title="删除账号" icon={<Trash className="h-3.5 w-3.5" />} />
+                    <Button size="sm" shape="square" variant={isArmed(`account:${account.id}`) ? 'destructive' : 'secondary-destructive'} onClick={() => deleteAccount(account)} aria-label="删除账号" title="删除账号" icon={<Trash className="h-3.5 w-3.5" />} />
                   </div>
                 </Table.Cell>
               </Table.Row>

@@ -9,6 +9,7 @@ import { Dialog } from '@cloudflare/kumo/components/dialog';
 import { ClipboardText, Tabs } from '@cloudflare/kumo';
 import { toast } from '../modules/toast.js';
 import { dialog } from '../modules/dialog.js';
+import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import useStore, {
   DEFAULT_MODULE_ORDER,
   MODULE_CONFIG,
@@ -236,6 +237,7 @@ function MaintenanceActionCard({
 }
 
 function SettingsPage() {
+  const { isArmed, confirmPress } = useConfirmPress();
   const {
     themeMode,
     theme,
@@ -896,7 +898,7 @@ function SettingsPage() {
   };
 
   const removePasskey = async (passkey) => {
-    if (!(await dialog.deleteResource(`确定删除“${passkey.label || '通行密钥'}”吗？`))) return;
+    if (!confirmPress(`passkey:${passkey.id}`, `删除通行密钥「${passkey.label || '通行密钥'}」`)) return;
 
     setPasskeyBusy(true);
     try {
@@ -1164,7 +1166,6 @@ function SettingsPage() {
 
           <SectionCard
             title="部署访问地址"
-            description="公开页与回调地址"
             icon={<Globe className="h-4 w-4 text-kumo-brand" />}
             className="min-h-0 self-start"
             bodyPadding="none"
@@ -1198,7 +1199,6 @@ function SettingsPage() {
           className="flex min-h-0 md:h-full"
           headerClassName="max-sm:min-h-12 max-sm:flex-row max-sm:items-center max-sm:px-3 max-sm:py-2"
           title="功能模块"
-          description="管理侧栏入口"
           icon={<Activity className="h-4 w-4 text-kumo-brand" />}
           actionsClassName="max-sm:ml-auto max-sm:w-auto max-sm:gap-1.5"
           actions={
@@ -1460,7 +1460,7 @@ function SettingsPage() {
                       </div>
                       <Button
                         size="sm"
-                        variant="secondary-destructive"
+                        variant={isArmed(`passkey:${passkey.id}`) ? 'destructive' : 'secondary-destructive'}
                         onClick={() => removePasskey(passkey)}
                         loading={passkeyBusy}
                         disabled={isDemoMode}
@@ -1937,40 +1937,31 @@ function SettingsPage() {
           <SectionCard
             className="shrink-0"
             title="审计与保留"
-            description="数据库审计与日志保留"
             icon={<FileText className="h-4 w-4 text-kumo-brand" />}
             bodyPadding="none"
+            actions={
+              <Switch
+                label="自动执行保留限制"
+                checked={logSettings.autoCleanup}
+                onCheckedChange={(checked) => setLogSettings((prev) => ({ ...prev, autoCleanup: checked }))}
+              />
+            }
           >
             <div className="p-5">
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid grid-cols-5 gap-3">
                 <Input size="sm" label="保留天数" type="number" min="0" value={logSettings.days} onChange={(e) => setLogSettings((prev) => ({ ...prev, days: Math.max(0, toInt(e.target.value, 0)) }))} />
                 <Input size="sm" label="单表最大条数" type="number" min="0" value={logSettings.count} onChange={(e) => setLogSettings((prev) => ({ ...prev, count: Math.max(0, toInt(e.target.value, 0)) }))} />
                 <Input size="sm" label="数据库最大 MB" type="number" min="0" value={logSettings.dbSizeMB} onChange={(e) => setLogSettings((prev) => ({ ...prev, dbSizeMB: Math.max(0, toInt(e.target.value, 0)) }))} />
                 <Input size="sm" label="app.log 最大 MB" type="number" min="1" value={logSettings.logFileSizeMB} onChange={(e) => setLogSettings((prev) => ({ ...prev, logFileSizeMB: Math.max(1, toInt(e.target.value, 10)) }))} />
+                <Input size="sm" label="执行间隔（小时）" type="number" min="1" value={logSettings.autoCleanupHours} onChange={(e) => setLogSettings((prev) => ({ ...prev, autoCleanupHours: Math.max(1, toInt(e.target.value, 24)) }))} disabled={!logSettings.autoCleanup} />
               </div>
 
-              <div className="mt-5 flex flex-wrap items-center justify-between gap-4 border-t border-kumo-line pt-4">
-                <div className="flex flex-wrap items-center gap-4">
-                  <Switch
-                    label="自动执行保留限制"
-                    checked={logSettings.autoCleanup}
-                    onCheckedChange={(checked) => setLogSettings((prev) => ({ ...prev, autoCleanup: checked }))}
-                  />
-                  <div className="w-44">
-                    <Input size="sm" label="执行间隔（小时）" type="number" min="1" value={logSettings.autoCleanupHours} onChange={(e) => setLogSettings((prev) => ({ ...prev, autoCleanupHours: Math.max(1, toInt(e.target.value, 24)) }))} disabled={!logSettings.autoCleanup} />
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
+                <div className="mt-4 flex justify-end gap-2">
                   <Button size="sm" variant="secondary" onClick={saveLogSettings} loading={logsBusy} icon={<Save className="h-4 w-4" />}>保存策略</Button>
                   <Button size="sm" onClick={runEnforceLogLimits} loading={logsBusy} icon={<Trash className="h-4 w-4" />}>执行保留限制</Button>
                 </div>
               </div>
-
-              <p className="mt-3 text-xs text-kumo-subtle">
-                单表最大条数过低时，将按「每个实体的最新记录」自动保底（如每仓库、每监控、每台服务器至少保留一条最新数据），不会删除实体最新状态。
-              </p>
-            </div>
-          </SectionCard>
+            </SectionCard>
 
           <div className="flex min-h-0 flex-1">
             <SectionCard
