@@ -190,7 +190,8 @@ jobs:
 
       - name: Run Go Tests
         working-directory: backend-go
-        run: go test ./... -v
+        # -p 1 串行运行各包，避免后台 goroutine 并发持 TempDir 句柄导致清理竞态。
+        run: go test ./... -v -p 1
 
       - name: Build Go Backend
         working-directory: backend-go
