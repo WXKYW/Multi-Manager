@@ -36,11 +36,23 @@ func newTestServer(t *testing.T, cfg config.Config) *Server {
 		cfg.DBName = "data.db"
 	}
 	handler := NewServer(cfg)
+	dataDir := cfg.DataDir
+	dbPath := filepath.Join(dataDir, cfg.DBName)
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		if err := handler.Shutdown(ctx); err != nil {
 			t.Errorf("shutdown server: %v", err)
+		}
+		// 等待后台 goroutine（代理预热等）释放数据库文件句柄，
+		// 避免 Linux CI 上 t.TempDir 清理时报 directory not empty。
+		if dbPath != "" {
+			for i := 0; i < 100; i++ {
+				if err := os.Remove(dbPath); err == nil {
+					return
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
 		}
 	})
 	return handler
