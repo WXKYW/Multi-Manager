@@ -55,6 +55,7 @@ type userSettingsRow struct {
 	AgentDownloadURL      sql.NullString
 	PublicAPIURL          sql.NullString
 	TimeZone              sql.NullString
+	UIFont                sql.NullString
 }
 
 type tableAnalysis struct {
@@ -1143,7 +1144,8 @@ func loadUserSettings(ctx context.Context, db *sql.DB) (map[string]interface{}, 
 			totp_settings,
 			agent_download_url,
 			public_api_url,
-			time_zone
+			time_zone,
+			ui_font
 		FROM user_settings
 		WHERE id = 1
 	`).Scan(
@@ -1166,6 +1168,7 @@ func loadUserSettings(ctx context.Context, db *sql.DB) (map[string]interface{}, 
 		&row.AgentDownloadURL,
 		&row.PublicAPIURL,
 		&row.TimeZone,
+		&row.UIFont,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		if _, insertErr := db.ExecContext(ctx, `
@@ -1236,6 +1239,7 @@ func loadUserSettings(ctx context.Context, db *sql.DB) (map[string]interface{}, 
 		"agentDownloadUrl":        nullString(row.AgentDownloadURL, ""),
 		"publicApiUrl":            nullString(row.PublicAPIURL, ""),
 		"timezone":                nullString(row.TimeZone, "system"),
+		"uiFont":                  nullString(row.UIFont, "default"),
 	}
 	if value := nullString(row.ThemeMode, ""); value != "" {
 		settings["themeMode"] = value
@@ -1267,6 +1271,7 @@ func saveUserSettings(ctx context.Context, db *sql.DB, settings map[string]inter
 	assignString(updates, "agent_download_url", settings, "agentDownloadUrl", "agent_download_url")
 	assignString(updates, "public_api_url", settings, "publicApiUrl", "public_api_url")
 	assignString(updates, "time_zone", settings, "timezone", "timeZone", "time_zone")
+	assignString(updates, "ui_font", settings, "uiFont", "ui_font")
 
 	if len(updates) == 0 {
 		return nil
@@ -1292,6 +1297,7 @@ func saveUserSettings(ctx context.Context, db *sql.DB, settings map[string]inter
 		"agent_download_url",
 		"public_api_url",
 		"time_zone",
+		"ui_font",
 	}
 
 	setParts := make([]string, 0, len(updates)+1)

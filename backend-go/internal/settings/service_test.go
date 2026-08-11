@@ -44,6 +44,9 @@ func TestUserSettingsReadPatchAndPost(t *testing.T) {
 	if payload.Data["pageWidthMode"] != "full" {
 		t.Fatalf("pageWidthMode default = %#v", payload.Data["pageWidthMode"])
 	}
+	if payload.Data["uiFont"] != "default" {
+		t.Fatalf("uiFont default = %#v", payload.Data["uiFont"])
+	}
 	visibility := payload.Data["moduleVisibility"].(map[string]interface{})
 	if visibility["scheduler"] != false || visibility["self-h"] != nil {
 		t.Fatalf("unexpected module visibility: %#v", visibility)
@@ -53,6 +56,7 @@ func TestUserSettingsReadPatchAndPost(t *testing.T) {
 		"themeMode":"dark",
 		"pageWidthMode":"wide",
 		"sidebarCollapsed":true,
+		"uiFont":"lxgw-wenkai-screen",
 		"totpSettings":{"maskAccount":true},
 		"moduleOrder":["server","antigravity"]
 	}`)
@@ -67,6 +71,9 @@ func TestUserSettingsReadPatchAndPost(t *testing.T) {
 	mustDecodeSettings(t, res, &payload)
 	if payload.Data["themeMode"] != "dark" || payload.Data["pageWidthMode"] != "wide" || payload.Data["sidebarCollapsed"] != true {
 		t.Fatalf("appearance settings not persisted: %#v", payload.Data)
+	}
+	if payload.Data["uiFont"] != "lxgw-wenkai-screen" {
+		t.Fatalf("uiFont not persisted: %#v", payload.Data["uiFont"])
 	}
 	totpSettings := payload.Data["totpSettings"].(map[string]interface{})
 	if totpSettings["maskAccount"] != true {

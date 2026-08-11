@@ -4561,9 +4561,6 @@ const trendSeries = useMemo(() => {
                   >
                     添加请求头
                   </Button>
-                  <p className="text-xs leading-snug text-kumo-subtle">
-                    随请求发送到上游，Authorization 由网关自动设置。
-                  </p>
                 </div>
               </div>
 
@@ -4577,9 +4574,6 @@ const trendSeries = useMemo(() => {
                   items={ENDPOINT_PROTOCOL_OPTIONS}
                   className="w-full"
                 />
-                <p className="-mt-2 text-xs leading-snug text-kumo-subtle">
-                  仅直连时生效。HTTP/1.1 与多数 AI SDK 客户端一致；部分上游对 HTTP/2 限流更严。
-                </p>
 
                 <div className="space-y-1.5">
                   <div className="flex min-w-0 items-center justify-between gap-2">
@@ -4658,9 +4652,6 @@ const trendSeries = useMemo(() => {
                   />
                   <span className="text-xs text-kumo-subtle">强制走代理，禁止直连</span>
                 </div>
-                <p className="text-xs leading-snug text-kumo-subtle">
-                  请求按池轮换出口 IP，适合 IP 敏感源。
-                </p>
               </div>
             </div>
 

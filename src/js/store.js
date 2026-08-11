@@ -200,7 +200,7 @@ export const MODULE_GROUPS = [
     subgroups: [
       {
         id: 'global-config',
-        name: '系统设置',
+        name: '全局配置',
         modules: ['notification', 'apidocs', 'systemlogs', 'settings'],
       },
     ],
@@ -221,7 +221,6 @@ export function getModuleIcon(moduleId) {
 
 const THEME_STORAGE_KEY = 'app_theme_mode';
 const LEGACY_THEME_STORAGE_KEY = 'app_theme';
-const PAGE_WIDTH_STORAGE_KEY = 'app_page_width_mode';
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'app_sidebar_collapsed';
 const DASHBOARD_FOOTER_VISIBLE_STORAGE_KEY = 'app_dashboard_footer_visible';
 const DASHBOARD_FOOTER_RECORD_NUMBER_STORAGE_KEY = 'app_dashboard_footer_record_number';
@@ -282,15 +281,9 @@ export function clearPendingAuthProvider() {
 }
 
 export const THEME_MODE_OPTIONS = ['auto', 'light', 'dark'];
-export const PAGE_WIDTH_OPTIONS = ['standard', 'wide', 'full'];
-export const DEFAULT_PAGE_WIDTH_MODE = 'full';
 
 const normalizeThemeMode = (mode, fallback = 'auto') => (
   THEME_MODE_OPTIONS.includes(mode) ? mode : fallback
-);
-
-const normalizePageWidthMode = (mode, fallback = DEFAULT_PAGE_WIDTH_MODE) => (
-  PAGE_WIDTH_OPTIONS.includes(mode) ? mode : fallback
 );
 
 const normalizeSidebarCollapsed = (value, fallback = false) => {
@@ -397,6 +390,37 @@ export const applyCustomCss = (css = '') => {
   style.textContent = css || '';
 };
 
+export const FONT_OPTIONS = [
+  { value: 'default', label: '系统默认' },
+  { value: 'lxgw-wenkai-screen', label: '霞鹜文楷屏幕阅读版' },
+];
+
+const FONT_LINK_ID = 'lxgw-wenkai-font-link';
+
+export const applyUIFont = (font) => {
+  if (typeof document === 'undefined') return;
+
+  const existing = document.getElementById(FONT_LINK_ID);
+  if (font === 'default' || !font) {
+    if (existing) existing.remove();
+    if (document.body) document.body.style.removeProperty('font-family');
+    return;
+  }
+
+  if (font === 'lxgw-wenkai-screen') {
+    if (!existing) {
+      const link = document.createElement('link');
+      link.id = FONT_LINK_ID;
+      link.rel = 'stylesheet';
+      link.href = 'https://cdn.bootcdn.net/ajax/libs/lxgw-wenkai-screen-webfont/1.7.0/lxgwwenkaiscreen.css';
+      document.head.appendChild(link);
+    }
+    if (document.body) {
+      document.body.style.setProperty('font-family', '"LXGW WenKai Screen", ui-sans-serif, system-ui, sans-serif');
+    }
+  }
+};
+
 export const normalizeUserSettings = (settings = {}) => {
   const validModules = new Set(DEFAULT_MODULE_ORDER);
   const savedOrder = Array.isArray(settings.moduleOrder)
@@ -437,13 +461,10 @@ export const normalizeUserSettings = (settings = {}) => {
 
   return {
     customCss: settings.customCss || '',
+    uiFont: settings.uiFont || settings.ui_font || 'default',
     themeMode: normalizeThemeMode(
       settings.themeMode || settings.theme_mode,
       typeof getInitialThemeMode === 'function' ? getInitialThemeMode() : 'auto'
-    ),
-    pageWidthMode: normalizePageWidthMode(
-      settings.pageWidthMode || settings.page_width_mode,
-      typeof getInitialPageWidthMode === 'function' ? getInitialPageWidthMode() : DEFAULT_PAGE_WIDTH_MODE
     ),
     sidebarCollapsed: normalizeSidebarCollapsed(
       settings.sidebarCollapsed ?? settings.sidebar_collapsed,
@@ -526,18 +547,6 @@ const getInitialThemeMode = () => {
 
 const initialThemeMode = getInitialThemeMode();
 
-const getInitialPageWidthMode = () => {
-  try {
-    const savedMode = localStorage.getItem(PAGE_WIDTH_STORAGE_KEY);
-    if (normalizePageWidthMode(savedMode, null)) return savedMode;
-  } catch (e) {
-    console.error('Failed to get initial page width mode:', e);
-  }
-  return DEFAULT_PAGE_WIDTH_MODE;
-};
-
-const initialPageWidthMode = getInitialPageWidthMode();
-
 const getInitialSidebarCollapsed = () => {
   try {
     return normalizeSidebarCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY), false);
@@ -594,11 +603,11 @@ const useStore = create((set, get) => ({
   appProcessUptimeMeasuredAt: 0,
   themeMode: initialThemeMode,
   theme: resolveThemeMode(initialThemeMode),
-  pageWidthMode: initialPageWidthMode,
   navGroupExpanded: null,
   userSettingsLoaded: false,
   userSettingsLoading: false,
   customCss: '',
+  uiFont: 'default',
   moduleVisibility: DEFAULT_MODULE_VISIBILITY,
   moduleOrder: DEFAULT_MODULE_ORDER,
   channelEnabled: DEFAULT_CHANNEL_ENABLED,
@@ -676,21 +685,7 @@ const useStore = create((set, get) => ({
     });
   },
   setNavGroupExpanded: (group) => set({ navGroupExpanded: group }),
-  setPageWidthMode: (mode, persist = true) => {
-    const normalizedMode = normalizePageWidthMode(mode);
-    if (persist) {
-      try {
-        localStorage.setItem(PAGE_WIDTH_STORAGE_KEY, normalizedMode);
-      } catch (e) {
-        console.error('Failed to save page width mode:', e);
-      }
-      if (get().isAuthenticated) {
-        scheduleAppearanceSettingsSave({ pageWidthMode: normalizedMode });
-      }
-    }
-    set({ pageWidthMode: normalizedMode });
-  },
-  
+
   setThemeMode: (themeMode, persist = true) => {
     const normalizedMode = normalizeThemeMode(themeMode);
     const effectiveTheme = resolveThemeMode(normalizedMode);
@@ -714,6 +709,15 @@ const useStore = create((set, get) => ({
     get().setThemeMode(theme, persist);
   },
 
+  setUIFont: (uiFont, persist = true) => {
+    const normalized = FONT_OPTIONS.some(o => o.value === uiFont) ? uiFont : 'default';
+    applyUIFont(normalized);
+    if (persist && get().isAuthenticated) {
+      scheduleAppearanceSettingsSave({ uiFont: normalized });
+    }
+    set({ uiFont: normalized });
+  },
+
   setVibrationEnabled: (enabled, persist = true) => {
     const nextEnabled = Boolean(enabled);
     if (persist && get().isAuthenticated) {
@@ -731,11 +735,11 @@ const useStore = create((set, get) => ({
     const normalized = normalizeUserSettings(settings);
     setDisplayTimeZone(normalized.timezone);
     applyCustomCss(normalized.customCss);
+    applyUIFont(normalized.uiFont);
     applyThemeMode(normalized.themeMode);
     try {
       localStorage.setItem(THEME_STORAGE_KEY, normalized.themeMode);
       localStorage.removeItem(LEGACY_THEME_STORAGE_KEY);
-      localStorage.setItem(PAGE_WIDTH_STORAGE_KEY, normalized.pageWidthMode);
       localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(normalized.sidebarCollapsed));
       localStorage.setItem(DASHBOARD_FOOTER_VISIBLE_STORAGE_KEY, String(normalized.dashboardFooterVisible));
       localStorage.setItem(DASHBOARD_FOOTER_RECORD_NUMBER_STORAGE_KEY, normalized.dashboardFooterRecordNumber);
@@ -746,12 +750,12 @@ const useStore = create((set, get) => ({
       userSettingsLoaded: true,
       themeMode: normalized.themeMode,
       theme: resolveThemeMode(normalized.themeMode),
-      pageWidthMode: normalized.pageWidthMode,
       sidebarCollapsed: normalized.sidebarCollapsed,
       dashboardFooterVisible: normalized.dashboardFooterVisible,
       dashboardFooterRecordNumber: normalized.dashboardFooterRecordNumber,
       siteBrandIconId: normalized.siteBrandIconId,
       customCss: normalized.customCss,
+      uiFont: normalized.uiFont,
       moduleVisibility: normalized.moduleVisibility,
       moduleOrder: normalized.moduleOrder,
       channelEnabled: normalized.channelEnabled,
@@ -785,9 +789,6 @@ const useStore = create((set, get) => ({
       const appearancePatch = {};
       if (!rawSettings.themeMode && !rawSettings.theme_mode) {
         appearancePatch.themeMode = normalized.themeMode;
-      }
-      if (!rawSettings.pageWidthMode && !rawSettings.page_width_mode) {
-        appearancePatch.pageWidthMode = normalized.pageWidthMode;
       }
       if (rawSettings.sidebarCollapsed === undefined && rawSettings.sidebar_collapsed === undefined) {
         appearancePatch.sidebarCollapsed = normalized.sidebarCollapsed;

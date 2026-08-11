@@ -833,6 +833,7 @@ func init() {
 		"siteName":   {t: "string"},
 		"themeMode":  {t: "string"},
 		"pageWidth":  {t: "string", e: []string{"standard", "wide", "full"}},
+		"uiFont":     {t: "string", e: []string{"default", "lxgw-wenkai-screen"}},
 	})
 	routeRequestContracts["/api/settings/site-brand/icons"] = obj([]string{"name"}, map[string]prop{
 		"name":     {t: "string", req: true},

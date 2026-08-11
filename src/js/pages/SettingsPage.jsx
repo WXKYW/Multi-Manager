@@ -12,6 +12,7 @@ import { dialog } from '../modules/dialog.js';
 import { useConfirmPress } from '../hooks/useConfirmPress.js';
 import useStore, {
   DEFAULT_MODULE_ORDER,
+  FONT_OPTIONS,
   MODULE_CONFIG,
   MODULE_GROUPS,
   applyCustomCss,
@@ -69,12 +70,6 @@ const THEME_OPTIONS = [
 ];
 
 const GITHUB_NEW_OAUTH_APP_URL = 'https://github.com/settings/applications/new';
-
-const PAGE_WIDTH_OPTIONS = [
-  { value: 'standard', label: '标准' },
-  { value: 'wide', label: '宽屏' },
-  { value: 'full', label: '全宽' },
-];
 
 const TIMEZONE_OPTIONS = [
   { value: 'system', label: '跟随服务器' },
@@ -242,11 +237,10 @@ function SettingsPage() {
     themeMode,
     theme,
     setThemeMode,
-    pageWidthMode,
-    setPageWidthMode,
     setDashboardFooterVisible,
     setDashboardFooterRecordNumber,
     setVibrationEnabled,
+    setUIFont,
     applyUserSettings,
     loadUserSettings,
     logout,
@@ -360,16 +354,16 @@ function SettingsPage() {
     patchSettings({ themeMode: nextMode });
   }, [patchSettings, setThemeMode]);
 
-  const handlePageWidthModeChange = useCallback((value) => {
-    const nextMode = String(value);
-    setPageWidthMode(nextMode);
-    patchSettings({ pageWidthMode: nextMode });
-  }, [patchSettings, setPageWidthMode]);
-
   const handleVibrationEnabledChange = useCallback((checked) => {
     setVibrationEnabled(checked);
     patchSettings({ vibrationEnabled: Boolean(checked) });
   }, [patchSettings, setVibrationEnabled]);
+
+  const handleUIFontChange = useCallback((value) => {
+    const nextFont = String(value);
+    setUIFont(nextFont);
+    patchSettings({ uiFont: nextFont });
+  }, [patchSettings, setUIFont]);
 
   const handleDashboardFooterVisibleChange = useCallback((checked) => {
     setDashboardFooterVisible(checked);
@@ -2019,8 +2013,8 @@ function SettingsPage() {
             <FieldRow title="主题模式" description="切换后立即生效">
               <Select size="sm" label="主题模式" value={themeMode} onValueChange={handleThemeModeChange} items={THEME_OPTIONS} />
             </FieldRow>
-            <FieldRow title="页面宽度" description="与顶部宽度切换同步">
-              <Select size="sm" label="页面宽度" value={pageWidthMode} onValueChange={handlePageWidthModeChange} items={PAGE_WIDTH_OPTIONS} />
+            <FieldRow title="界面字体" description="选择个性化字体，保存后全站生效">
+              <Select size="sm" label="界面字体" value={settings.uiFont || 'default'} onValueChange={handleUIFontChange} items={FONT_OPTIONS} />
             </FieldRow>
             <FieldRow title="显示首页页脚" description="控制仪表盘底部页脚">
               <Switch aria-label="显示首页页脚" checked={settings.dashboardFooterVisible} onCheckedChange={handleDashboardFooterVisibleChange} />

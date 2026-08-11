@@ -17,12 +17,8 @@ import {
   Globe,
   Server,
   LogOut,
-  AppWindow,
-  Columns,
   DesktopDisplay,
-  Maximize2,
   Palette,
-  Rectangle,
   Sun,
   Moon,
   Settings,
@@ -140,12 +136,6 @@ const getPathModule = pathname => {
   return MODULE_CONFIG[route] ? route : null;
 };
 
-const PAGE_WIDTH_CLASSES = {
-  standard: 'max-w-7xl',
-  wide: 'max-w-[1600px]',
-  full: 'max-w-none',
-};
-
 const renderSidebarStyleIcon = (IconComponent, label) => (
   <span
     title={label}
@@ -167,24 +157,6 @@ const formatAppProcessUptime = seconds => {
   if (minutes > 0) return `${minutes}分钟`;
   return `${totalSeconds}秒`;
 };
-
-const PAGE_WIDTH_OPTIONS = [
-  {
-    value: 'standard',
-    label: renderSidebarStyleIcon(Rectangle, '标准宽度'),
-    className: 'w-full !justify-center !px-0',
-  },
-  {
-    value: 'wide',
-    label: renderSidebarStyleIcon(Columns, '宽屏宽度'),
-    className: 'w-full !justify-center !px-0',
-  },
-  {
-    value: 'full',
-    label: renderSidebarStyleIcon(Maximize2, '全宽'),
-    className: 'w-full !justify-center !px-0',
-  },
-];
 
 const THEME_MODE_OPTIONS = [
   {
@@ -362,8 +334,6 @@ const SidebarBrand = ({ onHome }) => (
 );
 
 const SidebarStyleSwitchItems = ({
-  pageWidthMode,
-  onPageWidthChange,
   themeMode,
   onThemeModeChange,
 }) => {
@@ -383,25 +353,6 @@ const SidebarStyleSwitchItems = ({
 
   return (
     <>
-      <Sidebar.MenuItem>
-        <div className={controlRowClassName} data-sidebar="menu-button">
-          <div className={controlRowInnerClassName}>
-            <span className="h-4 w-4 shrink-0 opacity-40" title="页面宽度" aria-label="页面宽度">
-              <AppWindow className="h-4 w-4" />
-            </span>
-            <div className="sidebar-style-tabs min-w-0 flex-1 group-data-[state=collapsed]/sidebar:hidden">
-              <Tabs
-                {...TOOL_TABS_PROPS}
-                className="w-full min-w-0"
-                listClassName="grid w-full grid-cols-3"
-                value={pageWidthMode}
-                onValueChange={onPageWidthChange}
-                tabs={PAGE_WIDTH_OPTIONS}
-              />
-            </div>
-          </div>
-        </div>
-      </Sidebar.MenuItem>
       <Sidebar.MenuItem>
         <div className={controlRowClassName} data-sidebar="menu-button">
           <div className={controlRowInnerClassName}>
@@ -433,8 +384,6 @@ function MainLayout() {
     setSidebarCollapsed,
     themeMode,
     setThemeMode,
-    pageWidthMode,
-    setPageWidthMode,
     dashboardFooterVisible,
     dashboardFooterRecordNumber,
     appProcessUptimeSeconds,
@@ -447,7 +396,6 @@ function MainLayout() {
     logout,
   } = useStore();
   const [runtimeClock, setRuntimeClock] = useState(() => Date.now());
-  const pageWidthClass = PAGE_WIDTH_CLASSES[pageWidthMode] || PAGE_WIDTH_CLASSES.standard;
   const displayedAppProcessUptime =
     appProcessUptimeSeconds > 0
       ? appProcessUptimeSeconds + Math.max(0, runtimeClock - appProcessUptimeMeasuredAt) / 1000
@@ -636,7 +584,7 @@ const viewportWorkspaceModule = ['systemlogs', 'drawio', 'prompts'].includes(mai
       : viewportWorkspaceModule
         ? 'h-full min-h-0'
         : 'min-h-full'
-  } ${pageWidthClass}`;
+  }`;
 
   // 渲染当前模块页
   const renderActivePage = () => {
@@ -772,7 +720,7 @@ return (
                 <SidebarModuleSubgroup
                   subgroup={{
                     id: 'global-config',
-                    name: '系统设置',
+                    name: '全局配置',
                     icon: Settings,
                     modules: ['notification', 'apidocs', 'systemlogs', 'settings'].filter(
                       module =>
@@ -784,8 +732,6 @@ return (
                   onNavigate={navigateToModule}
                 />
                 <SidebarStyleSwitchItems
-                  pageWidthMode={pageWidthMode}
-                  onPageWidthChange={setPageWidthMode}
                   themeMode={themeMode}
                   onThemeModeChange={setThemeMode}
                 />
