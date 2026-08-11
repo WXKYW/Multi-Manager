@@ -41,6 +41,109 @@ func TestOpenAINormalization(t *testing.T) {
 	}
 }
 
+func TestNormalizeProtocol(t *testing.T) {
+	testCases := []struct {
+		input    string
+		expected string
+	}{
+		{"", "auto"},
+		{"auto", "auto"},
+		{"AUTO", "auto"},
+		{"http1", "http1"},
+		{"HTTP/1.1", "http1"},
+		{"h1", "http1"},
+		{"h2", "h2"},
+		{"HTTP2", "h2"},
+		{"http/2", "h2"},
+		{"quic", "auto"},
+		{"  ", "auto"},
+	}
+	for _, tc := range testCases {
+		if got := normalizeProtocol(tc.input); got != tc.expected {
+			t.Errorf("normalizeProtocol(%q) = %q; want %q", tc.input, got, tc.expected)
+		}
+	}
+}
+
+func TestEffectiveProxyAttempts(t *testing.T) {
+	pool := []string{"http://p1:8080", "http://p2:8080"}
+	testCases := []struct {
+		name     string
+		ep       Endpoint
+		expected int
+	}{
+		{
+			name:     "auto switch with pool",
+			ep:       Endpoint{AutoSwitch: true, ProxyEnabled: true, ProxyPool: pool},
+			expected: 2,
+		},
+		{
+			name:     "proxy disabled",
+			ep:       Endpoint{AutoSwitch: true, ProxyEnabled: false, ProxyPool: pool},
+			expected: 1,
+		},
+		{
+			name:     "pool empty",
+			ep:       Endpoint{AutoSwitch: true, ProxyEnabled: true, ProxyPool: []string{}},
+			expected: 1,
+		},
+		{
+			name:     "pool only whitespace",
+			ep:       Endpoint{AutoSwitch: true, ProxyEnabled: true, ProxyPool: []string{"  "}},
+			expected: 1,
+		},
+		{
+			name:     "auto switch off",
+			ep:       Endpoint{AutoSwitch: false, ProxyEnabled: true, ProxyPool: pool},
+			expected: 1,
+		},
+		{
+			name:     "everything off",
+			ep:       Endpoint{},
+			expected: 1,
+		},
+	}
+	for _, tc := range testCases {
+		if got := effectiveProxyAttempts(tc.ep); got != tc.expected {
+			t.Errorf("%s: effectiveProxyAttempts = %d; want %d", tc.name, got, tc.expected)
+		}
+	}
+}
+
+func TestClientForProtocol(t *testing.T) {
+	s := New(config.Config{
+		DataDir: t.TempDir(),
+		DBName:  "data.db",
+	})
+
+	http1 := s.clientForProtocol("http1")
+	if tr, ok := http1.Transport.(*http.Transport); !ok {
+		t.Fatal("clientForProtocol(http1) transport is not *http.Transport")
+	} else if tr.ForceAttemptHTTP2 {
+		t.Error("http1 transport must not force HTTP/2")
+	} else if len(tr.TLSNextProto) != 0 {
+		t.Errorf("http1 transport must disable h2 via empty TLSNextProto, got %d entries", len(tr.TLSNextProto))
+	}
+
+	h2 := s.clientForProtocol("h2")
+	if tr, ok := h2.Transport.(*http.Transport); !ok {
+		t.Fatal("clientForProtocol(h2) transport is not *http.Transport")
+	} else if !tr.ForceAttemptHTTP2 {
+		t.Error("h2 transport must force HTTP/2 attempt")
+	}
+
+	// 缓存复用：同一协议返回同一实例（连接池共享）。
+	if s.clientForProtocol("http1") != http1 {
+		t.Error("clientForProtocol(http1) should return the cached client")
+	}
+	if s.clientForProtocol("HTTP/1.1") != http1 {
+		t.Error("normalized alias HTTP/1.1 should hit the same cached http1 client")
+	}
+	if s.clientForProtocol("") != s.clientForProtocol("auto") {
+		t.Error("empty protocol should be treated as auto and cached")
+	}
+}
+
 func TestEnsureSchemaMigratesGatewayAnalyticsKeyColumn(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {

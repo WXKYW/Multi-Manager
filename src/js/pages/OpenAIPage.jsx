@@ -48,6 +48,11 @@ echarts.use([
   AriaComponent,
   CanvasRenderer,
 ]);
+const ENDPOINT_PROTOCOL_OPTIONS = [
+  { value: 'auto', label: '自动（HTTP/2 优先）' },
+  { value: 'http1', label: 'HTTP/1.1' },
+  { value: 'h2', label: 'HTTP/2' },
+];
 import {
   DEFAULT_MODEL_HEALTH_CONCURRENCY,
   DEFAULT_MODEL_HEALTH_TIMEOUT_SECONDS,
@@ -423,6 +428,7 @@ function OpenAIPage() {
     autoSwitch: false,
     proxyEnabled: false,
     forceProxy: false,
+    protocol: 'auto',
   });
   const [endpointFormError, setEndpointFormError] = useState('');
   const [endpointSaving, setEndpointSaving] = useState(false);
@@ -971,6 +977,7 @@ const trendSeries = useMemo(() => {
       autoSwitch: false,
       proxyEnabled: false,
       forceProxy: false,
+      protocol: 'auto',
     });
     setEndpointFormError('');
     setEndpointFormOpen(true);
@@ -988,6 +995,7 @@ const trendSeries = useMemo(() => {
       autoSwitch: Boolean(endpoint.autoSwitch),
       proxyEnabled: Boolean(endpoint.proxyEnabled),
       forceProxy: Boolean(endpoint.forceProxy),
+      protocol: endpoint.protocol || 'auto',
     });
     setEndpointFormError('');
     setEndpointFormOpen(true);
@@ -4559,8 +4567,20 @@ const trendSeries = useMemo(() => {
                 </div>
               </div>
 
-              {/* ====== 右列：代理相关 ====== */}
+              {/* ====== 右列：连接与代理 ====== */}
               <div className="space-y-4">
+                <Select
+                  size="sm"
+                  label="连接协议"
+                  value={endpointForm.protocol || 'auto'}
+                  onValueChange={value => setEndpointForm(current => ({ ...current, protocol: value }))}
+                  items={ENDPOINT_PROTOCOL_OPTIONS}
+                  className="w-full"
+                />
+                <p className="-mt-2 text-xs leading-snug text-kumo-subtle">
+                  仅直连时生效。HTTP/1.1 与多数 AI SDK 客户端一致；部分上游对 HTTP/2 限流更严。
+                </p>
+
                 <div className="space-y-1.5">
                   <div className="flex min-w-0 items-center justify-between gap-2">
                     <Label showOptional>出口代理池</Label>

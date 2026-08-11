@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -76,6 +77,7 @@ type Endpoint struct {
 	ProxyEnabled   bool              `json:"proxyEnabled"`
 	AutoSwitch     bool              `json:"autoSwitch"`
 	ForceProxy     bool              `json:"forceProxy"`
+	Protocol       string            `json:"protocol,omitempty"`
 	ModelMappings  map[string]string `json:"modelMappings,omitempty"`
 	CreatedAt      string            `json:"createdAt"`
 	LastUsed       *string           `json:"lastUsed"`
@@ -109,6 +111,11 @@ type Service struct {
 	apiKeys    *apikeys.Manager
 	schemaOnce sync.Once
 	schemaErr  error
+
+	// protocolClients 按连接协议（auto/h2/http1）缓存的直连客户端，
+	// 保证同一端点的协议设置能复用连接池（keep-alive / h2 流复用）。
+	protocolMu      sync.Mutex
+	protocolClients map[string]*http.Client
 
 	// proxyStateByEndpoint 记录每个端点的代理池运行时状态（当前游标、冷却中的代理）。
 	proxyMu              sync.Mutex
@@ -199,6 +206,7 @@ func New(cfg config.Config) *Service {
 		store:                database.New(cfg),
 		client:               &http.Client{Transport: tr},
 		apiKeys:              apikeys.New(cfg),
+		protocolClients:      map[string]*http.Client{},
 		proxyStateByEndpoint: make(map[string]*endpointProxyState),
 		endpointLatency:      make(map[string]int64),
 		endpointLatencyOK:    make(map[string]bool),
@@ -499,6 +507,9 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 	if err := ensureSQLiteColumn(ctx, db, "openai_endpoints", "proxy_enabled", "INTEGER DEFAULT 0"); err != nil {
 		return err
 	}
+	if err := ensureSQLiteColumn(ctx, db, "openai_endpoints", "protocol", "TEXT"); err != nil {
+		return err
+	}
 	if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_openai_analytics_gateway_key ON openai_gateway_analytics(gateway_key_id, timestamp)`); err != nil {
 		return fmt.Errorf("openai ensure schema: %w", err)
 	}
@@ -793,7 +804,7 @@ func (s *Service) listEndpoints(w http.ResponseWriter, r *http.Request) {
 	}
 	defer db.Close()
 
-	rows, err := db.QueryContext(ctx, "SELECT id, name, base_url, api_key, headers, disabled_models, proxy_pool, auto_switch, proxy_enabled, force_proxy, status, enabled, models, created_at, last_used, last_checked, model_mappings, sort_order FROM openai_endpoints ORDER BY sort_order ASC, created_at ASC")
+	rows, err := db.QueryContext(ctx, "SELECT id, name, base_url, api_key, headers, disabled_models, proxy_pool, auto_switch, proxy_enabled, force_proxy, protocol, status, enabled, models, created_at, last_used, last_checked, model_mappings, sort_order FROM openai_endpoints ORDER BY sort_order ASC, created_at ASC")
 	if err != nil {
 		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -803,11 +814,11 @@ func (s *Service) listEndpoints(w http.ResponseWriter, r *http.Request) {
 	endpoints := []Endpoint{}
 	for rows.Next() {
 		var ep Endpoint
-		var headersRaw, modelsRaw, disabledRaw, proxyRaw, mappingsRaw sql.NullString
+		var headersRaw, modelsRaw, disabledRaw, proxyRaw, mappingsRaw, protocolRaw sql.NullString
 		var created, used, checked sql.NullString
 		var enabledInt, autoSwitchInt, proxyEnabledInt, forceProxyInt, sortOrder int
 
-		err := rows.Scan(&ep.ID, &ep.Name, &ep.BaseURL, &ep.APIKey, &headersRaw, &disabledRaw, &proxyRaw, &autoSwitchInt, &proxyEnabledInt, &forceProxyInt, &ep.Status, &enabledInt, &modelsRaw, &created, &used, &checked, &mappingsRaw, &sortOrder)
+		err := rows.Scan(&ep.ID, &ep.Name, &ep.BaseURL, &ep.APIKey, &headersRaw, &disabledRaw, &proxyRaw, &autoSwitchInt, &proxyEnabledInt, &forceProxyInt, &protocolRaw, &ep.Status, &enabledInt, &modelsRaw, &created, &used, &checked, &mappingsRaw, &sortOrder)
 		if err != nil {
 			response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -818,6 +829,7 @@ func (s *Service) listEndpoints(w http.ResponseWriter, r *http.Request) {
 		ep.AutoSwitch = autoSwitchInt == 1
 		ep.ProxyEnabled = proxyEnabledInt == 1
 		ep.ForceProxy = forceProxyInt == 1
+		ep.Protocol = normalizeProtocol(protocolRaw.String)
 		if mappingsRaw.Valid && mappingsRaw.String != "" {
 			_ = json.Unmarshal([]byte(mappingsRaw.String), &ep.ModelMappings)
 		}
@@ -868,6 +880,7 @@ func (s *Service) createEndpoint(w http.ResponseWriter, r *http.Request) {
 		AutoSwitch   bool         `json:"autoSwitch"`
 		ProxyEnabled bool         `json:"proxyEnabled"`
 		ForceProxy   bool         `json:"forceProxy"`
+		Protocol     string       `json:"protocol"`
 		SkipVerify   bool         `json:"skipVerify"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -891,6 +904,7 @@ func (s *Service) createEndpoint(w http.ResponseWriter, r *http.Request) {
 	headersJSON, _ := json.Marshal(cleanHeaders(req.Headers))
 	proxyJSON, _ := json.Marshal(cleanProxyPool(req.ProxyPool))
 	autoSwitchInt := boolToInt(req.AutoSwitch)
+	protocol := normalizeProtocol(req.Protocol)
 
 	id := fmt.Sprintf("oai_%d_%s", time.Now().UnixNano(), s.randString(9))
 	status := "unknown"
@@ -935,9 +949,9 @@ func (s *Service) createEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err = db.ExecContext(ctx, `
-		INSERT INTO openai_endpoints (id, name, base_url, api_key, headers, disabled_models, proxy_pool, auto_switch, proxy_enabled, force_proxy, status, enabled, models, created_at, last_checked, sort_order)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, req.Name, normalizedURL, encryptedKey, string(headersJSON), "[]", string(proxyJSON), autoSwitchInt, boolToInt(req.ProxyEnabled), boolToInt(req.ForceProxy), status, 1, string(modelsJSON), createdAt, lastCheckedVal, time.Now().UnixMilli())
+		INSERT INTO openai_endpoints (id, name, base_url, api_key, headers, disabled_models, proxy_pool, auto_switch, proxy_enabled, force_proxy, protocol, status, enabled, models, created_at, last_checked, sort_order)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, req.Name, normalizedURL, encryptedKey, string(headersJSON), "[]", string(proxyJSON), autoSwitchInt, boolToInt(req.ProxyEnabled), boolToInt(req.ForceProxy), protocol, status, 1, string(modelsJSON), createdAt, lastCheckedVal, time.Now().UnixMilli())
 	if err != nil {
 		response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -957,6 +971,7 @@ func (s *Service) createEndpoint(w http.ResponseWriter, r *http.Request) {
 		Headers:     cleanHeaders(req.Headers),
 		ProxyPool:   cleanProxyPool(req.ProxyPool),
 		AutoSwitch:  req.AutoSwitch,
+		Protocol:    protocol,
 		Status:      status,
 		Enabled:     true,
 		Models:      modelsList,
@@ -982,6 +997,7 @@ func (s *Service) updateEndpoint(w http.ResponseWriter, r *http.Request, id stri
 		AutoSwitch   *bool         `json:"autoSwitch"`
 		ProxyEnabled *bool         `json:"proxyEnabled"`
 		ForceProxy   *bool         `json:"forceProxy"`
+		Protocol     *string       `json:"protocol"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -1042,6 +1058,12 @@ func (s *Service) updateEndpoint(w http.ResponseWriter, r *http.Request, id stri
 		forceProxyInt = boolToInt(*req.ForceProxy)
 		forceProxyChanged = true
 	}
+	protocol := ""
+	protocolChanged := false
+	if req.Protocol != nil {
+		protocol = normalizeProtocol(*req.Protocol)
+		protocolChanged = true
+	}
 
 	if req.APIKey != "" || req.BaseURL != "" {
 		status := "unknown"
@@ -1077,16 +1099,16 @@ func (s *Service) updateEndpoint(w http.ResponseWriter, r *http.Request, id stri
 
 		_, err = db.ExecContext(ctx, `
 			UPDATE openai_endpoints
-			SET name = ?, base_url = ?, api_key = ?, headers = ?, proxy_pool = ?, auto_switch = ?, proxy_enabled = ?, force_proxy = ?, status = ?, models = ?, last_checked = ?
+			SET name = ?, base_url = ?, api_key = ?, headers = ?, proxy_pool = ?, auto_switch = ?, proxy_enabled = ?, force_proxy = ?, protocol = ?, status = ?, models = ?, last_checked = ?
 			WHERE id = ?`,
-			req.Name, targetBaseURL, encryptedKey, string(headersJSON), string(proxyJSON), autoSwitchInt, proxyEnabledInt, forceProxyInt, status, string(modelsJSON), lastChecked, id)
+			req.Name, targetBaseURL, encryptedKey, string(headersJSON), string(proxyJSON), autoSwitchInt, proxyEnabledInt, forceProxyInt, protocol, status, string(modelsJSON), lastChecked, id)
 		if err != nil {
 			response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-	} else if headersChanged || proxyChanged || autoSwitchChanged || proxyEnabledChanged || forceProxyChanged {
-		_, err = db.ExecContext(ctx, "UPDATE openai_endpoints SET name = ?, headers = ?, proxy_pool = ?, auto_switch = ?, proxy_enabled = ?, force_proxy = ? WHERE id = ?",
-			req.Name, string(headersJSON), string(proxyJSON), autoSwitchInt, proxyEnabledInt, forceProxyInt, id)
+	} else if headersChanged || proxyChanged || autoSwitchChanged || proxyEnabledChanged || forceProxyChanged || protocolChanged {
+		_, err = db.ExecContext(ctx, "UPDATE openai_endpoints SET name = ?, headers = ?, proxy_pool = ?, auto_switch = ?, proxy_enabled = ?, force_proxy = ?, protocol = ? WHERE id = ?",
+			req.Name, string(headersJSON), string(proxyJSON), autoSwitchInt, proxyEnabledInt, forceProxyInt, protocol, id)
 		if err != nil {
 			response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -1100,6 +1122,17 @@ func (s *Service) updateEndpoint(w http.ResponseWriter, r *http.Request, id stri
 	}
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true})
+}
+
+// effectiveProxyAttempts 计算一次转发最多尝试的次数。
+// 只有「代理开关开启 + 代理池非空 + 自动切换」同时满足时，重试才可能换到不同的出口；
+// 否则重试只是对同一条链路的重复请求——流式首字超时（firstTokenTimeout）后的重发
+// 会把一次慢响应放大成两次串行等待，反而更慢，故此时固定只尝试一次。
+func effectiveProxyAttempts(ep Endpoint) int {
+	if ep.AutoSwitch && ep.ProxyEnabled && len(cleanProxyPool(ep.ProxyPool)) > 0 {
+		return len(cleanProxyPool(ep.ProxyPool))
+	}
+	return 1
 }
 
 func cleanProxyPool(pool []string) []string {
@@ -1203,6 +1236,60 @@ func weightedEndpointPick(latencies []int64, known []bool) int {
 	return len(latencies) - 1
 }
 
+// normalizeProtocol 规范化端点连接协议设置：
+//   - "" / auto：自动协商（HTTP/2 优先，服务端不支持时回退 HTTP/1.1），即默认行为
+//   - http1：强制 HTTP/1.1（对齐主流 AI SDK / 官方客户端的传输层）
+//   - h2：偏好 HTTP/2（标准库仅做 ALPN 协商，服务端不支持时仍回退 HTTP/1.1）
+//
+// 未知值一律回退 auto，避免旧配置 / 脏数据导致转发失败。
+func normalizeProtocol(p string) string {
+	switch strings.ToLower(strings.TrimSpace(p)) {
+	case "http1", "http/1.1", "http1.1", "h1":
+		return "http1"
+	case "h2", "http2", "http/2":
+		return "h2"
+	default:
+		return "auto"
+	}
+}
+
+// clientForProtocol 返回绑定指定连接协议的直连客户端。
+// 客户端按协议名缓存，同一协议共享连接池；auto 与 h2 使用同一传输层配置
+// （ForceAttemptHTTP2 开启、ALPN 协商），http1 关闭 HTTP/2 升级。
+func (s *Service) clientForProtocol(protocol string) *http.Client {
+	key := normalizeProtocol(protocol)
+	s.protocolMu.Lock()
+	defer s.protocolMu.Unlock()
+	if c, ok := s.protocolClients[key]; ok {
+		return c
+	}
+	tr := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   4 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          500,
+		MaxIdleConnsPerHost:   100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		// 兜底限制「等待响应头」的时间；快速切换由 headerTimeoutPerAttempt 在转发循环内控制，
+		// 故此处放宽到 60s，避免误杀「慢但最终成功」的非流式请求，也不限制流式响应体时长。
+		ResponseHeaderTimeout: 60 * time.Second,
+	}
+	if key == "http1" {
+		// 关闭 HTTP/2 升级：既不尝试 h2 也不在 ALPN 中声明 h2，
+		// 与 node fetch / curl 等 HTTP/1.1 客户端的传输行为一致。
+		tr.ForceAttemptHTTP2 = false
+		tr.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+	}
+	c := &http.Client{Transport: tr}
+	s.protocolClients[key] = c
+	return c
+}
+
 // newEndpointProxyState 创建端点的代理池运行时状态。
 func newEndpointProxyState() *endpointProxyState {
 	return &endpointProxyState{
@@ -1216,14 +1303,14 @@ func newEndpointProxyState() *endpointProxyState {
 
 // clientForEndpoint 按端点代理池选择下一个可用代理，返回绑定该代理的 http.Client。
 // 规则：
-//   - proxyEnabled 关闭：忽略代理池，直接返回直连客户端
+//   - proxyEnabled 关闭：忽略代理池，返回按端点 protocol 配置的直连客户端
 //   - proxyEnabled 开启且池为空：forceProxy 开启时报错（禁止直连），否则回退直连
 //   - proxyEnabled 开启且有池：按池选择代理；非空 sessionKey 时优先复用
 //     会话粘性绑定的代理（同一会话固定出口，请求数达 sessionProxyRequestLimit 后
 //     主动轮换下一个出口，规避上游按出口 IP 的限额）
-func (s *Service) clientForEndpoint(endpointID string, pool []string, proxyEnabled, forceProxy bool, sessionKey string) (*http.Client, string, error) {
+func (s *Service) clientForEndpoint(endpointID string, pool []string, proxyEnabled, forceProxy bool, sessionKey, protocol string) (*http.Client, string, error) {
 	if !proxyEnabled {
-		return s.client, "", nil
+		return s.clientForProtocol(protocol), "", nil
 	}
 	cleaned := cleanProxyPool(pool)
 	if len(cleaned) == 0 {
@@ -2985,9 +3072,9 @@ func (s *Service) importEndpointsRoute(w http.ResponseWriter, r *http.Request) {
 		}
 		autoSwitchInt := boolToInt(ep.AutoSwitch)
 		_, err = tx.ExecContext(ctx, `
-			INSERT OR REPLACE INTO openai_endpoints (id, name, base_url, api_key, headers, disabled_models, proxy_pool, auto_switch, status, enabled, models, created_at, last_used, last_checked)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			id, ep.Name, ep.BaseURL, encryptedKey, string(headersJSON), string(disabledJSON), string(proxyJSON), autoSwitchInt, status, enabledInt, string(modelsJSON), createdAt, ep.LastUsed, ep.LastChecked)
+			INSERT OR REPLACE INTO openai_endpoints (id, name, base_url, api_key, headers, disabled_models, proxy_pool, auto_switch, protocol, status, enabled, models, created_at, last_used, last_checked)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, ep.Name, ep.BaseURL, encryptedKey, string(headersJSON), string(disabledJSON), string(proxyJSON), autoSwitchInt, normalizeProtocol(ep.Protocol), status, enabledInt, string(modelsJSON), createdAt, ep.LastUsed, ep.LastChecked)
 		if err != nil {
 			response.JSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -3016,12 +3103,13 @@ func (s *Service) selectEndpointForModel(ctx context.Context, db *sql.DB, model,
 	var found bool
 	selectedModel := model
 
-	loadEndpoint := func(ep *Endpoint, headersRaw, modelsRaw, disabledRaw, proxyRaw, mappingsRaw sql.NullString, enabledInt, autoSwitchInt, proxyEnabledInt, forceProxyInt int) {
+	loadEndpoint := func(ep *Endpoint, headersRaw, modelsRaw, disabledRaw, proxyRaw, mappingsRaw, protocolRaw sql.NullString, enabledInt, autoSwitchInt, proxyEnabledInt, forceProxyInt int) {
 		ep.APIKey = secure.SecureDecrypt(ep.APIKey)
 		ep.Enabled = enabledInt == 1
 		ep.AutoSwitch = autoSwitchInt == 1
 		ep.ProxyEnabled = proxyEnabledInt == 1
 		ep.ForceProxy = forceProxyInt == 1
+		ep.Protocol = normalizeProtocol(protocolRaw.String)
 		if mappingsRaw.Valid && mappingsRaw.String != "" {
 			_ = json.Unmarshal([]byte(mappingsRaw.String), &ep.ModelMappings)
 		}
@@ -3044,14 +3132,14 @@ func (s *Service) selectEndpointForModel(ctx context.Context, db *sql.DB, model,
 
 	if targetEndpointID != "" {
 		var ep Endpoint
-		var headersRaw, modelsRaw, disabledRaw, proxyRaw, mappingsRaw sql.NullString
+		var headersRaw, modelsRaw, disabledRaw, proxyRaw, mappingsRaw, protocolRaw sql.NullString
 		var enabledInt, autoSwitchInt, proxyEnabledInt, forceProxyInt int
 		err := db.QueryRowContext(ctx, `
-			SELECT id, name, base_url, api_key, headers, disabled_models, proxy_pool, auto_switch, proxy_enabled, force_proxy, status, enabled, models, model_mappings
+			SELECT id, name, base_url, api_key, headers, disabled_models, proxy_pool, auto_switch, proxy_enabled, force_proxy, protocol, status, enabled, models, model_mappings
 			FROM openai_endpoints WHERE id = ? AND enabled = 1`, targetEndpointID).
-			Scan(&ep.ID, &ep.Name, &ep.BaseURL, &ep.APIKey, &headersRaw, &disabledRaw, &proxyRaw, &autoSwitchInt, &proxyEnabledInt, &forceProxyInt, &ep.Status, &enabledInt, &modelsRaw, &mappingsRaw)
+			Scan(&ep.ID, &ep.Name, &ep.BaseURL, &ep.APIKey, &headersRaw, &disabledRaw, &proxyRaw, &autoSwitchInt, &proxyEnabledInt, &forceProxyInt, &protocolRaw, &ep.Status, &enabledInt, &modelsRaw, &mappingsRaw)
 		if err == nil {
-			loadEndpoint(&ep, headersRaw, modelsRaw, disabledRaw, proxyRaw, mappingsRaw, enabledInt, autoSwitchInt, proxyEnabledInt, forceProxyInt)
+			loadEndpoint(&ep, headersRaw, modelsRaw, disabledRaw, proxyRaw, mappingsRaw, protocolRaw, enabledInt, autoSwitchInt, proxyEnabledInt, forceProxyInt)
 			if s.endpointHasModel(ep, model) && !isModelDisabled(ep.DisabledModels, model) {
 				selected = ep
 				selectedModel, _ = s.resolveEndpointModel(ep, model)
@@ -3063,7 +3151,7 @@ func (s *Service) selectEndpointForModel(ctx context.Context, db *sql.DB, model,
 	if !found {
 		// Enabled is the administrator's routing decision; status is the latest verification result.
 		rows, err := db.QueryContext(ctx, `
-			SELECT id, name, base_url, api_key, headers, disabled_models, proxy_pool, auto_switch, proxy_enabled, force_proxy, status, enabled, models, model_mappings
+			SELECT id, name, base_url, api_key, headers, disabled_models, proxy_pool, auto_switch, proxy_enabled, force_proxy, protocol, status, enabled, models, model_mappings
 			FROM openai_endpoints WHERE enabled = 1`)
 		if err != nil {
 			return selected, selectedModel, false
@@ -3072,10 +3160,10 @@ func (s *Service) selectEndpointForModel(ctx context.Context, db *sql.DB, model,
 		endpoints := []Endpoint{}
 		for rows.Next() {
 			var ep Endpoint
-			var headersRaw, modelsRaw, disabledRaw, proxyRaw, mappingsRaw sql.NullString
+			var headersRaw, modelsRaw, disabledRaw, proxyRaw, mappingsRaw, protocolRaw sql.NullString
 			var enabledInt, autoSwitchInt, proxyEnabledInt, forceProxyInt int
-			if errScan := rows.Scan(&ep.ID, &ep.Name, &ep.BaseURL, &ep.APIKey, &headersRaw, &disabledRaw, &proxyRaw, &autoSwitchInt, &proxyEnabledInt, &forceProxyInt, &ep.Status, &enabledInt, &modelsRaw, &mappingsRaw); errScan == nil {
-				loadEndpoint(&ep, headersRaw, modelsRaw, disabledRaw, proxyRaw, mappingsRaw, enabledInt, autoSwitchInt, proxyEnabledInt, forceProxyInt)
+			if errScan := rows.Scan(&ep.ID, &ep.Name, &ep.BaseURL, &ep.APIKey, &headersRaw, &disabledRaw, &proxyRaw, &autoSwitchInt, &proxyEnabledInt, &forceProxyInt, &protocolRaw, &ep.Status, &enabledInt, &modelsRaw, &mappingsRaw); errScan == nil {
+				loadEndpoint(&ep, headersRaw, modelsRaw, disabledRaw, proxyRaw, mappingsRaw, protocolRaw, enabledInt, autoSwitchInt, proxyEnabledInt, forceProxyInt)
 				endpoints = append(endpoints, ep)
 			}
 		}
@@ -3265,15 +3353,10 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	startTime := time.Now()
 
-	// 代理池选择 + 限流自动切换：最多尝试 len(pool) 个代理，池为空或代理未启用时只尝试一次。
-	maxProxyAttempts := len(selected.ProxyPool)
-	if maxProxyAttempts == 0 {
-		maxProxyAttempts = 1
-	}
-	// 未开启自动切换时，即使有代理池也只试一次（仍按池轮换，但不因限流重试）。
-	if !selected.AutoSwitch {
-		maxProxyAttempts = 1
-	}
+	// 代理池选择 + 限流自动切换：最多尝试 len(pool) 个代理。
+	// 代理开关未开启或池为空时只尝试一次（重试只是对同一链路的重复请求，
+	// 首字超时重发反而放大慢响应，见 effectiveProxyAttempts）。
+	maxProxyAttempts := effectiveProxyAttempts(selected)
 
 	var resp *http.Response
 	var lastErr error
@@ -3297,7 +3380,7 @@ func (s *Service) proxyChatCompletions(w http.ResponseWriter, r *http.Request) {
 	for attempt = 0; attempt < maxProxyAttempts; attempt++ {
 		attemptCtx, cancel := context.WithCancel(ctx)
 		attemptCancel = cancel
-		client, currentProxy, clientErr := s.clientForEndpoint(selected.ID, selected.ProxyPool, selected.ProxyEnabled, selected.ForceProxy, sessionKey)
+		client, currentProxy, clientErr := s.clientForEndpoint(selected.ID, selected.ProxyPool, selected.ProxyEnabled, selected.ForceProxy, sessionKey, selected.Protocol)
 		if clientErr != nil {
 			cancel()
 			lastErr = clientErr
@@ -3725,13 +3808,7 @@ func (s *Service) proxyResponses(w http.ResponseWriter, r *http.Request) {
 
 	startTime := time.Now()
 
-	maxProxyAttempts := len(selected.ProxyPool)
-	if maxProxyAttempts == 0 {
-		maxProxyAttempts = 1
-	}
-	if !selected.AutoSwitch {
-		maxProxyAttempts = 1
-	}
+	maxProxyAttempts := effectiveProxyAttempts(selected)
 
 	var resp *http.Response
 	var lastErr error
@@ -3751,7 +3828,7 @@ func (s *Service) proxyResponses(w http.ResponseWriter, r *http.Request) {
 	for attempt = 0; attempt < maxProxyAttempts; attempt++ {
 		attemptCtx, cancel := context.WithCancel(ctx)
 		attemptCancel = cancel
-		client, currentProxy, clientErr := s.clientForEndpoint(selected.ID, selected.ProxyPool, selected.ProxyEnabled, selected.ForceProxy, sessionKey)
+		client, currentProxy, clientErr := s.clientForEndpoint(selected.ID, selected.ProxyPool, selected.ProxyEnabled, selected.ForceProxy, sessionKey, selected.Protocol)
 		if clientErr != nil {
 			cancel()
 			lastErr = clientErr

@@ -213,6 +213,7 @@ func init() {
 		"headers":    {t: "array", d: "自定义请求头 [{name,value}]"},
 		"proxyPool":  {t: "array", d: "代理池"},
 		"autoSwitch": {t: "boolean", d: "失败自动切换"},
+		"protocol":   {t: "string", d: "连接协议 auto/http1/h2，默认 auto（HTTP/2 优先）"},
 		"skipVerify": {t: "boolean"},
 	})
 	routeRequestContracts["/api/openai/endpoints/{id}"] = routeRequestContracts["/api/openai/endpoints"]
