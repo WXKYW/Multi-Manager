@@ -616,6 +616,9 @@ function TrendBarChart({
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
+        // 挂到 body：LayerCard 自带 overflow-hidden，悬浮框默认渲染在图表
+        // 容器内会被卡片裁剪遮挡。
+        appendTo: 'body',
         backgroundColor: kumoHex('--color-kumo-base'),
         textStyle: { color: axisColor, fontSize: 11 },
         valueFormatter: formatValue,
@@ -661,15 +664,20 @@ function ModelTrendChart({ labels, series, isDarkMode }) {
   const chartRef = useRef(null);
   const [hiddenSeries, setHiddenSeries] = useState({});
 
-  // 单一颜色来源：排序后每模型一个固定索引颜色，Legend 与折线共用同一数组。
+  // 排序必须完全确定：调用次数降序、相同次数按模型名升序，避免图例顺序
+  // 随接口返回顺序（后端 map 迭代随机）漂移；颜色在排序后按固定位次分配，
+  // 保证同一模型始终同色。
   const ordered = useMemo(() => {
-    const withMeta = (series || []).map((item, index) => ({
+    const withMeta = (series || []).map(item => ({
       model: item.model,
-      color: ChartPalette.categorical(index, isDarkMode),
       total: (item.data || []).reduce((sum, value) => sum + (Number(value) || 0), 0),
       values: (item.data || []).map(value => Number(value) || 0),
     }));
-    return withMeta.sort((a, b) => b.total - a.total);
+    withMeta.sort((a, b) => b.total - a.total || (a.model < b.model ? -1 : a.model > b.model ? 1 : 0));
+    return withMeta.map((item, index) => ({
+      ...item,
+      color: ChartPalette.categorical(index, isDarkMode),
+    }));
   }, [series, isDarkMode]);
 
   const visibleSeries = useMemo(
@@ -705,6 +713,9 @@ function ModelTrendChart({ labels, series, isDarkMode }) {
         tooltip: {
           trigger: 'axis',
           traceHigh: true,
+          // 挂到 body：LayerCard 自带 overflow-hidden，悬浮框默认渲染在图表
+          // 容器内会被卡片裁剪遮挡。
+          appendTo: 'body',
           backgroundColor: kumoHex('--color-kumo-base'),
           textStyle: { color: axisColor, fontSize: 11 },
         },

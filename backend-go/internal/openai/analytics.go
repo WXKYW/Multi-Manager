@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -427,10 +428,9 @@ func (s *Service) getAnalyticsCharts(w http.ResponseWriter, r *http.Request) {
 		}
 		byModel = append(byModel, group)
 	}
-	// 保持桶顺序稳定：按 daily 顺序校准一次后按模型名排序展示。
-	for _, group := range byModel {
-		_ = group
-	}
+	// 输出顺序稳定：按模型名字母序排序。此前由 map 迭代生成，顺序每次随机，
+	// 前端相同调用次数的模型会在图例上来回换位。
+	sort.Slice(byModel, func(i, j int) bool { return byModel[i].Model < byModel[j].Model })
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"daily":   dailyPoints,
