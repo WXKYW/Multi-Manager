@@ -157,9 +157,9 @@ jobs:
             output_name: agent-linux-amd64
             use_cross: false
           - target: aarch64-unknown-linux-musl
-            os: ubuntu-latest
+            os: ubuntu-24.04-arm
             output_name: agent-linux-arm64
-            use_cross: true
+            use_cross: false
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             output_name: agent-windows-amd64.exe
@@ -175,15 +175,15 @@ jobs:
           target: ${{ matrix.target }}
           cache-workspaces: agent-rust
 
-      - name: Install musl-tools (Linux amd64)
-        if: matrix.target == 'x86_64-unknown-linux-musl'
+      - name: Install musl-tools (Linux)
+        if: matrix.target != 'x86_64-pc-windows-msvc'
         run: |
           sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \( -iname '*microsoft*' -o -iname '*azure*' \) -delete
           sudo sed -i.bak '/packages\.microsoft\.com/d' /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
           sudo apt-get update
           sudo apt-get install -y musl-tools
 
-      - name: Install cross (ARM64 Linux)
+      - name: Install cross (ARM64 Linux, qemu cross)
         if: matrix.use_cross
         shell: bash
         run: |
