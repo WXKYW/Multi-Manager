@@ -403,9 +403,16 @@ export const applyUIFont = (font) => {
   if (typeof document === 'undefined') return;
 
   const existing = document.getElementById(FONT_LINK_ID);
+  const root = document.documentElement;
+
+  // 除 body 继承链外，还要同步 --font-sans：.font-mono 等工具类显式引用
+  // `var(--font-sans)` 不参与继承，不同步的话统计数字、代码等元素不会
+  // 跟随界面字体，视觉上仍显示系统字体。
+
   if (font === 'default' || !font) {
     if (existing) existing.remove();
     if (document.body) document.body.style.removeProperty('font-family');
+    root.style.removeProperty('--font-sans');
     return;
   }
 
@@ -417,22 +424,23 @@ export const applyUIFont = (font) => {
       link.href = 'https://cdn.bootcdn.net/ajax/libs/lxgw-wenkai-screen-webfont/1.7.0/lxgwwenkaiscreen.css';
       document.head.appendChild(link);
     }
-    if (document.body) {
-      document.body.style.setProperty('font-family', '"LXGW WenKai Screen", ui-sans-serif, system-ui, sans-serif');
-    }
+    const fontStack = '"LXGW WenKai Screen", ui-sans-serif, system-ui, sans-serif';
+    if (document.body) document.body.style.setProperty('font-family', fontStack);
+    root.style.setProperty('--font-sans', fontStack);
     return;
   }
 
   if (existing) existing.remove();
 
   if (font === 'serif') {
-    if (document.body) {
-      document.body.style.setProperty('font-family', 'Georgia, "Noto Serif SC", "Songti SC", "SimSun", serif');
-    }
+    const fontStack = 'Georgia, "Noto Serif SC", "Songti SC", "SimSun", serif';
+    if (document.body) document.body.style.setProperty('font-family', fontStack);
+    root.style.setProperty('--font-sans', fontStack);
     return;
   }
 
   if (document.body) document.body.style.removeProperty('font-family');
+  root.style.removeProperty('--font-sans');
 };
 
 export const normalizeUserSettings = (settings = {}) => {
