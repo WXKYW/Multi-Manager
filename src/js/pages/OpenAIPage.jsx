@@ -99,6 +99,7 @@ import {
   Brain,
   Settings as SettingsIcon,
   Copy,
+  Cpu,
   AlertTriangle,
   Key,
   Reboot,
@@ -4107,7 +4108,7 @@ const trendSeries = useMemo(() => {
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-xs font-medium text-kumo-subtle">平均 TPM</span>
                   <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-kumo-recessed text-kumo-brand">
-                    <Brain className="h-3.5 w-3.5" />
+                    <Cpu className="h-3.5 w-3.5" />
                   </span>
                 </div>
                 <div className="flex min-w-0 items-baseline gap-1">
