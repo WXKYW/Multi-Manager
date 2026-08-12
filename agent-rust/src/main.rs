@@ -1825,9 +1825,9 @@ write_result_failed() {{
 }}
 
 if command -v curl >/dev/null 2>&1; then
-    curl -fL --retry 3 --connect-timeout 20 -o "$TMP_AGENT" "$DOWNLOAD_URL" || {{ write_result_failed "下载 Agent 二进制失败，请检查面板下载地址与网络连通性"; exit 1 }}
+    curl -fL --retry 3 --connect-timeout 20 -o "$TMP_AGENT" "$DOWNLOAD_URL" || {{ write_result_failed "下载 Agent 二进制失败，请检查面板下载地址与网络连通性"; exit 1; }}
 elif command -v wget >/dev/null 2>&1; then
-    wget -O "$TMP_AGENT" "$DOWNLOAD_URL" || {{ write_result_failed "下载 Agent 二进制失败，请检查面板下载地址与网络连通性"; exit 1 }}
+    wget -O "$TMP_AGENT" "$DOWNLOAD_URL" || {{ write_result_failed "下载 Agent 二进制失败，请检查面板下载地址与网络连通性"; exit 1; }}
 else
     write_result_failed "curl 与 wget 均不可用"
     exit 1
