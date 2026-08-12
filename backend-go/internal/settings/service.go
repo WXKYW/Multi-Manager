@@ -33,6 +33,13 @@ type Service struct {
 	importsMu      sync.Mutex
 	cleanupCancel  context.CancelFunc
 	cleanupWG      sync.WaitGroup
+	vacuumMu       sync.Mutex
+	vacuumRunning  bool
+	vacuumStarted  time.Time
+	vacuumDone     time.Time
+	vacuumError    string
+	vacuumBefore   int64
+	vacuumAfter    int64
 }
 
 type userSettingsRow struct {
@@ -310,11 +317,14 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		s.clearAppLogs(w, r)
 	case "/api/settings/vacuum-database":
-		if r.Method != http.MethodPost {
+		switch r.Method {
+		case http.MethodGet:
+			s.vacuumStatus(w, r)
+		case http.MethodPost:
+			s.vacuumDatabase(w, r)
+		default:
 			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
 		}
-		s.vacuumDatabase(w, r)
 	case "/api/settings/clear-logs":
 		if r.Method != http.MethodPost {
 			response.Error(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -927,35 +937,93 @@ func (s *Service) clearAppLogs(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "message": "Logs cleared"})
 }
 
+// vacuumDatabase 启动数据库压缩（异步执行）。
+// VACUUM 会重写整个数据库文件并持有排他写锁，在 1 核小容器上可能耗时数分钟，
+// 同步执行会阻塞单连接池（SetMaxOpenConns(1)）导致整个面板无响应，因此改为
+// 后台任务执行，请求立即返回，前端通过 GET 同路径轮询任务状态。
 func (s *Service) vacuumDatabase(w http.ResponseWriter, r *http.Request) {
-	db, err := s.store.Open(r.Context())
+	s.vacuumMu.Lock()
+	if s.vacuumRunning {
+		s.vacuumMu.Unlock()
+		response.JSON(w, http.StatusConflict, map[string]interface{}{
+			"success": false,
+			"message": "数据库压缩已在运行中",
+			"data":    s.vacuumSnapshot(),
+		})
+		return
+	}
+	s.vacuumRunning = true
+	s.vacuumStarted = time.Now()
+	s.vacuumDone = time.Time{}
+	s.vacuumError = ""
+	s.vacuumBefore = 0
+	s.vacuumAfter = 0
+	s.vacuumMu.Unlock()
+
+	s.cleanupWG.Add(1)
+	go s.runVacuum(r.Context())
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "数据库压缩已开始，将在后台执行",
+		"data":    s.vacuumSnapshot(),
+	})
+}
+
+// vacuumStatus 查询数据库压缩任务状态（GET /api/settings/vacuum-database）
+func (s *Service) vacuumStatus(w http.ResponseWriter, r *http.Request) {
+	response.OK(w, s.vacuumSnapshot())
+}
+
+func (s *Service) vacuumSnapshot() map[string]interface{} {
+	s.vacuumMu.Lock()
+	defer s.vacuumMu.Unlock()
+	return map[string]interface{}{
+		"running": s.vacuumRunning,
+		"started": s.vacuumStarted,
+		"done":    s.vacuumDone,
+		"error":   s.vacuumError,
+		"beforeSizeMB": sizeMBString(s.vacuumBefore),
+		"afterSizeMB":  sizeMBString(s.vacuumAfter),
+		"savedMB":      sizeMBString(s.vacuumBefore - s.vacuumAfter),
+	}
+}
+
+func (s *Service) runVacuum(ctx context.Context) {
+	defer s.cleanupWG.Done()
+	defer func() {
+		s.vacuumMu.Lock()
+		s.vacuumRunning = false
+		s.vacuumDone = time.Now()
+		s.vacuumMu.Unlock()
+	}()
+
+	db, err := s.store.Open(ctx)
 	if err != nil {
-		response.Error(w, http.StatusInternalServerError, err.Error())
+		s.vacuumMu.Lock()
+		s.vacuumError = err.Error()
+		s.vacuumMu.Unlock()
 		return
 	}
 	defer db.Close()
 
-	_, _ = db.ExecContext(r.Context(), `PRAGMA wal_checkpoint(PASSIVE)`)
-	beforeStorage := databaseStorageStats(r.Context(), db, s.store.DatabasePath())
-	if _, err := db.ExecContext(r.Context(), `VACUUM`); err != nil {
-		response.JSON(w, http.StatusInternalServerError, map[string]interface{}{"success": false, "error": "database vacuum failed: " + err.Error()})
+	_, _ = db.ExecContext(ctx, `PRAGMA wal_checkpoint(PASSIVE)`)
+	before := databaseStorageStats(ctx, db, s.store.DatabasePath())
+	s.vacuumMu.Lock()
+	s.vacuumBefore = before.TotalSizeBytes
+	s.vacuumMu.Unlock()
+
+	if _, err := db.ExecContext(ctx, `VACUUM`); err != nil {
+		s.vacuumMu.Lock()
+		s.vacuumError = err.Error()
+		s.vacuumMu.Unlock()
 		return
 	}
-	_, _ = db.ExecContext(r.Context(), `PRAGMA wal_checkpoint(PASSIVE)`)
-	afterStorage := databaseStorageStats(r.Context(), db, s.store.DatabasePath())
-	savedBytes := beforeStorage.TotalSizeBytes - afterStorage.TotalSizeBytes
-
-	response.JSON(w, http.StatusOK, map[string]interface{}{
-		"success": true,
-		"message": "database vacuum completed",
-		"data": map[string]interface{}{
-			"beforeSizeMB": sizeMBString(beforeStorage.TotalSizeBytes),
-			"afterSizeMB":  sizeMBString(afterStorage.TotalSizeBytes),
-			"savedMB":      sizeMBString(savedBytes),
-			"before":       beforeStorage,
-			"after":        afterStorage,
-		},
-	})
+	_, _ = db.ExecContext(ctx, `PRAGMA wal_checkpoint(PASSIVE)`)
+	after := databaseStorageStats(ctx, db, s.store.DatabasePath())
+	s.vacuumMu.Lock()
+	s.vacuumAfter = after.TotalSizeBytes
+	s.vacuumMu.Unlock()
 }
 
 func (s *Service) clearLogs(w http.ResponseWriter, r *http.Request) {

@@ -951,6 +951,51 @@ function SettingsPage() {
     }
   };
 
+  // 数据库压缩在后台执行（VACUUM 可能耗时数分钟），提交后轮询任务状态，
+  // 避免压缩期间面板无响应。
+  const runDatabaseVacuum = async () => {
+    setDatabaseBusy(true);
+    try {
+      const response = await fetch('/api/settings/vacuum-database', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || '启动数据库压缩失败');
+      if (result.data?.running) {
+        toast.info('数据库压缩已开始，将在后台执行…');
+      } else {
+        toast.success(result.message || '数据库已压缩');
+      }
+      // 轮询直到压缩完成（最多 10 分钟）
+      const deadline = Date.now() + 10 * 60 * 1000;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        const statusResponse = await fetch('/api/settings/vacuum-database', {
+          headers: getAuthHeaders(),
+        });
+        const status = await statusResponse.json();
+        if (!statusResponse.ok) break;
+        const snapshot = status.data || {};
+        if (!snapshot.running) {
+          if (snapshot.error) {
+            toast.error(`数据库压缩失败: ${snapshot.error}`);
+          } else if (snapshot.savedMB && snapshot.savedMB !== '0 B') {
+            toast.success(`数据库已压缩（节省 ${snapshot.savedMB}）`);
+          } else {
+            toast.success('数据库已压缩');
+          }
+          break;
+        }
+      }
+      await fetchDbState();
+    } catch (error) {
+      toast.error(error.message || '数据库压缩失败');
+    } finally {
+      setDatabaseBusy(false);
+    }
+  };
+
   const runEnforceLogLimits = async () => {
     setLogsBusy(true);
     try {
@@ -1844,7 +1889,7 @@ function SettingsPage() {
                   <Button
                     size="sm"
                     className="w-full justify-center"
-                    onClick={() => postSettingsAction('/api/settings/vacuum-database', '数据库已压缩', fetchDbState)}
+                    onClick={() => runDatabaseVacuum()}
                     loading={databaseBusy}
                   >
                     立即压缩
